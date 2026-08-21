@@ -6,7 +6,9 @@ import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { makeSurfaceState, makeHistoryEntry } from "@/lib/storybook/fixtures/a2ui"
 import { useA2UIStore } from "@/stores/a2ui"
 
-// Workspace action bar: undo/redo, mode switch, AI, save/export/share.
+// Workspace action bar, rendered as `WorkspaceHeader`'s secondary band:
+// undo/redo, panel toggles, zoom, then AI + the single filled Save primary.
+// The edit/preview/data switch is NOT here — the header's tabs own it.
 const meta = {
   title: "A2UI/Workspace/Toolbar",
   component: A2UIToolbar,

@@ -3,6 +3,8 @@
 /**
  * A2UI Workspace
  * Three-panel editing workspace for A2UI mini-apps
+ * Chrome: one `FeaturePageHeader` (identity + mode tabs) whose secondary band
+ *   is the toolbar — previously two independently styled bars
  * Desktop: Resizable panels (tree | preview | properties)
  * Mobile: Tab-based bottom nav with Sheet overlays
  */
@@ -299,8 +301,9 @@ function WorkspaceContent() {
 
   return (
     <div className="flex flex-col h-full">
-      <WorkspaceHeader />
-      <A2UIToolbar />
+      {/* One chrome element, not two stacked bars: the toolbar renders as the
+          header's secondary band (see `a2ui-workspace-header.tsx`). */}
+      <WorkspaceHeader controls={<A2UIToolbar />} />
       {/* Desktop */}
       <div className="flex-1 min-h-0 hidden sm:flex">{desktopLayout}</div>
       {/* Mobile */}

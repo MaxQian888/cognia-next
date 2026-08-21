@@ -2,7 +2,17 @@
 
 /**
  * A2UI Workspace Header
- * Navigation bar with back button, title, mode tabs, and status
+ *
+ * Built on the app-wide `FeaturePageHeader` (same chrome as /servers, /sites,
+ * /plugins …) so the editor stops looking like its own product. It used to be
+ * one hand-rolled bar stacked on top of `A2UIToolbar`, with the edit/preview/
+ * data switch rendered *twice* — as tabs here and as three toggle buttons
+ * there. The tabs are now the single mode control, and the toolbar is passed
+ * in as `controls` so it renders as this header's secondary band instead of a
+ * competing bar.
+ *
+ * `controls` is a prop rather than an import so the header stays renderable on
+ * its own (the toolbar pulls in the A2UI store, the app builder and tooltips).
  */
 
 import React from "react"
@@ -12,10 +22,16 @@ import { ArrowLeft, Pencil, Eye, Database, Blocks } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useWorkspaceContext, type WorkspaceMode } from "./a2ui-workspace-context"
 
-export function WorkspaceHeader() {
+export interface WorkspaceHeaderProps {
+  /** Rendered as the header's secondary band. See the note above. */
+  controls?: React.ReactNode
+}
+
+export function WorkspaceHeader({ controls }: WorkspaceHeaderProps) {
   const t = useTranslations("a2ui")
   const { surfaceId, workspaceMode, setWorkspaceMode } = useWorkspaceContext()
   const surface = useA2UIStore((state) => state.surfaces[surfaceId])
@@ -24,44 +40,54 @@ export function WorkspaceHeader() {
   const isReady = surface?.ready
 
   return (
-    <header className="flex items-center gap-2 border-b px-3 py-2 shrink-0 min-h-[48px]">
-      <Link href="/a2ui" className="shrink-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8">
-          <ArrowLeft className="h-4 w-4" />
+    <FeaturePageHeader
+      variant="compact"
+      testId="a2ui-workspace-header"
+      breadcrumb={
+        <Button variant="ghost" size="icon-sm" asChild aria-label={t("back")}>
+          <Link href="/a2ui">
+            <ArrowLeft className="size-4" />
+          </Link>
         </Button>
-      </Link>
-
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <Blocks className="h-4 w-4 text-cyan-500 shrink-0" />
-        <span className="font-medium text-sm truncate">{title}</span>
-        <Badge variant={isReady ? "default" : "secondary"} className="shrink-0 text-[10px] h-5">
-          {isReady ? t("previewMode") : t("workspace.headerLoading")}
-        </Badge>
-      </div>
-
-      {/* Mode tabs drive the desktop three-panel layout. On mobile the
-          bottom tab-bar is the single navigator, so these are hidden to avoid
-          a no-op control that would just confuse touch users. */}
-      <Tabs
-        value={workspaceMode}
-        onValueChange={(v) => setWorkspaceMode(v as WorkspaceMode)}
-        className="hidden shrink-0 sm:block"
-      >
-        <TabsList className="h-8">
-          <TabsTrigger value="edit" className="h-7 text-xs gap-1 px-2">
-            <Pencil className="h-3 w-3" />
-            <span className="hidden sm:inline">{t("editMode")}</span>
-          </TabsTrigger>
-          <TabsTrigger value="preview" className="h-7 text-xs gap-1 px-2">
-            <Eye className="h-3 w-3" />
-            <span className="hidden sm:inline">{t("previewMode")}</span>
-          </TabsTrigger>
-          <TabsTrigger value="data" className="h-7 text-xs gap-1 px-2">
-            <Database className="h-3 w-3" />
-            <span className="hidden sm:inline">{t("dataMode")}</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-    </header>
+      }
+      icon={<Blocks className="size-3.5" aria-hidden="true" />}
+      title={title}
+      // Only surfaced while the surface is still hydrating. A permanent "all
+      // good" badge is chrome that never tells the user anything.
+      status={
+        isReady ? undefined : (
+          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+            {t("workspace.headerLoading")}
+          </Badge>
+        )
+      }
+      // Mode tabs drive the desktop three-panel layout. On mobile the bottom
+      // tab-bar is the single navigator, so these are hidden to avoid a no-op
+      // control that would just confuse touch users.
+      navigationPlacement="inline"
+      navigation={
+        <Tabs
+          value={workspaceMode}
+          onValueChange={(v) => setWorkspaceMode(v as WorkspaceMode)}
+          className="hidden sm:block"
+        >
+          <TabsList className="h-7">
+            <TabsTrigger value="edit" className="h-6 gap-1 px-2 text-xs">
+              <Pencil className="size-3" />
+              <span className="hidden sm:inline">{t("editMode")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="preview" className="h-6 gap-1 px-2 text-xs">
+              <Eye className="size-3" />
+              <span className="hidden sm:inline">{t("previewMode")}</span>
+            </TabsTrigger>
+            <TabsTrigger value="data" className="h-6 gap-1 px-2 text-xs">
+              <Database className="size-3" />
+              <span className="hidden sm:inline">{t("dataMode")}</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      }
+      controls={controls}
+    />
   )
 }

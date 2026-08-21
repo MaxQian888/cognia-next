@@ -1,5 +1,6 @@
 import { createCreatorRunState, runCreatorPipeline, runCreatorStep } from "./executor"
 import type { CreatorHandlers, CreatorRunContext, RunStepDeps } from "./executor"
+import type { CreatorRunLog } from "./run-log"
 import { CREATOR_STEP_IDS } from "./steps"
 import type { CreatorAdvanceState } from "./steps"
 import type { AuthoringRoot, CreatorStepId } from "@/types/creator"
@@ -40,8 +41,17 @@ function handlers(overrides: Partial<CreatorHandlers> = {}): CreatorHandlers {
 }
 
 /** A full run-log double. Partial fakes hide missing calls behind a cast. */
+/**
+ * Call-recording stand-in for the run journal.
+ *
+ * The suite only ever asserts *that* an entry was written, never the
+ * `WorkflowRunEventRow` the real journal resolves, so the doubles resolve
+ * `undefined` and the shape is asserted to `CreatorRunLog` once here rather
+ * than fabricating a dozen rows nothing reads. The intersection keeps the
+ * `jest.Mock` surface (`toHaveBeenCalled`) available to the assertions.
+ */
 function fakeLog() {
-  return {
+  const journal = {
     runId: "creator_1",
     started: jest.fn(async () => undefined),
     stepStarted: jest.fn(async () => undefined),
@@ -56,6 +66,7 @@ function fakeLog() {
     completed: jest.fn(async () => undefined),
     failed: jest.fn(async () => undefined),
   }
+  return journal as unknown as typeof journal & CreatorRunLog
 }
 
 function okOps() {
@@ -270,7 +281,10 @@ describe("runCreatorStep — steps", () => {
   })
 
   it("gives the reviewer the requirements and changed paths, never the conversation", async () => {
-    const review = jest.fn(async () => ({ findings: [], reviewerAuthority: "plan" }))
+    const review = jest.fn(async (_ctx: unknown, _brief: unknown) => ({
+      findings: [],
+      reviewerAuthority: "plan",
+    }))
     const d = deps({
       ctx: ctx({ requirements: "the original ask" }),
       progress: { completed: before("review"), approvals: ["permission-widening"] },

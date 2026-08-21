@@ -78,6 +78,19 @@ export interface A2UIGenerateOptions {
    */
   onDispatch?: (message: A2UIDispatchMessage) => void
   signal?: AbortSignal
+  /**
+   * Per-generation execution overrides. Folded onto the throwaway session that
+   * is handed to `resolveSendOptions`, which reads exactly these fields off a
+   * real `ChatSession` row — so a character picked in the hub composer resolves
+   * its system prompt / skills / execution policy, and a model or provider
+   * override wins over the app default, identically to how the chat composer
+   * behaves. Every field is optional and an absent one simply falls through to
+   * the app default, so omitting the whole object reproduces the previous
+   * behaviour exactly.
+   */
+  characterId?: string
+  model?: string
+  providerOverride?: string
 }
 
 export interface A2UIGenerateResult {
@@ -247,7 +260,17 @@ async function runAiTurn(
   const settings = useSettingsStore.getState().settings
   const sessionId = mintSurfaceId() // wire-correlation only; never persisted
   const sendOptions = await resolveSendOptions({
-    session: { id: sessionId, a2uiEnabled: true } as unknown as ChatSession,
+    // Only spread the overrides the caller actually set: `resolveSendOptions`
+    // treats an explicitly-undefined field as "no override" already, but
+    // keeping them off the object entirely means the session literal stays
+    // identical to the pre-override shape when the hub has no preferences.
+    session: {
+      id: sessionId,
+      a2uiEnabled: true,
+      ...(opts.characterId ? { characterId: opts.characterId } : {}),
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.providerOverride ? { providerOverride: opts.providerOverride } : {}),
+    } as unknown as ChatSession,
     appSettings: settings,
   })
 

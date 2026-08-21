@@ -131,6 +131,21 @@ describe("A2UIToolbar", () => {
     expect(container.querySelectorAll("button").length).toBeGreaterThanOrEqual(6)
   })
 
+  it("no longer duplicates the header's edit/preview/data switch", () => {
+    renderToolbar()
+    const a2ui = (enMessages as unknown as { a2ui: Record<string, string> }).a2ui
+    // The mode control lives once, in `WorkspaceHeader`'s tabs. Two differently
+    // styled controls for one piece of state was the workspace's worst
+    // hierarchy bug.
+    expect(screen.queryByRole("button", { name: a2ui.editMode })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: a2ui.dataMode })).not.toBeInTheDocument()
+  })
+
+  it("shows the current zoom level without needing a tooltip", () => {
+    renderToolbar()
+    expect(screen.getByText("100%")).toBeInTheDocument()
+  })
+
   it("disables redo when redoStacks is empty for the active surface", () => {
     renderToolbar()
     const buttons = screen.getAllByRole("button")

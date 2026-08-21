@@ -4,6 +4,20 @@
  * A2UI Mini-Apps Page
  * Standalone hub for browsing, creating, and editing A2UI mini-apps
  * Two modes: Hub (discovery + creation) and Workspace (editing a specific app)
+ *
+ * Hub layout is deliberately single-column and generation-first: the composer
+ * is the only element on the page carrying primary weight, and every section
+ * below it is a bare heading + content rather than another bordered container.
+ * Nesting `rounded-3xl` shells around `rounded-xl` cards around `rounded-md`
+ * controls was what made this page read as a pile of mismatched boxes, so the
+ * only radii used here come from the `--radius-*` scale: `xl` for cards and the
+ * composer, `lg` for tiles, `md` for controls.
+ *
+ * Scrolling is owned by one native `overflow-y-auto` region (the house pattern
+ * — see `sites-console` / `memory-console`; Radix ScrollArea's `display:table`
+ * content wrapper does not host `position: sticky` reliably). Inside it the
+ * library toolbar pins to the top so search/sort/filters survive a long list,
+ * and a back-to-top control fades in once the composer is well out of view.
  */
 
 import {
@@ -21,8 +35,9 @@ import { useLocale, useTranslations } from "next-intl"
 import Link from "next/link"
 import {
   ArrowLeft,
+  ArrowUp,
   Blocks,
-  Calendar,
+  ChevronDown,
   Copy,
   Download,
   Edit,
@@ -34,7 +49,6 @@ import {
   Loader2,
   MoreVertical,
   Search,
-  SortAsc,
   Sparkles,
   Star,
   Trash2,
@@ -46,7 +60,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,19 +83,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
 import { filterAndSortApps, type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
 import { generateA2UIApp } from "@/lib/a2ui/ai-generate"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
+import {
+  loadGenerationPreferences,
+  saveGenerationPreferences,
+  type A2UIGenerationPreferences,
+} from "@/lib/a2ui/generation-preferences"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
 import { PageLoading } from "@/components/ui/loading-states"
 import { AppDetailDialog } from "@/components/a2ui/app-detail-dialog"
 import { DeleteConfirmDialog } from "@/components/a2ui/delete-confirm-dialog"
 import { TemplateCard } from "@/components/a2ui/quick-app-builder/template-card"
+import { A2UIGenerationOptions } from "@/components/a2ui/generation-options"
 import { A2UIWorkspace } from "@/components/a2ui/workspace/a2ui-workspace"
 import { cn } from "@/lib/utils"
 import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
+import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 import type { A2UIComponent } from "@/types/a2ui/schema"
 
@@ -96,6 +119,12 @@ const QUICK_SUGGESTION_KEYS = [
   "quickPromptConverter",
 ] as const
 
+/** Templates shown before the "show all" expander — two rows on desktop. */
+const TEMPLATE_PREVIEW_COUNT = 6
+
+/** Scroll distance (px) after which the back-to-top control appears. */
+const BACK_TO_TOP_THRESHOLD = 520
+
 function downloadJson(filename: string, content: string) {
   const blob = new Blob([content], { type: "application/json" })
   const url = URL.createObjectURL(blob)
@@ -106,6 +135,59 @@ function downloadJson(filename: string, content: string) {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+/** Section heading. Bare type on the page background — no wrapper box, so the
+ *  cards below are the only rounded surface in the band. */
+function SectionHeading({
+  id,
+  title,
+  count,
+  children,
+}: {
+  id: string
+  title: string
+  count?: number
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <h2 id={id} className="truncate text-sm font-semibold tracking-tight">
+          {title}
+        </h2>
+        {typeof count === "number" && (
+          <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        )}
+      </div>
+      {children ? <div className="flex flex-wrap items-center gap-2">{children}</div> : null}
+    </div>
+  )
+}
+
+function EmptyPanel({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: React.ReactNode
+  title: string
+  description: string
+  action?: React.ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-dashed bg-muted/20 px-6 py-10 text-center">
+      <div className="mx-auto grid size-10 place-items-center rounded-lg border bg-background text-muted-foreground">
+        {icon}
+      </div>
+      <p className="mt-3 text-sm font-medium">{title}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
+    </div>
+  )
 }
 
 function A2UIPageContent() {
@@ -135,7 +217,21 @@ function A2UIPageContent() {
   const [appToDelete, setAppToDelete] = useState<string | null>(null)
   const [previewAppId, setPreviewAppId] = useState<string | null>(null)
   const [detailAppId, setDetailAppId] = useState<string | null>(null)
+  const [templatesExpanded, setTemplatesExpanded] = useState(false)
+  // Empty first, hydrated after mount — NOT a lazy initialiser. The app is a
+  // static export, so this page is pre-rendered at build time with no `window`
+  // and `loadGenerationPreferences()` returns `{}` there. Reading localStorage
+  // during the first client render would then hand `A2UIGenerationOptions` a
+  // character name and model label the pre-rendered HTML does not contain,
+  // which is a hydration mismatch on every load for anyone who has ever set a
+  // preference. Same shape as the repo's `persistLocalStorage` stores: the
+  // markup matches, then the stored choice lands a tick later.
+  const [generationPrefs, setGenerationPrefs] = useState<A2UIGenerationPreferences>({})
+  const [toolbarPinned, setToolbarPinned] = useState(false)
+  const [showBackToTop, setShowBackToTop] = useState(false)
   const urlActionHandledRef = useRef(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const toolbarSentinelRef = useRef<HTMLDivElement>(null)
 
   const appBuilder = useA2UIAppBuilder({
     // Built-in mini-app interactions (calculator/timer/todo/…) are handled
@@ -180,9 +276,16 @@ function A2UIPageContent() {
     return appBuilder.templates
   }, [appBuilder, searchQuery, selectedCategory])
 
-  const featuredTemplates = useMemo(() => filteredTemplates.slice(0, 3), [filteredTemplates])
-  const recentApp = filteredApps[0] ?? null
-  const libraryApps = recentApp ? filteredApps.slice(1) : filteredApps
+  const visibleTemplates = useMemo(
+    () =>
+      templatesExpanded ? filteredTemplates : filteredTemplates.slice(0, TEMPLATE_PREVIEW_COUNT),
+    [filteredTemplates, templatesExpanded]
+  )
+
+  const hasActiveFilter = Boolean(searchQuery.trim() || selectedCategory || showFavoritesOnly)
+  // "Recently edited" only means anything while the list is actually ordered by
+  // recency — badging the first row of a name-sorted list would be a lie.
+  const recentAppId = sortBy === "newest" && !hasActiveFilter ? (filteredApps[0]?.id ?? null) : null
 
   const detailApp = useMemo(
     () => (detailAppId ? (allApps.find((app) => app.id === detailAppId) ?? null) : null),
@@ -192,6 +295,38 @@ function A2UIPageContent() {
     () => (detailApp ? appBuilder.getTemplate(detailApp.templateId) : undefined),
     [appBuilder, detailApp]
   )
+
+  // Pick the stored generation preference up once the DOM the export produced
+  // is already on screen, so hydration compares like with like.
+  useEffect(() => {
+    const stored = loadGenerationPreferences()
+    if (Object.keys(stored).length === 0) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setGenerationPrefs(stored)
+  }, [])
+
+  // The library toolbar sticks to the top of the scroll region; this flips a
+  // data attribute so it only grows its divider once it is actually pinned,
+  // instead of drawing a line that floats mid-page. Guarded because jsdom has
+  // no IntersectionObserver.
+  useEffect(() => {
+    const sentinel = toolbarSentinelRef.current
+    if (!sentinel || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(
+      ([entry]) => setToolbarPinned(!entry.isIntersecting),
+      { root: scrollRef.current, threshold: 1 }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [])
+
+  const handleBodyScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    setShowBackToTop(event.currentTarget.scrollTop > BACK_TO_TOP_THRESHOLD)
+  }, [])
+
+  const scrollToTop = useCallback(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
 
   const focusCreatePrompt = useCallback(() => {
     promptRef.current?.focus()
@@ -217,6 +352,9 @@ function A2UIPageContent() {
         instruction: heroPrompt,
         mode: "create",
         language: locale === "zh-CN" ? "zh" : "en",
+        characterId: generationPrefs.characterId,
+        model: generationPrefs.model,
+        providerOverride: generationPrefs.provider,
       })
       appBuilder.createCustomApp(result.title, result.components, result.dataModel)
       setHeroPrompt("")
@@ -227,7 +365,7 @@ function A2UIPageContent() {
     } finally {
       setIsGenerating(false)
     }
-  }, [appBuilder, heroPrompt, isGenerating, locale, t])
+  }, [appBuilder, generationPrefs, heroPrompt, isGenerating, locale, t])
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setHeroPrompt(suggestion)
@@ -413,83 +551,160 @@ function A2UIPageContent() {
     [appBuilder]
   )
 
+  const handleGenerationPrefsChange = useCallback((next: A2UIGenerationPreferences) => {
+    setGenerationPrefs(next)
+    saveGenerationPreferences(next)
+  }, [])
+
+  const handleClearFilters = useCallback(() => {
+    setSearchQuery("")
+    setSelectedCategory(null)
+    setShowFavoritesOnly(false)
+  }, [])
+
+  const renderAppActions = useCallback(
+    (app: A2UIAppInstance) => (
+      <div className="flex shrink-0 items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-foreground"
+          aria-label={app.isFavorite ? t("unfavorite") : t("favorite")}
+          onClick={(event) => {
+            event.stopPropagation()
+            void handleToggleFavorite(app.id)
+          }}
+        >
+          <Star className={cn("size-4", app.isFavorite && "fill-warning text-warning")} />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={t("moreActions")}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <MoreVertical className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-44">
+            <DropdownMenuItem onClick={() => handleOpenWorkspace(app.id)}>
+              <Edit className="size-4" />
+              {t("editApp")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setPreviewAppId(app.id)}>
+              <Eye className="size-4" />
+              {t("appPreview")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDetailAppId(app.id)}>
+              <Blocks className="size-4" />
+              {t("appDetail")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => handleDuplicate(app.id)}>
+              <Copy className="size-4" />
+              {t("duplicate")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleExport(app.id)}>
+              <Download className="size-4" />
+              {t("export")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={() => handleDeleteApp(app.id)}>
+              <Trash2 className="size-4" />
+              {t("delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    ),
+    [handleDeleteApp, handleDuplicate, handleExport, handleOpenWorkspace, handleToggleFavorite, t]
+  )
+
+  const renderRecentBadge = useCallback(
+    (app: A2UIAppInstance, className?: string) =>
+      app.id === recentAppId ? (
+        <Badge
+          variant="secondary"
+          className={cn("h-5 shrink-0 px-1.5 text-[10px] font-medium", className)}
+        >
+          {t("recentlyEdited")}
+        </Badge>
+      ) : null,
+    [recentAppId, t]
+  )
+
+  const renderAppMeta = useCallback(
+    (app: A2UIAppInstance) => (
+      <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="tabular-nums">{new Date(app.lastModified).toLocaleDateString()}</span>
+        {app.category && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{t(CATEGORY_I18N_MAP[app.category]) || app.category}</span>
+          </>
+        )}
+      </div>
+    ),
+    [t]
+  )
+
   if (appIdFromUrl) {
     return <A2UIWorkspace surfaceId={appIdFromUrl} />
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-bg-target="chat">
-      <header className="shrink-0 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-start gap-3 px-4 py-3 sm:px-6 sm:py-4">
-          <Link href="/" className="shrink-0">
-            <Button variant="ghost" size="icon" className="h-9 w-9">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <Blocks className="h-5 w-5 shrink-0 text-cyan-500" />
-              <h1 className="truncate text-lg font-semibold sm:text-xl">{t("pageTitle")}</h1>
-              <Badge variant="secondary" className="shrink-0">
-                {allApps.length}
-              </Badge>
-              <Badge variant="outline" className="shrink-0">
-                {appBuilder.templates.length} {t("templatesTab")}
-              </Badge>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("hubSummary")}</p>
-          </div>
-
-          <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
-              onClick={handleImportClick}
-              aria-label={t("importApp")}
-            >
-              <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("importApp")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
-              onClick={() => setShareCodeOpen(true)}
-              aria-label={t("importShareCode")}
-            >
-              <Link2 className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("importShareCode")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
-              onClick={handleExportAll}
-              disabled={allApps.length === 0}
-              aria-label={t("exportAllApps")}
-            >
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("exportAllApps")}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
-              onClick={handleCreateBlank}
-              aria-label={t("newBlankApp")}
-            >
-              <FilePlus2 className="h-4 w-4" />
-              <span className="hidden sm:inline">{t("newBlankApp")}</span>
-            </Button>
-            <Button className="shrink-0 gap-1.5" onClick={focusCreatePrompt}>
-              <Sparkles className="h-4 w-4" />
-              {t("newApp")}
-            </Button>
-          </div>
-        </div>
-      </header>
+      <FeaturePageHeader
+        variant="management"
+        testId="a2ui-hub-header"
+        breadcrumb={
+          <Button variant="ghost" size="icon-sm" asChild aria-label={t("back")}>
+            <Link href="/">
+              <ArrowLeft className="size-4" />
+            </Link>
+          </Button>
+        }
+        icon={<Blocks className="size-4" aria-hidden="true" />}
+        title={t("pageTitle")}
+        description={t("hubSummary")}
+        summary={
+          <>
+            <span className="tabular-nums">{t("appCount", { count: allApps.length })}</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums">
+              {appBuilder.templates.length} {t("templatesTab")}
+            </span>
+          </>
+        }
+        secondaryActions={[
+          {
+            id: "blank",
+            label: t("newBlankApp"),
+            icon: FilePlus2,
+            onSelect: handleCreateBlank,
+          },
+        ]}
+        overflowActions={[
+          { id: "import", label: t("importApp"), icon: Upload, onSelect: handleImportClick },
+          {
+            id: "share-code",
+            label: t("importShareCode"),
+            icon: Link2,
+            onSelect: () => setShareCodeOpen(true),
+          },
+          {
+            id: "export-all",
+            label: t("exportAllApps"),
+            icon: Download,
+            onSelect: handleExportAll,
+            disabled: allApps.length === 0,
+          },
+        ]}
+        overflowLabel={t("moreActions")}
+      />
 
       <Dialog open={shareCodeOpen} onOpenChange={setShareCodeOpen}>
         <DialogContent>
@@ -509,412 +724,412 @@ function A2UIPageContent() {
               {t("cancel")}
             </Button>
             <Button onClick={handleImportShareCode} disabled={!shareCodeInput.trim()}>
-              <Upload className="h-4 w-4" />
+              <Upload className="size-4" />
               {t("importApp")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <main className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1.35fr)_360px] lg:items-start">
-            <section className="order-2 space-y-6 lg:order-1">
-              <section
-                aria-labelledby="continue-working-heading"
-                className="space-y-4 rounded-3xl border bg-card/50 p-4 shadow-sm sm:p-5"
+      <main className="relative min-h-0 flex-1 overflow-hidden">
+        <div
+          ref={scrollRef}
+          onScroll={handleBodyScroll}
+          className="h-full overflow-y-auto overscroll-contain"
+          data-testid="a2ui-hub-scroll"
+        >
+          <div className="mx-auto flex w-full max-w-5xl flex-col px-4 sm:px-6">
+            {/* ── Composer: the single primary surface on the page ───────── */}
+            <section
+              aria-labelledby="a2ui-compose-heading"
+              className="mx-auto w-full max-w-2xl pb-10 pt-8 sm:pb-12 sm:pt-14"
+            >
+              <div className="text-center">
+                <h2
+                  id="a2ui-compose-heading"
+                  className="text-balance text-2xl font-semibold tracking-tight sm:text-3xl"
+                >
+                  {t("heroTitle")}
+                </h2>
+                <p className="mx-auto mt-2 max-w-md text-pretty text-sm text-muted-foreground">
+                  {t("heroSubtitle")}
+                </p>
+              </div>
+
+              <div
+                className={cn(
+                  "mt-6 overflow-hidden rounded-xl border bg-card shadow-sm",
+                  "transition-[border-color,box-shadow] duration-200 motion-reduce:transition-none",
+                  "focus-within:border-ring/70 focus-within:shadow-md"
+                )}
               >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2
-                      id="continue-working-heading"
-                      className="text-base font-semibold sm:text-lg"
+                <Textarea
+                  ref={promptRef}
+                  placeholder={t("flashPlaceholder")}
+                  value={heroPrompt}
+                  onChange={(event) => setHeroPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault()
+                      handleFlashGenerate()
+                    }
+                  }}
+                  rows={3}
+                  aria-label={t("flashTitle")}
+                  className={cn(
+                    "max-h-56 min-h-24 resize-none rounded-none border-0 bg-transparent px-4 py-3.5",
+                    "text-base shadow-none focus-visible:border-0 focus-visible:ring-0 md:text-base",
+                    "dark:bg-transparent"
+                  )}
+                />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-t bg-muted/25 px-2 py-2">
+                  <A2UIGenerationOptions
+                    value={generationPrefs}
+                    onChange={handleGenerationPrefsChange}
+                    disabled={isGenerating}
+                  />
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleCreateBlank}
+                      className="text-muted-foreground hover:text-foreground"
                     >
-                      {t("continueWorking")}
-                    </h2>
-                    <p className="text-sm text-muted-foreground">{t("manageApps")}</p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">
-                      {allApps.length} {t("allApps")}
-                    </Badge>
-                    <Badge variant="outline">
-                      {featuredTemplates.length} {t("featuredTemplates")}
-                    </Badge>
+                      <FilePlus2 className="size-4" />
+                      <span className="hidden sm:inline">{t("newBlankApp")}</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleFlashGenerate}
+                      disabled={!heroPrompt.trim() || isGenerating}
+                      className="shadow-sm shadow-primary/20"
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-4" />
+                      )}
+                      {isGenerating ? t("generating") : t("aiGenerate")}
+                    </Button>
                   </div>
                 </div>
+              </div>
 
-                {recentApp ? (
-                  <Card
-                    className="overflow-hidden border-border/60 bg-background/80"
-                    onClick={() => handleOpenWorkspace(recentApp.id)}
-                  >
-                    <div className="grid gap-0 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
-                      <div className="min-h-[220px] overflow-hidden border-b bg-muted/30 p-4 md:border-b-0 md:border-r">
-                        {/* w-[125%] compensates scale-[0.8] so the scaled preview fills its layout box */}
-                        <A2UIInlineSurface
-                          surfaceId={recentApp.id}
-                          className="pointer-events-none min-h-[180px] w-[125%] scale-[0.8] origin-top-left"
-                        />
-                      </div>
-                      <div className="flex flex-col justify-between gap-4 p-5">
-                        <div className="space-y-2">
-                          <Badge variant="secondary" className="w-fit">
-                            {t("recentlyEdited")}
-                          </Badge>
-                          <div>
-                            <CardTitle className="text-lg">{recentApp.name}</CardTitle>
-                            <CardDescription className="mt-1">
-                              {recentApp.description || t("manageApps")}
-                            </CardDescription>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span className="inline-flex items-center gap-1">
-                              <Calendar className="h-3.5 w-3.5" />
-                              {new Date(recentApp.lastModified).toLocaleDateString()}
-                            </span>
-                            {recentApp.category && (
-                              <Badge variant="outline">
-                                {t(CATEGORY_I18N_MAP[recentApp.category]) || recentApp.category}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            className="gap-1.5"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleOpenWorkspace(recentApp.id)
-                            }}
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                            {t("editApp")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setPreviewAppId(recentApp.id)
-                            }}
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            {t("appPreview")}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="gap-1.5"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setDetailAppId(recentApp.id)
-                            }}
-                          >
-                            <Blocks className="h-3.5 w-3.5" />
-                            {t("appDetail")}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-6">
-                    <div className="flex flex-col items-start gap-2 text-left">
-                      <div className="rounded-2xl bg-cyan-500/10 p-3 text-cyan-500">
-                        <Blocks className="h-5 w-5" />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="font-medium">{t("noAppsYet")}</h3>
-                        <p className="text-sm text-muted-foreground">{t("createFirstApp")}</p>
-                      </div>
-                      <Button size="sm" className="gap-1.5" onClick={focusCreatePrompt}>
-                        <Sparkles className="h-4 w-4" />
-                        {t("newApp")}
+              {/* No visible "Quick try:" label — it cost exactly the 7px that
+                  pushed the sixth chip onto a second, ragged line, and chips
+                  under a prompt box are self-explanatory. The label survives as
+                  the group's accessible name. */}
+              <div
+                role="group"
+                aria-label={t("quickTry")}
+                className="mt-3 flex flex-wrap items-center justify-center gap-1.5"
+              >
+                {QUICK_SUGGESTION_KEYS.map((key) => {
+                  const suggestion = t(key)
+                  return (
+                    <Button
+                      key={key}
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="font-normal text-muted-foreground hover:text-foreground"
+                      onClick={() => handleSuggestionClick(suggestion)}
+                    >
+                      {suggestion}
+                    </Button>
+                  )
+                })}
+              </div>
+            </section>
+
+            {/* ── My apps ───────────────────────────────────────────────── */}
+            <section aria-labelledby="a2ui-apps-heading" className="flex flex-col">
+              {/* Pin sensor: sits one pixel above the sticky bar, so leaving the
+                  viewport is exactly the moment the bar becomes pinned. */}
+              <div ref={toolbarSentinelRef} aria-hidden="true" className="h-px w-full shrink-0" />
+
+              <div
+                data-testid="a2ui-library-toolbar"
+                data-pinned={toolbarPinned}
+                className={cn(
+                  "sticky top-0 z-20 -mx-4 flex flex-col gap-2.5 px-4 pb-3 pt-2.5 sm:-mx-6 sm:px-6",
+                  // Same glass recipe as FeaturePageHeader, so a pinned toolbar
+                  // reads as an extension of the page chrome above it.
+                  "border-b border-transparent bg-background/88 backdrop-blur-xl",
+                  "supports-[backdrop-filter]:bg-background/76",
+                  "transition-colors duration-200 motion-reduce:transition-none",
+                  "data-[pinned=true]:border-border/70"
+                )}
+              >
+                <SectionHeading
+                  id="a2ui-apps-heading"
+                  title={t("myAppsTab")}
+                  count={allApps.length}
+                >
+                  <div className="relative w-full sm:w-56">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder={t("searchPlaceholder")}
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      className="h-8 pl-8 pr-8 text-sm"
+                    />
+                    {searchQuery && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        aria-label={t("close")}
+                        onClick={() => setSearchQuery("")}
+                      >
+                        <X className="size-3.5" />
                       </Button>
-                    </div>
+                    )}
+                  </div>
+
+                  <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortOption)}>
+                    <SelectTrigger size="sm" className="w-[132px]" aria-label={t("sortByLabel")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">{t("sortByNewest")}</SelectItem>
+                      <SelectItem value="oldest">{t("sortOldest")}</SelectItem>
+                      <SelectItem value="name">{t("sortByName")}</SelectItem>
+                      <SelectItem value="mostUsed">{t("sortByMostUsed")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <div className="hidden items-center gap-0.5 rounded-md border p-0.5 sm:flex">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={viewMode === "grid" ? "secondary" : "ghost"}
+                          size="icon-xs"
+                          className="size-7"
+                          aria-label={t("gridView")}
+                          aria-pressed={viewMode === "grid"}
+                          onClick={() => setViewMode("grid")}
+                        >
+                          <Grid3X3 className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("gridView")}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={viewMode === "list" ? "secondary" : "ghost"}
+                          size="icon-xs"
+                          className="size-7"
+                          aria-label={t("listView")}
+                          aria-pressed={viewMode === "list"}
+                          onClick={() => setViewMode("list")}
+                        >
+                          <List className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("listView")}</TooltipContent>
+                    </Tooltip>
+                  </div>
+                </SectionHeading>
+
+                {allApps.length > 0 && (
+                  <div className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <Button
+                      variant={!selectedCategory && !showFavoritesOnly ? "secondary" : "ghost"}
+                      size="xs"
+                      className="shrink-0 font-normal"
+                      onClick={handleClearFilters}
+                    >
+                      {t("allCategories")}
+                    </Button>
+                    <Button
+                      variant={showFavoritesOnly ? "secondary" : "ghost"}
+                      size="xs"
+                      className="shrink-0 font-normal"
+                      onClick={() => setShowFavoritesOnly((value) => !value)}
+                      aria-pressed={showFavoritesOnly}
+                    >
+                      <Star className={cn("size-3", showFavoritesOnly && "fill-current")} />
+                      {t("favoritesFilter")}
+                    </Button>
+                    <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+                    {CATEGORY_KEYS.map((category) => (
+                      <Button
+                        key={category}
+                        variant={selectedCategory === category ? "secondary" : "ghost"}
+                        size="xs"
+                        className="shrink-0 font-normal"
+                        aria-pressed={selectedCategory === category}
+                        onClick={() =>
+                          setSelectedCategory(
+                            selectedCategory === category
+                              ? null
+                              : (category as A2UIAppTemplate["category"])
+                          )
+                        }
+                      >
+                        {t(CATEGORY_I18N_MAP[category]) || category}
+                      </Button>
+                    ))}
                   </div>
                 )}
-              </section>
+              </div>
 
-              <section className="space-y-4 rounded-3xl border bg-card/50 p-4 shadow-sm sm:p-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="space-y-1">
-                    <h3 className="text-base font-semibold">{t("allApps")}</h3>
-                    <p className="text-sm text-muted-foreground">{t("searchAndManageApps")}</p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="relative min-w-[220px] flex-1 lg:min-w-[260px]">
-                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder={t("searchPlaceholder")}
-                        value={searchQuery}
-                        onChange={(event) => setSearchQuery(event.target.value)}
-                        className="pl-9"
-                      />
-                      {searchQuery && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-1 top-1 h-7 w-7"
-                          onClick={() => setSearchQuery("")}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-
-                    <Select
-                      value={sortBy}
-                      onValueChange={(value) => setSortBy(value as SortOption)}
-                    >
-                      <SelectTrigger className="w-auto min-w-[140px]">
-                        <SortAsc className="mr-1 h-4 w-4" />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="newest">{t("sortByNewest")}</SelectItem>
-                        <SelectItem value="oldest">{t("sortOldest")}</SelectItem>
-                        <SelectItem value="name">{t("sortByName")}</SelectItem>
-                        <SelectItem value="mostUsed">{t("sortByMostUsed")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <div className="hidden items-center gap-1 rounded-full border border-border/60 p-1 sm:flex">
-                      <Button
-                        variant={viewMode === "grid" ? "secondary" : "ghost"}
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setViewMode("grid")}
-                      >
-                        <Grid3X3 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant={viewMode === "list" ? "secondary" : "ghost"}
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => setViewMode("list")}
-                      >
-                        <List className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant={!selectedCategory ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setSelectedCategory(null)}
-                  >
-                    {t("allCategories")}
-                  </Button>
-                  <Button
-                    variant={showFavoritesOnly ? "secondary" : "ghost"}
-                    size="sm"
-                    onClick={() => setShowFavoritesOnly((value) => !value)}
-                    aria-pressed={showFavoritesOnly}
-                  >
-                    <Star
-                      className={cn("mr-1.5 h-3.5 w-3.5", showFavoritesOnly && "fill-current")}
-                    />
-                    {t("favoritesFilter")}
-                  </Button>
-                  {CATEGORY_KEYS.map((category) => (
-                    <Button
-                      key={category}
-                      variant={selectedCategory === category ? "secondary" : "ghost"}
-                      size="sm"
-                      onClick={() =>
-                        setSelectedCategory(
-                          selectedCategory === category
-                            ? null
-                            : (category as A2UIAppTemplate["category"])
-                        )
-                      }
-                    >
-                      {t(CATEGORY_I18N_MAP[category]) || category}
-                    </Button>
-                  ))}
-                </div>
-
+              <div className="pt-4">
                 {filteredApps.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-6 text-center">
-                    <p className="font-medium">
-                      {allApps.length === 0 ? t("noAppsYet") : t("noAppsFound")}
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {allApps.length === 0 ? t("createFirstApp") : t("tryCreating")}
-                    </p>
-                  </div>
-                ) : libraryApps.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-6 text-sm text-muted-foreground">
-                    {t("recentlyEdited")}
-                  </div>
-                ) : (
-                  <div
-                    className={cn(
-                      viewMode === "grid"
-                        ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
-                        : "flex flex-col gap-3"
-                    )}
-                  >
-                    {libraryApps.map((app) => (
+                  <EmptyPanel
+                    icon={<Blocks className="size-5" />}
+                    title={allApps.length === 0 ? t("noAppsYet") : t("noAppsFound")}
+                    description={allApps.length === 0 ? t("createFirstApp") : t("tryCreating")}
+                    action={
+                      allApps.length === 0 ? (
+                        <Button size="sm" onClick={focusCreatePrompt}>
+                          <Sparkles className="size-4" />
+                          {t("newApp")}
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" onClick={handleClearFilters}>
+                          {t("allCategories")}
+                        </Button>
+                      )
+                    }
+                  />
+                ) : viewMode === "grid" ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {filteredApps.map((app) => (
                       <Card
                         key={app.id}
+                        data-testid="a2ui-app-card"
                         className={cn(
-                          "group relative overflow-hidden border-border/60 bg-background/80 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0",
-                          viewMode === "list" && "flex-row"
+                          "group relative cursor-pointer gap-0 overflow-hidden py-0",
+                          "transition-[border-color,box-shadow,transform] duration-200",
+                          "hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md",
+                          "motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                         )}
                         onClick={() => handleOpenWorkspace(app.id)}
                       >
-                        <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            aria-label={app.isFavorite ? t("unfavorite") : t("favorite")}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              void handleToggleFavorite(app.id)
-                            }}
+                        {/* Full-bleed preview: the frame owns the border, so the
+                            inline surface drops its own radius/border/background
+                            to avoid a rounded box inside a rounded box. */}
+                        <div className="relative h-32 overflow-hidden border-b bg-muted/30">
+                          <A2UIInlineSurface
+                            surfaceId={app.id}
+                            className="pointer-events-none absolute inset-0 w-[200%] origin-top-left scale-50 rounded-none border-0 bg-transparent p-3 shadow-none"
+                          />
+                          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card via-card/70 to-transparent" />
+                          {renderRecentBadge(app, "absolute left-2 top-2 shadow-sm")}
+
+                          {/* Row actions live over the thumbnail so the title
+                              gets the full card width. Pointer devices reveal
+                              them on hover; a favourited card and any device
+                              without hover keep them visible. */}
+                          <div
+                            className={cn(
+                              "absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5",
+                              "rounded-md border bg-background/85 p-0.5 shadow-sm backdrop-blur",
+                              "transition-opacity duration-150 motion-reduce:transition-none",
+                              "focus-within:opacity-100 has-[[data-state=open]]:opacity-100",
+                              app.isFavorite
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                            )}
                           >
-                            <Star
-                              className={cn(
-                                "h-4 w-4",
-                                app.isFavorite && "fill-yellow-400 text-yellow-400"
-                              )}
-                            />
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleOpenWorkspace(app.id)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                {t("editApp")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setPreviewAppId(app.id)}>
-                                <Eye className="mr-2 h-4 w-4" />
-                                {t("appPreview")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setDetailAppId(app.id)}>
-                                <Blocks className="mr-2 h-4 w-4" />
-                                {t("appDetail")}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleDuplicate(app.id)}>
-                                <Copy className="mr-2 h-4 w-4" />
-                                {t("duplicate")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleExport(app.id)}>
-                                <Download className="mr-2 h-4 w-4" />
-                                {t("export")}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => handleDeleteApp(app.id)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                {t("delete")}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                            {renderAppActions(app)}
+                          </div>
                         </div>
 
-                        {viewMode === "grid" && (
-                          <div className="max-h-[180px] overflow-hidden border-b bg-muted/30 p-3">
-                            {/* w-[161%] compensates scale-[0.62] so the scaled preview fills its layout box */}
-                            <A2UIInlineSurface
-                              surfaceId={app.id}
-                              className="pointer-events-none min-h-[120px] w-[161%] scale-[0.62] origin-top-left"
-                            />
-                          </div>
-                        )}
-
-                        <CardHeader className={cn(viewMode === "list" && "flex-1")}>
-                          <CardTitle className="pr-8 text-base">{app.name}</CardTitle>
-                          <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                            <span>{new Date(app.lastModified).toLocaleDateString()}</span>
-                            {app.category && (
-                              <span>{t(CATEGORY_I18N_MAP[app.category]) || app.category}</span>
-                            )}
-                          </CardDescription>
-                        </CardHeader>
-
-                        <CardContent className="pt-0">
+                        <div className="flex flex-col gap-1 p-3">
+                          <h3 className="truncate text-sm font-medium">{app.name}</h3>
+                          {renderAppMeta(app)}
                           {app.tags && app.tags.length > 0 && (
-                            <div className="mb-3 flex flex-wrap gap-1">
+                            <div className="mt-0.5 flex flex-wrap gap-1">
                               {app.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} variant="outline" className="h-5 text-[10px]">
+                                <Badge
+                                  key={tag}
+                                  variant="outline"
+                                  className="h-4 px-1.5 text-[10px] font-normal"
+                                >
                                   {tag}
                                 </Badge>
                               ))}
                             </div>
                           )}
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="gap-1.5"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handleOpenWorkspace(app.id)
-                              }}
-                            >
-                              <Edit className="h-3.5 w-3.5" />
-                              {t("editApp")}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                setPreviewAppId(app.id)
-                              }}
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                              {t("appPreview")}
-                            </Button>
-                          </div>
-                        </CardContent>
+                        </div>
                       </Card>
                     ))}
                   </div>
-                )}
-              </section>
-
-              <section
-                aria-labelledby="template-library-heading"
-                className="space-y-4 rounded-3xl border bg-card/50 p-4 shadow-sm sm:p-5"
-              >
-                <div className="space-y-1">
-                  <h2 id="template-library-heading" className="text-base font-semibold sm:text-lg">
-                    {t("templateLibrary")}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">{t("browseTemplates")}</p>
-                </div>
-
-                {filteredTemplates.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                    {t("noTemplatesFound")}
-                  </div>
                 ) : (
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {filteredTemplates.map((template) => (
+                  /* List mode is one surface with divided rows, not a stack of
+                     floating cards — rows read as a list and the eye follows a
+                     single left edge down the page. */
+                  <div className="overflow-hidden rounded-xl border bg-card">
+                    {filteredApps.map((app, index) => (
+                      <div
+                        key={app.id}
+                        data-testid="a2ui-app-card"
+                        className={cn(
+                          "group flex cursor-pointer items-center gap-3 px-3 py-2.5",
+                          "transition-colors duration-150 hover:bg-accent/50",
+                          "motion-reduce:transition-none",
+                          index > 0 && "border-t"
+                        )}
+                        onClick={() => handleOpenWorkspace(app.id)}
+                      >
+                        <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                          <Blocks className="size-4" />
+                        </div>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <h3 className="truncate text-sm font-medium">{app.name}</h3>
+                            {renderRecentBadge(app)}
+                          </div>
+                          {renderAppMeta(app)}
+                        </div>
+                        {app.tags && app.tags.length > 0 && (
+                          <div className="hidden shrink-0 items-center gap-1 md:flex">
+                            {app.tags.slice(0, 2).map((tag) => (
+                              <Badge
+                                key={tag}
+                                variant="outline"
+                                className="h-4 px-1.5 text-[10px] font-normal"
+                              >
+                                {tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                        {renderAppActions(app)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* ── Templates ─────────────────────────────────────────────── */}
+            <section
+              aria-labelledby="a2ui-templates-heading"
+              className="flex flex-col gap-4 pb-20 pt-12"
+            >
+              <SectionHeading
+                id="a2ui-templates-heading"
+                title={t("templateLibrary")}
+                count={filteredTemplates.length}
+              >
+                <span className="text-xs text-muted-foreground">{t("browseTemplates")}</span>
+              </SectionHeading>
+
+              {filteredTemplates.length === 0 ? (
+                <EmptyPanel
+                  icon={<Sparkles className="size-5" />}
+                  title={t("noTemplatesFound")}
+                  description={t("tryDifferentSearch")}
+                />
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleTemplates.map((template) => (
                       <TemplateCard
                         key={template.id}
                         template={template}
@@ -923,108 +1138,50 @@ function A2UIPageContent() {
                       />
                     ))}
                   </div>
-                )}
-              </section>
-            </section>
 
-            <aside className="order-1 lg:order-2 lg:sticky lg:top-6">
-              <section
-                aria-labelledby="create-studio-heading"
-                className="space-y-5 rounded-[28px] border bg-gradient-to-b from-cyan-500/[0.07] via-background to-background p-4 shadow-sm sm:p-5"
-              >
-                <div className="space-y-2">
-                  <Badge variant="secondary" className="w-fit">
-                    {t("flashTab")}
-                  </Badge>
-                  <h2 id="create-studio-heading" className="text-base font-semibold sm:text-lg">
-                    {t("createStudio")}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">{t("flashDescription")}</p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="relative">
-                    <Textarea
-                      ref={promptRef}
-                      placeholder={t("flashPlaceholder")}
-                      value={heroPrompt}
-                      onChange={(event) => setHeroPrompt(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault()
-                          handleFlashGenerate()
-                        }
-                      }}
-                      rows={3}
-                      className="resize-none border-border/60 bg-background/80 pr-24 shadow-sm focus:shadow-md"
-                    />
-                    <Button
-                      size="sm"
-                      className="absolute bottom-2 right-2 gap-1.5"
-                      onClick={handleFlashGenerate}
-                      disabled={!heroPrompt.trim() || isGenerating}
-                    >
-                      {isGenerating ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                      {t("flashTab")}
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      {t("quickTry")}
-                    </span>
-                    <div className="flex flex-wrap gap-2">
-                      {QUICK_SUGGESTION_KEYS.map((key) => {
-                        const suggestion = t(key)
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-                            onClick={() => handleSuggestionClick(suggestion)}
-                          >
-                            {suggestion}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-medium">{t("featuredTemplates")}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {t("featuredTemplatesDescription")}
-                      </p>
-                    </div>
-                    <Badge variant="outline">{featuredTemplates.length}</Badge>
-                  </div>
-
-                  {featuredTemplates.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">{t("noTemplatesFound")}</p>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                      {featuredTemplates.map((template) => (
-                        <TemplateCard
-                          key={template.id}
-                          template={template}
-                          viewMode="grid"
-                          onSelect={() => handleTemplateSelect(template)}
+                  {/* Keeps the full catalogue two rows tall by default so the
+                      library above stays reachable without a long scroll. */}
+                  {filteredTemplates.length > TEMPLATE_PREVIEW_COUNT && (
+                    <div className="flex justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setTemplatesExpanded((value) => !value)}
+                        aria-expanded={templatesExpanded}
+                      >
+                        {templatesExpanded ? t("showLess") : t("showAll")}
+                        <ChevronDown
+                          className={cn(
+                            "size-4 transition-transform duration-200 motion-reduce:transition-none",
+                            templatesExpanded && "rotate-180"
+                          )}
                         />
-                      ))}
+                      </Button>
                     </div>
                   )}
-                </div>
-              </section>
-            </aside>
+                </>
+              )}
+            </section>
           </div>
-        </ScrollArea>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label={t("scrollToTop")}
+          data-testid="a2ui-back-to-top"
+          onClick={scrollToTop}
+          className={cn(
+            "absolute bottom-5 right-5 z-30 rounded-full bg-background/90 shadow-md backdrop-blur",
+            "transition-[opacity,transform] duration-200 motion-reduce:transition-none",
+            showBackToTop
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-2 opacity-0"
+          )}
+        >
+          <ArrowUp className="size-4" />
+        </Button>
       </main>
 
       <input
@@ -1044,12 +1201,9 @@ function A2UIPageContent() {
       {previewAppId && (
         <Dialog open={!!previewAppId} onOpenChange={(open) => !open && setPreviewAppId(null)}>
           <DialogContent aria-describedby={undefined} className="max-h-[80vh] max-w-2xl">
-            <DialogHeader className="sr-only">
+            <DialogHeader>
               <DialogTitle>{t("appPreview")}</DialogTitle>
             </DialogHeader>
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-semibold">{t("appPreview")}</h3>
-            </div>
             <ScrollArea className="max-h-[60vh]">
               <A2UIInlineSurface surfaceId={previewAppId} />
             </ScrollArea>

@@ -9,12 +9,9 @@ import React, { useCallback, useState } from "react"
 import { useLocale, useTranslations } from "next-intl"
 import {
   BookmarkPlus,
-  Database,
   Download,
-  Eye,
   Loader2,
   PanelRight,
-  Pencil,
   Redo2,
   RotateCcw,
   Save,
@@ -27,7 +24,6 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Dialog,
@@ -62,7 +58,6 @@ export function A2UIToolbar() {
   const {
     surfaceId,
     workspaceMode,
-    setWorkspaceMode,
     zoom,
     setZoom,
     showTree,
@@ -204,7 +199,7 @@ export function A2UIToolbar() {
   ])
 
   return (
-    <div className="flex items-center gap-1 border-b px-2 py-1 bg-background/95 backdrop-blur shrink-0">
+    <div className="flex w-full items-center gap-0.5">
       {/* Undo/Redo */}
       <ToolbarButton
         icon={<Undo2 className="h-4 w-4" />}
@@ -221,30 +216,13 @@ export function A2UIToolbar() {
         shortcut="Ctrl+Y"
       />
 
-      {/* Mode buttons drive the desktop three-panel layout only — on mobile
-          the bottom tab-bar owns panel navigation, so this group is hidden to
-          keep the touch toolbar to undo/redo + save/export/share. */}
-      <div className="hidden items-center gap-1 sm:flex">
-        <Separator orientation="vertical" className="h-6 mx-1" />
-        <ToolbarButton
-          icon={<Pencil className="h-4 w-4" />}
-          label={t("editMode")}
-          onClick={() => setWorkspaceMode("edit")}
-          active={workspaceMode === "edit"}
-        />
-        <ToolbarButton
-          icon={<Eye className="h-4 w-4" />}
-          label={t("previewMode")}
-          onClick={() => setWorkspaceMode("preview")}
-          active={workspaceMode === "preview"}
-        />
-        <ToolbarButton
-          icon={<Database className="h-4 w-4" />}
-          label={t("dataMode")}
-          onClick={() => setWorkspaceMode("data")}
-          active={workspaceMode === "data"}
-        />
-        <Separator orientation="vertical" className="h-6 mx-1" />
+      {/* Panel + zoom controls are desktop-only: on mobile the bottom tab-bar
+          owns panel navigation and the preview is already fit-to-width, so the
+          touch toolbar stays at undo/redo + AI + save/export/share. The
+          edit/preview/data switch is NOT repeated here — the header's mode tabs
+          are the single control for it. */}
+      <div className="hidden items-center gap-0.5 sm:flex">
+        <ToolbarDivider />
         {workspaceMode === "edit" && (
           <>
             <ToolbarButton
@@ -259,7 +237,7 @@ export function A2UIToolbar() {
               onClick={() => setShowProperties(!showProperties)}
               active={showProperties}
             />
-            <Separator orientation="vertical" className="h-6 mx-1" />
+            <ToolbarDivider />
           </>
         )}
         <ToolbarButton
@@ -268,38 +246,27 @@ export function A2UIToolbar() {
           onClick={() => setZoom(zoom - WORKSPACE_ZOOM_STEP)}
           disabled={zoom <= MIN_WORKSPACE_ZOOM}
         />
-        <ToolbarButton
-          icon={<RotateCcw className="size-4" />}
-          label={t("resetZoomWithLevel", { zoom })}
-          onClick={() => setZoom(100)}
-          disabled={zoom === 100}
-        />
+        {/* The zoom level used to live only inside the reset button's tooltip,
+            which meant the current scale was invisible until you hovered. */}
+        <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">{zoom}%</span>
         <ToolbarButton
           icon={<ZoomIn className="size-4" />}
           label={t("zoomIn")}
           onClick={() => setZoom(zoom + WORKSPACE_ZOOM_STEP)}
           disabled={zoom >= MAX_WORKSPACE_ZOOM}
         />
-        <Separator orientation="vertical" className="h-6 mx-1" />
+        <ToolbarButton
+          icon={<RotateCcw className="size-4" />}
+          label={t("resetZoomWithLevel", { zoom })}
+          onClick={() => setZoom(100)}
+          disabled={zoom === 100}
+        />
       </div>
-
-      {/* AI Generate */}
-      <ToolbarButton
-        icon={<Sparkles className="h-4 w-4" />}
-        label={t("aiGenerate")}
-        onClick={() => setRegenerateOpen(true)}
-        showLabel
-      />
 
       <div className="flex-1" />
 
-      {/* Save / Export / Share */}
-      <ToolbarButton
-        icon={<Save className="h-4 w-4" />}
-        label={t("saveApp")}
-        onClick={handleSave}
-        shortcut="Ctrl+S"
-      />
+      {/* Secondary: export / share / save-as-template stay icon-only ghosts so
+          the single filled button below reads as the primary action. */}
       <ToolbarButton
         icon={<Download className="h-4 w-4" />}
         label={t("export")}
@@ -314,6 +281,24 @@ export function A2UIToolbar() {
         icon={<BookmarkPlus className="h-4 w-4" />}
         label={t("saveAsTemplate")}
         onClick={handleSaveTemplate}
+      />
+
+      <ToolbarDivider />
+
+      <ToolbarButton
+        icon={<Sparkles className="h-4 w-4" />}
+        label={t("aiGenerate")}
+        onClick={() => setRegenerateOpen(true)}
+        showLabel
+        variant="outline"
+      />
+      <ToolbarButton
+        icon={<Save className="h-4 w-4" />}
+        label={t("saveApp")}
+        onClick={handleSave}
+        shortcut="Ctrl+S"
+        showLabel
+        variant="default"
       />
 
       <ShareLinkDialog
@@ -389,6 +374,10 @@ export function A2UIToolbar() {
   )
 }
 
+function ToolbarDivider() {
+  return <span className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
+}
+
 interface ToolbarButtonProps {
   icon: React.ReactNode
   label: string
@@ -397,6 +386,8 @@ interface ToolbarButtonProps {
   active?: boolean
   shortcut?: string
   showLabel?: boolean
+  /** Overrides the ghost/secondary default — `default` marks the one primary. */
+  variant?: "default" | "outline"
 }
 
 function ToolbarButton({
@@ -407,13 +398,14 @@ function ToolbarButton({
   active,
   shortcut,
   showLabel,
+  variant,
 }: ToolbarButtonProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           aria-label={label}
-          variant={active ? "secondary" : "ghost"}
+          variant={variant ?? (active ? "secondary" : "ghost")}
           size="sm"
           className={cn("h-7 px-2 gap-1", disabled && "opacity-40")}
           onClick={onClick}

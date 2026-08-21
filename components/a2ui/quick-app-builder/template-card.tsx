@@ -4,7 +4,7 @@ import React, { memo } from "react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardDescription, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Sparkles } from "lucide-react"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
@@ -16,6 +16,14 @@ interface TemplateCardProps {
   onSelect: (template: A2UIAppTemplate) => void
 }
 
+/**
+ * Template tile for the Mini-Apps hub.
+ *
+ * Density matches the app cards it sits under: one `rounded-xl` card (the
+ * `--radius-xl` token), a `rounded-lg` icon tile, and nothing else rounded.
+ * The default `Card` padding is dropped so the tile does not tower over the
+ * app grid beside it.
+ */
 export const TemplateCard = memo(function TemplateCard({
   template,
   viewMode,
@@ -24,56 +32,65 @@ export const TemplateCard = memo(function TemplateCard({
   const t = useTranslations("a2ui")
   const IconComponent = resolveIcon(template.icon)
 
+  const icon = (
+    <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+      {IconComponent ? (
+        React.createElement(IconComponent, { className: "size-4" })
+      ) : (
+        <Sparkles className="size-4" />
+      )}
+    </div>
+  )
+
   return (
     <Card
+      data-testid="a2ui-template-card"
       className={cn(
-        "group cursor-pointer transition-all hover:shadow-md hover:border-primary/50",
-        viewMode === "list" && "flex flex-row items-center"
+        "group cursor-pointer gap-0 py-0",
+        "transition-[border-color,box-shadow] duration-200 motion-reduce:transition-none",
+        "hover:border-primary/40 hover:shadow-sm",
+        viewMode === "list" ? "flex-row items-center gap-3 px-3 py-2.5" : "p-3"
       )}
       onClick={() => onSelect(template)}
     >
-      <CardHeader className={cn(viewMode === "list" && "flex-1 py-3")}>
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            {IconComponent ? (
-              React.createElement(IconComponent, { className: "h-5 w-5 text-primary" })
-            ) : (
-              <Sparkles className="h-5 w-5 text-primary" />
-            )}
+      {viewMode === "list" ? (
+        <>
+          {icon}
+          <div className="min-w-0 flex-1">
+            <CardTitle className="truncate text-sm">{template.name}</CardTitle>
+            <CardDescription className="truncate text-xs">{template.description}</CardDescription>
           </div>
-          <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm">{template.name}</CardTitle>
-            <CardDescription className="text-xs line-clamp-2">
-              {template.description}
-            </CardDescription>
-          </div>
-        </div>
-      </CardHeader>
-      {viewMode === "grid" && (
-        <CardFooter className="pt-0">
-          <div className="flex flex-wrap gap-1">
-            {template.tags.slice(0, 3).map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        </CardFooter>
-      )}
-      {viewMode === "list" && (
-        <div className="flex items-center gap-2 pr-4">
           <Button
             size="sm"
             variant="ghost"
-            className="opacity-0 group-hover:opacity-100"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             onClick={(e) => {
               e.stopPropagation()
               onSelect(template)
             }}
           >
-            <Plus className="h-4 w-4 mr-1" />
+            <Plus className="size-4" />
             {t("create")}
           </Button>
+        </>
+      ) : (
+        <div className="flex items-start gap-2.5">
+          {icon}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <CardTitle className="truncate text-sm">{template.name}</CardTitle>
+            <CardDescription className="line-clamp-2 text-xs">
+              {template.description}
+            </CardDescription>
+            {template.tags.length > 0 && (
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {template.tags.slice(0, 3).map((tag) => (
+                  <Badge key={tag} variant="outline" className="h-4 px-1.5 text-[10px] font-normal">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </Card>

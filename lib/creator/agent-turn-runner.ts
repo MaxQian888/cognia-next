@@ -25,7 +25,7 @@ import { hasNoLeakingPii } from "@cognia/redact"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { CreatorTurnRequest, CreatorTurnRunner } from "./agent-ports"
 
 /** Authority every Creator agent turn runs at. Never widened. */

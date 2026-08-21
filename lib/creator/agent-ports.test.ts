@@ -9,6 +9,7 @@ import {
   parseScaffoldPlan,
   parseSurveyFindings,
 } from "./agent-ports"
+import type { CreatorTurnRequest } from "./agent-ports"
 import type { CreatorRunContext } from "./executor"
 import type { AuthoringRoot } from "@/types/creator"
 
@@ -191,7 +192,9 @@ describe("parseReviewFindings", () => {
 
 describe("the agent handlers", () => {
   it("runs the survey with the authoring root as cwd", async () => {
-    const runTurn = jest.fn(async () => fence(JSON.stringify({ findings: [] })))
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ findings: [] }))
+    )
     await createAgentSurveyHandler({ runTurn })(ctx)
     expect(runTurn).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: "survey", cwd: "/work/authoring" })
@@ -199,20 +202,26 @@ describe("the agent handlers", () => {
   })
 
   it("puts the requirements in the plan prompt", async () => {
-    const runTurn = jest.fn(async () => fence(JSON.stringify({ files: [] })))
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ files: [] }))
+    )
     await createAgentPlanHandler({ runTurn })(ctx)
     expect(runTurn.mock.calls[0][0].prompt).toContain("clip the clipboard")
   })
 
   it("tells the generator that paths are relative", async () => {
-    const runTurn = jest.fn(async () => fence(JSON.stringify({ files: [] })))
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ files: [] }))
+    )
     await createAgentPlanHandler({ runTurn })(ctx)
     expect(runTurn.mock.calls[0][0].prompt).toMatch(/RELATIVE to the authoring root/)
   })
 
   // The purpose is what the runner keys the reviewer's fresh session on.
   it("marks the review turn so the runner can isolate its session", async () => {
-    const runTurn = jest.fn(async () => fence(JSON.stringify({ findings: [] })))
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ findings: [] }))
+    )
     await createAgentReviewHandler({ runTurn, reviewerAuthority: "plan" })(ctx, {
       artifactKind: "plugin",
       changedPaths: ["a.ts"],
@@ -226,7 +235,7 @@ describe("the agent handlers", () => {
   // The reviewer must not be able to self-report an authority it is not running
   // at — the panel shows this value as evidence.
   it("reports the runner's authority, not one the model claimed", async () => {
-    const runTurn = jest.fn(async () =>
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
       fence(JSON.stringify({ findings: [], reviewerAuthority: "bypassPermissions" }))
     )
     const verdict = await createAgentReviewHandler({ runTurn, reviewerAuthority: "plan" })(ctx, {
@@ -240,7 +249,9 @@ describe("the agent handlers", () => {
   })
 
   it("tells the reviewer it cannot change what it reviews", async () => {
-    const runTurn = jest.fn(async () => fence(JSON.stringify({ findings: [] })))
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) =>
+      fence(JSON.stringify({ findings: [] }))
+    )
     await createAgentReviewHandler({ runTurn, reviewerAuthority: "plan" })(ctx, {
       artifactKind: "plugin",
       changedPaths: [],
@@ -252,7 +263,7 @@ describe("the agent handlers", () => {
   })
 
   it("surfaces a malformed reply as an error the executor can fail on", async () => {
-    const runTurn = jest.fn(async () => "I couldn't do that.")
+    const runTurn = jest.fn(async (_request: CreatorTurnRequest) => "I couldn't do that.")
     await expect(createAgentPlanHandler({ runTurn })(ctx)).rejects.toThrow(CreatorResponseError)
   })
 

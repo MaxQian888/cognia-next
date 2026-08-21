@@ -1,9 +1,14 @@
-const mockPii = jest.fn(() => true)
+const mockPii = jest.fn((_text: string) => true)
 jest.mock("@cognia/redact", () => ({ hasNoLeakingPii: (text: string) => mockPii(text) }))
 
-const mockRun = jest.fn(async () => ({ text: "reply" }))
+const mockRun = jest.fn(
+  async (_sessionId: string, _prompt: unknown, _options?: unknown, _cap?: unknown) => ({
+    text: "reply",
+  })
+)
 jest.mock("@/lib/claude/run-and-capture", () => ({
-  runAndCaptureAssistantReply: (...args: unknown[]) => mockRun(...(args as [])),
+  runAndCaptureAssistantReply: (...args: unknown[]) =>
+    mockRun(...(args as Parameters<typeof mockRun>)),
 }))
 
 // A deliberately WIDE resolved default, so the test proves the runner narrows
@@ -15,7 +20,8 @@ const mockResolve = jest.fn(async () => ({
   model: "claude-x",
 }))
 jest.mock("@/lib/claude/build-options", () => ({
-  resolveSendOptions: (...args: unknown[]) => mockResolve(...(args as [])),
+  resolveSendOptions: (...args: unknown[]) =>
+    mockResolve(...(args as Parameters<typeof mockResolve>)),
 }))
 
 jest.mock("@/stores/settings/settings-store", () => ({

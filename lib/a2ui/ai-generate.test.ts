@@ -33,6 +33,7 @@ import { hasNoLeakingPii } from "@cognia/redact"
 import { isTauri } from "@/lib/tauri"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
+import { resolveSendOptions } from "@/lib/claude/build-options"
 import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
 
 const mockPii = jest.mocked(hasNoLeakingPii)
@@ -206,6 +207,44 @@ describe("generateA2UIApp — create", () => {
     expect(result.title).toBe("My App")
     expect(result.components).toHaveLength(2)
     expect(mockGen).not.toHaveBeenCalled()
+  })
+
+  it("leaves the resolver session untouched when no overrides are supplied", async () => {
+    mockRun.mockResolvedValue(capturedResult())
+    jest.mocked(resolveSendOptions).mockClear()
+    await generateA2UIApp({ instruction: "x", mode: "create", surfaceId: "canvas-1" })
+
+    const session = jest.mocked(resolveSendOptions).mock.calls[0][0].session as unknown as Record<
+      string,
+      unknown
+    >
+    // Absent overrides must not appear as explicit `undefined` keys — the
+    // session literal stays exactly what it was before overrides existed.
+    expect(Object.keys(session).sort()).toEqual(["a2uiEnabled", "id"])
+  })
+
+  it("folds the per-generation overrides onto the resolver session", async () => {
+    mockRun.mockResolvedValue(capturedResult())
+    jest.mocked(resolveSendOptions).mockClear()
+    await generateA2UIApp({
+      instruction: "x",
+      mode: "create",
+      surfaceId: "canvas-1",
+      characterId: "char_9",
+      model: "gpt-5",
+      providerOverride: "openai",
+    })
+
+    // These are the exact fields `resolveSendOptions` reads off a ChatSession,
+    // so the hub composer's choices resolve the same way a chat session's do.
+    expect(jest.mocked(resolveSendOptions).mock.calls[0][0].session).toEqual(
+      expect.objectContaining({
+        a2uiEnabled: true,
+        characterId: "char_9",
+        model: "gpt-5",
+        providerOverride: "openai",
+      })
+    )
   })
 
   it("streams tool-call events onto the caller's surfaceId", async () => {

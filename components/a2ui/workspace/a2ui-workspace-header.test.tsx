@@ -18,11 +18,11 @@ jest.mock("@/stores/a2ui", () => ({
 import { A2UIWorkspaceProvider } from "./a2ui-workspace-context"
 import { WorkspaceHeader } from "./a2ui-workspace-header"
 
-function renderHeader(surfaceId: string) {
+function renderHeader(surfaceId: string, controls?: React.ReactNode) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages as Record<string, unknown>}>
       <A2UIWorkspaceProvider surfaceId={surfaceId}>
-        <WorkspaceHeader />
+        <WorkspaceHeader controls={controls} />
       </A2UIWorkspaceProvider>
     </NextIntlClientProvider>
   )
@@ -68,6 +68,22 @@ describe("WorkspaceHeader", () => {
     renderHeader("sx")
     const link = screen.getByRole("link") as HTMLAnchorElement
     expect(link.getAttribute("href")).toBe("/a2ui")
+  })
+
+  it("drops the status badge once the surface is ready", () => {
+    storeState.surfaces = { sx: { title: "My Mini App", ready: true } }
+    renderHeader("sx")
+    // A badge that always says "fine" is chrome that never informs; the mode
+    // tabs carry the state instead.
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument()
+  })
+
+  it("renders the toolbar as its secondary band instead of a second bar", () => {
+    storeState.surfaces = { sx: { ready: true } }
+    renderHeader("sx", <div data-testid="stub-controls" />)
+    const header = screen.getByTestId("a2ui-workspace-header")
+    expect(header).toHaveAttribute("data-has-secondary", "true")
+    expect(header).toContainElement(screen.getByTestId("stub-controls"))
   })
 
   it("clicking a mode tab updates workspace mode (smoke test that handlers wire up)", () => {
