@@ -13,7 +13,7 @@
  * refresh. Comments are activity entries — see `lib/db/issue-events.ts`.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   CircleSlashIcon,
   ExternalLinkIcon,
@@ -22,6 +22,7 @@ import {
   PlayIcon,
   SquareIcon,
   TagIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
@@ -30,20 +31,32 @@ import { toast } from "sonner"
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { primaryFileReference } from "@/lib/issues/editor-links"
+import { collectFileReferences } from "@/lib/issues/editor-links"
 import { Separator } from "@/components/ui/separator"
 import { useClientLiveQuery } from "@/hooks/data"
 import { parseGithubMirrorId } from "@/lib/db/github-issue-mirror"
 import { listIssueEvents } from "@/lib/db/issue-events"
 import { listIssueRuns } from "@/lib/db/issue-runs"
-import { setIssueAssignee } from "@/lib/db/issues"
+import { addIssueComment, setIssueAssignee } from "@/lib/db/issues"
 import { actorKey } from "@/lib/issues/board-model"
+import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
+import { buildIssueMenuSections, canDeleteIssue } from "@/lib/issues/menu-model"
 import { cancelIssueRun } from "@/lib/issues/run/registry"
-import { isActiveIssueRunStatus, type IssueActor, type IssueRun } from "@/types/issues"
+import {
+  isActiveIssueRunStatus,
+  type IssueActor,
+  type IssueProject,
+  type IssueRun,
+} from "@/types/issues"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
+import type { AssigneeOption } from "./assignee-picker"
 import { AssigneePicker } from "./assignee-picker"
+import { IssueCommentComposer } from "./issue-comment-composer"
+import { useMenuEntryPresentation } from "./editors/menu-entry-presentation"
+import { IssuePropertyMenu } from "./editors/issue-property-menu"
+import { IssueTextEditor } from "./editors/issue-text-editor"
 import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeback-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
@@ -52,6 +65,18 @@ export interface IssueDetailPanelProps {
   item: UnifiedIssueItem
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
+  /** Local labels only — a GitHub projection is not applicable to a local row. */
+  labels?: readonly LabelRow[]
+  projects?: readonly IssueProject[]
+  assigneeOptions?: readonly AssigneeOption[]
+  /** A run is in flight, which locks the status menu. */
+  running?: boolean
+  /**
+   * Applies one edit. Routed through the caller so the outcome is reported
+   * once, in one place, rather than by every control that can write.
+   */
+  onAction?: (action: IssueBulkAction) => void
+  onRequestDelete?: () => void
   onClose?: () => void
   /** Fired after a GitHub write lands, so the caller can refresh the mirror. */
   onWritebackCompleted?: () => void
@@ -61,6 +86,12 @@ export function IssueDetailPanel({
   item,
   labelsById,
   projectNamesById,
+  labels: writableLabels = [],
+  projects = [],
+  assigneeOptions = [],
+  running = false,
+  onAction,
+  onRequestDelete,
   onClose,
   onWritebackCompleted,
 }: IssueDetailPanelProps) {
@@ -110,6 +141,51 @@ export function IssueDetailPanel({
     .map((id) => labelsById?.get(id))
     .filter((label): label is LabelRow => Boolean(label))
 
+  /**
+   * The same sections the right-click menu renders, from the same model — so
+   * an action offered here and refused there (or vice versa) is impossible.
+   */
+  const sections = useMemo(
+    () =>
+      buildIssueMenuSections({
+        item,
+        running,
+        labels: writableLabels,
+        projects,
+        assigneeOptions,
+      }),
+    [item, running, writableLabels, projects, assigneeOptions]
+  )
+  const presentation = useMenuEntryPresentation({
+    labels: writableLabels,
+    projects,
+    assigneeOptions,
+  })
+  const sectionsById = useMemo(
+    () => new Map(sections.map((section) => [section.id, section])),
+    [sections]
+  )
+  /** Every entry refused means the property is read-only for this row. */
+  const allRefused = (id: Parameters<typeof sectionsById.get>[0]) => {
+    const section = sectionsById.get(id)
+    return !section || section.entries.every((entry) => entry.disabled)
+  }
+
+  /** Every file path mentioned in the title or body, not just the first. */
+  const fileReferences = useMemo(
+    () => collectFileReferences(item.title, item.description ?? ""),
+    [item.title, item.description]
+  )
+
+  async function handleComment(body: string) {
+    if (!localId) return
+    try {
+      await addIssueComment(localId, body, { kind: "human" })
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   // Derived, never stored: a GitHub row's mirror id IS `owner/repo#n`, so the
   // write-back target cannot drift from the row it is shown next to.
   const githubTarget = parsed?.kind === "github" ? parseGithubMirrorId(parsed.sourceId) : null
@@ -135,7 +211,15 @@ export function IssueDetailPanel({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-        <h2 className="text-base font-semibold leading-snug">{item.title}</h2>
+        <IssueTextEditor
+          value={item.title}
+          onCommit={(title) => onAction?.({ kind: "title", to: title })}
+          disabled={!onAction || !item.capabilities.canEdit}
+          required
+          ariaLabel={t("detail.title")}
+          testId="issue-detail-title"
+          className="-mx-2 text-base font-semibold leading-snug"
+        />
 
         {!item.capabilities.canEdit ? (
           <p
@@ -151,16 +235,42 @@ export function IssueDetailPanel({
             {t("detail.properties")}
           </h3>
           <PropertyRow label={t("detail.status")}>
-            <span className="inline-flex items-center gap-1.5">
-              <IssueStatusIcon status={item.status} />
-              {t(`status.${item.status}`)}
-            </span>
+            {sectionsById.get("status") && onAction ? (
+              <IssuePropertyMenu
+                section={sectionsById.get("status")!}
+                presentation={presentation}
+                onAction={onAction}
+                disabled={allRefused("status")}
+                testId="issue-detail-status"
+              >
+                <IssueStatusIcon status={item.status} />
+                {t(`status.${item.status}`)}
+              </IssuePropertyMenu>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <IssueStatusIcon status={item.status} />
+                {t(`status.${item.status}`)}
+              </span>
+            )}
           </PropertyRow>
           <PropertyRow label={t("detail.priority")}>
-            <span className="inline-flex items-center gap-1.5">
-              <IssuePriorityIcon priority={item.priority} />
-              {t(`priority.${item.priority}`)}
-            </span>
+            {sectionsById.get("priority") && onAction ? (
+              <IssuePropertyMenu
+                section={sectionsById.get("priority")!}
+                presentation={presentation}
+                onAction={onAction}
+                disabled={allRefused("priority")}
+                testId="issue-detail-priority"
+              >
+                <IssuePriorityIcon priority={item.priority} />
+                {t(`priority.${item.priority}`)}
+              </IssuePropertyMenu>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <IssuePriorityIcon priority={item.priority} />
+                {t(`priority.${item.priority}`)}
+              </span>
+            )}
           </PropertyRow>
           <PropertyRow label={t("detail.assignee")}>
             {localId && item.capabilities.canAssign ? (
@@ -180,37 +290,74 @@ export function IssueDetailPanel({
               </span>
             )}
           </PropertyRow>
-          {item.issueProjectId ? (
+          {sectionsById.get("project") && onAction ? (
+            <PropertyRow label={t("detail.project")}>
+              <IssuePropertyMenu
+                section={sectionsById.get("project")!}
+                presentation={presentation}
+                onAction={onAction}
+                disabled={allRefused("project")}
+                testId="issue-detail-project"
+              >
+                <span className="truncate">
+                  {item.issueProjectId
+                    ? (projectNamesById?.get(item.issueProjectId) ?? item.issueProjectId)
+                    : t("detail.empty")}
+                </span>
+              </IssuePropertyMenu>
+            </PropertyRow>
+          ) : item.issueProjectId ? (
             <PropertyRow label={t("detail.project")}>
               {projectNamesById?.get(item.issueProjectId) ?? item.issueProjectId}
             </PropertyRow>
           ) : null}
           <PropertyRow label={t("detail.labels")}>
-            {labels.length === 0 ? (
-              <span className="italic opacity-70">{t("labels.none")}</span>
-            ) : (
-              <span className="flex flex-wrap gap-1">
-                {labels.map((label) => (
+            <span className="flex min-w-0 flex-wrap items-center gap-1">
+              {labels.length === 0 ? (
+                <span className="italic opacity-70">{t("labels.none")}</span>
+              ) : (
+                labels.map((label) => (
                   <LabelChip key={label.id} label={label} className="h-5 text-[10px]" />
-                ))}
-              </span>
-            )}
+                ))
+              )}
+              {sectionsById.get("labels") && onAction ? (
+                <IssuePropertyMenu
+                  section={sectionsById.get("labels")!}
+                  presentation={presentation}
+                  onAction={onAction}
+                  disabled={allRefused("labels")}
+                  testId="issue-detail-labels"
+                >
+                  <TagIcon className="size-3.5" />
+                  {t("detail.editLabels")}
+                </IssuePropertyMenu>
+              ) : null}
+            </span>
           </PropertyRow>
         </section>
 
-        {item.description ? (
+        {item.description || onAction ? (
           <>
             <Separator />
             <section className="flex flex-col gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {t("detail.description")}
               </h3>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.description}</p>
+              <IssueTextEditor
+                value={item.description ?? ""}
+                multiline
+                onCommit={(description) => onAction?.({ kind: "description", to: description })}
+                disabled={!onAction || !item.capabilities.canEdit}
+                placeholder={t("detail.descriptionPlaceholder")}
+                ariaLabel={t("detail.description")}
+                testId="issue-detail-description"
+                className="-mx-2 leading-relaxed"
+              />
             </section>
           </>
         ) : null}
 
-        <OpenInProIde item={item} />
+        <OpenInProIde item={item} references={fileReferences} />
 
         {item.kind !== "local" ? (
           <a
@@ -410,7 +557,31 @@ export function IssueDetailPanel({
                   </li>
                 ))}
               </ol>
+
+              {/*
+                The trail has always rendered comments; until now there was no
+                way to write one, because `addIssueComment` had no caller.
+              */}
+              {localId && item.capabilities.canComment ? (
+                <IssueCommentComposer onSubmit={handleComment} />
+              ) : null}
             </section>
+          </>
+        ) : null}
+
+        {onRequestDelete && canDeleteIssue(item, running) ? (
+          <>
+            <Separator />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-fit gap-1.5 text-destructive hover:text-destructive"
+              onClick={onRequestDelete}
+              data-testid="issue-detail-delete"
+            >
+              <Trash2Icon className="size-3.5" />
+              {t("context.delete")}
+            </Button>
           </>
         ) : null}
       </div>
@@ -463,9 +634,22 @@ function PropertyRow({ label, children }: { label: string; children: React.React
  * the issue to `in_review` when it ends, and opening a file must not move an
  * issue's state at all.
  */
-function OpenInProIde({ item }: { item: UnifiedIssueItem }) {
+/**
+ * Every file path mentioned in the issue, each openable in the Pro IDE.
+ *
+ * This used to open only `primaryFileReference` — the FIRST path found — so an
+ * issue that named three files silently dropped two of them, and
+ * `collectFileReferences` (written, tested, and the reason the scanner exists)
+ * had no caller at all.
+ */
+function OpenInProIde({
+  item,
+  references,
+}: {
+  item: UnifiedIssueItem
+  references: readonly { path: string; line?: number; column?: number }[]
+}) {
   const t = useTranslations("issues")
-  const reference = primaryFileReference(item.title, item.description)
   const [root, setRoot] = useState<string | null>(null)
 
   useEffect(() => {
@@ -480,9 +664,9 @@ function OpenInProIde({ item }: { item: UnifiedIssueItem }) {
     }
   }, [item.unifiedId])
 
-  if (!reference || !root) return null
+  if (references.length === 0 || !root) return null
 
-  const open = async () => {
+  const open = async (reference: { path: string; line?: number; column?: number }) => {
     const { codeServerClient } = await import("@/lib/codeserver/client")
     const absolute =
       reference.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(reference.path)
@@ -498,15 +682,20 @@ function OpenInProIde({ item }: { item: UnifiedIssueItem }) {
   }
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      className="h-7 w-fit gap-1.5 text-xs"
-      onClick={() => void open()}
-      data-testid="issue-detail-open-in-pro-ide"
-    >
-      <FileCodeIcon className="size-3.5" />
-      {t("detail.openInProIde", { path: reference.path })}
-    </Button>
+    <div className="flex flex-wrap gap-1.5" data-testid="issue-detail-file-references">
+      {references.map((reference) => (
+        <Button
+          key={`${reference.path}:${reference.line ?? ""}:${reference.column ?? ""}`}
+          variant="outline"
+          size="sm"
+          className="h-7 w-fit gap-1.5 text-xs"
+          onClick={() => void open(reference)}
+          data-testid={`issue-detail-open-in-pro-ide-${reference.path}`}
+        >
+          <FileCodeIcon className="size-3.5" />
+          {t("detail.openInProIde", { path: reference.path })}
+        </Button>
+      ))}
+    </div>
   )
 }

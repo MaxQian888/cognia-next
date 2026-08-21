@@ -199,9 +199,23 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
     () => buildIssueLabelCatalogue(labels ?? [], visibleFederated),
     [labels, visibleFederated]
   )
+  /**
+   * The rail's label list is the MERGED catalogue: filtering by a GitHub label
+   * is legitimate, so its projections belong here.
+   */
   const railLabels = useMemo(
     () => [...labelsById.values()].sort((a, b) => a.name.localeCompare(b.name)),
     [labelsById]
+  )
+  /**
+   * Every WRITE menu gets local labels only. A GitHub projection is not a row
+   * in the `labels` table, so offering to apply one would write a synthetic
+   * `github:<name>` id into a local issue's `labelIds` — an id that resolves
+   * only while that GitHub issue happens to be on the board.
+   */
+  const writableLabels = useMemo(
+    () => [...(labels ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [labels]
   )
   const projectNamesById = useMemo(
     () => new Map((projects ?? []).map((project) => [project.id, project.name])),
@@ -347,7 +361,7 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
         key={item.unifiedId}
         item={item}
         running={runningUnifiedIds.has(item.unifiedId)}
-        labels={railLabels}
+        labels={writableLabels}
         projects={projects ?? []}
         assigneeOptions={assigneeOptions}
         onAction={(action) => void runBulk([item], action)}
@@ -357,7 +371,7 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
         {children}
       </IssueContextMenu>
     ),
-    [runningUnifiedIds, railLabels, projects, assigneeOptions, runBulk]
+    [runningUnifiedIds, writableLabels, projects, assigneeOptions, runBulk]
   )
 
   /**
@@ -492,6 +506,12 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
                   item={selected}
                   labelsById={labelsById}
                   projectNamesById={projectNamesById}
+                  labels={writableLabels}
+                  projects={projects ?? []}
+                  assigneeOptions={assigneeOptions}
+                  running={runningUnifiedIds.has(selected.unifiedId)}
+                  onAction={(action) => void runBulk([selected], action)}
+                  onRequestDelete={() => setDeleteTargets([selected])}
                   onClose={() => setSelectedId(undefined)}
                   onWritebackCompleted={handleWritebackCompleted}
                 />
@@ -521,7 +541,7 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
       <IssueBulkToolbar
         items={checkedItems}
         runningIds={runningUnifiedIds}
-        labels={railLabels}
+        labels={writableLabels}
         projects={projects ?? []}
         assigneeOptions={assigneeOptions}
         onAction={(action) => void runBulk(checkedItems, action)}

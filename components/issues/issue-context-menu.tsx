@@ -37,26 +37,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import type { IssueBulkAction } from "@/lib/issues/bulk-actions"
-import {
-  buildIssueMenuSections,
-  canDeleteIssue,
-  type IssueMenuEntry,
-  type IssueMenuSectionId,
-} from "@/lib/issues/menu-model"
+import { buildIssueMenuSections, canDeleteIssue } from "@/lib/issues/menu-model"
 import type { IssueProject } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
-import { defaultLabelColor, type LabelRow } from "@/types/labels"
+import type { LabelRow } from "@/types/labels"
 import type { AssigneeOption } from "./assignee-picker"
-import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
-
-/** Section id → its `issues.detail.*` heading key. */
-const SECTION_LABEL_KEY: Record<IssueMenuSectionId, string> = {
-  status: "detail.status",
-  priority: "detail.priority",
-  assignee: "detail.assignee",
-  labels: "detail.labels",
-  project: "detail.project",
-}
+import { useMenuEntryPresentation } from "./editors/menu-entry-presentation"
 
 export interface IssueContextMenuProps {
   item: UnifiedIssueItem
@@ -89,57 +75,7 @@ export function IssueContextMenu({
     () => buildIssueMenuSections({ item, running, labels, projects, assigneeOptions }),
     [item, running, labels, projects, assigneeOptions]
   )
-  const labelsById = useMemo(() => new Map(labels.map((label) => [label.id, label])), [labels])
-  const projectsById = useMemo(
-    () => new Map(projects.map((project) => [project.id, project])),
-    [projects]
-  )
-  const assigneesByKey = useMemo(
-    () => new Map(assigneeOptions.map((option) => [option.key, option])),
-    [assigneeOptions]
-  )
-
-  /** Localize one entry. Ids are raw values, never display strings. */
-  function entryLabel(section: IssueMenuSectionId, entry: IssueMenuEntry): string {
-    switch (section) {
-      case "status":
-        return t(`status.${entry.id}`)
-      case "priority":
-        return t(`priority.${entry.id}`)
-      case "assignee":
-        return entry.id === "none"
-          ? t("actor.unassigned")
-          : (assigneesByKey.get(entry.id)?.actor.label ?? entry.id)
-      case "labels":
-        return labelsById.get(entry.id)?.name ?? entry.id
-      case "project":
-        return projectsById.get(entry.id)?.name ?? entry.id
-    }
-  }
-
-  function entryIcon(section: IssueMenuSectionId, entry: IssueMenuEntry): ReactNode {
-    if (section === "status") {
-      return <IssueStatusIcon status={entry.id as never} />
-    }
-    if (section === "priority") {
-      return <IssuePriorityIcon priority={entry.id as never} />
-    }
-    if (section === "labels") {
-      const label = labelsById.get(entry.id)
-      return label ? (
-        <span
-          aria-hidden
-          className="size-2.5 shrink-0 rounded-full"
-          style={{ backgroundColor: label.color ?? defaultLabelColor(label.name) }}
-        />
-      ) : null
-    }
-    if (section === "project") {
-      const project = projectsById.get(entry.id)
-      return project ? <span aria-hidden>{project.icon ?? "📁"}</span> : null
-    }
-    return null
-  }
+  const presentation = useMenuEntryPresentation({ labels, projects, assigneeOptions })
 
   return (
     <ContextMenu>
@@ -159,7 +95,7 @@ export function IssueContextMenu({
         {sections.map((section) => (
           <ContextMenuSub key={section.id}>
             <ContextMenuSubTrigger data-testid={`issue-context-${section.id}`}>
-              {t(SECTION_LABEL_KEY[section.id])}
+              {presentation.sectionLabel(section.id)}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-52">
               {section.entries.map((entry) => (
@@ -169,8 +105,10 @@ export function IssueContextMenu({
                   onSelect={() => onAction(entry.action)}
                   data-testid={`issue-context-${section.id}-${entry.id}`}
                 >
-                  {entryIcon(section.id, entry)}
-                  <span className="flex-1 truncate">{entryLabel(section.id, entry)}</span>
+                  {presentation.entryIcon(section.id, entry)}
+                  <span className="flex-1 truncate">
+                    {presentation.entryLabel(section.id, entry)}
+                  </span>
                   {entry.checked ? <CheckIcon className="size-3.5" /> : null}
                 </ContextMenuItem>
               ))}

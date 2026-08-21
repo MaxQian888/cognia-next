@@ -116,7 +116,9 @@
     "project": "Project",
     "properties": "Properties",
     "status": "Status",
-    "updated": "Updated"
+    "updated": "Updated",
+    "title": "Title",
+    "editLabels": "Edit labels"
   },
   "activity": {
     "created": "created this issue",

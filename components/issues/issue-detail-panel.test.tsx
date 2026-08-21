@@ -57,8 +57,10 @@ jest.mock("@/lib/codeserver/client", () => ({
 }))
 
 const mockSetIssueAssignee = jest.fn()
+const mockAddIssueComment = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/db/issues", () => ({
   setIssueAssignee: (...a: unknown[]) => mockSetIssueAssignee(...a),
+  addIssueComment: (...a: unknown[]) => mockAddIssueComment(...a),
 }))
 const mockCancelIssueRun = jest.fn()
 jest.mock("@/lib/issues/run/registry", () => ({
@@ -95,8 +97,11 @@ jest.mock("./run-issue-dialog", () => ({
     ) : null,
 }))
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
+import type { IssueProject } from "@/types/issues"
+import type { LabelRow } from "@/types/labels"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { FULL_ISSUE_CAPABILITIES, READ_ONLY_ISSUE_CAPABILITIES } from "@/types/issues/unified"
 import { IssueDetailPanel } from "./issue-detail-panel"
@@ -316,7 +321,10 @@ describe("IssueDetailPanel", () => {
     ]
     render(<IssueDetailPanel item={item()} />)
     expect(screen.getByText("looks good")).toBeInTheDocument()
-    expect(screen.getByText("detail.comment")).toBeInTheDocument()
+    // The composer's send button carries the same label, so scope to the trail.
+    expect(
+      within(screen.getByTestId("issue-detail-activity")).getByText("detail.comment")
+    ).toBeInTheDocument()
   })
 
   it("closes when asked", () => {
@@ -411,7 +419,8 @@ describe("GitHub write-back", () => {
 })
 
 describe("open in Pro IDE", () => {
-  const testId = "issue-detail-open-in-pro-ide"
+  /** The button is now per-reference: one id per path found. */
+  const testId = (path: string) => `issue-detail-open-in-pro-ide-${path}`
 
   beforeEach(() => {
     mockProIdeRoot = "/repo"
@@ -421,7 +430,7 @@ describe("open in Pro IDE", () => {
 
   it("offers the file an issue names in its title", async () => {
     render(<IssueDetailPanel item={item({ title: "crash in lib/foo/bar.ts:42" })} />)
-    const button = await screen.findByTestId(testId)
+    const button = await screen.findByTestId(testId("lib/foo/bar.ts"))
     fireEvent.click(button)
     await waitFor(() =>
       expect(mockDriveOpen).toHaveBeenCalledWith("/repo", "/repo/lib/foo/bar.ts", 42, undefined)
@@ -432,7 +441,7 @@ describe("open in Pro IDE", () => {
     render(
       <IssueDetailPanel item={item({ title: "Login broken", description: "see src/auth.ts" })} />
     )
-    fireEvent.click(await screen.findByTestId(testId))
+    fireEvent.click(await screen.findByTestId(testId("src/auth.ts")))
     await waitFor(() =>
       expect(mockDriveOpen).toHaveBeenCalledWith("/repo", "/repo/src/auth.ts", undefined, undefined)
     )
@@ -442,20 +451,20 @@ describe("open in Pro IDE", () => {
     // An affordance that is usually disabled teaches people to ignore it.
     render(<IssueDetailPanel item={item({ title: "The login button is the wrong colour" })} />)
     await waitFor(() => expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument())
-    expect(screen.queryByTestId(testId)).toBeNull()
+    expect(screen.queryByTestId("issue-detail-file-references")).toBeNull()
   })
 
   it("stays hidden when no Pro IDE is bound", async () => {
     mockProIdeRoot = null
     render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
     await waitFor(() => expect(screen.getByTestId("assignee-picker-stub")).toBeInTheDocument())
-    expect(screen.queryByTestId(testId)).toBeNull()
+    expect(screen.queryByTestId("issue-detail-file-references")).toBeNull()
   })
 
   it("falls back to the CLI opener when the companion extension is absent", async () => {
     mockDriveOpen.mockRejectedValueOnce(new Error("no extension connected"))
     render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
-    fireEvent.click(await screen.findByTestId(testId))
+    fireEvent.click(await screen.findByTestId(testId("lib/a.ts")))
     await waitFor(() =>
       expect(mockOpenFile).toHaveBeenCalledWith("/repo", "/repo/lib/a.ts", undefined, undefined)
     )
@@ -463,8 +472,167 @@ describe("open in Pro IDE", () => {
 
   it("does not touch the issue's state — opening a file is not a run", async () => {
     render(<IssueDetailPanel item={item({ title: "crash in lib/a.ts" })} />)
-    fireEvent.click(await screen.findByTestId(testId))
+    fireEvent.click(await screen.findByTestId(testId("lib/a.ts")))
     await waitFor(() => expect(mockDriveOpen).toHaveBeenCalled())
     expect(mockSetIssueAssignee).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * The editing surface. Every one of these controls reaches an export that had
+ * no caller anywhere in the app before this change: `updateIssue` (title,
+ * description, priority), `addIssueComment`, `moveIssueToProject`,
+ * `addIssueLabel` / `removeIssueLabel` and `deleteIssue`.
+ */
+describe("editing", () => {
+  const project: IssueProject = {
+    id: "p1",
+    projectId: "w1",
+    key: "MERC",
+    name: "Mercury",
+    status: "in_progress",
+    priority: "medium",
+    resources: [],
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const label: LabelRow = {
+    id: "l1",
+    scope: "issue",
+    name: "bug",
+    sortOrder: 0,
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  function editable(over: Partial<React.ComponentProps<typeof IssueDetailPanel>> = {}) {
+    const onAction = jest.fn()
+    render(
+      <IssueDetailPanel
+        item={item()}
+        labels={[label]}
+        projects={[project]}
+        assigneeOptions={[]}
+        onAction={onAction}
+        {...over}
+      />
+    )
+    return onAction
+  }
+
+  it("renames through the title editor", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-title"))
+    await user.clear(screen.getByTestId("issue-detail-title-input"))
+    await user.type(screen.getByTestId("issue-detail-title-input"), "Renamed{Enter}")
+    expect(onAction).toHaveBeenCalledWith({ kind: "title", to: "Renamed" })
+  })
+
+  it("edits the description, and offers the editor even when it is empty", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-description"))
+    await user.type(screen.getByTestId("issue-detail-description-input"), "Because reasons")
+    fireEvent.blur(screen.getByTestId("issue-detail-description-input"))
+    expect(onAction).toHaveBeenCalledWith({ kind: "description", to: "Because reasons" })
+  })
+
+  it("changes status from the property menu", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-status"))
+    await user.click(await screen.findByTestId("issue-detail-status-done"))
+    expect(onAction).toHaveBeenCalledWith({ kind: "status", to: "done" })
+  })
+
+  it("changes priority", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-priority"))
+    await user.click(await screen.findByTestId("issue-detail-priority-urgent"))
+    expect(onAction).toHaveBeenCalledWith({ kind: "priority", to: "urgent" })
+  })
+
+  it("moves the issue to another container", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-project"))
+    await user.click(await screen.findByTestId("issue-detail-project-p1"))
+    expect(onAction).toHaveBeenCalledWith({ kind: "project", issueProjectId: "p1" })
+  })
+
+  it("applies a label", async () => {
+    const user = userEvent.setup()
+    const onAction = editable()
+    await user.click(screen.getByTestId("issue-detail-labels"))
+    await user.click(await screen.findByTestId("issue-detail-labels-l1"))
+    expect(onAction).toHaveBeenCalledWith({ kind: "addLabel", labelId: "l1" })
+  })
+
+  it("writes a comment", async () => {
+    const user = userEvent.setup()
+    editable()
+    await user.type(screen.getByTestId("issue-comment-input"), "looks good")
+    await user.click(screen.getByTestId("issue-comment-submit"))
+    await waitFor(() =>
+      expect(mockAddIssueComment).toHaveBeenCalledWith("i1", "looks good", { kind: "human" })
+    )
+  })
+
+  it("routes delete through a confirmation", async () => {
+    const user = userEvent.setup()
+    const onRequestDelete = jest.fn()
+    editable({ onRequestDelete })
+    await user.click(screen.getByTestId("issue-detail-delete"))
+    expect(onRequestDelete).toHaveBeenCalled()
+  })
+
+  it("locks the status menu while a run holds the issue", async () => {
+    const user = userEvent.setup()
+    editable({ running: true })
+    await user.click(screen.getByTestId("issue-detail-status"))
+    expect(await screen.findByTestId("issue-detail-status-in_progress")).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
+  describe("federated rows", () => {
+    it("renders the properties without triggers rather than offering doomed controls", () => {
+      render(
+        <IssueDetailPanel
+          item={item({ kind: "github" })}
+          labels={[label]}
+          projects={[project]}
+          assigneeOptions={[]}
+          onAction={jest.fn()}
+        />
+      )
+      expect(screen.queryByTestId("issue-detail-status")).not.toBeInTheDocument()
+      expect(screen.getByTestId("issue-detail-status-static")).toBeInTheDocument()
+    })
+
+    it("gives them no comment composer — a mirror comment goes through write-back", () => {
+      render(<IssueDetailPanel item={item({ kind: "agent-task" })} onAction={jest.fn()} />)
+      expect(screen.queryByTestId("issue-comment-composer")).not.toBeInTheDocument()
+    })
+
+    it("never offers delete", () => {
+      render(
+        <IssueDetailPanel
+          item={item({ kind: "github" })}
+          onAction={jest.fn()}
+          onRequestDelete={jest.fn()}
+        />
+      )
+      expect(screen.queryByTestId("issue-detail-delete")).not.toBeInTheDocument()
+    })
+  })
+
+  it("falls back to a read-only panel when the caller supplies no action handler", () => {
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.queryByTestId("issue-detail-status")).not.toBeInTheDocument()
+    expect(screen.getByTestId("issue-detail-title")).toBeDisabled()
   })
 })

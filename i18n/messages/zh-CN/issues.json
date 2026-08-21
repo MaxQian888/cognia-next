@@ -116,7 +116,9 @@
     "project": "项目",
     "properties": "属性",
     "status": "状态",
-    "updated": "更新于"
+    "updated": "更新于",
+    "title": "标题",
+    "editLabels": "编辑标签"
   },
   "activity": {
     "created": "创建了这个议题",

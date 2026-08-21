@@ -32,8 +32,18 @@ import type { IssueActor, IssuePriority, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { parseUnifiedIssueId } from "@/types/issues/unified"
 
+/**
+ * One edit, expressed the same way whether it lands on one issue or twelve.
+ *
+ * `title` and `description` are in the vocabulary but deliberately absent from
+ * `menu-model.ts`, so they never appear in a bulk menu: setting one title on a
+ * dozen issues is not an edit anybody wants. They reach here from the
+ * inspector's inline text editors, which pass a single item.
+ */
 export type IssueBulkAction =
   | { kind: "status"; to: IssueStatus }
+  | { kind: "title"; to: string }
+  | { kind: "description"; to: string }
   | { kind: "priority"; to: IssuePriority }
   | { kind: "assignee"; to: IssueActor | null }
   | { kind: "addLabel"; labelId: string }
@@ -65,6 +75,8 @@ function requiredCapability(
     case "assignee":
       return "canAssign"
     case "priority":
+    case "title":
+    case "description":
     case "addLabel":
     case "removeLabel":
     case "project":
@@ -123,6 +135,12 @@ async function applyOne(sourceId: string, action: IssueBulkAction, by: IssueActo
     }
     case "priority":
       await updateIssue(sourceId, { priority: action.to }, by)
+      return
+    case "title":
+      await updateIssue(sourceId, { title: action.to }, by)
+      return
+    case "description":
+      await updateIssue(sourceId, { description: action.to }, by)
       return
     case "assignee":
       await setIssueAssignee(sourceId, action.to, by)

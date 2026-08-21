@@ -67,6 +67,8 @@ describe("canApplyBulkAction", () => {
     const local = item()
     const actions: IssueBulkAction[] = [
       { kind: "status", to: "done" },
+      { kind: "title", to: "Renamed" },
+      { kind: "description", to: "Because" },
       { kind: "priority", to: "high" },
       { kind: "assignee", to: null },
       { kind: "addLabel", labelId: "l1" },
@@ -156,6 +158,22 @@ describe("applyIssueBulkAction", () => {
 
     await applyIssueBulkAction([item()], { kind: "status", to: "done" }, BY)
     expect(moveIssue).toHaveBeenCalledWith({ id: "s7", to: "done", by: BY })
+
+    await applyIssueBulkAction([item()], { kind: "title", to: "Renamed" }, BY)
+    expect(updateIssue).toHaveBeenCalledWith("s8", { title: "Renamed" }, BY)
+
+    await applyIssueBulkAction([item()], { kind: "description", to: "Because" }, BY)
+    expect(updateIssue).toHaveBeenCalledWith("s9", { description: "Because" }, BY)
+  })
+
+  it("refuses a title or description edit on a federated row", async () => {
+    const outcome = await applyIssueBulkAction(
+      [item({ kind: "github", sourceId: "o/r#1" })],
+      { kind: "title", to: "Renamed" },
+      BY
+    )
+    expect(outcome).toMatchObject({ applied: 0, skipped: 1, reason: "federated-read-only" })
+    expect(updateIssue).not.toHaveBeenCalled()
   })
 
   it("passes the source id, not the unified id, to the writer", async () => {
