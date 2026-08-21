@@ -59,8 +59,12 @@ jest.mock("@dnd-kit/core", () => ({
     dndProps = props
     return <div data-testid="dnd-context">{props.children}</div>
   },
+  DragOverlay: ({ children }: { children?: ReactNode }) => (
+    <div data-testid="dnd-drag-overlay">{children}</div>
+  ),
   PointerSensor: function PointerSensor() {},
   closestCorners: jest.fn(),
+  defaultDropAnimationSideEffects: jest.fn(() => jest.fn()),
   useSensor: jest.fn(),
   useSensors: jest.fn(() => []),
   useDroppable: jest.fn(() => ({ setNodeRef: jest.fn(), isOver: false })),
@@ -263,5 +267,30 @@ describe("TaskBoard", () => {
     await waitFor(() => expect(screen.getByTestId("board-knowledge-twins")).toHaveTextContent("Kb"))
     await user.click(screen.getByTestId("board-swimlanes-toggle"))
     expect(await screen.findByTestId(`board-lane-${ctx.mate.id}-twin`)).toHaveTextContent("Ada")
+  })
+
+  describe("drag overlay", () => {
+    it("renders no clone until a drag starts", () => {
+      renderBoard(seed())
+      expect(screen.queryByTestId("task-drag-overlay")).not.toBeInTheDocument()
+    })
+
+    it("portals a clone that follows the cursor out of the board's scroll container", () => {
+      const ctx = seed()
+      renderBoard(ctx)
+      act(() => dndProps.onDragStart?.({ active: { id: ctx.pending1.id } } as never))
+      const overlay = screen.getByTestId("task-drag-overlay")
+      expect(overlay).toHaveTextContent("P1")
+      // The point of the portal: it is NOT inside the overflow-x-auto strip.
+      expect(screen.getByTestId("board-columns").contains(overlay)).toBe(false)
+    })
+
+    it("drops the clone when the drag is cancelled", () => {
+      const ctx = seed()
+      renderBoard(ctx)
+      act(() => dndProps.onDragStart?.({ active: { id: ctx.pending1.id } } as never))
+      act(() => dndProps.onDragCancel?.({} as never))
+      expect(screen.queryByTestId("task-drag-overlay")).not.toBeInTheDocument()
+    })
   })
 })

@@ -11,15 +11,19 @@ import { useTranslations } from "next-intl"
 import { BotIcon, ListTodoIcon } from "lucide-react"
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   closestCorners,
+  defaultDropAnimationSideEffects,
   useSensor,
   useSensors,
   useDroppable,
   type DragEndEvent,
   type DragStartEvent,
+  type DropAnimation,
 } from "@dnd-kit/core"
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
+import { createPortal } from "react-dom"
 import { toast } from "sonner"
 
 import { StatusBadge } from "@/components/status-badge"
@@ -323,8 +327,59 @@ export function TaskBoard({ team, tasks, teammates }: TaskBoardProps) {
               />
             ))}
           </div>
+          <TaskDragOverlay task={activeTask} assigneeName={nameOf(activeTask?.assignedTo)} />
         </DndContext>
       )}
     </div>
   )
+}
+
+/**
+ * The card that follows the cursor.
+ *
+ * Without it the dragged card was moved by a `transform` in place, inside a
+ * column that sits in `overflow-x-auto` — a scroll container clips its
+ * descendants, so the card vanished at the column edge instead of crossing the
+ * board. And because a dragged card carries `opacity-60` while a greyed-out
+ * illegal column carries `opacity-40`, both opened stacking contexts at
+ * `z-auto`: columns later in DOM order painted OVER the card being dragged.
+ * `components/desktop/channel-list.tsx` solved exactly this by portaling the
+ * clone to the body above the Radix layer; this follows it.
+ *
+ * The clone is a PREVIEW rather than a second `TaskBoardCard`: that component
+ * owns a dropdown, a comments dialog and a delete dialog, and rendering a
+ * second copy would register a second sortable node under the same task id for
+ * dnd-kit to measure against itself.
+ */
+function TaskDragOverlay({
+  task,
+  assigneeName,
+}: {
+  task: AgentTeamTask | null
+  assigneeName?: string
+}) {
+  if (typeof document === "undefined") return null
+  return createPortal(
+    <DragOverlay dropAnimation={TASK_DROP_ANIMATION} zIndex={60}>
+      {task ? (
+        <div
+          data-testid="task-drag-overlay"
+          className="w-60 cursor-grabbing rounded-lg border bg-card p-2 shadow-lg ring-1 ring-border/60"
+        >
+          <p className="line-clamp-2 text-xs font-medium leading-snug">{task.title}</p>
+          {assigneeName ? (
+            <p className="mt-1 truncate text-[10px] text-muted-foreground">{assigneeName}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </DragOverlay>,
+    document.body
+  )
+}
+
+/** A short ease onto the card's landing rect, matching the issue board. */
+const TASK_DROP_ANIMATION: DropAnimation = {
+  duration: 200,
+  easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+  sideEffects: defaultDropAnimationSideEffects({ styles: { active: { opacity: "0.4" } } }),
 }
