@@ -108,7 +108,9 @@ export function SquadFleetConsole({ selectedId, onSelect }: SquadFleetConsolePro
                     />
                   </ItemMedia>
                   <ItemContent className="min-w-0 gap-0.5">
-                    <ItemTitle className="truncate text-xs">{squad.name}</ItemTitle>
+                    <ItemTitle className="block w-full min-w-0 truncate text-xs">
+                      {squad.name}
+                    </ItemTitle>
                     <ItemDescription className="truncate text-[10px]">
                       {t("memberCount", { count: squad.memberCount })}
                     </ItemDescription>
@@ -176,7 +178,7 @@ export function SquadFleetConsole({ selectedId, onSelect }: SquadFleetConsolePro
       centerClassName="min-h-0"
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <AgentTeamCommandCenter />
+        <AgentTeamCommandCenter heading={false} />
       </div>
     </FeaturePageShell>
   )

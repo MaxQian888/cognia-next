@@ -149,7 +149,9 @@ export function SquadContextPanel({ sessionId }: SquadContextPanelProps) {
                   />
                 </ItemMedia>
                 <ItemContent className="min-w-0 gap-0.5">
-                  <ItemTitle className="truncate text-xs">{member.name}</ItemTitle>
+                  <ItemTitle className="block w-full min-w-0 truncate text-xs">
+                    {member.name}
+                  </ItemTitle>
                   {member.lastActivity ? (
                     <ItemDescription className="truncate text-[10px]">
                       {member.lastActivity}

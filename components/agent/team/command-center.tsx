@@ -32,7 +32,18 @@ const ACTIONS: Array<{
   { action: "terminate", icon: XCircleIcon },
 ]
 
-export function AgentTeamCommandCenter(): React.ReactElement {
+export interface AgentTeamCommandCenterProps {
+  /**
+   * Draw the section's own title. False inside a page that already has a
+   * header — two stacked titles saying the same thing is noise, and it costs
+   * a screenful before the first run row.
+   */
+  heading?: boolean
+}
+
+export function AgentTeamCommandCenter({
+  heading = true,
+}: AgentTeamCommandCenterProps = {}): React.ReactElement {
   const t = useTranslations("agentTeamsWorkspace.commandCenter")
   const now = useNow().getTime()
   const teams = useAgentTeamStore((state) => state.teams)
@@ -167,22 +178,26 @@ export function AgentTeamCommandCenter(): React.ReactElement {
 
   return (
     <section className="space-y-4" data-testid="agent-team-command-center">
-      <div>
-        <h2 className="text-lg font-semibold">{t("title")}</h2>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-      </div>
+      {heading ? (
+        <div>
+          <h2 className="text-lg font-semibold">{t("title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
+        </div>
+      ) : null}
 
-      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="command-center-filters">
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={t("filters.search")}
           aria-label={t("filters.search")}
+          className="h-8 w-full text-xs sm:w-56"
         />
         <NativeSelect
           value={status}
           onChange={(event) => setStatus(event.target.value as AgentTeamRunStatus | "all")}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.status")}
         >
           <NativeSelectOption value="all">{t("filters.allStatuses")}</NativeSelectOption>
@@ -195,7 +210,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={repository}
           onChange={(event) => setRepository(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.repository")}
         >
           <NativeSelectOption value="all">{t("filters.allRepositories")}</NativeSelectOption>
@@ -208,7 +224,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={project}
           onChange={(event) => setProject(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.project")}
         >
           <NativeSelectOption value="all">{t("filters.allProjects")}</NativeSelectOption>
@@ -221,7 +238,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={teamFilter}
           onChange={(event) => setTeamFilter(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.team")}
         >
           <NativeSelectOption value="all">{t("filters.allTeams")}</NativeSelectOption>
@@ -234,7 +252,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={runtime}
           onChange={(event) => setRuntime(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.runtime")}
         >
           <NativeSelectOption value="all">{t("filters.allRuntimes")}</NativeSelectOption>
@@ -246,7 +265,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={gate}
           onChange={(event) => setGate(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.gate")}
         >
           <NativeSelectOption value="all">{t("filters.allGates")}</NativeSelectOption>
@@ -256,7 +276,8 @@ export function AgentTeamCommandCenter(): React.ReactElement {
         <NativeSelect
           value={failureClass}
           onChange={(event) => setFailureClass(event.target.value)}
-          wrapperClassName="w-full"
+          wrapperClassName="w-auto"
+          className="h-8 text-xs"
           aria-label={t("filters.failureClass")}
         >
           <NativeSelectOption value="all">{t("filters.allFailures")}</NativeSelectOption>

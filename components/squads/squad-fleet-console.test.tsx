@@ -10,7 +10,9 @@ import type { AgentTeam, AgentTeammate, TeamStatus } from "@/types/agent/agent-t
 // Both are surfaces of their own with live Dexie queries; this suite is about
 // the fleet frame around them.
 jest.mock("@/components/agent/team/command-center", () => ({
-  AgentTeamCommandCenter: () => <div data-testid="command-center" />,
+  AgentTeamCommandCenter: ({ heading }: { heading?: boolean }) => (
+    <div data-testid="command-center" data-heading={String(heading)} />
+  ),
 }))
 jest.mock("@/components/agent/team/runs-list", () => ({
   TeamRunsList: ({ teamId }: { teamId: string }) => <div data-testid="runs-list">{teamId}</div>,
@@ -51,9 +53,10 @@ describe("SquadFleetConsole", () => {
     expect(rows[0]).toHaveTextContent("Zulu")
   })
 
-  it("shows the command centre without a selection", () => {
+  it("shows the command centre without a selection, and without a second title", () => {
+    // The page header already says what this is.
     render(<SquadFleetConsole onSelect={jest.fn()} />)
-    expect(screen.getByTestId("command-center")).toBeInTheDocument()
+    expect(screen.getByTestId("command-center")).toHaveAttribute("data-heading", "false")
     expect(screen.queryByTestId("squad-fleet-inspector")).not.toBeInTheDocument()
   })
 
