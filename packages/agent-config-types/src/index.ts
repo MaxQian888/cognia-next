@@ -2028,6 +2028,20 @@ export interface ChatSession {
   characterId?: string
   /** Team sessions: the team whose members reply. */
   teamId?: string
+  /**
+   * The Squad (agent team) this conversation runs on (Dexie v177).
+   *
+   * Not the same thing as {@link teamId}. A *team* is a conversation shape —
+   * several characters replying in one room. A *Squad* is an executor, the
+   * same axis as a model or a subagent, so any conversation can be bound to
+   * one regardless of its {@link kind}.
+   *
+   * This is the session's default executor. A single turn can override it
+   * without touching the row (the composition axis carries that), which is why
+   * the override is not persisted here: the column answers "what is this
+   * conversation", not "what happened on one turn".
+   */
+  squadId?: string
   /** Skills the user has temporarily disabled for this session only. */
   disabledSkillIds?: string[]
   /**

@@ -733,6 +733,55 @@ describe("getDb", () => {
     expect(children.every((run) => run.parentRunId !== undefined)).toBe(true)
   })
 
+  it("v177 indexes the Squad a conversation runs on, separately from its team", async () => {
+    // `squadId` (executor) and `teamId` (conversation shape) are different
+    // questions about the same row, so the index must answer one without
+    // dragging in the other.
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(177)
+    expect(db.sessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["squadId", "teamId"])
+    )
+
+    const now = Date.now()
+    await db.sessions.bulkAdd([
+      { id: "s-squad", title: "On a squad", createdAt: now, updatedAt: now, squadId: "squad-1" },
+      {
+        id: "s-team",
+        title: "A team room",
+        createdAt: now,
+        updatedAt: now,
+        kind: "team",
+        teamId: "team-1",
+      },
+      {
+        id: "s-both",
+        title: "Team room on a squad",
+        createdAt: now,
+        updatedAt: now,
+        kind: "team",
+        teamId: "team-1",
+        squadId: "squad-1",
+      },
+      { id: "s-plain", title: "Unbound", createdAt: now, updatedAt: now },
+    ])
+
+    const onSquad = await db.sessions.where("squadId").equals("squad-1").toArray()
+    expect(onSquad.map((session) => session.id).sort()).toEqual(["s-both", "s-squad"])
+
+    // The two axes are independent: querying by team must not pick up the
+    // squad-only session, and vice versa.
+    const inTeam = await db.sessions.where("teamId").equals("team-1").toArray()
+    expect(inTeam.map((session) => session.id).sort()).toEqual(["s-both", "s-team"])
+
+    // An unbound session is absent from the index rather than indexed under a
+    // sentinel — which is what makes "no backfill" the right call for the
+    // sessions that existed before this version.
+    expect(onSquad.every((session) => session.squadId !== undefined)).toBe(true)
+  })
+
   it("v172 indexes agentTraces by run identity and lifecycle status", async () => {
     const db = getDb()
     await db.open()

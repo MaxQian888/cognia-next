@@ -240,6 +240,9 @@ function buildChildRow(
     kind: parent.kind && EMBEDDED_KINDS.has(parent.kind) ? "direct" : parent.kind,
     characterId: parent.characterId,
     teamId: parent.teamId,
+    // Inherited alongside the other two identity columns: a branch continues
+    // the same conversation, so it continues to run on the same executor.
+    squadId: parent.squadId,
     disabledSkillIds: parent.disabledSkillIds,
     messageDisplayOverride: parent.messageDisplayOverride,
     model: parent.model,

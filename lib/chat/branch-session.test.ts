@@ -193,6 +193,31 @@ describe("branchSessionAtMessage — embedded sources", () => {
     expect(child.kind).toBe("team")
     expect(child.teamId).toBe("t1")
   })
+
+  it("carries the parent's Squad binding onto the branch", async () => {
+    // A branch continues the same conversation, so it continues to run on the
+    // same executor. Dropping this would silently demote the branch to the
+    // default executor with nothing on screen to say so.
+    await seedSource({ squadId: "squad-1" })
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: visible(),
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.squadId).toBe("squad-1")
+  })
+
+  it("leaves the Squad binding absent when the parent has none", async () => {
+    await seedSource({})
+    const child = await branchSessionAtMessage({
+      sourceId: "src1",
+      visibleMessages: visible(),
+      messageId: "a1",
+      mode: "direct",
+    })
+    expect(child.squadId).toBeUndefined()
+  })
 })
 
 describe("branchSessionAtMessage — workspace scoping", () => {

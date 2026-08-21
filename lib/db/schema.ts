@@ -4269,6 +4269,29 @@ export class CogniaDB extends Dexie {
         "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status]",
     })
 
+    // v177 — index `sessions.squadId`: the Squad (agent team) a conversation
+    // runs on.
+    //
+    // Distinct from `teamId`, which is the *character* team whose members reply
+    // in a `kind: "team"` conversation. A Squad is an executor — the same axis
+    // as a model or a subagent — so a session can be bound to one whatever its
+    // kind. The two coexist deliberately; conflating them is what made the old
+    // agent-team surface unreadable.
+    //
+    // This has to be a column and not the composition axis it mirrors
+    // (`orchestrationRef`, ADR-0117): that axis lives in a zustand store, so it
+    // is device-local and invisible to Dexie. A binding the conversation list
+    // can render, the companion can read, and another device can resume has to
+    // be on the row.
+    //
+    // Index-only: rows without the field are simply absent from the index,
+    // which is exactly right — they are unbound and answer to the default
+    // executor. No upgrade callback, no backfill.
+    this.version(177).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], surfaceBindingKey, squadId",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
