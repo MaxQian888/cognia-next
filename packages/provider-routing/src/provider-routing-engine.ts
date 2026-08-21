@@ -54,7 +54,6 @@ import {
   difficultyTier,
   isAmbiguousDifficulty,
   pickAutoAlias,
-  scoreDifficulty,
 } from "./difficulty-router"
 
 /** Provider info needed for routing decisions */

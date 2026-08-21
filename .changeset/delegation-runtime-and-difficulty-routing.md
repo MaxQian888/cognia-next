@@ -14,6 +14,10 @@ never observed. Accepting a delegation opens its card in the same tick, instead
 of leaving the person wondering for the length of a planning pass whether their
 request was heard.
 
+Reaching it is one command: `/delegate` promotes the turn a conversation
+already has in flight, rather than asking anyone to decide up front that a
+request will be slow.
+
 **Work in flight can be redirected instead of only stopped.** A new `steer`
 control reaches a team's every active worker (steering only the lead left the
 workers running on the instruction just corrected), an agent turn's live input
