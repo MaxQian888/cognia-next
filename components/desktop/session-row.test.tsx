@@ -496,6 +496,42 @@ test("Move to folder offers Remove from folder when the session is foldered", as
   expect(await screen.findByText("removeFromFolder")).toBeInTheDocument()
 })
 
+test("Move to folder omits folders that belong to another workspace", async () => {
+  // Under `groupBy: "workspace"` the list spans every workspace while the
+  // folders it carries belong to the active one. Filing this row into "Work"
+  // would point it at a folder that is not loaded where it lives, so the
+  // membership would show here and be gone after the next workspace switch.
+  const user = userEvent.setup()
+  const folders = [
+    { id: "f1", name: "Work", projectId: "p", order: 0, createdAt: 0, updatedAt: 0 },
+    { id: "f2", name: "Legacy", order: 1, createdAt: 0, updatedAt: 0 },
+  ] as never
+  setup({
+    session: { ...baseSession, projectId: "other" },
+    folders,
+    onAssignToFolder: jest.fn(),
+  })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.hover(await screen.findByText("moveToFolder"))
+  // The un-scoped folder predates workspace isolation and is still offered.
+  expect(await screen.findByText("Legacy")).toBeInTheDocument()
+  expect(screen.queryByText("Work")).toBeNull()
+})
+
+test("Move to folder submenu is hidden when every folder is another workspace's", async () => {
+  const user = userEvent.setup()
+  const folders = [
+    { id: "f1", name: "Work", projectId: "p", order: 0, createdAt: 0, updatedAt: 0 },
+  ] as never
+  setup({
+    session: { ...baseSession, projectId: "other" },
+    folders,
+    onAssignToFolder: jest.fn(),
+  })
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  expect(screen.queryByText("moveToFolder")).toBeNull()
+})
+
 test("Move to folder submenu is hidden without folders or a current folder", async () => {
   const user = userEvent.setup()
   setup({ folders: [], onAssignToFolder: jest.fn() })

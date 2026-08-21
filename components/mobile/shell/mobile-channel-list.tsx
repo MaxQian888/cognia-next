@@ -5,7 +5,6 @@ import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
-  BotIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
@@ -23,11 +22,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useClientLiveQuery, useDexieFirstQuery } from "@/hooks/data"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import {
+  useConversationReveal,
+  type ConversationRevealStep,
+} from "@/hooks/chat/use-conversation-reveal"
 import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { listCharacters } from "@/lib/db/characters"
 import { listSessionStates } from "@/lib/db/session-state"
+import { listTeams } from "@/lib/db/teams"
 import { bulkSetSessionsPinned } from "@/lib/db/sessions"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
@@ -40,15 +44,26 @@ import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
 import {
   ConversationFilterChips,
   ConversationFilterMenu,
+  ConversationSearchScopeControl,
 } from "@/components/chat/conversation-filter-controls"
 import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
 import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import {
+  CONVERSATION_GROUP_AXIS_ICON,
+  CONVERSATION_UNGROUPED_LABEL_KEY,
+} from "@/lib/chat/conversation-group-axis"
+import {
+  CONTENT_SEARCH_MIN_QUERY,
+  needsCrossWorkspaceSessions,
+  resolveConversationSearchOptions,
+} from "@/lib/chat/conversation-search-scope"
 import type {
   Character,
   ChatSession,
   ConversationSidebarDensity,
   ConversationSidebarSettings,
   SessionFolder,
+  Team,
 } from "@cognia/agent-config-types"
 
 import { SwipeRow } from "@/components/interactions/swipe-row"
@@ -121,15 +136,15 @@ export function MobileChannelList({
     cancelDebouncedQuery()
     setQuery("")
   }, [cancelDebouncedQuery])
-  // Active ⇄ Archived view + folder collapse — seeded from and written back to
-  // the persisted UI store (shared with the desktop sidebar) so the choice
-  // survives reloads. Local state keeps re-render cheap on a phone.
-  const persistedView = useUIStore((s) => s.channelListView)
+  // Active ⇄ Archived view + folder collapse — read straight from the persisted
+  // UI store (shared with the desktop sidebar) so the choice survives reloads.
+  // Straight, not mirrored: a local copy seeded once at mount could not see the
+  // other surface — or the reveal ladder below — move the view, and wrote its
+  // stale value back over theirs.
+  const view = useUIStore((s) => s.channelListView)
   const setPersistedView = useUIStore((s) => s.setChannelListView)
-  const [view, setViewState] = useState<ChannelListView>(persistedView)
   const setView = useCallback(
     (next: ChannelListView) => {
-      setViewState(next)
       setPersistedView(next)
     },
     [setPersistedView]
@@ -154,7 +169,11 @@ export function MobileChannelList({
   const showPreview = sidebarSettings?.showPreview ?? false
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges !== false
-  const contentScope = sidebarSettings?.searchScope === "titleAndContent"
+  // Same resolved reach as the desktop sidebar — one object, three axes.
+  const searchOptions = useMemo(
+    () => resolveConversationSearchOptions(sidebarSettings),
+    [sidebarSettings]
+  )
   // The mobile list has no optimistic save queue: merge the patch into the
   // settings the store currently holds and write straight through.
   const saveSidebarSettings = useCallback(
@@ -178,6 +197,15 @@ export function MobileChannelList({
     return map
   }, [characters])
 
+  // Teams, for the `team` grouping axis and the team filter facet. Without
+  // them the facet listed raw ids and the axis had no buckets to resolve —
+  // the two halves of "grouped by team" not actually being grouped by team.
+  const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
+  const teamGroups = useMemo(
+    () => (teams ?? []).map((team) => ({ id: team.id, name: team.name })),
+    [teams]
+  )
+
   const sessionStates = useClientLiveQuery(() => listSessionStates(), [], [])
   // `unreadIds` feeds the unread filter/sort and must stay independent of the
   // badge display setting — hiding a badge is a display choice, not a claim
@@ -200,16 +228,21 @@ export function MobileChannelList({
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const contentSearch = useChatHistorySearch(query, {
-    enabled: contentScope,
-    projectId: groupBy === "workspace" ? undefined : (activeProjectId ?? undefined),
-    includeArchived: view === "archived",
+    enabled: searchOptions.content,
+    projectId: needsCrossWorkspaceSessions(groupBy, searchOptions)
+      ? undefined
+      : (activeProjectId ?? undefined),
+    includeArchived: searchOptions.includeArchived || view === "archived",
     collapseBySession: true,
     limit: 200,
   })
   const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
-    if (!contentScope || query.trim().length < 2) return undefined
+    if (!searchOptions.content || query.trim().length < CONTENT_SEARCH_MIN_QUERY) return undefined
     return new Set(contentSearch.results.map((result) => result.sessionId))
-  }, [contentScope, query, contentSearch.results])
+  }, [searchOptions.content, query, contentSearch.results])
+  // A content query resolves a beat after the title hits; until it settles the
+  // result set is incomplete and the list must not claim there is nothing.
+  const contentPending = searchOptions.content && contentSearch.loading && query.trim().length > 0
   const contentTruncated =
     contentSearch.moreOlderHistory ||
     contentSearch.indexIncomplete ||
@@ -241,6 +274,7 @@ export function MobileChannelList({
     workspaces: workspaceGroups,
     folders,
     characters: characters ?? undefined,
+    teams: teamGroups,
     sidebarSettings,
     saveSidebarSettings,
   })
@@ -249,23 +283,82 @@ export function MobileChannelList({
 
   // Shared grouping model: pinned → folders → the chosen axis, or a flat result
   // list while searching (mirrors the desktop sidebar via the same headless hook).
-  const { sections, total, filteredCount } = useConversationListModel({
-    sessions: exposedSessions,
-    folders: view === "archived" ? undefined : folders,
-    query,
-    view,
-    collapsedFolderIds,
-    groupBy,
-    sortBy,
-    filters,
-    unreadIds,
-    filterContext,
-    workspaces: workspaceGroups,
-    agents: agentGroups,
-    activeWorkspaceId: activeProjectId,
-    groupCollapseOverrides,
-    contentMatchIds: contentScope ? contentMatchIds : undefined,
+  const { sections, total, filteredCount, visibleCount, activeFilterCount, orderedIds } =
+    useConversationListModel({
+      sessions: exposedSessions,
+      folders: view === "archived" ? undefined : folders,
+      query,
+      view,
+      collapsedFolderIds,
+      groupBy,
+      sortBy,
+      filters,
+      unreadIds,
+      filterContext,
+      workspaces: workspaceGroups,
+      agents: agentGroups,
+      teams: teamGroups,
+      activeWorkspaceId: activeProjectId,
+      groupCollapseOverrides,
+      contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
+      searchIncludesArchived: searchOptions.includeArchived,
+    })
+  // Same contract as the desktop sidebar: a conversation that was just created
+  // has to be visible here. The narrowing state (Archived view, the search
+  // field, quick filters, a folded section) is persisted and would otherwise
+  // leave the new chat open in the pane with no row to show for it.
+  const revealListed = useCallback(
+    (id: string) => exposedSessions.some((session) => session.id === id),
+    [exposedSessions]
+  )
+  // `orderedIds` is the model's own flattened render order, already excluding
+  // the members of a collapsed folder or group — the same array the desktop
+  // sidebar asks. Re-deriving it here would be a second copy of one visibility
+  // rule, and the two shells' reveal ladders would drift the first time it
+  // changed.
+  const revealVisible = useCallback((id: string) => orderedIds.includes(id), [orderedIds])
+  const revealSteps = useCallback(
+    (id: string): ConversationRevealStep[] => {
+      const holder = sections.find(
+        (section) =>
+          (section.kind === "folder" || section.kind === "group") &&
+          section.collapsed &&
+          section.sessions.some((session) => session.id === id)
+      )
+      return [
+        { active: view !== "active", undo: () => setView("active") },
+        { active: query.length > 0 || searchInput.length > 0, undo: clearSearch },
+        { active: activeFilterCount > 0, undo: resetConversationFilters },
+        {
+          active: holder != null,
+          undo: () => {
+            if (holder?.kind === "folder") toggleFolder(holder.folder.id)
+            else if (holder?.kind === "group")
+              setGroupCollapsed(conversationSectionKey(holder), false)
+          },
+        },
+      ]
+    },
+    [
+      sections,
+      view,
+      setView,
+      query,
+      searchInput,
+      clearSearch,
+      activeFilterCount,
+      resetConversationFilters,
+      toggleFolder,
+      setGroupCollapsed,
+    ]
+  )
+  useConversationReveal({
+    activeSessionId,
+    listed: revealListed,
+    visible: revealVisible,
+    steps: revealSteps,
   })
+
   const archived = view === "archived"
 
   // Decorate a session with its avatar glyph/color + unread count for rendering.
@@ -343,6 +436,12 @@ export function MobileChannelList({
             </Button>
           ) : null}
         </div>
+        {/* Same pair as the desktop sidebar, in the same order: reach, then
+            narrowing. */}
+        <ConversationSearchScopeControl
+          model={filterController}
+          testId="mobile-channel-search-scope"
+        />
         <ConversationFilterMenu model={filterController} testId="mobile-channel-filter" />
         <Button
           type="button"
@@ -370,7 +469,9 @@ export function MobileChannelList({
 
       <ConversationFilterChips
         model={filterController}
-        shown={filteredCount}
+        // Rows on screen, not rows that survived the filters — same contract as
+        // the desktop sidebar.
+        shown={visibleCount}
         total={total}
         className="border-b border-border px-3 py-1.5"
         testId="mobile-channel-filter-chips"
@@ -386,7 +487,17 @@ export function MobileChannelList({
             {t("searchTruncated")}
           </p>
         ) : null}
-        {filteredCount === 0 ? (
+        {filteredCount === 0 && contentPending ? (
+          // Message hits land a beat after the title hits. Saying "nothing
+          // matched" here and then filling the list contradicts itself.
+          <p
+            className="px-4 py-8 text-center text-xs text-muted-foreground"
+            role="status"
+            data-testid="mobile-channel-search-pending"
+          >
+            {t("searchingMessages")}
+          </p>
+        ) : filteredCount === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
             <p className="text-xs text-muted-foreground" data-testid="mobile-channel-empty">
               {query.trim().length > 0
@@ -469,8 +580,9 @@ export function MobileChannelList({
               const key = conversationSectionKey(section)
               const name =
                 section.group.id === UNGROUPED_ID
-                  ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
+                  ? t(CONVERSATION_UNGROUPED_LABEL_KEY[section.axis])
                   : section.group.name
+              const AxisIcon = CONVERSATION_GROUP_AXIS_ICON[section.axis]
               return (
                 <section key={key} data-testid={`mobile-channel-group-${key}`}>
                   <button
@@ -485,11 +597,7 @@ export function MobileChannelList({
                     ) : (
                       <ChevronDownIcon className="size-3 text-muted-foreground" />
                     )}
-                    {section.axis === "workspace" ? (
-                      <FolderIcon className="size-3 text-muted-foreground" aria-hidden="true" />
-                    ) : (
-                      <BotIcon className="size-3 text-muted-foreground" aria-hidden="true" />
-                    )}
+                    <AxisIcon className="size-3 text-muted-foreground" aria-hidden="true" />
                     <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       {name}
                     </span>

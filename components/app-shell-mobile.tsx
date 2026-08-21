@@ -87,6 +87,10 @@ import { getTeam } from "@/lib/db/teams"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import {
+  needsCrossWorkspaceSessions,
+  resolveConversationSearchOptions,
+} from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import { loggers } from "@cognia/logging"
 import type { Character, SendContent, Team } from "@cognia/agent-config-types"
@@ -101,11 +105,15 @@ export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
   const router = useRouter()
-  const sidebarGroupBy = resolveConversationGroupBy(
-    useSettingsStore((s) => s.settings?.conversationSidebar)
-  )
+  // Same reach contract as the desktop sidebar: grouping by workspace, or a
+  // search told to reach every workspace, loads the cross-workspace list.
+  const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const sidebarGroupBy = resolveConversationGroupBy(sidebarSettings)
+  const sidebarSearch = resolveConversationSearchOptions(sidebarSettings)
   const { sessions, activeSessionId, select, create, remove, rename, archive, unarchive, folders } =
-    useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
+    useSessions({
+      crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
+    })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 

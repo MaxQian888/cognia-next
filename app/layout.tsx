@@ -72,7 +72,6 @@ import { PluginConsentOverlay } from "@/components/plugins/dialogs/plugin-consen
 import { PluginEnableFailureToaster } from "@/components/plugins/plugin-enable-failure-toaster"
 import { PluginErrorToaster } from "@/components/plugins/plugin-error-toaster"
 import { SettingsLoadFailedBanner } from "@/components/error/settings-load-failed-banner"
-import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { DbUpgradeBlockedDialog } from "@/components/error/db-upgrade-blocked-dialog"
 import { DiagnosticNotifier } from "@/components/error/diagnostic-notifier"
 import { ReportProblemHost } from "@/components/support/report-problem-host"
@@ -435,11 +434,6 @@ export default async function RootLayout({
                              * case. Above <Toaster /> so a transient toast never
                              * paints over a condition that lasts the whole session. */}
                             <SettingsLoadFailedBanner />
-                            {/* Residual notice for a first run the user left
-                             * early (ADR-0122). Self-hiding — it costs one
-                             * selector unless `onboardingProgress.path` records
-                             * a deliberate skip. */}
-                            <FinishSetupBar />
                             <Toaster />
                             {/* Capacitor-only boot surfaces (splash). Consolidated +
                              * runtime-gated + dynamically imported; the browser/Tauri

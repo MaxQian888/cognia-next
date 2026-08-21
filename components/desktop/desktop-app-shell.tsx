@@ -19,7 +19,10 @@
  *   `MobileShellWrapper` keeps full ownership of the layout.
  * - On bypass routes (deep-link / overlay screens like `/share-target`,
  *   `/pair`, `/oauth`, `/canvas/join`) the chrome is suppressed so the
- *   target screen renders full-bleed.
+ *   target screen renders full-bleed. `/onboarding` joins them for its own
+ *   reason (ADR-0122): the first-run flow owns the window and draws its own
+ *   window bar, so painting a workspace frame around it would be advertising
+ *   an app the user has not finished setting up.
  */
 
 import { usePathname, useRouter } from "next/navigation"
@@ -54,34 +57,30 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useUIStore } from "@/stores/ui/ui-store"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { AgentExecutionHandleProvider } from "@/components/providers/agent-execution-handle-provider"
+import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
+import { isShellBypassRoute } from "@/lib/shell/bypass-routes"
+import { isOnboardingRoute } from "@/lib/onboarding/route"
 
 const log = loggers.shell
 
-const BYPASS_PREFIXES = [
-  "/share-target",
-  "/pair",
-  "/oauth",
-  "/canvas/join",
-  "/pet-overlay",
-  "/pet-popup",
-  "/island",
-  "/selection-toolbar",
-  "/tray-panel",
-]
-
-export function isShellBypassRoute(pathname: string | null | undefined): boolean {
-  if (!pathname) return false
-  return BYPASS_PREFIXES.some(
-    (p) => pathname === p || pathname === `${p}.html` || pathname.startsWith(p + "/")
-  )
-}
+// Re-exported so the shell stays the discoverable home of "which routes have
+// no chrome"; the list itself lives in `lib/shell/bypass-routes` because
+// `FinishSetupBar` — chrome this shell mounts — has to read it too.
+export { isShellBypassRoute }
 
 export function DesktopAppShell({ children }: { children: React.ReactNode }) {
   const platform = usePlatform()
   const pathname = usePathname()
   const router = useRouter()
 
-  const bypass = isShellBypassRoute(pathname)
+  // Two reasons to render no chrome, deliberately kept apart. `bypass` is the
+  // deep-link / overlay list; the first-run takeover (ADR-0122) is a route the
+  // user is *sent* to, which owns the window for the length of setup and draws
+  // its own window bar. Both suppress the same chrome, so they collapse into
+  // one flag here — but they answer to different owners, and merging the lists
+  // would have put "the flow the gate redirects into" in a file whose contract
+  // is "screens that keep the document scroll".
+  const bypass = isShellBypassRoute(pathname) || isOnboardingRoute(pathname)
   const isMobile = platform === "mobile"
 
   // View menu collapse toggles. Both default to `false` (visible). Persisted
@@ -209,6 +208,14 @@ export function DesktopAppShell({ children }: { children: React.ReactNode }) {
         <TerminalToggleShortcut />
         <PanelQuickSwitch />
         <TitleBar />
+        {/* Residual notice for a first run the user left early (ADR-0122).
+          Mounted here rather than at the body level: this shell is `h-screen`
+          and the body it sits in is `overflow:hidden`, so an in-flow bar after
+          the shell was laid out past the bottom edge and clipped — visible on
+          no route. As a row of the shell's own column it takes real height and
+          the content row below simply absorbs it. Self-hiding, so the normal
+          path costs one selector. */}
+        <FinishSetupBar />
         {/* Owns the dock's drag-to-move context. Renders no DOM of its own; the
           edge drop zones it paints during a drag are `fixed`, so the row's
           child order (which the rail-placement tests pin) is unchanged. */}

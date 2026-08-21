@@ -30,6 +30,11 @@ jest.mock("@/lib/db/session-state", () => ({
   listSessionStates: () => sessionStatesRef.value,
 }))
 
+const teamsRef: { value: Array<{ id: string; name: string }> } = { value: [] }
+jest.mock("@/lib/db/teams", () => ({
+  listTeams: () => teamsRef.value,
+}))
+
 jest.mock("@/hooks/data", () => ({
   // Synchronous wrapper: just invoke the query and return its value as-is
   // (the lib mocks above return values directly, not promises).
@@ -90,7 +95,15 @@ jest.mock("@/lib/capacitor/haptics", () => ({
 
 // Static UI-store mock: view/collapse are mirrored to local state in the
 // component, so no-op setters are enough (spies let us assert persistence).
-const setChannelListView = jest.fn()
+// The archived view is read straight from the store now (like folder
+// collapse), so the mock has to hold it and notify — a fixed snapshot would
+// make the view toggle a no-op.
+let channelListView: "active" | "archived" = "active"
+const setChannelListView = jest.fn((next: "active" | "archived") => {
+  channelListView = next
+  emitUiChange()
+})
+let pendingConversationReveal: string | null = null
 // Folder collapse now lives in the store itself (no local mirror), so the mock
 // has to be a real (if tiny) reactive store: the collapse assertions below
 // drive it through the UI and expect the list to re-render.
@@ -129,8 +142,13 @@ jest.mock("@/stores/ui", () => ({
       }
     }, [force])
     return selector({
-      channelListView: "active",
+      channelListView,
       setChannelListView,
+      pendingConversationReveal,
+      clearConversationReveal: () => {
+        pendingConversationReveal = null
+        emitUiChange()
+      },
       collapsedFolderIds,
       setCollapsedFolders,
       toggleCollapsedFolder,
@@ -188,7 +206,10 @@ describe("<MobileChannelList />", () => {
     relativeTimeMock.mockClear()
     charactersRef.value = []
     sessionStatesRef.value = []
-    setChannelListView.mockReset()
+    teamsRef.value = []
+    setChannelListView.mockClear()
+    channelListView = "active"
+    pendingConversationReveal = null
     collapsedFolderIds = []
     setCollapsedFolders.mockClear()
     toggleCollapsedFolder.mockClear()
@@ -639,6 +660,30 @@ describe("<MobileChannelList />", () => {
     expect(onUnarchive).toHaveBeenCalledWith("a1")
   })
 
+  it("comes out of the archived view to show a conversation that was just created", async () => {
+    // Same contract as the desktop sidebar: the narrowing state is persisted,
+    // so a new chat could otherwise open in the pane with no row to show for it.
+    channelListView = "archived"
+    pendingConversationReveal = "new"
+    render(
+      <MobileChannelList
+        sessions={[
+          baseSession("new", { title: "New chat", updatedAt: 20 }),
+          baseSession("a1", { title: "Archived chat", archivedAt: 5, updatedAt: 10 }),
+        ]}
+        activeSessionId="new"
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(await screen.findByTestId("mobile-channel-row-new")).toBeInTheDocument()
+    expect(channelListView).toBe("active")
+  })
+
   it("persists the archived-view choice to the shared UI store", async () => {
     const user = userEvent.setup()
     render(
@@ -726,6 +771,111 @@ describe("<MobileChannelList />", () => {
       expect(screen.getByTestId("mobile-channel-row-s3")).toBeInTheDocument()
     )
     expect(screen.queryByTestId("mobile-channel-row-s2")).not.toBeInTheDocument()
+  })
+
+  it("does not claim 'nothing matched' while the message index is still answering", async () => {
+    // Same contract as the desktop sidebar: message hits land a beat after the
+    // title hits, and an empty state in between contradicts itself.
+    conversationSidebar = { search: { content: true } }
+    historySearchState = { ...historySearchState, loading: true }
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-search-pending")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("mobile-channel-empty")).not.toBeInTheDocument()
+  })
+
+  it("lets a search reach archived conversations without switching the view", async () => {
+    conversationSidebar = { search: { includeArchived: true } }
+    const withArchived = [
+      ...sessions,
+      baseSession("s4", { title: "Standup archive", archivedAt: 5, updatedAt: 10 }),
+    ]
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={withArchived}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    // Browsing stays inside the active view…
+    expect(screen.queryByTestId("mobile-channel-row-s4")).not.toBeInTheDocument()
+    // …a query is what reaches across.
+    await user.type(screen.getByTestId("mobile-channel-search"), "Standup")
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-row-s4")).toBeInTheDocument()
+    )
+    expect(screen.getByTestId("mobile-channel-row-s1")).toBeInTheDocument()
+  })
+
+  it("keeps a search inside the view when the archive reach is off", async () => {
+    const withArchived = [
+      ...sessions,
+      baseSession("s4", { title: "Standup archive", archivedAt: 5, updatedAt: 10 }),
+    ]
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={withArchived}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.type(screen.getByTestId("mobile-channel-search"), "Standup")
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-row-s1")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("mobile-channel-row-s4")).not.toBeInTheDocument()
+  })
+
+  it("groups by team, so the axis means the same thing on both surfaces", () => {
+    // The mobile list has no guild rail, so team mode used to render plain date
+    // buckets over an unfiltered list — "grouped by team" that was not.
+    conversationSidebar = { groupBy: "team" }
+    teamsRef.value = [{ id: "t1", name: "Squad" }]
+    render(
+      <MobileChannelList
+        sessions={[
+          baseSession("s1", { title: "Standup", kind: "team", teamId: "t1", updatedAt: 100 }),
+          baseSession("s2", { title: "Solo", updatedAt: 50 }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("mobile-channel-group-team:t1")).toBeInTheDocument()
+    expect(screen.getByText("Squad")).toBeInTheDocument()
+    // A conversation with no team lands in the axis's own bucket.
+    expect(screen.getByTestId("mobile-channel-group-team:__ungrouped__")).toBeInTheDocument()
   })
 
   describe("filters and sorting", () => {

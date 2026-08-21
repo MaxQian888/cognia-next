@@ -26,6 +26,7 @@ jest.mock("@/hooks/data", () => ({
   useClientLiveQuery: () => liveValue,
 }))
 
+import type { UnreadSession } from "./use-guild-unread"
 import {
   aggregateGuildUnread,
   loadGuildUnread,
@@ -33,7 +34,9 @@ import {
   useGuildUnread,
 } from "./use-guild-unread"
 
-const session = (id: string, over: Record<string, unknown> = {}) => ({
+// Typed: an untyped `over` widened `kind` to `string`, which the hook's own
+// `UnreadSession` (a `Pick` of `ChatSession`) will not accept.
+const session = (id: string, over: Partial<UnreadSession> = {}): UnreadSession => ({
   id,
   kind: "direct",
   ...over,

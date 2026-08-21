@@ -39,11 +39,11 @@ interface Props {
    *
    * - `"rail"` (default) — the desktop chat workspace's right column. Hidden
    *   below `lg` (no room) and collapsible to an icon strip via
-   *   `ui.showMemberList`.
+   *   the local collapse state below.
    * - `"sheet"` — inside the mobile members Sheet, which owns its own width and
    *   whose close button already *is* the collapse. The `lg` gate must not
    *   apply: a phone viewport never reaches it, so the sheet opened blank, and
-   *   a persisted `showMemberList: false` blanked it a second way.
+   *   a collapsed rail state would blank it a second way.
    */
   variant?: "rail" | "sheet"
 }
@@ -55,8 +55,11 @@ interface Props {
  */
 export function MemberList({ teamSessionId, teamId, onMention, variant = "rail" }: Props) {
   const t = useTranslations("desktop.memberList")
-  const showMemberList = useUIStore((s) => s.showMemberList)
-  const setShowMemberList = useUIStore((s) => s.setShowMemberList)
+  // Local, not persisted: `ui.showMemberList` was removed with the rail rework
+  // (7f04234c0) and this component kept reading it, so the collapse had no
+  // home at all. Local state restores the behaviour without re-adding global
+  // persisted state that nothing else reads.
+  const [showMemberList, setShowMemberList] = useState(true)
   const memberStatus = useUIStore((s) => s.memberStatus)
 
   const team = useClientLiveQuery<Team | undefined>(

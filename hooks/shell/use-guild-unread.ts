@@ -38,7 +38,12 @@ export interface GuildUnread {
 
 const EMPTY_GUILD_UNREAD: GuildUnread = { dm: 0, teams: new Map(), total: 0 }
 
-type UnreadSession = Pick<ChatSession, "id" | "kind" | "teamId" | "archivedAt" | "visibility">
+/** The session fields the badge actually reads. Exported so a test fixture can
+ * speak the same vocabulary instead of widening `kind` to `string`. */
+export type UnreadSession = Pick<
+  ChatSession,
+  "id" | "kind" | "teamId" | "archivedAt" | "visibility"
+>
 
 /**
  * Pure aggregation: one unread conversation counts once, under the guild the

@@ -21,6 +21,12 @@ export interface SidebarNavMeta {
   i18nKey: string
   /** Primary feature vs. auxiliary/utility — drives the default pinned set. */
   group: "feature" | "auxiliary"
+  /**
+   * i18n key under `desktop.guildRail.aliases.*` holding a comma-separated list
+   * of extra ⌘K search terms. Set it when a surface absorbs another one whose
+   * name people still type — searching the retired name has to land somewhere.
+   */
+  aliasKey?: string
   /** Hidden entirely on the mobile (Capacitor) shell. */
   desktopOnly?: boolean
 }
@@ -64,7 +70,9 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "sites", route: "/sites", i18nKey: "sites", group: "auxiliary" },
   { id: "a2ui", route: "/a2ui", i18nKey: "a2ui", group: "auxiliary" },
   { id: "memory", route: "/memory", i18nKey: "memory", group: "auxiliary" },
-  { id: "observability", route: "/observability", i18nKey: "observability", group: "auxiliary" },
+  // No "observability" entry: the tracing dashboard is a sub-view of `/logs`
+  // → Traces now, not a route of its own, and two rail items pointing at the
+  // same page would both light up as the active destination.
   { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary" },
   { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
   {
@@ -74,7 +82,9 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
     group: "auxiliary",
     desktopOnly: true,
   },
-  { id: "logs", route: "/logs", i18nKey: "logs", group: "auxiliary" },
+  // The tracing dashboard folded into this route's Traces channel, taking its
+  // own rail entry with it — so "observability" has to resolve here in ⌘K.
+  { id: "logs", route: "/logs", i18nKey: "logs", group: "auxiliary", aliasKey: "logs" },
   { id: "me", route: "/me", i18nKey: "me", group: "auxiliary" },
 ] as const
 

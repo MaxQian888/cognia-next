@@ -208,6 +208,30 @@ describe("useUIStore", () => {
     })
   })
 
+  describe("activeConversationViewId", () => {
+    it("defaults to no view and round-trips a selection", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.activeConversationViewId).toBeNull()
+      act(() => result.current.setActiveConversationViewId("builtin:unread"))
+      expect(result.current.activeConversationViewId).toBe("builtin:unread")
+      act(() => result.current.setActiveConversationViewId(null))
+      expect(result.current.activeConversationViewId).toBeNull()
+    })
+
+    it("does not re-emit for the same id", () => {
+      // The chip and the filter menu both subscribe; a no-op write would
+      // re-render them on every unrelated store touch.
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setActiveConversationViewId("v1"))
+      const before = useUIStore.getState()
+      act(() => result.current.setActiveConversationViewId("v1"))
+      expect(useUIStore.getState()).toBe(before)
+      // The store is shared across tests in this file and persists — leave it
+      // as found so the partialize assertion below is not order-dependent.
+      act(() => result.current.setActiveConversationViewId(null))
+    })
+  })
+
   describe("persistence partialize", () => {
     it("persists only the safe-to-restore fields", () => {
       const { result } = renderHook(() => useUIStore())
@@ -234,6 +258,7 @@ describe("useUIStore", () => {
         collapsedFolderIds: [],
         groupCollapseOverrides: {},
         conversationFilters: EMPTY_CONVERSATION_FILTERS,
+        activeConversationViewId: null,
         guildRailCollapsed: true,
         statusBarCollapsed: true,
         barItems: { ...DEFAULT_BAR_ITEMS },
@@ -468,6 +493,24 @@ describe("useUIStore", () => {
       expect(result.current.channelListView).toBe("archived")
       act(() => result.current.setChannelListView("active"))
       expect(result.current.channelListView).toBe("active")
+    })
+  })
+
+  describe("pendingConversationReveal", () => {
+    it("holds the conversation the list still has to show, and lets go", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.pendingConversationReveal).toBeNull()
+      act(() => result.current.requestConversationReveal("s1"))
+      expect(result.current.pendingConversationReveal).toBe("s1")
+      act(() => result.current.clearConversationReveal())
+      expect(result.current.pendingConversationReveal).toBeNull()
+    })
+
+    it("no-ops a clear when nothing is pending, so consumers can call it freely", () => {
+      act(() => useUIStore.getState().clearConversationReveal())
+      const before = useUIStore.getState()
+      act(() => useUIStore.getState().clearConversationReveal())
+      expect(useUIStore.getState()).toBe(before)
     })
   })
 

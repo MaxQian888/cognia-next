@@ -1942,6 +1942,38 @@ describe("column-header projection", () => {
     expect(screen.getByTestId("title-bar-outlet-end")).toHaveAttribute("hidden")
   })
 
+  test("a projected centre header is counterweighted so the segments stay centred", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    renderProjecting(["center"])
+    const center = await screen.findByTestId("title-bar-outlet-center")
+    await waitFor(() => expect(center).toContainElement(screen.getByTestId("projected-center")))
+
+    // The outlet is `flex-1`; without an equal flex child after the segments it
+    // eats all the slack and the search pill ends up against the trailing
+    // chrome instead of in the middle of the chat column.
+    const counterweight = screen.getByTestId("title-bar-center-counterweight")
+    expect(counterweight.className).toContain("flex-1")
+    expect(center.className).toContain("flex-1")
+    // It sits after every segment, and carries none of them.
+    const search = screen.getByTestId("title-bar-search-pill")
+    expect(search.compareDocumentPosition(counterweight) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(counterweight).toBeEmptyDOMElement()
+    expect(counterweight).toHaveAttribute("aria-hidden", "true")
+  })
+
+  test("with nothing projected the centre zone has no counterweight", async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    renderProjecting([])
+    await screen.findByTestId("title-bar-search-pill")
+    // The un-projected bar centres its segments on its own — an extra flex
+    // child there would push them off-centre.
+    expect(screen.queryByTestId("title-bar-center-counterweight")).toBeNull()
+  })
+
   test("sizes the end outlet to the artifact dock below", async () => {
     isTauriMock.mockReturnValue(true)
     setPlatform("Win32")

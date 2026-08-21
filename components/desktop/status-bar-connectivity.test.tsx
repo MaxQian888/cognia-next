@@ -230,9 +230,44 @@ describe("StatusBarConnectivity", () => {
     fireEvent.click(screen.getByTestId("status-connectivity"))
     expect(screen.getByText("connectionCenter.thisBrowser")).toBeInTheDocument()
     expect(screen.queryByText("connectionCenter.hostLink")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("runtime-target-menu")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "connectionCenter.actions.connectHost" }))
     expect(mockPush).toHaveBeenCalledWith("/pair?mode=add")
+  })
+
+  it("does not dress a standalone browser up as a connected runtime", () => {
+    // Standalone is a *mode*, not a connection: every host-backed operation
+    // resolves to `requires-companion`. A success-green badge and no other
+    // qualification is what read as "already paired" while the rest of the app
+    // was still asking the user to pair.
+    mockPlatform = "web"
+    mockTarget = { id: "web-standalone", kind: "standalone", platform: "web" }
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+
+    expect(screen.getByTestId("connection-status-badge").className).not.toMatch(/bg-success/)
+    expect(screen.getByTestId("standalone-scope-note")).toHaveTextContent(
+      "connectionCenter.standaloneScope"
+    )
+  })
+
+  it("keeps the success badge for a native host, which really is the runtime", () => {
+    mockPlatform = "tauri"
+    mockTarget = null
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+
+    expect(screen.getByTestId("connection-status-badge").className).toMatch(/bg-success/)
+    expect(screen.queryByTestId("standalone-scope-note")).not.toBeInTheDocument()
+  })
+
+  it("offers the already-paired Hosts from the local runtime, not only a fresh pairing", () => {
+    // The footer's only action here is "Connect Host" → `/pair?mode=add`. Without
+    // the switcher, a browser that had already paired was told to pair again.
+    mockPlatform = "web"
+    mockTarget = { id: "web-standalone", kind: "standalone", platform: "web" }
+    render(<StatusBarConnectivity />)
+    fireEvent.click(screen.getByTestId("status-connectivity"))
+    expect(screen.getByTestId("runtime-target-menu")).toBeInTheDocument()
   })
 })

@@ -72,9 +72,25 @@ export function StatusBarConnectivity() {
   const [open, setOpen] = useState(false)
   const [tier, setTier] = useState<TransportTier | null>(null)
   const [loadedHost, setLoadedHost] = useState<LoadedHostRecord | null>(null)
-  const remoteTarget = runtimeSnapshot.target?.kind === "companion"
-  const remoteHostKind = remoteTarget ? runtimeSnapshot.target.hostKind : undefined
-  const activeHostId = remoteTarget ? runtimeSnapshot.target?.id : undefined
+  // Three runtimes, not two. `target === null` means this shell IS the
+  // execution host (Tauri/headless). A `standalone` target is the opposite: a
+  // browser running what it can locally, with every host-backed operation
+  // resolving to `requires-companion` (see `resolveOperationAvailability`).
+  // Collapsing both into "not remote" is what painted a green, connected-
+  // looking badge over a runtime that still has to pair before most of the app
+  // works.
+  //
+  // Narrowed once into a local rather than re-derived per use: a `const`
+  // boolean alias does not carry narrowing back to `runtimeSnapshot.target`,
+  // so `remoteTarget ? runtimeSnapshot.target.hostKind : undefined` read
+  // `hostKind` off a possibly-null union and never compiled.
+  const target = runtimeSnapshot.target
+  const companionTarget = target?.kind === "companion" ? target : null
+  const remoteTarget = companionTarget !== null
+  const nativeHost = !target
+  const standaloneTarget = target?.kind === "standalone"
+  const remoteHostKind = companionTarget?.hostKind
+  const activeHostId = companionTarget?.id
   const hostRecord = loadedHost && loadedHost.hostId === activeHostId ? loadedHost.record : null
 
   // Local execution remains available when the internet is down. A remote Host
@@ -106,15 +122,17 @@ export function StatusBarConnectivity() {
         ? RefreshCwIcon
         : WifiIcon
 
-  const recoveryAvailability: OperationAvailability = !remoteTarget
+  const recoveryAvailability: OperationAvailability = nativeHost
     ? { state: "available", reason: "local-host" }
-    : runtimeSnapshot.vaultState === "unavailable"
-      ? { state: "requires-pairing", reason: "companion-not-paired" }
-      : runtimeSnapshot.host && !runtimeSnapshot.host.compatible
-        ? { state: "incompatible", reason: "host-protocol" }
-        : state === "offline"
-          ? { state: "offline", reason: "connection-offline" }
-          : { state: "available", reason: "local-host" }
+    : standaloneTarget
+      ? { state: "unsupported", reason: "requires-companion" }
+      : runtimeSnapshot.vaultState === "unavailable"
+        ? { state: "requires-pairing", reason: "companion-not-paired" }
+        : runtimeSnapshot.host && !runtimeSnapshot.host.compatible
+          ? { state: "incompatible", reason: "host-protocol" }
+          : state === "offline"
+            ? { state: "offline", reason: "connection-offline" }
+            : { state: "available", reason: "local-host" }
   const recovery = resolveRuntimeRecovery(recoveryAvailability, platform)
 
   useEffect(() => {
@@ -173,8 +191,18 @@ export function StatusBarConnectivity() {
       ? t("connectionCenter.thisDesktop")
       : t("connectionCenter.thisBrowser")
 
-  const statusVariant =
-    state === "offline" ? "destructive" : state === "reconnecting" ? "warning" : "success"
+  // Green is a claim that the runtime can serve. Only a native host or a live
+  // Host link earns it; a standalone browser is a *mode*, not a connection, and
+  // showing it in success green is what read as "already paired".
+  const statusVariant = !remoteTarget
+    ? nativeHost
+      ? "success"
+      : "secondary"
+    : state === "offline"
+      ? "destructive"
+      : state === "reconnecting"
+        ? "warning"
+        : "success"
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -219,7 +247,7 @@ export function StatusBarConnectivity() {
                 {hostRecord?.label ?? targetLabel}
               </PopoverDescription>
             </div>
-            <Badge variant={statusVariant}>
+            <Badge variant={statusVariant} data-testid="connection-status-badge">
               {remoteTarget ? label : t("connectionCenter.localRuntime")}
             </Badge>
           </div>
@@ -306,6 +334,18 @@ export function StatusBarConnectivity() {
           ) : null}
         </dl>
 
+        {standaloneTarget ? (
+          <>
+            <Separator />
+            <div className="flex items-start gap-2 p-3 text-xs" data-testid="standalone-scope-note">
+              <ServerIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <p className="min-w-0 text-muted-foreground">
+                {t("connectionCenter.standaloneScope")}
+              </p>
+            </div>
+          </>
+        ) : null}
+
         {hostRecord?.connection.lastError ? (
           <>
             <Separator />
@@ -321,13 +361,18 @@ export function StatusBarConnectivity() {
           </>
         ) : null}
 
-        {platform === "web" && remoteTarget ? (
-          <>
-            <Separator />
-            <div className="p-1">
-              <RuntimeTargetMenuSection onSwitched={() => setOpen(false)} />
-            </div>
-          </>
+        {/* Also rendered on the standalone target, which is the case that
+          needed it most: the footer's only action there is "Connect Host",
+          so a browser that had already paired was being told to pair again
+          with no way to pick the Host it owns. The section self-hides unless
+          a companion target exists, so a never-paired browser is unchanged. */}
+        {platform === "web" ? (
+          <RuntimeTargetMenuSection
+            requireCompanion
+            showAddHost={false}
+            className="border-t p-1"
+            onSwitched={() => setOpen(false)}
+          />
         ) : null}
 
         <Separator />

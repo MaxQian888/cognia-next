@@ -1348,6 +1348,21 @@ export function TitleBar() {
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
           />
+          {/* Counterweight to the outlet. The outlet is `flex-1`, so with a
+              header projected it swallows every pixel of slack and shoves the
+              segments against the bar's trailing chrome — the search pill sat
+              centred on every route *except* inside a conversation. Mirroring
+              the outlet's flex weight on the far side keeps the cluster centred
+              in the chat column either way. Rendered only while the outlet is,
+              so the un-projected bar keeps the exact layout it had. */}
+          {projected.center ? (
+            <div
+              aria-hidden
+              data-tauri-drag-region
+              data-testid="title-bar-center-counterweight"
+              className="h-full min-w-0 flex-1"
+            />
+          ) : null}
         </div>
 
         {/* Artifact-dock header lands here, sized to the dock below. */}

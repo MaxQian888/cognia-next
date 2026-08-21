@@ -71,6 +71,7 @@ import { useFormatter, useNow, useTranslations } from "next-intl"
 import {
   memo,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -164,16 +165,24 @@ export interface SessionRowProps {
    * row's `memo` for the whole list.
    */
   showTimestamp?: boolean
-  /** @dnd-kit node ref from the Sortable wrapper (applied to the `<li>`). */
-  dragRef?: (el: HTMLElement | null) => void
+  /**
+   * Ref for the row's `<li>`, supplied by whatever owns its position: the
+   * @dnd-kit Sortable wrapper while dragging, or the virtualizer's
+   * `measureElement` in a long flat list.
+   */
+  nodeRef?: (el: HTMLElement | null) => void
   /** @dnd-kit drag listeners — applied to the hover grip handle. */
   dragListeners?: Record<string, unknown>
   /** @dnd-kit a11y attributes for the grip handle. */
   dragAttributes?: Record<string, unknown>
   /** @dnd-kit activator ref, applied to the dedicated grip handle. */
   dragActivatorRef?: (el: HTMLElement | null) => void
-  /** Transform/transition style from the Sortable wrapper. */
-  dragStyle?: CSSProperties
+  /**
+   * Inline style for the row's `<li>`, supplied by whatever is positioning it
+   * from outside: the Sortable wrapper's transform/transition while dragging,
+   * or the virtualizer's absolute placement in a long flat list.
+   */
+  nodeStyle?: CSSProperties
   /** True while this row is being dragged. */
   dragging?: boolean
   /** Pending insertion edge while another row is dragged over this one. */
@@ -222,11 +231,11 @@ function SessionRowImpl({
   searchQuery,
   contentMatch = false,
   showTimestamp = false,
-  dragRef,
+  nodeRef,
   dragListeners,
   dragAttributes,
   dragActivatorRef,
-  dragStyle,
+  nodeStyle,
   dragging = false,
   dropPosition,
   settleFlash,
@@ -272,10 +281,11 @@ function SessionRowImpl({
     if (focused) liRef.current?.scrollIntoView({ block: "nearest" })
   }, [focused])
 
-  // Merge the @dnd-kit sortable ref with our local ref for scroll-into-view.
+  // Merge the caller's node ref (sortable, or the virtualizer's measurer) with
+  // our local ref for scroll-into-view.
   const setLiRef = (el: HTMLLIElement | null) => {
     liRef.current = el
-    dragRef?.(el)
+    nodeRef?.(el)
   }
 
   const commit = () => {
@@ -325,6 +335,20 @@ function SessionRowImpl({
     log.info("session toggle-pinned", { sessionId: session.id, pinned: next })
     void onTogglePinned?.(session.id, next)
   }
+
+  // Only this conversation's own workspace can file it: a folder is
+  // workspace-scoped, and the list may span every workspace under
+  // `groupBy: "workspace"`. Offering a foreign folder would file the row into
+  // something that isn't loaded where it lives, so the membership would show
+  // here and be gone after the next workspace switch. Both sides are optional
+  // (either predates workspace isolation), so only a known mismatch is dropped.
+  const assignableFolders = useMemo(
+    () =>
+      (folders ?? []).filter(
+        (f) => !f.projectId || !session.projectId || f.projectId === session.projectId
+      ),
+    [folders, session.projectId]
+  )
 
   const isArchived = session.archivedAt != null
   const handleArchive = () => {
@@ -414,7 +438,7 @@ function SessionRowImpl({
   return (
     <li
       ref={setLiRef}
-      style={dragStyle}
+      style={nodeStyle}
       className={cn(
         // No padding on the `<li>` itself: the select button below owns the
         // row's inner padding so the whole surface — not just the text — is a
@@ -640,14 +664,14 @@ function SessionRowImpl({
                   {t("archive")}
                 </DropdownMenuItem>
               ) : null}
-              {onAssignToFolder && (folders?.length || session.folderId) ? (
+              {onAssignToFolder && (assignableFolders.length || session.folderId) ? (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <FolderInputIcon className="mr-2 size-4" />
                     {t("moveToFolder")}
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    {(folders ?? []).map((f) => (
+                    {assignableFolders.map((f) => (
                       <DropdownMenuItem
                         key={f.id}
                         onSelect={() => void onAssignToFolder(session.id, f.id)}

@@ -47,6 +47,13 @@ jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => <div data-testid="offline-banner-stub" />,
 }))
 
+// Stubbed for the same reason as the banner above: what this suite pins is
+// that the shell mounts it as a row of its own chrome, not the bar's own
+// self-hiding rules (those live in finish-setup-bar.test.tsx).
+jest.mock("@/components/onboarding/finish-setup-bar", () => ({
+  FinishSetupBar: () => <div data-testid="finish-setup-bar-stub" />,
+}))
+
 // The real host drags the whole global-search stack (Dexie providers, next-intl
 // formatters) into every wrapper test; the mount itself is what matters here.
 jest.mock("./mobile-global-search-host", () => ({
@@ -120,6 +127,22 @@ describe("<MobileShellWrapper />", () => {
     )
     expect(screen.getByTestId("mobile-tab-bar")).toBeInTheDocument()
     expect(screen.getByText("child")).toBeInTheDocument()
+  })
+
+  it("mounts the finish-setup notice inside the shell, above the page", () => {
+    // It used to be mounted at the body level in `app/layout.tsx`, which put it
+    // *after* a `min-h-[100dvh]` page — off the bottom of the document, where
+    // it only ever showed up as an unexplained scrollbar.
+    render(
+      <MobileShellWrapper>
+        <div>child</div>
+      </MobileShellWrapper>
+    )
+    const bar = screen.getByTestId("finish-setup-bar-stub")
+    expect(bar).toBeInTheDocument()
+    expect(
+      bar.compareDocumentPosition(screen.getByText("child")) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
   })
 
   it("mounts the file viewer dialog for every mobile route", () => {

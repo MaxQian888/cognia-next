@@ -140,6 +140,8 @@ let conversationFilters: Record<string, unknown> = {
 }
 const setConversationFilters = jest.fn()
 const resetConversationFilters = jest.fn()
+let channelListView: "active" | "archived" = "active"
+let pendingConversationReveal: string | null = null
 jest.mock("@/stores/ui", () => ({
   // A tiny reactive store, not a plain snapshot: folder collapse is read
   // straight from the store now (no local mirror), so a toggle has to
@@ -155,8 +157,19 @@ jest.mock("@/stores/ui", () => ({
     }, [force])
     return selector({
       selectedGuild,
-      channelListView: "active",
-      setChannelListView: () => {},
+      // Also read straight from the store now — the archived toggle used to
+      // keep a local mirror, which meant another writer (the mobile list, the
+      // reveal ladder) could not move it.
+      channelListView,
+      setChannelListView: (next: "active" | "archived") => {
+        channelListView = next
+        emitUiChange()
+      },
+      pendingConversationReveal,
+      clearConversationReveal: () => {
+        pendingConversationReveal = null
+        emitUiChange()
+      },
       collapsedFolderIds,
       setCollapsedFolders: (ids: string[]) => {
         collapsedFolderIds = ids
@@ -337,6 +350,8 @@ beforeEach(() => {
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   collapsedFolderIds = []
+  channelListView = "active"
+  pendingConversationReveal = null
   isNarrow = false
   sidebarCollapsed = false
   conversationSidebar = null
@@ -361,7 +376,7 @@ beforeEach(() => {
   useChatHistorySearch.mockImplementation(() => historySearchState)
 })
 
-test("DM guild renders only direct sessions, grouped into date buckets", () => {
+test("DM guild renders only direct sessions, under the team axis's own section", () => {
   // The rail's DM/Team split is the `"team"` grouping mode; the default
   // (`"workspace"`) deliberately stops filtering by guild.
   conversationSidebar = { groupBy: "team" }
@@ -381,8 +396,11 @@ test("DM guild renders only direct sessions, grouped into date buckets", () => {
   expect(screen.getByText("directMessages")).toBeInTheDocument()
   expect(screen.getByText("Hi Alice")).toBeInTheDocument()
   expect(screen.queryByText("Squad meeting")).toBeNull()
-  // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
-  expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+  // Team is a real grouping axis now, not date buckets behind the rail's
+  // filter: a conversation with no team lands in the axis's ungrouped bucket,
+  // which this axis labels after direct chats rather than "leftovers".
+  expect(screen.getByText("ungroupedTeam")).toBeInTheDocument()
+  expect(screen.queryByText("bucketOlder")).toBeNull()
 })
 
 test("renders while team data is loading", () => {
@@ -964,14 +982,32 @@ test.each([
     expected: { showUnreadBadges: false },
   },
   {
+    // The switch writes the resolved scope object, not the legacy enum: the
+    // reach now has three axes and the other two must survive a toggle.
     label: "searchMessageContent",
     initial: { searchScope: "title" },
-    expected: { searchScope: "titleAndContent" },
+    expected: {
+      searchScope: "title",
+      search: { workspace: "current", includeArchived: false, content: true },
+    },
+  },
+  {
+    // Legacy blob with no `search` object: the enum seeds `content`, and
+    // turning the switch off writes the object saying so — the stale enum is
+    // left alone because the resolver already prefers the object.
+    label: "searchMessageContent",
+    initial: { searchScope: "titleAndContent" },
+    expected: {
+      searchScope: "titleAndContent",
+      search: { workspace: "current", includeArchived: false, content: false },
+    },
   },
   {
     label: "searchMessageContent",
-    initial: { searchScope: "titleAndContent" },
-    expected: { searchScope: "title" },
+    initial: { search: { workspace: "all", includeArchived: true, content: false } },
+    expected: {
+      search: { workspace: "all", includeArchived: true, content: true },
+    },
   },
   {
     label: "metadata.provider",
@@ -1641,6 +1677,97 @@ test("archive view toggle switches between active and archived sessions", async 
   expect(screen.queryByText("Active one")).toBeNull()
 })
 
+describe("revealing a freshly created conversation", () => {
+  it("leaves the list alone when the new row is already on screen", async () => {
+    callQueue.push(characters, [], undefined)
+    pendingConversationReveal = "new"
+    render(
+      <ChannelList
+        sessions={[baseSession("new", { title: "New chat" })]}
+        activeSessionId="new"
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Nothing was hiding it, so no narrowing is undone — the common case must
+    // not cost the user their view, their search or their filters.
+    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    expect(resetConversationFilters).not.toHaveBeenCalled()
+    expect(channelListView).toBe("active")
+  })
+
+  it("drops a quick filter that is hiding the new conversation", async () => {
+    callQueue.push(characters, [], undefined)
+    // The new chat carries no unread messages, so this filter hides it.
+    conversationFilters = { unread: true, pinned: false, branched: false, kind: "all" }
+    pendingConversationReveal = "new"
+    render(
+      <ChannelList
+        sessions={[baseSession("new", { title: "New chat" })]}
+        activeSessionId="new"
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await waitFor(() => expect(resetConversationFilters).toHaveBeenCalled())
+  })
+
+  it("comes out of the archived view so the new conversation is visible", async () => {
+    callQueue.push(characters, [], undefined)
+    channelListView = "archived"
+    pendingConversationReveal = "new"
+    render(
+      <ChannelList
+        sessions={[
+          baseSession("new", { title: "New chat" }),
+          baseSession("old", { title: "Archived one", archivedAt: 50 }),
+        ]}
+        activeSessionId="new"
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    expect(channelListView).toBe("active")
+  })
+
+  it("clears a search that is hiding the new conversation", async () => {
+    callQueue.push(characters, [], undefined)
+    pendingConversationReveal = "new"
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[baseSession("new", { title: "New chat" })]}
+        activeSessionId="new"
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Type a query that matches nothing, then let the reveal request land.
+    await user.type(screen.getByPlaceholderText("searchPlaceholder"), "zzz")
+    await screen.findByText(/emptySearch/)
+    pendingConversationReveal = "new"
+    act(() => emitUiChange())
+    expect(await screen.findByText("New chat")).toBeInTheDocument()
+    // The field itself is cleared too, not just the debounced query.
+    expect(screen.getByPlaceholderText("searchPlaceholder")).toHaveValue("")
+  })
+})
+
 test("an empty archived view shows the archived empty state", async () => {
   callQueue.push(characters, [], undefined)
   const user = userEvent.setup()
@@ -2126,6 +2253,310 @@ describe("interaction upgrades", () => {
     )
     expect(await screen.findByText("Bravo")).toBeInTheDocument()
     expect(screen.queryByText("Alpha")).toBeNull()
+  })
+
+  test("does not claim 'no results' while the message index is still answering", async () => {
+    // The content query lands a beat after the title hits. Saying "nothing
+    // matched X" here and then filling the list a moment later reads as a miss
+    // and then contradicts itself.
+    conversationSidebar = { search: { content: true } }
+    historySearchState = { ...historySearchState, loading: true }
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.type(screen.getByLabelText("searchAria"), "zzz")
+    expect(await screen.findByTestId("channel-list-search-pending")).toBeInTheDocument()
+    expect(screen.queryByText(/^emptySearch/)).toBeNull()
+  })
+
+  test("still says 'no results' once the message index has settled", async () => {
+    conversationSidebar = { search: { content: true } }
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.type(screen.getByLabelText("searchAria"), "zzz")
+    expect(await screen.findByText(/^emptySearch/)).toBeInTheDocument()
+    expect(screen.queryByTestId("channel-list-search-pending")).toBeNull()
+  })
+
+  test("says so when a query is too short for the message index", async () => {
+    // Titles match from one character, messages need two. Degrading silently
+    // reads as a broken index.
+    conversationSidebar = { search: { content: true } }
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.type(screen.getByLabelText("searchAria"), "A")
+    expect(await screen.findByText(/^searchContentMinQuery/)).toBeInTheDocument()
+  })
+
+  test("a search reaches archived conversations without switching the view", async () => {
+    conversationSidebar = { search: { includeArchived: true } }
+    const archived = baseSession("s-arch", { title: "Alpha archived", archivedAt: 5 })
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, archived]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Row titles are split into highlighted runs while searching, so assert on
+    // the row's own text rather than a single text node.
+    const rowTitles = () => screen.queryAllByRole("listitem").map((li) => li.textContent ?? "")
+    // Not listed while browsing…
+    expect(rowTitles().some((text) => text.includes("Alpha archived"))).toBe(false)
+    // …but findable.
+    await user.type(screen.getByLabelText("searchAria"), "Alpha")
+    await waitFor(() =>
+      expect(rowTitles().some((text) => text.includes("Alpha archived"))).toBe(true)
+    )
+    expect(rowTitles().some((text) => text.includes("Alpha"))).toBe(true)
+  })
+
+  test("stays inside the view when the archive reach is off", async () => {
+    conversationSidebar = {}
+    const archived = baseSession("s-arch", { title: "Alpha archived", archivedAt: 5 })
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, archived]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const rowTitles = () => screen.queryAllByRole("listitem").map((li) => li.textContent ?? "")
+    await user.type(screen.getByLabelText("searchAria"), "Alpha")
+    await waitFor(() => expect(rowTitles().some((text) => text.includes("Alpha"))).toBe(true))
+    expect(rowTitles().some((text) => text.includes("Alpha archived"))).toBe(false)
+  })
+})
+
+describe("order freeze", () => {
+  // Row text is `<title>dt(<ts>)<model>`; the title is what this is about.
+  const listOrder = () =>
+    screen
+      .queryAllByRole("listitem")
+      .map((li) => (li.textContent ?? "").replace(/dt\(\d+\).*$/, ""))
+
+  const renderWith = (sessions: ChatSession[]) => {
+    callQueue.push(characters, [], undefined)
+    return render(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+  }
+
+  test("re-sorts freely while nobody is in the list", () => {
+    conversationSidebar = { groupBy: "none" }
+    const { rerender } = renderWith([
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+    ])
+    expect(listOrder()).toEqual(["Alpha", "Bravo"])
+    rerender(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Bravo", updatedAt: 99 }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(listOrder()).toEqual(["Bravo", "Alpha"])
+  })
+
+  test("holds the order under the pointer, says how many are waiting, and applies on click", async () => {
+    // The row you were reaching for must not slide out from under the cursor.
+    conversationSidebar = { groupBy: "none" }
+    const user = userEvent.setup()
+    const { container, rerender } = renderWith([
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+    ])
+    const scroller = container.querySelector("[data-slot=scroll-area]")!
+    fireEvent.mouseEnter(scroller)
+    rerender(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Bravo", updatedAt: 99 }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(listOrder()).toEqual(["Alpha", "Bravo"])
+    const pill = await screen.findByTestId("channel-list-order-pending")
+    expect(pill).toHaveTextContent('orderPending:{"count":1}')
+    await user.click(pill)
+    expect(listOrder()).toEqual(["Bravo", "Alpha"])
+    expect(screen.queryByTestId("channel-list-order-pending")).toBeNull()
+  })
+
+  test("releases once the pointer leaves", () => {
+    conversationSidebar = { groupBy: "none" }
+    const { container, rerender } = renderWith([
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+    ])
+    const scroller = container.querySelector("[data-slot=scroll-area]")!
+    fireEvent.mouseEnter(scroller)
+    const next = [
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 99 }),
+    ]
+    const props = {
+      activeSessionId: null,
+      onSelect: jest.fn(),
+      onNewDirect: jest.fn(),
+      onNewTeamConversation: jest.fn(),
+      onDelete: jest.fn(),
+      onRename: jest.fn(),
+    }
+    rerender(<ChannelList sessions={next} {...props} />)
+    expect(listOrder()).toEqual(["Alpha", "Bravo"])
+    fireEvent.mouseLeave(scroller)
+    rerender(<ChannelList sessions={next} {...props} />)
+    expect(listOrder()).toEqual(["Bravo", "Alpha"])
+  })
+
+  test("does not freeze search results — those are ranked by relevance", async () => {
+    conversationSidebar = { groupBy: "none" }
+    const user = userEvent.setup()
+    const { container, rerender } = renderWith([
+      baseSession("s-a", { title: "Alpha one", updatedAt: 30 }),
+      baseSession("s-b", { title: "Alpha two", updatedAt: 20 }),
+      baseSession("s-c", { title: "Bravo", updatedAt: 10 }),
+    ])
+    const scroller = container.querySelector("[data-slot=scroll-area]")!
+    fireEvent.mouseEnter(scroller)
+    await user.type(screen.getByLabelText("searchAria"), "Alpha")
+    // Wait for the debounced query to actually reach the model — "Bravo"
+    // dropping out is the proof, not the absence of a pill that would be
+    // absent anyway until something moves.
+    await waitFor(() => expect(listOrder()).toEqual(["Alpha one", "Alpha two"]))
+    rerender(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha one", updatedAt: 30 }),
+          baseSession("s-b", { title: "Alpha two", updatedAt: 99 }),
+          baseSession("s-c", { title: "Bravo", updatedAt: 10 }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Equal-length prefix matches score identically, so recency decides the tie
+    // — and it is allowed to reorder them, pointer or not.
+    expect(listOrder()).toEqual(["Alpha two", "Alpha one"])
+    expect(screen.queryByTestId("channel-list-order-pending")).toBeNull()
+  })
+})
+
+describe("virtualized flat lists", () => {
+  const many = (count: number, prefix: string) =>
+    Array.from({ length: count }, (_, i) =>
+      baseSession(`${prefix}-${i}`, { title: `${prefix} ${i}`, updatedAt: count - i })
+    )
+
+  const renderWith = (sessions: ChatSession[]) => {
+    callQueue.push(characters, [], undefined)
+    return render(
+      <ChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+  }
+
+  test("renders an ordinary flat list without windowing", () => {
+    // The machinery must not cost anything on a list nobody needs it for.
+    conversationSidebar = { groupBy: "none", sortBy: "title" }
+    renderWith(many(20, "Chat"))
+    expect(screen.queryByTestId("channel-list-virtual-rows")).toBeNull()
+  })
+
+  test("windows a long flat list, painting a fraction of its rows", () => {
+    conversationSidebar = { groupBy: "none", sortBy: "title" }
+    renderWith(many(400, "Chat"))
+    const container = screen.getByTestId("channel-list-virtual-rows")
+    // jsdom gives every element a zero client height, so the window resolves to
+    // nothing; what the test can prove is that the list is no longer painting
+    // 400 rows, and that it still reserves their full scroll height.
+    expect(screen.queryAllByRole("listitem").length).toBeLessThan(400)
+    expect(container.querySelector("ul")).toHaveStyle({ height: "17600px" })
+  })
+
+  test("leaves a long grouped list alone — sticky headers and dragging live there", () => {
+    conversationSidebar = { groupBy: "date", sortBy: "recent" }
+    renderWith(many(400, "Chat"))
+    expect(screen.queryByTestId("channel-list-virtual-rows")).toBeNull()
   })
 })
 

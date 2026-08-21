@@ -175,6 +175,43 @@ interface UIState {
   resetConversationFilters: () => void
 
   /**
+   * The saved view the conversation list is currently sitting in, or `null` for
+   * none.
+   *
+   * The view *definitions* live in `AppSettings.conversationSidebar.views` so
+   * they follow the profile across devices; which one is *active* is layout
+   * state and lives here, so a phone and a desktop can sit in different views
+   * without overwriting each other.
+   *
+   * Kept rather than re-derived by comparing the current filters to each saved
+   * view: that inference lost track of the view the instant the user nudged
+   * anything, which is also why "update this view" could not be offered — by
+   * then nothing knew which view was meant. The chip says "name · modified"
+   * instead, and `conversationViewDrift` supplies the "modified".
+   */
+  activeConversationViewId: string | null
+  setActiveConversationViewId: (viewId: string | null) => void
+
+  /**
+   * A conversation the list still has to make visible — set by
+   * `startNewSession` for every entry point that creates one (channel-list "+",
+   * welcome CTA, command palette, Cmd+N, tray, CLI).
+   *
+   * The list's narrowing state is sticky and persisted: the Archived view, a
+   * search still in the field, a quick filter left on since yesterday. Without
+   * this marker a brand-new conversation opens in the chat pane while the
+   * sidebar shows no trace of it — created, selected, and invisible. The
+   * consumer undoes one narrowing dimension per pass and clears the marker as
+   * soon as the row is on screen (`hooks/chat/use-conversation-reveal.ts`), so
+   * nothing is reset when the row was visible all along.
+   *
+   * Deliberately NOT persisted: it describes one moment, not a preference.
+   */
+  pendingConversationReveal: string | null
+  requestConversationReveal: (sessionId: string) => void
+  clearConversationReveal: () => void
+
+  /**
    * Desktop left guild rail (feature switcher) collapse. Persisted across
    * reloads, and driven by the View menu / the title bar's layout dropdown —
    * both of which flip it, so a toggle is the whole surface. (There is no
@@ -360,6 +397,19 @@ export const useUIStore = create<UIState>()(
         set({ conversationFilters: resolveConversationFilters(filters) }),
       resetConversationFilters: () => set({ conversationFilters: EMPTY_CONVERSATION_FILTERS }),
 
+      activeConversationViewId: null,
+      setActiveConversationViewId: (viewId) =>
+        set((s) =>
+          s.activeConversationViewId === viewId ? s : { activeConversationViewId: viewId }
+        ),
+
+      pendingConversationReveal: null,
+      requestConversationReveal: (sessionId) => set({ pendingConversationReveal: sessionId }),
+      clearConversationReveal: () =>
+        set((s) =>
+          s.pendingConversationReveal === null ? s : { pendingConversationReveal: null }
+        ),
+
       guildRailCollapsed: false,
       toggleGuildRail: () => set((s) => ({ guildRailCollapsed: !s.guildRailCollapsed })),
 
@@ -504,6 +554,7 @@ export const useUIStore = create<UIState>()(
         collapsedFolderIds: s.collapsedFolderIds,
         groupCollapseOverrides: s.groupCollapseOverrides,
         conversationFilters: s.conversationFilters,
+        activeConversationViewId: s.activeConversationViewId,
         guildRailCollapsed: s.guildRailCollapsed,
         statusBarCollapsed: s.statusBarCollapsed,
         barItems: s.barItems,

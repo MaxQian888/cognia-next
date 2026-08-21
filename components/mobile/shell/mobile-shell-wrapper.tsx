@@ -24,6 +24,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MobileConsentSheet } from "@/components/mobile/automation/mobile-consent-sheet"
 import { FileViewerDialog } from "@/components/file-viewer/file-viewer-dialog"
 import { OfflineBanner } from "@/components/mobile/offline-banner"
+import { FinishSetupBar } from "@/components/onboarding/finish-setup-bar"
 import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { usePlatform } from "@/hooks/use-platform"
 import { getDb } from "@/lib/db/schema"
@@ -180,6 +181,12 @@ export function MobileShellWrapper({ children, badges, className }: MobileShellW
         style={keyboard.keyboardHeight > 0 ? { paddingBottom: keyboard.keyboardHeight } : undefined}
       >
         <OfflineBanner />
+        {/* The mobile half of the mount in `DesktopAppShell` — the first-run
+          residual notice (ADR-0122). A row of the shell's own column, like the
+          offline banner beside it, so it reads as chrome at the top of the
+          screen instead of a strip appended below a `min-h-[100dvh]` page
+          where nobody scrolls to find it. Self-hides on chrome-free routes. */}
+        <FinishSetupBar />
         {children}
       </div>
       <MobileConsentSheet />

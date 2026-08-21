@@ -100,11 +100,9 @@ export function getSidebarCatalog(
     if (platform === "mobile" && meta.desktopOnly) return false
     if (runtimeSnapshot) {
       const contract = getSurfaceContract(meta.id)
-      if (
-        platform !== "tauri" &&
-        runtimeSnapshot.target === null &&
-        contract?.standalone === "hidden"
-      ) {
+      // No `platform !== "tauri"` guard: the `tauri` case returned above, so it
+      // was always true by the time control reached here.
+      if (runtimeSnapshot.target === null && contract?.standalone === "hidden") {
         return false
       }
       return contract ? shouldShowSurface(contract, runtimeSnapshot) : false

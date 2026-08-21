@@ -54,6 +54,11 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformValue,
 }))
 
+// Stubbed like the rest of the shell's chrome: what this suite pins is the
+// mount, not the bar's own self-hiding rules (finish-setup-bar.test.tsx).
+jest.mock("@/components/onboarding/finish-setup-bar", () => ({
+  FinishSetupBar: () => <div data-testid="finish-setup-bar-stub" />,
+}))
 jest.mock("@/components/desktop/title-bar", () => ({
   TitleBar: () => <div data-testid="title-bar" />,
 }))
@@ -281,6 +286,45 @@ test("returns children passthrough on bypass routes (no chrome)", () => {
   )
   expect(screen.queryByTestId("title-bar")).toBeNull()
   expect(screen.getByTestId("route-content")).toBeInTheDocument()
+  // Bypass routes own the whole viewport and keep the document scroll. While
+  // this bar was mounted at the body level it landed *after* their
+  // `min-h-[100dvh]` page and showed up as a scrollbar on the pairing flow.
+  expect(screen.queryByTestId("finish-setup-bar-stub")).toBeNull()
+})
+
+test("renders the first-run takeover bare — setup is not a page inside the app", () => {
+  // ADR-0122. The flow draws its own window bar (drag region + window buttons),
+  // so a workspace frame around it would be advertising an app the user has
+  // not finished setting up — and the residual finish-setup notice would be
+  // pointing at the very screen it sits on.
+  pathname = "/onboarding"
+  render(
+    <DesktopAppShell>
+      <div data-testid="route-content" />
+    </DesktopAppShell>
+  )
+  expect(screen.queryByTestId("title-bar")).toBeNull()
+  expect(screen.queryByTestId("guild-create-team")).toBeNull()
+  expect(screen.queryByTestId("finish-setup-bar-stub")).toBeNull()
+  expect(screen.getByTestId("route-content")).toBeInTheDocument()
+})
+
+test("mounts the finish-setup notice as a row of the shell, not after it", () => {
+  // The shell is `h-screen` inside an `overflow:hidden` body: mounted at the
+  // body level the bar was laid out past the bottom edge and clipped, so it
+  // was visible on no desktop route at all.
+  render(
+    <DesktopAppShell>
+      <div data-testid="route-content" />
+    </DesktopAppShell>
+  )
+  const bar = screen.getByTestId("finish-setup-bar-stub")
+  expect(bar).toBeInTheDocument()
+  expect(screen.getByTestId("title-bar").compareDocumentPosition(bar)).toBeTruthy()
+  expect(
+    bar.compareDocumentPosition(screen.getByTestId("route-content")) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
 })
 
 test("does not set data-app-shell on bypass routes", () => {

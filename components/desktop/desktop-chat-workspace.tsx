@@ -52,6 +52,10 @@ import { markSessionRead } from "@/lib/db/session-state"
 import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
 import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import {
+  needsCrossWorkspaceSessions,
+  resolveConversationSearchOptions,
+} from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
@@ -79,11 +83,13 @@ export function DesktopChatWorkspace() {
   })
   const composerDisabled = chatAvailability.state !== "available"
   const runtimeRecovery = resolveRuntimeRecovery(chatAvailability, platform)
-  // Grouping by workspace is the one mode that needs conversations from every
-  // workspace; every other mode keeps the sidebar workspace-isolated.
-  const sidebarGroupBy = resolveConversationGroupBy(
-    useSettingsStore((s) => s.settings?.conversationSidebar)
-  )
+  // Two independent reasons to load every workspace's conversations: grouping
+  // BY workspace, and a search told to reach them. Binding the second to the
+  // first is what used to make "can I find this chat?" depend on how the list
+  // happened to be grouped.
+  const sidebarSettings = useSettingsStore((s) => s.settings?.conversationSidebar)
+  const sidebarGroupBy = resolveConversationGroupBy(sidebarSettings)
+  const sidebarSearch = resolveConversationSearchOptions(sidebarSettings)
   const {
     sessions,
     isLoadingSessions,
@@ -106,7 +112,9 @@ export function DesktopChatWorkspace() {
     deleteFolder,
     reorderFolders,
     assignToFolder,
-  } = useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
+  } = useSessions({
+    crossWorkspace: needsCrossWorkspaceSessions(sidebarGroupBy, sidebarSearch),
+  })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 

@@ -1,5 +1,6 @@
 "use client"
 
+import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -48,6 +49,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { useIsNarrow, useRangeSelection, useEdgeResize } from "@/hooks/ui"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { useConversationListModel } from "@/hooks/chat/use-conversation-list-model"
+import { useConversationOrderFreeze } from "@/hooks/chat/use-conversation-order-freeze"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import {
+  useConversationReveal,
+  type ConversationRevealStep,
+} from "@/hooks/chat/use-conversation-reveal"
 import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
@@ -129,12 +136,22 @@ import type {
   ConversationSidebarMetadata,
   ConversationSidebarSettings,
   ConversationSidebarDensity,
-  ConversationSearchScope,
   ConversationSidebarTitleMotion,
   ConversationSortBy,
 } from "@cognia/agent-config-types"
 import { conversationSectionKey, UNGROUPED_ID } from "@/lib/chat/conversation-list-model"
-import type { DateBucket } from "@/lib/chat/conversation-list-model"
+import type { ConversationGroupAxis, DateBucket } from "@/lib/chat/conversation-list-model"
+import {
+  CONVERSATION_GROUP_AXIS_ICON,
+  CONVERSATION_UNGROUPED_LABEL_KEY,
+} from "@/lib/chat/conversation-group-axis"
+import {
+  CONTENT_SEARCH_MIN_QUERY,
+  describeConversationSearchScope,
+  needsCrossWorkspaceSessions,
+  resolveConversationSearchOptions,
+  type ResolvedConversationSearchOptions,
+} from "@/lib/chat/conversation-search-scope"
 import {
   CONVERSATION_GROUP_BY_OPTIONS,
   CONVERSATION_SIDEBAR_METADATA_OPTIONS,
@@ -150,6 +167,7 @@ import {
 import {
   ConversationFilterChips,
   ConversationFilterMenu,
+  ConversationSearchScopeControl,
 } from "@/components/chat/conversation-filter-controls"
 import { useConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 import { getModelDisplayName, getProviderDisplayName } from "@/lib/ai/icons"
@@ -159,7 +177,6 @@ import {
   ArchiveIcon,
   ArrowDownIcon,
   ArrowUpIcon,
-  BotIcon,
   ChevronRightIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -261,6 +278,86 @@ function SectionChevron({ collapsed }: { collapsed: boolean }) {
 }
 
 /** Maps a date bucket to its `desktop.channelList` label key. */
+/**
+ * Rows past which a flat section switches to windowed rendering.
+ *
+ * High enough that an ordinary profile never pays for the machinery, low
+ * enough that the lists which genuinely explode — a search across every
+ * workspace, an alphabetical sort over years of conversations — do not paint
+ * thousands of rows to show twenty.
+ */
+const VIRTUAL_ROW_THRESHOLD = 200
+
+/** Row height used to place windowed rows before they have been measured. */
+const VIRTUAL_ROW_ESTIMATE = 44
+
+/**
+ * A windowed list of conversation rows.
+ *
+ * Only used for flat, un-draggable sections (see the call site): a sortable
+ * context whose items leave the DOM would break dragging, and a sticky group
+ * header cannot survive its section being windowed away. Rows measure
+ * themselves, so density and the optional preview line still decide their real
+ * height.
+ */
+function VirtualRows({
+  sessions,
+  renderRow,
+}: {
+  sessions: ChatSession[]
+  /**
+   * Renders one row, given the positioning the virtualizer needs on its `<li>`.
+   * `SessionRow` already accepts both (`nodeRef` / `nodeStyle`) because a drag
+   * positions the same element the same way.
+   */
+  renderRow: (
+    session: ChatSession,
+    positioning: { nodeRef: (el: HTMLElement | null) => void; nodeStyle: CSSProperties }
+  ) => ReactNode
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // TanStack Virtual returns non-memoizable functions; the React Compiler
+  // correctly skips it. Nothing to fix on our side.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: sessions.length,
+    // The section scrolls inside the list's own ScrollArea viewport, which is
+    // this element's nearest scrollable ancestor.
+    getScrollElement: () =>
+      scrollRef.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]") ?? null,
+    estimateSize: () => VIRTUAL_ROW_ESTIMATE,
+    overscan: 8,
+    getItemKey: (index) => sessions[index]!.id,
+  })
+  const items = virtualizer.getVirtualItems()
+  return (
+    <div ref={scrollRef} data-testid="channel-list-virtual-rows">
+      {/* The rows position themselves: wrapping each one would nest an `<li>`
+          inside an `<li>`, and the row already takes a ref and a style for
+          exactly this reason. */}
+      <ul className="relative flex flex-col" style={{ height: virtualizer.getTotalSize() }}>
+        {items.map((item) =>
+          renderRow(sessions[item.index]!, {
+            nodeRef: (el) => {
+              if (el) {
+                el.dataset.index = String(item.index)
+                virtualizer.measureElement(el)
+              }
+            },
+            nodeStyle: {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              transform: `translateY(${item.start}px)`,
+            },
+          })
+        )}
+      </ul>
+    </div>
+  )
+}
+
 const BUCKET_LABEL_KEY: Record<DateBucket, string> = {
   today: "bucketToday",
   yesterday: "bucketYesterday",
@@ -578,7 +675,13 @@ function ChannelListBody({
   const groupBy = resolveConversationGroupBy(sidebarSettings)
   const sortBy = resolveConversationSortBy(sidebarSettings)
   const showUnreadBadges = sidebarSettings?.showUnreadBadges ?? true
-  const searchScope: ConversationSearchScope = sidebarSettings?.searchScope ?? "title"
+  // What a query is allowed to reach: workspaces, archived rows, message
+  // content. One resolved object rather than three settings read from three
+  // unrelated places — see `lib/chat/conversation-search-scope.ts`.
+  const searchOptions = useMemo(
+    () => resolveConversationSearchOptions(sidebarSettings),
+    [sidebarSettings]
+  )
   const metadataFields = useMemo(
     () => resolveConversationSidebarMetadata(sidebarSettings),
     [sidebarSettings]
@@ -694,14 +797,15 @@ function ChannelListBody({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState("")
 
-  // Active ⇄ Archived view — seeded from and written back to the persisted UI
-  // store so the choice survives reloads. Local state keeps re-render cheap.
-  const persistedView = useUIStore((s) => s.channelListView)
+  // Active ⇄ Archived view — read straight from the persisted UI store, like
+  // `collapsedFolderIds` below. A local mirror seeded once at mount could not
+  // see another writer switch the view (the mobile list, or the reveal ladder
+  // that has to bring a freshly created conversation back into sight) and wrote
+  // its stale copy back over theirs.
+  const view = useUIStore((s) => s.channelListView)
   const setPersistedView = useUIStore((s) => s.setChannelListView)
-  const [view, setViewState] = useState<ChannelListView>(persistedView)
   const setView = useCallback(
     (next: ChannelListView) => {
-      setViewState(next)
       setPersistedView(next)
       void trackConversationViewChanged(next)
     },
@@ -736,20 +840,35 @@ function ChannelListBody({
   // display names come from here.
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
-  // The workspace grouping intentionally spans every project; every other
-  // grouping stays scoped to the active one.
-  const scopeProjectId = groupBy === "workspace" ? undefined : (activeProjectId ?? undefined)
+  // Which workspaces the *content* index is asked about — the same reach the
+  // session list is loaded with, so title hits and message hits never disagree
+  // about which conversations exist.
+  const scopeProjectId = needsCrossWorkspaceSessions(groupBy, searchOptions)
+    ? undefined
+    : (activeProjectId ?? undefined)
   const contentSearch = useChatHistorySearch(query, {
-    enabled: searchScope === "titleAndContent",
+    enabled: searchOptions.content,
     projectId: scopeProjectId,
-    includeArchived: view === "archived",
+    // The index is asked for both sides whenever the query may cross the
+    // archive split; the model still decides which of them survive.
+    includeArchived: searchOptions.includeArchived || view === "archived",
     collapseBySession: true,
     limit: 200,
   })
   const contentMatchIds = useMemo<ReadonlySet<string> | undefined>(() => {
-    if (searchScope !== "titleAndContent" || query.trim().length < 2) return undefined
+    if (!searchOptions.content || query.trim().length < CONTENT_SEARCH_MIN_QUERY) return undefined
     return new Set(contentSearch.results.map((result) => result.sessionId))
-  }, [searchScope, query, contentSearch.results])
+  }, [searchOptions.content, query, contentSearch.results])
+  // Message search needs two characters (`useChatHistorySearch`'s
+  // `minQueryLength`); titles match from one. Without saying so, a one-character
+  // query silently degrades to title-only and reads as a broken index.
+  const contentBelowMinQuery =
+    searchOptions.content &&
+    query.trim().length > 0 &&
+    query.trim().length < CONTENT_SEARCH_MIN_QUERY
+  // A content query resolves a beat after the title hits. Until it settles the
+  // result set is incomplete, so the list must not claim there is nothing.
+  const contentPending = searchOptions.content && contentSearch.loading && query.trim().length > 0
   const contentTruncated =
     contentSearch.moreOlderHistory || contentSearch.indexIncomplete || contentSearch.error !== null
   const workspaceGroups = useMemo(
@@ -798,7 +917,15 @@ function ChannelListBody({
 
   // Grouping/filtering/sorting/search now live in the shared headless model
   // (pinned → folders → the chosen axis, or a flat result list while searching).
-  const { sections, total, filteredCount, orderedIds, contentOnlyIds } = useConversationListModel({
+  const {
+    sections,
+    total,
+    filteredCount,
+    visibleCount,
+    orderedIds,
+    contentOnlyIds,
+    activeFilterCount,
+  } = useConversationListModel({
     sessions: filtered,
     folders: modelFolders,
     query,
@@ -813,7 +940,70 @@ function ChannelListBody({
     agents: agentGroups,
     activeWorkspaceId: activeProjectId,
     groupCollapseOverrides,
-    contentMatchIds: searchScope === "titleAndContent" ? contentMatchIds : undefined,
+    contentMatchIds: searchOptions.content ? contentMatchIds : undefined,
+    searchIncludesArchived: searchOptions.includeArchived,
+  })
+
+  // Remount token for the search field: it owns the immediate input value, so
+  // clearing `query` from out here (the reveal ladder below) has to reach it.
+  const [searchResetToken, setSearchResetToken] = useState(0)
+  // A conversation that was just created has to be visible in this list. The
+  // narrowing state is sticky and persisted — Archived view, a search still in
+  // the field, a quick filter left on since yesterday — so without this the new
+  // chat opens in the pane while the sidebar shows no trace of it. One rung is
+  // undone per pass, cheapest first, and only while the row is genuinely
+  // off screen.
+  const revealListed = useCallback(
+    (id: string) => filtered.some((session) => session.id === id),
+    [filtered]
+  )
+  const revealVisible = useCallback((id: string) => orderedIds.includes(id), [orderedIds])
+  const revealSteps = useCallback(
+    (id: string): ConversationRevealStep[] => {
+      // Last rung: the row is in a section the user folded away.
+      const holder = sections.find(
+        (section) =>
+          (section.kind === "folder" || section.kind === "group") &&
+          section.collapsed &&
+          section.sessions.some((session) => session.id === id)
+      )
+      return [
+        { active: view !== "active", undo: () => setView("active") },
+        {
+          active: query.length > 0,
+          undo: () => {
+            setQuery("")
+            setSearchResetToken((token) => token + 1)
+          },
+        },
+        { active: activeFilterCount > 0, undo: resetConversationFilters },
+        {
+          active: holder != null,
+          undo: () => {
+            if (holder?.kind === "folder") toggleFolderCollapsed(holder.folder.id)
+            else if (holder?.kind === "group")
+              setGroupCollapsed(conversationSectionKey(holder), false)
+          },
+        },
+      ]
+    },
+    [
+      sections,
+      view,
+      setView,
+      query,
+      setQuery,
+      activeFilterCount,
+      resetConversationFilters,
+      toggleFolderCollapsed,
+      setGroupCollapsed,
+    ]
+  )
+  useConversationReveal({
+    activeSessionId,
+    listed: revealListed,
+    visible: revealVisible,
+    steps: revealSteps,
   })
 
   // One search event per settled query (debounced upstream, so this is per
@@ -826,17 +1016,20 @@ function ChannelListBody({
       reportedSearchRef.current = null
       return
     }
-    if (searchScope === "titleAndContent" && contentSearch.loading) return
-    const stamp = `${searchScope}:${trimmed}`
+    if (contentPending) return
+    // Names the reach, never the text: which axes were widened is the useful
+    // signal, and it is not derived from anything the user typed.
+    const scope = describeConversationSearchScope(searchOptions)
+    const stamp = `${scope}:${trimmed}`
     if (reportedSearchRef.current === stamp) return
     reportedSearchRef.current = stamp
     void trackConversationSearched({
-      scope: searchScope,
+      scope,
       query: trimmed,
       resultCount: filteredCount,
       truncated: contentTruncated,
     })
-  }, [query, searchScope, contentSearch.loading, filteredCount, contentTruncated])
+  }, [query, searchOptions, contentPending, filteredCount, contentTruncated])
 
   // Per-row accent: team sessions inherit the team color, DM sessions inherit
   // their character color. Replaces the old per-character group accent.
@@ -886,7 +1079,7 @@ function ChannelListBody({
               : undefined
             : character?.name,
         model: getModelDisplayName(
-          session.model ?? character?.model ?? defaultModel ?? "claude-sonnet-4-5"
+          session.model ?? character?.model ?? defaultModel ?? ANTHROPIC_DEFAULT_MODEL
         ),
         provider: getProviderDisplayName(
           session.providerOverride ?? character?.providerId ?? defaultProvider ?? "anthropic"
@@ -1117,11 +1310,31 @@ function ChannelListBody({
   // "nothing happened". Rendering the dropped order in the same tick as the
   // drop lets the overlay's drop animation carry the row into its final slot.
   const [pendingReorder, setPendingReorder] = useState<PendingReorder | null>(null)
+  // The row being dragged — drives the DragOverlay clone that follows the
+  // pointer while the source row stays put as a placeholder.
+  const [activeDragId, setActiveDragId] = useState<string | null>(null)
   const projectedReorder = useMemo(
     () => projectPendingReorder(sections, pendingReorder),
     [sections, pendingReorder]
   )
-  const displaySections = projectedReorder.sections
+  // Hold the order still while the reader is in the list. The two signals are
+  // read from the DOM rather than derived: "the pointer is over the list" and
+  // "the list is scrolled" are facts about the surface, not about the model.
+  const [pointerInList, setPointerInList] = useState(false)
+  const [listScrolled, setListScrolled] = useState(false)
+  const handleListScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
+    setListScrolled(event.currentTarget.scrollTop > 0)
+  }, [])
+  const orderFreeze = useConversationOrderFreeze({
+    sections: projectedReorder.sections,
+    hovering: pointerInList,
+    scrolled: listScrolled,
+    // Search results are ranked by relevance and a drag already owns the order
+    // it is previewing; a freeze on top of either would be a third story about
+    // where a row is.
+    disabled: query.trim().length > 0 || activeDragId !== null,
+  })
+  const displaySections = orderFreeze.sections
   // Drop the projection the moment it stops being needed: `settled` means the
   // store now carries the dropped order; `stale` means the store moved
   // elsewhere and the snapshot must not override it. Either way it must not
@@ -1148,9 +1361,6 @@ function ChannelListBody({
     return map
   }, [displaySections])
   const [dropPreview, setDropPreview] = useState<ConversationDropPreview | null>(null)
-  // The row being dragged — drives the DragOverlay clone that follows the
-  // pointer while the source row stays put as a placeholder.
-  const [activeDragId, setActiveDragId] = useState<string | null>(null)
   // "This is the row you just moved": the same landing mark conversation
   // jumps use, so a reorder between look-alike rows still answers which one
   // moved once the drop animation has finished.
@@ -1260,7 +1470,7 @@ function ChannelListBody({
     groupBy,
     sortBy,
     showUnreadBadges,
-    searchScope,
+    searchOptions,
     metadataFields,
     titleMotion,
     onUpdateDisplay: saveSidebarSettings,
@@ -1354,12 +1564,21 @@ function ChannelListBody({
           )}
         >
           <ChannelListSearch
+            key={searchResetToken}
             inputRef={searchInputRef}
             onQueryChange={setQuery}
             onExpandedChange={setSearchExpanded}
           />
           {searchExpanded ? null : (
             <>
+              {/* Beside the field it governs: how far a query looks is not a
+                  display preference and does not belong in a settings page. */}
+              <ConversationSearchScopeControl
+                model={filterController}
+                side="right"
+                triggerClassName="size-9 rounded-lg"
+                testId="channel-list-search-scope"
+              />
               <ConversationFilterMenu
                 model={filterController}
                 side="right"
@@ -1396,7 +1615,10 @@ function ChannelListBody({
         ) : null}
         <ConversationFilterChips
           model={filterController}
-          shown={filteredCount}
+          // What is on screen, so folding a group moves the number. The empty
+          // state below still branches on `filteredCount` — collapsing
+          // everything is not "your filters matched nothing".
+          shown={visibleCount}
           total={total}
           className="px-3 pb-2"
           testId="channel-list-filter-chips"
@@ -1415,13 +1637,37 @@ function ChannelListBody({
           onMoveToFolder={rowActions.onBulkAssignToFolder}
           onClear={clear}
         />
-        {contentTruncated && query.trim() ? (
+        {contentBelowMinQuery ? (
+          <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
+            {t("searchContentMinQuery", { count: CONTENT_SEARCH_MIN_QUERY })}
+          </p>
+        ) : contentTruncated && query.trim() ? (
           <p className="px-3 pb-1 text-[11px] text-muted-foreground" role="status">
             {t("searchTruncated")}
           </p>
         ) : null}
         <Separator className="opacity-60" />
-        <ScrollArea className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block">
+        {orderFreeze.pending > 0 ? (
+          // The freeze is honest about itself: a held list that never said so
+          // would just look stale. One click applies everything at once.
+          <button
+            type="button"
+            onClick={orderFreeze.release}
+            className="mx-3 mb-1 inline-flex h-6 items-center justify-center gap-1 self-start rounded-full border border-border/60 bg-muted/60 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            data-testid="channel-list-order-pending"
+          >
+            <ArrowUpIcon className="size-3 shrink-0" aria-hidden />
+            {t("orderPending", { count: orderFreeze.pending })}
+          </button>
+        ) : null}
+        <ScrollArea
+          className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
+          onMouseEnter={() => setPointerInList(true)}
+          onMouseLeave={() => setPointerInList(false)}
+          // The viewport is what scrolls; `onScroll` does not bubble and the
+          // root is `overflow-hidden`, so a handler on the root never fires.
+          viewportProps={{ onScroll: handleListScroll }}
+        >
           {loading && total === 0 ? (
             <SessionListLoading />
           ) : total === 0 ? (
@@ -1436,6 +1682,18 @@ function ChannelListBody({
                     : handleNewDirect
               }
             />
+          ) : filteredCount === 0 && contentPending ? (
+            // Message hits land a beat after the title hits, so until the index
+            // answers the result set is incomplete. Claiming "no results for X"
+            // here and then filling the list a moment later is the worst of both
+            // — it reads as a miss and then contradicts itself.
+            <p
+              className="px-4 py-6 text-center text-xs text-muted-foreground"
+              role="status"
+              data-testid="channel-list-search-pending"
+            >
+              {t("searchingMessages")}
+            </p>
           ) : filteredCount === 0 ? (
             // Three different reasons a non-empty view can show nothing, and
             // they need different exits: refine the query, drop the filters, or
@@ -1857,7 +2115,7 @@ interface HeaderActionsProps {
   groupBy: ConversationGroupBy
   sortBy: ConversationSortBy
   showUnreadBadges: boolean
-  searchScope: ConversationSearchScope
+  searchOptions: ResolvedConversationSearchOptions
   metadataFields: ConversationSidebarMetadata[]
   titleMotion: ConversationSidebarTitleMotion
   onUpdateDisplay: (patch: Partial<ConversationSidebarSettings>) => void
@@ -1880,7 +2138,7 @@ function HeaderActions({
   groupBy,
   sortBy,
   showUnreadBadges,
-  searchScope,
+  searchOptions,
   metadataFields,
   titleMotion,
   onUpdateDisplay,
@@ -2041,9 +2299,9 @@ function HeaderActions({
         </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem
-          checked={searchScope === "titleAndContent"}
+          checked={searchOptions.content}
           onCheckedChange={(checked) =>
-            onUpdateDisplay({ searchScope: checked ? "titleAndContent" : "title" })
+            onUpdateDisplay({ search: { ...searchOptions, content: Boolean(checked) } })
           }
         >
           {t("searchMessageContent")}
@@ -2216,6 +2474,15 @@ function ConversationSections({
       <SessionRow key={s.id} {...rowProps(s)} />
     )
   const renderStaticRow = (s: ChatSession) => <SessionRow key={s.id} {...rowProps(s)} />
+  /**
+   * A row the virtualizer places itself. Never a `SortableSessionRow`: dragging
+   * needs every item of its sortable context in the DOM, which is precisely
+   * what windowing takes away — hence the `!sortable` guard at the call site.
+   */
+  const renderPositionedRow = (
+    s: ChatSession,
+    positioning: { nodeRef: (el: HTMLElement | null) => void; nodeStyle: CSSProperties }
+  ) => <SessionRow key={s.id} {...rowProps(s)} {...positioning} />
 
   // The pointer-following clone. The source row stays in the list as a
   // dimmed placeholder (see `SortableSessionRow`) and shifts into the target
@@ -2264,7 +2531,7 @@ function ConversationSections({
               axis={section.axis}
               name={
                 section.group.id === UNGROUPED_ID
-                  ? t(section.axis === "workspace" ? "ungroupedWorkspace" : "ungroupedAgent")
+                  ? t(CONVERSATION_UNGROUPED_LABEL_KEY[section.axis])
                   : section.group.name
               }
               collapsed={section.collapsed}
@@ -2285,9 +2552,22 @@ function ConversationSections({
                 : null
         const key = section.kind === "date" ? `date:${section.bucket}` : section.kind
         const sortable = section.kind !== "search" && reorderable
-        const rows = (
+        // Virtualize only a long, flat, un-draggable list. That is exactly
+        // where the rows pile up — a search across every workspace, or a
+        // title / unread sort, both of which the model already renders as one
+        // section — and it is the one place where windowing costs nothing:
+        // no sticky group header to keep pinned, and no dnd-kit sortable
+        // context whose items would vanish from the DOM mid-drag.
+        const virtualize =
+          !sortable &&
+          (section.kind === "search" || section.kind === "recent") &&
+          section.sessions.length > VIRTUAL_ROW_THRESHOLD
+        const renderRow = section.kind === "search" ? renderStaticRow : renderSortableRow
+        const rows = virtualize ? (
+          <VirtualRows sessions={section.sessions} renderRow={renderPositionedRow} />
+        ) : (
           <ul className="flex flex-col gap-0.5">
-            {section.sessions.map(section.kind === "search" ? renderStaticRow : renderSortableRow)}
+            {section.sessions.map((session) => renderRow(session))}
           </ul>
         )
         return (
@@ -2397,7 +2677,13 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
     isDragging,
   } = useSortable({
     id: props.session.id,
-    data: { type: "session", folderId: props.session.folderId ?? null },
+    // `projectId` rides along so a drop onto a folder header can reject a
+    // cross-workspace assignment (`resolveConversationDrop`).
+    data: {
+      type: "session",
+      folderId: props.session.folderId ?? null,
+      projectId: props.session.projectId ?? null,
+    },
   })
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -2406,18 +2692,18 @@ function SortableSessionRow(props: ComponentProps<typeof SessionRow>) {
   return (
     <SessionRow
       {...props}
-      dragRef={setNodeRef}
+      nodeRef={setNodeRef}
       dragListeners={listeners as unknown as Record<string, unknown>}
       dragAttributes={attributes as unknown as Record<string, unknown>}
       dragActivatorRef={setActivatorNodeRef}
-      dragStyle={style}
+      nodeStyle={style}
       dragging={isDragging}
     />
   )
 }
 
 /**
- * A workspace / agent group. Deliberately not a drop target: dragging a
+ * A workspace / agent / team group. Deliberately not a drop target: dragging a
  * conversation into another workspace would have to re-scope every row it owns
  * (artifacts, terminals, memories), which is a move operation, not a reorder.
  */
@@ -2431,14 +2717,14 @@ function GroupSection({
   renderRow,
 }: {
   sectionKey: string
-  axis: "workspace" | "agent"
+  axis: ConversationGroupAxis
   name: string
   collapsed: boolean
   sessions: ChatSession[]
   onToggle: () => void
   renderRow: (s: ChatSession) => ReactNode
 }) {
-  const Icon = axis === "workspace" ? FolderIcon : BotIcon
+  const Icon = CONVERSATION_GROUP_AXIS_ICON[axis]
   return (
     <Collapsible asChild open={!collapsed} onOpenChange={onToggle}>
       <section
@@ -2513,7 +2799,7 @@ function FolderSection({
   const t = useTranslations("desktop.channelList")
   const { setNodeRef, isOver } = useDroppable({
     id: `folder:${folder.id}`,
-    data: { type: "folder", folderId: folder.id },
+    data: { type: "folder", folderId: folder.id, projectId: folder.projectId ?? null },
   })
   return (
     <Collapsible asChild open={!collapsed} onOpenChange={onToggle}>
