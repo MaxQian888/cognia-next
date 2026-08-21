@@ -29,7 +29,7 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
-import { useUIStore } from "@/stores/ui-store"
+import { useUIStore } from "@/stores/ui/ui-store"
 import {
   SQUAD_TAB_PARAM,
   parseSquadPanelId,
@@ -87,7 +87,7 @@ function SquadsSectionInner() {
     const squad = createTeam({
       name: t("nav.newSquadName"),
       task: "",
-      teamLeadName: t("nav.defaultLeadName"),
+      leadName: t("nav.defaultLeadName"),
     })
     navigate(squadPanelId(squad.id))
   }, [createTeam, navigate, t])

@@ -99,6 +99,22 @@ describe("SquadsSection", () => {
     expect(Object.keys(useAgentTeamStore.getState().teams)).toHaveLength(3)
   })
 
+  it("names the new Squad and its lead from translations, not from defaults", async () => {
+    // `CreateTeamInput` takes `leadName`; an excess property is silently
+    // ignored, so a typo here shows up as an English "Team Lead" on a
+    // Chinese install rather than as an error.
+    render(<SquadsSection />)
+    await userEvent.click(screen.getByTestId("squads-nav-create"))
+    const created = Object.values(useAgentTeamStore.getState().teams).find(
+      (t) => !["a", "b"].includes(t.id)
+    )!
+    expect(created.name).toBe("New Squad")
+    const lead = Object.values(useAgentTeamStore.getState().teammates).find(
+      (m) => m.teamId === created.id
+    )
+    expect(lead?.name).toBe("Squad Lead")
+  })
+
   it("moves the selection off a Squad it just deleted", async () => {
     searchString = "section=squads&squadTab=squad:a"
     render(<SquadsSection />)
