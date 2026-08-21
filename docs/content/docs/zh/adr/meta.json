@@ -135,6 +135,7 @@
     "0135-diagnostic-service-completion",
     "0136-cross-device-placement",
     "0137-delegation-runtime",
-    "0138-reading-area-layout-stability"
+    "0138-reading-area-layout-stability",
+    "0139-visual-output-routing"
   ]
 }
