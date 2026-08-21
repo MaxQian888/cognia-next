@@ -683,7 +683,7 @@ describe("ConversationOverrideForm", () => {
       type: "lark",
       displayName: "Bot",
       enabled: true,
-      transportMode: "long-connection",
+      transportMode: "longpoll",
       settings: {},
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },

@@ -25,10 +25,12 @@ function fromRow(row: AdapterInstanceRow | undefined): ConversationBehaviorValue
 
 export function AdapterBehaviorDefaults({ adapterId }: { adapterId: string }) {
   const row = useLiveQuery(
-    () =>
-      typeof window === "undefined"
-        ? Promise.resolve(undefined)
-        : getDb().adapterInstances.get(adapterId),
+    // `async` so both branches share one `Promise<AdapterInstanceRow | undefined>`.
+    // The ternary's mixed `Promise.resolve(undefined)` / `PromiseExtended<...>`
+    // union defeated `useLiveQuery`'s unwrapping, so `row` came back as the
+    // promise itself.
+    async () =>
+      typeof window === "undefined" ? undefined : getDb().adapterInstances.get(adapterId),
     [adapterId]
   )
   return (

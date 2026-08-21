@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/connector-conversation-state"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import { deliveryTargetFromEvent } from "@/types/connectors/event"
+import { deliveryTargetFromEvent, isReplyToSelf } from "@/types/connectors/event"
 import type { InboundActivationPolicy } from "@/types/connectors/policy"
 
 export const DEFAULT_TOPIC_ACTIVATION_TTL_MS = 24 * 60 * 60 * 1_000
@@ -71,6 +71,21 @@ export function resolveInboundActivationPolicy(
 }
 
 /**
+ * "The user addressed this bot in a group": an @-mention, or a reply to a
+ * message this bot authored. Replying to the bot is as direct an address as
+ * mentioning it — `defaultGroupChatPolicy()` has always gated on both — so the
+ * mention gate must accept either, otherwise the `reply-to-bot` trigger rule
+ * can never fire in a group and ships dormant.
+ *
+ * `delivery_unverified` deliberately keeps testing `selfMentioned` alone: that
+ * gate is about whether the PLATFORM will push unmentioned group events to us,
+ * which a reply says nothing about.
+ */
+function addressesUs(event: NormalizedInboundEvent): boolean {
+  return event.mentions.selfMentioned || isReplyToSelf(event)
+}
+
+/**
  * Apply conversation-aware admission after transport/chat-list validation.
  * Mention activation is intentionally limited to explicit thread scopes;
  * parent groups keep requiring a mention.
@@ -104,7 +119,7 @@ export async function admitConversationEvent(
     return { allowed: false, reason: "at_direct_only", activated: false }
   }
   if (policy === "mention_each" || event.channel.kind !== "thread") {
-    return event.mentions.selfMentioned
+    return addressesUs(event)
       ? { allowed: true, activated: false }
       : { allowed: false, reason: "at_mention_required", activated: false }
   }
@@ -121,7 +136,7 @@ export async function admitConversationEvent(
   const ttl = resolveActivationTtlMs(adapter, override, options.activationTtlMs)
   const deliveryTarget = deliveryTargetFromEvent(event)
 
-  if (event.mentions.selfMentioned) {
+  if (addressesUs(event)) {
     if (deliveryTarget) {
       await activateConnectorConversation(deliveryTarget, {
         activatedBy: event.sender.remoteUserId,

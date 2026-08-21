@@ -112,6 +112,9 @@ export function makeConversationLabel(
   const now = Date.now()
   return {
     id: `label-${labelSeq}`,
+    // `scope` is required — a label row belongs to either conversations or the
+    // issue tracker, and the fixture predates that split.
+    scope: "conversation",
     name: "follow-up",
     color: "#f59e0b",
     sortOrder: labelSeq,

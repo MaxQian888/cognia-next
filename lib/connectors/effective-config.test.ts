@@ -1,27 +1,28 @@
 import { resolveImEffectiveConfig } from "./effective-config"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 
-const adapter = {
+const adapter: AdapterInstanceRow = {
   id: "a1",
   type: "telegram",
   displayName: "Bot",
   enabled: true,
-  transportMode: "long-poll",
+  transportMode: "longpoll",
   settings: {},
   credentialsRef: { keyringService: "x", accounts: [] },
   trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
   defaultMode: "auto",
   createdAt: 1,
   updatedAt: 1,
-} as const
+}
 
 describe("resolveImEffectiveConfig", () => {
   it("reports requested, effective, and source for shared behavior fields", () => {
-    const configuredAdapter = {
+    const configuredAdapter: AdapterInstanceRow = {
       ...adapter,
       inboundActivationPolicy: "mention_each",
       activeRunDispatchMode: "queue",
       activationTtlMs: 3_600_000,
-    } as const
+    }
     const result = resolveImEffectiveConfig({
       adapter: configuredAdapter,
       override: {
@@ -66,7 +67,14 @@ describe("resolveImEffectiveConfig", () => {
 
     const direct = resolveImEffectiveConfig({
       adapter: { ...adapter, defaultTeamId: "team_a" },
-      override: { conversationKey: "c", teamDisabled: true },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        teamDisabled: true,
+      },
       rule: null,
       system: { mode: "auto" },
     })
@@ -80,6 +88,10 @@ describe("resolveImEffectiveConfig", () => {
     const assigned = resolveImEffectiveConfig({
       adapter: { ...adapter, defaultTeamId: "team_a" },
       override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
         conversationKey: "c",
         teamId: "team_asg",
         characterId: "char_asg",
@@ -105,7 +117,15 @@ describe("resolveImEffectiveConfig", () => {
     // still assignment provenance.
     const inheritPrev = resolveImEffectiveConfig({
       adapter,
-      override: { conversationKey: "c", mode: "manual", assignmentPreviousMode: null },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        mode: "manual",
+        assignmentPreviousMode: null,
+      },
       rule: null,
       system: { mode: "auto" },
     })
@@ -114,7 +134,14 @@ describe("resolveImEffectiveConfig", () => {
     // Explicit mode edit (marker cleared) → conversation-override again.
     const explicit = resolveImEffectiveConfig({
       adapter,
-      override: { conversationKey: "c", mode: "manual" },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        mode: "manual",
+      },
       rule: null,
       system: { mode: "auto" },
     })
@@ -124,7 +151,14 @@ describe("resolveImEffectiveConfig", () => {
   it("keeps Character independent and marks invalid explicit references blocked", () => {
     const result = resolveImEffectiveConfig({
       adapter: { ...adapter, defaultTeamId: "team_a" },
-      override: { conversationKey: "c", characterId: "char_missing" },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        characterId: "char_missing",
+      },
       rule: null,
       system: { mode: "auto" },
       references: { characterExists: false },
@@ -139,7 +173,15 @@ describe("resolveImEffectiveConfig", () => {
   it("makes Provider/Model target-managed outside Direct Agent", () => {
     const result = resolveImEffectiveConfig({
       adapter: { ...adapter, defaultWorkflowId: "wf" },
-      override: { conversationKey: "c", providerOverride: "openai", modelOverride: "gpt" },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        providerOverride: "openai",
+        modelOverride: "gpt",
+      },
       rule: null,
       system: { mode: "auto" },
     })
@@ -158,7 +200,14 @@ describe("resolveImEffectiveConfig", () => {
         requireHitlForWrites: false,
         hostCapabilityCeiling: ["computer_use", "ocr"],
       },
-      override: { conversationKey: "c", allowComputerUse: true },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        allowComputerUse: true,
+      },
       rule: null,
       system: { mode: "auto" },
       characterComputerUseEnabled: true,
@@ -172,6 +221,164 @@ describe("resolveImEffectiveConfig", () => {
     expect(result.permissions.requireHitlForWrites).toMatchObject({
       effective: false,
       source: "adapter-default",
+    })
+  })
+})
+
+const override = (patch: Partial<ConversationOverrideRow>): ConversationOverrideRow => ({
+  id: "o1",
+  conversationKey: "telegram:a1:c1",
+  createdAt: 1,
+  updatedAt: 1,
+  ...patch,
+})
+
+describe("composed-mode axes", () => {
+  it("derives autonomy and engagement from the legacy pair when a row has neither", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.autonomy.effective).toBe("act")
+    expect(result.engagement.effective).toBe("inline")
+  })
+
+  it("keeps a team-bound conversation detached even in draft mode", () => {
+    // The `draft-prepare` bug in axis terms: draft is an autonomy level, not a
+    // route, so the team still runs and its product is what waits for a human.
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultTeamId: "team-1" },
+      override: override({ mode: "draft" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.target.effective).toEqual({ kind: "team", id: "team-1" })
+    expect(result.autonomy.effective).toBe("suggest")
+    expect(result.engagement.effective).toBe("background")
+  })
+
+  it("prefers an explicit axis write over the derived value", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: override({ mode: "auto", autonomy: "confirm", engagement: "background" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.autonomy).toMatchObject({
+      requested: "confirm",
+      effective: "confirm",
+      source: "conversation-override",
+    })
+    expect(result.engagement.effective).toBe("background")
+  })
+
+  it("resolves a human assignment to human engagement", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultTeamId: "team-1" },
+      override: override({ mode: "manual", assignmentPreviousMode: "auto" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.engagement.effective).toBe("human")
+    expect(result.autonomy.effective).toBe("observe")
+    expect(result.mode.source).toBe("assignment")
+  })
+
+  it("labels an SLA-forced mode as escalation instead of an operator edit", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: override({ mode: "draft", modeForcedBy: "escalation" }),
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.mode.source).toBe("escalation")
+    expect(result.autonomy.source).toBe("escalation")
+  })
+
+  it("projects approvalMode onto authority", () => {
+    expect(
+      resolveImEffectiveConfig({
+        adapter,
+        override: override({ approvalMode: "yolo" }),
+        rule: null,
+        system: { mode: "auto" },
+      }).authority.effective
+    ).toBe("bypassPermissions")
+
+    expect(
+      resolveImEffectiveConfig({
+        adapter,
+        override: null,
+        rule: null,
+        system: { mode: "auto" },
+      }).authority.effective
+    ).toBeUndefined()
+  })
+
+  it("takes bot-level axis defaults when the conversation says nothing", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultAutonomy: "suggest", defaultAuthority: "plan" },
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.autonomy).toMatchObject({ effective: "suggest", source: "adapter-default" })
+    expect(result.authority).toMatchObject({ effective: "plan", source: "adapter-default" })
+  })
+})
+
+describe("session layer", () => {
+  it("reports the session model that the send path will actually use", () => {
+    // The `/status` divergence: `resolveSendOptions` reads `session.model`
+    // between the conversation override and the bot default.
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultModel: "bot-default" },
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+      session: { model: "session-model" },
+    })
+    expect(result.model).toMatchObject({ effective: "session-model", source: "session" })
+  })
+
+  it("still lets a conversation override beat the session", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultModel: "bot-default" },
+      override: override({ modelOverride: "channel-model" }),
+      rule: null,
+      system: { mode: "auto" },
+      session: { model: "session-model" },
+    })
+    expect(result.model).toMatchObject({
+      effective: "channel-model",
+      source: "conversation-override",
+    })
+  })
+
+  it("keeps today's answer when no session is passed", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultModel: "bot-default", defaultProvider: "anthropic" },
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.model).toMatchObject({ effective: "bot-default", source: "adapter-default" })
+    expect(result.provider).toMatchObject({ effective: "anthropic", source: "adapter-default" })
+  })
+
+  it("still blanks provider and model for a delegated conversation", () => {
+    const result = resolveImEffectiveConfig({
+      adapter: { ...adapter, defaultTeamId: "team-1", defaultModel: "bot-default" },
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+      session: { model: "session-model" },
+    })
+    expect(result.model).toMatchObject({
+      effective: undefined,
+      blockedReason: "managed_by_target",
     })
   })
 })

@@ -16,6 +16,7 @@
  */
 
 import { useMemo, useState } from "react"
+import type { Character } from "@cognia/agent-config-types"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { InfoIcon, ShieldAlertIcon, XIcon } from "lucide-react"
@@ -121,6 +122,9 @@ export interface ConversationOverrideFormProps {
   effectiveTargetKind?: ImExecutionTarget["kind"]
 }
 
+/** Typed empty default — a bare `[]` infers `never[]` and poisons every read. */
+const EMPTY_CHARACTERS: Character[] = []
+
 export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const {
     adapterId,
@@ -133,9 +137,16 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
     effectiveTargetKind,
   } = props
   const t = useTranslations("inbox.conversationOverride")
+  // The SSR branch and the default both need the row type spelled out; a bare
+  // `[]` infers `never[]`, collapses the union, and every field read off a
+  // character below then fails with "does not exist on type 'never'".
   const characters = useLiveQuery(
-    () => (typeof window === "undefined" ? Promise.resolve([]) : getDb().characters.toArray()),
-    []
+    () =>
+      typeof window === "undefined"
+        ? Promise.resolve<Character[]>([])
+        : getDb().characters.toArray(),
+    [],
+    EMPTY_CHARACTERS
   )
   const executableWorkflows = useLiveQuery(async () => {
     if (typeof window === "undefined") return []

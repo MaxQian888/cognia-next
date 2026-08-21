@@ -1,19 +1,20 @@
 /**
  * Slack OAuth handler — completes the Slack OAuth code exchange path.
  *
- * The deep-link router (cognia://connector/oauth/slack?code=...&state=...)
- * invokes `handleSlackOAuth(code, {state})` after validating state. This
- * module exchanges the code for a bot token via Slack's `oauth.v2.access`
- * endpoint and persists it so the adapter's send loop can authenticate —
- * mirroring the Lark OAuth handler's shape.
+ * Reached on both hosts: the desktop deep-link router
+ * (`cognia://connector/oauth/slack?code=…&state=…`) and the headless brain's
+ * `connectors://connector-oauth/callback` subscription both land here. The
+ * `state` was minted and persisted by `oauth-begin.ts` in THIS process, on
+ * either host.
  *
  *   1. Parse the adapterId out of `slack:<adapterId>:<nonce>` state.
- *   2. Resolve the AdapterInstanceRow + read clientId/clientSecret/redirectUri
- *      from the keyring.
- *   3. POST oauth.v2.access (form-encoded) for the bot token (+ optional user
+ *   2. Validate that state against the durable pending record and spend it.
+ *   3. Resolve the AdapterInstanceRow + read clientId/clientSecret from the
+ *      keyring; the redirect_uri is replayed from the pending record.
+ *   4. POST oauth.v2.access (form-encoded) for the bot token (+ optional user
  *      token).
- *   4. Store `botToken` (and `userToken` when present) in the keyring.
- *   5. Stamp connected-team metadata onto AdapterInstanceRow.settings.
+ *   5. Store `botToken` (and `userToken` when present) in the keyring.
+ *   6. Stamp connected-team metadata onto AdapterInstanceRow.settings.
  */
 
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
@@ -23,6 +24,7 @@ import {
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import { recordGrantedScopes, type ConnectedScopes } from "@/lib/connectors/oauth-scope-audit"
+import { clearSlackOAuthPending, getSlackOAuthPending } from "./oauth-pending"
 
 export function buildSlackOAuthState(adapterId: string, nonce: string): string {
   return `slack:${adapterId}:${nonce}`
@@ -72,6 +74,22 @@ export async function handleSlackOAuth(
   }
   const { adapterId } = parsed
 
+  // ── Authoritative CSRF check ───────────────────────────────────────────
+  // The renderer's `sessionStorage` copy is a convenience pre-check that only
+  // exists on the desktop; a headless brain has no Web Storage and the browser
+  // that started the flow is a different process. The durable pending record
+  // is the check that holds on both hosts and across a restart.
+  const pending = await getSlackOAuthPending(adapterId)
+  if (!pending) {
+    throw new Error(`Slack OAuth: no pending authorization for ${adapterId} — retry Connect`)
+  }
+  if (pending.state !== deps.state) {
+    throw new Error("Slack OAuth: state does not match the pending authorization")
+  }
+  // Clear-on-use: spent before the exchange so a replayed redirect cannot ride
+  // the same record, whether the exchange below succeeds or throws.
+  await clearSlackOAuthPending(adapterId)
+
   const adapter = await getAdapterInstance(adapterId)
   if (!adapter) throw new Error(`Slack OAuth: adapter ${adapterId} not found`)
   if (adapter.type !== "slack") {
@@ -87,7 +105,11 @@ export async function handleSlackOAuth(
       `Slack OAuth: clientId/clientSecret not found in keyring (adapterId=${adapterId})`
     )
   }
-  const redirectUri = String(adapter.settings.redirectUri ?? "").trim()
+  // Slack requires the exchange to replay the exact `redirect_uri` sent to
+  // authorize. It comes from the pending record rather than settings so the
+  // two can never disagree — a stale settings value would fail the exchange
+  // with `bad_redirect_uri` long after the mistake was made.
+  const redirectUri = pending.redirectUri
 
   const form = new URLSearchParams()
   form.set("client_id", clientId)

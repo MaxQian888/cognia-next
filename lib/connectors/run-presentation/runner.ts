@@ -14,6 +14,7 @@ import type {
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { appendAudit } from "@/lib/connectors/audit"
 import { buildA2UISegment } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
+import { buildFollowUpItems, FOLLOW_UP_TTL_MS } from "./follow-up-items"
 import { countPendingConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import {
@@ -402,6 +403,22 @@ async function deliverFallback(
   }
   const editTargetMessageId = deliveryMode === "card-edit" ? binding.platformMessageId : undefined
   const surface = buildRunActivitySurface(snapshot, resolveActivityI18n(snapshot.locale))
+
+  // Register the run-control verbs on the generic path too.
+  //
+  // Only the Feishu driver ever wrote a `followUpControl` registration, so run
+  // control existed on exactly one platform of twelve — even though the matcher
+  // that consumes it was already platform-neutral. Registering here gives every
+  // card-edit and append platform the same verbs; where the platform has no
+  // native follow-up bubbles the labels are printed in the card body and typing
+  // one back matches this registration.
+  //
+  // Direct chats only, matching the consumer: in a group a bare "stop" is a
+  // plausible thing to say for reasons unrelated to a run, and the match is by
+  // exact label. Groups keep the card buttons, which carry an explicit action id.
+  const followUpEligible =
+    binding.deliveryTarget?.address.scopeKind === "private" && snapshot.allowedActions.length > 0
+  const followUpItems = followUpEligible ? buildFollowUpItems(snapshot) : []
   const job = await enqueueOutbound({
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
@@ -433,13 +450,29 @@ async function deliverFallback(
     )
   }
   const platformMessageId = terminal.platformMessageId ?? binding.platformMessageId
+  const registeredAt = Date.now()
   return {
     ref: {
       ...(platformMessageId ? { platformMessageId } : {}),
       opaqueState: {
         ...binding.presentationState,
-        ...(deliveryMode === "append" ? { lastAppendAt: Date.now() } : {}),
+        ...(deliveryMode === "append" ? { lastAppendAt: registeredAt } : {}),
         lastProjectedStatus: snapshot.status,
+        // Re-registered on every delivery so the 600s window tracks the message
+        // the user is actually looking at, and so the verbs match the run's
+        // CURRENT allowedActions rather than the ones it had when it started.
+        ...(followUpItems.length > 0 && platformMessageId
+          ? {
+              followUpControl: {
+                platformMessageId,
+                runId: snapshot.runId,
+                revision: snapshot.revision,
+                createdAt: registeredAt,
+                expiresAt: registeredAt + FOLLOW_UP_TTL_MS,
+                items: followUpItems,
+              },
+            }
+          : {}),
       },
     },
     deliveryMode,

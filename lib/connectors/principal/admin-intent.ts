@@ -19,8 +19,9 @@
 import type { FeishuPrincipalStatus } from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { beginLarkOAuth } from "@/lib/connectors/adapters/lark/oauth-begin"
+import { beginSlackOAuth } from "@/lib/connectors/adapters/slack/oauth-begin"
 import {
-  LARK_OAUTH_RELAY_PATH,
+  connectorOAuthRelayPath,
   resolveConnectorsIngressBase,
 } from "@/lib/connectors/server-transport"
 import { isTauri } from "@/lib/tauri"
@@ -53,6 +54,7 @@ export type PrincipalAdminOutcome =
 export interface PrincipalAdminIntentDependencies {
   getAdapter: typeof getAdapterInstance
   beginOAuth: typeof beginLarkOAuth
+  beginSlackOAuth: typeof beginSlackOAuth
   /** Public origin of this deployment — `COGNIA_LARK_PUBLIC_BASE` by default. */
   publicBase: () => string | undefined
   isDesktop: () => boolean
@@ -86,6 +88,7 @@ export async function runPrincipalAdminIntent(
   const deps: PrincipalAdminIntentDependencies = {
     getAdapter: getAdapterInstance,
     beginOAuth: beginLarkOAuth,
+    beginSlackOAuth,
     publicBase: () => process.env.COGNIA_LARK_PUBLIC_BASE,
     isDesktop: isTauri,
     ...overrides,
@@ -198,6 +201,14 @@ export async function runPrincipalAdminIntent(
       }
 
       case "oauth-begin": {
+        // The op is platform-generic: the wire frame only carries `adapterId`,
+        // so the platform comes from the adapter's own row rather than from an
+        // operator-typed flag that could disagree with it.
+        const row = await deps.getAdapter(adapterId)
+        if (!row) return { ok: false, error: "adapter_not_found" }
+        const begin =
+          row.type === "lark" ? deps.beginOAuth : row.type === "slack" ? deps.beginSlackOAuth : null
+        if (!begin) return { ok: false, error: "oauth_unsupported_for_kind" }
         // A self-hosted install serves the relay on its own origin under the
         // `/connectors` nest, so the redirect is derivable and an operator
         // should not have to retype it; an explicit value still wins, which is
@@ -209,16 +220,18 @@ export async function runPrincipalAdminIntent(
               isDesktop: deps.isDesktop(),
               publicBase: deps.publicBase(),
             })
-            return base ? `${base}${LARK_OAUTH_RELAY_PATH}` : ""
+            return base ? `${base}${connectorOAuthRelayPath(row.type)}` : ""
           })()
         if (!redirectUri) return { ok: false, error: "redirect_uri_unresolved" }
-        const begun = await deps.beginOAuth({ adapterId, redirectUri })
+        const begun = await begin({ adapterId, redirectUri })
         // The URL is the deliverable: the operator opens it in a browser that
-        // can reach Feishu, and the brain completes the exchange when the
-        // relay hands the code back to this same process.
+        // can reach the platform, and the brain completes the exchange when the
+        // relay hands the code back to this same process. `kind` rides along so
+        // the CLI can name the right console in its instructions.
         return {
           ok: true,
           result: {
+            kind: row.type,
             authorizeUrl: begun.authorizeUrl,
             redirectUri: begun.redirectUri,
             state: begun.state,

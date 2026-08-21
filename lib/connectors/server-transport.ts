@@ -101,3 +101,20 @@ export function connectorWebhookPath(adapterType: string, adapterId: string): st
  * derive the same URL with no UI in the picture.
  */
 export const LARK_OAUTH_RELAY_PATH = "/oauth/lark/callback"
+
+/**
+ * Relay path for every other connector's OAuth (`oauth_connector_callback` in
+ * `axum_app.rs`).
+ *
+ * Same reason as the Lark relay — Slack's console, like Feishu's, refuses a
+ * custom scheme and only registers http/https — but parameterised by kind, so
+ * the next platform needs no new route. Lark keeps its own path: it is already
+ * registered byte-for-byte in existing installs' consoles.
+ *
+ * Whichever host is running derives the same absolute URL by prefixing
+ * `resolveConnectorsIngressBase()`, so the brain can produce it with no UI in
+ * the picture.
+ */
+export function connectorOAuthRelayPath(kind: string): string {
+  return kind === "lark" ? LARK_OAUTH_RELAY_PATH : `/oauth/connector/${kind}/callback`
+}

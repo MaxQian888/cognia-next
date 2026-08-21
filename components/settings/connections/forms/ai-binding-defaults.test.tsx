@@ -56,7 +56,7 @@ function makeRow(patch: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
     type: "telegram",
     displayName: "Bot",
     enabled: true,
-    transportMode: "long-poll",
+    transportMode: "longpoll",
     settings: {},
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },

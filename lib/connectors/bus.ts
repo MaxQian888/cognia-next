@@ -613,6 +613,29 @@ export class ConnectorBus {
     const dispatchMode =
       override?.activeRunDispatchMode ?? adapterRow.activeRunDispatchMode ?? "queue"
 
+    // ── Step 3.05: resolve the replied-to author ────────────────────────────
+    // Adapters fill `replyTo.parentSenderId` when the wire shape carries the
+    // parent author. When it doesn't, consult the delivered-message ledger: a
+    // hit means the parent is one of OUR messages, so stamp `selfId`.
+    //
+    // This MUST precede admission, not just `evaluatePolicy`. Admission's
+    // mention gate treats a reply to us as a direct address, and it can only
+    // see that once the parent author is resolved — running the lookup after
+    // admission (where it used to live) meant every ledger-resolved reply was
+    // already dropped as `at_mention_required`, so the `reply-to-bot` trigger
+    // rule could never fire in a group. The stamp still lands before the
+    // payload update, so the persisted job stays self-describing and
+    // `evaluatePolicy` remains pure.
+    let replyParentResolvedBy: "ledger" | undefined
+    if (
+      event.replyTo &&
+      event.replyTo.parentSenderId === undefined &&
+      (await wasDeliveredByUs(event.adapterId, event.conversationKey, event.replyTo.messageId))
+    ) {
+      event = { ...event, replyTo: { ...event.replyTo, parentSenderId: event.selfId } }
+      replyParentResolvedBy = "ledger"
+    }
+
     // ── Step 3.1: conversation-aware admission ──────────────────────────────
     // This runs after the durable insert so ignored messages remain auditable,
     // and after override resolution so a topic can override adapter defaults.
@@ -750,22 +773,6 @@ export class ConnectorBus {
     } catch (err) {
       // Hook dispatch must never break the inbound pipeline.
       console.error("[connector-bus] onConnectorInbound dispatch failed", err)
-    }
-
-    // ── Step 4.7: resolve the replied-to author for `reply-to-bot` ──────────
-    // Adapters fill `replyTo.parentSenderId` when the wire shape carries the
-    // parent author. When it doesn't, consult the delivered-message ledger:
-    // a hit means the parent is one of OUR messages, so stamp `selfId`. Done
-    // before the payload update so the persisted job stays self-describing
-    // and `evaluatePolicy` remains pure.
-    let replyParentResolvedBy: "ledger" | undefined
-    if (
-      event.replyTo &&
-      event.replyTo.parentSenderId === undefined &&
-      (await wasDeliveredByUs(event.adapterId, event.conversationKey, event.replyTo.messageId))
-    ) {
-      event = { ...event, replyTo: { ...event.replyTo, parentSenderId: event.selfId } }
-      replyParentResolvedBy = "ledger"
     }
 
     event = {

@@ -6,8 +6,8 @@
  * Covers:
  *  - Web mode: onDeepLink not called.
  *  - Tauri mode, unknown path: handler not invoked.
- *  - Tauri mode, state mismatch: toast.error("OAuth state mismatch").
- *  - Tauri mode, unknown adapterType: toast.error("No OAuth handler for X").
+ *  - Tauri mode, state mismatch: localized `connectors.oauth.stateMismatch`.
+ *  - Tauri mode, unknown adapterType: localized `connectors.oauth.unknownPlatform`.
  *  - Tauri mode, registered handler: handler invoked, toast.success.
  *  - Tauri mode, handler throws: toast.error with error message.
  */
@@ -16,6 +16,14 @@ import { render, waitFor } from "@testing-library/react"
 import { ConnectorDeepLinkRouter } from "./connector-deep-link-router"
 import { isTauri } from "@/lib/tauri"
 import { oauthRegistry } from "@/lib/connectors/oauth-registry"
+import enMessages from "@/i18n/messages/en.json"
+
+/**
+ * Every toast here is localized (`connectors.oauth.*`). Asserting against the
+ * bundle rather than a copy keeps the test honest if the wording is edited,
+ * while still failing if a raw English literal creeps back into the router.
+ */
+const OAUTH_MESSAGES = enMessages.connectors.oauth
 
 // ── Mock isTauri ─────────────────────────────────────────────────────────────
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
@@ -138,7 +146,7 @@ describe("ConnectorDeepLinkRouter", () => {
 
     capturedDeepLinkHandler!(["cognia://connector/oauth/telegram?code=abc123&state=wrong-state"])
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("OAuth state mismatch")
+      expect(mockToastError).toHaveBeenCalledWith(OAUTH_MESSAGES.stateMismatch)
     })
   })
 
@@ -154,7 +162,7 @@ describe("ConnectorDeepLinkRouter", () => {
 
     capturedDeepLinkHandler!(["cognia://connector/oauth/telegram?code=abc123&state=any-state"])
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("OAuth state mismatch")
+      expect(mockToastError).toHaveBeenCalledWith(OAUTH_MESSAGES.stateMismatch)
     })
   })
 
@@ -170,9 +178,7 @@ describe("ConnectorDeepLinkRouter", () => {
 
     capturedDeepLinkHandler!(["cognia://connector/oauth/unknownplatform?code=abc&state=my-state"])
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringContaining("No OAuth handler for unknown platform")
-      )
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("No sign-in handler for"))
     })
   })
 
@@ -189,7 +195,7 @@ describe("ConnectorDeepLinkRouter", () => {
 
     capturedDeepLinkHandler!(["cognia://connector/oauth/slack?code=abc&state=my-state"])
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("No OAuth handler for slack")
+      expect(mockToastError).toHaveBeenCalledWith("“slack” doesn't use this sign-in flow.")
     })
   })
 
@@ -214,7 +220,7 @@ describe("ConnectorDeepLinkRouter", () => {
       // ADR-0009 v41 / D2 — handler signature gained `state` so platform
       // handlers (Lark first) can decode an adapterId out of it.
       expect(fakeHandler).toHaveBeenCalledWith("exchange-code", "valid-state")
-      expect(mockToastSuccess).toHaveBeenCalledWith("slack connected successfully")
+      expect(mockToastSuccess).toHaveBeenCalledWith("slack connected.")
     })
   })
 
@@ -257,7 +263,7 @@ describe("ConnectorDeepLinkRouter", () => {
 
     await waitFor(() => {
       expect(fakeHandler).toHaveBeenCalledWith("cold-code", "valid-state")
-      expect(mockToastSuccess).toHaveBeenCalledWith("lark connected successfully")
+      expect(mockToastSuccess).toHaveBeenCalledWith("lark connected.")
     })
     // State is cleared on use (both copies).
     expect(sessionStorage.getItem("connector-oauth-state")).toBeNull()
@@ -283,7 +289,7 @@ describe("ConnectorDeepLinkRouter", () => {
     capturedCapHandler!({ raw })
     await waitFor(() => {
       expect(fakeHandler).toHaveBeenCalledWith("exchange-code", "valid-state")
-      expect(mockToastSuccess).toHaveBeenCalledWith("slack connected successfully")
+      expect(mockToastSuccess).toHaveBeenCalledWith("slack connected.")
     })
     // The in-app browser sheet that hosted the authorize page is dismissed.
     expect(mockCapBrowserClose).toHaveBeenCalled()

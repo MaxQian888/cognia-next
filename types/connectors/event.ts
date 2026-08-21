@@ -148,6 +148,24 @@ export interface NormalizedInboundEvent {
     | "lifecycle"
 }
 
+/**
+ * `true` when this event replies to a message THIS bot authored.
+ *
+ * The single source of truth for "the user addressed us by replying", shared
+ * by the `reply-to-bot` trigger rule (`policy-eval.ts`), the adapter at-gate
+ * (`at-gate.ts`) and conversation admission (`conversation-admission.ts`), so
+ * a reply cannot pass one gate and be dropped by the next.
+ *
+ * Strict: an unknown parent author is NOT a reply to the bot, so this never
+ * over-matches. `parentSenderId` is filled either by the adapter parser or,
+ * for wire shapes that omit the parent author, from the delivered-message
+ * ledger before either gate runs.
+ */
+export function isReplyToSelf(event: NormalizedInboundEvent): boolean {
+  const parent = event.replyTo?.parentSenderId
+  return parent !== undefined && parent !== "" && parent === event.selfId
+}
+
 /** Build the complete target that must be persisted for later outbound use. */
 export function deliveryTargetFromEvent(event: NormalizedInboundEvent): ConversationDeliveryTarget {
   const address =

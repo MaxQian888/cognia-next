@@ -2,7 +2,7 @@ import { setConnectorCommandInvoker, type MatrixCryptoOutgoingRequest } from "..
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getDb } from "@/lib/db/schema"
 import * as matrixPendingEvents from "@/lib/db/matrix-pending-events"
-import { MatrixE2EERuntime } from "./e2ee"
+import { MatrixE2EERuntime, type MatrixRequest } from "./e2ee"
 import type { MatrixTimelineEvent } from "./parse"
 
 jest.mock("@/lib/db/matrix-pending-events", () => {
@@ -67,7 +67,7 @@ describe("MatrixE2EERuntime", () => {
     setConnectorCommandInvoker(restoreInvoker)
   })
 
-  function runtime(request = jest.fn(async () => ({}))) {
+  function runtime(request: MatrixRequest = jest.fn(async () => ({}))) {
     return new MatrixE2EERuntime({
       adapterId: "mx-1",
       userId: "@bot:example.org",

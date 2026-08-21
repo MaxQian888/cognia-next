@@ -24,7 +24,7 @@ import { appendAudit } from "@/lib/connectors/audit"
 import { createFeishuPrincipal, getFeishuTenant } from "@/lib/db/feishu-principals"
 import { getDb } from "@/lib/db/schema"
 import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
-import { registerFeishuTenant, type PrincipalAdminDependencies } from "./admin"
+import { registerFeishuTenant, withDefaults, type PrincipalAdminDependencies } from "./admin"
 import { getActiveRuntimeAccountId } from "./resolve"
 
 export type BootstrapSkipReason = "flag_off" | "identity_unknown" | "already_registered"
@@ -57,12 +57,12 @@ export async function bootstrapFeishuRegistry(
   input: BootstrapRegistryInput,
   overrides: Partial<BootstrapDependencies> = {}
 ): Promise<BootstrapRegistryResult> {
+  // The shared admin defaults plus this module's own `listIdentities`. Built
+  // from `withDefaults` rather than re-listing the fields here: the local copy
+  // had drifted and no longer supplied `revokeSessions`.
   const deps: BootstrapDependencies = {
-    audit: appendAudit,
-    now: Date.now,
-    activeAccountId: getActiveRuntimeAccountId,
-    listIdentities: defaultListIdentities,
-    ...overrides,
+    ...withDefaults(overrides),
+    listIdentities: overrides.listIdentities ?? defaultListIdentities,
   }
 
   if (!isLarkPrincipalRegistryEnabled(input.adapterRow)) {

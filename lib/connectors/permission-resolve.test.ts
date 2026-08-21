@@ -4,6 +4,7 @@ import {
   resolveImHostCapabilities,
   resolveRequireHitlForWrites,
 } from "./permission-resolve"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 describe("IM permission resolution", () => {
   it("treats an undefined skill ceiling as unrestricted and supports family wildcards", () => {
@@ -24,7 +25,11 @@ describe("IM permission resolution", () => {
   })
 
   it("uses adapter host capabilities as ceilings, never as high-risk defaults", () => {
-    const adapter = { hostCapabilityCeiling: ["computer_use", "ocr"] as const }
+    // Annotated rather than `as const`: the row field is a mutable array, and a
+    // readonly tuple is not assignable to it.
+    const adapter: Pick<AdapterInstanceRow, "hostCapabilityCeiling"> = {
+      hostCapabilityCeiling: ["computer_use", "ocr"],
+    }
     expect(adapterAllowsHostCapability(adapter, "goal_driving")).toBe(false)
     expect(
       resolveImHostCapabilities({

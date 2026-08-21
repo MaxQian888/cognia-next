@@ -136,7 +136,7 @@ describe("QQOfficialConfigDialog", () => {
       transportMode: "gateway",
       settings: {},
       credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
-      trigger: {},
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "auto",
       createdAt: 1,
       updatedAt: 2,

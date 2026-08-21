@@ -7,6 +7,8 @@ import {
   HEADLESS_CONNECTORS_PREFIX,
   adapterNeedsInboundServer,
   connectorWebhookPath,
+  LARK_OAUTH_RELAY_PATH,
+  connectorOAuthRelayPath,
   resolveConnectorsIngressBase,
 } from "./server-transport"
 import type { TransportMode } from "@/types/connectors/adapter"
@@ -108,5 +110,34 @@ describe("resolveConnectorsIngressBase", () => {
   it("returns null on a cloud host with no configured origin", () => {
     expect(resolveConnectorsIngressBase({ isDesktop: false })).toBeNull()
     expect(resolveConnectorsIngressBase({ isDesktop: false, publicBase: "" })).toBeNull()
+  })
+})
+
+describe("connectorOAuthRelayPath", () => {
+  it("keeps Lark on its own path", () => {
+    // That exact path is registered byte-for-byte in every existing install's
+    // Feishu console; moving it onto the generic route would break them.
+    expect(connectorOAuthRelayPath("lark")).toBe(LARK_OAUTH_RELAY_PATH)
+  })
+
+  it("puts every other platform on the generic connector relay", () => {
+    expect(connectorOAuthRelayPath("slack")).toBe("/oauth/connector/slack/callback")
+  })
+
+  it("is what the brain prefixes with the ingress base on either host", () => {
+    const desktop = resolveConnectorsIngressBase({
+      isDesktop: true,
+      tunnelUrl: "https://t.example",
+    })
+    const headless = resolveConnectorsIngressBase({
+      isDesktop: false,
+      publicBase: "https://cognia.example",
+    })
+    expect(`${desktop}${connectorOAuthRelayPath("slack")}`).toBe(
+      "https://t.example/oauth/connector/slack/callback"
+    )
+    expect(`${headless}${connectorOAuthRelayPath("slack")}`).toBe(
+      "https://cognia.example/connectors/oauth/connector/slack/callback"
+    )
   })
 })

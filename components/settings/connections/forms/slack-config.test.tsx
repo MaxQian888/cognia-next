@@ -26,10 +26,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 
-jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }))
 
-jest.mock("@/lib/connectors/adapters/slack/oauth", () => ({
-  buildSlackOAuthUrl: jest.fn().mockReturnValue("https://slack.com/oauth/v2/authorize?mock=1"),
+const mockBeginSlackOAuth = jest.fn()
+jest.mock("@/lib/connectors/adapters/slack/oauth-begin", () => ({
+  beginSlackOAuth: (...args: unknown[]) => mockBeginSlackOAuth(...args),
 }))
 
 const mockOpenUrl = jest.fn().mockResolvedValue(undefined)
@@ -82,7 +83,10 @@ beforeEach(() => {
   mockTunnel.running = false
   mockTunnel.url = null
   mockTunnel.loading = false
-  delete process.env.NEXT_PUBLIC_SLACK_CLIENT_ID
+  // The OAuth state now rides the shared connector key; clear both copies so
+  // one test's mirror cannot satisfy another's assertion.
+  sessionStorage.clear()
+  localStorage.clear()
 })
 
 // ---------------------------------------------------------------------------
@@ -344,21 +348,119 @@ describe("SlackConfigDialog — create new", () => {
 // ---------------------------------------------------------------------------
 
 describe("SlackConfigDialog — OAuth + errors", () => {
-  it("errors when NEXT_PUBLIC_SLACK_CLIENT_ID is unset", () => {
+  const savedRow = {
+    id: "slack-1",
+    type: "slack",
+    displayName: "Slack",
+    enabled: true,
+    transportMode: "gateway",
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+    trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+    defaultMode: "auto",
+    createdAt: 1,
+    updatedAt: 1,
+  } as never
+
+  it("cannot authorize before the connection is saved", () => {
+    // The state carries the adapter id and the pending record is keyed by it,
+    // so there is nothing to bind an authorization to yet.
+    mockTunnel.url = "https://relay.example"
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByRole("button", { name: /connect via oauth/i })).toBeDisabled()
+    expect(screen.getByTestId("slack-oauth-needs-save")).toBeInTheDocument()
+  })
+
+  it("cannot authorize without a public address Slack can redirect to", () => {
+    // Slack refuses to register a custom scheme, so with no tunnel / public
+    // origin there is no usable redirect and the button stays inert.
+    mockTunnel.url = null
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+    expect(screen.getByRole("button", { name: /connect via oauth/i })).toBeDisabled()
+    expect(screen.getByTestId("slack-oauth-no-relay")).toBeInTheDocument()
+  })
+
+  it("shows the exact redirect URL that must be registered in the Slack app", () => {
+    mockTunnel.url = "https://relay.example"
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+    expect(screen.getByTestId("slack-oauth-redirect")).toHaveTextContent(
+      "https://relay.example/oauth/connector/slack/callback"
+    )
+  })
+
+  it("authorizes through the brain and mirrors the state under the shared key", async () => {
+    mockTunnel.url = "https://relay.example"
+    mockBeginSlackOAuth.mockResolvedValue({
+      authorizeUrl: "https://slack.com/oauth/v2/authorize?state=slack%3Aslack-1%3An",
+      state: "slack:slack-1:n",
+      redirectUri: "https://relay.example/oauth/connector/slack/callback",
+    })
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+
     fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("NEXT_PUBLIC_SLACK_CLIENT_ID")
+
+    await waitFor(() => expect(mockBeginSlackOAuth).toHaveBeenCalled())
+    // The relay, not the `cognia://` scheme Slack would have rejected.
+    expect(mockBeginSlackOAuth).toHaveBeenCalledWith({
+      adapterId: "slack-1",
+      redirectUri: "https://relay.example/oauth/connector/slack/callback",
+    })
+    await waitFor(() =>
+      expect(mockOpenUrl).toHaveBeenCalledWith(
+        "https://slack.com/oauth/v2/authorize?state=slack%3Aslack-1%3An"
+      )
+    )
+    // The deep-link router reads THIS key. Writing "slack_oauth_state" — as
+    // this dialog used to — meant the router's check never matched.
+    expect(sessionStorage.getItem("connector-oauth-state")).toBe("slack:slack-1:n")
+    expect(localStorage.getItem("connector-oauth-state")).toBe("slack:slack-1:n")
+  })
+
+  it("persists newly entered OAuth credentials before starting authorization", async () => {
+    mockTunnel.url = "https://relay.example"
+    mockBeginSlackOAuth.mockResolvedValue({
+      authorizeUrl: "https://slack.com/oauth/v2/authorize?state=state",
+      state: "state",
+      redirectUri: "https://relay.example/oauth/connector/slack/callback",
+    })
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+
+    fireEvent.change(screen.getByLabelText(/client id/i), { target: { value: "client-123" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), {
+      target: { value: "secret-456" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
+
+    await waitFor(() => expect(mockBeginSlackOAuth).toHaveBeenCalled())
+    expect(mockConnectorsKeyringSet).toHaveBeenCalledWith("slack-1", "clientId", "client-123")
+    expect(mockConnectorsKeyringSet).toHaveBeenCalledWith("slack-1", "clientSecret", "secret-456")
+    expect(mockConnectorsKeyringSet.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mockBeginSlackOAuth.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("maps a missing client id to an actionable message", async () => {
+    mockTunnel.url = "https://relay.example"
+    mockBeginSlackOAuth.mockRejectedValue(new Error("client_id_missing"))
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("OAuth client ID"))
     )
     expect(mockOpenUrl).not.toHaveBeenCalled()
   })
 
-  it("opens the OAuth URL and stores the CSRF state when a client id is configured", () => {
-    process.env.NEXT_PUBLIC_SLACK_CLIENT_ID = "client-1"
-    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+  it("does not expose an internal OAuth reason to the user", async () => {
+    mockTunnel.url = "https://relay.example"
+    mockBeginSlackOAuth.mockRejectedValue(new Error("redirect_uri_invalid"))
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={savedRow} />)
+
     fireEvent.click(screen.getByRole("button", { name: /connect via oauth/i }))
-    expect(mockOpenUrl).toHaveBeenCalledWith("https://slack.com/oauth/v2/authorize?mock=1")
-    expect(sessionStorage.getItem("slack_oauth_state")).toBeTruthy()
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Connection failed"))
+    expect(mockToastError).not.toHaveBeenCalledWith("redirect_uri_invalid")
   })
 
   it("errors when Test is pressed with no bot token", () => {

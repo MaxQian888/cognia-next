@@ -31,7 +31,7 @@
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringGet, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { recordGrantedScopes, type ConnectedScopes } from "@/lib/connectors/oauth-scope-audit"
-import { exchangeCodeForUserAccessToken, fetchLarkUserInfo } from "./auth"
+import { clearUserTokenCache, exchangeCodeForUserAccessToken, fetchLarkUserInfo } from "./auth"
 import { clearLarkOAuthPending, getLarkOAuthPending } from "./oauth-pending"
 
 // ---------------------------------------------------------------------------
@@ -157,6 +157,12 @@ export async function handleLarkOAuth(
   // ── Step 5: persist tokens in keyring ──────────────────────────────────
   await connectorsKeyringSet(adapterId, "user_token", tokens.accessToken)
   await connectorsKeyringSet(adapterId, "user_refresh_token", tokens.refreshToken)
+  // The in-memory cache in `auth.ts` holds a cold keyring read with no known
+  // expiry, and `getUserAccessToken` serves such an entry indefinitely. Without
+  // this eviction a re-authorization (new scopes, a different user) kept
+  // sending as the PREVIOUS token for the rest of the process lifetime —
+  // visible only as "the new scope still isn't working" until a restart.
+  clearUserTokenCache(adapterId)
 
   // ── Step 6: stamp connected-user metadata ─────────────────────────────
   const now = Date.now()

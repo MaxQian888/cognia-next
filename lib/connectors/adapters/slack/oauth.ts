@@ -16,9 +16,12 @@ export interface SlackOAuthUrlInput {
 /**
  * Build the Slack OAuth v2 authorization URL.
  *
- * URL-encodes all parameters. The `state` value should be a caller-generated
- * random string; callers are responsible for storing it in sessionStorage for
- * CSRF verification before calling this function.
+ * URL-encodes all parameters. `state` and `redirectUri` come from
+ * `oauth-begin.ts`, which mints the `slack:<adapterId>:<nonce>` state and
+ * persists the pending record before this URL is handed out — the durable
+ * record, not any browser storage, is what `handleSlackOAuth` validates
+ * against. `redirectUri` must be https: Slack's console will not register a
+ * custom scheme.
  */
 export function buildSlackOAuthUrl(input: SlackOAuthUrlInput): string {
   const params = new URLSearchParams()

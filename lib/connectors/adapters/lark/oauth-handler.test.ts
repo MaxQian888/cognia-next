@@ -30,6 +30,7 @@ jest.mock("./oauth-pending", () => ({
 }))
 
 import { buildLarkOAuthState, parseLarkOAuthState, handleLarkOAuth } from "./oauth-handler"
+import { clearUserTokenCache, getUserAccessToken } from "./auth"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 
 const mockGetAdapter = getAdapterInstance as jest.Mock
@@ -268,5 +269,42 @@ describe("handleLarkOAuth — error paths", () => {
       }),
     })
     await expect(handleLarkOAuth("code", { state })).rejects.toThrow(/auth code expired/)
+  })
+})
+
+describe("handleLarkOAuth — in-memory user-token cache", () => {
+  // `auth.ts` caches a cold keyring read with no known expiry, and
+  // `getUserAccessToken` serves such an entry for the whole process lifetime.
+  // Re-authorizing therefore has to evict it, or every later send keeps using
+  // the token from before the re-authorization.
+  afterEach(() => clearUserTokenCache("lk-1"))
+
+  it("evicts the previous token so a re-authorization takes effect immediately", async () => {
+    mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+      cred === "appId"
+        ? "cli_test123"
+        : cred === "appSecret"
+          ? "secret_456"
+          : cred === "user_token"
+            ? "u-access-OLD"
+            : null
+    )
+    // Warm the cache the way a live send would.
+    await expect(getUserAccessToken("lk-1")).resolves.toBe("u-access-OLD")
+
+    const state = buildLarkOAuthState("lk-1", "nonce-1")
+    primePending(state)
+    mockGetAdapter.mockResolvedValue(makeAdapterRow())
+    mockHttp.mockResolvedValueOnce(tokenV2Response()).mockResolvedValueOnce(userInfoResponse())
+
+    await handleLarkOAuth("code-1", { state })
+
+    // The keyring now holds what the exchange wrote.
+    expect(mockKeyringSet).toHaveBeenCalledWith("lk-1", "user_token", "u-access-789")
+    mockKeyringGet.mockImplementation(async (_id: string, cred: string) =>
+      cred === "user_token" ? "u-access-789" : null
+    )
+
+    await expect(getUserAccessToken("lk-1")).resolves.toBe("u-access-789")
   })
 })

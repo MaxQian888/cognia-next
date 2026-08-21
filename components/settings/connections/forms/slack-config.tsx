@@ -33,7 +33,12 @@ import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
-import { buildSlackOAuthUrl } from "@/lib/connectors/adapters/slack/oauth"
+import { beginSlackOAuth } from "@/lib/connectors/adapters/slack/oauth-begin"
+import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
+import {
+  connectorOAuthRelayPath,
+  resolveConnectorsIngressBase,
+} from "@/lib/connectors/server-transport"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
@@ -143,6 +148,9 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const [botToken, setBotToken] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [appToken, setAppToken] = useState("")
+  const [clientId, setClientId] = useState("")
+  const [clientSecret, setClientSecret] = useState("")
+  const [authorizing, setAuthorizing] = useState(false)
   const [transport, setTransport] = useState<TransportMode>(persisted.transport ?? "socket-mode")
   const [assistantAppEnabled, setAssistantAppEnabled] = useState<boolean>(
     persisted.assistantAppEnabled === true
@@ -157,6 +165,13 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
 
   const desktop = isTauri()
   const tunnel = useTunnelStatus()
+  const ingressBase = resolveConnectorsIngressBase({
+    isDesktop: desktop,
+    tunnelUrl: tunnel.url,
+    publicBase: typeof window === "undefined" ? null : window.location.origin,
+  })
+  /** Exact redirect Slack's console must have registered. Null with no ingress. */
+  const relayUrl = ingressBase ? `${ingressBase}${connectorOAuthRelayPath("slack")}` : null
 
   const dirty =
     isNew ||
@@ -164,6 +179,8 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
     botToken.length > 0 ||
     signingSecret.length > 0 ||
     appToken.length > 0 ||
+    clientId.length > 0 ||
+    clientSecret.length > 0 ||
     transport !== (persisted.transport ?? "socket-mode") ||
     assistantAppEnabled !== (persisted.assistantAppEnabled === true) ||
     parseSlackHistoryMaxPages(historyMaxPagesInput) !== persistedPages ||
@@ -192,24 +209,54 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
     }
   }
 
-  const handleOAuth = () => {
-    const clientId = process.env.NEXT_PUBLIC_SLACK_CLIENT_ID ?? ""
-    if (!clientId) {
-      toast.error(t("oauthClientIdMissing"))
+  const handleOAuth = async () => {
+    if (!row) {
+      toast.error(t("oauthNeedsSavedAdapter"))
       return
     }
-    const state =
-      typeof crypto !== "undefined" ? crypto.randomUUID() : Math.random().toString(36).slice(2)
-    if (typeof sessionStorage !== "undefined") {
-      sessionStorage.setItem("slack_oauth_state", state)
+    setAuthorizing(true)
+    try {
+      // Slack's console only accepts an https redirect, so the flow goes
+      // through the connectors relay rather than the `cognia://` scheme it
+      // used to point at — Slack would have rejected that at authorize time.
+      const effectiveRedirect = relayUrl ?? ""
+      if (!effectiveRedirect) {
+        toast.error(t("oauthNeedsRelay"))
+        return
+      }
+      if (clientId.trim()) {
+        await connectorsKeyringSet(row.id, "clientId", clientId.trim())
+      }
+      if (clientSecret.trim()) {
+        await connectorsKeyringSet(row.id, "clientSecret", clientSecret.trim())
+      }
+      // The brain mints the state and owns the pending record, because the
+      // brain is what spends it when the relay hands the code back. On the
+      // desktop that is this same process; a headless install drives the very
+      // same function through the `oauth-begin` operator intent.
+      const begun = await beginSlackOAuth({ adapterId: row.id, redirectUri: effectiveRedirect })
+      // The deep-link router validates the redirect's `state`. sessionStorage
+      // covers the live path; a localStorage mirror survives a cold restart.
+      // This is a pre-check only — the authoritative one is against the
+      // pending record inside `handleSlackOAuth`.
+      sessionStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, begun.state)
+      try {
+        localStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, begun.state)
+      } catch {
+        // localStorage unavailable — the live sessionStorage path still works.
+      }
+      await openUrl(begun.authorizeUrl)
+      toast.info(t("oauthOpened"))
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      // `beginSlackOAuth` throws short stable reasons; map the one an operator
+      // can actually fix rather than showing them a bare code.
+      toast.error(
+        reason === "client_id_missing" ? t("oauthNeedsClientId") : t("connectionFailedToast")
+      )
+    } finally {
+      setAuthorizing(false)
     }
-    const url = buildSlackOAuthUrl({
-      clientId,
-      scopes: ["chat:write", "channels:history", "im:history", "app_mentions:read"],
-      redirectUri: "cognia://connector/oauth/slack",
-      state,
-    })
-    void openUrl(url)
   }
 
   const handleCopyWebhookUrl = async (url: string) => {
@@ -297,6 +344,16 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
 
       if (botToken.trim()) {
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
+      }
+      // The OAuth app credentials live in the keyring next to the tokens, the
+      // same place `handleSlackOAuth` reads them from at exchange time. They
+      // used to be expected from `NEXT_PUBLIC_SLACK_CLIENT_ID`, which is set
+      // nowhere and which the exchange never looked at.
+      if (clientId.trim()) {
+        await connectorsKeyringSet(adapterId, "clientId", clientId.trim())
+      }
+      if (clientSecret.trim()) {
+        await connectorsKeyringSet(adapterId, "clientSecret", clientSecret.trim())
       }
       if (signingSecret.trim()) {
         await connectorsKeyringSet(adapterId, "signingSecret", signingSecret.trim())
@@ -434,18 +491,65 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
         )}
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>
+          <div className="space-y-1">
+            <Label htmlFor="slack-client-id" className="text-xs">
+              {t("clientIdLabel")}
+            </Label>
+            <Input
+              id="slack-client-id"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder={t("clientIdPlaceholder")}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="slack-client-secret" className="text-xs">
+              {t("clientSecretLabel")}
+            </Label>
+            <Input
+              id="slack-client-secret"
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          {/* The relay URL is what Slack's console must have registered; show
+              it so the operator can copy it rather than guess. */}
+          {relayUrl ? (
+            <p className="text-muted-foreground text-[11px]" data-testid="slack-oauth-redirect">
+              {t("oauthRedirectHint", { url: relayUrl })}
+            </p>
+          ) : (
+            <p
+              className="text-xs text-amber-600 dark:text-amber-400"
+              data-testid="slack-oauth-no-relay"
+            >
+              {t("oauthNeedsRelay")}
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleOAuth}
-            disabled={saving}
+            onClick={() => void handleOAuth()}
+            // OAuth needs a saved row: the state carries the adapter id and the
+            // pending record is keyed by it, so there is nothing to bind to
+            // before the first Save.
+            disabled={saving || authorizing || isNew || !relayUrl}
             aria-label={t("oauthButtonAria")}
           >
-            {t("oauthButton")}
+            {authorizing ? t("oauthConnecting") : t("oauthButton")}
           </Button>
+          {isNew ? (
+            <p className="text-muted-foreground text-[11px]" data-testid="slack-oauth-needs-save">
+              {t("oauthNeedsSavedAdapter")}
+            </p>
+          ) : null}
         </div>
       </div>
     ),

@@ -12,7 +12,7 @@
  * `false`: static export never renders IM chrome.
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import { useSyncExternalStore } from "react"
 
 import { getDb } from "@/lib/db/schema"
@@ -26,7 +26,10 @@ function notify(): void {
 }
 
 function start(): void {
-  subscription = liveQuery(() => getDb().adapterInstances.count()).subscribe({
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  subscription = Dexie.liveQuery(() => getDb().adapterInstances.count()).subscribe({
     next: (count) => {
       adapterCount = count
       notify()

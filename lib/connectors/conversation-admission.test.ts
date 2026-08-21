@@ -13,7 +13,12 @@ import {
 } from "./conversation-admission"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 
-function event(options: { mentioned: boolean; thread?: boolean; messageId?: string }) {
+function event(options: {
+  mentioned: boolean
+  thread?: boolean
+  messageId?: string
+  replyParentSenderId?: string
+}) {
   const thread = options.thread !== false
   const conversationKey = thread ? "lark:lk-1:oc-1:omt-1" : "lark:lk-1:oc-1"
   return {
@@ -41,6 +46,15 @@ function event(options: { mentioned: boolean; thread?: boolean; messageId?: stri
     segments: [{ type: "text", text: "hello" }],
     plainText: "hello",
     mentions: { selfMentioned: options.mentioned, users: options.mentioned ? ["bot"] : [] },
+    ...(options.replyParentSenderId !== undefined
+      ? {
+          replyTo: {
+            messageId: "om-parent",
+            snippet: "…",
+            parentSenderId: options.replyParentSenderId,
+          },
+        }
+      : {}),
     timestamp: 1_000,
     raw: {},
   } satisfies NormalizedInboundEvent
@@ -125,6 +139,50 @@ describe("conversation admission", () => {
     await expect(
       admitConversationEvent(event({ mentioned: false }), adapter, { now: 2_000 })
     ).resolves.toEqual({ allowed: false, reason: "delivery_unverified", activated: false })
+  })
+
+  it("admits an unmentioned group reply to one of OUR messages (reply is a direct address)", async () => {
+    // The `reply-to-bot` trigger rule can only fire if admission lets the
+    // event through: `mention_each` is the default policy, so a reply that is
+    // not also an @-mention has to be admitted here or the rule is dormant.
+    const adapter = { id: "lk-1", type: "lark", inboundActivationPolicy: "mention_each" } as never
+
+    await expect(
+      admitConversationEvent(
+        event({ mentioned: false, thread: false, replyParentSenderId: "bot" }),
+        adapter,
+        { now: 1_000 }
+      )
+    ).resolves.toEqual({ allowed: true, activated: false })
+  })
+
+  it("still requires a mention for a reply to somebody else's message", async () => {
+    const adapter = { id: "lk-1", type: "lark", inboundActivationPolicy: "mention_each" } as never
+
+    await expect(
+      admitConversationEvent(
+        event({ mentioned: false, thread: false, replyParentSenderId: "u-9" }),
+        adapter,
+        { now: 1_000 }
+      )
+    ).resolves.toEqual({ allowed: false, reason: "at_mention_required", activated: false })
+  })
+
+  it("activates a verified topic on a reply to us, exactly as it does on a mention", async () => {
+    const adapter = {
+      id: "lk-1",
+      type: "lark",
+      inboundActivationPolicy: "mention_activates",
+      deliveryReadiness: "all_messages_verified",
+    } as never
+
+    await expect(
+      admitConversationEvent(event({ mentioned: false, replyParentSenderId: "bot" }), adapter, {
+        now: 1_000,
+      })
+    ).resolves.toEqual({ allowed: true, activated: true })
+    const state = await getConnectorConversationState("lark:lk-1:oc-1:omt-1")
+    expect(state?.activationStatus).toBe("active")
   })
 
   it("keeps a legacy Lark always policy mention-gated until no-@ delivery is verified", async () => {

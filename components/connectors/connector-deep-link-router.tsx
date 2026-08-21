@@ -98,7 +98,16 @@ function parseOAuthUrl(raw: string): {
   return { adapterType, code, state }
 }
 
-async function handleOAuthUrl(raw: string): Promise<void> {
+/**
+ * Translator for the `connectors.oauth` namespace.
+ *
+ * Passed in rather than read here: this function is deliberately outside the
+ * component (it runs from deep-link subscriptions, including the cold-start
+ * launch URL) and hooks cannot be called from it.
+ */
+type OAuthToastT = (key: string, values?: Record<string, string>) => string
+
+async function handleOAuthUrl(raw: string, t: OAuthToastT): Promise<void> {
   const parsed = parseOAuthUrl(raw)
   if (!parsed) return // not an OAuth deep-link
 
@@ -108,7 +117,7 @@ async function handleOAuthUrl(raw: string): Promise<void> {
   const storedState = readStoredOAuthState()
 
   if (!state || state !== storedState) {
-    toast.error("OAuth state mismatch")
+    toast.error(t("stateMismatch"))
     return
   }
 
@@ -118,13 +127,13 @@ async function handleOAuthUrl(raw: string): Promise<void> {
     import("@/types/connectors/platform-kind"),
   ])
   if (!isPlatformKind(adapterType)) {
-    toast.error(`No OAuth handler for unknown platform: ${adapterType}`)
+    toast.error(t("unknownPlatform", { platform: adapterType }))
     return
   }
 
   const handler = oauthRegistry.get(adapterType as PlatformKind)
   if (!handler) {
-    toast.error(`No OAuth handler for ${adapterType}`)
+    toast.error(t("noHandler", { platform: adapterType }))
     return
   }
 
@@ -137,21 +146,27 @@ async function handleOAuthUrl(raw: string): Promise<void> {
   // the exchange to a specific configured account). ADR-0009 v41 / D2.
   try {
     await handler(code, state)
-    toast.success(`${adapterType} connected successfully`)
+    toast.success(t("succeeded", { platform: adapterType }))
   } catch (err) {
-    toast.error(`OAuth exchange failed: ${err instanceof Error ? err.message : String(err)}`)
+    toast.error(
+      t("failed", {
+        platform: adapterType,
+        reason: err instanceof Error ? err.message : String(err),
+      })
+    )
   }
 }
 
 export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNode }) {
   const tDocs = useTranslations("docsProviders")
+  const tOAuth = useTranslations("connectors.oauth")
 
   // One entry point for both schemes so every host path (desktop live, desktop
   // cold-start, Capacitor live, Capacitor cold-start) routes identically.
   const dispatchUrl = useCallback(
     async (raw: string): Promise<void> => {
       if (!DOCS_OAUTH_RE.test(raw)) {
-        await handleOAuthUrl(raw)
+        await handleOAuthUrl(raw, tOAuth)
         return
       }
       const { completeDocsOAuthDeepLink } = await import("@/lib/docs-providers/oauth-deep-link")
@@ -164,7 +179,7 @@ export function ConnectorDeepLinkRouter({ children }: { children: React.ReactNod
         toast.error(tDocs("errors.notConfigured"))
       }
     },
-    [tDocs]
+    [tDocs, tOAuth]
   )
 
   useEffect(() => {

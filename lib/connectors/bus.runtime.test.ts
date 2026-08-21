@@ -45,9 +45,16 @@ jest.mock("@cognia/redact", () => ({
   hasNoLeakingPii: () => true,
 }))
 
+// `bus.ts` imports the GENERALIZED name (`maybeHandleRunControlFollowUp`);
+// `maybeHandleLarkFollowUpControl` is only the back-compat alias. Stubbing the
+// alias alone left the real implementation wired into the bus, so both
+// follow-up-control tests below were asserting against unstubbed behaviour.
+// Override both names off the same jest.fn so either import site is stubbed.
 const mockMaybeHandleLarkFollowUpControl = jest.fn(async (..._args: unknown[]) => false)
 jest.mock("./follow-up-control", () => ({
   ...jest.requireActual("./follow-up-control"),
+  maybeHandleRunControlFollowUp: (...args: unknown[]) =>
+    mockMaybeHandleLarkFollowUpControl(...args),
   maybeHandleLarkFollowUpControl: (...args: unknown[]) =>
     mockMaybeHandleLarkFollowUpControl(...args),
 }))

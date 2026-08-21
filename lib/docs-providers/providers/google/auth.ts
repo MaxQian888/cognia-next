@@ -32,6 +32,7 @@ import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import { DocsProviderError } from "@/lib/docs-providers/types"
 import {
   GOOGLE_DOCS_SCOPE_STRING,
+  clearGoogleConnection,
   getGoogleClientSecret,
   getGoogleDocsSettings,
   loadGoogleTokens,
@@ -289,6 +290,73 @@ export async function refreshGoogleTokens(deps: GoogleAuthDeps = {}): Promise<Go
   }
   await saveGoogleTokens(tokens)
   return tokens
+}
+
+/** Outcome of a disconnect, for the caller to report honestly. */
+export type GoogleDisconnectOutcome =
+  /** Google confirmed the grant is gone. */
+  | { revoked: true }
+  /** Nothing was stored — local state was already clean. */
+  | { revoked: false; reason: "not-connected" }
+  /** Local state is cleared, but the grant may still stand at Google. */
+  | { revoked: false; reason: string }
+
+/**
+ * Disconnect Google Docs: revoke the grant at Google, then drop local state.
+ *
+ * Clearing the keyring alone only makes the connection invisible — the refresh
+ * token stays valid on Google's side, so "Disconnect" left a live grant behind
+ * and the user had to go find it in their Google account settings. Revoking the
+ * refresh token invalidates the whole grant (Google cascades to the access
+ * tokens minted from it).
+ *
+ * Revocation is best-effort by design: the local clear MUST happen even when
+ * the network call fails, or a user offline (or with an already-dead token)
+ * could never disconnect. The outcome says which of the two happened so the UI
+ * can tell the user to finish the job at Google when it matters. An already
+ * invalid token answers HTTP 400 `invalid_token`, which is success for our
+ * purposes — the grant is gone either way.
+ */
+export async function disconnectGoogleDocs(
+  deps: GoogleAuthDeps = {}
+): Promise<GoogleDisconnectOutcome> {
+  const http = deps.http ?? googleHttp
+  const stored = await loadGoogleTokens()
+  if (!stored) {
+    await clearGoogleConnection()
+    return { revoked: false, reason: "not-connected" }
+  }
+  // Revoking the refresh token takes the access tokens with it; when only an
+  // access token was ever issued, revoking that is all there is to revoke.
+  const token = stored.refreshToken ?? stored.accessToken
+  let outcome: GoogleDisconnectOutcome
+  try {
+    const response = await http({
+      url: GOOGLE_REVOKE_URL,
+      method: "POST",
+      headers: FORM_HEADERS,
+      body: form({ token }),
+    })
+    if (response.status >= 200 && response.status < 300) {
+      outcome = { revoked: true }
+    } else {
+      const parsed = parseJson<{ error?: string; error_description?: string }>(response.body)
+      outcome =
+        parsed?.error === "invalid_token"
+          ? { revoked: true }
+          : {
+              revoked: false,
+              reason:
+                parsed?.error_description ??
+                parsed?.error ??
+                `Google returned HTTP ${response.status}`,
+            }
+    }
+  } catch (err) {
+    outcome = { revoked: false, reason: err instanceof Error ? err.message : String(err) }
+  }
+  await clearGoogleConnection()
+  return outcome
 }
 
 /**

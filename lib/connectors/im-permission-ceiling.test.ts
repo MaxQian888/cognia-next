@@ -3,15 +3,24 @@ import {
   IM_OCR_TOOL_NAMES,
   IM_SCHEDULER_TOOL_NAMES,
 } from "./im-permission-ceiling"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-const adapter = {
+// A real row, not a shorthand. `platform` / `accountLabel` were never fields on
+// `AdapterInstanceRow` (they are `type` / `displayName`), and `as const` kept the
+// fixture from ever being checked against the type it stands in for.
+const adapter: AdapterInstanceRow = {
   id: "adapter_1",
-  platform: "telegram",
-  accountLabel: "Bot",
+  type: "telegram",
+  displayName: "Bot",
   enabled: true,
+  transportMode: "longpoll",
+  settings: {},
+  credentialsRef: { keyringService: "x", accounts: [] },
+  trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+  defaultMode: "auto",
   createdAt: 1,
   updatedAt: 1,
-} as const
+}
 
 describe("deriveImPermissionCeiling", () => {
   it("denies skills removed by any IM manifest gate, including nested aliases", () => {
@@ -47,7 +56,15 @@ describe("deriveImPermissionCeiling", () => {
   it("lets the adapter ceiling restrict OCR and never lets it grant Computer Use", () => {
     const result = deriveImPermissionCeiling({
       adapter: { ...adapter, hostCapabilityCeiling: ["computer_use"] },
-      override: { conversationKey: "c", allowComputerUse: true, allowOcr: true },
+      override: {
+        id: "o1",
+        sessionId: "s1",
+        createdAt: 1,
+        updatedAt: 1,
+        conversationKey: "c",
+        allowComputerUse: true,
+        allowOcr: true,
+      },
       target: "direct",
       character: { enableComputerUse: false },
       allBuiltInSkills: [],

@@ -24,7 +24,7 @@
  * short-circuit (and audit the block via `inbound.policy_blocked`).
  */
 
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/event"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
@@ -139,7 +139,14 @@ export function shouldRespondToMessage(
       return { allowed: true }
     case "mention_only":
       if (isDm) return { allowed: true }
-      if (event.mentions.selfMentioned) return { allowed: true }
+      // A reply to one of OUR messages is as direct an address as a mention,
+      // and `defaultGroupChatPolicy()` gates on both — so this gate has to
+      // accept it or the `reply-to-bot` trigger rule never reaches the bus.
+      // Strict `parentSenderId` matching keeps it from over-matching; the
+      // parent is filled by the adapter parser here, and by
+      // `gateInboundEvent` from the delivered-message ledger for the wire
+      // shapes that omit it.
+      if (event.mentions.selfMentioned || isReplyToSelf(event)) return { allowed: true }
       return { allowed: false, reason: "at_mention_required" }
     case "direct_only":
       if (isDm) return { allowed: true }

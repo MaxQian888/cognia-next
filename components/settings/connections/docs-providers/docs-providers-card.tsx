@@ -39,9 +39,11 @@ import {
   getGoogleDocsSettings,
   saveGoogleClientSecret,
   updateGoogleDocsSettings,
-  clearGoogleConnection,
 } from "@/lib/docs-providers/providers/google/config"
-import { beginGoogleDocsAuth } from "@/lib/docs-providers/providers/google/auth"
+import {
+  beginGoogleDocsAuth,
+  disconnectGoogleDocs,
+} from "@/lib/docs-providers/providers/google/auth"
 
 export function DocsProvidersCard() {
   const t = useTranslations("docsProviders")
@@ -157,10 +159,24 @@ function GoogleDocsRow() {
   }, [clientId, clientSecret, t])
 
   const disconnect = useCallback(async () => {
-    await clearGoogleConnection()
-    setConnected(false)
-    setEmail(undefined)
-  }, [])
+    setBusy(true)
+    try {
+      // Revokes at Google first, then clears local state — see
+      // `disconnectGoogleDocs`. Local state is cleared either way, so the UI
+      // always ends up disconnected; the toast is how the user learns that the
+      // grant may still stand on Google's side and needs finishing there.
+      const outcome = await disconnectGoogleDocs()
+      setConnected(false)
+      setEmail(undefined)
+      if (outcome.revoked) {
+        toast.success(t("settings.disconnectRevoked"))
+      } else if (outcome.reason !== "not-connected") {
+        toast.warning(t("settings.disconnectNotRevoked", { reason: outcome.reason }))
+      }
+    } finally {
+      setBusy(false)
+    }
+  }, [t])
 
   return (
     <section className="space-y-2" data-testid="docs-provider-google">
@@ -186,8 +202,14 @@ function GoogleDocsRow() {
         ))}
       </ul>
       {connected ? (
-        <Button variant="outline" size="sm" onClick={() => void disconnect()}>
-          {t("settings.disconnect")}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void disconnect()}
+          data-testid="docs-provider-google-disconnect"
+        >
+          {busy ? t("settings.disconnecting") : t("settings.disconnect")}
         </Button>
       ) : (
         <div className="space-y-2">

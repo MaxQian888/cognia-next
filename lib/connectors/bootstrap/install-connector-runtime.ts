@@ -95,12 +95,13 @@ import { startSlaEscalationSweep } from "@/lib/connectors/escalation/schedule"
 import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
 import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
 import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
+import { installDelegationBridge } from "@/lib/execution/delegation-bridge"
 import { recoverPendingRunInterrupts } from "@/lib/execution/run-control"
 import {
   startResumeReconnect,
   type ResumeReconnectHandle,
 } from "@/lib/connectors/bootstrap/resume-reconnect"
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { recoverStaleConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { createConnectorRuntimeLease } from "@/lib/connectors/runtime-lease"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
@@ -313,7 +314,10 @@ function makeDefaultAcquireRuntimeLock(
  * are already booted.
  */
 function defaultSubscribeAdapterChanges(onChange: () => void): () => void {
-  const sub = liveQuery(() => listEnabledAdapterInstances()).subscribe({
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const sub = Dexie.liveQuery(() => listEnabledAdapterInstances()).subscribe({
     next: () => onChange(),
     error: () => undefined,
   })
@@ -368,6 +372,7 @@ export function installConnectorRuntime(
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowExecutionBridge: (() => void) | null = null
+  let stopDelegationBridge: (() => void) | null = null
   let stopExecutionRunPresentationRunner: (() => void) | null = null
   let disposeExecutionRunControlHandlers: (() => void) | null = null
   let teardownPromise: Promise<void> | null = null
@@ -473,9 +478,7 @@ export function installConnectorRuntime(
     return observed === "running" || observed === "starting" || observed === "degraded"
   }
 
-  const teardownRuntime = (
-    reason: ConnectorRuntimeReleaseReason = "unmount"
-  ): Promise<void> => {
+  const teardownRuntime = (reason: ConnectorRuntimeReleaseReason = "unmount"): Promise<void> => {
     if (teardownPromise) return teardownPromise
     teardownPromise = (async () => {
       cancelled = true
@@ -492,6 +495,8 @@ export function installConnectorRuntime(
       resumeReconnect = null
       stopWorkflowExecutionBridge?.()
       stopWorkflowExecutionBridge = null
+      stopDelegationBridge?.()
+      stopDelegationBridge = null
       stopExecutionRunPresentationRunner?.()
       stopExecutionRunPresentationRunner = null
       disposeExecutionRunControlHandlers?.()
@@ -817,6 +822,13 @@ export function installConnectorRuntime(
     // runner owns native projection, coalescing, cursor commits, and fallback.
     if (!cancelled) {
       stopWorkflowExecutionBridge = startWorkflowExecutionBridge()
+      // A delegation's children report through the delegation, not beside it.
+      // Installed here rather than lazily because the interesting case is the
+      // one where the process that would have watched a child settle was not
+      // running when it did — reload recovery is the whole point.
+      stopDelegationBridge = installDelegationBridge({
+        onError: (error) => console.error("[delegation] reconciliation failed", error),
+      })
       stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
       disposeExecutionRunControlHandlers = installExecutionRunControlHandlers().dispose
       void recoverPendingRunInterrupts().catch((error) => {

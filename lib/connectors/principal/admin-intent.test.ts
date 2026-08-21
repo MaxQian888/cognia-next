@@ -12,7 +12,9 @@ import { runPrincipalAdminIntent } from "./admin-intent"
 
 const WHOAMI = { botName: "bot", appId: "cli_1", openId: "ou_bot", tenantKey: "tk_a" }
 
-function deps(row: unknown = { id: "lark-1", settings: {}, lastWhoamiResult: WHOAMI }) {
+function deps(
+  row: unknown = { id: "lark-1", type: "lark", settings: {}, lastWhoamiResult: WHOAMI }
+) {
   return { getAdapter: (async () => row) as never }
 }
 
@@ -46,12 +48,54 @@ describe("runPrincipalAdminIntent", () => {
     it("derives the relay redirect from the deployment's public base", async () => {
       const d = oauthDeps()
       const outcome = await runPrincipalAdminIntent({ adapterId: "lark-1", op: "oauth-begin" }, d)
-      expect(outcome).toEqual({ ok: true, result: AUTHORIZED })
+      // `kind` rides along so the CLI can name the right developer console.
+      expect(outcome).toEqual({ ok: true, result: { kind: "lark", ...AUTHORIZED } })
       // `/connectors` nest + the relay path — the address the Feishu console
       // must have registered for a self-hosted install.
       expect(d.beginOAuth).toHaveBeenCalledWith({
         adapterId: "lark-1",
         redirectUri: "https://cognia.example/connectors/oauth/lark/callback",
+      })
+    })
+
+    it("routes a Slack adapter to the Slack begin, on the Slack relay path", async () => {
+      // The wire frame only carries `adapterId`; the platform comes from the
+      // adapter's own row, so an operator cannot point the wrong begin at it.
+      const beginSlack = jest.fn(async () => ({
+        authorizeUrl: "https://slack.com/oauth/v2/authorize?x=1",
+        state: "slack:sl-1:nonce",
+        redirectUri: "https://cognia.example/connectors/oauth/connector/slack/callback",
+      }))
+      const d = oauthDeps({
+        ...deps({ id: "sl-1", type: "slack", settings: {} }),
+        beginSlackOAuth: beginSlack as never,
+      })
+
+      const outcome = await runPrincipalAdminIntent({ adapterId: "sl-1", op: "oauth-begin" }, d)
+
+      expect(beginSlack).toHaveBeenCalledWith({
+        adapterId: "sl-1",
+        // Slack gets the generic connector relay; Lark keeps its own path.
+        redirectUri: "https://cognia.example/connectors/oauth/connector/slack/callback",
+      })
+      expect(d.beginOAuth).not.toHaveBeenCalled()
+      expect(outcome).toMatchObject({ ok: true, result: { kind: "slack" } })
+    })
+
+    it("refuses a platform with no OAuth handler", async () => {
+      const d = oauthDeps(deps({ id: "tg-1", type: "telegram", settings: {} }))
+      expect(await runPrincipalAdminIntent({ adapterId: "tg-1", op: "oauth-begin" }, d)).toEqual({
+        ok: false,
+        error: "oauth_unsupported_for_kind",
+      })
+      expect(d.beginOAuth).not.toHaveBeenCalled()
+    })
+
+    it("refuses when the adapter row is gone", async () => {
+      const d = oauthDeps(deps(null))
+      expect(await runPrincipalAdminIntent({ adapterId: "gone", op: "oauth-begin" }, d)).toEqual({
+        ok: false,
+        error: "adapter_not_found",
       })
     })
 

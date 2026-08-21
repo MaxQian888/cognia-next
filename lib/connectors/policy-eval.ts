@@ -6,7 +6,7 @@
  * after a decision is made.
  */
 
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
+import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/event"
 import type { TriggerBlocker, TriggerPolicy, TriggerRule } from "@/types/connectors/policy"
 
 /**
@@ -62,15 +62,13 @@ function matchRule(rule: TriggerRule, event: NormalizedInboundEvent): boolean {
     case "self-mention":
       return event.mentions.selfMentioned
 
-    case "reply-to-bot": {
+    case "reply-to-bot":
       // Exact match: the replied-to message must have been authored by this
       // bot. `parentSenderId` is filled either by the adapter parser (when the
       // wire shape carries the parent author) or by the bus from the
       // delivered-message ledger before evaluation. Unknown parent ⇒ NOT a
       // reply to the bot (strict, never over-matches).
-      const parent = event.replyTo?.parentSenderId
-      return parent !== undefined && parent !== "" && parent === event.selfId
-    }
+      return isReplyToSelf(event)
 
     case "slash-command": {
       const text = event.plainText.trimStart()

@@ -249,6 +249,36 @@ describe('shouldRespondToMessage — strategy "mention_only"', () => {
     })
   })
 
+  it("allows an unmentioned group message that replies to one of OUR messages", () => {
+    const event = makeEvent({
+      kind: "create",
+      replyTo: { messageId: "bot_out_7", snippet: "…", parentSenderId: "bot-42" },
+    })
+    expect(shouldRespondToMessage(event, adapter)).toEqual({ allowed: true })
+  })
+
+  it("still denies a reply to somebody else's message", () => {
+    const event = makeEvent({
+      kind: "create",
+      replyTo: { messageId: "human_1", snippet: "…", parentSenderId: "user-9" },
+    })
+    expect(shouldRespondToMessage(event, adapter)).toEqual({
+      allowed: false,
+      reason: "at_mention_required",
+    })
+  })
+
+  it("still denies a reply whose parent author is unknown", () => {
+    const event = makeEvent({
+      kind: "create",
+      replyTo: { messageId: "unknown_1", snippet: "…" },
+    })
+    expect(shouldRespondToMessage(event, adapter)).toEqual({
+      allowed: false,
+      reason: "at_mention_required",
+    })
+  })
+
   it("allows DMs without a mention (DMs bypass the mention surface)", () => {
     const event = makeEvent({
       kind: "create",

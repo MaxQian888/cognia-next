@@ -28,7 +28,6 @@ jest.mock("./tabs/audit-tab", () => ({ AuditTab: () => <div>Audit</div> }))
 jest.mock("./tabs/conversations-tab", () => ({
   ConversationsTab: () => <div>Conversations</div>,
 }))
-jest.mock("./tabs/inbox-tab", () => ({ InboxTab: () => <div>Inbox</div> }))
 jest.mock("./tabs/inbox-assets-tab", () => ({ InboxAssetsTab: () => <div>Assets</div> }))
 
 import { ConnectionsSection } from "./connections-section"
@@ -53,6 +52,9 @@ describe("ConnectionsSection", () => {
     expect(screen.queryByRole("status", { name: /web mode banner/i })).not.toBeInTheDocument()
   })
 
+  // Tunnel folded into Overview and the standalone Inbox summary was dropped in
+  // favour of the /inbox route; both used to have their own tab here. The
+  // count plus the two name assertions are what stop either from creeping back.
   it("renders the seven operational tabs without duplicate Inbox or Tunnel tabs", () => {
     render(<ConnectionsSection />)
     expect(screen.getAllByRole("tab")).toHaveLength(7)

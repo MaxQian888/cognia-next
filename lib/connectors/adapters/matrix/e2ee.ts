@@ -21,7 +21,7 @@ import {
 import type { MatrixSyncResponse, MatrixTimelineEvent } from "./parse"
 
 type MatrixMethod = "GET" | "POST" | "PUT"
-type MatrixRequest = (
+export type MatrixRequest = (
   method: MatrixMethod,
   path: string,
   payload?: unknown

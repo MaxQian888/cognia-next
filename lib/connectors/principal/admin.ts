@@ -50,7 +50,14 @@ export interface PrincipalAdminDependencies {
   revokeSessions: typeof revokeWebSessionsForPrincipal
 }
 
-function withDefaults(
+/**
+ * The complete dependency bundle, with every default filled in.
+ *
+ * Exported because `bootstrap.ts` needs the same bundle and used to hand-roll a
+ * partial copy of it — which silently omitted `revokeSessions` and only stayed
+ * upright because its own code path never reached that dependency.
+ */
+export function withDefaults(
   overrides: Partial<PrincipalAdminDependencies> = {}
 ): PrincipalAdminDependencies {
   return {
