@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 /// Envelope the app process ships to the out-of-process monitor via
 /// `KIND_META`, so a later native crash can be rendered with the same context
-/// + application state the in-process panic path would have used. The monitor
+/// and application state the in-process panic path would have used. The monitor
 /// supplies `system` itself (same machine), so it isn't carried here.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

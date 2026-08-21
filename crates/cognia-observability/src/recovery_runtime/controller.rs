@@ -7,9 +7,7 @@
 
 use std::sync::Mutex;
 
-use crate::event::{
-    ObservabilityPayload, ObservabilityRuntime, ObservabilitySeverity,
-};
+use crate::event::{ObservabilityPayload, ObservabilityRuntime, ObservabilitySeverity};
 use crate::recovery::{
     ChildAction, RecoveryMode, RecoveryStateV1, RecoverySubsystem, RendererAction,
 };

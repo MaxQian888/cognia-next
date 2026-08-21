@@ -92,7 +92,18 @@ cognia-terminal = { path = "../crates/cognia-terminal" }
 # Background-job supervisor — the non-interactive sibling of cognia-terminal.
 # Owns `bash(run_in_background)` and scheduled-task background work.
 cognia-jobs = { path = "../crates/cognia-jobs" }
-cognia-observability = { path = "../crates/cognia-observability" }
+# ADR-0067 Tier C — `desktop-host` carries the crash/logging/telemetry cluster
+# that moved out of this crate; it is off by default there so cognia-cli stays
+# lean. The move also took `fern`, `tracing-subscriber`, `crash-handler`,
+# `minidumper`, the four OpenTelemetry crates and the per-OS log sinks
+# (`oslog`/`eventlog`/`syslog`/`libsystemd`) out of this manifest.
+cognia-observability = { path = "../crates/cognia-observability", features = ["desktop-host"] }
+# The Rust CODE that uses `tauri-plugin-log` moved into cognia-observability
+# with it, but this declaration must STAY: `tauri-build` harvests plugin
+# permission sets from the app crate's DIRECT dependencies, and
+# `capabilities/default.json` asks for `log:default`. Dropping it fails the
+# build with `Permission log:default not found`.
+tauri-plugin-log = "2"
 cognia-headless-contract = { path = "../crates/cognia-headless-contract" }
 # ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
 # stays as an app-side facade holding the top-level command surface.
@@ -151,19 +162,16 @@ log = "0.4"
 # (`src-tauri/src/browser/embedded.rs`). Pinned exactly because unstable APIs
 # may shift across minor versions.
 tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
-tauri-plugin-log = "2"
 
 # Native logging — fern dispatch chain mirrors records into the OS-native
 # platform logger; chrono for ISO-8601 timestamps in readiness payloads;
 # once_cell for the global readiness state behind a Mutex.
-fern = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
 # Structured tracing layer (separate native subscriber; tauri-plugin-log keeps
 # ownership of the global `log` logger — we never call LogTracer::init). Emits
 # JSON to cognia-structured.log, gated by a runtime-mutable per-target filter.
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 # Crash-report System Details (OS version / memory / CPU). Pinned to 0.33 —
 # the latest line bumped its MSRV to 1.95, above our 1.93 toolchain pin
 # (`rust-toolchain.toml`). Only the `system` feature is needed; disabling the
@@ -238,10 +246,6 @@ fontdb = "0.24"
 regex = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart", "form"] }
-opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
-tracing-opentelemetry = { version = "0.33", optional = true }
 # `tokio-socks` / `tokio-rustls` were direct declarations no `src-tauri/src`
 # file ever named; reqwest's `socks` / `rustls` features pull them transitively.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
@@ -399,15 +403,12 @@ tauri-plugin-cli = "2"
 # Mach ports); `minidumper` writes the minidump out-of-process from a sibling
 # monitor. Desktop-only — mobile shells (Capacitor) never compile this crate,
 # and the code is additionally `#[cfg(desktop)]`-gated in `crash::monitor`.
-crash-handler = "0.8"
-minidumper = "0.11"
 
 # Platform-native logging backends + UI automation back-ends.
 [target."cfg(target_os = \"windows\")".dependencies]
 # Real OS credential store (Windows Credential Manager) — see the keyring
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "4", features = ["windows-native-keyring-store"] }
-eventlog = "0.4"
 # Codex App exposes its app-server control plane over a Unix-domain socket on
 # every desktop platform. Windows needs the same compatibility stack Codex
 # itself uses for that socket transport.
@@ -443,7 +444,6 @@ block2 = "0.6"
 # Real OS credential store (macOS/iOS Keychain) — see the keyring note in
 # [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
-oslog = "0.2"
 # ADR-0067 Phase 5 — `enigo` and the skill-recorder CGEventTap hook moved to
 # `crates/cognia-automation`. `core-graphics` / `core-foundation` stay: the pet
 # overlay (`pet_window/surfaces.rs`) and `power_assertion.rs` use them directly.
@@ -495,8 +495,6 @@ libc = "0.2"
 # Chosen over `linux-native` (kernel keyutils) because keyutils is wiped on
 # reboot, which would lose stored bot credentials.
 keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
-libsystemd = "0.7"
-syslog = "7"
 # ADR-0067 Phase 5 — `enigo` (atspi input sim) + `seccompiler` (bwrap seccomp
 # filter) moved to `crates/cognia-automation`.
 
@@ -527,26 +525,21 @@ agent-debug = []
 webrtc-harness = []
 # ADR-0073 — native OTLP trace/metric export is deliberately opt-in so the
 # OpenTelemetry dependency graph does not slow normal desktop development.
-otel-export = [
-  "dep:opentelemetry",
-  "dep:opentelemetry_sdk",
-  "dep:opentelemetry-otlp",
-  "dep:tracing-opentelemetry",
-]
+otel-export = ["cognia-observability/otel-export"]
 # Cross-platform Tesseract via the local `tesseract` CLI. The feature links
 # no native library; runtime availability depends on the executable being
 # installed on PATH or packaged by the app shell.
 # ADR-0067 Phase 3 — these forward to the extracted `cognia-ocr` crate, which
 # owns the real ocrs/rten/oar-ocr/ort/image optional deps.
-ocr-tesseract = ["cognia-ocr/ocr-tesseract"]
+ocr-tesseract = ["cognia-ocr/ocr-tesseract", "cognia-observability/ocr-tesseract"]
 # Windows.Media.Ocr — requires MSIX package identity; see `tauri.conf.json`.
-ocr-windows = ["cognia-ocr/ocr-windows"]
+ocr-windows = ["cognia-ocr/ocr-windows", "cognia-observability/ocr-windows"]
 # Apple Vision needs no feature — `cognia-ocr` wires Vision.framework
 # in-process whenever the target is macOS.
 # Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
-ocr-ocrs = ["cognia-ocr/ocr-ocrs"]
+ocr-ocrs = ["cognia-ocr/ocr-ocrs", "cognia-observability/ocr-ocrs"]
 # PaddleOCR PP-OCRv6 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
-ocr-paddle = ["cognia-ocr/ocr-paddle"]
+ocr-paddle = ["cognia-ocr/ocr-paddle", "cognia-observability/ocr-paddle"]
 # ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
 # (T2 topology). Off desktop builds: only the headless `cognia-server` image
 # enables it, so the Docker client never enters the Tauri binary.

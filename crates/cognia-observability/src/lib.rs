@@ -1,3 +1,22 @@
+// ADR-0067 Tier C — the desktop observability host moved in from `app_lib`:
+// `crash` (out-of-process minidump monitor, panic hook, report retention,
+// submission), `logging` (tauri-plugin-log bootstrap, the per-OS native log
+// sinks, tracing setup) and `telemetry` (OTLP export + traceparent).
+//
+// Landing all three here dissolves two dependency cycles that could not be
+// broken while they lived in `app_lib`: `logging` <-> `crash` and
+// `logging` <-> `telemetry` are now plain intra-crate module references.
+//
+// They sit behind `desktop-host` so `cognia-cli` — which links this crate
+// only for `diagnostic_package`/`diagnostic_submit` — never pulls tauri,
+// tokio, reqwest or the minidump stack.
+#[cfg(feature = "desktop-host")]
+pub mod crash;
+#[cfg(feature = "desktop-host")]
+pub mod logging;
+#[cfg(feature = "desktop-host")]
+pub mod telemetry;
+
 pub mod diagnostic_package;
 pub mod diagnostic_submit;
 pub mod event;

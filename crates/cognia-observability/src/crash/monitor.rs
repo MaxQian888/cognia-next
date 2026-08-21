@@ -10,19 +10,24 @@
 //! messages, so the monitor can render a companion `.txt`/`.json` next to the
 //! `.dmp` in the same MC-style layout as panic reports.
 
-#[cfg(desktop)]
+// ADR-0067 Tier C: this was `#[cfg(desktop)]`, a cfg emitted by tauri-build's
+// build script. A plain library crate never receives it, so keeping it here
+// would have silently reduced the whole monitor to the no-op stubs below
+// instead of failing to compile. The predicate below is what `desktop` means
+// and is exactly how `crash-handler`/`minidumper` are gated in Cargo.toml.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use desktop_impl::{install_client, maybe_run_monitor, send_meta};
 
-#[cfg(not(desktop))]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn maybe_run_monitor() -> bool {
     false
 }
-#[cfg(not(desktop))]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn install_client() {}
-#[cfg(not(desktop))]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn send_meta(_bytes: &[u8]) {}
 
-#[cfg(desktop)]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_impl {
     use crate::crash::report::{self, CrashKind, CrashReport, MonitorMeta};
     use crate::crash::system_info;

@@ -12,13 +12,13 @@
 //! desktop CSP would block the request at the far end anyway.
 //!
 //! The upload sequence itself is not implemented here — it is
-//! `cognia_observability::diagnostic_submit`, shared with the CLI so both
+//! `crate::diagnostic_submit`, shared with the CLI so both
 //! speak the same protocol. This file supplies the transport (the app's proxy
 //! policy) and the local bookkeeping.
 
 use std::path::{Path, PathBuf};
 
-use cognia_observability::{
+use crate::{
     create_diagnostic_package, delete_incident, exchange_installation_grant, fetch_receipt,
     installation_key_path, submit_package, withdraw_consent, AttachmentInput, AttachmentKind,
     DiagnosticPackageInput, DiagnosticTransport, HttpRequest, HttpResponse, InstallationIdentity,
@@ -103,7 +103,7 @@ impl DiagnosticTransport for NativeTransport {
             .method
             .parse()
             .map_err(|_| format!("invalid HTTP method {}", request.method))?;
-        let (builder, _route) = crate::proxy_config::apply_reqwest_policy(
+        let (builder, _route) = cognia_net::proxy_config::apply_reqwest_policy(
             reqwest::Client::builder().timeout(std::time::Duration::from_secs(120)),
             &request.url,
         )
@@ -778,7 +778,7 @@ mod tests {
         )
         .unwrap();
         assert!(!without.included_minidump);
-        let (_, parts) = cognia_observability::read_package_parts(&without.path).unwrap();
+        let (_, parts) = crate::read_package_parts(&without.path).unwrap();
         let kinds: Vec<&str> = parts.iter().map(|part| part.artifact_kind).collect();
         assert_eq!(kinds, vec!["manifest", "events", "attachment"]);
 
@@ -795,7 +795,7 @@ mod tests {
         )
         .unwrap();
         assert!(with.included_minidump);
-        let (_, parts) = cognia_observability::read_package_parts(&with.path).unwrap();
+        let (_, parts) = crate::read_package_parts(&with.path).unwrap();
         let kinds: Vec<&str> = parts.iter().map(|part| part.artifact_kind).collect();
         // A whitespace-only description contributes nothing rather than an
         // empty attachment.
@@ -823,7 +823,7 @@ mod tests {
             &identity,
         )
         .unwrap();
-        let (manifest, _) = cognia_observability::read_package_parts(&built.path).unwrap();
+        let (manifest, _) = crate::read_package_parts(&built.path).unwrap();
         assert!(manifest
             .inventory()
             .iter()

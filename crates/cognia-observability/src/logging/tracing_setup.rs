@@ -324,8 +324,8 @@ mod tests {
         // INFO threshold: WARN/ERROR/INFO shown, DEBUG/TRACE hidden.
         assert!(Level::WARN <= st.default_level);
         assert!(Level::INFO <= st.default_level);
-        assert!(!(Level::DEBUG <= st.default_level));
-        assert!(!(Level::TRACE <= st.default_level));
+        assert!(Level::DEBUG > st.default_level);
+        assert!(Level::TRACE > st.default_level);
     }
 
     #[test]

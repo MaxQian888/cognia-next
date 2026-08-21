@@ -119,8 +119,8 @@ pub fn prune_crash_reports(
 
     // 1) Age sweep — only stems with a parseable, older-than-cutoff timestamp.
     let aged: Vec<String> = groups
-        .iter()
-        .filter_map(|(stem, _)| match stem_timestamp(stem) {
+        .keys()
+        .filter_map(|stem| match stem_timestamp(stem) {
             Some(ts) if ts < cutoff => Some(stem.clone()),
             _ => None,
         })

@@ -232,7 +232,7 @@ mod tests {
     }
 
     fn controller_ptr() -> Option<*const RecoveryController> {
-        super::controller().map(|controller| Arc::as_ptr(controller))
+        super::controller().map(Arc::as_ptr)
     }
 
     #[test]

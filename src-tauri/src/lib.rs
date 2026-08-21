@@ -50,8 +50,15 @@ pub mod companion_api;
 // matrix-sdk E2EE stack); re-aliased so `crate::connectors::…` (companion_api,
 // plugin_api, headless, generate_handler! + .manage()) resolves unchanged.
 pub use cognia_connectors as connectors;
-pub mod crash;
+// ADR-0067 — extracted to `crates/cognia-automation`; re-aliased so the
+// `cua_sandbox::cua_sandbox_*` entries in generate_handler! resolve unchanged.
 pub use cognia_automation::cua_sandbox;
+// ADR-0067 Tier C — extracted to `crates/cognia-observability` (behind its
+// `desktop-host` feature). Re-aliased so `crash::commands::…` /
+// `crash::submit::…` in generate_handler!, the setup hook's
+// `crash::install_app_handle` / `crash::sentinel` / `crash::retention` calls
+// and `shutdown.rs` all resolve unchanged.
+pub use cognia_observability::crash;
 // ADR-0067 follow-up — extracted to `crates/cognia-external-agent` (isolates
 // the optional bollard/kube stacks); re-aliased so `crate::external_agent::…`
 // (companion_api rpc, headless, claude, generate_handler!) resolves unchanged.
@@ -80,7 +87,11 @@ mod hooks;
 // shares it). Thin: the substrate itself lives in `crates/cognia-jobs`.
 pub mod jobs;
 mod keyring_secrets;
-mod logging;
+// ADR-0067 Tier C — extracted alongside `crash`, which dissolves the
+// `logging` <-> `crash` and `logging` <-> `telemetry` cycles. Re-aliased for
+// `logging::tracing_setup::init()`, `logging::commands::…` and the
+// `logging::query::…` reads in `companion_api/rpc/diagnostics.rs`.
+pub use cognia_observability::logging;
 
 /// Install Cognia's structured tracing subscriber for non-Tauri entrypoints.
 ///
@@ -170,7 +181,11 @@ mod subscription;
 // headless/brain) resolves unchanged.
 pub use cognia_core::supervision_backoff;
 pub mod task_workspace;
-mod telemetry;
+// ADR-0067 Tier C — extracted alongside `logging`; re-aliased so
+// `telemetry::telemetry_*` in generate_handler! and the `set_parent` /
+// `sidecar_env` / `validate_traceparent` call sites in `claude` and
+// `companion_api` resolve unchanged.
+pub use cognia_observability::telemetry;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
 // `crate::terminal::…` (companion_api rpc/ws_terminal, plugin_api cli_exec,
 // generate_handler! + .manage()) resolves unchanged.

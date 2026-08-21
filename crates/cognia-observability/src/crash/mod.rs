@@ -59,7 +59,9 @@ pub fn install_app_handle(handle: AppHandle) {
     let _ = APP_HANDLE.set(handle);
 }
 
-pub(crate) fn app_handle() -> Option<AppHandle> {
+/// `pub` across the crate boundary (ADR-0067 Tier C): the built-in hooks
+/// runner in `app_lib` reads the published handle.
+pub fn app_handle() -> Option<AppHandle> {
     APP_HANDLE.get().cloned()
 }
 

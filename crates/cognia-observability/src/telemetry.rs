@@ -72,7 +72,9 @@ fn parse_otlp_headers(value: &str) -> Result<HashMap<String, String>, String> {
     Ok(headers)
 }
 
-pub(crate) fn validate_traceparent(value: &str) -> Option<String> {
+/// `pub` across the crate boundary (ADR-0067 Tier C): `companion_api`'s
+/// remote-execution path validates inbound traceparents and stayed app-side.
+pub fn validate_traceparent(value: &str) -> Option<String> {
     let value = value.trim();
     let mut parts = value.split('-');
     let version = parts.next()?;
@@ -183,10 +185,10 @@ fn build_headers(
     let secret = match &credential {
         TelemetryCredential::None => None,
         TelemetryCredential::GrafanaCloud { .. } => {
-            crate::secret_store::get(TELEMETRY_SECRET_NAMESPACE, GRAFANA_API_TOKEN_KEY)?
+            cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, GRAFANA_API_TOKEN_KEY)?
         }
         TelemetryCredential::Langfuse { .. } => {
-            crate::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)?
+            cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, LANGFUSE_SECRET_KEY)?
         }
         TelemetryCredential::Posthog { .. } => None,
     };
@@ -253,17 +255,17 @@ pub async fn telemetry_secret_set(kind: TelemetrySecretKind, value: String) -> R
     if value.is_empty() {
         return Err("telemetry secret must not be empty".to_string());
     }
-    crate::secret_store::set(TELEMETRY_SECRET_NAMESPACE, kind.key(), &value)
+    cognia_secrets::secret_store::set(TELEMETRY_SECRET_NAMESPACE, kind.key(), &value)
 }
 
 #[tauri::command]
 pub async fn telemetry_secret_has(kind: TelemetrySecretKind) -> Result<bool, String> {
-    Ok(crate::secret_store::get(TELEMETRY_SECRET_NAMESPACE, kind.key())?.is_some())
+    Ok(cognia_secrets::secret_store::get(TELEMETRY_SECRET_NAMESPACE, kind.key())?.is_some())
 }
 
 #[tauri::command]
 pub async fn telemetry_secret_clear(kind: TelemetrySecretKind) -> Result<(), String> {
-    crate::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, kind.key())
+    cognia_secrets::secret_store::delete(TELEMETRY_SECRET_NAMESPACE, kind.key())
 }
 
 #[tauri::command]
@@ -284,7 +286,7 @@ pub async fn telemetry_otlp_export(
     }
     let headers = build_headers(headers, credential)?;
     let builder = reqwest::Client::builder().timeout(EXPORT_TIMEOUT);
-    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
+    let (builder, _) = cognia_net::proxy_config::apply_reqwest_policy(builder, endpoint.as_str())
         .map_err(|error| error.to_string())?;
     let client = builder
         .build()
@@ -445,6 +447,10 @@ pub use native_otel::{configure_exporter, disable_exporter, init_tracer, set_par
 #[cfg(not(feature = "otel-export"))]
 pub fn set_parent(_span: &tracing::Span, _traceparent: Option<&str>) {}
 
+// The argument list is the IPC contract: the renderer invokes this command
+// with these exact named keys, so collapsing them into a struct would change
+// the payload shape rather than simplify anything.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn telemetry_configure_sidecar(
     enabled: bool,
@@ -680,7 +686,7 @@ mod tests {
 
     #[tokio::test]
     async fn native_export_reaches_a_local_collector_with_trace_context() {
-        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default())
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
             .expect("initialize proxy policy");
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let address = listener.local_addr().expect("address");

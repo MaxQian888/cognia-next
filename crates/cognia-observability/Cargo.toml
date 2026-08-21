@@ -6,6 +6,57 @@ rust-version = "1.82"
 license = "AGPL-3.0-or-later"
 publish = false
 
+[features]
+default = []
+# Marker features — they compile no code. `crash::system_info` reports which
+# OCR backends were linked into the binary, and after ADR-0067 Tier C that
+# report lives here while the real features live in `cognia-ocr`. `src-tauri`
+# enables both halves under one feature name, so the report stays truthful
+# instead of silently listing nothing. (`cognia-ocr` declares two of these as
+# markers too — the CLI-based backends link no crate.)
+ocr-tesseract = []
+ocr-windows = []
+ocr-ocrs = []
+ocr-paddle = []
+# ADR-0067 Tier C — the desktop crash/logging/telemetry host (`crash`,
+# `logging`, `telemetry`). OFF by default: `cognia-cli` links this crate only
+# for `diagnostic_package` / `diagnostic_submit`, and it is a deliberately lean
+# binary (ureq over reqwest, no tokio, no tracing). `src-tauri` turns it on.
+desktop-host = [
+  "dep:tauri",
+  "dep:tauri-plugin-log",
+  "dep:tauri-plugin-opener",
+  "dep:fern",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:sysinfo",
+  "dep:reqwest",
+  "dep:once_cell",
+  "dep:base64",
+  "dep:url",
+  "dep:tempfile",
+  "dep:cognia-automation",
+  "dep:cognia-instrument",
+  "dep:cognia-net",
+  "dep:cognia-secrets",
+  "dep:crash-handler",
+  "dep:minidumper",
+  "dep:eventlog",
+  "dep:oslog",
+  "dep:libsystemd",
+  "dep:syslog",
+]
+# ADR-0073 — native OTLP trace/metric export stays opt-in so the OpenTelemetry
+# graph does not slow normal desktop development. `src-tauri` forwards its own
+# `otel-export` here. Implies `desktop-host`: the only consumer is `telemetry`.
+otel-export = [
+  "desktop-host",
+  "dep:opentelemetry",
+  "dep:opentelemetry_sdk",
+  "dep:opentelemetry-otlp",
+  "dep:tracing-opentelemetry",
+]
+
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 # ADR-0067 Tier C — `recovery_runtime` moved in from `app_lib`: `dirs` for the
@@ -23,5 +74,51 @@ uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "5", default-features = false, features = ["deflate"] }
 zstd = "0.13"
 
+# --- ADR-0067 Tier C: the `desktop-host` cluster (all optional) ---
+tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"], optional = true }
+tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+fern = { version = "0.7", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"], optional = true }
+sysinfo = { version = "0.39", default-features = false, features = ["system"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream", "socks", "http2", "multipart", "form"], optional = true }
+once_cell = { version = "1", optional = true }
+base64 = { version = "0.23", optional = true }
+url = { version = "2", optional = true }
+# `crash::submit` stages a package in a TempDir at runtime — not a dev-only dep.
+tempfile = { version = "3", optional = true }
+# The crash reporter attaches a screenshot; telemetry feeds the metrics registry.
+cognia-automation = { path = "../cognia-automation", optional = true }
+cognia-instrument = { path = "../cognia-instrument", optional = true }
+# `proxy_config` for outbound uploads, `secret_store` for the telemetry token.
+cognia-net = { path = "../cognia-net", optional = true }
+cognia-secrets = { path = "../cognia-secrets", optional = true }
+# --- ADR-0073 OTLP export (optional, see [features]) ---
+opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
+tracing-opentelemetry = { version = "0.33", optional = true }
+
+# The out-of-process minidump monitor. Gated exactly as in src-tauri; the
+# `#[cfg(...)]` in `crash/monitor.rs` mirrors this predicate (it used to read
+# `#[cfg(desktop)]`, which only tauri-build emits).
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+crash-handler = { version = "0.8", optional = true }
+minidumper = { version = "0.11", optional = true }
+
+[target."cfg(target_os = \"windows\")".dependencies]
+eventlog = { version = "0.4", optional = true }
+
+[target."cfg(target_os = \"macos\")".dependencies]
+oslog = { version = "0.2", optional = true }
+
+[target."cfg(target_os = \"linux\")".dependencies]
+libsystemd = { version = "0.7", optional = true }
+syslog = { version = "7", optional = true }
+
 [dev-dependencies]
+# `telemetry`'s OTLP export tests stand up a loopback TCP listener. tokio is
+# test-only here: the production paths use `tauri::async_runtime`.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "net"] }
 tempfile = "3"

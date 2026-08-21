@@ -126,4 +126,27 @@ mod tests {
             assert!(known.contains(&f.as_str()), "unexpected feature: {f}");
         }
     }
+
+    /// The converse of the subset check above, which passes trivially on an
+    /// EMPTY list — which is exactly how this broke during ADR-0067 Tier C.
+    /// The `ocr-*` cfgs read features of THIS crate, but the real ones live in
+    /// `cognia-ocr`; when the module moved out of `app_lib` the report silently
+    /// went blank. `src-tauri` now enables a marker feature here under the same
+    /// name, and this pins that forwarding.
+    #[test]
+    fn every_enabled_ocr_marker_is_reported() {
+        let reported = enabled_features();
+        for (enabled, name) in [
+            (cfg!(feature = "ocr-tesseract"), "ocr-tesseract"),
+            (cfg!(feature = "ocr-windows"), "ocr-windows"),
+            (cfg!(feature = "ocr-ocrs"), "ocr-ocrs"),
+            (cfg!(feature = "ocr-paddle"), "ocr-paddle"),
+        ] {
+            assert_eq!(
+                enabled,
+                reported.iter().any(|f| f == name),
+                "{name}: compiled-in state and crash-report state disagree"
+            );
+        }
+    }
 }
