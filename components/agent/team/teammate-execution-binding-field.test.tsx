@@ -4,10 +4,8 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { TeammateExecutionBindingField } from "./teammate-execution-binding-field"
 
 const flags: Record<string, boolean> = {
-  agentExecutionResolverV2: false,
   agentTeamRemoteDispatch: false,
 }
-let taskWorkspace = false
 let hosts: Array<Record<string, unknown>> = []
 
 jest.mock("next-intl", () => ({
@@ -21,7 +19,7 @@ jest.mock("@/hooks/fleet/use-fleet-snapshot", () => ({
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
-    selector({ settings: { developer: { taskWorkspace } } }),
+    selector({ settings: { developer: {} } }),
 }))
 jest.mock("@/components/ui/select", () => ({
   ...(() => {
@@ -64,9 +62,7 @@ jest.mock("@/components/ui/select", () => ({
 
 describe("TeammateExecutionBindingField remote prerequisites", () => {
   beforeEach(() => {
-    flags.agentExecutionResolverV2 = false
     flags.agentTeamRemoteDispatch = false
-    taskWorkspace = false
     hosts = []
   })
 
@@ -84,9 +80,7 @@ describe("TeammateExecutionBindingField remote prerequisites", () => {
   })
 
   it("enables only profile-ready remote hosts after all gates are active", () => {
-    flags.agentExecutionResolverV2 = true
     flags.agentTeamRemoteDispatch = true
-    taskWorkspace = true
     hosts = [
       { hostRef: "device:ready", online: true, placementReady: true },
       { hostRef: "device:legacy", online: true, placementReady: false },
@@ -101,29 +95,23 @@ describe("TeammateExecutionBindingField remote prerequisites", () => {
     expect(screen.getByRole("button", { name: "hostPinnedOffline" })).toBeDisabled()
   })
 
+  // Task Workspace is GA, so it is no longer one of the axes: what remains is
+  // the remote-dispatch flag and a placement-ready worker.
   it.each([
-    [true, false, true, true],
-    [true, true, false, true],
-    [true, true, true, false],
-  ])(
-    "keeps remote auto disabled when one prerequisite is missing",
-    (resolver, dispatch, workspace, profile) => {
-      flags.agentExecutionResolverV2 = resolver
-      flags.agentTeamRemoteDispatch = dispatch
-      taskWorkspace = workspace
-      hosts = profile ? [{ hostRef: "device:ready", online: true, placementReady: true }] : []
-      const { unmount } = render(
-        <TeammateExecutionBindingField value={undefined} onChange={jest.fn()} />
-      )
-      expect(screen.getByRole("button", { name: "hostAuto" })).toBeDisabled()
-      unmount()
-    }
-  )
+    [false, true],
+    [true, false],
+  ])("keeps remote auto disabled when one prerequisite is missing", (dispatch, profile) => {
+    flags.agentTeamRemoteDispatch = dispatch
+    hosts = profile ? [{ hostRef: "device:ready", online: true, placementReady: true }] : []
+    const { unmount } = render(
+      <TeammateExecutionBindingField value={undefined} onChange={jest.fn()} />
+    )
+    expect(screen.getByRole("button", { name: "hostAuto" })).toBeDisabled()
+    unmount()
+  })
 
   it("labels an advertised offline host and preserves the waiting warning", () => {
-    flags.agentExecutionResolverV2 = true
     flags.agentTeamRemoteDispatch = true
-    taskWorkspace = true
     hosts = [{ hostRef: "device:offline", online: false, placementReady: true }]
     render(
       <TeammateExecutionBindingField
@@ -140,9 +128,7 @@ describe("TeammateExecutionBindingField remote prerequisites", () => {
   })
 
   it("routes binding, host, policy, and ref edits through the shared field", () => {
-    flags.agentExecutionResolverV2 = true
     flags.agentTeamRemoteDispatch = true
-    taskWorkspace = true
     hosts = [{ hostRef: "device:ready", online: true, placementReady: true }]
     const onChange = jest.fn()
     const { rerender } = render(

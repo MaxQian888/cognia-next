@@ -11,7 +11,7 @@
  */
 import { getSettings } from "@/lib/db/settings"
 import { getDb } from "@/lib/db/schema"
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { APP_VERSION } from "@/lib/app-version"
 import {
   configureBehaviorTelemetrySettings,
@@ -180,7 +180,10 @@ registerHeadlessRuntime({
     }
 
     configureBehaviorTelemetrySettings(await loadPolicy())
-    const subscription = liveQuery(loadPolicy).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const subscription = Dexie.liveQuery(loadPolicy).subscribe({
       next: (policy) => configureBehaviorTelemetrySettings(policy),
       error: (error) =>
         ctx.log(

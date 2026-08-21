@@ -133,8 +133,15 @@ export interface ProtocolAdapter {
 
   /**
    * Optional: Get session model state (ACP)
+   *
+   * Synchronous for ACP, which keeps the state locally. `PiRpcClientAdapter`
+   * implements it with two RPC round-trips instead, so the promise form is part
+   * of the contract — and {@link AgentManager.getSessionModels} rejects it as
+   * unsupported rather than handing a pending promise back as model state.
    */
-  getSessionModels?: (sessionId: string) => AcpSessionModelState | undefined
+  getSessionModels?: (
+    sessionId: string
+  ) => AcpSessionModelState | undefined | Promise<AcpSessionModelState | undefined>
 
   /**
    * Optional: Set a session config option (ACP)
@@ -150,7 +157,14 @@ export interface ProtocolAdapter {
    * Optional: Get session config options (ACP)
    * @see https://agentclientprotocol.com/protocol/session-config-options
    */
-  getConfigOptions?: (sessionId: string) => AcpConfigOption[] | undefined
+  /**
+   * Synchronous for ACP; `PiRpcClientAdapter` asks the process instead, so the
+   * promise form is part of the contract. {@link AgentManager.getConfigOptions}
+   * reports a promise as unsupported rather than passing it off as the list.
+   */
+  getConfigOptions?: (
+    sessionId: string
+  ) => AcpConfigOption[] | undefined | Promise<AcpConfigOption[] | undefined>
 
   /**
    * Optional: Append user input to the session's in-flight turn without

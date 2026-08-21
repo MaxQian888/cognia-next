@@ -2,7 +2,6 @@
 import "fake-indexeddb/auto"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
-import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
 
 import { startHeadlessWorkOutbox, startRendererWorkOutbox } from "./bootstrap"
 
@@ -15,24 +14,11 @@ jest.mock("./terminal-events", () => ({
   }),
 }))
 
-jest.mock("@/lib/ai/agent/execution/feature-flags", () => ({
-  getAgentExecutionFlags: jest.fn(() => ({ durableWorkSubmission: false })),
-}))
-
-const flags = getAgentExecutionFlags as jest.MockedFunction<typeof getAgentExecutionFlags>
-
-function enable(enabled: boolean) {
-  flags.mockReturnValue({ durableWorkSubmission: enabled } as ReturnType<
-    typeof getAgentExecutionFlags
-  >)
-}
-
 describe("work outbox bootstrap", () => {
   beforeEach(async () => {
     await getDb().delete()
     __resetDbForTesting()
     jest.useFakeTimers()
-    enable(false)
     stopTerminalEvents.mockClear()
   }, 30_000)
 
@@ -43,19 +29,7 @@ describe("work outbox bootstrap", () => {
   it.each([
     ["renderer", startRendererWorkOutbox],
     ["headless", startHeadlessWorkOutbox],
-  ])("%s start is a no-op while the feature is off", (_label, start) => {
-    const listClaimable = jest.fn(async () => [])
-    const stop = start({ listClaimable })
-    expect(listClaimable).not.toHaveBeenCalled()
-    // Still returns a callable teardown so a React effect cleanup is safe.
-    expect(() => stop()).not.toThrow()
-  })
-
-  it.each([
-    ["renderer", startRendererWorkOutbox],
-    ["headless", startHeadlessWorkOutbox],
-  ])("%s sweeps immediately once the feature is on", (_label, start) => {
-    enable(true)
+  ])("%s sweeps immediately on start", (_label, start) => {
     const listClaimable = jest.fn(async () => [])
     const stop = start({ listClaimable })
     expect(listClaimable).toHaveBeenCalledTimes(1)
@@ -63,7 +37,6 @@ describe("work outbox bootstrap", () => {
   })
 
   it("stops sweeping after teardown", () => {
-    enable(true)
     const listClaimable = jest.fn(async () => [])
     const stop = startRendererWorkOutbox({ listClaimable })
     stop()
@@ -75,7 +48,6 @@ describe("work outbox bootstrap", () => {
   it("logs a sweep failure through the default error reporter", async () => {
     // Without an injected reporter a failing sweep must still surface; a silent
     // recovery loop is indistinguishable from a working one.
-    enable(true)
     jest.useRealTimers()
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => {})
     try {
@@ -95,7 +67,6 @@ describe("work outbox bootstrap", () => {
   }, 30_000)
 
   it("parks a legacy row that lacks the frozen payload needed by production dispatch", async () => {
-    enable(true)
     jest.useRealTimers()
 
     const row = {

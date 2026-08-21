@@ -9,8 +9,7 @@
  * and classified via `decideDelegationMode` (the registry-time native filter
  * in `lib/claude/agents/subagents` is that decision's conservative
  * projection). Refs only: this field never accepts endpoints or key
- * material. While `agentExecutionResolverV2` is off, dispatch ignores the
- * binding — the field says so inline (flagOffHint).
+ * material.
  */
 
 import { useMemo } from "react"
@@ -33,7 +32,6 @@ import { resolveTeammateExecutionBinding } from "@/lib/ai/agent/team/execution-b
 import { resolveAgentExecutionSpec } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionBinding } from "@/types/agent/agent-team"
 import { useFleetSnapshot } from "@/hooks/fleet/use-fleet-snapshot"
-import { useSettingsStore } from "@/stores/settings"
 
 export interface TeammateExecutionBindingFieldProps {
   value: TeammateExecutionBinding | undefined
@@ -47,11 +45,10 @@ const RUNTIME_AUTO = "__auto__"
 
 function previewDecision(
   value: TeammateExecutionBinding | undefined,
-  teamDefault: TeammateExecutionBinding | undefined,
-  resolverEnabled: boolean
+  teamDefault: TeammateExecutionBinding | undefined
 ) {
   const environment = { isTauri: true, isHeadlessHost: false }
-  const flags = { ...getAgentExecutionFlags(), agentExecutionResolverV2: resolverEnabled }
+  const flags = getAgentExecutionFlags()
   const base = {
     surface: "team" as const,
     environment,
@@ -71,11 +68,7 @@ export function TeammateExecutionBindingField({
 }: TeammateExecutionBindingFieldProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig.executionBinding")
   const { snapshot } = useFleetSnapshot()
-  const resolverEnabled = useAgentExecutionFlag("agentExecutionResolverV2")
   const remoteDispatchEnabled = useAgentExecutionFlag("agentTeamRemoteDispatch")
-  const taskWorkspaceEnabled = useSettingsStore(
-    (state) => state.settings?.developer?.taskWorkspace === true
-  )
 
   const mode = value?.mode ?? "inherit"
   const pinned = value?.mode === "pinned" ? value : undefined
@@ -85,13 +78,9 @@ export function TeammateExecutionBindingField({
   const pinnedHostRef = executionTarget.mode === "pinned" ? executionTarget.hostRef : undefined
   const hosts = snapshot.hosts ?? []
   const workerProfileReady = hosts.some((host) => host.online && host.placementReady === true)
-  const remoteReady =
-    resolverEnabled && remoteDispatchEnabled && taskWorkspaceEnabled && workerProfileReady
+  const remoteReady = remoteDispatchEnabled && workerProfileReady
 
-  const decision = useMemo(
-    () => previewDecision(value, teamDefault, resolverEnabled),
-    [resolverEnabled, teamDefault, value]
-  )
+  const decision = useMemo(() => previewDecision(value, teamDefault), [teamDefault, value])
 
   return (
     <div className="space-y-2">
@@ -107,11 +96,6 @@ export function TeammateExecutionBindingField({
         </Badge>
       </div>
       <p className="text-[10px] text-muted-foreground">{t("description")}</p>
-      {!resolverEnabled && (
-        <p className="text-[10px] text-amber-600 dark:text-amber-500" data-testid="flag-off-hint">
-          {t("flagOffHint")}
-        </p>
-      )}
       {!remoteReady && executionTarget.mode !== "colocate" ? (
         <p className="text-[10px] text-amber-600 dark:text-amber-500">
           {t("remotePrerequisitesHint")}

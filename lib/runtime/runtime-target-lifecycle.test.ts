@@ -38,19 +38,25 @@ it("runs composable participants in phase and priority order exactly once", asyn
     id: "late-capture",
     phase: "finalize-captures",
     priority: 20,
-    run: async () => order.push("capture-late"),
+    run: async () => {
+      order.push("capture-late")
+    },
   })
   const unregisterEarly = registerRuntimeTargetTransitionParticipant({
     id: "early-capture",
     phase: "finalize-captures",
     priority: 10,
-    run: async () => order.push("capture-early"),
+    run: async () => {
+      order.push("capture-early")
+    },
   })
   const unregisterRelease = registerRuntimeTargetTransitionParticipant({
     id: "release-perf",
     phase: "release-subscriptions",
     priority: 0,
-    run: async () => order.push("release"),
+    run: async () => {
+      order.push("release")
+    },
   })
 
   await runRuntimeTargetTransitionPhase("finalize-captures", {

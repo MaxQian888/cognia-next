@@ -24,7 +24,6 @@ const mockApplyCircuitBreakerSettings = jest.fn()
 const mockLiveSettingsState: { settings?: Record<string, unknown> } = {}
 const mockResolveProviderAttemptOptions = jest.fn()
 const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
-const mockRecordAgentExecutionShadow = jest.fn(async (..._args: unknown[]) => undefined)
 
 jest.mock("ai", () => ({ streamText: jest.fn() }))
 jest.mock("@/lib/ai/provider-consumption", () => ({
@@ -33,6 +32,20 @@ jest.mock("@/lib/ai/provider-consumption", () => ({
   createFeatureProviderModel: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
+// Task Workspace isolation is GA, so a config carrying `cwd` now always asks
+// the host for a run lease. This suite has no transport behind that call; a real
+// host without Task Workspace answers "unknown command", which
+// `beginTaskWorkspaceTurn` maps to `null` and the lease then runs in place.
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  withTaskWorkspaceRun: async (
+    input: { workspaceRoot?: string },
+    execute: (root: string) => Promise<unknown>
+  ) => ({
+    value: await execute(input.workspaceRoot ?? ""),
+    executionRoot: input.workspaceRoot ?? "",
+    trackingUnavailable: true,
+  }),
+}))
 jest.mock("@/lib/db/characters", () => ({ resolveCharacterById: jest.fn() }))
 jest.mock("@/lib/db/sessions", () => ({
   createSession: jest.fn(),
@@ -55,10 +68,6 @@ jest.mock("@/lib/claude/provider-attempt-options", () => ({
 }))
 jest.mock("@cognia/redact", () => ({
   hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
-}))
-jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
-  ...jest.requireActual("@/lib/ai/agent/execution/agent-execution-service"),
-  recordAgentExecutionShadow: (...args: unknown[]) => mockRecordAgentExecutionShadow(...args),
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
@@ -139,7 +148,6 @@ describe("executeAgent", () => {
     mockIsTauri.mockReturnValue(false)
     mockPlanRoute.mockResolvedValue(routingPlan())
     mockHasNoLeakingPiiDeep.mockReturnValue(true)
-    mockRecordAgentExecutionShadow.mockResolvedValue(undefined)
     mockResolveProviderAttemptOptions.mockResolvedValue({
       providerCredentials: { apiKey: "sk-fallback", protocol: "anthropic" },
     })
@@ -825,62 +833,59 @@ describe("executeAgent", () => {
     })
   })
 
-  describe("ADR-0090 resolver flag delegation", () => {
-    afterEach(() => {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
-    })
-
-    it("delegates to the unified service when agentExecutionResolverV2 is on", async () => {
-      process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
-      // Web environment (isTauri=false) + legacy toolsEnabled:true maps to the
-      // explicit completion fallback — the service runs the completion rail and
-      // stamps degradedReason instead of silently degrading.
+  describe("ADR-0090 unified-service delegation", () => {
+    it("stamps the resolved runtime onto every result", async () => {
       primeTextChannel(["ok"])
       const result = (await executeAgent("hi", { toolsEnabled: true })) as Awaited<
         ReturnType<typeof executeAgent>
-      > & { degradedReason?: string; runtime?: string }
+      > & { runtime?: string; executionFingerprint?: string }
       expect(result.text).toBe("ok")
-      expect(result.channel).toBe("text")
-      expect(result.degradedReason).toBe("legacy-completion-fallback")
       expect(result.runtime).toBe("claude-agent-sdk")
+      expect(result.executionFingerprint).toEqual(expect.any(String))
     })
 
-    it("keeps the legacy branch byte-identical when the flag is off", async () => {
+    // ADR-0090 retirement: `executeAgent` no longer owns rail selection — it
+    // delegates to the unified service. These pin that the delegation preserves
+    // the behavior the deleted legacy branch had, and that the one thing which
+    // DID change (the silent fallback is now labelled) is visible.
+    it("still falls back to the text channel when tools are asked for without a host", async () => {
       primeTextChannel(["ok"])
       const result = (await executeAgent("hi", { toolsEnabled: true })) as Awaited<
         ReturnType<typeof executeAgent>
       > & { degradedReason?: string }
       expect(result.text).toBe("ok")
       expect(result.channel).toBe("text")
+      expect(mockRunAndCapture).not.toHaveBeenCalled()
+    })
+
+    it("labels that fallback instead of degrading silently", async () => {
+      primeTextChannel(["legacy"])
+
+      const result = (await executeAgent("hi", { toolsEnabled: true })) as Awaited<
+        ReturnType<typeof executeAgent>
+      > & { degradedReason?: string; legacyMigrated?: boolean }
+
+      // The legacy branch returned the same text with no explanation of why the
+      // sidecar was skipped. The migration table (legacy-mapping.ts) maps
+      // `toolsEnabled: true` + no `requireTools` to
+      // `fallbackPolicy: "completion"`, so the outcome is unchanged — but it now
+      // says so.
+      expect(result.text).toBe("legacy")
+      expect(result.degradedReason).toBe("legacy-completion-fallback")
+      expect(result.legacyMigrated).toBe(true)
+    })
+
+    it("routes a plain completion with no degraded label at all", async () => {
+      primeTextChannel(["plain"])
+
+      const result = (await executeAgent("hi")) as Awaited<ReturnType<typeof executeAgent>> & {
+        degradedReason?: string
+      }
+
+      // `toolsEnabled` absent is an INTENTIONAL completion, not a degradation.
+      expect(result.text).toBe("plain")
+      expect(result.channel).toBe("text")
       expect(result.degradedReason).toBeUndefined()
-    })
-
-    it("records a shadow decision without changing the legacy result when the flag is off", async () => {
-      primeTextChannel(["legacy"])
-
-      await expect(executeAgent("hi", { toolsEnabled: true })).resolves.toMatchObject({
-        text: "legacy",
-        channel: "text",
-      })
-      await new Promise((resolve) => setTimeout(resolve, 0))
-
-      expect(mockRecordAgentExecutionShadow).toHaveBeenCalledWith(
-        expect.objectContaining({ toolsEnabled: true }),
-        {
-          isTauri: false,
-          isHeadlessHost: false,
-        }
-      )
-    })
-
-    it("swallows shadow-recording failures so the legacy path stays available", async () => {
-      mockRecordAgentExecutionShadow.mockRejectedValue(new Error("shadow store unavailable"))
-      primeTextChannel(["legacy"])
-
-      await expect(executeAgent("hi")).resolves.toMatchObject({ text: "legacy", channel: "text" })
-      await new Promise((resolve) => setTimeout(resolve, 0))
-
-      expect(mockRecordAgentExecutionShadow).toHaveBeenCalledTimes(1)
     })
   })
 })

@@ -21,7 +21,6 @@ const UNSERVED_BY_PARENT = (() => {
 })()
 
 const flags: Record<AgentExecutionFlag, boolean> = {
-  agentExecutionResolverV2: true,
   agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,

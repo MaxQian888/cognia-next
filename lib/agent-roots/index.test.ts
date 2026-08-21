@@ -29,6 +29,8 @@ const DESKTOP_ROOTS: VendorRoots = {
   opencodeDataDir: "/xdg/data/opencode",
   piAgentDir: "/custom/pi-agent",
   piSessionDir: "/custom/pi-agent/sessions",
+  geminiDir: "/custom/gemini",
+  continueDir: "/custom/continue",
 }
 
 beforeEach(() => {
@@ -49,6 +51,12 @@ describe("vendorRootsFromHome", () => {
       opencodePlatformDataDir: "/home/u/.local/share/opencode",
       piAgentDir: "/home/u/.pi/agent",
       piSessionDir: "/home/u/.pi/agent/sessions",
+      // Home-relative on every OS: no relocation variable for either vendor is
+      // confirmed upstream, so declaring one would be a promise this resolver
+      // does not keep. Carrying the roots at all is what stops the two session
+      // adapters deriving their own paths from a bare home.
+      geminiDir: "/home/u/.gemini",
+      continueDir: "/home/u/.continue",
     })
   })
 

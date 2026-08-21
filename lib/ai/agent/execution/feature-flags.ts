@@ -5,7 +5,6 @@
 // node tests) only env applies, so the same module serves both hosts.
 
 export type AgentExecutionFlag =
-  | "agentExecutionResolverV2"
   | "agentTeamRemoteDispatch"
   | "genericAgentHostCommands"
   | "gatewayAgentRouteTickets"
@@ -15,12 +14,10 @@ export type AgentExecutionFlag =
   | "claudeSdkSessionStore"
   | "claudeSdkCheckpoint"
   | "claudeSdkPrewarm"
-  | "durableWorkSubmission"
 
 const AGENT_EXECUTION_FLAGS_KEY = "cognia-agent-execution-flags-v1"
 
 export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
-  "agentExecutionResolverV2",
   "agentTeamRemoteDispatch",
   "genericAgentHostCommands",
   "gatewayAgentRouteTickets",
@@ -30,11 +27,9 @@ export const AGENT_EXECUTION_FLAGS: readonly AgentExecutionFlag[] = [
   "claudeSdkSessionStore",
   "claudeSdkCheckpoint",
   "claudeSdkPrewarm",
-  "durableWorkSubmission",
 ]
 
 const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
-  agentExecutionResolverV2: false,
   agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,
@@ -44,9 +39,6 @@ const DEFAULT_AGENT_EXECUTION_FLAGS: Record<AgentExecutionFlag, boolean> = {
   claudeSdkSessionStore: false,
   claudeSdkCheckpoint: false,
   claudeSdkPrewarm: false,
-  // ADR-0123. Off until Direct Chat has run a full shadow cycle: with it off,
-  // the chat send path is byte-for-byte what it is today.
-  durableWorkSubmission: false,
 }
 
 function parseFlagValue(raw: string | undefined): boolean | undefined {
@@ -59,7 +51,6 @@ function readEnvFlags(): Partial<Record<AgentExecutionFlag, boolean>> {
   // Each env var is referenced statically so Next.js can inline it into the
   // client bundle; read per-call so node/headless env changes are observed.
   const raw: Record<AgentExecutionFlag, string | undefined> = {
-    agentExecutionResolverV2: process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2,
     agentTeamRemoteDispatch: process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH,
     genericAgentHostCommands: process.env.NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS,
     gatewayAgentRouteTickets: process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS,
@@ -70,7 +61,6 @@ function readEnvFlags(): Partial<Record<AgentExecutionFlag, boolean>> {
     claudeSdkSessionStore: process.env.NEXT_PUBLIC_CLAUDE_SDK_SESSION_STORE,
     claudeSdkCheckpoint: process.env.NEXT_PUBLIC_CLAUDE_SDK_CHECKPOINT,
     claudeSdkPrewarm: process.env.NEXT_PUBLIC_CLAUDE_SDK_PREWARM,
-    durableWorkSubmission: process.env.NEXT_PUBLIC_DURABLE_WORK_SUBMISSION,
   }
   const result: Partial<Record<AgentExecutionFlag, boolean>> = {}
   for (const flag of AGENT_EXECUTION_FLAGS) {
@@ -110,12 +100,18 @@ export function isAgentExecutionFlagEnabled(flag: AgentExecutionFlag): boolean {
   return getAgentExecutionFlags()[flag]
 }
 
-/** Remote team dispatch is fail-closed unless both prerequisite authorities are active. */
-export function isAgentTeamRemoteDispatchEnabled(taskWorkspaceEnabled: boolean): boolean {
-  const flags = getAgentExecutionFlags()
-  return (
-    flags.agentTeamRemoteDispatch && flags.agentExecutionResolverV2 && taskWorkspaceEnabled === true
-  )
+/**
+ * Remote team dispatch is off by default and enabled by one flag.
+ *
+ * Two prerequisites used to guard it: the unified execution resolver and the
+ * `developer.taskWorkspace` setting. Neither is a toggle any more — the
+ * resolver is the only execution path, and Task Workspace isolation is always
+ * on — so this is a single flag read. Whether the *remote* host can isolate is
+ * still checked per worker against its advertised manifest
+ * (`evaluateRemoteWorkerPlacement` → `task_workspace_unavailable`).
+ */
+export function isAgentTeamRemoteDispatchEnabled(): boolean {
+  return getAgentExecutionFlags().agentTeamRemoteDispatch
 }
 
 /**

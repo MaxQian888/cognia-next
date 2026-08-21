@@ -51,6 +51,24 @@ export interface VendorRoots {
   piAgentDir: string
   /** `$PI_CODING_AGENT_SESSION_DIR` or `<piAgentDir>/sessions`. */
   piSessionDir: string
+  /**
+   * `<home>/.gemini` — Gemini CLI's user-scope directory (session transcripts
+   * live under `tmp/`).
+   *
+   * Home-relative with NO environment override, deliberately: no relocation
+   * variable for Gemini CLI is confirmed against upstream, and declaring one
+   * would be a path this module claims to honour and does not. It is carried
+   * here anyway so the renderer stops deriving it — `adapters/gemini-cli.ts`
+   * and `adapters/continue-dev.ts` were the only two session sources still
+   * joining onto a bare `home`, which is precisely the drift this module was
+   * created to end (see the header note about `codex.ts`).
+   */
+  geminiDir: string
+  /**
+   * `<home>/.continue` — Continue's global directory (session JSON lives under
+   * `sessions/`). Home-relative, no confirmed override; see {@link geminiDir}.
+   */
+  continueDir: string
 }
 
 /** All roots unresolvable — what web mode gets, and the shape of a failed IPC. */
@@ -62,6 +80,8 @@ export const EMPTY_VENDOR_ROOTS: VendorRoots = {
   opencodePlatformDataDir: "",
   piAgentDir: "",
   piSessionDir: "",
+  geminiDir: "",
+  continueDir: "",
 }
 
 /** True when at least one vendor tree is locatable. */
@@ -134,6 +154,9 @@ export function vendorRootsFromEnv(
     opencodePlatformDataDir: under(platformData, ".local/share/opencode"),
     piAgentDir,
     piSessionDir,
+    // Home-relative on every OS; see the field docs for why no env override.
+    geminiDir: base ? joinPath(base, ".gemini") : "",
+    continueDir: base ? joinPath(base, ".continue") : "",
   }
 }
 
@@ -164,6 +187,8 @@ function asVendorRoots(value: unknown): VendorRoots | null {
     opencodeDataDir: read("opencodeDataDir"),
     piAgentDir: read("piAgentDir"),
     piSessionDir: read("piSessionDir"),
+    geminiDir: read("geminiDir"),
+    continueDir: read("continueDir"),
   }
   const platformDataDir = read("opencodePlatformDataDir")
   if (platformDataDir) roots.opencodePlatformDataDir = platformDataDir

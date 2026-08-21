@@ -265,20 +265,34 @@ it("fails before spend when the active certification health gate blocks a hard r
   expect(completionRail).not.toHaveBeenCalled()
 })
 
-it("records the resolver decision without changing the legacy path while the flag is off", async () => {
-  const { recordAgentExecutionShadow } = await import("./agent-execution-service")
-  await recordAgentExecutionShadow(
+it("resolves the authoritative spec for a config without running any rail", async () => {
+  const { resolveAgentExecutionSpecForConfig } = await import("./agent-execution-service")
+  const resolution = await resolveAgentExecutionSpecForConfig(
     { provider: "anthropic", model: "claude-opus-4-8", toolsEnabled: true },
     { isTauri: true, isHeadlessHost: false }
   )
 
-  expect(trackEvent).toHaveBeenCalledWith(
-    "agent.execution.shadow",
-    expect.objectContaining({
-      runtimeAdapter: "claude-agent-sdk",
-      executionKind: "agent",
-    })
-  )
+  expect(resolution.spec.runtimeAdapter).toBe("claude-agent-sdk")
+  expect(resolution.spec.executionKind).toBe("agent")
+  // The point of this entry point: a caller can inspect the frozen decision
+  // (the connector runtime reminting a gateway ticket) without spending a turn.
+  expect(agentRail).not.toHaveBeenCalled()
+  expect(completionRail).not.toHaveBeenCalled()
+})
+
+it("resolves the same spec executeAgentTurn would use, so the two cannot disagree", async () => {
+  const { resolveAgentExecutionSpecForConfig } = await import("./agent-execution-service")
+  const config = { sessionId: "s-parity", toolsEnabled: true } as const
+  const resolved = await resolveAgentExecutionSpecForConfig(config, {
+    isTauri: true,
+    isHeadlessHost: false,
+  })
+  const executed = await executeAgentTurn(config.sessionId, config, {
+    isTauri: true,
+    isHeadlessHost: false,
+  })
+
+  expect(executed.executionFingerprint).toBe(resolved.spec.executionFingerprint)
 })
 
 it("threads the caller session id into the resolved identity fingerprint deterministically", async () => {
@@ -321,14 +335,14 @@ it("runs managed filesystem work through one Task Workspace lease", async () => 
   expect(result.trackingUnavailable).toBeUndefined()
 })
 
-describe("openAgentSession dormancy label (CLAUDE.md working rule 7)", () => {
-  it("still has no production caller, which is what the docblock claims", async () => {
-    // Rule 7: intentional dormancy must be labelled at the type AND pinned by a
-    // test. `openAgentSession` carries an "INTENTIONALLY DORMANT until Phase 7"
-    // docblock, and it is the only caller of `createAgentExecutionHandle` — so
-    // the entire handle path is currently test-only. A comment alone rots; this
-    // fails the day someone wires a real caller, forcing the label to be
-    // removed in the same change rather than left behind as a lie.
+describe("execution-handle path is live (CLAUDE.md working rule 7)", () => {
+  it("has the production callers its docblock names", async () => {
+    // Rule 7: a dormancy label must be pinned by a test, so that wiring a real
+    // caller forces the label to be removed in the same change. That guard was
+    // here and it worked — `openAgentSession`/`createAgentExecutionHandle`
+    // gained callers in Chat and the TUI while still carrying an
+    // "INTENTIONALLY DORMANT until Phase 7" docblock. The label is gone now, so
+    // this asserts the inverse: the path IS wired, and stays wired.
     const { execFileSync } = await import("node:child_process")
     const out = execFileSync(
       "git",
@@ -356,6 +370,7 @@ describe("openAgentSession dormancy label (CLAUDE.md working rule 7)", () => {
           !f.endsWith("lib/ai/agent/execution/agent-execution-handle.ts")
       )
 
-    expect(callers).toEqual([])
+    expect(callers).toContain("hooks/chat/use-claude-chat-controller.ts")
+    expect(callers).toContain("cli/src/tui/hooks/useAgentSession.tsx")
   })
 })

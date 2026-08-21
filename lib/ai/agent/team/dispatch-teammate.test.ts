@@ -17,11 +17,10 @@ jest.mock("@/lib/telemetry/events/track-event", () => ({
 const isTauriMock = jest.fn<boolean, []>(() => false)
 jest.mock("@/lib/tauri", () => ({ isTauri: () => isTauriMock() }))
 
-const taskWorkspaceEnabledMock = jest.fn(() => false)
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: {
     getState: () => ({
-      settings: { developer: { taskWorkspace: taskWorkspaceEnabledMock() } },
+      settings: { developer: {} },
     }),
   },
 }))
@@ -275,8 +274,12 @@ beforeEach(() => {
   jest.clearAllMocks()
   resolveSendOptionsMock.mockResolvedValue({})
   isTauriMock.mockReturnValue(false)
-  taskWorkspaceEnabledMock.mockReturnValue(false)
-  beginTaskWorkspaceTurnMock.mockResolvedValue(null)
+  // Task Workspace is GA — a dispatch with a working dir always opens a lease,
+  // and dispatch fails hard when the host cannot give it an execution root.
+  beginTaskWorkspaceTurnMock.mockResolvedValue({
+    runId: "task-run-default",
+    executionRoot: "/isolated/task-run-default",
+  })
   settleTaskWorkspaceRunMock.mockResolvedValue([])
   resolveExternalMock.mockResolvedValue(null)
   applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "unused-default", applied: false })
@@ -321,13 +324,27 @@ describe("dispatchTeammate — text-only fallback", () => {
       SystemEvents.AGENT_COMPLETED,
       expect.objectContaining({ agentId: "tm1" })
     )
-    expect(mockTrackEvent.mock.calls).toEqual([
-      ["agent.teammate.started", { runId: "run1", teamId: "team1", role: "teammate" }],
-      [
-        "agent.teammate.completed",
-        expect.objectContaining({ runId: "run1", teamId: "team1", channel: "text" }),
-      ],
+    // The resolver is no longer behind a flag, so every team dispatch now also
+    // records which runtime/route it froze. Names are pinned exactly so a new
+    // event cannot appear here unnoticed.
+    expect(mockTrackEvent.mock.calls.map(([name]) => name)).toEqual([
+      "agent.teammate.started",
+      "agent.execution.resolved",
+      "agent.teammate.completed",
     ])
+    expect(mockTrackEvent).toHaveBeenCalledWith("agent.teammate.started", {
+      runId: "run1",
+      teamId: "team1",
+      role: "teammate",
+    })
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.execution.resolved",
+      expect.objectContaining({ surface: "team", legacyMigrated: true })
+    )
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.teammate.completed",
+      expect.objectContaining({ runId: "run1", teamId: "team1", channel: "text" })
+    )
   })
 
   it("records a bounded failure class without exporting the error message", async () => {
@@ -386,7 +403,6 @@ describe("dispatchTeammate — text-only fallback", () => {
   })
 
   it("resolver flag on: pool bindings pick the first candidate and legacy provider rows migrate (ADR-0090 P7)", async () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     try {
       executeAgentMock.mockResolvedValue({ text: "ok" })
       // Pool member: deterministic first-candidate pick feeds the resolver.
@@ -406,12 +422,10 @@ describe("dispatchTeammate — text-only fallback", () => {
       const result2 = await dispatchTeammate(ctx2, { taskId: "t2", prompt: "go" })
       expect(result2.text).toBe("ok")
     } finally {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     }
   })
 
   it("resolver flag on: the unified resolver picks the same text channel (parity)", async () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     try {
       executeAgentMock.mockResolvedValue({ text: "ok" })
       const { ctx, notifier } = makeCtx(makeTeammate())
@@ -423,7 +437,6 @@ describe("dispatchTeammate — text-only fallback", () => {
         expect.objectContaining({ dedupeKey: "text-fallback:run1:tm1" })
       )
     } finally {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     }
   })
 
@@ -547,9 +560,7 @@ describe("dispatchTeammate — durable execution environment", () => {
 
 describe("dispatchTeammate — remote durable worker", () => {
   it("claims a child lease, dispatches by stable repository ref, and captures events once", async () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "true"
     process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
-    taskWorkspaceEnabledMock.mockReturnValue(true)
     const complete = jest.fn(async () => undefined)
     const attachControl = jest.fn(async () => undefined)
     beginDurableDispatchMock.mockResolvedValue({
@@ -685,7 +696,6 @@ describe("dispatchTeammate — remote durable worker", () => {
       )
       expect(pool.recordSuccess).toHaveBeenCalledWith("tm1")
     } finally {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
       delete process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH
     }
   })
@@ -773,11 +783,20 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
 
     expect(result.channel).toBe("sidecar")
     expect(result.text).toBe("tool result")
+    // Task Workspace is GA: the teammate session is bound to the ISOLATED
+    // execution root, not to the raw repository the team was pointed at.
     expect(createSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "team", workingDir: "/repo" })
+      expect.objectContaining({ kind: "team", workingDir: "/isolated/task-run-default" })
     )
     expect(resolveSendOptionsMock).toHaveBeenCalledTimes(1)
-    expect(runAndCaptureMock).toHaveBeenCalledWith("sess1", "edit code", {}, expect.any(Object))
+    // The dispatch names the turn so a lifecycle hook can scope to teammates:
+    // without it the run is indistinguishable from the user's own chat turn.
+    expect(runAndCaptureMock).toHaveBeenCalledWith(
+      "sess1",
+      "edit code",
+      { agentKind: "teammate", agentRef: "tm1" },
+      expect.any(Object)
+    )
     expect(deleteSessionMock).toHaveBeenCalledWith("sess1")
     expect(executeAgentMock).not.toHaveBeenCalled()
   })
@@ -878,7 +897,7 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(externalExecuteMock).toHaveBeenCalledWith(
       "agent-1",
       "edit code",
-      expect.objectContaining({ workingDirectory: "/repo" })
+      expect.objectContaining({ workingDirectory: "/isolated/task-run-default" })
     )
     expect(runAndCaptureMock).not.toHaveBeenCalled()
     expect(executeAgentMock).not.toHaveBeenCalled()
@@ -1627,8 +1646,7 @@ describe("dispatchTeammate — workspace isolation", () => {
     )
   })
 
-  it("uses and settles the shared task workspace when the experiment is enabled", async () => {
-    taskWorkspaceEnabledMock.mockReturnValue(true)
+  it("uses and settles the shared task workspace", async () => {
     isTauriMock.mockReturnValue(true)
     beginTaskWorkspaceTurnMock.mockResolvedValue({
       runId: "task-run-1",
@@ -1661,7 +1679,6 @@ describe("dispatchTeammate — workspace isolation", () => {
   })
 
   it("forwards workspaceKey to the task workspace service when the experiment is enabled", async () => {
-    taskWorkspaceEnabledMock.mockReturnValue(true)
     isTauriMock.mockReturnValue(true)
     beginTaskWorkspaceTurnMock.mockResolvedValue({
       runId: "task-run-pipeline",

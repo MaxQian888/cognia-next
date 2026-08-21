@@ -18,10 +18,14 @@ export function setActiveRuntimeTargetContext(
 ): void {
   const checkedAccountId = assertAccountId(accountId)
   const checkedTargetId = assertTargetId(targetId)
+  // Bound to a local so TypeScript can narrow it — `sameRoute` proves the
+  // scope is non-null, but a boolean const carries no narrowing back to the
+  // field accesses below, which left this module failing `tsc`.
+  const previous = activeScope
   const sameRoute =
-    activeScope?.accountId === checkedAccountId && activeScope.targetId === checkedTargetId
+    previous?.accountId === checkedAccountId && previous.targetId === checkedTargetId
   const generation =
-    routingGeneration ?? (sameRoute ? activeScope.routingGeneration : nextRoutingGeneration++)
+    routingGeneration ?? (sameRoute ? previous.routingGeneration : nextRoutingGeneration++)
   if (!Number.isSafeInteger(generation) || generation < 0) {
     throw new Error("Invalid runtime routing generation.")
   }

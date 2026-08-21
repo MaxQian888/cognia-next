@@ -12,7 +12,6 @@
  * provider decision is re-resolved during recovery.
  */
 
-import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
 import { interruptSession } from "@/lib/claude/ipc"
 
 import { startWorkOutboxRunner, type Unsubscribe, type WorkOutboxDeps } from "./outbox-runner"
@@ -40,11 +39,9 @@ function runnerDeps(
 
 /**
  * Start the renderer's sweep. Returns an unsubscribe suitable for a React
- * effect cleanup. A no-op while the feature flag is off, so it is safe to mount
- * ahead of the rollout.
+ * effect cleanup.
  */
 export function startRendererWorkOutbox(overrides: WorkOutboxBootstrapOverrides = {}): Unsubscribe {
-  if (!getAgentExecutionFlags().durableWorkSubmission) return () => {}
   let stopped = false
   let stopRunner: Unsubscribe = () => {}
   const stopTerminalEvents = startWorkSubmissionTerminalEvents({
@@ -70,7 +67,6 @@ export function startRendererWorkOutbox(overrides: WorkOutboxBootstrapOverrides 
  * true rather than aspirational.
  */
 export function startHeadlessWorkOutbox(overrides: WorkOutboxBootstrapOverrides = {}): Unsubscribe {
-  if (!getAgentExecutionFlags().durableWorkSubmission) return () => {}
   let stopped = false
   let stopRunner: Unsubscribe = () => {}
   const stopTerminalEvents = startWorkSubmissionTerminalEvents({

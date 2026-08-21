@@ -221,7 +221,7 @@ describe("createOutboundRunner", () => {
     expect(call).not.toHaveBeenCalled()
     expect(
       await listByStatus("pending", {
-        accountId: scope.accountId,
+        ...scope,
         targetId: "desktop-other",
       })
     ).toHaveLength(1)
@@ -250,7 +250,7 @@ describe("createOutboundRunner", () => {
     const runnerB = createOutboundRunner({
       dispatcher: { call: callB },
       enforceMobile: false,
-      scope: { accountId: scope.accountId, targetId: "host-b" },
+      scope: { ...scope, targetId: "host-b" },
       now: () => 100,
     })
     await runnerB.kick()
@@ -261,7 +261,7 @@ describe("createOutboundRunner", () => {
     const runnerA = createOutboundRunner({
       dispatcher: { call: callA },
       enforceMobile: false,
-      scope: { accountId: scope.accountId, targetId: "host-a" },
+      scope: { ...scope, targetId: "host-a" },
       now: () => 100,
     })
     await runnerA.kick()

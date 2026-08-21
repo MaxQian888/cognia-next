@@ -15,7 +15,6 @@ import { RUNTIME_CAPABILITIES, resolveAgentExecutionSpec } from "./resolve-agent
 import type { AgentExecutionFlag } from "./feature-flags"
 
 const flags: Record<AgentExecutionFlag, boolean> = {
-  agentExecutionResolverV2: true,
   agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,

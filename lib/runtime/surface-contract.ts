@@ -242,14 +242,6 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
-    id: "observability",
-    route: "/observability",
-    navigation: true,
-    standalone: "read-only",
-    companion: "remote",
-    offline: "cached-read",
-  },
-  {
     id: "servers",
     route: "/servers",
     navigation: true,
@@ -335,11 +327,17 @@ export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/island",
   "/lark/entry",
   "/lark/shortcut",
+  // Same category as `/plugin-auth/callback`: an identity-provider return leg
+  // that hands off and navigates away, with no runtime of its own to classify.
+  "/logto/callback",
   "/pet-overlay",
   "/pet-popup",
   "/plugin-auth/callback",
   "/selection-toolbar",
   "/share-target",
+  // A public, read-only document served by the lightweight route shell — it
+  // deliberately boots no account, no target and no transport.
+  "/status",
   "/tray-panel",
 ] as const
 

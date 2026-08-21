@@ -43,6 +43,13 @@ jest.mock("@/lib/connectors/adapters/lark/oauth-handler", () => ({
   handleLarkOAuth: (...args: unknown[]) => mockHandleLarkOAuth(...args),
 }))
 
+const mockOAuthRegistry = new Map<string, (code: string, state: string) => Promise<void>>()
+jest.mock("@/lib/connectors/oauth-registry", () => ({
+  get oauthRegistry() {
+    return mockOAuthRegistry
+  },
+}))
+
 const makeBridge = (): RuntimeBridge => ({
   listen: async () => () => undefined,
   invoke: async () => null,
@@ -226,6 +233,94 @@ describe("connector-runtime (headless)", () => {
     controller.abort()
     await stop()
     expect(handlers.has("connectors://lark-oauth/callback")).toBe(false)
+  })
+
+  it("completes any platform's OAuth callback through the registry", async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    mockSubscribe.mockImplementation((event: string, handler: (payload: unknown) => void) => {
+      handlers.set(event, handler)
+      return () => handlers.delete(event)
+    })
+    const slackHandler = jest.fn(async () => undefined)
+    mockOAuthRegistry.set("slack", slackHandler)
+    mockCall.mockImplementation((name: string) =>
+      Promise.resolve(name === "connectors_runtime_lease_acquire")
+    )
+
+    const { ctx, stop } = await bootConnectorRuntime()
+    const controller = new AbortController()
+    await mockInstall.mock.calls[0][0]!.acquireRuntimeLock!(controller.signal)
+    expect(handlers.has("connectors://connector-oauth/callback")).toBe(true)
+
+    // One subscription serves every platform — the relay names the kind, the
+    // registry supplies the handler. No per-platform wiring here.
+    handlers.get("connectors://connector-oauth/callback")!({
+      kind: "slack",
+      code: "code-1",
+      state: "slack:sl-1:nonce",
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(slackHandler).toHaveBeenCalledWith("code-1", "slack:sl-1:nonce")
+    expect(ctx.logs).toContainEqual(["info", "[connector-bus] slack OAuth completed"])
+
+    controller.abort()
+    await stop()
+    expect(handlers.has("connectors://connector-oauth/callback")).toBe(false)
+  })
+
+  it("reports an unregistered kind instead of silently dropping the callback", async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    mockSubscribe.mockImplementation((event: string, handler: (payload: unknown) => void) => {
+      handlers.set(event, handler)
+      return () => handlers.delete(event)
+    })
+    mockCall.mockImplementation((name: string) =>
+      Promise.resolve(name === "connectors_runtime_lease_acquire")
+    )
+
+    const { ctx, stop } = await bootConnectorRuntime()
+    const controller = new AbortController()
+    await mockInstall.mock.calls[0][0]!.acquireRuntimeLock!(controller.signal)
+
+    handlers.get("connectors://connector-oauth/callback")!({
+      kind: "kook",
+      code: "c",
+      state: "kook:k-1:n",
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(ctx.logs).toContainEqual([
+      "error",
+      "[connector-bus] no OAuth handler registered for kook",
+    ])
+    controller.abort()
+    await stop()
+  })
+
+  it("refuses a relay payload with no kind", async () => {
+    const handlers = new Map<string, (payload: unknown) => void>()
+    mockSubscribe.mockImplementation((event: string, handler: (payload: unknown) => void) => {
+      handlers.set(event, handler)
+      return () => handlers.delete(event)
+    })
+    mockCall.mockImplementation((name: string) =>
+      Promise.resolve(name === "connectors_runtime_lease_acquire")
+    )
+
+    const { ctx, stop } = await bootConnectorRuntime()
+    const controller = new AbortController()
+    await mockInstall.mock.calls[0][0]!.acquireRuntimeLock!(controller.signal)
+
+    handlers.get("connectors://connector-oauth/callback")!({ code: "c", state: "s" })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(ctx.logs).toContainEqual([
+      "error",
+      "[connector-bus] connector OAuth callback is missing its kind",
+    ])
+    controller.abort()
+    await stop()
   })
 
   it("teardown restores the default Tauri seams", async () => {

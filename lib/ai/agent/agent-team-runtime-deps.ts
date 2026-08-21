@@ -173,7 +173,14 @@ export function buildAgentTeamRuntimeDeps(
     // hook bracket it will never close meaningfully.
     const execution = buildLeadExecutionConfig({ lead, settings: await readSettings() })
 
-    const hookCtx: AgentHookContext = { agentId: `team-lead-${phase}`, sessionId: team.id }
+    const hookCtx: AgentHookContext = {
+      agentId: `team-lead-${phase}`,
+      // The lead planner is the team's own agent, so an `agents: "teammate"`
+      // selector catches it alongside the dispatched teammates.
+      agentKind: "teammate",
+      agentRef: `team-lead-${phase}`,
+      sessionId: team.id,
+    }
     const pre = await firePreCallHooks(firer, hookCtx, prompt, {
       phase: `team-${phase}`,
       teamId: team.id,

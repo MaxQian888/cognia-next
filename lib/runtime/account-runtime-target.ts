@@ -222,7 +222,13 @@ export async function switchAccountRuntimeTarget(
       await runRuntimeTargetTransitionPhase("release-subscriptions", {
         accountId: scope?.accountId ?? accountId,
         fromTargetId: scope?.targetId ?? null,
-        toTargetId,
+        // The destination is this call's `targetId`. `toTargetId` is the field
+        // name on `RuntimeTargetTransitionContext`, not a binding in scope —
+        // written as shorthand it was an undeclared identifier, so every switch
+        // that used the default dependencies (the menu's "This browser" row and
+        // `removeCompanionHost`) died with a ReferenceError before it could
+        // activate anything.
+        toTargetId: targetId,
       })
     },
     reloadTransport: async () => {

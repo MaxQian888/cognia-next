@@ -459,6 +459,11 @@ export class ExternalAgentManager {
     }
     try {
       const data = adapter.getSessionModels(sessionId)
+      // An adapter whose implementation is async (Pi-RPC, which has to ask the
+      // process) cannot satisfy this synchronous capability. Report it
+      // unsupported — the alternative was returning the pending promise as if
+      // it were the model state, which every caller then rendered as one.
+      if (data instanceof Promise) return { status: "unsupported" }
       return data ? { status: "ok", data } : { status: "unsupported" }
     } catch (error) {
       return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
@@ -509,6 +514,9 @@ export class ExternalAgentManager {
     }
     try {
       const data = adapter.getConfigOptions(sessionId)
+      // See `getSessionModels` above: an async adapter cannot satisfy this
+      // synchronous capability, and a pending promise is not a config list.
+      if (data instanceof Promise) return { status: "unsupported" }
       return data ? { status: "ok", data } : { status: "unsupported" }
     } catch (error) {
       return { status: "error", error: error instanceof Error ? error : new Error(String(error)) }
@@ -1927,7 +1935,9 @@ export class ExternalAgentManager {
     session: ExternalAgentSession,
     model: string
   ): Promise<void> {
-    const configOptions = adapter.getConfigOptions?.(session.id)
+    // Awaited: unlike the public `getConfigOptions` capability, this call site
+    // is already async and can wait for an adapter that has to ask its process.
+    const configOptions = await adapter.getConfigOptions?.(session.id)
     const modelOption = configOptions?.find(
       (option): option is Extract<AcpConfigOption, { type: "select" }> =>
         option.category === "model" && option.type === "select"
@@ -2131,6 +2141,8 @@ export class ExternalAgentManager {
 
     const hookCtx: AgentHookContext = {
       agentId,
+      agentKind: "external",
+      agentRef: agentId,
       sessionId: session.id,
       cwd: options?.workingDirectory || instance.config.process?.cwd || undefined,
     }
@@ -2365,6 +2377,8 @@ export class ExternalAgentManager {
     const executionTimeoutMs = this.resolveExecutionTimeoutMs(instance, options)
     const hookCtx: AgentHookContext = {
       agentId,
+      agentKind: "external",
+      agentRef: agentId,
       sessionId: session.id,
       cwd: options?.workingDirectory || instance.config.process?.cwd || undefined,
     }

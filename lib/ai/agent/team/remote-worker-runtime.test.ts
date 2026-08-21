@@ -1,5 +1,7 @@
 import {
   __resetRemoteWorkerRuntimeForTesting,
+  isRemoteWorkerDispatchAvailable,
+  subscribeToRemoteWorkerRuntime,
   evaluateRemoteWorkerPlacement,
   getRemoteWorkerRuntime,
   installRemoteWorkerRuntime,
@@ -86,14 +88,40 @@ describe("remote AgentTeam worker selection", () => {
     ).toBe("device:a")
   })
 
+  it("carries the pinned target's specific reason, not a generic mismatch", () => {
+    // Selection now delegates ordering and the tiebreak to the shared placement
+    // layer, whose vocabulary is deliberately narrower. The eleven worker
+    // reasons are persisted on `AgentTeamChildRun.placementReason`, so they have
+    // to survive the round trip rather than collapsing into one value.
+    try {
+      selectRemoteWorker(
+        [worker("device:b", { activeTurns: 1 })],
+        { mode: "pinned", hostRef: "device:b" },
+        requirements
+      )
+      throw new Error("expected the incompatible pinned worker to wait")
+    } catch (error) {
+      expect(error).toBeInstanceOf(RemoteWorkerWaitingError)
+      expect(error).toMatchObject({
+        reason: "no_compatible_capacity",
+        hostRef: "device:b",
+        placementReason: "capacity_exhausted",
+      })
+    }
+  })
+
   it("keeps an offline pinned target waiting instead of migrating", () => {
-    expect(() =>
+    try {
       selectRemoteWorker(
         [worker("device:a"), worker("device:b", { online: false })],
         { mode: "pinned", hostRef: "device:b" },
         requirements
       )
-    ).toThrow(RemoteWorkerWaitingError)
+      throw new Error("expected the offline pinned worker to wait")
+    } catch (error) {
+      expect(error).toBeInstanceOf(RemoteWorkerWaitingError)
+      expect(error).toMatchObject({ reason: "pinned_host_offline", hostRef: "device:b" })
+    }
     try {
       selectRemoteWorker(
         [worker("device:a")],
@@ -223,5 +251,53 @@ describe("remote AgentTeam worker selection", () => {
     expect(getRemoteWorkerRuntime()).toBe(second)
     uninstallSecond()
     expect(getRemoteWorkerRuntime()).toBeUndefined()
+  })
+
+  it("publishes dispatch availability so a host can say it is inert", () => {
+    // Whether a brain is attached is the difference between a worker that will
+    // receive frames and one that never will. Fleet reads this rather than
+    // inferring capability from a successful enrollment.
+    __resetRemoteWorkerRuntimeForTesting()
+    const listener = jest.fn()
+    const unsubscribe = subscribeToRemoteWorkerRuntime(listener)
+    expect(isRemoteWorkerDispatchAvailable()).toBe(false)
+
+    const uninstall = installRemoteWorkerRuntime({
+      listWorkers: jest.fn(() => []),
+      run: jest.fn(),
+    } as never)
+    expect(isRemoteWorkerDispatchAvailable()).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    uninstall()
+    expect(isRemoteWorkerDispatchAvailable()).toBe(false)
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    installRemoteWorkerRuntime({ listWorkers: jest.fn(() => []), run: jest.fn() } as never)
+    expect(listener).toHaveBeenCalledTimes(2)
+    __resetRemoteWorkerRuntimeForTesting()
+  })
+
+  it("does not notify when a stale uninstall loses the race to a newer runtime", () => {
+    // A WebView reload installs a new pool before the old one's cleanup runs.
+    // Firing "unavailable" there would flash the inert warning over a host that
+    // is in fact dispatching.
+    __resetRemoteWorkerRuntimeForTesting()
+    const uninstallFirst = installRemoteWorkerRuntime({
+      listWorkers: jest.fn(() => []),
+      run: jest.fn(),
+    } as never)
+    const second = { listWorkers: jest.fn(() => []), run: jest.fn() }
+    installRemoteWorkerRuntime(second as never)
+
+    const listener = jest.fn()
+    const unsubscribe = subscribeToRemoteWorkerRuntime(listener)
+    uninstallFirst()
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(getRemoteWorkerRuntime()).toBe(second)
+    unsubscribe()
+    __resetRemoteWorkerRuntimeForTesting()
   })
 })

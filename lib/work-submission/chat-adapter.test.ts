@@ -37,7 +37,6 @@ const KEY = new Uint8Array(32).fill(11)
 
 function deps(overrides: Partial<ChatAdapterDeps> = {}): ChatAdapterDeps {
   return {
-    isEnabled: () => true,
     resolveScope: () => ({ accountId: "account-1", runtimeTargetId: "target-1" }),
     loadKey: async () => KEY,
     ...overrides,
@@ -164,18 +163,6 @@ describe("acceptChatTurn", () => {
     expect(await getWorkSubmission("work:run-1")).toBeUndefined()
   }, 30_000)
 
-  it("returns null and writes nothing when the feature is off", async () => {
-    // With the flag off the chat path must be byte-for-byte what it is today.
-    const writeTranscript = jest.fn(async () => {})
-    const receipt = await acceptChatTurn(
-      { ...turn, writeTranscript },
-      deps({ isEnabled: () => false })
-    )
-    expect(receipt).toBeNull()
-    expect(writeTranscript).not.toHaveBeenCalled()
-    expect(await getDb().workSubmissions.count()).toBe(0)
-  }, 30_000)
-
   it("returns null when no runtime target is active", async () => {
     const receipt = await acceptChatTurn(turn, deps({ resolveScope: () => null }))
     expect(receipt).toBeNull()
@@ -237,14 +224,11 @@ describe("acceptChatTurn", () => {
     clearActiveRuntimeTargetContext()
     // No active target: the real resolver returns null and the adapter declines
     // instead of inventing an account to attribute the work to.
-    expect(
-      await acceptChatTurn(turn, { isEnabled: () => true, loadKey: async () => KEY })
-    ).toBeNull()
+    expect(await acceptChatTurn(turn, { loadKey: async () => KEY })).toBeNull()
 
     setActiveRuntimeTargetContext("account-1", "target-1")
     try {
       const receipt = await acceptChatTurn(turn, {
-        isEnabled: () => true,
         loadKey: async () => KEY,
       })
       expect(receipt).toMatchObject({ submissionId: "work:run-1" })
@@ -307,14 +291,6 @@ describe("bindChatTurnContext", () => {
     expect((await getExecutionContextBundle("work:run-1"))?.projectId).toBe("project-1")
   }, 30_000)
 
-  it("returns false when the feature is off", async () => {
-    const bound = await bindChatTurnContext(
-      { runId: "run-1", context: {}, now: NOW + 1 },
-      deps({ isEnabled: () => false })
-    )
-    expect(bound).toBe(false)
-  }, 30_000)
-
   it("returns false rather than interrupting a turn whose submission is missing", async () => {
     const onError = jest.fn()
     const bound = await bindChatTurnContext(
@@ -366,15 +342,6 @@ describe("settleChatTurn", () => {
     expect((await getWorkSubmission("work:run-1"))?.errorCode).toBe("sidecar_exit")
   }, 30_000)
 
-  it("returns false when the feature is off", async () => {
-    expect(
-      await settleChatTurn(
-        { runId: "run-1", outcome: "completed" },
-        deps({ isEnabled: () => false })
-      )
-    ).toBe(false)
-  }, 30_000)
-
   it("seals the open turn when only the session id is known", async () => {
     expect(
       await settleChatTurnForSession("session-1", { outcome: "completed", now: NOW + 5 }, deps())
@@ -390,16 +357,6 @@ describe("settleChatTurn", () => {
     ).toBe(false)
     expect(
       await settleChatTurnForSession("session-unknown", { outcome: "completed" }, deps())
-    ).toBe(false)
-  }, 30_000)
-
-  it("returns false for a session lookup when the feature is off", async () => {
-    expect(
-      await settleChatTurnForSession(
-        "session-1",
-        { outcome: "completed" },
-        deps({ isEnabled: () => false })
-      )
     ).toBe(false)
   }, 30_000)
 
@@ -451,13 +408,6 @@ describe("markChatTurnStarted", () => {
     })
     expect(await listClaimableWorkSubmissions(NOW + 60_000)).toEqual([])
   }, 30_000)
-
-  it("does nothing when durable submission is disabled", async () => {
-    expect(await markChatTurnStarted("run-1", NOW + 1, deps({ isEnabled: () => false }))).toBe(
-      false
-    )
-    expect((await getWorkSubmission("work:run-1"))?.dispatchState).toBe("pending")
-  }, 30_000)
 })
 
 describe("claimChatTurnForDispatch", () => {
@@ -470,11 +420,5 @@ describe("claimChatTurnForDispatch", () => {
   it("gives exactly one live sender ownership of the accepted turn", async () => {
     expect(await claimChatTurnForDispatch("run-1", NOW + 1, deps())).toBe("claimed")
     expect(await claimChatTurnForDispatch("run-1", NOW + 1, deps())).toBe("owned_elsewhere")
-  }, 30_000)
-
-  it("preserves the legacy send path when durable submission is disabled", async () => {
-    expect(await claimChatTurnForDispatch("run-1", NOW + 1, deps({ isEnabled: () => false }))).toBe(
-      "legacy"
-    )
   }, 30_000)
 })

@@ -12,7 +12,7 @@ const STORAGE_KEY = "cognia-agent-execution-flags-v1"
 
 describe("agent execution feature flags", () => {
   const envKeys = [
-    "NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2",
+    "NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS",
     "NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH",
     "NEXT_PUBLIC_GENERIC_AGENT_HOST_COMMANDS",
     "NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS",
@@ -50,14 +50,14 @@ describe("agent execution feature flags", () => {
   })
 
   it("env vars override defaults ('1'/'true' on, '0'/'false' off, junk ignored)", () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "1"
     process.env.NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH = "true"
     process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "true"
     process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1 = "true"
     process.env.NEXT_PUBLIC_HEADLESS_LLM_GATEWAY = "banana"
 
     const flags = getAgentExecutionFlags()
-    expect(flags.agentExecutionResolverV2).toBe(true)
+    expect(flags.gatewayAgentRouteTickets).toBe(true)
     expect(flags.agentTeamRemoteDispatch).toBe(true)
     expect(flags.gatewayAgentRouteTickets).toBe(true)
     expect(flags.claudeSdkParityV1).toBe(true)
@@ -66,36 +66,39 @@ describe("agent execution feature flags", () => {
   })
 
   it("localStorage overrides env", () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "0"
+    process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "0"
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        agentExecutionResolverV2: true,
+        gatewayAgentRouteTickets: true,
         experimentalAnthropicDeploymentAgentSdk: true,
       })
     )
 
-    expect(isAgentExecutionFlagEnabled("agentExecutionResolverV2")).toBe(true)
+    expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(true)
     expect(isAgentExecutionFlagEnabled("experimentalAnthropicDeploymentAgentSdk")).toBe(true)
   })
 
-  it("requires resolver v2 and Task Workspace before remote team dispatch activates", () => {
+  it("activates remote team dispatch on its own flag alone", () => {
+    // Two prerequisites used to guard this: the unified execution resolver and
+    // `developer.taskWorkspace`. Neither is a toggle any more — the resolver is
+    // the only execution path and Task Workspace isolation is GA — so this is a
+    // single flag read. Remote isolation is still checked per worker against
+    // its advertised manifest, not here.
+    expect(isAgentTeamRemoteDispatchEnabled()).toBe(false)
     setAgentExecutionFlag("agentTeamRemoteDispatch", true)
-    expect(isAgentTeamRemoteDispatchEnabled(true)).toBe(false)
-    setAgentExecutionFlag("agentExecutionResolverV2", true)
-    expect(isAgentTeamRemoteDispatchEnabled(false)).toBe(false)
-    expect(isAgentTeamRemoteDispatchEnabled(true)).toBe(true)
+    expect(isAgentTeamRemoteDispatchEnabled()).toBe(true)
   })
 
   it("ignores malformed localStorage payloads and non-boolean values", () => {
     window.localStorage.setItem(STORAGE_KEY, "{not json")
-    expect(isAgentExecutionFlagEnabled("agentExecutionResolverV2")).toBe(false)
+    expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
 
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ agentExecutionResolverV2: "yes", unknownFlag: true })
+      JSON.stringify({ gatewayAgentRouteTickets: "yes", unknownFlag: true })
     )
-    expect(isAgentExecutionFlagEnabled("agentExecutionResolverV2")).toBe(false)
+    expect(isAgentExecutionFlagEnabled("gatewayAgentRouteTickets")).toBe(false)
   })
 
   describe("setAgentExecutionFlag", () => {
@@ -110,11 +113,11 @@ describe("agent execution feature flags", () => {
     })
 
     it("preserves other stored overrides when writing one flag", () => {
-      setAgentExecutionFlag("agentExecutionResolverV2", true)
+      setAgentExecutionFlag("gatewayAgentRouteTickets", true)
       setAgentExecutionFlag("gatewayAgentRouteTickets", true)
 
       const flags = getAgentExecutionFlags()
-      expect(flags.agentExecutionResolverV2).toBe(true)
+      expect(flags.gatewayAgentRouteTickets).toBe(true)
       expect(flags.gatewayAgentRouteTickets).toBe(true)
     })
 

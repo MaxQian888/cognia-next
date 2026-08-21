@@ -23,6 +23,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentPermissionRequestEvent,
 } from "@/types/agent/external-agent"
+import type { HookAgentKind } from "@/lib/claude/hooks"
 
 const log = createLogger("agent.external.hooks")
 
@@ -38,6 +39,19 @@ export interface AgentHookContext {
   agentId: string
   sessionId: string
   cwd?: string
+  /**
+   * Which kind of agent this event came from. Required so every producer has to
+   * answer it — a silently-defaulted identity is what made `agentId` dead
+   * weight for so long (it was declared here but never sent to the runtime).
+   * Reaches hooks as `agent_kind`, and backs the `HookGroup.agents` selector.
+   */
+  agentKind: HookAgentKind
+  /**
+   * Free-form identity within {@link agentKind} — a teammate id, a subagent
+   * definition id, an external agent id. Reaches hooks as `agent_ref` and is
+   * also matched by the `agents` selector. Defaults to `agentId` when omitted.
+   */
+  agentRef?: string
 }
 
 /**
@@ -102,6 +116,8 @@ export async function fireAgentHook(
       sessionId: ctx.sessionId,
       cwd: ctx.cwd ?? null,
       toolName: opts?.toolName ?? null,
+      agentKind: ctx.agentKind,
+      agentRef: ctx.agentRef ?? ctx.agentId,
       payload: opts?.payload ?? null,
     })
   } catch (e) {

@@ -1,5 +1,5 @@
 // AgentExecutionService (ADR-0090 Phase 6) — the SINGLE entry every caller
-// funnels through once `agentExecutionResolverV2` is on.
+// funnels through. It is not optional and has no legacy sibling.
 //
 // Not a parallel implementation: the rails ARE the bodies executeAgent always
 // ran (`runAgentRail` / `runCompletionRail`, exported from agent-executor) and
@@ -135,30 +135,21 @@ async function resolveExecution(
   return resolveAgentExecutionSpec({ ...input, certifiedPath: certification.certifiedPath })
 }
 
-/** Resolve the rollout decision for shadow metadata without executing a rail. */
-export async function resolveAgentExecutionShadowSpec(
+/**
+ * Resolve the authoritative execution spec for a config WITHOUT running a rail.
+ *
+ * Callers that need the frozen decision itself — the connector runtime reminting
+ * a gateway ticket on a recovery turn, for instance — use this instead of
+ * {@link executeAgentTurn}. It is the same resolution `executeAgentTurn`
+ * performs, so the two can never disagree.
+ */
+export async function resolveAgentExecutionSpecForConfig(
   config: ExecuteAgentConfig,
   environment: AgentExecutionEnvironment,
   options?: AgentExecutionTurnOptions
 ) {
   const { getAgentExecutionFlags } = await import("./feature-flags")
   return resolveExecution(config, environment, options, getAgentExecutionFlags())
-}
-
-/** Evaluate and record the new resolver while the legacy branch still owns execution. */
-export async function recordAgentExecutionShadow(
-  config: ExecuteAgentConfig,
-  environment: AgentExecutionEnvironment,
-  options?: AgentExecutionTurnOptions
-): Promise<void> {
-  const resolution = await resolveAgentExecutionShadowSpec(config, environment, options)
-  void trackEvent("agent.execution.shadow", {
-    runtimeAdapter: resolution.spec.runtimeAdapter,
-    executionKind: resolution.spec.executionKind,
-    routeKind: resolution.spec.route.kind,
-    missingRequiredCount: resolution.missingRequired.length,
-    compatibilityEvidence: resolution.spec.compatibility.evidence,
-  })
 }
 
 /**
@@ -233,13 +224,7 @@ export async function executeAgentTurn(
 
   const tracking =
     options?.taskWorkspace ??
-    (config.cwd && (await taskWorkspaceFlagEnabled())
-      ? {
-          enabled: true,
-          agentId: spec.identity.runId,
-          agentKind: surface,
-        }
-      : undefined)
+    (config.cwd ? { enabled: true, agentId: spec.identity.runId, agentKind: surface } : undefined)
   if (tracking?.enabled && config.cwd && spec.executionKind === "agent" && hostAvailable) {
     const { withTaskWorkspaceRun } = await import("@/lib/task-workspace/run-lease")
     const leased = await withTaskWorkspaceRun(
@@ -279,20 +264,6 @@ export async function executeAgentTurn(
   return result
 }
 
-async function taskWorkspaceFlagEnabled(): Promise<boolean> {
-  try {
-    const { useSettingsStore } = await import("@/stores/settings")
-    const enabled = useSettingsStore.getState().settings?.developer?.taskWorkspace
-    if (typeof enabled === "boolean") return enabled
-  } catch {}
-  try {
-    const { getSettings } = await import("@/lib/db/settings")
-    return (await getSettings())?.developer?.taskWorkspace === true
-  } catch {
-    return false
-  }
-}
-
 /**
  * Open a streaming / multi-turn handle bound to ONE frozen execution spec for
  * the session (ADR-0090 Phase 6). The handle's capability gates and frozen
@@ -300,9 +271,11 @@ async function taskWorkspaceFlagEnabled(): Promise<boolean> {
  * re-derive runtime/route/host once the handle exists. Hard-required
  * capabilities fail closed BEFORE the handle is created.
  *
- * INTENTIONALLY DORMANT until Phase 7: the team execution-binding resolver is
- * its first production caller; today only tests exercise it (pinned in
- * agent-execution-service.test.ts).
+ * No longer dormant: `createAgentExecutionHandle` has real production callers
+ * in Chat (`hooks/chat/use-claude-chat-controller.ts`) and the TUI
+ * (`cli/src/tui/hooks/useAgentSession.tsx`). The old "INTENTIONALLY DORMANT
+ * until Phase 7" label outlived its truth by two commits; the guard test that
+ * was supposed to catch that is rewritten alongside this.
  */
 export async function openAgentSession(input: {
   sessionId: string
@@ -338,21 +311,18 @@ export async function openAgentSession(input: {
 }
 
 /**
- * Renderer-side convenience wrapper: the unified authority behind the resolver
- * flag, the legacy `executeAgent` path otherwise. Environment is renderer host
- * truth (desktop sidecar vs web); the headless brain calls
+ * Renderer-side convenience wrapper over {@link executeAgentTurn}. Environment
+ * is renderer host truth (desktop sidecar vs web); the headless brain calls
  * {@link executeAgentTurn} with its own environment instead.
+ *
+ * Deliberately does NOT delegate to `executeAgent`: that function now delegates
+ * *here*, so a fallback in this direction would be an infinite loop.
  */
 export async function executeAgentTurnFromRenderer(
   prompt: string,
   config: ExecuteAgentConfig,
   options?: AgentExecutionTurnOptions
 ): Promise<AgentExecutionServiceResult> {
-  const { isAgentExecutionFlagEnabled } = await import("./feature-flags")
-  if (!isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
-    const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-    return executeAgent(prompt, config)
-  }
   const { isTauri } = await import("@/lib/tauri")
   return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false }, options)
 }

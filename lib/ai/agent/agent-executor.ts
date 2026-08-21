@@ -53,6 +53,7 @@ import type {
   PluginToolPermissionFn,
 } from "@/types/plugin/plugin-agent-sdk"
 import type { PluginPostToolUseFn } from "@/types/plugin/plugin-agent-hooks"
+import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 
 export interface AgentTool {
   /** Stable id; defaults to `name` when the caller omits it. */
@@ -479,22 +480,10 @@ async function runToolEnabledStandalone(
       traceEmitter.recordEvent(sendOptions.spanId, {
         name: "routing.plan",
         at: Date.now(),
-        attributes: {
-          decisionId: plan.decisionId,
-          surface: plan.surface,
-          strategy: plan.strategy,
-          providerId: plan.selected.providerId,
-          modelId: plan.selected.modelId,
-          candidateCount: plan.orderedCandidates.length,
-          reasonCodes: plan.reasonCodes,
-          ...(plan.classification
-            ? {
-                category: plan.classification.category,
-                complexity: plan.classification.complexity,
-                difficultyScore: plan.classification.difficultyScore,
-              }
-            : {}),
-        },
+        // One shared projection: two hand-written attribute objects had already
+        // drifted, and a calibration pipeline fed two shapes silently analyses
+        // half its data. Numbers and enums only — never prompt text.
+        attributes: routingPlanTraceAttributes(plan),
       })
       if (plan.shadowComparison?.differs) {
         traceEmitter.recordEvent(sendOptions.spanId, {
@@ -666,31 +655,13 @@ export async function executeAgent(
 ): Promise<ExecuteAgentResult> {
   const { isTauri } = await import("@/lib/tauri")
 
-  // ADR-0090 Phase 6: behind the resolver flag the unified service is the
-  // single authority (resolver-driven rail selection, fail-closed hard
-  // capabilities, explicit-only completion fallback with degradedReason).
-  // Flag off ⇒ the legacy branch below runs byte-identically (kept until
-  // Phase 9 retirement).
-  const { isAgentExecutionFlagEnabled } = await import("@/lib/ai/agent/execution/feature-flags")
-  if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
-    const { executeAgentTurn } = await import("@/lib/ai/agent/execution/agent-execution-service")
-    return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false })
-  }
-  void import("@/lib/ai/agent/execution/agent-execution-service")
-    .then(({ recordAgentExecutionShadow }) =>
-      recordAgentExecutionShadow(config, { isTauri: isTauri(), isHeadlessHost: false })
-    )
-    .catch(() => undefined)
-
-  // Tool-enabled branch: route through the sidecar when requested and available.
-  if (config.toolsEnabled) {
-    if (isTauri()) {
-      return runAgentRail(prompt, config)
-    }
-    // Requested tools but no sidecar — fall through to the text-only channel.
-  }
-
-  return runCompletionRail(prompt, config)
+  // ADR-0090: the unified service is THE authority — one resolver decision,
+  // fail-closed hard capabilities (fail-before-spend), and an explicit-only
+  // completion fallback that carries `degradedReason`. The rails it runs are
+  // the bodies this function used to inline (`runAgentRail` /
+  // `runCompletionRail`), so this is a delegation, not a second path.
+  const { executeAgentTurn } = await import("@/lib/ai/agent/execution/agent-execution-service")
+  return executeAgentTurn(prompt, config, { isTauri: isTauri(), isHeadlessHost: false })
 }
 
 /**
@@ -705,6 +676,11 @@ export async function runCompletionRail(
   // in-memory snapshot here closes every public Agent entrypoint without
   // adding a Dexie/network operation or threading the same tuple through each
   // plugin, dispatch, plan, team, and external-bridge adapter.
+  // Lifecycle hooks: this degraded text-only rail is NOT covered by
+  // settings.json hooks. It exists precisely because the sidecar is
+  // unavailable (web / mobile), and the sidecar is where SDK-native hooks are
+  // registered — so there is nothing to fire against here. Deliberate: see the
+  // Hooks settings coverage list.
   const liveSettings = await import("@/stores/settings")
     .then(({ useSettingsStore }) => useSettingsStore.getState().settings)
     .catch(() => undefined)

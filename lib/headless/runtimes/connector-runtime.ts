@@ -79,6 +79,95 @@ async function completeLarkOAuthCallback(
   }
 }
 
+/**
+ * Generic connector OAuth relay topic (`oauth_connector_callback` in
+ * `axum_app.rs`). Carries `kind` so one subscription serves every platform;
+ * Lark keeps its own topic because its relay path predates this one and is
+ * registered byte-for-byte in existing Feishu consoles.
+ */
+const CONNECTOR_OAUTH_CALLBACK_TOPIC = "connectors://connector-oauth/callback"
+
+interface ConnectorOAuthCallbackPayload extends LarkOAuthCallbackPayload {
+  kind?: unknown
+}
+
+/**
+ * Complete a platform-connector OAuth callback delivered by the headless
+ * connector front door.
+ *
+ * Routes through `oauthRegistry` rather than a per-platform import, so a
+ * platform that registers a handler is authorizable headless with no change
+ * here. The handler re-validates the durable pending state before exchanging
+ * the code, so the event bus is only transport — never an auth bypass.
+ */
+async function completeConnectorOAuthCallback(
+  payload: ConnectorOAuthCallbackPayload,
+  log: (level: "info" | "warn" | "error", message: string) => void
+): Promise<void> {
+  const kind = typeof payload.kind === "string" ? payload.kind.trim() : ""
+  if (!kind) {
+    log("error", "[connector-bus] connector OAuth callback is missing its kind")
+    return
+  }
+  if (typeof payload.error === "string" && payload.error.trim()) {
+    log("error", `[connector-bus] ${kind} OAuth rejected: ${payload.error.trim()}`)
+    return
+  }
+  if (
+    typeof payload.code !== "string" ||
+    !payload.code.trim() ||
+    typeof payload.state !== "string" ||
+    !payload.state.trim()
+  ) {
+    log("error", `[connector-bus] ${kind} OAuth callback is missing code or state`)
+    return
+  }
+  try {
+    const { oauthRegistry } = await import("@/lib/connectors/oauth-registry")
+    const handler = oauthRegistry.get(kind)
+    if (!handler) {
+      log("error", `[connector-bus] no OAuth handler registered for ${kind}`)
+      return
+    }
+    await handler(payload.code, payload.state)
+    log("info", `[connector-bus] ${kind} OAuth completed`)
+  } catch (error) {
+    log(
+      "error",
+      `[connector-bus] ${kind} OAuth completion failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  }
+}
+
+function installConnectorOAuthCallbackHandler(
+  listen: ConnectorListenFn,
+  log: (level: "info" | "warn" | "error", message: string) => void
+): () => void {
+  let disposed = false
+  let unlisten: (() => void) | undefined
+  void listen<ConnectorOAuthCallbackPayload>(CONNECTOR_OAUTH_CALLBACK_TOPIC, ({ payload }) => {
+    void completeConnectorOAuthCallback(payload, log)
+  })
+    .then((dispose) => {
+      if (disposed) dispose()
+      else unlisten = dispose
+    })
+    .catch((error) => {
+      log(
+        "error",
+        `[connector-bus] connector OAuth listener failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    })
+  return () => {
+    disposed = true
+    unlisten?.()
+  }
+}
+
 function installLarkOAuthCallbackHandler(
   listen: ConnectorListenFn,
   log: (level: "info" | "warn" | "error", message: string) => void
@@ -190,12 +279,18 @@ registerHeadlessRuntime({
     const prevListen = setConnectorListen(headlessConnectorListen)
     let dispose: () => Promise<void> = async () => undefined
     let disposeLarkOAuth: () => void = () => undefined
+    let disposeConnectorOAuth: () => void = () => undefined
     const acquireRuntimeLock = createHeadlessConnectorRuntimeLease(
       ctx.log,
       () => dispose(),
       () => {
         disposeLarkOAuth()
         disposeLarkOAuth = installLarkOAuthCallbackHandler(headlessConnectorListen, ctx.log)
+        disposeConnectorOAuth()
+        disposeConnectorOAuth = installConnectorOAuthCallbackHandler(
+          headlessConnectorListen,
+          ctx.log
+        )
       }
     )
     dispose = installConnectorRuntime({
@@ -209,6 +304,7 @@ registerHeadlessRuntime({
     const disposeLarkIntents = installLarkIntentHandler(headlessConnectorListen)
     return async () => {
       disposeLarkOAuth()
+      disposeConnectorOAuth()
       disposeLarkIntents()
       await dispose()
       setConnectorCommandInvoker(prevInvoker)

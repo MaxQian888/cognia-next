@@ -328,3 +328,109 @@ describe("advancePlanToNextStep — degraded reads", () => {
     expect(out.userMessage).toContain("Step 1 of 3")
   })
 })
+
+describe("lifecycle hooks around a plan step", () => {
+  /** A firer that records every event and can block one of them. */
+  function recordingFirer(block?: { event: string; reason: string }, context?: string) {
+    const fired: { event: string; agentKind?: string; agentRef?: string; payload?: unknown }[] = []
+    const firer = jest.fn(
+      async (
+        event: string,
+        ctx: { agentKind?: string; agentRef?: string },
+        opts?: { payload?: Record<string, unknown> }
+      ) => {
+        fired.push({
+          event,
+          ...(ctx.agentKind ? { agentKind: ctx.agentKind } : {}),
+          ...(ctx.agentRef ? { agentRef: ctx.agentRef } : {}),
+          payload: opts?.payload,
+        })
+        if (block && block.event === event) return { block: block.reason, warnings: [] }
+        if (context && event === "UserPromptSubmit")
+          return { block: null, additionalContext: context, warnings: [] }
+        return { block: null, warnings: [] }
+      }
+    )
+    return { fired, firer: firer as never }
+  }
+
+  beforeEach(() => {
+    getPlanRuntimeMock.mockReturnValue({ finishPlanRun })
+  })
+
+  it("brackets the dispatched step with SessionStart + UserPromptSubmit", async () => {
+    seed(plan())
+    const { fired, firer } = recordingFirer()
+
+    const outcome = await advancePlanToNextStep("p1", GEN, { firer })
+
+    expect(outcome.kind).toBe("continue")
+    expect(fired.map((f) => f.event)).toEqual(["SessionStart", "UserPromptSubmit"])
+    // The identity is what makes an `agents: "plan-step"` selector work — the
+    // whole reason this seam exists.
+    expect(fired[0]!.agentKind).toBe("plan-step")
+    expect(fired[0]!.agentRef).toBe("s0")
+    expect(fired[1]!.payload).toMatchObject({
+      phase: "plan-step",
+      planId: "p1",
+      stepId: "s0",
+      stepTitle: "step 0",
+    })
+  })
+
+  it("appends a hook's additionalContext to the dispatched step message", async () => {
+    seed(plan())
+    const { firer } = recordingFirer(undefined, "Remember: repo is read-only today.")
+
+    const outcome = await advancePlanToNextStep("p1", GEN, { firer })
+
+    expect(outcome.kind).toBe("continue")
+    if (outcome.kind !== "continue") throw new Error("unreachable")
+    expect(outcome.userMessage).toContain("Remember: repo is read-only today.")
+    // Injected, not replaced — the step instructions must survive.
+    expect(outcome.userMessage).toContain("step 0")
+  })
+
+  it("PAUSES the plan when a hook blocks, rather than failing it", async () => {
+    const row = seed(plan())
+    const { firer } = recordingFirer({ event: "UserPromptSubmit", reason: "budget exhausted" })
+
+    const outcome = await advancePlanToNextStep("p1", GEN, { firer })
+
+    expect(outcome).toEqual({ kind: "exit", status: "paused", reason: "budget exhausted" })
+    // Paused, not failed: the plan is fine, a policy said "not now", and the
+    // user can fix the hook and resume from the tracker dock.
+    expect(row.current().status).toBe("paused")
+    expect(appendPlanEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planId: "p1",
+        kind: "exit",
+        payload: { kind: "exit", status: "paused", reason: "budget exhausted" },
+      })
+    )
+  })
+
+  it("fires Stop for the finished step before advancing", async () => {
+    seed(plan({ steps: [step(0, { status: "in_progress" }), step(1)], currentStepId: "s0" }))
+    const { fired, firer } = recordingFirer()
+
+    await handlePlanTurnComplete({
+      planId: "p1",
+      lastResponse: "done",
+      capturedGenerationId: GEN,
+      firer,
+    })
+
+    // Stop closes the bracket for s0; the next step then opens its own.
+    const stop = fired.find((f) => f.event === "Stop")
+    expect(stop).toBeDefined()
+    expect(stop!.agentRef).toBe("s0")
+  })
+
+  it("is a silent no-op when no firer is injected", async () => {
+    seed(plan())
+    // Every pre-existing caller passes nothing — behaviour must be unchanged.
+    const outcome = await advancePlanToNextStep("p1", GEN)
+    expect(outcome.kind).toBe("continue")
+  })
+})

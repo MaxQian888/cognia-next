@@ -33,7 +33,6 @@
 
 import type { WorkReceiptV1 } from "@cognia/agent-config-types/work-submission"
 
-import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
 import {
   claimWorkSubmission,
   getWorkSubmission,
@@ -77,7 +76,6 @@ export interface AcceptChatTurnInput extends ChatTurnIdentity {
 }
 
 export interface ChatAdapterDeps extends WorkSubmissionServiceDeps {
-  isEnabled?: () => boolean
   resolveScope?: () => ChatTurnScope | null
   onError?: (error: unknown) => void
 }
@@ -104,8 +102,6 @@ function defaultScope(): ChatTurnScope | null {
 }
 
 function resolve(deps: ChatAdapterDeps): ChatTurnScope | null {
-  const enabled = deps.isEnabled?.() ?? getAgentExecutionFlags().durableWorkSubmission
-  if (!enabled) return null
   return (deps.resolveScope ?? defaultScope)()
 }
 

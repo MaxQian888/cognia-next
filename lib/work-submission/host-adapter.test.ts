@@ -32,7 +32,7 @@ const KEY = new Uint8Array(32).fill(13)
 const NOW = 1_755_000_000_000
 
 function deps(overrides: Partial<HostAdapterDeps> = {}): HostAdapterDeps {
-  return { isEnabled: () => true, loadKey: async () => KEY, ...overrides }
+  return { loadKey: async () => KEY, ...overrides }
 }
 
 function action(
@@ -127,11 +127,6 @@ describe("acceptHostStateChatTurn", () => {
     expect(JSON.stringify(batch?.envelope)).not.toContain("hello from mobile")
   }, 30_000)
 
-  it("returns null when the feature is off", async () => {
-    expect(await acceptHostStateChatTurn(action(), deps({ isEnabled: () => false }))).toBeNull()
-    expect(await getDb().workSubmissions.count()).toBe(0)
-  }, 30_000)
-
   it.each<AllowedHostStateIntentV1>([
     { kind: "turn.abort" },
     { kind: "turn.steer", text: "actually, stop" },
@@ -176,11 +171,6 @@ describe("acceptHostStateChatTurn", () => {
       )
     ).rejects.toThrow("keyring unavailable")
     expect(onError).toHaveBeenCalled()
-  }, 30_000)
-
-  it("reads the live flag when none is injected", async () => {
-    // Default-off in production, so the Host path is unchanged until rollout.
-    expect(await acceptHostStateChatTurn(action(), { loadKey: async () => KEY })).toBeNull()
   }, 30_000)
 })
 

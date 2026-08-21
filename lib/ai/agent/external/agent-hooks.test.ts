@@ -30,7 +30,12 @@ import {
   type ExternalHookFireNotice,
 } from "./agent-hooks"
 
-const ctx: AgentHookContext = { agentId: "a1", sessionId: "s1", cwd: "/repo" }
+const ctx: AgentHookContext = {
+  agentId: "a1",
+  agentKind: "external",
+  sessionId: "s1",
+  cwd: "/repo",
+}
 
 beforeEach(() => {
   invoke.mockReset()
@@ -61,6 +66,8 @@ describe("fireAgentHook", () => {
       sessionId: "s1",
       cwd: "/repo",
       toolName: "Bash",
+      agentKind: "external",
+      agentRef: "a1",
       payload: { tool_name: "Bash" },
     })
   })
@@ -73,12 +80,15 @@ describe("fireAgentHook", () => {
 
   it("passes null defaults when cwd + opts are omitted", async () => {
     invoke.mockResolvedValue({ block: null, warnings: [] })
-    await fireAgentHook("Stop", { agentId: "a1", sessionId: "s1" })
+    await fireAgentHook("Stop", { agentId: "a1", agentKind: "external", sessionId: "s1" })
     expect(invoke).toHaveBeenCalledWith("run_agent_hook", {
       event: "Stop",
       sessionId: "s1",
       cwd: null,
       toolName: null,
+      agentKind: "external",
+      // agentRef falls back to agentId when the caller does not name one.
+      agentRef: "a1",
       payload: null,
     })
   })

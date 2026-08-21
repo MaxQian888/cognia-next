@@ -1,4 +1,36 @@
 import type { RuntimeTargetRecord } from "./target-registry"
+
+// The suite below always injects `dependencies`, so the DEFAULT dependency
+// object — the one every production caller actually uses — was never executed.
+// These two mocks are what let a test call `switchAccountRuntimeTarget` with no
+// dependencies at all: the registry singleton is constructed at module load and
+// would otherwise open Dexie, and `reloadTransport` dynamically imports the
+// companion transport.
+let mockRegistry: Record<string, jest.Mock> = {}
+jest.mock("./target-registry", () => {
+  const actual = jest.requireActual("./target-registry")
+  const forward =
+    (name: string) =>
+    (...args: unknown[]) =>
+      mockRegistry[name](...args)
+  return {
+    ...actual,
+    RuntimeTargetRegistry: class {
+      getActiveTarget = forward("getActiveTarget")
+      ensureStandaloneTarget = forward("ensureStandaloneTarget")
+      activateTarget = forward("activateTarget")
+      listTargets = forward("listTargets")
+      deleteTarget = forward("deleteTarget")
+      deleteAccountTargets = forward("deleteAccountTargets")
+      close() {}
+    },
+  }
+})
+
+const mockReloadCompanionConfig = jest.fn(async () => undefined)
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  reloadCompanionConfigForActiveTarget: () => mockReloadCompanionConfig(),
+}))
 import {
   detachActiveCompanionRuntimeTarget,
   deriveCompanionRuntimeTargetId,
@@ -172,7 +204,11 @@ it("atomically registers the Companion metadata before switching database contex
             return companion
           },
         },
-        getContext: () => ({ accountId: "acct_runtime", targetId: "web-standalone" }),
+        getContext: () => ({
+          accountId: "acct_runtime",
+          targetId: "web-standalone",
+          routingGeneration: 1,
+        }),
         activateDatabase: (_accountId, targetId) => events.push(`database:${targetId}`),
         setContext: (_accountId, targetId) => events.push(`context:${targetId}`),
       }
@@ -397,5 +433,59 @@ it("switches to standalone before removing a revoked active Companion target", a
     "context:web-standalone",
     "metadata:companion-studio",
     "database-delete:cognia-account-acct_runtime-target-companion-studio",
+  ])
+})
+
+it("completes a switch that relies on the default dependencies", async () => {
+  // Regression: the default `stopSubscriptions` built its transition context
+  // with a bare `toTargetId` — the *field name*, not a binding in scope — so
+  // every caller that omitted `dependencies` (the runtime-target menu's "This
+  // browser" row, `removeCompanionHost`) threw `ReferenceError: toTargetId is
+  // not defined` and left the account on the target it was trying to leave.
+  const companion: RuntimeTargetRecord = {
+    ...standalone,
+    id: "companion-studio",
+    kind: "companion",
+    hostKind: "desktop",
+  }
+  mockRegistry = {
+    getActiveTarget: jest.fn(async () => companion),
+    ensureStandaloneTarget: jest.fn(async () => standalone),
+    activateTarget: jest.fn(async () => standalone),
+    listTargets: jest.fn(async () => [standalone, companion]),
+    deleteTarget: jest.fn(),
+    deleteAccountTargets: jest.fn(),
+  }
+  mockReloadCompanionConfig.mockClear()
+
+  const { registerRuntimeTargetTransitionParticipant } = await import("./runtime-target-lifecycle")
+  const { setActiveRuntimeTargetContext, clearActiveRuntimeTargetContext } =
+    await import("./runtime-target-context")
+  const contexts: Array<Record<string, unknown>> = []
+  const unregister = registerRuntimeTargetTransitionParticipant({
+    id: "default-dependency-regression",
+    phase: "release-subscriptions",
+    priority: 0,
+    run: (context) => {
+      contexts.push({ ...context })
+    },
+  })
+  setActiveRuntimeTargetContext("acct_runtime", companion.id)
+
+  try {
+    await expect(switchAccountRuntimeTarget("acct_runtime", standalone.id)).resolves.toEqual(
+      standalone
+    )
+  } finally {
+    unregister()
+    clearActiveRuntimeTargetContext()
+  }
+
+  expect(mockRegistry.activateTarget).toHaveBeenCalledWith("acct_runtime", standalone.id)
+  expect(mockReloadCompanionConfig).toHaveBeenCalledTimes(1)
+  // The destination the participants are told about is the target being
+  // switched TO, not the one being left.
+  expect(contexts).toEqual([
+    { accountId: "acct_runtime", fromTargetId: companion.id, toTargetId: standalone.id },
   ])
 })

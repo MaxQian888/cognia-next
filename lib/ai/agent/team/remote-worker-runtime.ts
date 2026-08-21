@@ -5,6 +5,9 @@ import type {
   HandoffEnvelope,
 } from "@cognia/agent"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import { isPlaceable } from "@/lib/placement/liveness"
+import { selectPlacement } from "@/lib/placement/select"
+import { PlacementWaitingError, type PlacementCandidate } from "@/lib/placement/types"
 import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
 
 export interface RemoteWorkerDescriptor {
@@ -58,7 +61,17 @@ export function evaluateRemoteWorkerPlacement(
   const manifest = worker.manifest
   const profile = manifest.executionProfile
   const spec = requirements.spec
-  if (!worker.online) return { ready: false, reason: "worker_offline" }
+  // A worker's socket is the strongest liveness signal there is, so this goes
+  // through the shared judgment rather than reading `online` directly — one
+  // definition of reachable across workers, phones, and remote hosts.
+  if (
+    !isPlaceable(
+      { online: worker.online, lastSeenAt: worker.lastSeenAt, source: "socket" },
+      Date.now()
+    )
+  ) {
+    return { ready: false, reason: "worker_offline" }
+  }
   if (!profile) return { ready: false, reason: "execution_profile_missing" }
   if (profile.runtimeAdapter !== spec.runtimeAdapter) {
     return { ready: false, reason: "runtime_mismatch" }
@@ -103,31 +116,75 @@ export function evaluateRemoteWorkerPlacement(
   return { ready: true }
 }
 
+/**
+ * Project a worker onto the shared placement vocabulary.
+ *
+ * Only the fields the shared selector reads: identity, liveness, and load.
+ * Compatibility stays with {@link evaluateRemoteWorkerPlacement}, whose eleven
+ * reasons are persisted on `AgentTeamChildRun.placementReason` and therefore
+ * cannot be flattened into the generic ones.
+ */
+function asPlacementCandidate(worker: RemoteWorkerDescriptor): PlacementCandidate {
+  return {
+    ref: worker.hostRef,
+    kind: "worker",
+    liveness: { online: worker.online, lastSeenAt: worker.lastSeenAt, source: "socket" },
+    provides: [],
+    activeUnits: worker.activeTurns,
+    maxUnits: worker.manifest.maxActiveTurns,
+  }
+}
+
 export function selectRemoteWorker(
   workers: readonly RemoteWorkerDescriptor[],
   target: Exclude<TeammateExecutionTarget, { mode: "colocate" }>,
   requirements: RemoteWorkerRequirements
 ): RemoteWorkerDescriptor {
-  if (target.mode === "pinned") {
-    const pinned = workers.find((worker) => worker.hostRef === target.hostRef)
-    if (!pinned?.online) {
-      throw new RemoteWorkerWaitingError("pinned_host_offline", target.hostRef)
-    }
-    const placement = evaluateRemoteWorkerPlacement(pinned, requirements)
-    if (!placement.ready) {
-      throw new RemoteWorkerWaitingError("no_compatible_capacity", target.hostRef, placement.reason)
-    }
-    return pinned
-  }
-  const compatible = workers
-    .filter((worker) => evaluateRemoteWorkerPlacement(worker, requirements).ready)
-    .sort(
-      (left, right) =>
-        left.activeTurns - right.activeTurns || left.hostRef.localeCompare(right.hostRef)
+  const byRef = new Map(workers.map((worker) => [worker.hostRef, worker]))
+  const verdicts = new Map<string, ReturnType<typeof evaluateRemoteWorkerPlacement>>()
+  const pinnedRef = target.mode === "pinned" ? target.hostRef : undefined
+  const constraint =
+    pinnedRef !== undefined
+      ? ({ mode: "pinned", ref: pinnedRef } as const)
+      : ({ mode: "auto" } as const)
+
+  try {
+    // The shared selector owns ordering, the lexicographic tiebreak that keeps
+    // two hosts from picking different targets for the same placement, and the
+    // waiting-is-not-failure distinction. Worker compatibility stays here.
+    const selection = selectPlacement(
+      workers.map(asPlacementCandidate),
+      constraint,
+      [],
+      Date.now(),
+      {
+        evaluate: (candidate) => {
+          const worker = byRef.get(candidate.ref)!
+          const verdict = evaluateRemoteWorkerPlacement(worker, requirements)
+          verdicts.set(candidate.ref, verdict)
+          return verdict.ready
+            ? { ready: true }
+            : {
+                ready: false,
+                reason: verdict.reason === "worker_offline" ? "offline" : "capability_mismatch",
+              }
+        },
+      }
     )
-  const selected = compatible[0]
-  if (!selected) throw new RemoteWorkerWaitingError("no_compatible_capacity")
-  return selected
+    return byRef.get(selection.candidate.ref)!
+  } catch (error) {
+    if (!(error instanceof PlacementWaitingError)) throw error
+    const reason = error.ref ? verdicts.get(error.ref) : undefined
+    const placementReason = reason && !reason.ready ? reason.reason : undefined
+    if (error.waiting === "pinned_candidate_unavailable") {
+      throw new RemoteWorkerWaitingError("pinned_host_offline", pinnedRef)
+    }
+    throw new RemoteWorkerWaitingError(
+      "no_compatible_capacity",
+      error.ref ?? pinnedRef,
+      placementReason
+    )
+  }
 }
 
 export interface RemoteWorkerRunInput {
@@ -157,11 +214,19 @@ export interface RemoteWorkerRuntime {
 }
 
 let runtime: RemoteWorkerRuntime | undefined
+const runtimeListeners = new Set<() => void>()
+
+function notifyRuntimeChanged(): void {
+  for (const listener of [...runtimeListeners]) listener()
+}
 
 export function installRemoteWorkerRuntime(next: RemoteWorkerRuntime): () => void {
   runtime = next
+  notifyRuntimeChanged()
   return () => {
-    if (runtime === next) runtime = undefined
+    if (runtime !== next) return
+    runtime = undefined
+    notifyRuntimeChanged()
   }
 }
 
@@ -169,6 +234,27 @@ export function getRemoteWorkerRuntime(): RemoteWorkerRuntime | undefined {
   return runtime
 }
 
+/**
+ * Observe whether this host can dispatch to workers at all.
+ *
+ * Presence of the runtime is the difference between a worker that will receive
+ * frames and one that will silently never be dispatched to, so the Fleet UI
+ * reads it through `useSyncExternalStore` rather than assuming a host is
+ * capable because it accepted an enrollment.
+ */
+export function subscribeToRemoteWorkerRuntime(listener: () => void): () => void {
+  runtimeListeners.add(listener)
+  return () => {
+    runtimeListeners.delete(listener)
+  }
+}
+
+/** True when a brain is attached on this host and dispatch can actually run. */
+export function isRemoteWorkerDispatchAvailable(): boolean {
+  return runtime !== undefined
+}
+
 export function __resetRemoteWorkerRuntimeForTesting(): void {
   runtime = undefined
+  notifyRuntimeChanged()
 }

@@ -21,6 +21,7 @@
  *   frames the bytes itself (see `pi-rpc-peer.ts`).
  */
 
+import type { ExternalAgentCompactionCapability } from "./session-capabilities"
 import type {
   AcpConfigOption,
   AcpElicitationResponse,
@@ -911,12 +912,11 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     await record.peer.sendCommand("compact", {}, 120000)
   }
 
-  async getCompactionCapability(): Promise<{
-    status: "supported"
-    routes: Array<{ kind: "native" }>
-  }> {
-    // Native `compact` command, not a slash-command heuristic.
-    return { status: "supported", routes: [{ kind: "native" }] }
+  async getCompactionCapability(): Promise<ExternalAgentCompactionCapability> {
+    // Native `compact` command, not a slash-command heuristic. `supportsFocus`
+    // is part of the native route's shape and was missing from the hand-written
+    // return type this used to declare.
+    return { status: "supported", routes: [{ kind: "native", supportsFocus: false }] }
   }
 
   // ------------------------------------------------------------------ config
@@ -1002,16 +1002,26 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     ]
   }
 
-  async setConfigOption(sessionId: string, optionId: string, value: unknown): Promise<void> {
+  /**
+   * Returns the refreshed option list, like the ACP implementation does — the
+   * `ProtocolAdapter` contract promises `AcpConfigOption[]` and callers use it
+   * to re-render the picker. This resolved `void` before, so a Pi session handed
+   * `AgentManager.setConfigOption`'s callers `undefined` where they expected an
+   * array.
+   */
+  async setConfigOption(
+    sessionId: string,
+    optionId: string,
+    value: unknown
+  ): Promise<AcpConfigOption[]> {
     if (optionId === "model") {
       await this.setSessionModel(sessionId, String(value))
-      return
-    }
-    if (optionId === "thinking") {
+    } else if (optionId === "thinking") {
       await this.setThinkingLevel(sessionId, String(value))
-      return
+    } else {
+      throw new Error(`Unknown Pi config option: ${optionId}`)
     }
-    throw new Error(`Unknown Pi config option: ${optionId}`)
+    return this.getConfigOptions(sessionId)
   }
 
   // ------------------------------------------------------------- permissions

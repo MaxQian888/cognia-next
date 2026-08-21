@@ -27,7 +27,6 @@ import type { HostStateActionV1 } from "@cognia/agent-config-types/host-state"
 import type { WorkReceiptV1 } from "@cognia/agent-config-types/work-submission"
 import type { SendOptions } from "@cognia/agent-config-types"
 
-import { getAgentExecutionFlags } from "@/lib/ai/agent/execution/feature-flags"
 import { claimWorkSubmission, getWorkSubmission } from "@/lib/db/work-submissions"
 
 import { chatIdempotencyKey } from "./chat-adapter"
@@ -40,7 +39,6 @@ import {
 } from "./service"
 
 export interface HostAdapterDeps extends WorkSubmissionServiceDeps {
-  isEnabled?: () => boolean
   onError?: (error: unknown) => void
 }
 
@@ -65,8 +63,6 @@ export async function acceptHostStateChatTurn(
   action: HostStateActionV1,
   deps: HostAdapterDeps = {}
 ): Promise<WorkReceiptV1 | null> {
-  const enabled = deps.isEnabled?.() ?? getAgentExecutionFlags().durableWorkSubmission
-  if (!enabled) return null
   if (action.action.kind !== "message.enqueue") return null
   const sessionId = action.sessionId
   if (!sessionId) return null
@@ -115,8 +111,7 @@ export async function bindHostStateChatTurnContext(
   sendOptions: SendOptions,
   deps: HostAdapterDeps = {}
 ): Promise<boolean> {
-  const enabled = deps.isEnabled?.() ?? getAgentExecutionFlags().durableWorkSubmission
-  if (!enabled || action.action.kind !== "message.enqueue" || !action.sessionId) return false
+  if (action.action.kind !== "message.enqueue" || !action.sessionId) return false
   try {
     const runId = hostStateRunId(action.actionId)
     const result = await bindWorkExecutionContext(
@@ -144,8 +139,6 @@ export async function markHostStateChatTurnStarted(
   now = Date.now(),
   deps: HostAdapterDeps = {}
 ): Promise<boolean> {
-  const enabled = deps.isEnabled?.() ?? getAgentExecutionFlags().durableWorkSubmission
-  if (!enabled) return false
   try {
     await markWorkSubmissionStarted(hostStateSubmissionId(actionId), now)
     return true
@@ -163,8 +156,6 @@ export async function claimHostStateChatTurnForDispatch(
   now = Date.now(),
   deps: HostAdapterDeps = {}
 ): Promise<HostStateTurnDispatchClaim> {
-  const enabled = deps.isEnabled?.() ?? getAgentExecutionFlags().durableWorkSubmission
-  if (!enabled) return "legacy"
   const submissionId = hostStateSubmissionId(actionId)
   try {
     const claimed = await claimWorkSubmission(submissionId, "host-state", now)

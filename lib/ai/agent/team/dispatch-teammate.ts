@@ -56,7 +56,10 @@ import {
   getRemoteWorkerRuntime,
   RemoteWorkerWaitingError,
   selectRemoteWorker,
+  type RemoteWorkerDescriptor,
 } from "./remote-worker-runtime"
+import { requestWorkerWake, shouldAttemptWake } from "./wake-worker"
+import { routingPlanTraceAttributes } from "@/lib/routing/plan-trace-attributes"
 
 const DEFAULT_TEAMMATE_SYSTEM_PROMPT =
   "You are a focused, helpful agent teammate. Stay on-task and produce concrete output."
@@ -277,10 +280,23 @@ async function runToolEnabled(
           }
         : {}),
     })
+    // Name the turn for lifecycle-hook scoping. `resolveSendOptions` defaults
+    // every turn to `"chat"` because that is what it normally resolves; a
+    // teammate dispatch is not, and without this its SessionStart/Stop fired as
+    // an anonymous chat session — indistinguishable from the user typing.
+    sendOptions.agentKind = "teammate"
+    sendOptions.agentRef = teammate.id
     // Apply the resolved step budget as an explicit per-dispatch turn cap. The
     // sidecar dispatcher honors `maxTurns` (an explicit value takes precedence
     // over its default 256-turn budget).
     if (typeof maxSteps === "number" && maxSteps > 0) sendOptions.maxTurns = maxSteps
+    // `preferCheap` with no model to move to: the reasoning ladder is the other
+    // large cost lever, and dropping it is the only downshift still available
+    // when the user has no cheap lane configured. Previously `preferCheap` was
+    // read nowhere at all, so a budget escalation changed nothing whatsoever.
+    if (teamCtx.modelPref.get().preferCheap && !modelHint && sendOptions.effort) {
+      delete sendOptions.effort
+    }
     const plan = sendOptions.routingPlan
     const controller = plan
       ? new RoutingAttemptController(
@@ -298,15 +314,10 @@ async function runToolEnabled(
       recordEvent(spanId, {
         name: "routing.plan",
         at: Date.now(),
-        attributes: {
-          decisionId: plan.decisionId,
-          surface: plan.surface,
-          strategy: plan.strategy,
-          providerId: plan.selected.providerId,
-          modelId: plan.selected.modelId,
-          candidateCount: plan.orderedCandidates.length,
-          reasonCodes: plan.reasonCodes,
-        },
+        // Shared projection with the chat executor. This site used to omit the
+        // classification entirely, so a teammate turn contributed a decision id
+        // with no score and calibration counted it as absent.
+        attributes: routingPlanTraceAttributes(plan),
       })
       if (plan.shadowComparison?.differs) {
         recordEvent(spanId, {
@@ -671,77 +682,73 @@ export async function dispatchTeammate(
     if (isTauri()) channel = "sidecar"
   }
 
-  // ADR-0090 Phase 6: behind the resolver flag, the unified resolver owns the
-  // channel decision. It is fed the RESOLVED external backing (external-agent
-  // availability is environment truth resolved above, exactly like host
-  // availability): a teammate whose external agent did not resolve executes as
-  // built-in — non-claude runtimes on the text rail, claude on the agent rail.
+  // ADR-0090: the unified resolver owns the channel decision. It is fed the
+  // RESOLVED external backing (external-agent availability is environment truth
+  // resolved above, exactly like host availability): a teammate whose external
+  // agent did not resolve executes as built-in — non-claude runtimes on the
+  // text rail, claude on the agent rail.
   {
-    const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
-      await import("@/lib/ai/agent/execution/feature-flags")
-    if (isAgentExecutionFlagEnabled("agentExecutionResolverV2")) {
-      const [
-        { resolveAgentExecutionSpec, channelFromSpec },
-        { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
-      ] = await Promise.all([
-        import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
-        import("./execution-binding-resolver"),
-      ])
-      const { isTauri } = await import("@/lib/tauri")
-      const environment = { isTauri: isTauri(), isHeadlessHost: false }
-      // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
-      // default; run/app-default/managed slots reserved). A legacy raw-cred
-      // member migrates to its provider-id deployment ref at dispatch time
-      // (refs only — the raw values are never copied). The resulting policy
-      // fragment feeds the SAME resolver call.
-      const binding = resolveTeammateExecutionBinding({
-        member:
-          teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
-        teamDefault: teamCtx.team.config?.defaultExecution,
-      })
-      // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
-      // deployment id is the deterministic selection (documented on the field's
-      // pool hint) — never a silent no-op.
-      const poolPick = binding.candidateIds?.[0]
-      const { spec } = resolveAgentExecutionSpec({
-        surface: "team",
-        environment,
-        flags: getAgentExecutionFlags(),
-        policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
-        legacy: {
-          runtime: externalAgentId ? runtime : "claude",
-          modelId: modelHint ?? teammate.config?.model,
-          toolsEnabled: externalAgentId
-            ? args.preferToolEnabled !== false
-            : runtime === "claude" && args.preferToolEnabled !== false,
-        },
-        identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
-      })
-      frozenExecutionSpec = spec
-      executionTarget = binding.executionTarget
-      channel = channelFromSpec(spec, environment)
-      // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
-      // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
-      // In-place on the per-run cached bundle — the clamp is deterministic per
-      // teammate and only ever removes.
-      const { clampCapabilitiesToRuntime } = await import("./capability-resolver")
-      const clamped = clampCapabilitiesToRuntime(resolvedCaps, spec.capabilities.effective)
-      resolvedCaps.mcpServerIds = clamped.mcpServerIds
-      resolvedCaps.subagentIds = clamped.subagentIds
-      resolvedCaps.nativeAnthropicToolIds = clamped.nativeAnthropicToolIds
-      resolvedCaps.skillIds = clamped.skillIds
-      void import("@/lib/telemetry/events/track-event")
-        .then(({ trackEvent }) =>
-          trackEvent("agent.execution.resolved", {
-            surface: "team",
-            runtime: spec.runtimeAdapter,
-            routeKind: spec.route.kind,
-            executionKind: spec.executionKind,
-            legacyMigrated: spec.legacyMigrated === true,
-          })
-        )
-        .catch(() => undefined)
-    }
+    const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
+    const [
+      { resolveAgentExecutionSpec, channelFromSpec },
+      { resolveTeammateExecutionBinding, migrateTeammateExecutionBinding },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/execution/resolve-agent-execution-spec"),
+      import("./execution-binding-resolver"),
+    ])
+    const { isTauri } = await import("@/lib/tauri")
+    const environment = { isTauri: isTauri(), isHeadlessHost: false }
+    // ADR-0090 Phase 7: fixed-precedence execution binding (member → team
+    // default; run/app-default/managed slots reserved). A legacy raw-cred
+    // member migrates to its provider-id deployment ref at dispatch time
+    // (refs only — the raw values are never copied). The resulting policy
+    // fragment feeds the SAME resolver call.
+    const binding = resolveTeammateExecutionBinding({
+      member: teammate.config?.execution ?? migrateTeammateExecutionBinding(teammate.config ?? {}),
+      teamDefault: teamCtx.team.config?.defaultExecution,
+    })
+    // Pool mode: until the coordinator-driven pick lands, the FIRST candidate
+    // deployment id is the deterministic selection (documented on the field's
+    // pool hint) — never a silent no-op.
+    const poolPick = binding.candidateIds?.[0]
+    const { spec } = resolveAgentExecutionSpec({
+      surface: "team",
+      environment,
+      flags: getAgentExecutionFlags(),
+      policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
+      legacy: {
+        runtime: externalAgentId ? runtime : "claude",
+        modelId: modelHint ?? teammate.config?.model,
+        toolsEnabled: externalAgentId
+          ? args.preferToolEnabled !== false
+          : runtime === "claude" && args.preferToolEnabled !== false,
+      },
+      identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
+    })
+    frozenExecutionSpec = spec
+    executionTarget = binding.executionTarget
+    channel = channelFromSpec(spec, environment)
+    // ADR-0090 Phase 7: intersect the plugin capability bundle with what the
+    // FROZEN runtime can serve (mcp / native subagents / tool-backed ids).
+    // In-place on the per-run cached bundle — the clamp is deterministic per
+    // teammate and only ever removes.
+    const { clampCapabilitiesToRuntime } = await import("./capability-resolver")
+    const clamped = clampCapabilitiesToRuntime(resolvedCaps, spec.capabilities.effective)
+    resolvedCaps.mcpServerIds = clamped.mcpServerIds
+    resolvedCaps.subagentIds = clamped.subagentIds
+    resolvedCaps.nativeAnthropicToolIds = clamped.nativeAnthropicToolIds
+    resolvedCaps.skillIds = clamped.skillIds
+    void import("@/lib/telemetry/events/track-event")
+      .then(({ trackEvent }) =>
+        trackEvent("agent.execution.resolved", {
+          surface: "team",
+          runtime: spec.runtimeAdapter,
+          routeKind: spec.route.kind,
+          executionKind: spec.executionKind,
+          legacyMigrated: spec.legacyMigrated === true,
+        })
+      )
+      .catch(() => undefined)
   }
 
   // Degradation is a first-class, machine-readable outcome (ADR-0090 Phase 6):
@@ -915,15 +922,13 @@ export async function dispatchTeammate(
           promptText,
         ].join("\n")
       }
-      const taskWorkspaceEnabled =
-        useSettingsStore.getState().settings?.developer?.taskWorkspace === true
       const { isAgentTeamRemoteDispatchEnabled } =
         await import("@/lib/ai/agent/execution/feature-flags")
       if (
         durableDispatch &&
         frozenExecutionSpec &&
         executionTarget.mode !== "colocate" &&
-        isAgentTeamRemoteDispatchEnabled(taskWorkspaceEnabled)
+        isAgentTeamRemoteDispatchEnabled()
       ) {
         const remoteRuntime = getRemoteWorkerRuntime()
         if (!remoteRuntime) throw new RemoteWorkerWaitingError("no_compatible_capacity")
@@ -938,11 +943,34 @@ export async function dispatchTeammate(
         const selectedExecutionTarget = durableDispatch.retryTargetHostRef
           ? ({ mode: "pinned", hostRef: durableDispatch.retryTargetHostRef } as const)
           : executionTarget
-        const target = selectRemoteWorker(remoteRuntime.listWorkers(), selectedExecutionTarget, {
+        const placementRequirements = {
           spec: frozenExecutionSpec,
           workspaceBindingRef: repositoryRef,
           requiredSandboxCapabilities: teamCtx.team.config?.sandboxPolicy ? ["filesystem"] : [],
-        })
+        }
+        let target: RemoteWorkerDescriptor
+        try {
+          target = selectRemoteWorker(
+            remoteRuntime.listWorkers(),
+            selectedExecutionTarget,
+            placementRequirements
+          )
+        } catch (error) {
+          // A worker that is merely asleep is indistinguishable from one that
+          // is gone, and waiting alone never changes that. Ask the host to send
+          // a magic packet, then rethrow so the caller's existing wait/retry
+          // path runs — the machine cannot boot inside this frame.
+          if (shouldAttemptWake(error) && selectedExecutionTarget.mode === "pinned") {
+            const hostRef = selectedExecutionTarget.hostRef
+            // Imported lazily: the account module reaches into Dexie, and this
+            // file is on the import path of pure planning code that must stay
+            // loadable without a database.
+            void import("@/lib/accounts/active-account-id").then(({ getActiveAccountId }) =>
+              requestWorkerWake({ tenantId: getActiveAccountId(), hostRef })
+            )
+          }
+          throw error
+        }
         const remoteExecutionSpec = rebindResolvedAgentExecutionHost(
           frozenExecutionSpec,
           target.hostRef
@@ -1210,10 +1238,7 @@ export async function dispatchTeammate(
           workspacePath: durableEnvironmentSession.executionRoot,
           ...(durableEnvironmentSession.branch ? { branch: durableEnvironmentSession.branch } : {}),
         })
-      } else if (
-        useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
-        taskWorkspaceRoot
-      ) {
+      } else if (taskWorkspaceRoot) {
         const lease = await openTaskWorkspaceRunLease({
           taskId: taskIdForMessage(`team:${teamCtx.runId}`),
           sessionId: teamCtx.runId,

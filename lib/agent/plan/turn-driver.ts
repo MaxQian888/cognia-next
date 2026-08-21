@@ -18,10 +18,25 @@
  * a plan has a finite, ordered step list, so "advance one step per completed
  * turn" is the whole state machine. Quality control is the approval gate before
  * execution and the refinement loop after a failure — not a per-turn verdict.
+ *
+ * Lifecycle hooks: this driver had no firer seam at all, unlike its sibling
+ * `lib/goal/turn-driver.ts` — so a settings.json hook could not see, augment or
+ * gate a plan step even though every other autonomous turn honoured them. Each
+ * step is now bracketed through the shared `lib/claude/hooks/lifecycle-firer`
+ * with `agent_kind: "plan-step"`, so an `agents: "plan-step"` selector scopes to
+ * exactly these turns. A blocking hook PAUSES the plan (rather than failing it)
+ * so the user can fix the hook and resume.
  */
 
 import type { PlanStatus, PlanStep } from "@/types/agent/plan"
 import { appendPlanEvent, getPlan, updatePlan } from "@/lib/db/plans"
+import {
+  firePostCallHooks,
+  firePreCallHooks,
+  noopLifecycleFirer,
+  type AgentHookContext,
+  type LifecycleHookFirer,
+} from "@/lib/claude/hooks/lifecycle-firer"
 import { applyStepStatus, nextRunnableStep } from "./steps"
 import { renderPlanStepMessage } from "./prompts"
 import { emitPlanStatus } from "./notify"
@@ -37,7 +52,16 @@ export type PlanTurnOutcome =
   | { kind: "continue"; stepId: string; stepTitle: string; userMessage: string }
   | { kind: "exit"; status: PlanStatus; reason: string }
 
-export interface PlanTurnCompleteInput {
+/**
+ * Lifecycle-hook seam, mirroring `lib/goal/turn-driver.ts`. Absent ⇒ the
+ * no-op firer, so every existing caller and test is unaffected.
+ */
+export interface PlanTurnHookDeps {
+  firer?: LifecycleHookFirer
+  hookContext?: AgentHookContext
+}
+
+export interface PlanTurnCompleteInput extends PlanTurnHookDeps {
   planId: string
   /** Latest assistant message text — stored as the finished step's result. */
   lastResponse: string
@@ -60,7 +84,8 @@ export interface PlanTurnCompleteInput {
  */
 export async function advancePlanToNextStep(
   planId: string,
-  capturedGenerationId: string
+  capturedGenerationId: string,
+  hooks: PlanTurnHookDeps = {}
 ): Promise<PlanTurnOutcome> {
   const plan = await getPlan(planId)
   if (!plan) return { kind: "no_plan" }
@@ -103,12 +128,53 @@ export async function advancePlanToNextStep(
   })
   const fresh = await getPlan(planId)
   void emitPlanStatus(fresh)
+
+  // Bracket the step with the pre-call hooks: a blocking `UserPromptSubmit`
+  // denies it, and any `additionalContext` is appended to the step message the
+  // caller is about to dispatch.
+  const userMessage = renderPlanStepMessage(fresh ?? plan, next)
+  const ctx = planHookContext(hooks, planId, next.id)
+  const pre = await firePreCallHooks(hooks.firer ?? noopLifecycleFirer, ctx, userMessage, {
+    phase: "plan-step",
+    planId,
+    stepId: next.id,
+    stepTitle: next.title,
+  })
+  if (pre.block) {
+    // Pause, do not fail: the plan is fine, a policy said not now. The user can
+    // fix the hook and resume from the tracker dock.
+    await updatePlan(planId, { status: "paused" })
+    await appendPlanEvent({
+      planId,
+      kind: "exit",
+      payload: { kind: "exit", status: "paused", reason: pre.block },
+    })
+    void emitPlanStatus(await getPlan(planId))
+    return { kind: "exit", status: "paused", reason: pre.block }
+  }
+
   return {
     kind: "continue",
     stepId: next.id,
     stepTitle: next.title,
-    userMessage: renderPlanStepMessage(fresh ?? plan, next),
+    userMessage: pre.additionalContext ? `${userMessage}\n\n${pre.additionalContext}` : userMessage,
   }
+}
+
+/** The hook identity for a plan step — explicit context wins, else derived. */
+function planHookContext(
+  hooks: PlanTurnHookDeps,
+  planId: string,
+  stepId: string
+): AgentHookContext {
+  return (
+    hooks.hookContext ?? {
+      agentId: "plan-step",
+      agentKind: "plan-step",
+      agentRef: stepId,
+      sessionId: planId,
+    }
+  )
 }
 
 /**
@@ -148,6 +214,12 @@ export async function handlePlanTurnComplete(
       kind: "step_completed",
       payload: { kind: "step_completed", stepId: current.id, title: current.title },
     })
+    // Close the bracket opened when this step was dispatched. Observational.
+    void firePostCallHooks(
+      input.firer ?? noopLifecycleFirer,
+      planHookContext(input, planId, current.id),
+      { success: true }
+    )
   }
 
   // Re-check the guard after the writes: a pause / cancel landing in that
@@ -159,7 +231,10 @@ export async function handlePlanTurnComplete(
   }
   if (signal?.aborted) return { kind: "aborted" }
 
-  return advancePlanToNextStep(planId, capturedGenerationId)
+  return advancePlanToNextStep(planId, capturedGenerationId, {
+    ...(input.firer ? { firer: input.firer } : {}),
+    ...(input.hookContext ? { hookContext: input.hookContext } : {}),
+  })
 }
 
 /**

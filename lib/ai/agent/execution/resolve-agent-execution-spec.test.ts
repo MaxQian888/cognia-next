@@ -27,7 +27,6 @@ const UNSERVED_BY_CLAUDE = (() => {
 })()
 
 const flagsOff: Record<AgentExecutionFlag, boolean> = {
-  agentExecutionResolverV2: false,
   agentTeamRemoteDispatch: false,
   genericAgentHostCommands: false,
   gatewayAgentRouteTickets: false,
