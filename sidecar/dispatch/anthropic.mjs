@@ -186,6 +186,11 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
    * @type {Map<string, { resolve: (r: any) => void }>}
    */
   const pendingPluginToolCalls = new Map()
+  // `{ type: "plugin" }` lifecycle-hook handlers round-trip through the renderer
+  // the same way plugin tools do; `claude-host.mjs` settles this map from the
+  // `plugin_hook_response` frame. See `dispatch/plugin-hook-exec.mjs` for why
+  // `host_rpc` cannot be used for this.
+  const pendingPluginHookCalls = new Map()
 
   const resumeId = sendOptions.resumeSessionId ?? sendOptions.forkFromSessionId
   const isFork = sendOptions.forkFromSessionId != null
@@ -480,7 +485,14 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
         sessionId,
         cwd: sendOptions.cwd,
         provider: "claude",
+        // Which agent this turn belongs to, for the `agents` group selector.
+        // The SDK cannot supply it (cognia never launches with `--agent`), so
+        // the renderer names the turn and it rides in on sendOptions.
+        agentKind: sendOptions.agentKind,
+        agentRef: sendOptions.agentRef,
         executeNativeHandler: executeNativeHook,
+        pendingPluginHookCalls,
+        newId: () => randomUUID(),
       })
     ),
 
@@ -824,6 +836,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
       ),
     pendingApprovals,
     pendingPluginToolCalls,
+    pendingPluginHookCalls,
     sendOptions,
   }
 

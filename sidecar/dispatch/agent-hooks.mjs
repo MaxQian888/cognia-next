@@ -19,6 +19,7 @@ import { spawn } from "node:child_process"
 
 import { HOOK_EVENTS } from "@anthropic-ai/claude-agent-sdk"
 import { hasNoLeakingPiiDeep, redactText } from "@cognia/redact"
+import { runPluginHookHandler } from "./plugin-hook-exec.mjs"
 
 const DEFAULT_TIMEOUT_SECS = 5
 const HARD_TIMEOUT_CAP_SECS = 30
@@ -124,6 +125,45 @@ export function matcherMatches(matcher, target, narrowExactSet = false) {
     matcherRegexCache.set(m, re)
   }
   return re ? re.test(target) : false
+}
+
+/**
+ * Resolve the agent identity for one hook fire.
+ *
+ * cognia does not launch the SDK with `--agent`, so the SDK only fills
+ * `agent_id` / `agent_type` INSIDE a Task-dispatched subagent — every other
+ * turn (a teammate, a plan step, a connector auto-reply) is indistinguishable
+ * from a plain chat turn as far as the SDK is concerned. So the session's own
+ * identity is injected host-side via `deps`, and the SDK's subagent identity
+ * layers on top when present: a Task subagent spawned inside a teammate turn is
+ * a subagent, not a teammate.
+ */
+export function resolveAgentIdentity(input, deps = {}) {
+  const sdkAgentId = typeof input?.agent_id === "string" ? input.agent_id : undefined
+  const sdkAgentType = typeof input?.agent_type === "string" ? input.agent_type : undefined
+  const kind = sdkAgentId ? "subagent" : deps.agentKind
+  const agentRef = sdkAgentType ?? sdkAgentId ?? deps.agentRef
+  return {
+    ...(kind ? { agent_kind: kind } : {}),
+    ...(agentRef ? { agent_ref: agentRef } : {}),
+  }
+}
+
+/**
+ * Test a group's `agents` selector against the resolved identity. Absent
+ * selector → match all, so every pre-existing config is untouched. A present
+ * selector matches when it applies to EITHER `agent_kind` or `agent_ref`.
+ *
+ * An unidentified event never matches a present selector: a hook that asked to
+ * be narrowed must not fire on a turn whose agent we cannot name.
+ */
+export function agentsMatch(selector, identity) {
+  if (selector == null) return true
+  const sel = String(selector).trim()
+  if (sel === "" || sel === "*") return true
+  return [identity?.agent_kind, identity?.agent_ref]
+    .filter((v) => typeof v === "string" && v.length > 0)
+    .some((target) => matcherMatches(sel, target))
 }
 
 // --- Decision parsing (port of command.rs:parse_zero_exit_output/extract_decision)
@@ -415,6 +455,21 @@ function runHandler(handler, payloadJson, signal, cwd, deps = {}) {
   if ((handler.type === "http" || handler.type === "webhook") && typeof handler.url === "string") {
     return runWebhookHandler(handler.url, handler.headers, handler.timeout, payloadJson, signal)
   }
+  if (handler.type === "plugin") {
+    // The settings.json ⇄ plugin bridge. Redact before the payload leaves the
+    // sidecar: a plugin handler is third-party code, so it gets the same
+    // outbound treatment as an HTTP hook rather than the raw turn.
+    const redactedPayloadJson = redactText(payloadJson).redacted
+    if (!hasNoLeakingPiiDeep(redactedPayloadJson)) {
+      return Promise.resolve({ block: HOOK_PII_BLOCK_REASON })
+    }
+    return runPluginHookHandler(handler, redactedPayloadJson, {
+      emit: deps.emitRaw,
+      sessionId: deps.sessionId,
+      pendingPluginHookCalls: deps.pendingPluginHookCalls,
+      newId: deps.newId,
+    }).catch((e) => ({ warning: `plugin hook failed: ${e?.message ?? e}` }))
+  }
   if (
     (handler.type === "prompt" || handler.type === "agent" || handler.type === "mcp_tool") &&
     typeof deps.executeNativeHandler === "function"
@@ -499,6 +554,9 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, deps =
       )
     )
       continue
+    // Orthogonal to `matcher`: `matcher` narrows by tool, `agents` by producer.
+    // Applies to EVERY event, including the matcher-less ones.
+    if (!agentsMatch(group.agents, deps.agentIdentity)) continue
     for (const handler of Array.isArray(group.hooks) ? group.hooks : []) {
       const index = handlerIndex++
       const startedAt = Date.now()
@@ -513,7 +571,9 @@ export async function runGroups(groups, target, payloadJson, signal, cwd, deps =
             policyClass: handlerPolicyClass(handler),
             outcome: auditOutcome(outcome),
             latencyMs: Math.max(0, Date.now() - startedAt),
-            redacted: ["http", "webhook", "prompt", "agent", "mcp_tool"].includes(handler?.type),
+            redacted: ["http", "webhook", "prompt", "agent", "mcp_tool", "plugin"].includes(
+              handler?.type
+            ),
             blockReason: outcome?.block,
             error: outcome?.warning,
           })
@@ -650,15 +710,25 @@ function makeEventCallback(eventName, hooksConfig, deps) {
   return async (input, _toolUseId, ctx) => {
     const groups = groupsForEvent(hooksConfig, eventName)
     if (groups.length === 0) return {}
-    const target = hookMatchTarget(eventName, input)
-    const payloadJson = safeStringify(input)
+    // Merged BEFORE the payload is serialized so a hook script reads
+    // `agent_kind` / `agent_ref` as top-level fields, exactly as the Rust rail
+    // emits them.
+    const agentIdentity = resolveAgentIdentity(input, deps)
+    const identifiedInput = { ...input, ...agentIdentity }
+    const target = hookMatchTarget(eventName, identifiedInput)
+    const payloadJson = safeStringify(identifiedInput)
     const hookDepth =
       input?.hook_origin === "hook" ? Math.max(1, Number(input?.hook_recursion_depth ?? 1) || 1) : 0
     const dec = await runGroups(groups, target, payloadJson, ctx?.signal, deps?.cwd, {
       eventName,
       provider: deps?.provider ?? "claude",
       sessionId: deps?.sessionId,
+      agentIdentity,
       hookDepth,
+      // Plugin-handler round-trip seam (`{ type: "plugin" }`).
+      emitRaw: deps?.emit,
+      pendingPluginHookCalls: deps?.pendingPluginHookCalls,
+      newId: deps?.newId,
       executeNativeHandler: deps?.executeNativeHandler,
       onAudit:
         typeof deps?.emitAudit === "function"
@@ -684,7 +754,7 @@ function makeEventCallback(eventName, hooksConfig, deps) {
  * caller can omit the field.
  *
  * @param {object|undefined} hooksConfig  `HooksConfig` (event → HookGroup[])
- * @param {{ emit: Function, emitAudit?: Function, log?: Function, sessionId: string, cwd?: string, provider?: string, executeNativeHandler?: Function }} deps
+ * @param {{ emit: Function, emitAudit?: Function, log?: Function, sessionId: string, cwd?: string, provider?: string, agentKind?: string, agentRef?: string, executeNativeHandler?: Function, pendingPluginHookCalls?: Map<string, any>, newId?: () => string }} deps
  */
 export function buildAgentHooks(hooksConfig, deps) {
   if (!hooksConfig || typeof hooksConfig !== "object") return undefined

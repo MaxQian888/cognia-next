@@ -93,22 +93,32 @@ describe("queryPreCompactDecision", () => {
     assert.equal(result.source, "fallback")
   })
 
-  it("returns plugin decision when host responds", async () => {
-    const rpc = {
-      isClosed: false,
-      call: async (_method, _params, _opts) => ({ skipCompaction: true }),
-    }
-    const result = await queryPreCompactDecision(rpc, {
+  it("returns the plugin decision when the renderer bridge responds", async () => {
+    // The transport is the plugin-hook round-trip, NOT `host_rpc`: that frame is
+    // answered in Rust and never reaches the renderer, which is why this hook
+    // fell back on every call before.
+    const result = await queryPreCompactDecision(
+      null,
+      { sessionId: "s1", messageCount: 10, tokenCount: 5000, compressionRatio: 0.8 },
+      { pluginHookBridge: async () => ({ skipCompaction: true }) }
+    )
+    assert.equal(result.source, "plugin")
+    assert.equal(result.skip, true)
+  })
+
+  it("falls back when no renderer bridge is supplied", async () => {
+    // Headless, or a rail with no renderer: compaction proceeds on its built-in
+    // strategy exactly as before.
+    const result = await queryPreCompactDecision(null, {
       sessionId: "s1",
       messageCount: 10,
       tokenCount: 5000,
       compressionRatio: 0.8,
     })
-    assert.equal(result.source, "plugin")
-    assert.equal(result.skip, true)
+    assert.equal(result.source, "fallback")
   })
 
-  it("returns fallback when host call throws", async () => {
+  it("returns fallback when the bridge throws", async () => {
     const rpc = {
       isClosed: false,
       call: async () => {
@@ -124,17 +134,16 @@ describe("queryPreCompactDecision", () => {
     assert.equal(result.source, "fallback")
   })
 
-  it("passes context to the host call", async () => {
+  it("passes the context and the hook name through the bridge", async () => {
     let received
-    const rpc = {
-      isClosed: false,
-      call: async (_method, params) => {
-        received = params
+    const ctx = { sessionId: "s1", messageCount: 20, tokenCount: 10000, compressionRatio: 0.75 }
+    await queryPreCompactDecision(null, ctx, {
+      pluginHookBridge: async (req) => {
+        received = req
         return {}
       },
-    }
-    const ctx = { sessionId: "s1", messageCount: 20, tokenCount: 10000, compressionRatio: 0.75 }
-    await queryPreCompactDecision(rpc, ctx)
-    assert.deepEqual(received, ctx)
+    })
+    assert.deepEqual(received.payload, ctx)
+    assert.equal(received.hookId, "onPreCompact")
   })
 })

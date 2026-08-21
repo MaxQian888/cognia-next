@@ -11,6 +11,7 @@
 //   { type: "interrupt",           sessionId }
 //   { type: "permission_response", sessionId, requestId, decision: "allow"|"allow_always"|"deny" }
 //   { type: "plugin_tool_response", sessionId, toolUseId, result?, error? }
+//   { type: "plugin_hook_response", sessionId, execId, result?, error? }
 //   { type: "tool_result_decision", sessionId, reviewId, updatedToolOutput? }
 //   { type: "close",               sessionId }
 //
@@ -24,6 +25,7 @@
 //       marks the approval "interrupted" instead of silently dropping it.
 //   { type: "tool_result_review", sessionId, reviewId, toolUseId, toolName, result, isError }
 //   { type: "plugin_tool_exec",   sessionId, toolUseId, name, args }
+//   { type: "plugin_hook_exec",   sessionId, execId, pluginId, hookId, payload }
 //   { type: "session_ended",      sessionId, result?: SDKResultMessage, error?: string }
 //   { type: "ready",              sdkVersion?, sidecarVersion?, builtinToolsCount? }
 //   { type: "log",                level, message }
@@ -137,6 +139,7 @@ const hostRpc = createHostRpc({ emit })
  * @property {() => void} closeInput               signal end-of-input to the SDK
  * @property {Map<string, {resolve: (r: any) => void}>} pendingApprovals
  * @property {Map<string, {resolve: (r: any) => void}>} [pendingPluginToolCalls]
+ * @property {Map<string, {resolve: (r: any) => void}>} [pendingPluginHookCalls]
  */
 
 /** @type {Map<string, Session>} */
@@ -803,6 +806,22 @@ function handlePluginToolResponse(msg) {
 }
 
 /**
+ * Settle a `{ type: "plugin" }` lifecycle-hook round-trip. Same contract and
+ * same tolerance for unknown ids as {@link handlePluginToolResponse}: a late or
+ * raced response must not fault the host, and the sidecar-side timeout has
+ * already failed the hook OPEN by then.
+ */
+function handlePluginHookResponse(msg) {
+  const { sessionId, execId, result, error } = msg
+  const s = sessions.get(sessionId)
+  if (!s || !s.pendingPluginHookCalls) return
+  const pending = s.pendingPluginHookCalls.get(execId)
+  if (!pending) return
+  s.pendingPluginHookCalls.delete(execId)
+  pending.resolve({ result, error })
+}
+
+/**
  * Code-level protocol adapter round-trip (P2-E). The renderer executes the
  * plugin's adapter and streams AI-SDK-shaped chunks back; we push them into
  * the per-session `pendingProtocolExecs` channel the sidecar's code-adapter
@@ -994,6 +1013,9 @@ function startReadLoop() {
         break
       case "plugin_tool_response":
         handlePluginToolResponse(msg)
+        break
+      case "plugin_hook_response":
+        handlePluginHookResponse(msg)
         break
       case "host_rpc_result":
         // Answered by Rust directly (never by the renderer) — see host-rpc.mjs.

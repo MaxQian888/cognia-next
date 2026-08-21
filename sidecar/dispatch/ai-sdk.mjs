@@ -31,6 +31,7 @@ import {
 import { shouldCompact, estimateTokens, makeSummaryMessage, summaryVersion } from "./compaction.mjs"
 import { planStrategy } from "./compaction-strategies.mjs"
 import { queryPreCompactDecision } from "./pre-compact-hook.mjs"
+import { runPluginHookHandler, PLUGIN_HOOK_BROADCAST } from "./plugin-hook-exec.mjs"
 import { capToolResults } from "./tool-result-cap.mjs"
 import { sanitizeToolMessagePairs } from "./tool-message-pairing.mjs"
 import { buildMcpLogEvent } from "./mcp-log.mjs"
@@ -519,6 +520,10 @@ export function dispatchAiSdk({
   // `plugin_tool_response` against this Map (same contract as the Anthropic
   // path). Exposed on the returned session so the host can reach it.
   const pendingPluginToolCalls = new Map()
+  // `{ type: "plugin" }` lifecycle hooks and the host's own plugin-hook seams
+  // (compaction) round-trip through the renderer against this map; settled by
+  // `claude-host.mjs` from the `plugin_hook_response` frame.
+  const pendingPluginHookCalls = new Map()
   // Tool-permission approvals round-trip the same way (`permission_request` →
   // `permission_response`), resolved by claude-host against this Map.
   const pendingApprovals = new Map()
@@ -759,7 +764,10 @@ export function dispatchAiSdk({
 
     // ── PreCompact plugin hook (ADR-0090 Phase 9) ──────────────────────────
     // Gives plugins a chance to skip compaction, inject context, or override
-    // the strategy. Falls back gracefully when hostRpc is unavailable.
+    // the strategy. This used to route through `host_rpc`, which is answered in
+    // Rust and never reaches the renderer — so it always fell back and the hook
+    // was dead. It now rides the plugin-hook round-trip. Still falls back
+    // gracefully when no renderer is attached.
     const preCompactDecision = await queryPreCompactDecision(
       hostRpc,
       {
@@ -768,7 +776,17 @@ export function dispatchAiSdk({
         tokenCount: lastInputTokens ?? estimateTokens(conversation),
         compressionRatio: undefined,
       },
-      { log }
+      {
+        log,
+        pluginHookBridge: async ({ hookId, payload, timeoutMs }) => {
+          const outcome = await runPluginHookHandler(
+            { type: "plugin", pluginId: PLUGIN_HOOK_BROADCAST, hookId, timeout: timeoutMs / 1000 },
+            JSON.stringify(payload),
+            { emit, sessionId, pendingPluginHookCalls, newId: () => randomUUID() }
+          )
+          return outcome?.pluginResult
+        },
+      }
     )
     if (preCompactDecision.skip) {
       log("info", "compaction skipped by plugin preCompact decision")
@@ -1682,6 +1700,7 @@ export function dispatchAiSdk({
     },
     pendingApprovals,
     pendingPluginToolCalls,
+    pendingPluginHookCalls,
     pendingProtocolExecs,
     pendingToolResultReviews,
     // Exposed for tests: the execute-layer PostToolUse review round-trip that

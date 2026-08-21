@@ -1,7 +1,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import http from "node:http"
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -21,6 +21,8 @@ import {
   runCommandHandler,
   runGroups,
   runWebhookHandler,
+  agentsMatch,
+  resolveAgentIdentity,
 } from "./agent-hooks.mjs"
 
 // A cross-platform command string: `node -e "<js>"` runs under both `cmd /C`
@@ -720,4 +722,174 @@ test("a lifecycle event blocks and injects context through the generic mapping",
 test("a configured-but-empty group registers nothing", () => {
   const map = buildAgentHooks({ Stop: [{ hooks: [] }] }, { sessionId: "s", emit() {} })
   assert.equal(map, undefined)
+})
+
+// --- Cross-rail matcher conformance ----------------------------------------
+
+test("matcher conformance: this rail defines the canonical rule", () => {
+  // The sidecar is canonical, so this asserts the TABLE still describes what
+  // this implementation does. If someone changes the rule here deliberately,
+  // this test fails first and the table (and the two ports) must follow.
+  const table = JSON.parse(
+    readFileSync(join(import.meta.dirname, "../../hooks/matcher-conformance.json"), "utf8")
+  )
+  assert.ok(table.cases.length > 0)
+  assert.ok(table.narrowCases.length > 0)
+  for (const [key, narrow] of [
+    ["cases", false],
+    ["narrowCases", true],
+  ]) {
+    for (const c of table[key]) {
+      assert.equal(
+        matcherMatches(c.matcher, c.target, narrow),
+        c.expected,
+        `${key}: matcher=${JSON.stringify(c.matcher)} target=${JSON.stringify(c.target)} — ${c.why}`
+      )
+    }
+  }
+})
+
+// --- Agent identity + the `agents` selector --------------------------------
+
+test("resolveAgentIdentity: host identity names the turn the SDK cannot", () => {
+  // cognia never launches with `--agent`, so a teammate turn reaches the SDK
+  // with no agent_id/agent_type at all — the host has to name it.
+  assert.deepEqual(
+    resolveAgentIdentity({ tool_name: "Bash" }, { agentKind: "teammate", agentRef: "reviewer" }),
+    { agent_kind: "teammate", agent_ref: "reviewer" }
+  )
+  // No host identity and no SDK identity → no fields at all, so a narrowed
+  // hook cannot match an unidentified turn.
+  assert.deepEqual(resolveAgentIdentity({ tool_name: "Bash" }, {}), {})
+})
+
+test("resolveAgentIdentity: an SDK Task subagent wins over the host identity", () => {
+  // A Task subagent spawned inside a teammate turn is a subagent, not a
+  // teammate — otherwise `agents: "teammate"` would leak into its tool calls.
+  assert.deepEqual(
+    resolveAgentIdentity(
+      { agent_id: "ag_1", agent_type: "explore" },
+      { agentKind: "teammate", agentRef: "reviewer" }
+    ),
+    { agent_kind: "subagent", agent_ref: "explore" }
+  )
+})
+
+test("agentsMatch: absent/star selector matches everything", () => {
+  const id = { agent_kind: "teammate", agent_ref: "reviewer" }
+  assert.equal(agentsMatch(undefined, id), true)
+  assert.equal(agentsMatch(null, id), true)
+  assert.equal(agentsMatch("", id), true)
+  assert.equal(agentsMatch("*", id), true)
+  // Absent selector still matches when there is no identity at all — every
+  // pre-existing config keeps its behaviour.
+  assert.equal(agentsMatch(undefined, {}), true)
+})
+
+test("agentsMatch: matches either the kind or the ref, with matcher syntax", () => {
+  const id = { agent_kind: "teammate", agent_ref: "reviewer" }
+  assert.equal(agentsMatch("teammate", id), true)
+  assert.equal(agentsMatch("reviewer", id), true)
+  assert.equal(agentsMatch("chat|teammate", id), true)
+  assert.equal(agentsMatch("^review", id), true)
+  assert.equal(agentsMatch("chat", id), false)
+  assert.equal(agentsMatch("planner", id), false)
+})
+
+test("agentsMatch: a present selector never matches an unidentified event", () => {
+  // A hook that asked to be narrowed must not fire on a turn we cannot name.
+  assert.equal(agentsMatch("teammate", {}), false)
+  assert.equal(agentsMatch("teammate", { agent_kind: "" }), false)
+  assert.equal(agentsMatch("teammate", undefined), false)
+})
+
+test("runGroups: the agents selector narrows independently of the matcher", async () => {
+  const groups = [
+    { matcher: "Bash", agents: "teammate", hooks: [{ type: "command", command: "exit 2" }] },
+  ]
+  const payload = JSON.stringify({ tool_name: "Bash" })
+
+  // Right tool, right agent → the group runs and its block lands.
+  const hit = await runGroups(groups, "Bash", payload, undefined, undefined, {
+    eventName: "PreToolUse",
+    agentIdentity: { agent_kind: "teammate" },
+  })
+  assert.equal(typeof hit.block, "string")
+
+  // Right tool, wrong agent → skipped entirely.
+  const missAgent = await runGroups(groups, "Bash", payload, undefined, undefined, {
+    eventName: "PreToolUse",
+    agentIdentity: { agent_kind: "chat" },
+  })
+  assert.equal(missAgent.block, undefined)
+
+  // Right agent, wrong tool → still skipped; the two selectors are ANDed.
+  const missTool = await runGroups(groups, "Read", payload, undefined, undefined, {
+    eventName: "PreToolUse",
+    agentIdentity: { agent_kind: "teammate" },
+  })
+  assert.equal(missTool.block, undefined)
+})
+
+test("runGroups: agents narrows even the matcher-less events", async () => {
+  // hookMatchTarget returns null for UserPromptSubmit, so `matcher` is ignored
+  // there — `agents` must still apply or the selector would be silently
+  // inert on exactly the events guards care about most.
+  const groups = [{ agents: "chat", hooks: [{ type: "command", command: "exit 2" }] }]
+  const payload = JSON.stringify({ prompt: "hi" })
+
+  const hit = await runGroups(groups, null, payload, undefined, undefined, {
+    eventName: "UserPromptSubmit",
+    agentIdentity: { agent_kind: "chat" },
+  })
+  assert.equal(typeof hit.block, "string")
+
+  const miss = await runGroups(groups, null, payload, undefined, undefined, {
+    eventName: "UserPromptSubmit",
+    agentIdentity: { agent_kind: "scheduler" },
+  })
+  assert.equal(miss.block, undefined)
+})
+
+test("buildAgentHooks: the identity reaches the hook script as real stdin fields", async () => {
+  // End-to-end through the SDK callback: a command hook that reads stdin and
+  // blocks only when it sees the injected identity. Proves the merge happens
+  // before serialization, not just that resolveAgentIdentity computes it.
+  const script = join(tmpdir(), `cognia-hook-identity-${process.pid}.mjs`)
+  writeFileSync(
+    script,
+    [
+      'import { readFileSync } from "node:fs"',
+      'const p = JSON.parse(readFileSync(0, "utf8"))',
+      'if (p.agent_kind === "teammate" && p.agent_ref === "reviewer") {',
+      '  process.stderr.write("saw identity")',
+      "  process.exit(2)",
+      "}",
+      "process.exit(0)",
+    ].join("\n")
+  )
+
+  const map = buildAgentHooks(
+    {
+      PostToolUse: [
+        { hooks: [{ type: "command", command: `${process.execPath} ${JSON.stringify(script)}` }] },
+      ],
+    },
+    { emit: () => {}, sessionId: "s1", agentKind: "teammate", agentRef: "reviewer" }
+  )
+  const callback = map.PostToolUse[0].hooks[0]
+  const out = await callback({ tool_name: "Bash" }, undefined, {})
+  assert.match(JSON.stringify(out), /saw identity/)
+
+  // Same hook, no host identity → the script sees no agent_kind and allows.
+  const anon = buildAgentHooks(
+    {
+      PostToolUse: [
+        { hooks: [{ type: "command", command: `${process.execPath} ${JSON.stringify(script)}` }] },
+      ],
+    },
+    { emit: () => {}, sessionId: "s1" }
+  )
+  const anonOut = await anon.PostToolUse[0].hooks[0]({ tool_name: "Bash" }, undefined, {})
+  assert.doesNotMatch(JSON.stringify(anonOut), /saw identity/)
 })

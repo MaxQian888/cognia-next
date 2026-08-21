@@ -8,11 +8,22 @@
  * cannot import `lib/`. This module bridges that gap through the existing
  * `host_rpc` channel.
  *
- * Protocol (sidecar → host → renderer → host → sidecar):
- *   1. sidecar emits: { type: "host_rpc", rpcId, method: "preCompact", params }
- *   2. Rust host receives, calls renderer's `dispatchPreCompact`
- *   3. renderer returns `PreCompactResult` (or times out → fallback)
- *   4. Rust host replies: { type: "host_rpc_result", rpcId, ok: true, result }
+ * ## Protocol
+ *
+ * This module originally documented a `host_rpc` round-trip to the renderer.
+ * That never worked: `answer_host_rpc` in `src-tauri/src/claude/sidecar.rs` is
+ * deliberately TERMINAL — answered in Rust, never forwarded to the renderer —
+ * and it only dispatches `jobs.*` plus the agent-session-store methods. There
+ * has never been a `preCompact` method, so every call errored and fell back,
+ * which is why `onPreCompact` was marked dormant in `types/plugin/plugin-hooks.ts`.
+ *
+ * It now rides the same renderer round-trip the `{ type: "plugin" }` hook
+ * handler uses (`./plugin-hook-exec.mjs`):
+ *   1. sidecar emits { type: "plugin_hook_exec", sessionId, execId,
+ *      pluginId: "*", hookId: "onPreCompact", payload }
+ *   2. Rust's default branch forwards it on SIDECAR_EVENT (no special case)
+ *   3. the renderer dispatches to every plugin and answers
+ *   4. Rust writes { type: "plugin_hook_response", … } to the sidecar stdin
  *   5. sidecar reads the result and adjusts the compaction plan accordingly
  *
  * Wire params match the existing `PreCompactContext`:
@@ -104,9 +115,9 @@ export function validatePreCompactResult(raw) {
  * Call the host's preCompact hook and return the decision.
  * Falls back gracefully on timeout, error, or unavailability.
  *
- * @param {object} hostRpc - The host_rpc client from `host-rpc.mjs`
+ * @param {object} hostRpc - retained for call-site compatibility; unused
  * @param {PreCompactContext} context
- * @param {{ log?: (level: string, msg: string) => void }} [opts]
+ * @param {{ log?: (level: string, msg: string) => void, pluginHookBridge?: (req: {hookId: string, payload: unknown, timeoutMs?: number}) => Promise<unknown> }} [opts]
  * @returns {Promise<PreCompactDecision>}
  */
 export async function queryPreCompactDecision(hostRpc, context, opts = {}) {
@@ -118,12 +129,21 @@ export async function queryPreCompactDecision(hostRpc, context, opts = {}) {
     source: "fallback",
   }
 
-  if (!hostRpc || hostRpc.isClosed) {
+  // `hostRpc` is kept in the signature for call-site compatibility but is no
+  // longer the transport — see the protocol note above. The renderer bridge is
+  // supplied through `opts`; without it (headless, or a rail with no renderer)
+  // compaction proceeds on its built-in strategy exactly as before.
+  const bridge = opts.pluginHookBridge
+  if (typeof bridge !== "function") {
     return fallback
   }
 
   try {
-    const raw = await hostRpc.call("preCompact", context, { timeoutMs: PRE_COMPACT_TIMEOUT_MS })
+    const raw = await bridge({
+      hookId: "onPreCompact",
+      payload: context,
+      timeoutMs: PRE_COMPACT_TIMEOUT_MS,
+    })
     const decision = validatePreCompactResult(raw)
     if (decision.skip) {
       log("info", `preCompact plugin requested skip (session ${context.sessionId})`)
