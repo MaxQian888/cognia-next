@@ -212,6 +212,42 @@ if (typeof (globalThis as { structuredClone?: unknown }).structuredClone !== "fu
     ) => JSON.parse(JSON.stringify(value)) as unknown
   }
 }
+// jest-environment-jsdom deletes `setImmediate` to match the browser. That
+// hole is not neutral: `jszip` (reached from `lib/templates/package.ts`, and
+// therefore from the plugin-manifest validator that half the stores import)
+// bundles the `setimmediate` polyfill, which fills the hole ON IMPORT and —
+// because Jest leaves Node's `process` on the jsdom global — backs it with
+// `process.nextTick`.
+//
+// `fake-indexeddb`'s `queueTask` prefers `globalThis.setImmediate` over its own
+// jsdom escape hatch, so from that moment every IndexedDB transaction is driven
+// by the nextTick queue, which drains BEFORE promise microtasks. Dexie queues
+// its next request from a microtask after each success event, so the
+// transaction re-enters `_start` with an empty request queue, fires `complete`,
+// and any still-running `db.transaction(...)` scope dies with
+// `PrematureCommitError: Transaction committed too early` — silently losing the
+// write. fake-indexeddb's own scheduler comment names `process.nextTick` as the
+// thing that must never drive it.
+//
+// Restoring the real macrotask `setImmediate` fixes both ends: the polyfill
+// early-returns because the global already exists, and fake-indexeddb gets the
+// check-phase timing it expects (the same function its jsdom escape hatch
+// reaches for anyway).
+if (typeof (globalThis as { setImmediate?: unknown }).setImmediate !== "function") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeTimers = require("node:timers")
+  Object.defineProperty(globalThis, "setImmediate", {
+    value: nodeTimers.setImmediate,
+    configurable: true,
+    writable: true,
+  })
+  Object.defineProperty(globalThis, "clearImmediate", {
+    value: nodeTimers.clearImmediate,
+    configurable: true,
+    writable: true,
+  })
+}
+
 type MockNextImageProps = React.ComponentPropsWithoutRef<"img"> & {
   priority?: boolean
   fill?: boolean

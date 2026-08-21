@@ -11,8 +11,11 @@
  *   experimental → may have 0 mounts, WARN
  *   deprecated   → unmounted is OK; mounted emits WARN
  *
- * Drift: each implemented contract's `binding` field must match at least one
- * discovered mount file path. Otherwise FAIL with `binding-drift`.
+ * Drift: each implemented contract's `binding` field lists the host file(s)
+ * the slot is mounted in, joined with ` + ` when a slot has more than one
+ * host. EVERY declared path must be backed by a discovered mount — losing one
+ * of a multi-host slot's mounts is exactly the drift this catches. Otherwise
+ * FAIL with `binding-drift`.
  *
  * Slot must use a string-literal `point` attribute. Computed values
  * (`point={getPoint()}`) are rejected so the audit stays sound.
@@ -214,6 +217,21 @@ interface AuditDeps {
   getContract?: (point: string) => PluginPointContract | undefined
 }
 
+/**
+ * A contract `binding` names the host file(s) a slot is mounted in. A slot with
+ * more than one host declares them joined with ` + ` (e.g. the left sidebar,
+ * which renders from both the guild rail and the nav section). Splitting is
+ * required: comparing the whole joined string against a single mount path can
+ * never match, which used to fail those slots forever.
+ */
+export function parseBindingPaths(binding: string): string[] {
+  return binding
+    .split("+")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .map((part) => path.normalize(part).replace(/\\/g, "/"))
+}
+
 export function evaluateAuditFromSources(
   mounts: DiscoveredMount[],
   computed: ComputedAttribute[],
@@ -258,22 +276,22 @@ export function evaluateAuditFromSources(
     let registrationBindingMissing = false
 
     if (contract.status === "implemented" && hostKind === "jsx-mount" && pointMounts.length > 0) {
-      const bindingPath = path.normalize(contract.binding).replace(/\\/g, "/")
-      const matched = pointMounts.some((m) => {
-        const rel = path.relative(repoRoot, m.filePath).replace(/\\/g, "/")
-        return rel === bindingPath || rel.endsWith("/" + bindingPath)
-      })
-      if (!matched) {
-        const mountPaths = pointMounts
-          .map((m) => path.relative(repoRoot, m.filePath).replace(/\\/g, "/"))
-          .join(", ")
-        drift = `contract claims binding "${contract.binding}" but mounts found at: ${mountPaths}`
+      const mountPathList = pointMounts.map((m) =>
+        path.relative(repoRoot, m.filePath).replace(/\\/g, "/")
+      )
+      const unmatched = parseBindingPaths(contract.binding).filter(
+        (bindingPath) =>
+          !mountPathList.some((rel) => rel === bindingPath || rel.endsWith("/" + bindingPath))
+      )
+      if (unmatched.length > 0) {
+        drift = `contract claims binding "${contract.binding}" but no mount was found for ${unmatched.join(", ")}; mounts found at: ${mountPathList.join(", ")}`
       }
     }
 
     if (contract.status === "implemented" && hostKind === "registration") {
-      const absBinding = path.join(repoRoot, contract.binding)
-      registrationBindingMissing = !fs.existsSync(absBinding)
+      registrationBindingMissing = parseBindingPaths(contract.binding).some(
+        (bindingPath) => !fs.existsSync(path.join(repoRoot, bindingPath))
+      )
     }
 
     return {

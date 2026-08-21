@@ -112,6 +112,8 @@ export const EXEMPTIONS = {
   "test:e2e:workflows:editor": "playwright subset helper — owned by test.yml",
   "test:e2e:workflows:nodes": "playwright subset helper — owned by test.yml",
   "test:e2e:workflows:runs": "playwright subset helper — owned by test.yml",
+  "test:e2e:web-headless":
+    "real-service playwright lane — owned by compose-e2e.yml, which brings the server/tls/web-headless-e2e compose profiles up before running it. Needs a live stack, so it can never run inside the fast gate matrix",
   "sidecar:test": "sidecar node --test suites — owned by test.yml via sidecars:test",
   "sidecar:test:builtin": "sidecar node --test subset — owned by test.yml",
   "sidecar:test:dispatch": "sidecar node --test subset — owned by test.yml",
@@ -133,6 +135,7 @@ export const EXEMPTIONS = {
   "audit:loading-states:test": "covered by scripts:test:gates",
   "audit:unreachable-components:test": "covered by scripts:test:gates",
   "audit:ai-elements:test": "covered by scripts:test:gates",
+  "audit:hooks:test": "covered by scripts:test:gates",
   "audit:data-governance:test": "covered by scripts:test:gates",
   "lint:static-export:test": "covered by scripts:test:gates",
   "clean:cache:test": "covered by scripts:test:build",
@@ -155,6 +158,23 @@ export const EXEMPTIONS = {
   "e2e:serve:test": "covered by scripts:test:ci",
   "test:coverage:changed:test": "covered by scripts:test:ci",
   "test:coverage:merge:test": "covered by scripts:test:ci",
+
+  // --- db-fixture audit (scripts/test/audit-db-fixtures.mjs) ---
+  // The non-strict half IS a real ratchet gate — same shape as
+  // `audit:colocated-tests` — and belongs in REGISTRY. It is exempt only
+  // because it is currently RED on pre-existing debt: 126 legacy-reset suites
+  // against a baseline of 121, all five of the excess committed by other work.
+  // Registering it today would fail `check:all` on someone else's suites.
+  // Migrate those five to `createDbTestFixture`, then move this entry into the
+  // REGISTRY in scripts/gates/check-all.mjs — that is the whole point of the
+  // baseline, which may only shrink.
+  "test:db-fixture:audit":
+    "ratchet gate, currently red on pre-existing debt (126 legacy resets vs baseline 121). Register it in check-all.mjs once those suites adopt createDbTestFixture",
+  "test:db-fixture:audit:strict":
+    "zero-tolerance variant — passes only when every suite has adopted the fast fixture; the ratchet half is `test:db-fixture:audit`",
+  "test:db-fixture:candidates":
+    "reporter — lists suites that could adopt the fast fixture; asserts nothing",
+  "test:db-fixture:audit:test": "covered by scripts:test:ci",
 }
 
 /**

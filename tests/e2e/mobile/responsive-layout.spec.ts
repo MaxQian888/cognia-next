@@ -93,7 +93,7 @@ const UNBRANCHED_ROUTES = [
   "/integrations",
   "/agent-runs",
   "/browser",
-  "/observability",
+  "/logs?channel=traces&view=dashboard",
   "/source-control",
   "/scheduler",
   "/plugins",

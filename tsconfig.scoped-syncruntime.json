@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["lib/plugin/core/manager.ts", "lib/plugin/core/manager.test.ts", "types/**/*.ts"]
+}

@@ -33,7 +33,61 @@ const NODE_ONLY_MODULES = [
   "node:stream/promises",
   "events",
   "node:events",
+  // --- Built-ins the sidecar's own dependency tree reaches for --------------
+  //
+  // `lib/mcp/transport.ts` dynamically imports `sidecar/mcp-oauth-helper.mjs`
+  // (a Node-only helper that only ever executes on the desktop/Tauri path),
+  // which statically imports `undici` and lazily imports
+  // `@modelcontextprotocol/sdk/client/*`. Because the importer physically
+  // lives in `sidecar/` — a separate Node project with its own lockfile, NOT a
+  // pnpm workspace member — webpack resolves those from `sidecar/node_modules`
+  // and pulls undici 8.10.x (not the root's 7.x) into the preview graph. Same
+  // shape as the `lib/skills/built-in/lark/exec-lark-cli` case next.config.ts
+  // documents: statically reachable, never evaluated in a WebView, so it gets
+  // stubbed rather than restructured.
+  //
+  // `pnpm build` never needs these because next.config.ts also installs a
+  // `NormalModuleReplacementPlugin(/^node:/)` that rewrites the WHOLE request
+  // to the empty stub. @storybook/nextjs installs its own `/^node:/` plugin
+  // that merely STRIPS the scheme and hands the rest to
+  // node-polyfill-webpack-plugin, so `require('node:sqlite')` arrives here as
+  // a bare `sqlite` that nothing can resolve.
+  //
+  // Only add names node-polyfill-webpack-plugin does NOT already cover. It
+  // merges as `{ ...its polyfills, ...ourFallback }`, so anything listed here
+  // SHADOWS the real polyfill — stubbing e.g. `util` or `buffer` would swap a
+  // working browser implementation for an empty module. The plugin covers
+  // assert, buffer, console, constants, crypto, domain, events, http, https,
+  // os, path, punycode, process, querystring, stream, string_decoder, sys,
+  // timers, tty, url, util, vm and zlib; the subpaths and newer built-ins
+  // below are the gaps.
+  "async_hooks",
+  "node:async_hooks",
+  "diagnostics_channel",
+  "node:diagnostics_channel",
+  "perf_hooks",
+  "node:perf_hooks",
+  "readline",
+  "node:readline",
+  "sqlite",
+  "node:sqlite",
+  "worker_threads",
+  "node:worker_threads",
 ]
+
+// Built-in SUBPATHS from the same sidecar graph. These cannot live in
+// `resolve.fallback` alongside the names above: fallback entries are matched
+// like aliases (`key` also matches `key/anything`), the polyfill plugin merges
+// as `{ ...its polyfills, ...ourFallback }`, and webpack takes the FIRST
+// matching entry. So its `stream` → stream-browserify wins over our
+// `stream/web` and rewrites the request to `stream-browserify/index.js/web`,
+// which resolves to nothing. `resolve.alias` is consulted BEFORE normal
+// resolution and is a list we own outright, so the subpath wins there.
+// (The pre-existing `stream/promises` / `fs/promises` fallback entries have
+// the same shadowing problem; `fs/promises` happens to work anyway because
+// Storybook's own `fs: false` fallback swallows it, and nothing in the preview
+// graph requests `stream/promises`.)
+const NODE_ONLY_SUBPATHS = ["util/types", "node:util/types", "stream/web", "node:stream/web"]
 
 // Optional server-only deps loaded via `import(/* webpackIgnore */ "pkg")`.
 const OPTIONAL_SERVER_PACKAGES = ["langfuse"]
@@ -166,6 +220,8 @@ const config: StorybookConfig = {
     }
     cfg.resolve.alias = {
       ...(cfg.resolve.alias ?? {}),
+      // Built-in subpaths — alias, not fallback (see NODE_ONLY_SUBPATHS).
+      ...Object.fromEntries(NODE_ONLY_SUBPATHS.map((m) => [m, false])),
       // Mirror of next.config.ts:188 — collapse pixi to its single-file dist.
       "pixi.js$": PIXI_PREBUNDLED_ABS,
       // Replace the LLM-backed follow-ups hook with a controllable mock so the

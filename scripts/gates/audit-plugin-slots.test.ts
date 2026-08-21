@@ -3,6 +3,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import {
   evaluateAuditFromSources,
+  parseBindingPaths,
   runAudit,
   type ComputedAttribute,
   type DiscoveredMount,
@@ -135,6 +136,55 @@ describe("audit-plugin-slots: evaluateAuditFromSources", () => {
     expect(report.errors).toEqual([expect.stringContaining("[binding-drift]")])
     expect(report.errors[0]).toContain("components/host/correct.tsx")
     expect(report.errors[0]).toContain("components/host/wrong.tsx")
+  })
+
+  it("multi-host binding: all declared hosts mounted = no drift", () => {
+    const contract = mockContract(
+      "X",
+      "implemented",
+      "stable",
+      "components/shell/guild-rail.tsx + components/shell/sidebar-footer.tsx"
+    )
+    const mounts = [
+      mockMount("X", path.join(repoRoot, "components/shell/guild-rail.tsx")),
+      mockMount("X", path.join(repoRoot, "components/shell/sidebar-footer.tsx"), 32),
+    ]
+    const report = evaluateAuditFromSources(mounts, [], {
+      repoRoot,
+      canonicalPoints: ["X"],
+      getContract: () => contract,
+    })
+    expect(report.ok).toBe(true)
+    expect(report.errors).toEqual([])
+  })
+
+  it("multi-host binding: one declared host lost its mount = drift naming that host", () => {
+    const contract = mockContract(
+      "X",
+      "implemented",
+      "stable",
+      "components/shell/guild-rail.tsx + components/shell/sidebar-footer.tsx"
+    )
+    const mounts = [mockMount("X", path.join(repoRoot, "components/shell/guild-rail.tsx"))]
+    const report = evaluateAuditFromSources(mounts, [], {
+      repoRoot,
+      canonicalPoints: ["X"],
+      getContract: () => contract,
+    })
+    expect(report.ok).toBe(false)
+    expect(report.errors).toEqual([expect.stringContaining("[binding-drift]")])
+    expect(report.errors[0]).toContain("components/shell/sidebar-footer.tsx")
+    // The host that IS mounted must not be reported as missing.
+    expect(report.errors[0]).not.toContain("for components/shell/guild-rail.tsx")
+  })
+
+  it("parseBindingPaths splits a joined binding and leaves a single one intact", () => {
+    expect(parseBindingPaths("components/a.tsx + components/b.tsx")).toEqual([
+      "components/a.tsx",
+      "components/b.tsx",
+    ])
+    expect(parseBindingPaths("components/a.tsx")).toEqual(["components/a.tsx"])
+    expect(parseBindingPaths("  components/a.tsx  +  ")).toEqual(["components/a.tsx"])
   })
 
   it("registration host with existing binding file = no error", () => {
