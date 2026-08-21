@@ -314,6 +314,19 @@ jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
   ],
 }))
 
+const startSquadRunMock = jest.fn()
+const stopSquadWatchMock = jest.fn()
+const watchSquadRunSettlementMock = jest.fn(() => stopSquadWatchMock)
+jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
+  startSquadRun: (...a: unknown[]) => startSquadRunMock(...(a as [])),
+}))
+jest.mock("@/lib/ai/agent/team/watch-squad-run", () => ({
+  watchSquadRunSettlement: (...a: unknown[]) => watchSquadRunSettlementMock(...(a as [])),
+}))
+jest.mock("@/lib/execution/agent-team-bridge", () => ({
+  agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
+}))
+
 interface SliceLike {
   messages: unknown[]
   status: string
@@ -672,6 +685,9 @@ beforeEach(() => {
   setDelegationRulesMock.mockReset()
   mockTrackEvent.mockClear()
   for (const method of Object.values(chatTurnPerformanceMock)) method.mockClear()
+  startSquadRunMock.mockReset().mockResolvedValue({ started: true, runId: "run_team_abc123def456" })
+  stopSquadWatchMock.mockClear()
+  watchSquadRunSettlementMock.mockClear()
 })
 
 async function flush() {
@@ -3000,5 +3016,135 @@ describe("useClaudeChat — pre-turn editor flush", () => {
     })
 
     expect(flushProjectEditorEdits).not.toHaveBeenCalled()
+  })
+})
+
+describe("useClaudeChat — Squad dispatch", () => {
+  function squadSession(extra: Record<string, unknown> = {}) {
+    getSessionMock.mockResolvedValue({
+      id: "sess-1",
+      title: "On a squad",
+      model: "sonnet",
+      squadId: "squad-1",
+      ...extra,
+    })
+  }
+
+  it("hands the turn to the Squad instead of running a model turn", async () => {
+    squadSession()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("ship the thing")
+    })
+
+    expect(startSquadRunMock).toHaveBeenCalledTimes(1)
+    expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        squadId: "squad-1",
+        goal: "ship the thing",
+        origin: "chat",
+        triggeredFrom: { source: "chat", sessionId: "sess-1" },
+      })
+    )
+    // The whole point: no second, thinner executor runs alongside it.
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps holding the session until the run settles", async () => {
+    // Holding is what makes a follow-up queue as steering instead of starting
+    // a second Squad over the top of the first.
+    squadSession()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("go")
+    })
+
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "streaming")
+    expect(chatState.setSessionStatus).not.toHaveBeenCalledWith("sess-1", "idle")
+    expect(watchSquadRunSettlementMock).toHaveBeenCalledWith(
+      expect.objectContaining({ executionRunId: "execution:team:run_team_abc123def456" })
+    )
+  })
+
+  it("releases the hold when the watcher reports the run is over", async () => {
+    squadSession()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("go")
+    })
+
+    const onSettled = watchSquadRunSettlementMock.mock.calls[0]![0] as unknown as {
+      onSettled: (status: string) => void
+    }
+    act(() => onSettled.onSettled("completed"))
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "ok")
+  })
+
+  it("reports a failed dispatch instead of leaving the session held", async () => {
+    squadSession()
+    startSquadRunMock.mockResolvedValueOnce({ started: false, reason: "squad_not_found" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("go")
+    })
+
+    expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
+    expect(chatState.setSessionDiagnostic).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ code: "squadNotFound" })
+    )
+    expect(watchSquadRunSettlementMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("runs an ordinary turn when the conversation has no Squad", async () => {
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello")
+    })
+
+    expect(startSquadRunMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("lets one turn opt out of a bound Squad", async () => {
+    // The override has to point down as well as up, or a Squad-bound
+    // conversation could never send a single plain turn.
+    squadSession()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", undefined, {
+        compositionOverride: { presetId: "p1", orchestration: "direct" },
+      })
+    })
+
+    expect(startSquadRunMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalled()
+  })
+
+  it("lets one turn point at a different Squad than the conversation", async () => {
+    squadSession()
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("hello", undefined, {
+        compositionOverride: {
+          presetId: "p1",
+          orchestration: "team",
+          orchestrationRef: "squad-2",
+        },
+      })
+    })
+
+    expect(startSquadRunMock.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({ squadId: "squad-2" })
+    )
   })
 })

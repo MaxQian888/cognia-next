@@ -7,6 +7,7 @@ import { makeUserMessage } from "@/lib/claude/adapter"
 import { toast } from "sonner"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { createDiagnostic } from "@cognia/diagnostics"
+import { resolveTurnSquad } from "@/lib/ai/agent/team/resolve-turn-squad"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
 import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
@@ -251,6 +252,16 @@ export function useClaudeChat() {
   const sendRef = useRef<SendFn | null>(null)
 
   /**
+   * Live Squad-run settlement watchers, one per session.
+   *
+   * A Squad turn holds its session `streaming` until its run ends, so the
+   * watcher that releases the hold has to outlive the `send` call that armed
+   * it. Keyed by session so a second Squad turn replaces the first's watcher
+   * rather than leaving a stale one to settle a hold it no longer represents.
+   */
+  const squadWatchersRef = useRef<Map<string, () => void>>(new Map())
+
+  /**
    * Per-session serialization queue for `handleEvent`. Sidecar events arrive
    * fire-and-forget, but `handleEvent` does an async read → apply → persist →
    * store-update that spans multiple `await`s. Without serialization, two
@@ -312,10 +323,16 @@ export function useClaudeChat() {
   // the last partial isn't lost when the hook tears down mid-turn.
   useEffect(() => {
     const executionHandles = executionHandlesRef.current
+    const squadWatchers = squadWatchersRef.current
     return () => {
       registry.flushAllPersist()
       registry.clear()
       executionHandles.clear()
+      // Each watcher owns a Dexie subscription and an interval. The Squad run
+      // itself is unaffected — it is fire-and-forget and reports through the
+      // run surfaces; only this hook's hold on the session goes away with it.
+      for (const stop of squadWatchers.values()) stop()
+      squadWatchers.clear()
     }
   }, [registry])
 
@@ -438,6 +455,14 @@ export function useClaudeChat() {
          *  until an SDK event arrives, which is only necessary when the target
          *  is an assistant message that does not exist yet. */
         branchTag?: { groupId: string; index: number }
+        /** The executor chosen for THIS turn only (ADR-0117 axes).
+         *
+         *  Deliberately not persisted: a sticky override would quietly become
+         *  a session-level switch, leaving nothing on screen to name what the
+         *  conversation is actually bound to. The composer resets after send;
+         *  the durable binding is `ChatSession.squadId`. */
+        compositionOverride?:
+          import("@cognia/agent-config-types/agent-composition").AgentCompositionSelectionV1 | null
       }
     ) => {
       const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
@@ -946,6 +971,84 @@ export function useClaudeChat() {
             (useAgentRuntimeStore.getState().runtime === "external" ? "external" : "unknown"),
           surface: "chat",
         })
+      }
+
+      // ── Squad dispatch (ADR-0117 orchestration axis) ──
+      // A conversation bound to a Squad hands the whole turn to the team
+      // runtime instead of running one model turn here. Deliberately the same
+      // primitive `action.team.run` and the IM lane use, so a Squad turn gets
+      // the entire pipeline — skills, memory, twin, MCP, hooks, permission
+      // ceiling, tool approval — rather than a second, thinner executor.
+      //
+      // It branches HERE, above the direct-chat bookkeeping, because that
+      // bookkeeping (`startDirectChatExecutionRun`, the work-submission lease,
+      // the assembly heartbeat) describes a single model turn. A Squad run has
+      // its own execution run and would otherwise have to unwind machinery it
+      // never wanted.
+      //
+      // The session stays `streaming` until the run settles — the same posture
+      // `use-team-chat` takes for a multi-member turn. That is what makes a
+      // follow-up typed mid-run queue as steering instead of starting a second
+      // Squad over the top of the first.
+      const squadDecision = resolveTurnSquad({
+        turnOverride: callOptions?.compositionOverride ?? null,
+        session,
+      })
+      if (squadDecision.squadId) {
+        const squadId = squadDecision.squadId
+        try {
+          const [{ startSquadRun }, { agentTeamExecutionRunId }] = await Promise.all([
+            import("@/lib/ai/agent/team/start-squad-run"),
+            import("@/lib/execution/agent-team-bridge"),
+          ])
+          const result = await startSquadRun({
+            squadId,
+            goal: providerText,
+            origin: "chat",
+            triggeredFrom: { source: "chat", sessionId },
+            ...(session ? { session } : {}),
+            ...(session?.characterId ? { characterId: session.characterId } : {}),
+          })
+          if (!result.started || !result.runId) {
+            store.getState().setSessionStatus(sessionId, "idle")
+            store
+              .getState()
+              .setSessionDiagnostic(
+                sessionId,
+                createDiagnostic(
+                  result.reason === "squad_not_found" ? "squadNotFound" : "squadDispatchFailed",
+                  { source: "chat", meta: { sessionId, squadId } }
+                )
+              )
+            chatTurnPerformance.finish(sessionId, "failed")
+            return
+          }
+          // Release the hold when the run ends, however it ends. Without this
+          // the conversation would queue follow-ups forever.
+          const { watchSquadRunSettlement } = await import("@/lib/ai/agent/team/watch-squad-run")
+          const stopWatching = watchSquadRunSettlement({
+            executionRunId: agentTeamExecutionRunId(result.runId),
+            onSettled: (status) => {
+              squadWatchersRef.current.delete(sessionId)
+              store.getState().setSessionStatus(sessionId, "idle")
+              chatTurnPerformance.finish(sessionId, status === "completed" ? "ok" : "failed")
+            },
+          })
+          // One watcher per session: a previous Squad turn's watcher would
+          // otherwise settle this one's hold when the old run finally lands.
+          squadWatchersRef.current.get(sessionId)?.()
+          squadWatchersRef.current.set(sessionId, stopWatching)
+        } catch (error) {
+          store.getState().setSessionStatus(sessionId, "idle")
+          store
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(error, { source: "chat", meta: { sessionId, squadId } })
+            )
+          chatTurnPerformance.finish(sessionId, "failed")
+        }
+        return
       }
 
       // A persisted execution context owns the chat's Task Workspace identity.
