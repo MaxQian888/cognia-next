@@ -17,7 +17,7 @@
 import { useDroppable } from "@dnd-kit/core"
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
-import { Fragment } from "react"
+import { Fragment, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { columnDropId } from "@/lib/issues/board-model"
@@ -54,6 +54,8 @@ export interface BoardColumnProps {
   emptyText: string
   collapseLabel: string
   expandLabel: string
+  /** Wraps each card, so the board can attach the shared context menu. */
+  renderItemMenu?: (item: UnifiedIssueItem, children: ReactNode) => ReactNode
 }
 
 export function BoardColumn({
@@ -74,6 +76,7 @@ export function BoardColumn({
   emptyText,
   collapseLabel,
   expandLabel,
+  renderItemMenu,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: columnDropId(status), disabled: dimmed })
 
@@ -129,19 +132,21 @@ export function BoardColumn({
     )
   }
 
-  const cards = items.map((item) => (
-    <IssueCard
-      key={item.unifiedId}
-      item={item}
-      labels={item.labelIds
-        .map((id) => labelsById?.get(id))
-        .filter((label): label is LabelRow => Boolean(label))}
-      projectName={item.issueProjectId ? projectNamesById?.get(item.issueProjectId) : undefined}
-      selected={selectedId === item.unifiedId}
-      running={runningIds?.has(item.unifiedId)}
-      onSelect={onSelect}
-    />
-  ))
+  const cards = items.map((item) => {
+    const card = (
+      <IssueCard
+        item={item}
+        labels={item.labelIds
+          .map((id) => labelsById?.get(id))
+          .filter((label): label is LabelRow => Boolean(label))}
+        projectName={item.issueProjectId ? projectNamesById?.get(item.issueProjectId) : undefined}
+        selected={selectedId === item.unifiedId}
+        running={runningIds?.has(item.unifiedId)}
+        onSelect={onSelect}
+      />
+    )
+    return renderItemMenu ? renderItemMenu(item, card) : card
+  })
 
   const indicator = (
     <div

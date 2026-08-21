@@ -1,5 +1,10 @@
 /**
  * @jest-environment jsdom
+ *
+ * Orchestration-level tests: the rail, the filter bar, the board, the list and
+ * the inspector each have their own suite, so they are stubbed here and this
+ * file asserts on what the console hands them and what it does with what comes
+ * back.
  */
 
 jest.mock("next-intl", () => ({
@@ -7,29 +12,42 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${Object.values(vars).join(",")}` : key,
 }))
 
+let shellProps: Record<string, unknown> = {}
 jest.mock("@/components/feature-shell/feature-page-shell", () => ({
-  FeaturePageShell: ({
-    header,
-    children,
-    rightPane,
-  }: {
-    header: React.ReactNode
-    children: React.ReactNode
-    rightPane?: { content: React.ReactNode }
-  }) => (
-    <div>
-      {header}
-      {children}
-      {rightPane?.content}
-    </div>
-  ),
-}))
-jest.mock("@/components/feature-shell/feature-page-header", () => ({
-  FeaturePageHeader: ({ controls }: { controls?: React.ReactNode }) => <div>{controls}</div>,
+  FeaturePageShell: (props: Record<string, unknown>) => {
+    shellProps = props
+    const { header, children, leftPane, rightPane } = props as {
+      header: React.ReactNode
+      children: React.ReactNode
+      leftPane?: { content: React.ReactNode }
+      rightPane?: { content: React.ReactNode }
+    }
+    return (
+      <div>
+        {header}
+        {leftPane?.content}
+        {children}
+        {rightPane?.content}
+      </div>
+    )
+  },
 }))
 
-// Board / list / inspector / dialog are covered by their own suites; stub them
-// so this one stays at the orchestration layer.
+let headerProps: Record<string, unknown> = {}
+jest.mock("@/components/feature-shell/feature-page-header", () => ({
+  FeaturePageHeader: (props: Record<string, unknown>) => {
+    headerProps = props
+    const { status, actions, controls } = props as Record<string, React.ReactNode>
+    return (
+      <div data-testid="header-stub">
+        {status}
+        {actions}
+        {controls}
+      </div>
+    )
+  },
+}))
+
 let boardProps: Record<string, unknown> = {}
 jest.mock("./board/issue-board", () => ({
   IssueBoard: (props: Record<string, unknown>) => {
@@ -37,7 +55,55 @@ jest.mock("./board/issue-board", () => ({
     return <div data-testid="board-stub" />
   },
 }))
-jest.mock("./issue-list", () => ({ IssueList: () => <div data-testid="list-stub" /> }))
+let listProps: Record<string, unknown> = {}
+jest.mock("./list/issue-list", () => ({
+  IssueList: (props: Record<string, unknown>) => {
+    listProps = props
+    return <div data-testid="list-stub" />
+  },
+}))
+let railProps: Record<string, unknown> = {}
+jest.mock("./rail/issue-rail", () => ({
+  IssueRail: (props: Record<string, unknown>) => {
+    railProps = props
+    return <div data-testid="rail-stub" />
+  },
+}))
+let filterBarProps: Record<string, unknown> = {}
+jest.mock("./filter-bar/issue-filter-bar", () => ({
+  IssueFilterBar: (props: Record<string, unknown>) => {
+    filterBarProps = props
+    return <div data-testid="filter-bar-stub" />
+  },
+}))
+let bulkProps: Record<string, unknown> = {}
+jest.mock("./list/issue-bulk-toolbar", () => ({
+  IssueBulkToolbar: (props: Record<string, unknown>) => {
+    bulkProps = props
+    const items = props.items as unknown[]
+    return items.length > 0 ? <div data-testid="bulk-stub">{items.length}</div> : null
+  },
+}))
+let contextMenuItems: string[] = []
+jest.mock("./issue-context-menu", () => ({
+  IssueContextMenu: ({
+    item,
+    children,
+  }: {
+    item: { unifiedId: string }
+    children: React.ReactNode
+  }) => {
+    contextMenuItems.push(item.unifiedId)
+    return <div data-testid={`context-${item.unifiedId}`}>{children}</div>
+  },
+}))
+let deleteDialogProps: Record<string, unknown> = {}
+jest.mock("./delete-issue-dialog", () => ({
+  DeleteIssueDialog: (props: Record<string, unknown>) => {
+    deleteDialogProps = props
+    return props.open ? <div data-testid="delete-dialog-stub" /> : null
+  },
+}))
 let detailProps: Record<string, unknown> = {}
 jest.mock("./issue-detail-panel", () => ({
   IssueDetailPanel: (props: Record<string, unknown>) => {
@@ -49,10 +115,13 @@ jest.mock("./create-issue-dialog", () => ({
   CreateIssueDialog: (props: Record<string, unknown>) =>
     props.open ? <div data-testid="create-dialog-stub" /> : null,
 }))
-jest.mock("./board/board-toolbar", () => ({
-  IssueBoardToolbar: (props: { onLayoutChange: (l: string) => void }) => (
-    <button data-testid="toolbar-to-list" onClick={() => props.onLayoutChange("list")} />
-  ),
+jest.mock("@/hooks/issues/use-assignee-options", () => ({
+  useAssigneeOptions: () => [],
+}))
+
+const mockApplyBulk = jest.fn().mockResolvedValue({ applied: 1, skipped: 0, failed: 0 })
+jest.mock("@/lib/issues/bulk-actions", () => ({
+  applyIssueBulkAction: (...a: unknown[]) => mockApplyBulk(...a),
 }))
 
 const mockMoveIssue = jest.fn().mockResolvedValue(null)
@@ -64,15 +133,21 @@ jest.mock("@/lib/db/issues", () => ({
 }))
 jest.mock("@/lib/db/issue-projects", () => ({ listIssueProjects: jest.fn() }))
 jest.mock("@/lib/db/labels", () => ({ listLabels: jest.fn() }))
-// Stable reference on purpose: a fresh array per render would mask whether
+
+// Stable references on purpose: a fresh array per render would mask whether
 // the console's fan-out effect is identity-fragile.
 const EMPTY_ROWS: unknown[] = []
-// The running-run index is the only live query whose initial value is a Set;
-// tests swap `runningIdsForTest` to simulate active runs.
+let projectsForTest: unknown[] = EMPTY_ROWS
+let labelsForTest: unknown[] = EMPTY_ROWS
 let runningIdsForTest: ReadonlySet<string> = new Set()
 jest.mock("@/hooks/data", () => ({
-  useClientLiveQuery: (_query: unknown, _deps: unknown, initial: unknown) =>
-    initial instanceof Set ? runningIdsForTest : EMPTY_ROWS,
+  useClientLiveQuery: (query: unknown, _deps: unknown, initial: unknown) => {
+    if (initial instanceof Set) return runningIdsForTest
+    const source = String(query)
+    if (source.includes("listIssueProjects")) return projectsForTest
+    if (source.includes("listLabels")) return labelsForTest
+    return EMPTY_ROWS
+  },
 }))
 
 let viewerForTest = { selfKey: "human:self", agentKeys: [] as string[] }
@@ -87,13 +162,19 @@ jest.mock("@/lib/issues/sources/registry", () => ({
   getIssueSourceRegistry: () => ({ listAll: (...a: unknown[]) => mockListAll(...a) }),
 }))
 
-const mockRunSync = jest.fn()
+const mockRunSync = jest.fn().mockResolvedValue({ repoCount: 0, results: [], failures: [] })
 jest.mock("@/lib/issues/sync-runner", () => ({
   runWorkspaceGithubSync: (...a: unknown[]) => mockRunSync(...a),
 }))
 
-const mockToastError = jest.fn()
-jest.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => mockToastError(...a) } }))
+const toastCalls: Array<[string, unknown]> = []
+jest.mock("sonner", () => ({
+  toast: {
+    error: (m: unknown) => toastCalls.push(["error", m]),
+    success: (m: unknown) => toastCalls.push(["success", m]),
+    warning: (m: unknown) => toastCalls.push(["warning", m]),
+  },
+}))
 
 let activeProjectId: string | null = "w1"
 jest.mock("@/stores/project/project-store", () => ({
@@ -105,14 +186,16 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { FULL_ISSUE_CAPABILITIES, READ_ONLY_ISSUE_CAPABILITIES } from "@/types/issues/unified"
+import { useIssueViewStore } from "@/stores/issues/issue-view-store"
 import { IssueConsole } from "./issue-console"
 
 function item(over: Partial<UnifiedIssueItem> = {}): UnifiedIssueItem {
   const kind = over.kind ?? "local"
+  const sourceId = over.sourceId ?? "i1"
   return {
-    unifiedId: `${kind}:i1`,
+    unifiedId: `${kind}:${sourceId}`,
     kind,
-    sourceId: "i1",
+    sourceId,
     identifier: "MERC-1",
     title: "Ship it",
     status: "todo",
@@ -128,231 +211,429 @@ function item(over: Partial<UnifiedIssueItem> = {}): UnifiedIssueItem {
   }
 }
 
+/** Call a captured prop callback inside `act`. */
+function callProp<T extends unknown[]>(
+  props: Record<string, unknown>,
+  name: string,
+  ...args: T
+): void {
+  act(() => {
+    ;(props[name] as (...a: T) => void)(...args)
+  })
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
+  window.localStorage.clear()
+  useIssueViewStore.getState().reset()
+  shellProps = {}
+  headerProps = {}
   boardProps = {}
+  listProps = {}
+  railProps = {}
+  filterBarProps = {}
+  bulkProps = {}
+  deleteDialogProps = {}
+  detailProps = {}
+  contextMenuItems = []
+  toastCalls.length = 0
   activeProjectId = "w1"
+  projectsForTest = EMPTY_ROWS
+  labelsForTest = EMPTY_ROWS
   runningIdsForTest = new Set()
   viewerForTest = { selfKey: "human:self", agentKeys: [] }
   mockListAll.mockResolvedValue({ items: [], errors: [] })
+  mockRunSync.mockResolvedValue({ repoCount: 0, results: [], failures: [] })
 })
 
 describe("IssueConsole", () => {
-  it("reads the board through the source registry, not straight from Dexie", async () => {
-    render(<IssueConsole />)
-    await waitFor(() => expect(mockListAll).toHaveBeenCalledWith({ projectId: "w1" }))
+  describe("data", () => {
+    it("reads the board through the source registry, not straight from Dexie", async () => {
+      render(<IssueConsole />)
+      await waitFor(() => expect(mockListAll).toHaveBeenCalledWith({ projectId: "w1" }))
+    })
+
+    it("does not query when no workspace is active", async () => {
+      activeProjectId = null
+      render(<IssueConsole />)
+      await waitFor(() => expect(mockListAll).not.toHaveBeenCalled())
+    })
   })
 
-  it("does not query when no workspace is active", async () => {
-    activeProjectId = null
-    render(<IssueConsole />)
-    await waitFor(() => expect(mockListAll).not.toHaveBeenCalled())
+  describe("layout", () => {
+    it("mounts the rail in the shell's left pane", async () => {
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("rail-stub")).toBeInTheDocument()
+      expect(shellProps.leftPane).toBeDefined()
+    })
+
+    it("hides the rail when it is collapsed, and says so on the toggle", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("rail-stub")
+      fireEvent.click(screen.getByTestId("issue-rail-toggle"))
+      await waitFor(() => expect(screen.queryByTestId("rail-stub")).not.toBeInTheDocument())
+      expect(shellProps.leftPane).toBeUndefined()
+    })
+
+    it("renders the filter bar above the layout rather than in the header", async () => {
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("filter-bar-stub")).toBeInTheDocument()
+      expect(headerProps.controls).toBeUndefined()
+    })
+
+    it("offers create as the header's primary action", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(headerProps.primaryAction).toMatchObject({ id: "create", disabled: false })
+    })
+
+    it("disables create without a workspace, rather than hiding it", async () => {
+      activeProjectId = null
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(headerProps.primaryAction).toMatchObject({ disabled: true })
+    })
   })
 
-  it("renders the four built-in views", async () => {
-    render(<IssueConsole />)
-    for (const id of ["all", "assigned", "created", "my-agents"]) {
-      expect(await screen.findByTestId(`issue-view-${id}`)).toBeInTheDocument()
+  describe("views and preferences", () => {
+    it("opens on the board layout the default view declares", async () => {
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("board-stub")).toBeInTheDocument()
+    })
+
+    it("follows the view's own layout when the rail switches view", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      // The `created` view ships a list layout.
+      callProp(railProps, "onSelectView", "created")
+      expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
+    })
+
+    it("lets the filter bar override the view's layout", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
+    })
+
+    it("keeps each view's override apart", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+
+      // `assigned` also declares a board layout and must not inherit the override.
+      callProp(railProps, "onSelectView", "assigned")
+      expect(await screen.findByTestId("board-stub")).toBeInTheDocument()
+
+      callProp(railProps, "onSelectView", "all")
+      expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
+    })
+
+    it("survives a remount, which is what the old useState version could not do", async () => {
+      const { unmount } = render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      unmount()
+
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
+    })
+  })
+
+  describe("rail wiring", () => {
+    it("counts every view from the unfiltered scope", async () => {
+      mockListAll.mockResolvedValue({
+        items: [item(), item({ sourceId: "i2" })],
+        errors: [],
+      })
+      render(<IssueConsole />)
+      await waitFor(() => expect((railProps.viewCounts as Record<string, number>).all).toBe(2))
+    })
+
+    it("turns a project click into a filter, not a navigation", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("rail-stub")
+      callProp(railProps, "onToggleProject", "p1")
+      await waitFor(() =>
+        expect((filterBarProps.filter as { issueProjectIds: string[] }).issueProjectIds).toEqual([
+          "p1",
+        ])
+      )
+    })
+
+    it("turns a label click into a filter", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("rail-stub")
+      callProp(railProps, "onToggleLabel", "l1")
+      await waitFor(() =>
+        expect((filterBarProps.filter as { labelIds: string[] }).labelIds).toEqual(["l1"])
+      )
+    })
+  })
+
+  describe("running runs", () => {
+    it("passes the run index to the board — it used to be computed and dropped", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      runningIdsForTest = new Set(["i1"])
+      render(<IssueConsole />)
+      await waitFor(() =>
+        expect(boardProps.runningIds as ReadonlySet<string>).toEqual(new Set(["local:i1"]))
+      )
+    })
+
+    it("shows the agents-working badge only when something is running", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(screen.queryByTestId("issue-agents-working")).not.toBeInTheDocument()
+    })
+
+    it("shows it once a run is in flight", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      runningIdsForTest = new Set(["i1"])
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("issue-agents-working")).toBeInTheDocument()
+    })
+
+    it("surfaces a degraded source instead of silently under-reporting", async () => {
+      mockListAll.mockResolvedValue({ items: [], errors: [new Error("boom")] })
+      render(<IssueConsole />)
+      expect(await screen.findByTestId("issue-source-errors")).toBeInTheDocument()
+    })
+  })
+
+  describe("drops", () => {
+    it("writes a move through the guarded store call", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", { type: "move", unifiedId: "local:i1", to: "done" })
+      await waitFor(() =>
+        expect(mockMoveIssue).toHaveBeenCalledWith({
+          id: "i1",
+          to: "done",
+          by: { kind: "human" },
+        })
+      )
+    })
+
+    it("localizes a denial instead of writing", async () => {
+      mockListAll.mockResolvedValue({ items: [item({ kind: "github" })], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", {
+        type: "denied",
+        unifiedId: "github:i1",
+        reason: "federated-read-only",
+      })
+      await waitFor(() =>
+        expect(toastCalls).toContainEqual([
+          "error",
+          "board.denied.federated-read-only:source.github",
+        ])
+      )
+      expect(mockMoveIssue).not.toHaveBeenCalled()
+    })
+
+    it("ignores a drop on a federated row that reached the writer anyway", async () => {
+      mockListAll.mockResolvedValue({ items: [item({ kind: "github" })], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", { type: "move", unifiedId: "github:i1", to: "done" })
+      await waitFor(() => expect(mockMoveIssue).not.toHaveBeenCalled())
+    })
+  })
+
+  describe("bulk actions", () => {
+    async function selectOne() {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      callProp(listProps, "onToggleCheck", "local:i1", { shiftKey: false })
+      await screen.findByTestId("bulk-stub")
     }
-  })
 
-  it("switches layout when the view changes, and back when the toolbar overrides", async () => {
-    mockListAll.mockResolvedValue({ items: [item()], errors: [] })
-    render(<IssueConsole />)
-    expect(await screen.findByTestId("board-stub")).toBeInTheDocument()
-
-    // The `created` view ships a list layout.
-    fireEvent.click(screen.getByTestId("issue-view-created"))
-    expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
-  })
-
-  it("lets the toolbar override the view's layout", async () => {
-    render(<IssueConsole />)
-    fireEvent.click(await screen.findByTestId("toolbar-to-list"))
-    expect(await screen.findByTestId("list-stub")).toBeInTheDocument()
-  })
-
-  it("reports how many agents are working from the live run index", async () => {
-    mockListAll.mockResolvedValue({
-      items: [item(), item({ unifiedId: "local:i2", sourceId: "i2" })],
-      errors: [],
+    it("shows nothing until something is ticked", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(screen.queryByTestId("bulk-stub")).not.toBeInTheDocument()
     })
-    runningIdsForTest = new Set(["i1"])
-    render(<IssueConsole />)
-    await waitFor(() =>
-      expect(screen.getByTestId("issue-agents-working")).toHaveTextContent("board.agentsWorking:1")
-    )
-  })
 
-  it("scopes the My agents view to the viewer's Characters and squads", async () => {
-    mockListAll.mockResolvedValue({
-      items: [
-        item({ unifiedId: "local:mine", sourceId: "mine", assignee: { kind: "agent", id: "a1" } }),
-        item({
-          unifiedId: "local:other",
-          sourceId: "other",
-          assignee: { kind: "agent", id: "zz" },
-        }),
-        item({ unifiedId: "local:none", sourceId: "none" }),
-      ],
-      errors: [],
+    it("hands the ticked issues to the toolbar", async () => {
+      await selectOne()
+      expect((bulkProps.items as UnifiedIssueItem[]).map((i) => i.unifiedId)).toEqual(["local:i1"])
     })
-    viewerForTest = { selfKey: "human:self", agentKeys: ["agent:a1"] }
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-    fireEvent.click(screen.getByTestId("issue-view-my-agents"))
-    await waitFor(() =>
-      expect((boardProps.items as UnifiedIssueItem[]).map((i) => i.sourceId)).toEqual(["mine"])
-    )
-  })
 
-  it("surfaces a degraded source rather than under-reporting silently", async () => {
-    mockListAll.mockResolvedValue({
-      items: [],
-      errors: [{ kind: "github", error: new Error("x") }],
+    it("applies an action and reports the count", async () => {
+      await selectOne()
+      await act(async () => {
+        ;(bulkProps.onAction as (a: unknown) => void)({ kind: "priority", to: "high" })
+      })
+      expect(mockApplyBulk).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ unifiedId: "local:i1" })]),
+        { kind: "priority", to: "high" },
+        { kind: "human" },
+        expect.any(Set)
+      )
+      expect(toastCalls).toContainEqual(["success", "bulk.applied:1"])
     })
-    render(<IssueConsole />)
-    expect(await screen.findByTestId("issue-source-errors")).toBeInTheDocument()
-  })
 
-  it("hides the degraded badge when every source is healthy", async () => {
-    render(<IssueConsole />)
-    await screen.findByTestId("issue-agents-working")
-    expect(screen.queryByTestId("issue-source-errors")).not.toBeInTheDocument()
-  })
-
-  it("opens the create dialog from the header", async () => {
-    render(<IssueConsole />)
-    expect(screen.queryByTestId("create-dialog-stub")).not.toBeInTheDocument()
-    fireEvent.click(await screen.findByTestId("issue-create-trigger"))
-    expect(await screen.findByTestId("create-dialog-stub")).toBeInTheDocument()
-  })
-
-  it("disables creation when no workspace is active", async () => {
-    activeProjectId = null
-    render(<IssueConsole />)
-    expect(await screen.findByTestId("issue-create-trigger")).toBeDisabled()
-  })
-
-  it("writes a move through the guarded CRUD path", async () => {
-    mockListAll.mockResolvedValue({ items: [item()], errors: [] })
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-
-    await (boardProps.onDrop as (a: unknown) => Promise<void>)({
-      type: "move",
-      unifiedId: "local:i1",
-      to: "done",
+    it("says how many were skipped rather than claiming them all", async () => {
+      mockApplyBulk.mockResolvedValueOnce({ applied: 1, skipped: 2, failed: 0 })
+      await selectOne()
+      await act(async () => {
+        ;(bulkProps.onAction as (a: unknown) => void)({ kind: "priority", to: "high" })
+      })
+      expect(toastCalls).toContainEqual(["warning", "bulk.skipped:1,2"])
     })
-    expect(mockMoveIssue).toHaveBeenCalledWith({
-      id: "i1",
-      to: "done",
-      by: { kind: "human" },
+
+    it("explains a total refusal with the guard's own reason", async () => {
+      mockApplyBulk.mockResolvedValueOnce({
+        applied: 0,
+        skipped: 1,
+        failed: 0,
+        reason: "runtime-owned",
+      })
+      await selectOne()
+      await act(async () => {
+        ;(bulkProps.onAction as (a: unknown) => void)({ kind: "status", to: "done" })
+      })
+      expect(toastCalls).toContainEqual(["error", "board.denied.runtime-owned:source.local"])
+    })
+
+    it("reports a failure as a failure", async () => {
+      mockApplyBulk.mockResolvedValueOnce({ applied: 0, skipped: 0, failed: 2 })
+      await selectOne()
+      await act(async () => {
+        ;(bulkProps.onAction as (a: unknown) => void)({ kind: "delete" })
+      })
+      expect(toastCalls).toContainEqual(["error", "bulk.failed:2"])
+    })
+
+    it("clears the selection when the rows leave the result set", async () => {
+      await selectOne()
+      act(() => {
+        mockListAll.mockResolvedValue({ items: [], errors: [] })
+      })
+      callProp(filterBarProps, "onFilterChange", {
+        query: "nothing-matches-this",
+        labelIds: [],
+        priorities: [],
+        assignees: [],
+        sources: [],
+        issueProjectIds: [],
+      })
+      await waitFor(() => expect(screen.queryByTestId("bulk-stub")).not.toBeInTheDocument())
     })
   })
 
-  it("localizes a denial instead of failing silently", async () => {
-    mockListAll.mockResolvedValue({ items: [item({ kind: "github" })], errors: [] })
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-
-    await (boardProps.onDrop as (a: unknown) => Promise<void>)({
-      type: "denied",
-      unifiedId: "github:i1",
-      reason: "federated-read-only",
+  describe("delete", () => {
+    it("keeps the dialog shut until something asks for it", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(screen.queryByTestId("delete-dialog-stub")).not.toBeInTheDocument()
     })
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("board.denied.federated-read-only")
-    )
-    expect(mockMoveIssue).not.toHaveBeenCalled()
+
+    it("opens with the issues it would delete", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      callProp(listProps, "onToggleCheck", "local:i1", { shiftKey: false })
+      callProp(bulkProps, "onRequestDelete")
+      expect(await screen.findByTestId("delete-dialog-stub")).toBeInTheDocument()
+      expect(deleteDialogProps.items as UnifiedIssueItem[]).toHaveLength(1)
+    })
   })
 
-  it("never writes for a federated row even if a move slips through", async () => {
-    mockListAll.mockResolvedValue({ items: [item({ kind: "github" })], errors: [] })
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-
-    await (boardProps.onDrop as (a: unknown) => Promise<void>)({
-      type: "move",
-      unifiedId: "github:i1",
-      to: "done",
+  describe("context menu", () => {
+    it("wraps every card so the shared menu is reachable from the board", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(typeof boardProps.renderItemMenu).toBe("function")
     })
-    expect(mockMoveIssue).not.toHaveBeenCalled()
+
+    it("wraps every row in the list too", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      expect(typeof listProps.renderItemMenu).toBe("function")
+    })
   })
 
-  it("reports a denial returned by the write boundary itself", async () => {
-    mockMoveIssue.mockResolvedValueOnce("runtime-owned")
-    mockListAll.mockResolvedValue({ items: [item()], errors: [] })
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-
-    await (boardProps.onDrop as (a: unknown) => Promise<void>)({
-      type: "move",
-      unifiedId: "local:i1",
-      to: "in_progress",
+  describe("inspector", () => {
+    it("stays shut until a row is selected", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(screen.queryByTestId("detail-stub")).not.toBeInTheDocument()
     })
-    expect(mockToastError).toHaveBeenCalledWith(
-      expect.stringContaining("board.denied.runtime-owned")
-    )
+
+    it("opens on the selected row and resolves its labels through the catalogue", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onSelect", "local:i1")
+      expect(await screen.findByTestId("detail-stub")).toBeInTheDocument()
+      expect(detailProps.labelsById).toBeInstanceOf(Map)
+    })
+
+    it("round-trips a GitHub write-back through a full sync", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onSelect", "local:i1")
+      await screen.findByTestId("detail-stub")
+      await act(async () => {
+        await (detailProps.onWritebackCompleted as () => Promise<void>)()
+      })
+      expect(mockRunSync).toHaveBeenCalledWith({ projectId: "w1", full: true })
+    })
   })
 
-  it("persists a reorder", async () => {
-    mockListAll.mockResolvedValue({
-      items: [item(), item({ kind: "local", sourceId: "i2" })],
-      errors: [],
+  describe("labels", () => {
+    it("resolves GitHub's namespaced ids so no raw `github:` string reaches the UI", async () => {
+      mockListAll.mockResolvedValue({
+        items: [item({ kind: "github", labelIds: ["github:bug"] })],
+        errors: [],
+      })
+      render(<IssueConsole />)
+      await waitFor(() =>
+        expect(
+          (boardProps.labelsById as Map<string, { name: string }>).get("github:bug")?.name
+        ).toBe("bug")
+      )
     })
-    render(<IssueConsole />)
-    await screen.findByTestId("board-stub")
-
-    await (boardProps.onDrop as (a: unknown) => Promise<void>)({
-      type: "reorder",
-      unifiedId: "local:i1",
-      targetIndex: 1,
-    })
-    expect(mockReorderIssues).toHaveBeenCalled()
-  })
-})
-
-describe("GitHub write-back refresh", () => {
-  async function selectFederatedIssue() {
-    mockListAll.mockResolvedValue({
-      items: [item({ kind: "github", unifiedId: "github:o/r#7" })],
-      errors: [],
-    })
-    render(<IssueConsole />)
-    await waitFor(() => expect(mockListAll).toHaveBeenCalled())
-    await waitFor(() => expect(boardProps.items).toHaveLength(1))
-    act(() => {
-      ;(boardProps.onSelect as (id: string) => void)("github:o/r#7")
-    })
-    await waitFor(() => expect(screen.getByTestId("detail-stub")).toBeInTheDocument())
-  }
-
-  it("round-trips through GitHub rather than patching the row locally", async () => {
-    mockRunSync.mockResolvedValue({ repoCount: 1, results: [], failures: [] })
-    await selectFederatedIssue()
-    const before = mockListAll.mock.calls.length
-
-    await act(async () => {
-      await (detailProps.onWritebackCompleted as () => Promise<void>)()
-    })
-
-    // GitHub owns these rows; an optimistic local edit would be a second
-    // source of truth for the same field.
-    expect(mockRunSync).toHaveBeenCalledWith({ projectId: "w1", full: true })
-    await waitFor(() => expect(mockListAll.mock.calls.length).toBeGreaterThan(before))
   })
 
-  it("still re-reads the sources when the refetch itself fails", async () => {
-    mockRunSync.mockRejectedValue(new Error("offline"))
-    await selectFederatedIssue()
-    const before = mockListAll.mock.calls.length
-
-    await act(async () => {
-      await (detailProps.onWritebackCompleted as () => Promise<void>)()
+  describe("keyboard", () => {
+    it("opens the create dialog on `c`", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }))
+      })
+      expect(await screen.findByTestId("create-dialog-stub")).toBeInTheDocument()
     })
 
-    // The write DID land on GitHub; failing to re-read must not hide it forever.
-    await waitFor(() => expect(mockListAll.mock.calls.length).toBeGreaterThan(before))
+    it("does not open it while typing", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      const input = document.createElement("input")
+      document.body.appendChild(input)
+      act(() => {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }))
+      })
+      expect(screen.queryByTestId("create-dialog-stub")).not.toBeInTheDocument()
+      input.remove()
+    })
   })
 })

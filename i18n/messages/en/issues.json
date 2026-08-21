@@ -89,7 +89,14 @@
       "priority": "Priority",
       "assignee": "Assignee",
       "source": "Source",
-      "project": "Project"
+      "project": "Project",
+      "query": "Search"
+    },
+    "removeFilter": "Remove filter {facet}: {value}",
+    "density": {
+      "label": "Density",
+      "comfortable": "Comfortable",
+      "compact": "Compact"
     }
   },
   "detail": {
@@ -342,5 +349,46 @@
       "agent": "an agent",
       "team": "a squad"
     }
+  },
+  "rail": {
+    "label": "Issue navigation",
+    "views": "Views",
+    "projects": "Projects",
+    "labels": "Labels",
+    "noProjects": "No projects yet",
+    "noLabels": "No labels yet",
+    "manageProjects": "Open the projects console",
+    "manageLabels": "Manage labels",
+    "openProject": "Open {name} in the projects console",
+    "show": "Show the sidebar",
+    "hide": "Hide the sidebar"
+  },
+  "list": {
+    "select": "Select {identifier}",
+    "moreLabels": "+{count}"
+  },
+  "context": {
+    "open": "Open issue",
+    "delete": "Delete"
+  },
+  "bulk": {
+    "label": "Bulk actions",
+    "selected": "{count, plural, one {# selected} other {# selected}}",
+    "clear": "Clear",
+    "addLabel": "Add label",
+    "removeLabel": "Remove label",
+    "applied": "{count, plural, one {# issue updated} other {# issues updated}}",
+    "skipped": "{count, plural, one {# issue updated} other {# issues updated}}, {skipped} skipped",
+    "failed": "{count, plural, one {# issue failed} other {# issues failed}}",
+    "nothing": "Nothing to change"
+  },
+  "delete": {
+    "titleOne": "Delete {identifier}?",
+    "titleMany": "Delete {count} issues?",
+    "bodyOne": "“{title}”, its whole activity trail and its run history go with it. This cannot be undone.",
+    "bodyMany": "Their activity trails and run histories go with them. This cannot be undone.",
+    "cancel": "Keep",
+    "confirm": "Delete",
+    "working": "Deleting…"
   }
 }

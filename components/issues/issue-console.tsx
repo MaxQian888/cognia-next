@@ -4,36 +4,56 @@
  * The `/issues` surface — the total board.
  *
  * Reads through the `IssueSourceRegistry`, not straight from Dexie, so the
- * GitHub mirror and agent-task sources (slices ② / ③) light up by registering
- * an adapter with no change here. Reactivity comes from a Dexie live query on
- * the local table: any local write re-emits, which re-runs the registry
- * fan-out. Federated sources refresh on their own cadence (a scheduler
- * executor, for GitHub) and are picked up by the same fan-out.
+ * GitHub mirror and agent-task sources light up by registering an adapter with
+ * no change here. Reactivity comes from a Dexie live query on the local table:
+ * any local write re-emits, which re-runs the registry fan-out. Federated
+ * sources refresh on their own cadence and are picked up by the same fan-out.
  *
- * Layout is `FeaturePageShell` — the repo's existing 3-pane feature shell —
- * so the board sits in the centre with a properties inspector on the right and
- * degrades to a Sheet below `md` for free.
+ * LAYOUT — three bands, and each one exists because the previous single-slot
+ * version broke:
+ *
+ *   - The RAIL (`leftPane`) owns views, delivery containers and labels. All of
+ *     that used to sit in `FeaturePageHeader`'s `controls` slot, which renders
+ *     inside `overflow-x-auto` with the scrollbar hidden — so on a narrow
+ *     window the view tabs and the create button scrolled off the right edge
+ *     with nothing on screen to say they were there.
+ *   - The HEADER is back to one row: identity, counts, and the primary action.
+ *   - The FILTER BAR sits above the board and, crucially, renders a chip per
+ *     engaged filter. A count badge on a closed menu is not evidence.
+ *
+ * Display preferences live in `stores/issues/issue-view-store.ts`, per view.
+ * They used to be `useState`, so leaving the route and coming back reset the
+ * board every time.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
+import { CircleDotIcon, PanelLeftIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useClientLiveQuery } from "@/hooks/data"
-import { listIssues } from "@/lib/db/issues"
+import { useAssigneeOptions } from "@/hooks/issues/use-assignee-options"
+import { useIssueSelection } from "@/hooks/issues/use-issue-selection"
+import { useIssueShortcuts } from "@/hooks/issues/use-issue-shortcuts"
+import { listIssues, moveIssue, reorderIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
 import { listLabels } from "@/lib/db/labels"
 import {
   applyIssueFilter,
+  buildIssueColumns,
   buildIssueGroups,
-  EMPTY_ISSUE_FILTER,
   issueRunHint,
+  reorderIssueColumn,
   type IssueBoardFilter,
-  type IssueGroupBy,
+  type IssueDropAction,
 } from "@/lib/issues/board-model"
+import { applyIssueBulkAction, type IssueBulkAction } from "@/lib/issues/bulk-actions"
+import { buildIssueLabelCatalogue } from "@/lib/issues/github-label-display"
+import { computeProgressFromIssues } from "@/lib/issues/project-progress"
 import {
   listRunningIssueIds,
   loadIssueViewerContext,
@@ -41,32 +61,28 @@ import {
 } from "@/lib/issues/run/running"
 import { getIssueSourceRegistry } from "@/lib/issues/sources/registry"
 import { runWorkspaceGithubSync } from "@/lib/issues/sync-runner"
+import { toggleFilterValue } from "@/lib/issues/filter-chips"
 import {
   applyIssueSort,
   applyViewScope,
   BUILTIN_ISSUE_VIEWS,
-  DEFAULT_ISSUE_VIEW_ID,
+  countIssuesPerView,
   findIssueView,
-  type IssueSortMode,
-  type IssueViewLayout,
+  resolveIssueViewPreferences,
   type IssueViewerContext,
 } from "@/lib/issues/views"
+import { useIssueViewStore } from "@/stores/issues/issue-view-store"
 import { useProjectStore } from "@/stores/project/project-store"
-import type { IssueStatus } from "@/types/issues"
+import type { IssueActor, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { makeUnifiedIssueId, parseUnifiedIssueId } from "@/types/issues/unified"
-import type { LabelRow } from "@/types/labels"
-import { moveIssue, reorderIssues } from "@/lib/db/issues"
-import {
-  buildIssueColumns,
-  reorderIssueColumn,
-  type IssueDropAction,
-} from "@/lib/issues/board-model"
-import { toast } from "sonner"
-import { PlusIcon } from "lucide-react"
+import { DeleteIssueDialog } from "./delete-issue-dialog"
+import { IssueContextMenu } from "./issue-context-menu"
 import { IssueBoard } from "./board/issue-board"
-import { IssueBoardToolbar } from "./board/board-toolbar"
-import { IssueList } from "./issue-list"
+import { IssueFilterBar } from "./filter-bar/issue-filter-bar"
+import { IssueBulkToolbar } from "./list/issue-bulk-toolbar"
+import { IssueList } from "./list/issue-list"
+import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
 
@@ -75,8 +91,8 @@ const EMPTY_ITEMS: UnifiedIssueItem[] = []
 
 /**
  * The local human has no id — see `IssueActor`. `agentKeys` is filled in from
- * the Character table and the AgentTeam store at runtime (`loadIssueViewerContext`);
- * this is only the pre-load value.
+ * the Character table and the AgentTeam store at runtime
+ * (`loadIssueViewerContext`); this is only the pre-load value.
  */
 const INITIAL_VIEWER: IssueViewerContext = { selfKey: SELF_ACTOR_KEY, agentKeys: [] }
 
@@ -89,16 +105,25 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
   const t = useTranslations("issues")
   const projectId = useProjectStore((s) => s.activeProjectId)
 
-  const [viewId, setViewId] = useState(DEFAULT_ISSUE_VIEW_ID)
-  const [filter, setFilter] = useState<IssueBoardFilter>(EMPTY_ISSUE_FILTER)
-  const [layout, setLayout] = useState<IssueViewLayout | null>(null)
-  const [groupBy, setGroupBy] = useState<IssueGroupBy | null>(null)
-  const [sort, setSort] = useState<IssueSortMode | null>(null)
+  const viewId = useIssueViewStore((s) => s.viewId)
+  const overrides = useIssueViewStore((s) => s.overrides[s.viewId])
+  const railCollapsed = useIssueViewStore((s) => s.railCollapsed)
+  const setViewId = useIssueViewStore((s) => s.setViewId)
+  const setRailCollapsed = useIssueViewStore((s) => s.setRailCollapsed)
+  const setFilter = useIssueViewStore((s) => s.setFilter)
+  const setLayout = useIssueViewStore((s) => s.setLayout)
+  const setGroupBy = useIssueViewStore((s) => s.setGroupBy)
+  const setSort = useIssueViewStore((s) => s.setSort)
+  const setDensity = useIssueViewStore((s) => s.setDensity)
+  const toggleColumnCollapsed = useIssueViewStore((s) => s.toggleColumnCollapsed)
+
+  const view = findIssueView(viewId) ?? BUILTIN_ISSUE_VIEWS[0]
+  const prefs = useMemo(() => resolveIssueViewPreferences(view, overrides), [view, overrides])
+
   const [selectedId, setSelectedId] = useState<string | undefined>(
     initialSelectedId ? `local:${initialSelectedId}` : undefined
   )
-
-  const view = findIssueView(viewId) ?? BUILTIN_ISSUE_VIEWS[0]
+  const searchRef = useRef<HTMLInputElement>(null)
 
   // Reactivity tick: any local write re-emits and re-runs the registry fan-out.
   const localRows = useClientLiveQuery(
@@ -111,7 +136,7 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
     [projectId],
     []
   )
-  const labels = useClientLiveQuery(() => listLabels("issue"), [], [] as LabelRow[])
+  const labels = useClientLiveQuery(() => listLabels("issue"), [], [])
 
   const [federated, setFederated] = useState<UnifiedIssueItem[]>([])
   const [sourceErrors, setSourceErrors] = useState(0)
@@ -135,9 +160,7 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
    *
    * Depending on `localRows` directly makes the fan-out effect re-run on any
    * render where the hook hands back a fresh array — and since the effect
-   * calls `setFederated`, that is a render loop. Dexie's `useLiveQuery`
-   * happens to cache its result between emissions, so production survives it,
-   * but the effect must not depend on that to stay correct.
+   * calls `setFederated`, that is a render loop.
    */
   const localSignature = useMemo(
     () => (localRows ?? []).map((row) => `${row.id}:${row.updatedAt}`).join("|"),
@@ -145,9 +168,6 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
   )
 
   useEffect(() => {
-    // No synchronous `setState` on the no-workspace path: clearing here would
-    // be a cascading render, and the empty case is a pure function of
-    // `projectId` anyway (see `visibleFederated` below).
     if (!projectId) return
     let cancelled = false
     getIssueSourceRegistry()
@@ -157,8 +177,6 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
         setFederated(result.items)
         setSourceErrors(result.errors.length)
       })
-    // Re-read alongside the fan-out: a Character or team created while the
-    // board is open should count as "mine" on the next tick, not after reload.
     void loadIssueViewerContext()
       .then((context) => {
         if (!cancelled) setViewer(context)
@@ -169,24 +187,33 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
     }
   }, [projectId, localSignature, federatedTick])
 
+  /** Federated rows are only meaningful inside a workspace. */
+  const visibleFederated = projectId ? federated : EMPTY_ITEMS
+
+  /**
+   * Local labels PLUS ephemeral rows for GitHub's namespaced ids. Without the
+   * second half, `github:bug` resolved to nothing, every chip was filtered out
+   * and the filter menu showed the user the literal id.
+   */
   const labelsById = useMemo(
-    () => new Map((labels ?? []).map((label) => [label.id, label])),
-    [labels]
+    () => buildIssueLabelCatalogue(labels ?? [], visibleFederated),
+    [labels, visibleFederated]
+  )
+  const railLabels = useMemo(
+    () => [...labelsById.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    [labelsById]
   )
   const projectNamesById = useMemo(
     () => new Map((projects ?? []).map((project) => [project.id, project.name])),
     [projects]
   )
 
-  /** Federated rows are only meaningful inside a workspace. */
-  const visibleFederated = projectId ? federated : EMPTY_ITEMS
   const scoped = useMemo(
     () => applyViewScope(visibleFederated, view.scope, viewer),
     [visibleFederated, view.scope, viewer]
   )
-  const filtered = useMemo(() => applyIssueFilter(scoped, filter), [scoped, filter])
-  const effectiveSort = sort ?? view.sort
-  const sorted = useMemo(() => applyIssueSort(filtered, effectiveSort), [filtered, effectiveSort])
+  const filtered = useMemo(() => applyIssueFilter(scoped, prefs.filter), [scoped, prefs.filter])
+  const sorted = useMemo(() => applyIssueSort(filtered, prefs.sort), [filtered, prefs.sort])
 
   const runHint = useMemo(
     () =>
@@ -197,17 +224,141 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
       ),
     [sorted, runningIds]
   )
-  const effectiveLayout = layout ?? view.layout
-  const effectiveGroupBy = groupBy ?? view.groupBy
-  const groups = useMemo(
-    () => buildIssueGroups(sorted, effectiveGroupBy),
-    [sorted, effectiveGroupBy]
+  /** The board and the list both speak `unifiedId`; the run index does not. */
+  const runningUnifiedIds = useMemo(
+    () => new Set([...(runningIds ?? [])].map((id) => makeUnifiedIssueId("local", id))),
+    [runningIds]
+  )
+  const groups = useMemo(() => buildIssueGroups(sorted, prefs.groupBy), [sorted, prefs.groupBy])
+
+  /** Rail tallies come from the unfiltered scope — a filter must not hide its own count. */
+  const viewCounts = useMemo(
+    () => countIssuesPerView(visibleFederated, viewer),
+    [visibleFederated, viewer]
+  )
+  const labelCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of scoped) {
+      for (const labelId of item.labelIds) counts.set(labelId, (counts.get(labelId) ?? 0) + 1)
+    }
+    return counts
+  }, [scoped])
+  const projectProgress = useMemo(
+    () =>
+      computeProgressFromIssues(
+        (projects ?? []).map((project) => project.id),
+        localRows ?? []
+      ),
+    [projects, localRows]
   )
 
   const selected = sorted.find((item) => item.unifiedId === selectedId)
 
+  /**
+   * The rows a bulk action would reach, in display order. Built from the same
+   * `groups` the list renders so shift-range selects what the eye sees rather
+   * than what an unrendered sort produced.
+   */
+  const orderedIds = useMemo(
+    () => groups.flatMap((group) => group.items.map((item) => item.unifiedId)),
+    [groups]
+  )
+  const selection = useIssueSelection(orderedIds)
+  const assigneeOptions = useAssigneeOptions()
+  const itemsById = useMemo(() => new Map(sorted.map((item) => [item.unifiedId, item])), [sorted])
+  const checkedItems = useMemo(
+    () =>
+      [...selection.selectedIds]
+        .map((id) => itemsById.get(id))
+        .filter((item): item is UnifiedIssueItem => Boolean(item)),
+    [selection.selectedIds, itemsById]
+  )
+  const [deleteTargets, setDeleteTargets] = useState<readonly UnifiedIssueItem[]>([])
+
   const [createOpen, setCreateOpen] = useState(false)
   const [createStatus, setCreateStatus] = useState<IssueStatus>("backlog")
+
+  const openCreate = useCallback((status: IssueStatus = "backlog") => {
+    setCreateStatus(status)
+    setCreateOpen(true)
+  }, [])
+
+  useIssueShortcuts({
+    create: () => {
+      if (projectId) openCreate()
+    },
+    focusSearch: () => searchRef.current?.focus(),
+    next: () => selection.moveCursor(1),
+    previous: () => selection.moveCursor(-1),
+    open: () => {
+      if (selection.cursorId) setSelectedId(selection.cursorId)
+    },
+    toggleSelect: () => {
+      if (selection.cursorId) selection.toggle(selection.cursorId)
+    },
+    clearSelection: () => {
+      if (selection.selectedIds.size > 0) selection.clear()
+      else setSelectedId(undefined)
+    },
+  })
+
+  const updateFilter = useCallback(
+    (next: IssueBoardFilter) => setFilter(viewId, next),
+    [setFilter, viewId]
+  )
+
+  /**
+   * Run one action over a set of issues and say what actually happened.
+   *
+   * The outcome is reported rather than assumed: a selection mixing local and
+   * GitHub rows cannot all be written, and "12 updated" when four were skipped
+   * is a claim the user has no way to check.
+   */
+  const runBulk = useCallback(
+    async (targets: readonly UnifiedIssueItem[], action: IssueBulkAction) => {
+      const by: IssueActor = { kind: "human" }
+      const outcome = await applyIssueBulkAction(targets, action, by, runningUnifiedIds)
+      if (outcome.failed > 0) {
+        toast.error(t("bulk.failed", { count: outcome.failed }))
+      } else if (outcome.applied === 0) {
+        // Nothing landed: explain with the guard's own reason when there is one.
+        toast.error(
+          outcome.reason
+            ? t(`board.denied.${outcome.reason}`, { source: t("source.local") })
+            : t("bulk.nothing")
+        )
+      } else if (outcome.skipped > 0) {
+        toast.warning(t("bulk.skipped", { count: outcome.applied, skipped: outcome.skipped }))
+      } else {
+        toast.success(t("bulk.applied", { count: outcome.applied }))
+      }
+    },
+    [runningUnifiedIds, t]
+  )
+
+  /**
+   * The shared right-click menu, wrapped around every row and every card. One
+   * menu, one action vocabulary (`IssueBulkAction`) and one capability gate,
+   * whether it fires on a single issue or on a selection.
+   */
+  const renderItemMenu = useCallback(
+    (item: UnifiedIssueItem, children: ReactNode) => (
+      <IssueContextMenu
+        key={item.unifiedId}
+        item={item}
+        running={runningUnifiedIds.has(item.unifiedId)}
+        labels={railLabels}
+        projects={projects ?? []}
+        assigneeOptions={assigneeOptions}
+        onAction={(action) => void runBulk([item], action)}
+        onOpen={() => setSelectedId(item.unifiedId)}
+        onRequestDelete={() => setDeleteTargets([item])}
+      >
+        {children}
+      </IssueContextMenu>
+    ),
+    [runningUnifiedIds, railLabels, projects, assigneeOptions, runBulk]
+  )
 
   /**
    * Pull the change we just made back down from GitHub, then re-run the
@@ -267,65 +418,70 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
       header={
         <FeaturePageHeader
           variant="management"
+          icon={<CircleDotIcon />}
           title={t("title")}
           summary={t("summary", { count: sorted.length })}
-          controls={
-            <div className="flex flex-wrap items-center gap-2">
-              <nav className="flex items-center gap-1" aria-label={t("title")}>
-                {BUILTIN_ISSUE_VIEWS.map((candidate) => (
-                  <Button
-                    key={candidate.id}
-                    size="sm"
-                    variant={candidate.id === viewId ? "secondary" : "ghost"}
-                    onClick={() => {
-                      setViewId(candidate.id)
-                      setLayout(null)
-                      setGroupBy(null)
-                      setSort(null)
-                    }}
-                    data-testid={`issue-view-${candidate.id}`}
-                  >
-                    {t(`views.${candidate.labelKey}`)}
-                  </Button>
-                ))}
-              </nav>
-              <span className="flex-1" />
-              <Button
-                size="sm"
-                onClick={() => {
-                  setCreateStatus("backlog")
-                  setCreateOpen(true)
-                }}
-                disabled={!projectId}
-                data-testid="issue-create-trigger"
-              >
-                <PlusIcon className="size-4" />
-                {t("create.trigger")}
-              </Button>
-              <Badge variant="outline" className="font-normal" data-testid="issue-agents-working">
-                {t("board.agentsWorking", { count: runHint.running })}
-              </Badge>
+          status={
+            <div className="flex items-center gap-1.5">
+              {runHint.running > 0 ? (
+                <Badge variant="outline" className="font-normal" data-testid="issue-agents-working">
+                  {t("board.agentsWorking", { count: runHint.running })}
+                </Badge>
+              ) : null}
               {sourceErrors > 0 ? (
                 <Badge variant="destructive" data-testid="issue-source-errors">
                   {t("source.degraded", { count: sourceErrors })}
                 </Badge>
               ) : null}
-              <IssueBoardToolbar
-                items={scoped}
-                filter={filter}
-                onFilterChange={setFilter}
-                layout={effectiveLayout}
-                onLayoutChange={setLayout}
-                groupBy={effectiveGroupBy}
-                onGroupByChange={setGroupBy}
-                sort={effectiveSort}
-                onSortChange={setSort}
-                labelsById={labelsById}
-                projectNamesById={projectNamesById}
-              />
             </div>
           }
+          actions={
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={railCollapsed ? t("rail.show") : t("rail.hide")}
+              title={railCollapsed ? t("rail.show") : t("rail.hide")}
+              aria-pressed={!railCollapsed}
+              onClick={() => setRailCollapsed(!railCollapsed)}
+              data-testid="issue-rail-toggle"
+            >
+              <PanelLeftIcon className="size-4" />
+            </Button>
+          }
+          primaryAction={{
+            id: "create",
+            label: t("create.trigger"),
+            onSelect: () => openCreate(),
+            disabled: !projectId,
+            testId: "issue-create-trigger",
+          }}
         />
+      }
+      leftPane={
+        railCollapsed
+          ? undefined
+          : {
+              label: t("rail.label"),
+              content: (
+                <IssueRail
+                  viewId={viewId}
+                  viewCounts={viewCounts}
+                  onSelectView={setViewId}
+                  projects={projects ?? []}
+                  projectProgress={projectProgress}
+                  activeProjectIds={prefs.filter.issueProjectIds}
+                  onToggleProject={(id) =>
+                    updateFilter(toggleFilterValue(prefs.filter, "issueProjectIds", id))
+                  }
+                  labels={railLabels}
+                  labelCounts={labelCounts}
+                  activeLabelIds={prefs.filter.labelIds}
+                  onToggleLabel={(id) =>
+                    updateFilter(toggleFilterValue(prefs.filter, "labelIds", id))
+                  }
+                />
+              ),
+            }
       }
       rightPane={
         selected
@@ -345,29 +501,82 @@ export function IssueConsole({ initialSelectedId }: IssueConsoleProps) {
       }
       centerClassName="min-h-0"
     >
-      {effectiveLayout === "board" ? (
+      <IssueFilterBar
+        items={scoped}
+        filter={prefs.filter}
+        onFilterChange={updateFilter}
+        layout={prefs.layout}
+        onLayoutChange={(layout) => setLayout(viewId, layout)}
+        groupBy={prefs.groupBy}
+        onGroupByChange={(groupBy) => setGroupBy(viewId, groupBy)}
+        sort={prefs.sort}
+        onSortChange={(sort) => setSort(viewId, sort)}
+        density={prefs.density}
+        onDensityChange={(density) => setDensity(viewId, density)}
+        labelsById={labelsById}
+        projectNamesById={projectNamesById}
+        searchRef={searchRef}
+      />
+
+      <IssueBulkToolbar
+        items={checkedItems}
+        runningIds={runningUnifiedIds}
+        labels={railLabels}
+        projects={projects ?? []}
+        assigneeOptions={assigneeOptions}
+        onAction={(action) => void runBulk(checkedItems, action)}
+        onRequestDelete={() => setDeleteTargets(checkedItems)}
+        onClear={selection.clear}
+      />
+
+      {prefs.layout === "board" ? (
         <IssueBoard
           items={sorted}
           labelsById={labelsById}
           projectNamesById={projectNamesById}
+          runningIds={runningUnifiedIds}
+          columnCollapse={prefs.columnCollapse}
+          onToggleColumnCollapsed={(status, count) => toggleColumnCollapsed(viewId, status, count)}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onDrop={handleDrop}
-          onAddIssue={(status) => {
-            setCreateStatus(status)
-            setCreateOpen(true)
-          }}
+          onAddIssue={openCreate}
+          renderItemMenu={renderItemMenu}
         />
       ) : (
         <IssueList
           groups={groups}
-          groupBy={effectiveGroupBy}
+          groupBy={prefs.groupBy}
+          density={prefs.density}
           labelsById={labelsById}
           projectNamesById={projectNamesById}
+          runningIds={runningUnifiedIds}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          checkedIds={selection.selectedIds}
+          onToggleCheck={(id, modifiers) =>
+            modifiers.shiftKey ? selection.extendTo(id) : selection.toggle(id)
+          }
+          cursorId={selection.cursorId}
+          renderItemMenu={renderItemMenu}
         />
       )}
+
+      <DeleteIssueDialog
+        open={deleteTargets.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTargets([])
+        }}
+        items={deleteTargets}
+        onConfirm={async () => {
+          await runBulk(deleteTargets, { kind: "delete" })
+          // A deleted row must not stay in the inspector or the selection.
+          if (deleteTargets.some((item) => item.unifiedId === selectedId)) {
+            setSelectedId(undefined)
+          }
+          selection.clear()
+        }}
+      />
 
       {projectId ? (
         <CreateIssueDialog

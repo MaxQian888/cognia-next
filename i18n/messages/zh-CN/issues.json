@@ -89,7 +89,14 @@
       "priority": "优先级",
       "assignee": "负责人",
       "source": "来源",
-      "project": "项目"
+      "project": "项目",
+      "query": "搜索"
+    },
+    "removeFilter": "移除筛选 {facet}：{value}",
+    "density": {
+      "label": "密度",
+      "comfortable": "宽松",
+      "compact": "紧凑"
     }
   },
   "detail": {
@@ -342,5 +349,46 @@
       "agent": "一个 Agent",
       "team": "一个小队"
     }
+  },
+  "rail": {
+    "label": "Issue 导航",
+    "views": "视图",
+    "projects": "项目",
+    "labels": "标签",
+    "noProjects": "还没有项目",
+    "noLabels": "还没有标签",
+    "manageProjects": "打开项目控制台",
+    "manageLabels": "管理标签",
+    "openProject": "在项目控制台中打开 {name}",
+    "show": "显示侧栏",
+    "hide": "隐藏侧栏"
+  },
+  "list": {
+    "select": "选中 {identifier}",
+    "moreLabels": "+{count}"
+  },
+  "context": {
+    "open": "打开 issue",
+    "delete": "删除"
+  },
+  "bulk": {
+    "label": "批量操作",
+    "selected": "已选中 {count} 项",
+    "clear": "取消选择",
+    "addLabel": "添加标签",
+    "removeLabel": "移除标签",
+    "applied": "已更新 {count} 个 issue",
+    "skipped": "已更新 {count} 个 issue，跳过 {skipped} 个",
+    "failed": "{count} 个 issue 更新失败",
+    "nothing": "没有可更改的项"
+  },
+  "delete": {
+    "titleOne": "删除 {identifier}？",
+    "titleMany": "删除 {count} 个 issue？",
+    "bodyOne": "「{title}」及其全部活动记录与运行历史都会一并删除，且无法恢复。",
+    "bodyMany": "它们的活动记录与运行历史都会一并删除，且无法恢复。",
+    "cancel": "保留",
+    "confirm": "删除",
+    "working": "删除中…"
   }
 }

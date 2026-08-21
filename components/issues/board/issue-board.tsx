@@ -44,7 +44,7 @@ import {
   type DropAnimation,
 } from "@dnd-kit/core"
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useTranslations } from "next-intl"
 
@@ -108,6 +108,8 @@ export interface IssueBoardProps {
   onSelect?: (unifiedId: string) => void
   onDrop?: (action: IssueDropAction) => void
   onAddIssue?: (status: IssueStatus) => void
+  /** Wraps each card, so the console can attach the shared context menu. */
+  renderItemMenu?: (item: UnifiedIssueItem, children: ReactNode) => ReactNode
 }
 
 export function IssueBoard({
@@ -121,6 +123,7 @@ export function IssueBoard({
   onSelect,
   onDrop,
   onAddIssue,
+  renderItemMenu,
 }: IssueBoardProps) {
   const t = useTranslations("issues")
   const { reduce } = useFlowMotion()
@@ -245,6 +248,7 @@ export function IssueBoard({
               selectedId={selectedId}
               onSelect={onSelect}
               onAddIssue={onAddIssue}
+              renderItemMenu={renderItemMenu}
               collapsed={resolveColumnCollapsed(
                 column.status,
                 column.items.length,
