@@ -1899,6 +1899,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-agent-state"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cognia-gateway",
+ "dirs 6.0.0",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "cognia-agents"
+version = "0.1.0"
+dependencies = [
+ "dirs 6.0.0",
+ "serde",
+ "serde_json",
+ "tauri",
+ "toml_edit 0.25.13+spec-1.1.0",
+]
+
+[[package]]
 name = "cognia-automation"
 version = "0.1.0"
 dependencies = [
@@ -2130,6 +2158,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-files"
+version = "0.1.0"
+dependencies = [
+ "cognia-agents",
+ "dirs 6.0.0",
+ "gray_matter",
+ "ignore",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tokio",
+]
+
+[[package]]
 name = "cognia-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2258,12 +2302,14 @@ name = "cognia-net"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "cognia-secrets",
  "dirs 6.0.0",
  "futures-util",
  "hex",
  "rcgen",
  "regex",
  "reqwest 0.13.4",
+ "rquickjs",
  "rustls",
  "rustls-native-certs",
  "serde",
@@ -2296,11 +2342,14 @@ dependencies = [
  "cbc 0.2.1",
  "chrono",
  "clap",
+ "cognia-agent-state",
+ "cognia-agents",
  "cognia-automation",
  "cognia-ccswitch",
  "cognia-connectors",
  "cognia-core",
  "cognia-external-agent",
+ "cognia-files",
  "cognia-gateway",
  "cognia-git",
  "cognia-headless-contract",
@@ -2334,11 +2383,9 @@ dependencies = [
  "fontdb 0.24.0",
  "futures-util",
  "git2",
- "gray_matter",
  "hex",
  "hkdf 0.13.0",
  "hmac 0.13.0",
- "ignore",
  "jsonwebtoken",
  "keyring",
  "libc",
@@ -2366,7 +2413,6 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.13.4",
- "rquickjs",
  "rusqlite",
  "rustls",
  "serde",
