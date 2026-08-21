@@ -47,6 +47,17 @@
       "federated-read-only": "该议题归属于 {source}，无法在这里移动。",
       "runtime-owned": "有 Agent 正在处理这个议题 —— 请等待运行结束。",
       "illegal-transition": "不允许这样移动。"
+    },
+    "runningCard": "有 Agent 正在处理这个 issue",
+    "collapseColumn": "折叠{status}",
+    "expandColumn": "展开{status}",
+    "dnd": {
+      "instructions": "按空格键拾起 issue，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开 issue。",
+      "pickedUp": "已从{column}拾起 {identifier}。",
+      "over": "{identifier} 将放入{column}，第 {position} / {total} 位。",
+      "denied": "{column}不接受 {identifier}。",
+      "dropped": "{identifier} 已放入{column}，第 {position} / {total} 位。",
+      "cancelled": "已取消拖动，{identifier} 仍在{column}。"
     }
   },
   "toolbar": {

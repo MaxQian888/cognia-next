@@ -388,3 +388,53 @@ export function reorderIssueColumn(
   })
   return changes
 }
+
+/**
+ * Where would the dragged card land, right now?
+ *
+ * Drives the cross-column insertion indicator. Returns null for an illegal
+ * target so no indicator is drawn on a column that would refuse the drop —
+ * the same legality source (`canMoveIssue`) that greys the column out, so the
+ * two affordances can never disagree.
+ *
+ * The index is computed against the target column WITHOUT the dragged card,
+ * because that is the sequence the card is being inserted into.
+ */
+export interface IssueDropPreview {
+  status: IssueStatus
+  /** Insertion index within the target column's visual sequence. */
+  index: number
+}
+
+export function resolveIssueDropPreview(
+  activeId: string | null,
+  overId: string | null,
+  itemsById: ReadonlyMap<string, UnifiedIssueItem>,
+  context: IssueMoveContext
+): IssueDropPreview | null {
+  if (!activeId || !overId) return null
+  const active = parseDndId(activeId)
+  if (active.kind !== "card") return null
+  const item = itemsById.get(active.unifiedId)
+  if (!item) return null
+
+  const over = parseDndId(overId)
+  const targetStatus =
+    over.kind === "column" ? over.status : (itemsById.get(over.unifiedId)?.status ?? null)
+  if (!targetStatus) return null
+
+  // Same-column is expressed as a from===to move, which `canMoveIssue` treats
+  // as a reorder and allows for any movable row.
+  if (!canMoveIssue(item.capabilities, item.status, targetStatus, context).allowed) return null
+
+  const column = sortIssueColumn(
+    [...itemsById.values()].filter(
+      (candidate) => candidate.status === targetStatus && candidate.unifiedId !== item.unifiedId
+    )
+  )
+
+  if (over.kind === "column") return { status: targetStatus, index: column.length }
+
+  const index = column.findIndex((candidate) => candidate.unifiedId === over.unifiedId)
+  return { status: targetStatus, index: index === -1 ? column.length : index }
+}

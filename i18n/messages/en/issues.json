@@ -47,6 +47,17 @@
       "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
       "runtime-owned": "An agent is working on this issue — wait for the run to finish.",
       "illegal-transition": "That move isn't allowed."
+    },
+    "runningCard": "An agent is working on this issue",
+    "collapseColumn": "Collapse {status}",
+    "expandColumn": "Expand {status}",
+    "dnd": {
+      "instructions": "Press Space to pick up an issue. Use the arrow keys to move it between columns, Space to drop it, and Escape to cancel. Press Enter to open an issue instead.",
+      "pickedUp": "Picked up {identifier} from {column}.",
+      "over": "{identifier} will land in {column}, position {position} of {total}.",
+      "denied": "{column} will not accept {identifier}.",
+      "dropped": "{identifier} landed in {column}, position {position} of {total}.",
+      "cancelled": "Drag cancelled. {identifier} stayed in {column}."
     }
   },
   "toolbar": {

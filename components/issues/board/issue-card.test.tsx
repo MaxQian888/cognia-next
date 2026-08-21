@@ -106,16 +106,52 @@ describe("IssueCard", () => {
     )
   })
 
-  it("selects on click and on keyboard activation", () => {
+  it("selects on click and on Enter", () => {
     const onSelect = jest.fn()
     render(<IssueCard item={item()} onSelect={onSelect} />)
     const card = screen.getByTestId("issue-card-local:i1")
 
     fireEvent.click(card)
     fireEvent.keyDown(card, { key: "Enter" })
-    fireEvent.keyDown(card, { key: " " })
-    expect(onSelect).toHaveBeenCalledTimes(3)
+    expect(onSelect).toHaveBeenCalledTimes(2)
     expect(onSelect).toHaveBeenCalledWith("local:i1")
+  })
+
+  it("leaves Space to the keyboard drag sensor rather than selecting", () => {
+    // The board narrows dnd-kit's keyboard activator to Space alone so Enter
+    // can open a card; if Space also selected, a keyboard user could never
+    // start a drag without also opening the inspector.
+    const onSelect = jest.fn()
+    render(<IssueCard item={item()} onSelect={onSelect} />)
+    fireEvent.keyDown(screen.getByTestId("issue-card-local:i1"), { key: " " })
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("defers to the sensor's own key handler before acting on Enter", () => {
+    const onSelect = jest.fn()
+    const onKeyDown = jest.fn((event: { preventDefault: () => void }) => event.preventDefault())
+    mockUseSortable.mockReturnValueOnce({
+      attributes: {},
+      listeners: { onKeyDown },
+      setNodeRef: jest.fn(),
+      transform: null,
+      transition: undefined,
+      isDragging: false,
+    })
+    render(<IssueCard item={item()} onSelect={onSelect} />)
+    fireEvent.keyDown(screen.getByTestId("issue-card-local:i1"), { key: "Enter" })
+    expect(onKeyDown).toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("marks a running card", () => {
+    render(<IssueCard item={item()} running />)
+    expect(screen.getByTestId("issue-card-running-local:i1")).toBeInTheDocument()
+  })
+
+  it("leaves an idle card unmarked", () => {
+    render(<IssueCard item={item()} />)
+    expect(screen.queryByTestId("issue-card-running-local:i1")).not.toBeInTheDocument()
   })
 
   it("ignores unrelated keys", () => {

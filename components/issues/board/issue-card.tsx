@@ -11,12 +11,18 @@
  * Federated rows (GitHub mirrors, agent tasks) render with a source badge and
  * are NOT draggable — `capabilities.canMove` is the single gate, so a read-only
  * row can never acquire a drag affordance it would then fail to honour.
+ *
+ * SPLIT: the markup lives in `IssueCardVisual`, the dnd wiring in `IssueCard`.
+ * The board's `<DragOverlay>` renders the visual alone — rendering a second
+ * `IssueCard` would register a second sortable node under the same id, which
+ * dnd-kit resolves by fighting with itself over the measured rect.
  */
 
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { FolderIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import type { KeyboardEvent } from "react"
 
 import { LabelChip } from "@/components/labels/label-chip"
 import { Badge } from "@/components/ui/badge"
@@ -26,62 +32,79 @@ import type { UnifiedIssueItem } from "@/types/issues/unified"
 import type { LabelRow } from "@/types/labels"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
 
-export interface IssueCardProps {
+export interface IssueCardVisualProps {
   item: UnifiedIssueItem
   /** Resolved label rows for `item.labelIds`; unresolved ids are simply absent. */
   labels?: readonly LabelRow[]
   /** Display name for `item.issueProjectId`, when the caller can resolve it. */
   projectName?: string
   selected?: boolean
-  onSelect?: (unifiedId: string) => void
+  /** An `IssueRunAdapter` run is in flight for this issue. */
+  running?: boolean
+  /** The real card, dimmed while its clone rides the drag overlay. */
+  dragging?: boolean
+  /** The clone inside `<DragOverlay>` — lifted, and never marked selected. */
+  overlay?: boolean
+  draggable?: boolean
+  className?: string
 }
 
-export function IssueCard({ item, labels, projectName, selected, onSelect }: IssueCardProps) {
+/**
+ * The card's markup, with no dnd behaviour at all. Shared by the board card
+ * and the drag overlay's clone so the two can never look different.
+ */
+export function IssueCardVisual({
+  item,
+  labels,
+  projectName,
+  selected,
+  running,
+  dragging,
+  overlay,
+  draggable,
+  className,
+}: IssueCardVisualProps) {
   const t = useTranslations("issues")
-  const draggable = item.capabilities.canMove
-
-  const sortable = useSortable({ id: item.unifiedId, disabled: !draggable })
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
 
   const assigneeLabel = item.assignee
     ? (item.assignee.label ?? t(`actor.${item.assignee.kind}`))
     : t("actor.unassigned")
 
   return (
-    <article
-      ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      {...attributes}
-      {...listeners}
-      onClick={() => onSelect?.(item.unifiedId)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          onSelect?.(item.unifiedId)
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      data-testid={`issue-card-${item.unifiedId}`}
-      data-dragging={isDragging || undefined}
+    <div
       className={cn(
-        "group flex w-full cursor-pointer flex-col gap-2 rounded-lg border bg-card p-3 text-left shadow-xs transition-shadow",
-        "hover:shadow-sm focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-[3px]",
+        "group flex w-full flex-col gap-2 rounded-lg border bg-card p-3 text-left shadow-xs",
+        "motion-safe:transition-[box-shadow,opacity] motion-safe:duration-150",
         draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
-        selected && "ring-ring/60 ring-2",
-        isDragging && "opacity-50"
+        !overlay && "hover:shadow-sm",
+        !overlay && selected && "ring-ring/60 ring-2",
+        // The source card stays in place at low opacity so the column keeps its
+        // height while the clone is away — removing it would collapse the list
+        // under the pointer and make every drop target jump.
+        dragging && "opacity-40",
+        overlay && "cursor-grabbing rotate-1 shadow-lg ring-1 ring-border/60",
+        className
       )}
     >
       <header className="flex items-center gap-2">
         <IssueStatusIcon status={item.status} />
-        <span className="font-mono text-xs text-muted-foreground">{item.identifier}</span>
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+          {item.identifier}
+        </span>
         <span className="flex-1" />
+        {running ? (
+          <span
+            aria-label={t("board.runningCard")}
+            title={t("board.runningCard")}
+            data-testid={`issue-card-running-${item.unifiedId}`}
+            className="size-1.5 shrink-0 rounded-full bg-amber-500 motion-safe:animate-pulse"
+          />
+        ) : null}
         {item.priority !== "none" ? <IssuePriorityIcon priority={item.priority} /> : null}
         {item.kind !== "local" ? (
           <Badge
             variant="outline"
-            className="h-5 px-1.5 text-[10px] font-normal"
+            className="h-5 shrink-0 px-1.5 text-[10px] font-normal"
             title={t("source.readOnly", { source: t(`source.${item.kind}`) })}
           >
             {t(`source.${item.kind}`)}
@@ -114,6 +137,71 @@ export function IssueCard({ item, labels, projectName, selected, onSelect }: Iss
           {assigneeLabel}
         </span>
       </footer>
+    </div>
+  )
+}
+
+export interface IssueCardProps {
+  item: UnifiedIssueItem
+  labels?: readonly LabelRow[]
+  projectName?: string
+  selected?: boolean
+  running?: boolean
+  onSelect?: (unifiedId: string) => void
+}
+
+export function IssueCard({
+  item,
+  labels,
+  projectName,
+  selected,
+  running,
+  onSelect,
+}: IssueCardProps) {
+  const draggable = item.capabilities.canMove
+
+  const sortable = useSortable({ id: item.unifiedId, disabled: !draggable })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable
+
+  /**
+   * Enter opens the card; Space is dnd-kit's. The board narrows the keyboard
+   * sensor's activator to Space alone (see `issue-board.tsx`) precisely so this
+   * split is possible — dnd-kit's default claims Enter too, which would leave
+   * a keyboard user able to drag a card but never to open one.
+   */
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    listeners?.onKeyDown?.(event)
+    if (event.defaultPrevented) return
+    if (event.key === "Enter") {
+      event.preventDefault()
+      onSelect?.(item.unifiedId)
+    }
+  }
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      {...attributes}
+      {...listeners}
+      onKeyDown={handleKeyDown}
+      onClick={() => onSelect?.(item.unifiedId)}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      data-testid={`issue-card-${item.unifiedId}`}
+      data-dragging={isDragging || undefined}
+      className="focus-visible:ring-ring/50 rounded-lg focus-visible:outline-none focus-visible:ring-[3px]"
+    >
+      <IssueCardVisual
+        item={item}
+        labels={labels}
+        projectName={projectName}
+        selected={selected}
+        running={running}
+        dragging={isDragging}
+        draggable={draggable}
+      />
     </article>
   )
 }

@@ -22,6 +22,7 @@ import {
   parseDndId,
   reorderIssueColumn,
   resolveIssueDrop,
+  resolveIssueDropPreview,
   sortIssueColumn,
 } from "./board-model"
 
@@ -392,5 +393,118 @@ describe("reorderIssueColumn", () => {
     const local = item({ sourceId: "l", order: 1 })
     const changes = reorderIssueColumn([gh, local], local.unifiedId, 0)
     expect(changes.every((c) => c.sourceId === "l")).toBe(true)
+  })
+})
+
+describe("resolveIssueDropPreview", () => {
+  function indexOf(items: UnifiedIssueItem[]) {
+    return new Map(items.map((i) => [i.unifiedId, i]))
+  }
+
+  it("returns null without both ends of a drag", () => {
+    const a = item()
+    expect(resolveIssueDropPreview(null, columnDropId("done"), indexOf([a]), AT_REST)).toBeNull()
+    expect(resolveIssueDropPreview(a.unifiedId, null, indexOf([a]), AT_REST)).toBeNull()
+  })
+
+  it("returns null for an unknown active card", () => {
+    const a = item()
+    expect(
+      resolveIssueDropPreview("local:missing", columnDropId("done"), indexOf([a]), AT_REST)
+    ).toBeNull()
+  })
+
+  it("returns null when the active id is a column, not a card", () => {
+    const a = item()
+    expect(
+      resolveIssueDropPreview(columnDropId("todo"), columnDropId("done"), indexOf([a]), AT_REST)
+    ).toBeNull()
+  })
+
+  it("appends to the end when hovering an empty column", () => {
+    const a = item({ status: "todo" })
+    expect(
+      resolveIssueDropPreview(a.unifiedId, columnDropId("done"), indexOf([a]), AT_REST)
+    ).toEqual({ status: "done", index: 0 })
+  })
+
+  it("appends after the existing cards when hovering a populated column", () => {
+    const a = item({ status: "todo" })
+    const b = item({ status: "done", order: 0 })
+    const c = item({ status: "done", order: 1 })
+    expect(
+      resolveIssueDropPreview(a.unifiedId, columnDropId("done"), indexOf([a, b, c]), AT_REST)
+    ).toEqual({ status: "done", index: 2 })
+  })
+
+  it("reports the hovered card's index when hovering a card", () => {
+    const a = item({ status: "todo" })
+    const b = item({ status: "done", order: 0 })
+    const c = item({ status: "done", order: 1 })
+    expect(resolveIssueDropPreview(a.unifiedId, c.unifiedId, indexOf([a, b, c]), AT_REST)).toEqual({
+      status: "done",
+      index: 1,
+    })
+  })
+
+  it("excludes the dragged card from the target sequence", () => {
+    // Dragging the FIRST card of a column onto the second: with the dragged
+    // card excluded, the second card is now at index 0.
+    const a = item({ status: "todo", order: 0 })
+    const b = item({ status: "todo", order: 1 })
+    expect(resolveIssueDropPreview(a.unifiedId, b.unifiedId, indexOf([a, b]), AT_REST)).toEqual({
+      status: "todo",
+      index: 0,
+    })
+  })
+
+  it("previews a same-column reorder", () => {
+    const a = item({ status: "todo", order: 0 })
+    const b = item({ status: "todo", order: 1 })
+    const c = item({ status: "todo", order: 2 })
+    expect(resolveIssueDropPreview(c.unifiedId, a.unifiedId, indexOf([a, b, c]), AT_REST)).toEqual({
+      status: "todo",
+      index: 0,
+    })
+  })
+
+  it("returns null for a federated row — it has no legal target at all", () => {
+    const a = item({ kind: "github", sourceId: "o/r#1", status: "todo" })
+    expect(
+      resolveIssueDropPreview(a.unifiedId, columnDropId("done"), indexOf([a]), AT_REST)
+    ).toBeNull()
+  })
+
+  it("returns null for a target the run guard would refuse", () => {
+    const a = item({ status: "todo" })
+    expect(
+      resolveIssueDropPreview(a.unifiedId, columnDropId("in_progress"), indexOf([a]), {
+        runActive: true,
+      })
+    ).toBeNull()
+  })
+
+  it("draws no indicator on exactly the columns resolveIssueDrop would refuse", () => {
+    // The card's own column is excluded: dropping on your own column body is a
+    // no-op for `resolveIssueDrop` but a legitimate reorder position to preview.
+    const a = item({ status: "in_progress" })
+    const map = indexOf([a])
+    const foreign = ISSUE_BOARD_COLUMN_ORDER.filter((status) => status !== a.status)
+    for (const status of foreign) {
+      const drop = resolveIssueDrop(a.unifiedId, columnDropId(status), map, { runActive: true })
+      const preview = resolveIssueDropPreview(a.unifiedId, columnDropId(status), map, {
+        runActive: true,
+      })
+      expect(preview === null).toBe(drop?.type === "denied")
+    }
+  })
+
+  it("still previews the card's own column, which is always a legal reorder", () => {
+    const a = item({ status: "in_progress" })
+    expect(
+      resolveIssueDropPreview(a.unifiedId, columnDropId("in_progress"), indexOf([a]), {
+        runActive: true,
+      })
+    ).toEqual({ status: "in_progress", index: 0 })
   })
 })
