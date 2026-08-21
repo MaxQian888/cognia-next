@@ -519,6 +519,26 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     actions: [{ kind: "open-settings", section: "agent-teams" }],
     icon: "settings",
   },
+  // The conversation names a Squad the store no longer has — deleted, or
+  // belonging to another account. Persistent: the binding stays wrong until
+  // someone changes it.
+  squadNotFound: {
+    severity: "error",
+    retryable: false,
+    persistent: true,
+    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    icon: "settings",
+  },
+  // The Squad exists but the run could not be launched. Retryable: the usual
+  // causes (a loader failing, a deleted entry Character) are transient or
+  // fixable without touching the binding.
+  squadDispatchFailed: {
+    severity: "error",
+    retryable: true,
+    persistent: false,
+    actions: [{ kind: "retry" }, { kind: "dismiss" }],
+    icon: "alert",
+  },
 
   // -------------------------------------------------------- execution layer
   capabilityUnsatisfied: {

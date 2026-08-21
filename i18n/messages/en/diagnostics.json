@@ -308,6 +308,14 @@
       "hint": "The local agent backend isn't running — restart it to send messages again.",
       "label": "Backend not running"
     },
+    "squadDispatchFailed": {
+      "hint": "The Squad exists but its run could not be started — try again, or check the Squad's members.",
+      "label": "Squad could not start"
+    },
+    "squadNotFound": {
+      "hint": "This conversation is bound to a Squad that no longer exists — pick another one, or unbind it.",
+      "label": "Squad not found"
+    },
     "strictFailure": {
       "hint": "The external agent failed and this session is set to strict mode, so nothing was retried elsewhere.",
       "label": "Agent failed (strict mode)"
