@@ -7,14 +7,14 @@ import type { Character, OnboardingPath, OnboardingStepId } from "@cognia/agent-
 
 import { Button } from "@/components/ui/button"
 import { FirstRunStep } from "./steps/first-run-step"
-import { ProviderStep } from "./steps/provider-step"
+import { ProviderStep, type ProviderView } from "./steps/provider-step"
 import { ScanStep } from "./steps/scan-step"
 import { StepShell } from "./step-shell"
 import { WelcomeStep } from "./steps/welcome-step"
 import { applyMigration, buildMigrationPreview } from "@/lib/agent-migration/run"
 import { countSessions, createSession } from "@/lib/db/sessions"
 import { detectPlatform } from "@/lib/platform/detect"
-import { hasModelAccess } from "@/lib/onboarding/scan"
+import { useModelAccess } from "@/hooks/onboarding/use-model-access"
 import { listCharacters } from "@/lib/db/characters"
 import { loggers } from "@cognia/logging"
 import { nextStep, previousStep, resolveStepSequence, resumeStep } from "@/lib/onboarding/steps"
@@ -72,18 +72,17 @@ export function OnboardingFlow() {
   const { paired: companionPaired, loading: companionLoading } = useCompanionConfig()
   const pairingGateClosed = shell === "mobile-paired" && (companionLoading || !companionPaired)
 
-  // A pasted key or an active subscription both count, and so does an
-  // already-authenticated runtime the scan found — that last one is what makes
-  // the provider step disappear for someone who already runs claude-code.
-  const modelAccess = hasModelAccess({
-    scan: scan.result,
-    apiKey: settings?.apiKey,
-    hasSubscription: Boolean(settings?.defaultProvider),
-  })
+  // Whether this device arrived with model access, latched at the first
+  // settled probe. It used to be derived inline from `settings.apiKey` and
+  // `Boolean(settings.defaultProvider)` — the second of which is the active
+  // *provider id*, not evidence of a credential, and is written by nothing in
+  // the sign-in path. See `useModelAccess` for why it is latched rather than
+  // live, and `hasModelAccess` for the three sources it folds together.
+  const modelAccess = useModelAccess(scan.result)
 
   const sequence = useMemo(
-    () => resolveStepSequence({ shell, hasModelAccess: modelAccess }),
-    [shell, modelAccess]
+    () => resolveStepSequence({ shell, hasModelAccess: modelAccess.resolved }),
+    [shell, modelAccess.resolved]
   )
 
   const [step, setStep] = useState<OnboardingStepId>(() =>
@@ -93,6 +92,11 @@ export function OnboardingFlow() {
   )
   const currentStep = step === "first-run" && pairingGateClosed ? "scan" : step
   const [busy, setBusy] = useState(false)
+  // Which half of the provider step is showing. Owned here because the
+  // action row is: while the key panel is up it carries the step's primary
+  // button, and a second Continue beside it would be two ways to leave one
+  // screen with different meanings.
+  const [providerView, setProviderView] = useState<ProviderView>("chooser")
 
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   // Someone with chats on this device (a Settings re-run, or a long-time user
@@ -111,6 +115,10 @@ export function OnboardingFlow() {
   const goTo = useCallback(
     (next: OnboardingStepId) => {
       setStep(next)
+      // The provider step's view is local state, so leaving it remounts at the
+      // chooser. Without resetting the flow's copy, a return visit would keep
+      // hiding the Continue that the chooser is the one view to need.
+      setProviderView("chooser")
       void advanceOnboarding(next)
     },
     [advanceOnboarding]
@@ -162,11 +170,14 @@ export function OnboardingFlow() {
       // The shell (and therefore the sequence) is derived from this choice, so
       // recompute rather than reusing the stale `sequence` closure.
       const nextShell = resolveOnboardingShell(detectPlatform(), mode)
-      const nextSequence = resolveStepSequence({ shell: nextShell, hasModelAccess: modelAccess })
+      const nextSequence = resolveStepSequence({
+        shell: nextShell,
+        hasModelAccess: modelAccess.resolved,
+      })
       const next = nextStep(nextSequence, "welcome")
       if (next) goTo(next)
     },
-    [goTo, modelAccess]
+    [goTo, modelAccess.resolved]
   )
 
   const handleImport = useCallback(async (vendor: MigrationVendor) => {
@@ -210,9 +221,13 @@ export function OnboardingFlow() {
     [character, completeOnboarding, pairingGateClosed, router, setOnboardingProfile, t]
   )
 
-  const showRailBack = previousStep(sequence, currentStep) !== null
+  const showBack = previousStep(sequence, currentStep) !== null
   const runtimeLabel = scan.result.runtimes[0]?.label
   const showSkip = !(currentStep === "scan" && pairingGateClosed)
+  // The first-run step's cards *are* its forward action, and the API-key
+  // panel's Save is its own — both would be shadowed by a generic Continue.
+  const showContinue =
+    currentStep !== "first-run" && !(currentStep === "provider" && providerView === "apiKey")
 
   const footer =
     currentStep === "welcome" ? undefined : (
@@ -227,7 +242,7 @@ export function OnboardingFlow() {
             {t("skip")}
           </Button>
         )}
-        {currentStep !== "first-run" && (
+        {showContinue && (
           <Button
             size="sm"
             onClick={advance}
@@ -245,7 +260,7 @@ export function OnboardingFlow() {
       sequence={sequence}
       current={currentStep}
       onStepChange={goTo}
-      onBack={showRailBack ? back : undefined}
+      onBack={showBack ? back : undefined}
       busy={busy}
       footer={footer}
     >
@@ -278,12 +293,16 @@ export function OnboardingFlow() {
         />
       )}
 
-      {currentStep === "provider" && <ProviderStep onConnected={advance} />}
+      {currentStep === "provider" && <ProviderStep onViewChange={setProviderView} />}
 
       {currentStep === "first-run" && (
         <FirstRunStep
           shell={shell}
           capabilities={scan.result.capabilities}
+          modelAccess={modelAccess.value}
+          onConnectModel={
+            sequence.some((step) => step.id === "provider") ? () => goTo("provider") : undefined
+          }
           character={character}
           onChangeCharacter={() => {
             const list = characters ?? []

@@ -44,19 +44,44 @@ export const EMPTY_SCAN: ScanResult = { runtimes: [], migratable: [], capabiliti
 /**
  * Whether the user can reach a model at all, from any source.
  *
- * Three sources count, and the distinction matters: an already-authenticated
- * `claude-code` on the machine means a first output is reachable *without* any
- * Cognia-side credentials, which is exactly when the provider step is noise.
+ * Three sources count, and no two of them live in the same place — which is
+ * why this takes three inputs rather than reading settings itself:
+ *
+ *  - `credentialsOk` is the chat path's own verdict (`useCredentialStatus`):
+ *    a keyring API key or an OAuth bearer under Tauri, or a resolved BYOK
+ *    provider in standalone mode. `null` while the probe is in flight, and on
+ *    a paired phone, which borrows the desktop's credentials and has nothing
+ *    local to answer with.
+ *  - `providerConfigured` is a settings-resolved AI-SDK provider (OpenAI,
+ *    Google, a local Ollama, a custom base URL…). The Tauri probe cannot see
+ *    these: `hasApiKey()` reads an Anthropic-only env slot, so a desktop user
+ *    running entirely on OpenAI reads as `keyOk: false`.
+ *  - an already-authenticated `claude-code` the scan found, which reaches a
+ *    model *without* any Cognia-side credentials at all.
+ *  - `legacyApiKey` (`settings.apiKey`), the pre-`providerSettings` Anthropic
+ *    slot. Still real — it is pushed into the Rust `ApiKeyState` at boot — and
+ *    read directly rather than waited for, because the probe that would
+ *    otherwise report it (`hasApiKey()`) only answers *after* that boot-time
+ *    sync lands, and the latch takes the first settled verdict.
+ *
+ * This used to read `settings.defaultProvider` as "has a subscription". That
+ * field is the active default AI provider id (`"openai"`, `"anthropic"`, …),
+ * not evidence of a credential, and nothing in the sign-in path writes it — so
+ * the flow believed a user who had just connected Claude Pro had no model, and
+ * believed a user who had merely *picked* a provider did.
  */
 export function hasModelAccess(input: {
   scan: ScanResult
-  /** A pasted Anthropic API key. */
-  apiKey?: string
-  /** True when any provider has an active subscription account. */
-  hasSubscription: boolean
+  /** `useCredentialStatus().keyOk` — `null` until the probe settles. */
+  credentialsOk: boolean | null
+  /** A settings-resolved provider+credential (`resolveStandaloneProvider`). */
+  providerConfigured: boolean
+  /** `settings.apiKey`, the legacy Anthropic-only slot. */
+  legacyApiKey?: string
 }): boolean {
-  if (input.apiKey) return true
-  if (input.hasSubscription) return true
+  if (input.credentialsOk === true) return true
+  if (input.providerConfigured) return true
+  if (input.legacyApiKey?.trim()) return true
   return input.scan.runtimes.some((r) => r.authenticated)
 }
 

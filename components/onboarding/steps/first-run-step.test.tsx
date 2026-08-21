@@ -16,11 +16,68 @@ import { FirstRunStep } from "./first-run-step"
 const character = { id: "c1", name: "Ada" } as Character
 
 describe("FirstRunStep", () => {
+  it("disables the cards when this device cannot reach a model", () => {
+    // Running a card creates a session, queues its prompt and records the flow
+    // as completed — so an ungated click reported success and handed the user
+    // a turn that failed in the chat pane a moment later.
+    const onPick = jest.fn()
+    render(
+      <FirstRunStep
+        shell="tauri"
+        capabilities={["web"]}
+        modelAccess={false}
+        character={character}
+        onChangeCharacter={jest.fn()}
+        onPick={onPick}
+      />
+    )
+    expect(screen.getByTestId("onboarding-first-run-blocked")).toBeInTheDocument()
+    expect(screen.getByTestId("onboarding-card-summarize-web")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("onboarding-card-summarize-web"))
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it("offers the way back to sign-in rather than only refusing", () => {
+    const onConnectModel = jest.fn()
+    render(
+      <FirstRunStep
+        shell="tauri"
+        capabilities={["web"]}
+        modelAccess={false}
+        onConnectModel={onConnectModel}
+        character={character}
+        onChangeCharacter={jest.fn()}
+        onPick={jest.fn()}
+      />
+    )
+    fireEvent.click(screen.getByTestId("onboarding-first-run-connect"))
+    expect(onConnectModel).toHaveBeenCalled()
+  })
+
+  it("does not block a shell that has nothing local to probe", () => {
+    // A paired phone reports `null`: its credentials live on the desktop it
+    // pairs with, so a local "no model" verdict would be about the wrong
+    // machine.
+    render(
+      <FirstRunStep
+        shell="mobile-paired"
+        capabilities={["web"]}
+        modelAccess={null}
+        character={character}
+        onChangeCharacter={jest.fn()}
+        onPick={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("onboarding-first-run-blocked")).toBeNull()
+    expect(screen.getByTestId("onboarding-card-summarize-web")).not.toBeDisabled()
+  })
+
   it("offers every card whose capability was confirmed", () => {
     render(
       <FirstRunStep
         shell="tauri"
         capabilities={["fs", "ocr", "web"]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={jest.fn()}
@@ -36,6 +93,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={jest.fn()}
@@ -50,6 +108,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={[]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={jest.fn()}
@@ -58,12 +117,29 @@ describe("FirstRunStep", () => {
     expect(screen.getByTestId("onboarding-card-summarize-web")).toBeInTheDocument()
   })
 
+  it("hides the footer row when it has nothing to say", () => {
+    // An empty row still painted its top border, leaving a hairline under the
+    // grid with nothing beneath it.
+    const { container } = render(
+      <FirstRunStep
+        shell="web"
+        capabilities={["web"]}
+        modelAccess
+        character={null}
+        onChangeCharacter={jest.fn()}
+        onPick={jest.fn()}
+      />
+    )
+    expect(container.querySelector(".border-t")).toBeNull()
+  })
+
   it("runs the picked card", async () => {
     const onPick = jest.fn().mockResolvedValue(undefined)
     render(
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={onPick}
@@ -81,6 +157,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={onPick}
@@ -97,6 +174,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={null}
         onChangeCharacter={jest.fn()}
         onPick={jest.fn()}
@@ -110,6 +188,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={character}
         onChangeCharacter={jest.fn()}
         onPick={jest.fn()}
@@ -125,6 +204,7 @@ describe("FirstRunStep", () => {
       <FirstRunStep
         shell="tauri"
         capabilities={["web"]}
+        modelAccess
         character={character}
         onChangeCharacter={onChangeCharacter}
         onPick={jest.fn()}

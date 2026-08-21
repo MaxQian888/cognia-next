@@ -40,25 +40,42 @@ describe("StepRail", () => {
     expect(onStepChange).not.toHaveBeenCalled()
   })
 
-  it("hides Back when no handler is supplied", () => {
+  it("carries no Back of its own — the window bar owns it at every width", () => {
+    // The rail is hidden below `md`, so a Back button here needed a second
+    // copy in the narrow progress bar: two controls, one behaviour.
     render(<StepRail sequence={seq} current="scan" />)
     expect(screen.queryByTestId("onboarding-rail-back")).toBeNull()
   })
 
-  it("wires Back when supplied", () => {
-    const onBack = jest.fn()
-    render(<StepRail sequence={seq} current="scan" onBack={onBack} />)
-    fireEvent.click(screen.getByTestId("onboarding-rail-back"))
-    expect(onBack).toHaveBeenCalled()
+  it("is a flush column, not a floating card", () => {
+    render(<StepRail sequence={seq} current="scan" />)
+    const rail = screen.getByTestId("onboarding-rail")
+    expect(rail.className).toContain("border-r")
+    expect(rail.className).not.toMatch(/\brounded-/)
+    // The old rail hard-coded `dark`, which made it a black slab under a
+    // light theme.
+    expect(rail.className).not.toMatch(/(^|\s)dark(\s|$)/)
+  })
+
+  it("connects the steps so the list reads as one progression", () => {
+    const { container } = render(<StepRail sequence={seq} current="provider" />)
+    // One connector per gap — the last bullet has nothing to join to.
+    const connectors = container.querySelectorAll("li span.w-px")
+    expect(connectors).toHaveLength(seq.filter((s) => s.countsAsProgress).length - 1)
   })
 })
 
 describe("StepProgressBar", () => {
-  it("carries its own Back button — the rail is hidden at these widths", () => {
-    const onBack = jest.fn()
-    render(<StepProgressBar sequence={seq} current="scan" onBack={onBack} />)
-    fireEvent.click(screen.getByTestId("onboarding-bar-back"))
-    expect(onBack).toHaveBeenCalled()
+  it("is chrome for the column beneath it, with its own hairline", () => {
+    render(<StepProgressBar sequence={seq} current="scan" />)
+    const bar = screen.getByTestId("onboarding-progress-bar")
+    expect(bar.className).toContain("border-b")
+    expect(bar.className).toContain("md:hidden")
+  })
+
+  it("carries no Back button — the window bar above it does", () => {
+    render(<StepProgressBar sequence={seq} current="scan" />)
+    expect(screen.queryByTestId("onboarding-bar-back")).toBeNull()
   })
 
   it("names the current step", () => {

@@ -5,6 +5,11 @@ jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+jest.mock("@/components/desktop/window-controls", () => ({
+  useWindowChromeMode: () => "none",
+  WindowControls: () => null,
+}))
+
 import { StepHeading, StepShell } from "./step-shell"
 import { resolveStepSequence } from "@/lib/onboarding/steps"
 
@@ -21,20 +26,41 @@ describe("StepShell", () => {
     expect(screen.getByText("body")).toBeInTheDocument()
   })
 
-  it("fills its parent slot instead of the viewport so the desktop chrome (rail, title/status bars) is respected", () => {
+  it("owns the whole window — the desktop chrome is suppressed on this route", () => {
     render(
       <StepShell sequence={seq} current="scan">
         <p>body</p>
       </StepShell>
     )
     const shell = screen.getByTestId("onboarding-shell")
-    // `DesktopAppShell` mounts routes inside a flex row between the title bar,
-    // guild rail and status bar. A viewport-height shell overflowed that slot
-    // and pushed the sticky footer under the status bar.
-    expect(shell.className).toContain("h-full")
+    // `isOnboardingRoute` makes `DesktopAppShell` render bare children here, so
+    // nothing above supplies a height: the flow has to be the viewport itself.
+    expect(shell.className).toContain("h-[100dvh]")
+    expect(shell.className).toContain("overflow-hidden")
+    // Still a flex child on mobile, where the wrapper hands it a definite
+    // column — flex-basis governs there, so one class list serves both.
     expect(shell.className).toContain("flex-1")
     expect(shell.className).toContain("min-h-0")
-    expect(shell.className).not.toMatch(/\bh-\[100dvh\]|\bh-screen|\bh-dvh/)
+  })
+
+  it("draws its own window bar, since the title bar that carried the drag region is gone", () => {
+    render(
+      <StepShell sequence={seq} current="scan">
+        <p>body</p>
+      </StepShell>
+    )
+    expect(screen.getByTestId("onboarding-window-bar")).toBeInTheDocument()
+  })
+
+  it("keeps every edge square — radii belong to the cards inside, not the window", () => {
+    render(
+      <StepShell sequence={seq} current="scan" footer={<button>skip</button>}>
+        <p>body</p>
+      </StepShell>
+    )
+    expect(screen.getByTestId("onboarding-shell").className).not.toMatch(/\brounded-/)
+    expect(screen.getByTestId("onboarding-rail").className).not.toMatch(/\brounded-/)
+    expect(screen.getByTestId("onboarding-actions").className).not.toMatch(/\brounded-/)
   })
 
   it("replays the body entrance on each step change while the shell itself stays mounted", () => {
@@ -64,12 +90,23 @@ describe("StepShell", () => {
 
   it("renders both rail and narrow progress bar so one is always available", () => {
     render(
-      <StepShell sequence={seq} current="scan" onBack={jest.fn()}>
+      <StepShell sequence={seq} current="scan">
         <p>body</p>
       </StepShell>
     )
-    expect(screen.getByTestId("onboarding-rail-back")).toBeInTheDocument()
-    expect(screen.getByTestId("onboarding-bar-back")).toBeInTheDocument()
+    expect(screen.getByTestId("onboarding-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("onboarding-progress-bar")).toBeInTheDocument()
+  })
+
+  it("routes Back to the window bar, which exists at every width", () => {
+    const onBack = jest.fn()
+    render(
+      <StepShell sequence={seq} current="scan" onBack={onBack}>
+        <p>body</p>
+      </StepShell>
+    )
+    // One control, not one per breakpoint — the rail is hidden below `md`.
+    expect(screen.getAllByTestId("onboarding-back")).toHaveLength(1)
   })
 
   it("omits the footer region entirely when no footer is given", () => {

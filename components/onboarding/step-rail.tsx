@@ -1,10 +1,9 @@
 "use client"
 
-import { ArrowLeftIcon, CheckIcon } from "lucide-react"
+import { CheckIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { OnboardingStepId } from "@cognia/agent-config-types"
 
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { OnboardingStepDef } from "@/lib/onboarding/steps"
 
@@ -13,13 +12,12 @@ interface StepRailProps {
   current: OnboardingStepId
   /** Jump back to an already-completed step. Omit to make the rail read-only. */
   onStepChange?: (step: OnboardingStepId) => void
-  onBack?: () => void
-  /** Steps raise this while a request is in flight, locking Back and the rail. */
+  /** Steps raise this while a request is in flight, locking the rail. */
   busy?: boolean
 }
 
 /**
- * The persistent rail: where you are, and how to go back.
+ * The persistent rail: where you are.
  *
  * **Only completed steps are clickable.** Moving forward has to run the
  * current step's validation and submit (the scan step commits a runtime
@@ -29,101 +27,117 @@ interface StepRailProps {
  * `welcome` is in the sequence but not in the rail — reading a product intro
  * is not progress toward being set up, and numbering it makes the flow feel
  * longer than it is. `progressPosition` reports `-1` there for the same reason.
+ *
+ * **Flush, not floating.** It is a full-height column with a hairline on its
+ * trailing edge and a tint a step off the page, the same way the app's own
+ * columns divide. It used to be a `rounded-2xl` card inset in a padded gutter,
+ * with a hard-coded `dark` class that made it a black slab under a light
+ * theme — a dialog's geometry and someone else's palette, on a screen that is
+ * neither.
+ *
+ * **Back is not here any more.** It lives in `OnboardingWindowBar`, which
+ * exists at every width; this rail is hidden below `md`, so carrying it here
+ * meant a second copy in the narrow progress bar.
  */
-export function StepRail({ sequence, current, onStepChange, onBack, busy = false }: StepRailProps) {
+export function StepRail({ sequence, current, onStepChange, busy = false }: StepRailProps) {
   const t = useTranslations("onboarding")
   const counted = sequence.filter((s) => s.countsAsProgress)
   const currentIndex = counted.findIndex((s) => s.id === current)
 
   return (
-    <aside className="hidden w-[15rem] shrink-0 p-3 md:block lg:w-[19rem] lg:p-4">
-      <div className="dark relative flex h-full w-full flex-col overflow-hidden rounded-2xl bg-background px-5 py-6 text-foreground ring-1 ring-border">
-        <header className="flex min-h-9 shrink-0 items-center justify-between gap-3">
-          <span className="truncate text-sm font-medium">{t("wordmark")}</span>
-          {onBack && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              onClick={onBack}
-              disabled={busy}
-              aria-label={t("back")}
-              data-testid="onboarding-rail-back"
-            >
-              <ArrowLeftIcon className="size-4" />
-            </Button>
-          )}
-        </header>
+    <nav
+      aria-label={t("rail.label")}
+      data-testid="onboarding-rail"
+      className="hidden w-[15.5rem] shrink-0 flex-col border-r border-border/60 bg-muted/30 px-6 py-9 md:flex lg:w-[18rem] lg:px-8"
+    >
+      <ol className="flex flex-col">
+        {counted.map((step, index) => {
+          const done = index < currentIndex
+          const isCurrent = index === currentIndex
+          const canReturn = done && !!onStepChange && !busy
+          const isLast = index === counted.length - 1
 
-        <nav
-          className="flex min-h-0 flex-1 flex-col justify-center gap-6 py-10"
-          aria-label={t("rail.label")}
-        >
-          {counted.map((step, index) => {
-            const done = index < currentIndex
-            const isCurrent = index === currentIndex
-            const canReturn = done && !!onStepChange && !busy
-
-            const body = (
-              <>
+          const body = (
+            <>
+              {/* Bullet + connector share a column so the line always spans
+                  exactly the gap between two bullets, whatever the label
+                  wraps to. */}
+              <span aria-hidden className="flex shrink-0 flex-col items-center self-stretch">
                 <span
-                  aria-hidden
                   className={cn(
                     "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ring-1 transition-colors",
                     done
                       ? "bg-foreground text-background ring-foreground"
                       : isCurrent
-                        ? "ring-muted-foreground"
+                        ? "bg-background ring-foreground"
                         : "ring-border"
                   )}
                 >
                   {done ? (
-                    <CheckIcon className="size-3" />
+                    <CheckIcon className="size-2.5" />
                   ) : isCurrent ? (
                     <span className="block size-1.5 rounded-full bg-foreground" />
                   ) : null}
                 </span>
-                <span className="min-w-0 flex-1 text-left">
+                {!isLast && (
                   <span
                     className={cn(
-                      "block text-sm transition-colors",
-                      isCurrent || done ? "text-foreground" : "text-muted-foreground"
+                      "mt-1.5 w-px flex-1 transition-colors",
+                      done ? "bg-foreground/40" : "bg-border"
                     )}
-                  >
-                    {t(`rail.${step.id}.label`)}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {t(`rail.${step.id}.description`)}
-                  </span>
+                  />
+                )}
+              </span>
+              <span className="min-w-0 flex-1 text-left">
+                <span
+                  className={cn(
+                    "block text-sm transition-colors",
+                    isCurrent
+                      ? "font-medium text-foreground"
+                      : done
+                        ? "text-foreground"
+                        : "text-muted-foreground"
+                  )}
+                >
+                  {t(`rail.${step.id}.label`)}
                 </span>
-              </>
-            )
+                <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                  {t(`rail.${step.id}.description`)}
+                </span>
+              </span>
+            </>
+          )
 
-            return canReturn ? (
-              <button
-                key={step.id}
-                type="button"
-                onClick={() => onStepChange(step.id)}
-                data-testid={`onboarding-rail-${step.id}`}
-                className="flex w-full items-start gap-3 rounded-md text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {body}
-              </button>
-            ) : (
-              <div
-                key={step.id}
-                className="flex w-full items-start gap-3"
-                data-testid={`onboarding-rail-${step.id}`}
-                {...(isCurrent ? { "aria-current": "step" as const } : {})}
-              >
-                {body}
-              </div>
-            )
-          })}
-        </nav>
-      </div>
-    </aside>
+          const rowClass = cn("flex w-full items-stretch gap-3 text-left", !isLast && "pb-8")
+
+          return (
+            <li key={step.id} className="flex">
+              {canReturn ? (
+                <button
+                  type="button"
+                  onClick={() => onStepChange(step.id)}
+                  data-testid={`onboarding-rail-${step.id}`}
+                  className={cn(
+                    rowClass,
+                    "rounded-md transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  )}
+                >
+                  {body}
+                </button>
+              ) : (
+                <div
+                  className={rowClass}
+                  data-testid={`onboarding-rail-${step.id}`}
+                  {...(isCurrent ? { "aria-current": "step" as const } : {})}
+                >
+                  {body}
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }
 
@@ -133,36 +147,24 @@ export function StepRail({ sequence, current, onStepChange, onBack, busy = false
  * point is to spend as little vertical space as possible, and "which step, how
  * far along" is what the list was communicating anyway.
  *
- * It carries the Back button too. Leaving that to the rail stranded every step
- * but the first with no way back on a phone — the exact width where the whole
- * flow now runs.
+ * A flush row with its own hairline, not a floating strip inside the body's
+ * padding — it is chrome for the column beneath it, and it has to read as the
+ * narrow-width stand-in for a bordered rail. Back is not here: the window bar
+ * above carries it at every width.
  */
 export function StepProgressBar({
   sequence,
   current,
-  onBack,
-  busy = false,
-}: Omit<StepRailProps, "onStepChange">) {
+}: Pick<StepRailProps, "sequence" | "current">) {
   const t = useTranslations("onboarding")
   const counted = sequence.filter((s) => s.countsAsProgress)
   const currentIndex = counted.findIndex((s) => s.id === current)
 
   return (
-    <div className="mb-6 flex items-center gap-3 md:hidden">
-      {onBack && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="-ml-2 size-8 shrink-0"
-          onClick={onBack}
-          disabled={busy}
-          aria-label={t("back")}
-          data-testid="onboarding-bar-back"
-        >
-          <ArrowLeftIcon className="size-4" />
-        </Button>
-      )}
+    <div
+      className="flex shrink-0 items-center gap-3 border-b border-border/60 px-6 py-3 md:hidden"
+      data-testid="onboarding-progress-bar"
+    >
       <span aria-hidden className="flex flex-1 items-center gap-1.5">
         {counted.map((step, index) => (
           <span

@@ -99,7 +99,7 @@ export function ScanStep({
 
       {scan.phase === "empty" && (
         <div className="flex flex-col gap-3" data-testid="onboarding-scan-empty">
-          <div className="flex items-start gap-3 rounded-lg border bg-background p-4">
+          <div className="flex items-start gap-3 rounded-xl border bg-card p-4">
             <SearchXIcon className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">{t("scan.empty")}</p>
@@ -130,7 +130,7 @@ export function ScanStep({
                 {scan.result.runtimes.map((rt) => (
                   <li
                     key={rt.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-background px-4 py-3"
+                    className="flex items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3"
                     data-testid={`onboarding-runtime-${rt.id}`}
                   >
                     <span className="truncate text-sm">{rt.label}</span>
@@ -153,7 +153,7 @@ export function ScanStep({
                   return (
                     <li
                       key={probe.vendor}
-                      className="flex items-center justify-between gap-3 rounded-lg border bg-background px-4 py-3"
+                      className="flex items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3"
                       data-testid={`onboarding-migrate-${probe.vendor}`}
                     >
                       <span className="min-w-0 flex-1 text-sm text-muted-foreground">
@@ -243,7 +243,7 @@ function ChatHistoryBlock({
   return (
     <div className="flex flex-col gap-2" data-testid="onboarding-history">
       <p className="text-sm font-medium">{t("scan.historyTitle")}</p>
-      <div className="flex items-start gap-3 rounded-lg border bg-background px-4 py-3">
+      <div className="flex items-start gap-3 rounded-xl border bg-card px-4 py-3">
         <MessagesSquareIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="text-sm">

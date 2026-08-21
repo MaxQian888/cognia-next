@@ -71,6 +71,19 @@ describe("FinishSetupBar", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  // Chrome-free deep links own the whole viewport. The desktop shell never
+  // mounts the bar on these, but `MobileShellWrapper` drops only its tab bar
+  // there — without this guard the bar painted over the pairing flow.
+  it.each(["/pair", "/pair/manual", "/oauth", "/share-target", "/canvas/join/room-1"])(
+    "stays off the chrome-free route %s",
+    (route) => {
+      pathname = route
+      settings = withPath("provider_skipped")
+      const { container } = render(<FinishSetupBar />)
+      expect(container).toBeEmptyDOMElement()
+    }
+  )
+
   it("routes back into the flow", () => {
     settings = withPath("provider_skipped")
     render(<FinishSetupBar />)

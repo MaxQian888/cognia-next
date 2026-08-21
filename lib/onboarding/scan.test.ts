@@ -21,18 +21,34 @@ const runtime = (patch: Partial<ScannedRuntime> = {}): ScannedRuntime => ({
 const scan = (patch: Partial<ScanResult> = {}): ScanResult => ({ ...EMPTY_SCAN, ...patch })
 
 describe("hasModelAccess", () => {
+  const base = { credentialsOk: false as boolean | null, providerConfigured: false }
+
   it("is false with nothing configured and nothing found", () => {
-    expect(hasModelAccess({ scan: EMPTY_SCAN, hasSubscription: false })).toBe(false)
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base })).toBe(false)
   })
 
-  it("is true with a pasted API key", () => {
-    expect(hasModelAccess({ scan: EMPTY_SCAN, apiKey: "sk-ant-x", hasSubscription: false })).toBe(
-      true
-    )
+  it("is true once the chat path's own credential probe says yes", () => {
+    // Covers a keyring API key, an OAuth bearer, and standalone BYOK — the
+    // three things `useCredentialStatus` already knows how to tell apart.
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, credentialsOk: true })).toBe(true)
   })
 
-  it("is true with an active subscription account", () => {
-    expect(hasModelAccess({ scan: EMPTY_SCAN, hasSubscription: true })).toBe(true)
+  it("is true with a settings-resolved AI-SDK provider the Tauri probe cannot see", () => {
+    // `hasApiKey()` reads an Anthropic-only env slot, so a desktop user running
+    // entirely on OpenAI reads as `keyOk: false` and would be asked to sign in
+    // to something they do not use.
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, providerConfigured: true })).toBe(true)
+  })
+
+  it("is true with the legacy Anthropic key slot, without waiting on the probe", () => {
+    // `settings.apiKey` is pushed into the Rust `ApiKeyState` at boot, so
+    // `hasApiKey()` reports it only *after* that sync — later than the latch
+    // takes its first settled answer.
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, legacyApiKey: "sk-ant-x" })).toBe(true)
+  })
+
+  it("ignores a blank legacy key", () => {
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, legacyApiKey: "   " })).toBe(false)
   })
 
   it("is true when a scanned runtime is already authenticated", () => {
@@ -40,7 +56,7 @@ describe("hasModelAccess", () => {
     // machine can already reach a model without Cognia-side credentials.
     const out = hasModelAccess({
       scan: scan({ runtimes: [runtime({ authenticated: true })] }),
-      hasSubscription: false,
+      ...base,
     })
     expect(out).toBe(true)
   })
@@ -48,9 +64,16 @@ describe("hasModelAccess", () => {
   it("is false when a runtime was found but is not authenticated", () => {
     const out = hasModelAccess({
       scan: scan({ runtimes: [runtime({ authenticated: false })] }),
-      hasSubscription: false,
+      ...base,
     })
     expect(out).toBe(false)
+  })
+
+  it("treats an unsettled probe as no access rather than as access", () => {
+    // `null` is "the probe has not answered" (or a paired phone, which has
+    // nothing local to answer with). Reading it as access would drop the
+    // sign-in step for everyone during the first frames of the flow.
+    expect(hasModelAccess({ scan: EMPTY_SCAN, ...base, credentialsOk: null })).toBe(false)
   })
 })
 

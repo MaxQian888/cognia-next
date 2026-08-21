@@ -62,8 +62,22 @@ jest.mock("@/lib/agent-migration/run", () => ({
   applyMigration: jest.fn(),
 }))
 jest.mock("@/lib/runtime/standalone-mode", () => ({ setMobileRuntimeMode: jest.fn() }))
+
+// The flow reads one verdict, not the credential stack behind it. Mocking the
+// hook keeps this suite about sequencing — `use-model-access.test.tsx` owns
+// the latch and the three sources it folds together.
+const modelAccess = { value: false as boolean | null, resolved: false }
+jest.mock("@/hooks/onboarding/use-model-access", () => ({
+  useModelAccess: () => modelAccess,
+}))
 jest.mock("@/components/onboarding/steps/provider-step", () => ({
-  ProviderStep: () => <div data-testid="onboarding-provider" />,
+  // Stubbed down to the one thing the flow reacts to: which view is showing.
+  ProviderStep: ({ onViewChange }: { onViewChange?: (v: "chooser" | "apiKey") => void }) => (
+    <div data-testid="onboarding-provider">
+      <button data-testid="stub-pick-api-key" onClick={() => onViewChange?.("apiKey")} />
+      <button data-testid="stub-back-to-chooser" onClick={() => onViewChange?.("chooser")} />
+    </div>
+  ),
 }))
 jest.mock("@/components/desktop/avatar-badge", () => ({ AvatarBadge: () => <span /> }))
 
@@ -93,6 +107,8 @@ beforeEach(() => {
   sessionCount = 0
   companionPaired = false
   companionLoading = false
+  modelAccess.value = false
+  modelAccess.resolved = false
 })
 
 describe("OnboardingFlow", () => {
@@ -131,13 +147,52 @@ describe("OnboardingFlow", () => {
   })
 
   it("drops the provider step entirely once model access already exists", async () => {
-    settings = { id: "singleton", apiKey: "sk-ant-x" } as AppSettings
+    modelAccess.value = true
+    modelAccess.resolved = true
     render(<OnboardingFlow />)
     fireEvent.click(screen.getByTestId("onboarding-welcome-cta"))
     await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("scan"))
     fireEvent.click(screen.getByTestId("onboarding-continue"))
     // scan → first-run, skipping provider.
     await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run"))
+  })
+
+  it("stands its action row down while the key panel owns the primary button", () => {
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "provider" },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    // Chooser view: Continue is the way past a step you do not want to do now.
+    expect(screen.getByTestId("onboarding-continue")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("stub-pick-api-key"))
+    // Key view: Save is the primary action, and a second button labelled
+    // Continue beside it meant two ways off one screen with different results.
+    expect(screen.queryByTestId("onboarding-continue")).toBeNull()
+    // Leaving early still has to be possible from here.
+    expect(screen.getByTestId("onboarding-skip")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("stub-back-to-chooser"))
+    expect(screen.getByTestId("onboarding-continue")).toBeInTheDocument()
+  })
+
+  it("resets the provider view on a step change, so a return visit is not stuck", async () => {
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "provider" },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("stub-pick-api-key"))
+    expect(screen.queryByTestId("onboarding-continue")).toBeNull()
+
+    // Back to the scan step, then forward again: the step remounts at its
+    // chooser, and the action row has to come back with it.
+    fireEvent.click(screen.getByTestId("onboarding-back"))
+    await waitFor(() => expect(screen.getByTestId("onboarding-scan")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("onboarding-continue"))
+    await waitFor(() => expect(screen.getByTestId("onboarding-provider")).toBeInTheDocument())
+    expect(screen.getByTestId("onboarding-continue")).toBeInTheDocument()
   })
 
   it("records why the user left so the finish bar can name it", async () => {
@@ -152,6 +207,8 @@ describe("OnboardingFlow", () => {
   })
 
   it("runs a starter card through the production send path and completes", async () => {
+    modelAccess.value = true
+    modelAccess.resolved = true
     settings = {
       id: "singleton",
       apiKey: "sk-ant-x",
@@ -172,6 +229,44 @@ describe("OnboardingFlow", () => {
     )
     await waitFor(() => expect(completeOnboarding).toHaveBeenCalled())
     expect(replace).toHaveBeenCalledWith("/")
+  })
+
+  it("does not let the terminal step claim success with no model to run on", async () => {
+    // The cards create a session, queue a prompt and record the flow as
+    // `completed`; without the gate the step reported success and handed the
+    // user a turn that failed in the chat pane a moment later.
+    modelAccess.value = false
+    modelAccess.resolved = false
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "first-run" },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    expect(screen.getByTestId("onboarding-card-summarize-web")).toBeDisabled()
+
+    // And it offers the way out rather than just refusing.
+    fireEvent.click(screen.getByTestId("onboarding-first-run-connect"))
+    await waitFor(() => expect(screen.getByTestId("onboarding-provider")).toBeInTheDocument())
+  })
+
+  it("unblocks the terminal step for a model connected during the flow", async () => {
+    // The sequence verdict is latched so the steps cannot shuffle underneath
+    // the user — but the card gate reads the live one, or someone who just
+    // pasted a key would meet disabled cards one step later.
+    modelAccess.value = false
+    modelAccess.resolved = false
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "first-run" },
+    } as AppSettings
+    const { rerender } = render(<OnboardingFlow />)
+    expect(screen.getByTestId("onboarding-card-summarize-web")).toBeDisabled()
+
+    modelAccess.value = true
+    rerender(<OnboardingFlow />)
+    await waitFor(() =>
+      expect(screen.getByTestId("onboarding-card-summarize-web")).not.toBeDisabled()
+    )
   })
 
   it("shows no Skip on welcome — there is nothing to abandon yet", () => {

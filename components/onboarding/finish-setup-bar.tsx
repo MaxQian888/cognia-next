@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { ONBOARDING_ROUTE } from "@/lib/onboarding/route"
 import { shouldShowFinishBar } from "@/lib/onboarding/gate"
+import { isShellBypassRoute } from "@/lib/shell/bypass-routes"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
 /**
@@ -26,8 +27,13 @@ import { useSettingsStore } from "@/stores/settings/settings-store"
  * `legacy_dismissed` is pre-dismissed by the migration so an upgrade never
  * nags about a flow the user never opted into.
  *
- * Self-hiding — it costs one selector on the normal path — so the layout can
- * mount it unconditionally alongside the other persistent notices.
+ * Self-hiding — it costs one selector on the normal path — so both shells can
+ * mount it unconditionally as a row of their own chrome (`DesktopAppShell`
+ * under the title bar, `MobileShellWrapper` beside the offline banner). It is
+ * deliberately NOT mounted at the body level: the desktop shell is `h-screen`
+ * inside an `overflow:hidden` body, so a bar laid out after it was clipped,
+ * and on the routes that keep the document scroll the same bar landed under
+ * a `min-h-[100dvh]` page and added a scrollbar to reach it.
  */
 export function FinishSetupBar() {
   const t = useTranslations("onboarding.finishBar")
@@ -40,6 +46,12 @@ export function FinishSetupBar() {
   // Never render over the flow itself — the bar's whole purpose is to get the
   // user back here, and it would be pointing at the page it is sitting on.
   if (pathname?.startsWith(ONBOARDING_ROUTE)) return null
+  // Chrome-free routes get no chrome. `/pair`, `/oauth` and the share target
+  // are mid-task deep links owning the whole viewport — a "finish setup" CTA
+  // there interrupts the task it is standing on and, on the mobile shell,
+  // still paints because that wrapper only drops its tab bar. The desktop
+  // shell never mounts this on a bypass route; this covers the other shells.
+  if (isShellBypassRoute(pathname)) return null
 
   const path = settings.onboardingProgress?.path
   if (!path) return null
