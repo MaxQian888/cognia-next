@@ -28,6 +28,23 @@ interface RuntimeTargetMenuSectionProps {
   onSwitchOverride?: (accountId: string, targetId: string) => Promise<RuntimeTargetRecord>
   onRemoveOverride?: typeof removeCompanionHost
   onSwitched?: () => void
+  /**
+   * Render nothing unless at least one *companion* target exists. Every web
+   * account has a standalone target, so without this the section would appear
+   * on a browser that has never paired — a one-row list of the target it is
+   * already on. Callers that already describe the current target (the runtime
+   * connection popover) pass this so the list appears only when it offers a
+   * real choice.
+   */
+  requireCompanion?: boolean
+  /** Hide the built-in "Add host" row for callers that offer their own. */
+  showAddHost?: boolean
+  /**
+   * Applied to the root. Callers that need a divider must put it here rather
+   * than beside the element: this component renders `null` in several cases,
+   * and a sibling `<Separator />` would survive as a stray rule over nothing.
+   */
+  className?: string
 }
 
 export function RuntimeTargetMenuSection({
@@ -37,6 +54,9 @@ export function RuntimeTargetMenuSection({
   onSwitchOverride,
   onRemoveOverride = removeCompanionHost,
   onSwitched,
+  requireCompanion = false,
+  showAddHost = true,
+  className,
 }: RuntimeTargetMenuSectionProps) {
   const t = useTranslations("account.runtimeTarget")
   const router = useRouter()
@@ -69,6 +89,7 @@ export function RuntimeTargetMenuSection({
   const targets =
     targetsOverride ?? (accountId && snapshot.target?.platform === "web" ? loadedTargets : [])
   if (!accountId || targets.length === 0) return null
+  if (requireCompanion && !targets.some((target) => target.kind === "companion")) return null
 
   const switchTarget = async (targetId: string) => {
     if (targetId === activeTargetId || pendingTargetId) return
@@ -135,18 +156,20 @@ export function RuntimeTargetMenuSection({
   }
 
   return (
-    <section aria-label={t("heading")} data-testid="runtime-target-menu">
+    <section aria-label={t("heading")} data-testid="runtime-target-menu" className={className}>
       <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {t("heading")}
       </div>
-      <button
-        type="button"
-        onClick={() => router.push("/pair?mode=add")}
-        className="mx-2 mb-1 flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
-      >
-        <PlusIcon aria-hidden className="size-4" />
-        {t("addHost")}
-      </button>
+      {showAddHost ? (
+        <button
+          type="button"
+          onClick={() => router.push("/pair?mode=add")}
+          className="mx-2 mb-1 flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+        >
+          <PlusIcon aria-hidden className="size-4" />
+          {t("addHost")}
+        </button>
+      ) : null}
       <div className="flex flex-col">
         {targets.map((target) => {
           const active = target.id === activeTargetId

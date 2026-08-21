@@ -43,6 +43,13 @@ jest.mock("@/lib/files/workspace-backend", () => ({
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+// Task Workspace is GA (no developer flag), so the task-discovery effect runs
+// on every mount. These tests cover the editor dock, not task scope: resolve to
+// "this session has no task workspace" and the dock renders its normal surface.
+jest.mock("@/lib/task-workspace/client", () => ({
+  listTaskWorkspaces: jest.fn(async () => []),
+  listTaskRuns: jest.fn(async () => []),
+}))
 
 const supportedMock = jest.fn<Promise<boolean>, []>()
 const driveOpenMock = jest.fn().mockResolvedValue(undefined)

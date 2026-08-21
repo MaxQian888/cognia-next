@@ -539,6 +539,8 @@ async function fireWorktreeHook(
       event,
       {
         agentId: hookContext?.source ?? "git-command",
+        // Worktree lifecycle is host bookkeeping, not an agent turn.
+        agentKind: "system",
         sessionId: hookContext?.sessionId ?? "",
         cwd,
       },

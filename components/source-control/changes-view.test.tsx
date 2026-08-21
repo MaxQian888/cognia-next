@@ -52,6 +52,8 @@ const status: GitStatus = {
 
 function makeActions(): UseGitActionsResult {
   return {
+    // The capability probe every action row consults before enabling itself.
+    can: jest.fn(() => true),
     stage: jest.fn().mockResolvedValue(undefined),
     unstage: jest.fn().mockResolvedValue(undefined),
     discard: jest.fn().mockResolvedValue(undefined),

@@ -32,7 +32,6 @@ import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layo
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
-import { useSettingsStore } from "@/stores/settings"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { TaskResourcesPanel } from "./task-resources-panel"
 
@@ -168,12 +167,9 @@ function WorkspaceEditorBody({
   )
   const setEditorSession = useProjectEditorSessionStore((state) => state.setSession)
   const proIdeAllowed = isTauri() && layout !== "mobile"
-  const taskWorkspaceEnabled = useSettingsStore(
-    (state) => state.settings?.developer?.taskWorkspace === true
-  )
   const activeTask = useTaskWorkspaceStore((state) => state.activeBySession[sessionId])
   const activateTask = useTaskWorkspaceStore((state) => state.activate)
-  const hasTaskScope = taskWorkspaceEnabled && Boolean(activeTask)
+  const hasTaskScope = Boolean(activeTask)
   const visibleScope = hasTaskScope ? scope : "workspace"
 
   // Task scope replaces the editor body with the task resources panel and hides
@@ -215,7 +211,7 @@ function WorkspaceEditorBody({
   const editor = workbench.editor
 
   useEffect(() => {
-    if (!taskWorkspaceEnabled || activeTask) return
+    if (activeTask) return
     let cancelled = false
     void listTaskWorkspaces(sessionId)
       .then(async (tasks) => {
@@ -237,7 +233,7 @@ function WorkspaceEditorBody({
     return () => {
       cancelled = true
     }
-  }, [activeTask, activateTask, sessionId, taskWorkspaceEnabled, workingDir])
+  }, [activeTask, activateTask, sessionId, workingDir])
   const {
     roots,
     rootKey,

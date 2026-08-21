@@ -142,3 +142,45 @@ it("opens add mode and removes only after confirmation", async () => {
     })
   )
 })
+
+it("hides itself under requireCompanion until a Host is actually paired", () => {
+  // Every web account owns a standalone target, so without this the runtime
+  // connection popover would show a one-row list of the target the user is
+  // already on, next to a "Connect Host" button.
+  const { container, rerender } = render(
+    <RuntimeTargetMenuSection
+      accountIdOverride="acct_web"
+      targetsOverride={[standalone]}
+      activeTargetIdOverride="web-standalone"
+      requireCompanion
+    />
+  )
+  expect(container).toBeEmptyDOMElement()
+
+  rerender(
+    <RuntimeTargetMenuSection
+      accountIdOverride="acct_web"
+      targetsOverride={[standalone, companion]}
+      activeTargetIdOverride="web-standalone"
+      requireCompanion
+    />
+  )
+  expect(screen.getByTestId("runtime-target-menu")).toBeInTheDocument()
+  expect(screen.getByText("Studio Mac")).toBeInTheDocument()
+})
+
+it("drops its own Add host row when the caller already offers one", () => {
+  render(
+    <RuntimeTargetMenuSection
+      accountIdOverride="acct_web"
+      targetsOverride={[standalone, companion]}
+      activeTargetIdOverride="web-standalone"
+      showAddHost={false}
+      className="border-t"
+    />
+  )
+  expect(screen.queryByText("Add host")).not.toBeInTheDocument()
+  // The divider rides on the root, so a self-hidden section leaves no rule
+  // hanging over nothing.
+  expect(screen.getByTestId("runtime-target-menu")).toHaveClass("border-t")
+})
