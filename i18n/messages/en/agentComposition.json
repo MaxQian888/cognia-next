@@ -16,8 +16,14 @@
       "options": {
         "direct": "Single agent",
         "subagent": "Delegate to subagents",
+        "team": "Agent team",
         "verified-fresh-agent": "Independent reviewer",
         "workflow": "Workflow"
+      },
+      "unavailable": {
+        "notImplemented": "Not built yet",
+        "viaMention": "Reach it with @mention",
+        "viaSlashCommand": "Reach it with /workflow"
       }
     },
     "toolPresentation": {
@@ -36,6 +42,14 @@
   "chip": {
     "ariaLabel": "Mode: {preset}",
     "narrowed": "This mode was narrowed for this turn"
+  },
+  "executor": {
+    "label": "Executor",
+    "needsSession": "Choosable once this conversation has started.",
+    "noSquads": "No Squads yet — create one in Settings.",
+    "runsOnSquad": "Model and thinking level come from the Squad's members.",
+    "singleAgent": "Single agent",
+    "squadMissing": "Squad unavailable"
   },
   "inherit": "Preset default · {preset}",
   "inheritGeneric": "Preset default",

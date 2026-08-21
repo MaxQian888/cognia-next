@@ -43,6 +43,7 @@ import type {
 } from "@cognia/agent-config-types/agent-composition"
 import { visiblePresets } from "@/lib/agent/composition/preset-catalog"
 import { resolveComposition } from "@/lib/agent/composition/resolve-composition"
+import { chatOrchestrationUnavailableReason } from "@/lib/agent/composition/chat-orchestrations"
 import { presetDisplayName, type PresetNameTranslator } from "@/lib/agent/composition/preset-label"
 
 export interface CompositionPickerProps {
@@ -283,10 +284,16 @@ export function CompositionPicker({
               onValueChange={axisChange("orchestration")}
               disabled={disabled}
               inheritLabel={inheritLabel}
-              options={AGENT_ORCHESTRATION_POLICIES.map((value) => ({
-                value,
-                label: t(`axis.orchestration.options.${value}`),
-              }))}
+              options={AGENT_ORCHESTRATION_POLICIES.map((value) => {
+                const reason = chatOrchestrationUnavailableReason(value)
+                return {
+                  value,
+                  label: t(`axis.orchestration.options.${value}`),
+                  ...(reason
+                    ? { unavailableHint: t(`axis.orchestration.unavailable.${reason}`) }
+                    : {}),
+                }
+              })}
             />
           </div>
         ) : null}
@@ -341,7 +348,7 @@ interface AxisSelectProps {
   label: string
   value: string
   onValueChange: (value: string) => void
-  options: Array<{ value: string; label: string }>
+  options: Array<{ value: string; label: string; unavailableHint?: string }>
   inheritLabel: string
   disabled?: boolean
 }
@@ -373,8 +380,22 @@ function AxisSelect({
         <SelectContent position="popper" align="end" className="max-h-72">
           <SelectItem value={INHERIT}>{inheritLabel}</SelectItem>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              disabled={option.unavailableHint !== undefined}
+            >
+              <span className="flex flex-col items-start gap-0.5">
+                <span>{option.label}</span>
+                {/* Named rather than hidden: two of these are real features
+                    reachable another way, and one is genuinely unbuilt. A
+                    silently-missing entry teaches neither. */}
+                {option.unavailableHint ? (
+                  <span className="text-[0.6875rem] text-muted-foreground">
+                    {option.unavailableHint}
+                  </span>
+                ) : null}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>

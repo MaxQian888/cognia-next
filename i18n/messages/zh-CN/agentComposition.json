@@ -16,8 +16,14 @@
       "options": {
         "direct": "单个 Agent",
         "subagent": "委派子 Agent",
+        "team": "Agent 团队",
         "verified-fresh-agent": "独立 Reviewer",
         "workflow": "工作流"
+      },
+      "unavailable": {
+        "notImplemented": "尚未实现",
+        "viaMention": "用 @ 提及子代理",
+        "viaSlashCommand": "用 /workflow 命令"
       }
     },
     "toolPresentation": {
@@ -36,6 +42,14 @@
   "chip": {
     "ariaLabel": "模式：{preset}",
     "narrowed": "该模式在本轮被收窄"
+  },
+  "executor": {
+    "label": "执行体",
+    "needsSession": "会话开始后可选。",
+    "noSquads": "还没有小队——去设置里新建一个。",
+    "runsOnSquad": "模型与思考深度由小队成员各自的配置决定。",
+    "singleAgent": "单个 Agent",
+    "squadMissing": "小队已不存在"
   },
   "inherit": "跟随预置 · {preset}",
   "inheritGeneric": "跟随预置",

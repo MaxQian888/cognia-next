@@ -15,6 +15,19 @@ jest.mock("@/hooks/agent/use-code-sandbox-presentations", () => ({
   useCodeSandboxPresentations: () => ["native"],
 }))
 
+// The executor reads Dexie; the chip only needs its answer. Mutable so a test
+// can put the conversation on a Squad without a database.
+const executorState = {
+  squadId: null as string | null,
+  squadName: null as string | null,
+  squads: [] as Array<{ id: string; name: string }>,
+  select: jest.fn(async () => undefined),
+  bindable: true,
+}
+jest.mock("./use-chat-executor", () => ({
+  useChatExecutor: () => executorState,
+}))
+
 const messages = {
   agentComposition: compositionMessages,
   agentMode: agentModeMessages,
@@ -246,5 +259,37 @@ describe("CompositionChip", () => {
       expect(screen.getByTestId("composition-chip")).toBeDisabled()
       expect(screen.getByTestId("composition-advanced-trigger")).toBeDisabled()
     })
+  })
+})
+
+describe("CompositionChip — executor", () => {
+  beforeEach(() => {
+    executorState.squadId = null
+    executorState.squadName = null
+    executorState.squads = []
+    executorState.select.mockClear()
+  })
+
+  it("shows the preset while the conversation runs on a single agent", () => {
+    renderChip({ sessionId: "s1" })
+    expect(screen.getByTestId("composition-chip")).toHaveTextContent("Standard")
+  })
+
+  it("names the Squad instead of the preset once one is bound", () => {
+    // Which Squad is running this conversation outranks which preset shapes
+    // one agent's prompt — the chip has room for one of them.
+    executorState.squadId = "sq-1"
+    executorState.squadName = "Research Squad"
+    renderChip({ sessionId: "s1" })
+    expect(screen.getByTestId("composition-chip")).toHaveTextContent("Research Squad")
+  })
+
+  it("flags a binding whose Squad is gone rather than falling back silently", () => {
+    executorState.squadId = "deleted"
+    executorState.squadName = null
+    renderChip({ sessionId: "s1" })
+    const chip = screen.getByTestId("composition-chip")
+    expect(chip).toHaveTextContent("Squad unavailable")
+    expect(chip).toHaveAttribute("data-narrowed", "true")
   })
 })

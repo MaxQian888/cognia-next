@@ -41,7 +41,7 @@
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useRef, type ReactNode } from "react"
 import { useTranslations } from "next-intl"
-import { MoreHorizontalIcon } from "lucide-react"
+import { MoreHorizontalIcon, UsersIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useElementWidth } from "@/hooks/use-element-width"
@@ -58,6 +58,7 @@ import { EffortChip } from "./effort-chip"
 import { SandboxShield } from "./sandbox-shield"
 import { AgentRuntimeSelector } from "@/components/agent/mode/runtime-selector"
 import { CompositionChip } from "@/components/agent/composition/composition-chip"
+import { useChatExecutor } from "@/components/agent/composition/use-chat-executor"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
@@ -126,6 +127,11 @@ function GenericBottomToolbar({
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const runtime = useAgentRuntimeStore((s) => s.runtime)
+  // Live, not derived from the `session` prop: binding a Squad has to change
+  // this row in the same tick the chip changes, and the prop's freshness is
+  // the caller's business.
+  const executor = useChatExecutor(session?.id)
+  const tComposition = useTranslations("agentComposition.executor")
 
   // Disable toolbar controls while a turn is in flight so mid-stream
   // configuration changes (model, runtime, mode, etc.) can't race the send.
@@ -222,24 +228,42 @@ function GenericBottomToolbar({
       className="flex min-w-0 flex-nowrap items-center gap-0.5"
       data-testid="composer-execution-controls"
     >
-      <ModelPicker
-        session={session}
-        disabled={isStreaming}
-        className={cn(TOOLBAR_CHIP, "max-w-[11rem]")}
-      />
-      {/* Thinking level sits immediately after the model because it qualifies
+      {/* A Squad answers "which model, how deeply" per teammate, from each
+          member's own configuration. Leaving the two pickers on the row would
+          offer a choice this turn does not take — the shape of the old team
+          chat tab, where the model picker was a dead chip and the effort
+          selector silently rendered nothing. Say so instead. */}
+      {executor.squadId ? (
+        <span
+          className={cn(TOOLBAR_CHIP, "max-w-[11rem] cursor-default")}
+          title={tComposition("runsOnSquad")}
+          data-testid="composer-executor-summary"
+        >
+          <UsersIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
+          <span className="truncate">{executor.squadName ?? tComposition("squadMissing")}</span>
+        </span>
+      ) : (
+        <>
+          <ModelPicker
+            session={session}
+            disabled={isStreaming}
+            className={cn(TOOLBAR_CHIP, "max-w-[11rem]")}
+          />
+          {/* Thinking level sits immediately after the model because it qualifies
           it — the pair reads as one answer to "how deeply will this run". It
           self-hides on a surface with no depth control, which is why it can
           live on the permanent row rather than behind the overflow. */}
-      {/* The two short labels hold their ground: "Auto" abbreviated to "A…"
+          {/* The two short labels hold their ground: "Auto" abbreviated to "A…"
           teaches nothing, and the model id beside them is the only string on
           this side long enough to be worth ellipsizing. Below the compact
           threshold the whole row re-packs instead of shaving letters. */}
-      <EffortChip
-        session={session}
-        disabled={isStreaming}
-        className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
-      />
+          <EffortChip
+            session={session}
+            disabled={isStreaming}
+            className={cn(TOOLBAR_CHIP, "max-w-[7.5rem] shrink-0")}
+          />
+        </>
+      )}
       <PermissionModeIndicator
         onCycle={(next) => setPermissionMode(next)}
         disabled={isStreaming}

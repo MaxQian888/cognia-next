@@ -61,6 +61,9 @@ import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import { resolveComposition } from "@/lib/agent/composition/resolve-composition"
 import { presetDisplayName } from "@/lib/agent/composition/preset-label"
 import { STANDARD_PRESET, visiblePresets } from "@/lib/agent/composition/preset-catalog"
+import { CHAT_SUPPORTED_ORCHESTRATIONS } from "@/lib/agent/composition/chat-orchestrations"
+import { useChatExecutor } from "./use-chat-executor"
+import { ExecutorChoiceList, ExecutorMenuSection } from "./executor-choice"
 
 const PLACEHOLDER_DIGEST = `sha256:${"0".repeat(64)}`
 
@@ -103,12 +106,18 @@ export function CompositionChip({
   const setSessionComposition = useAgentRuntimeStore((s) => s.setSessionComposition)
   const setDefaultComposition = useAgentRuntimeStore((s) => s.setDefaultComposition)
 
+  const executor = useChatExecutor(sessionId)
+
   const resolved = useMemo(
     () =>
       resolveComposition({
         selection,
         presets,
         supportedToolPresentations,
+        // Told, at last. Without this the resolver assumed every orchestration
+        // was runnable here, so picking one that is not did nothing and said
+        // nothing.
+        supportedOrchestrations: CHAT_SUPPORTED_ORCHESTRATIONS,
         promptDigest: PLACEHOLDER_DIGEST,
         toolDigest: PLACEHOLDER_DIGEST,
       }),
@@ -125,9 +134,13 @@ export function CompositionChip({
   // so the lookup cannot miss, and a "not found" branch here would be dead code
   // claiming otherwise.
   const activePreset = presets.find((preset) => preset.id === resolved.presetId) ?? STANDARD_PRESET
-  const label = presetDisplayName(activePreset, tModes)
+  const presetLabel = presetDisplayName(activePreset, tModes)
+  // A dangling binding gets its own label rather than the preset's: falling
+  // back silently would read as "running normally".
+  const squadGone = executor.squadId !== null && executor.squadName === null
+  const label = executor.squadName ?? (squadGone ? t("executor.squadMissing") : presetLabel)
 
-  const narrowed = resolved.warnings.length > 0
+  const narrowed = resolved.warnings.length > 0 || squadGone
   const overrideCount = AXES.filter((axis) => selection[axis] !== undefined).length
 
   function commit(next: typeof selection): void {
@@ -170,6 +183,7 @@ export function CompositionChip({
             className="w-56"
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
+            <ExecutorMenuSection executor={executor} disabled={disabled} />
             <DropdownMenuLabel className="text-xs text-muted-foreground">
               {t("presetLabel")}
             </DropdownMenuLabel>
@@ -244,6 +258,7 @@ export function CompositionChip({
               developerMode={developerMode}
               presetControl={false}
               supportedToolPresentations={supportedToolPresentations}
+              supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
             />
           </PopoverContent>
         </Popover>
@@ -270,6 +285,7 @@ export function CompositionChip({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-3">
+        <ExecutorChoiceList executor={executor} disabled={disabled} />
         <CompositionPicker
           presets={presets}
           selection={selection}
@@ -278,6 +294,7 @@ export function CompositionChip({
           advancedOpen={advancedOpen}
           onAdvancedOpenChange={setAdvancedOpen}
           supportedToolPresentations={supportedToolPresentations}
+          supportedOrchestrations={CHAT_SUPPORTED_ORCHESTRATIONS}
         />
       </PopoverContent>
     </Popover>
