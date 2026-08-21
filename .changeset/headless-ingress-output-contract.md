@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Fix Marketplace Integration ingress dying on every headless (`cognia-agent serve`) boot. `integration_ingress_poll` returns a list of spooled deliveries, but its hand-written Headless output contract declared an object, so even an empty spool's `[]` came back as a 500 `contract_output_violation` — the brain logged `the command result violates the Headless command contract` at stage `ingress-install`, and because the spool has no polling timer, the delivery wake subscription was never installed and inbound webhook deliveries were never consumed. The same root-type mismatch is fixed for `plugin_get_capabilities`, `plugin_runtime_snapshot`, and `task_workspace_settle`; all four now carry contracts typed from the shape their dispatch arm actually serializes. The ingress runtime also subscribes to the wake signal before its catch-up drain and keeps that subscription alive if the catch-up pass fails, so a delivery arriving mid-startup — or one bad startup call — no longer takes ingress down for the life of the process.

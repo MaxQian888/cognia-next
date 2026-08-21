@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+LAN auto-discovery now survives a restart, works in both directions, and reaches the browser client. The companion listener and the mDNS broadcast are remembered and re-established at boot, so a paired phone no longer silently loses the desktop every time it quits (previously both switches were per-session UI state, and the only automatic start bound loopback-only, which no phone can reach). The desktop can now browse `_cognia._tcp` as well as advertise it: Settings → Remote hosts → Add host lists the Cognia hosts on the network, and cross-checks a pasted invitation against them by TLS fingerprint — offering the live address when the invitation carries a stale one after a DHCP move. And a browser tab, which can do neither mDNS nor the ICE-seeded subnet sweep, now finds a Host through the loopback browser-access listener; when one is running but has not allowlisted the tab's origin, the pair screen says so and names the exact origin to add instead of reporting that no hosts exist.
