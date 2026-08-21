@@ -14,7 +14,7 @@
  * ai-run reply.
  */
 
-import Dexie, { liveQuery, type Table } from "dexie"
+import Dexie, { type Table } from "dexie"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -324,7 +324,18 @@ async function waitForTerminalRaw(
   if (isOutboundTerminal(initial.status)) return initial
   return new Promise<OutboundJobRow>((resolve) => {
     let latest = initial
-    const subscription = liveQuery(() => getDb().outboundQueue.get(jobId)).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import. Dexie's CJS build (what
+    // Jest resolves) defines `liveQuery` as a NON-ENUMERABLE property of
+    // `module.exports` and sets no `__esModule` marker. A named import on its
+    // own is fine — SWC reads it straight off the `require()` result. The trap
+    // is that importing the `Dexie` default (or a namespace) ANYWHERE in the
+    // module switches the whole import to `_interop_require_wildcard`, which
+    // copies enumerable keys only, so the named `liveQuery` binding silently
+    // becomes `undefined`. That is exactly how this file broke: it read
+    // `import Dexie, { liveQuery, type Table } from "dexie"`. The static is the
+    // same function (`Dexie.liveQuery === liveQuery` under real ESM) and is
+    // correct through either path.
+    const subscription = Dexie.liveQuery(() => getDb().outboundQueue.get(jobId)).subscribe({
       next: (row) => {
         if (!row) return
         latest = row
@@ -709,26 +720,28 @@ export async function listPendingForConversation(
 export async function markSending(jobId: string, now: number = Date.now()): Promise<boolean> {
   const db = getDb()
   const queue = db.outboundQueue as Table<OutboundJobRow, string>
-  return db.transaction("rw", db.outboundQueue, async () => {
-    const row = await queue.get(jobId)
-    if (!row || (row.status !== "pending" && row.status !== "failed")) {
-      return false
-    }
-    // A host-mirrored projection is never claimable by this runner.
-    if (!isLocallyDispatchable(row)) return false
-    await queue.update(jobId, {
-      status: "sending",
-      attempts: (row.attempts ?? 0) + 1,
-      // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
-      // legitimately in-flight send from a claim orphaned by a crash.
-      claimedAt: now,
-      updatedAt: now,
+  return db
+    .transaction("rw", db.outboundQueue, async () => {
+      const row = await queue.get(jobId)
+      if (!row || (row.status !== "pending" && row.status !== "failed")) {
+        return false
+      }
+      // A host-mirrored projection is never claimable by this runner.
+      if (!isLocallyDispatchable(row)) return false
+      await queue.update(jobId, {
+        status: "sending",
+        attempts: (row.attempts ?? 0) + 1,
+        // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
+        // legitimately in-flight send from a claim orphaned by a crash.
+        claimedAt: now,
+        updatedAt: now,
+      })
+      return true
     })
-    return true
-  }).then((claimed) => {
-    if (claimed) invalidate()
-    return claimed
-  })
+    .then((claimed) => {
+      if (claimed) invalidate()
+      return claimed
+    })
 }
 
 /**

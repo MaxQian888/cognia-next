@@ -12,7 +12,7 @@ import { encryptBackupPackage } from "@/lib/data/crypto"
 import { rotateBackupKey, getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
 
-const mockApplyBackupPackage = jest.fn(async () => ({
+const mockApplyBackupPackage = jest.fn(async (_pkg?: unknown, _options?: unknown) => ({
   added: {},
   overwritten: {},
   skipped: {},

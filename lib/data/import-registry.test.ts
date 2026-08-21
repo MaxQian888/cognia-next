@@ -3,9 +3,12 @@
 
 import "fake-indexeddb/auto"
 import {
+  ChatImportUnsupportedError,
   detectFormat,
+  getAcceptedChatImportExtensions,
   importChatExport,
   applyImported,
+  parseChatImportPayload,
   registerChatImporter,
   unregisterChatImporter,
   unregisterImportersByPlugin,
@@ -175,5 +178,77 @@ describe("dynamic importer overlay", () => {
     expect(removed).toBe(2)
     // p2's importer survives.
     expect(detectFormat({ __fake: true })).toBe("fake-plugin-format")
+  })
+})
+
+describe("import-registry gaps closed", () => {
+  afterEach(() => __resetDynamicImportersForTesting())
+
+  it("routes importChatExport through detectFormat's backup classification", async () => {
+    // These branches lived in `detectFormat` from the start but were dead:
+    // `importChatExport` ran its own detection loop and never consulted it, so
+    // a Cognia backup produced a generic "could not recognize" error.
+    const v3 = importChatExport({ version: "3.0" })
+    await expect(v3).rejects.toBeInstanceOf(ChatImportUnsupportedError)
+    await expect(v3).rejects.toMatchObject({ reason: "cognia-backup", format: "cognia-v3" })
+
+    await expect(importChatExport({ schemaVersion: 1 })).rejects.toMatchObject({
+      reason: "cognia-backup",
+      format: "cognia-v1",
+    })
+  })
+
+  it("classifies an encrypted backup envelope as encrypted, not unrecognized", async () => {
+    await expect(
+      importChatExport({
+        version: "enc-v1",
+        ciphertext: "…",
+        kdf: { name: "PBKDF2", salt: "s", iterations: 1 },
+      })
+    ).rejects.toMatchObject({ reason: "encrypted" })
+  })
+
+  it("still reports a genuinely unknown payload as unrecognized", async () => {
+    await expect(importChatExport({ random: 1 })).rejects.toMatchObject({
+      reason: "unrecognized",
+      format: "unknown",
+    })
+  })
+
+  it("derives picker extensions from the registry, defaulting built-ins to json", () => {
+    expect(getAcceptedChatImportExtensions()).toEqual(["json"])
+
+    const slack: ChatImporter<{ slack: true }> = {
+      format: "acme:slack",
+      label: "Slack export",
+      extensions: [".ZIP", "jsonl"],
+      detect: (d): d is { slack: true } => (d as { slack?: boolean })?.slack === true,
+      parse: async () => [],
+    }
+    registerChatImporter(slack, { pluginId: "acme" })
+    expect(getAcceptedChatImportExtensions().sort()).toEqual(["json", "jsonl", "zip"])
+  })
+
+  it("parseChatImportPayload falls back to raw text so non-JSON exports are reachable", async () => {
+    expect(parseChatImportPayload('{"a":1}')).toEqual({ a: 1 })
+    expect(parseChatImportPayload("# aider chat started at 2026")).toBe(
+      "# aider chat started at 2026"
+    )
+
+    const text: ChatImporter<string> = {
+      format: "acme:text",
+      label: "Text log",
+      extensions: ["txt"],
+      detect: (d): d is string => typeof d === "string" && d.startsWith("# aider"),
+      parse: async () => [],
+    }
+    registerChatImporter(text, { pluginId: "acme" })
+    const result = await importChatExport(parseChatImportPayload("# aider chat started at 2026"))
+    expect(result.format).toBe("acme:text")
+  })
+
+  it("a raw string never trips a built-in importer", () => {
+    expect(detectFormat("[]")).toBe("unknown")
+    expect(detectFormat("anything at all")).toBe("unknown")
   })
 })

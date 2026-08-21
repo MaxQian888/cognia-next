@@ -5,9 +5,14 @@
 // folder, manual order, rename, archive). Live fs-watch re-imports make that
 // re-import path routine, so the write must merge instead of clobber:
 //
-//   • `importFrozen` session  → SKIP entirely. The user continued it, so Cognia
-//     owns the thread; source-side edits must never touch it (they surface as a
-//     "diverged" badge instead — freeze is set in `use-claude-chat.ts`).
+//   • `importFrozen` session  → SKIP the content entirely. The user continued
+//     it, so Cognia owns the thread; source-side edits must never touch it.
+//     They are not silently dropped either: when the source has actually MOVED
+//     since the last mirrored import, the row is flagged `importDiverged` and
+//     the chat header says so (`components/chat/imported-origin-chip.tsx`).
+//     That badge is what this comment promised for a long time while nothing
+//     in the app read `importFrozen` at all. Freeze is set in
+//     `use-claude-chat-controller.ts` on the first continuation.
 //   • otherwise                → refresh CONTENT (messages, auto-title, detected
 //     model, workingDir, updatedAt, branchSeed) from the freshly-parsed
 //     conversation, but PRESERVE the user's local decorations from the existing
@@ -49,6 +54,10 @@ const PRESERVED_DECORATIONS = [
   "branchedFromMessageId",
   "branchKind",
   "projectId",
+  // Divergence bookkeeping is Cognia's, not the source's: a re-parse must not
+  // clear a flag the user has not acknowledged yet.
+  "importDiverged",
+  "importDivergedAt",
 ] as const
 
 /** Overlay the existing row's user-owned decorations onto a re-parsed session. */
@@ -73,10 +82,25 @@ export function mergeImportedSession(
 }
 
 /**
+ * Cheap identity of a source transcript: how many messages it has plus the
+ * identity of its last one.
+ *
+ * Deliberately not a content hash — the point is only to answer "has the source
+ * moved since we last mirrored it?", and an agent that is still running appends
+ * turns rather than rewriting them. Hashing every message body on every watch
+ * event would cost far more than the question is worth.
+ */
+export function importSourceDigest(messages: readonly StoredMessage[]): string {
+  const last = messages[messages.length - 1]
+  return `${messages.length}:${last?.id ?? ""}:${last?.createdAt ?? 0}`
+}
+
+/**
  * Persist parsed conversations to Dexie with the clobber-guard applied. One
  * `rw` transaction over `sessions` + `messages`; reads the existing row per
  * conversation to decide skip-vs-merge. Returns counts actually written
- * (frozen sessions are excluded).
+ * (frozen sessions are excluded — but a frozen row whose source has moved is
+ * flagged `importDiverged`, which is a metadata-only write).
  */
 export async function applyImportedMerged(
   conversations: ImportedConversation[],
@@ -92,10 +116,24 @@ export async function applyImportedMerged(
   // happen before the atomic sessions/messages/ref write below. Skip rows that
   // are already frozen to avoid ingesting media for a conversation Cognia no
   // longer mirrors. The transaction re-checks the guard before committing.
+  /** Frozen rows needing a source baseline or divergence update. */
+  const frozenSourceUpdates: Array<{ id: string; digest: string; diverged: boolean }> = []
+
   const prepared = await Promise.all(
     conversations.map(async (conversation) => {
       const existing = await db.sessions.get(conversation.session.id)
-      if (existing?.importFrozen) return null
+      if (existing?.importFrozen) {
+        // Frozen means "do not mirror", not "do not look". Comparing the cheap
+        // digest is what turns a silently-ignored source edit into something the
+        // user can see.
+        const digest = importSourceDigest(conversation.messages)
+        if (!existing.importSourceDigest) {
+          frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: false })
+        } else if (existing.importSourceDigest !== digest) {
+          frozenSourceUpdates.push({ id: conversation.session.id, digest, diverged: true })
+        }
+        return null
+      }
       return {
         conversation,
         messages: await Promise.all(conversation.messages.map(normalizeStoredMessageMedia)),
@@ -118,6 +156,7 @@ export async function applyImportedMerged(
         const merged = mergeImportedSession(conv.session, existing)
         sessionRows.push({
           ...merged,
+          importSourceDigest: importSourceDigest(entry.messages),
           transcriptRevision: (existing?.transcriptRevision ?? merged.transcriptRevision ?? 0) + 1,
         })
         for (const message of entry.messages) messageRows.push(message)
@@ -160,6 +199,25 @@ export async function applyImportedMerged(
 
   if (orphanCandidates.size > 0) {
     await collectUnreferencedMessageMedia(orphanCandidates)
+  }
+
+  // Metadata-only, and outside the content transaction: flagging divergence must
+  // never be able to fail the import it observed. `modify` leaves every other
+  // field — including the frozen transcript — untouched.
+  for (const { id, digest, diverged } of frozenSourceUpdates) {
+    await db.sessions
+      .where("id")
+      .equals(id)
+      .modify((row) => {
+        if (diverged) {
+          row.importDiverged = true
+          row.importDivergedAt = Date.now()
+        }
+        // Record what we saw, so the same unchanged-since divergence does not
+        // re-stamp a new timestamp on every subsequent watch event. For a
+        // legacy frozen row this first observation establishes the baseline.
+        row.importSourceDigest = digest
+      })
   }
 
   return { sessions: sessionsWritten, messages: messagesWritten }

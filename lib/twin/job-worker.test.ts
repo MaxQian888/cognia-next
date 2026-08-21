@@ -36,6 +36,7 @@ const baseConfig: JobWorkerConfig = {
 
 const distillResult = (partialFailures: Record<string, string>): RunDistillResult => ({
   draftIds: ["twd_1"],
+  llmUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
   styleSampleCount: 0,
   playbookCount: 0,
   entityCount: 0,

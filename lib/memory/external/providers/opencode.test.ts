@@ -39,6 +39,8 @@ describe("discoverOpencode", () => {
             opencodeDataDir: "/data/opencode",
             piAgentDir: "",
             piSessionDir: "",
+            geminiDir: "",
+            continueDir: "",
           },
         })
       )

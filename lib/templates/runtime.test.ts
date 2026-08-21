@@ -1,4 +1,6 @@
 import { TemplateCatalog } from "./catalog"
+import { TEMPLATE_PACKAGE_SCHEMA_VERSION } from "./package"
+import { TEMPLATE_API_VERSION } from "./contracts"
 import { InMemoryTemplateRepository, type StoredTemplatePackage } from "./repository"
 import { createTemplateRuntime } from "./runtime"
 import type { FullDomainTemplatePorts } from "./adapters"
@@ -52,16 +54,25 @@ describe("template runtime", () => {
     const isPublisherTrusted = jest.fn(async () => true)
     await repository.putPackage({
       key: "pack.runtime@1.0.0",
+      // A complete manifest, not a four-field stand-in: `schemaVersion`,
+      // `apiVersion`, `name`, `entrypoints` and `assets` are all required, and
+      // the direct assertion had no overlap to lean on without them.
       manifest: {
+        schemaVersion: TEMPLATE_PACKAGE_SCHEMA_VERSION,
+        apiVersion: TEMPLATE_API_VERSION,
         id: "pack.runtime",
         version: "1.0.0",
+        name: "Runtime pack",
+        entrypoints: [],
         definitions: [],
+        assets: [],
         signature: {
           algorithm: "ed25519",
+          publisher: "publisher",
           publicKey: "publisher-public-key",
           signature: "signature",
         },
-      } as StoredTemplatePackage["manifest"],
+      } satisfies StoredTemplatePackage["manifest"],
       fingerprint: "fingerprint",
       trust: "signed-unknown",
       importedAt: 1,

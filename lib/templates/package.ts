@@ -1,4 +1,21 @@
-import JSZip from "jszip"
+import type JSZip from "jszip"
+
+/**
+ * JSZip is loaded lazily, and must stay that way.
+ *
+ * `validateTemplatePackageManifest` (below) is imported by
+ * `lib/plugin/core/validation.ts`, which the plugin store — and through it
+ * project-store, artifact-store and account-store — pulls in at import time.
+ * A static `import JSZip from "jszip"` therefore dragged the whole zip library
+ * into that graph just to validate a manifest, and jszip bundles the
+ * `setimmediate` polyfill, whose ON-IMPORT global patching drove Jest's
+ * `fake-indexeddb` off `process.nextTick` and killed every Dexie transaction in
+ * the suites that reached it. Only the two archive functions need it, and both
+ * are already async.
+ */
+async function loadJSZip(): Promise<typeof JSZip> {
+  return (await import("jszip")).default
+}
 
 import { sha256Bytes } from "@/lib/ocr/hash"
 import { sha256Hex } from "@/lib/share/hash"
@@ -227,9 +244,10 @@ export async function exportTemplatePackage(
   input: ExportTemplatePackageInput
 ): Promise<ExportedTemplatePackage> {
   await validateExportInput(input)
+  const JSZipCtor = await loadJSZip()
   const definitions: TemplatePackageDefinitionRecord[] = []
   const assets: TemplatePackageFileRecord[] = []
-  const zip = new JSZip()
+  const zip = new JSZipCtor()
 
   for (const definition of [...input.definitions].sort((a, b) =>
     definitionKey(a).localeCompare(definitionKey(b))
@@ -400,9 +418,10 @@ export async function inspectTemplatePackage(bytes: Uint8Array): Promise<Inspect
       `Template package exceeds ${TEMPLATE_PACKAGE_MAX_COMPRESSED_BYTES} compressed bytes`
     )
   }
+  const JSZipCtor = await loadJSZip()
   let zip: JSZip
   try {
-    zip = await JSZip.loadAsync(bytes)
+    zip = await JSZipCtor.loadAsync(bytes)
   } catch (error) {
     throw new Error(
       `Failed to read template package: ${error instanceof Error ? error.message : String(error)}`

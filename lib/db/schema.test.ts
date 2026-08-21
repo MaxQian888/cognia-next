@@ -659,6 +659,80 @@ describe("getDb", () => {
     expect(db.sessionUsage.schema.primKey.name).toBe("messageId")
   })
 
+  it("v175 makes host dispatch enqueue-once atomic rather than merely likely", async () => {
+    // A read-then-write idempotency check is not atomic: two concurrent
+    // enqueues of the same work both saw "no existing row" and both inserted.
+    // The unique index is what makes the invariant true.
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(175)
+    const index = db.hostDispatchQueue.schema.indexes.find(
+      (candidate) => candidate.name === "idempotencyKey"
+    )
+    expect(index?.unique).toBe(true)
+    expect(db.hostDispatchQueue.schema.indexes.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "domain",
+        "targetRef",
+        "status",
+        "[status+nextAttemptAt]",
+        "[accountId+status]",
+        "runId",
+      ])
+    )
+    expect(db.hostDispatchQueue.schema.primKey.name).toBe("id")
+  })
+
+  it("v176 makes a run's children queryable instead of a full-table scan", async () => {
+    // `parentRunId` existed from v114 but was unindexed, so nothing ever asked
+    // "which runs belong to this one?" — the answer cost a scan. Delegation
+    // projects children onto ONE card and `retry` links a new run to the run
+    // it replaces; both are that question.
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(176)
+    expect(db.executionRuns.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["parentRunId", "[parentRunId+status]"])
+    )
+
+    const now = Date.now()
+    await db.executionRuns.bulkAdd([
+      {
+        id: "execution:delegation:parent",
+        kind: "delegation",
+        sourceId: "parent",
+        title: "Parent",
+        status: "running",
+        currentRevision: 0,
+        startedAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "execution:agent-turn:child",
+        parentRunId: "execution:delegation:parent",
+        kind: "agent-turn",
+        sourceId: "child",
+        title: "Child",
+        status: "running",
+        currentRevision: 0,
+        startedAt: now,
+        updatedAt: now,
+      },
+    ])
+    const children = await db.executionRuns
+      .where("parentRunId")
+      .equals("execution:delegation:parent")
+      .toArray()
+    expect(children.map((run) => run.id)).toEqual(["execution:agent-turn:child"])
+
+    // A root row has no `parentRunId`, so it is absent from the index rather
+    // than indexed under a sentinel — which is what makes "no backfill" right.
+    expect(children.every((run) => run.parentRunId !== undefined)).toBe(true)
+  })
+
   it("v172 indexes agentTraces by run identity and lifecycle status", async () => {
     const db = getDb()
     await db.open()

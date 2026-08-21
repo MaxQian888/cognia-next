@@ -44,6 +44,7 @@ import type {
   KnowledgeBaseIngestJob,
   KnowledgeBaseSource,
 } from "@/types/knowledge-base"
+import type { HostDispatchJobRow } from "@/types/placement/host-dispatch"
 import type { TrustedWorkspace } from "./trusted-workspaces"
 import type {
   DeploymentProfile,
@@ -4233,6 +4234,41 @@ export class CogniaDB extends Dexie {
         "&id, issueId, [issueId+status], projectId, [projectId+status], adapterId, kind, targetId, status, startedAt, updatedAt",
     })
 
+    // v175 — durable host -> target outbound dispatch. The mirror of
+    // `mobileOutboundQueue`, which only ever ran client -> host; every
+    // host-initiated cross-device dispatch (remote workflow steps,
+    // `action.mobile.*` proxy calls, scheduler handoffs) previously lived in
+    // memory for the lifetime of one promise and was lost outright if the host
+    // quit mid-flight. `[status+nextAttemptAt]` is the drain index; `runId` is
+    // how a resumed run reclaims what it had already sent. `idempotencyKey` is
+    // UNIQUE on purpose: a read-then-write check is not atomic, so two
+    // concurrent enqueues of the same work both passed it and both inserted.
+    // The constraint is what makes "enqueue once" true rather than likely.
+    this.version(175).stores({
+      hostDispatchQueue:
+        "&id, accountId, domain, targetRef, status, [status+nextAttemptAt], [accountId+status], runId, &idempotencyKey, createdAt",
+    })
+
+    // v176 — index `executionRuns.parentRunId`.
+    //
+    // The column has existed since v114 ("previous immutable journal run when
+    // this run continues a recovered attempt") but was never indexed, so
+    // "which runs belong to this one?" was a full table scan — which is why
+    // nothing asked it. Two features need that question answered cheaply:
+    //
+    //  - a `delegation` run, which owns the engine runs that carry it out and
+    //    projects their progress onto ONE card instead of one card per child;
+    //  - `retry`, which must mint a NEW run pointing at the failed one rather
+    //    than append to a settled journal (see `run-control.ts`).
+    //
+    // Index-only change: no upgrade callback, no backfill. Existing rows keep
+    // an absent `parentRunId` and are simply absent from the index, which is
+    // exactly right — they are roots.
+    this.version(176).stores({
+      executionRuns:
+        "&id, kind, sourceId, status, sessionId, projectId, updatedAt, [kind+sourceId], parentRunId, [parentRunId+status]",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4243,6 +4279,9 @@ export class CogniaDB extends Dexie {
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.
+  // v175 — durable host -> target outbound dispatch queue (the mirror of
+  // `mobileOutboundQueue`). See `lib/db/host-dispatch-queue.ts`.
+  hostDispatchQueue!: Table<HostDispatchJobRow, string>
   skillRecordings!: Table<SkillRecordingRow, string>
   sessionState!: Table<SessionStateRow, string>
   tts_provider_keys!: Table<TtsProviderKeyRow, string>

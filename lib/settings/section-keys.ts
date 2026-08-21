@@ -96,7 +96,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "turnServers",
     "turnProvider",
   ],
-  data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention"],
+  data: ["telemetryEnabled", "behaviorTelemetry", "storageRetention", "sessionImportWatch"],
   appearance: [
     "theme",
     "colorTheme",

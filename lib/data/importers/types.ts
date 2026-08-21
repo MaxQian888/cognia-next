@@ -51,7 +51,25 @@ export interface ChatImporter<TData = unknown> {
    * `${pluginId}:${format}` string.
    */
   label?: string
-  /** Cheap structural sniff. Run on every parsed JSON candidate. */
+  /**
+   * File extensions this importer accepts, for the picker's filter. Bare or
+   * dotted, case-insensitive. Defaults to `["json"]` when omitted — the three
+   * built-ins are all web-export JSON.
+   *
+   * The picker used to hard-code `["json"]`, which made the §A-4 plugin overlay
+   * half-dormant: a plugin could register a Slack/Discord/Poe importer whose
+   * export is a `.zip`, `.jsonl` or `.txt`, and the user could not even select
+   * the file. Deriving the filter from the registry means a format is pickable
+   * the moment it registers, exactly as `getAcceptedPickerExtensions()` does
+   * for session sources (ADR-0062).
+   */
+  extensions?: string[]
+  /**
+   * Cheap structural sniff. Run on every candidate payload: the parsed JSON
+   * when the file is JSON, else the raw file text as a string (so a
+   * non-JSON-shaped export is still reachable). Built-ins narrow on
+   * `typeof data === "object"` and therefore reject the string form.
+   */
   detect: (data: unknown) => data is TData
   /** Convert detected data into our internal conversation shape. */
   parse: (data: TData, opts: ChatImportOptions) => Promise<ImportedConversation[]>

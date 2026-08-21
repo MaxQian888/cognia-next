@@ -10,8 +10,12 @@ import { pickAndReadFiles } from "@/lib/files/file-bridge"
 import { createLogger } from "@cognia/logging"
 import {
   applyImported,
+  ChatImportUnsupportedError,
+  getAcceptedChatImportExtensions,
   importChatExport,
+  parseChatImportPayload,
   type ChatImportFormat,
+  type ChatImportRejection,
   type ImportedConversation,
 } from "@/lib/data/import-registry"
 
@@ -31,7 +35,16 @@ export type ChatImportFlowState =
       conversations: ImportedConversation[]
     }
   | { status: "done"; sessionsAdded: number; messagesAdded: number; format: ChatImportFormat }
-  | { status: "error"; message: string }
+  | {
+      status: "error"
+      message: string
+      /**
+       * Set when the file was recognized but belongs to another flow (an
+       * encrypted or plain Cognia backup) or matched nothing. Lets the dialog
+       * point at the restore flow instead of printing a generic parse error.
+       */
+      rejection?: ChatImportRejection
+    }
 
 export function useChatImport() {
   const [state, setState] = useState<ChatImportFlowState>({ status: "idle" })
@@ -45,16 +58,19 @@ export function useChatImport() {
   const pickFile = useCallback(async () => {
     setState({ status: "loading" })
     try {
+      // Derived from the registry, not hard-coded: a plugin importer for a
+      // `.zip` / `.jsonl` / `.txt` export was previously unselectable.
       const picked = await pickAndReadFiles({
-        filters: [{ name: "Chat export", extensions: ["json"] }],
+        filters: [{ name: "Chat export", extensions: getAcceptedChatImportExtensions() }],
       })
       const raw = picked[0]?.content ?? null
       if (raw === null) {
         setState({ status: "idle" })
         return
       }
-      const parsed = JSON.parse(raw)
-      const result = await importChatExport(parsed)
+      // JSON when it parses, raw text otherwise — a bare `JSON.parse` here used
+      // to reject every non-JSON export before any importer saw it.
+      const result = await importChatExport(parseChatImportPayload(raw))
       setState({
         status: "preview",
         format: result.format,
@@ -62,7 +78,11 @@ export function useChatImport() {
       })
     } catch (err) {
       log.error("chat-import-pick-failed", { error: err })
-      setState({ status: "error", message: err instanceof Error ? err.message : String(err) })
+      setState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+        ...(err instanceof ChatImportUnsupportedError ? { rejection: err.reason } : {}),
+      })
     }
   }, [])
 

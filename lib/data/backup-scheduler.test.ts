@@ -16,7 +16,9 @@ const mockHasSyncPassphrase = jest.fn(() => false)
 const mockGetSyncPassphrase = jest.fn((): string | null => null)
 const mockLoadPersistedSyncPassphrase = jest.fn(async () => false)
 const mockNotifyRemoteNewer = jest.fn(async (_input?: unknown) => false)
-const mockAttachPortableRetrievalKeys = jest.fn(async (value: unknown) => value)
+const mockAttachPortableRetrievalKeys = jest.fn(
+  async (value: unknown, _passphrase: string) => value
+)
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: () => mockGetSettings(),

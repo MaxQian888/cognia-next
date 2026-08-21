@@ -32,7 +32,7 @@ interface IngressRouteInput {
   enabled: boolean
 }
 
-type IngressDeliveryStage = "route" | "normalize" | "publish" | "acknowledge"
+type IngressDeliveryStage = "startup" | "route" | "normalize" | "publish" | "acknowledge"
 
 function reportIngressFailure(
   delivery: Pick<IntegrationVerifiedDelivery, "routeId" | "deliveryId">,
@@ -206,11 +206,33 @@ export async function getIntegrationIngressDeadletter(
   )
 }
 
+/**
+ * Install the ingress runtime: the wake subscription first, then the catch-up
+ * pass.
+ *
+ * Order and error handling are both load-bearing, because `integration:
+ * delivery-available` is the *only* thing that drains the spool — there is no
+ * polling timer to paper over a missed wake:
+ *
+ *  - Subscribing after the initial drain left a window where an accepted
+ *    delivery raised its wake signal into a subscription that did not exist
+ *    yet, so it sat in the spool until some later delivery happened to drain
+ *    it.
+ *  - Letting the catch-up pass throw took the subscription with it. A headless
+ *    brain rejected `integration_ingress_poll` on every boot (its output
+ *    contract declared an object where the arm returns a `Vec<SpoolDelivery>`,
+ *    so the empty spool's `[]` was a 500), this function rejected, and
+ *    `startIntegrationRuntime` caught it into a no-op dispose — leaving
+ *    Integration ingress dead for the life of the process on the one host that
+ *    has no UI to notice.
+ *
+ * The catch-up failure is still reported; it just no longer decides whether
+ * ingress runs at all. A live subscription drains the whole backlog on the
+ * next delivery.
+ */
 export async function installIntegrationIngressRuntime(): Promise<() => void> {
   if (!supportsIntegrationExecution()) return () => undefined
-  await syncIntegrationIngressRoutes()
-  await drainIntegrationIngress()
-  return transport.subscribe("integration:delivery-available", () => {
+  const unsubscribe = transport.subscribe("integration:delivery-available", () => {
     void drainIntegrationIngress().catch((error) =>
       reportIngressFailure(
         {
@@ -222,6 +244,13 @@ export async function installIntegrationIngressRuntime(): Promise<() => void> {
       )
     )
   })
+  try {
+    await syncIntegrationIngressRoutes()
+    await drainIntegrationIngress()
+  } catch (error) {
+    reportIngressFailure({ routeId: "runtime", deliveryId: "startup" }, "startup", error)
+  }
+  return unsubscribe
 }
 
 export async function deleteIntegrationSubscription(

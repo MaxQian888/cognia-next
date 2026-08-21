@@ -1,4 +1,4 @@
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 
 import {
   createFolder,
@@ -93,7 +93,10 @@ describe("session-folders CRUD", () => {
     const f = await createFolder("Old")
 
     const emissions: string[][] = []
-    const sub = liveQuery(() => listFolders("proj-A")).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const sub = Dexie.liveQuery(() => listFolders("proj-A")).subscribe({
       next: (rows) => emissions.push(rows.map((r) => r.name)),
     })
     const waitUntil = async (pred: () => boolean) => {

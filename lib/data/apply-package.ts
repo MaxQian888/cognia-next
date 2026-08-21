@@ -671,7 +671,10 @@ function validateRetrievalProfileRow(row: RetrievalProfileRow): RetrievalProfile
     row.schemaVersion !== 1 ||
     !row.id ||
     !row.fingerprint ||
-    row.profile?.version !== 1 ||
+    // `schemaVersion`, not `version`: the profile has never had a `version`
+    // field, so this read was always `undefined` and rejected every valid
+    // package that carried a retrieval profile.
+    row.profile?.schemaVersion !== 1 ||
     row.profile.id !== row.id ||
     !Number.isFinite(row.createdAt) ||
     !Number.isFinite(row.updatedAt)

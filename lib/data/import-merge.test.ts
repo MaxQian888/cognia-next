@@ -2,7 +2,7 @@
 // Clobber-guard tests for external-agent session re-import (ADR-0062).
 
 import "fake-indexeddb/auto"
-import { applyImportedMerged, mergeImportedSession } from "./import-merge"
+import { applyImportedMerged, importSourceDigest, mergeImportedSession } from "./import-merge"
 import type { ImportedConversation } from "./importers/types"
 import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { getDb, whenSeeded, __resetDbForTesting } from "@/lib/db/schema"
@@ -256,5 +256,73 @@ describe("applyImportedMerged", () => {
       await applyImportedMerged([makeConv("import:codex:s3", {}, ["source changed"])])
       expect(await db.chatSearchText.where("sessionId").equals("import:codex:s3").count()).toBe(0)
     })
+  })
+})
+
+describe("frozen-source divergence (ADR-0062)", () => {
+  it("records a digest of the source on every mirrored write", async () => {
+    const conv = makeConv("import:codex:d1")
+    await applyImportedMerged([conv])
+    const row = await getDb().sessions.get("import:codex:d1")
+    expect(row?.importSourceDigest).toBe(importSourceDigest(conv.messages))
+  })
+
+  it("flags a frozen row whose source moved, without touching its transcript", async () => {
+    await applyImportedMerged([makeConv("import:codex:d2", {}, ["hi", "yo"])])
+    await getDb().sessions.update("import:codex:d2", { importFrozen: true })
+    const before = await getDb().sessions.get("import:codex:d2")
+
+    // The agent kept running on disk: one more turn.
+    await applyImportedMerged([makeConv("import:codex:d2", {}, ["hi", "yo", "and more"])])
+
+    const after = await getDb().sessions.get("import:codex:d2")
+    expect(after?.importDiverged).toBe(true)
+    expect(after?.importDivergedAt).toEqual(expect.any(Number))
+    // Frozen still means frozen: the content the user owns is untouched.
+    expect(after?.title).toBe(before?.title)
+    expect(after?.transcriptRevision).toBe(before?.transcriptRevision)
+    expect(await getDb().messages.where("sessionId").equals("import:codex:d2").count()).toBe(2)
+  })
+
+  it("does not flag a frozen row when the source has not moved", async () => {
+    await applyImportedMerged([makeConv("import:codex:d3")])
+    await getDb().sessions.update("import:codex:d3", { importFrozen: true })
+    await applyImportedMerged([makeConv("import:codex:d3")])
+    expect((await getDb().sessions.get("import:codex:d3"))?.importDiverged).toBeUndefined()
+  })
+
+  it("does not re-stamp the timestamp for the same unchanged divergence", async () => {
+    await applyImportedMerged([makeConv("import:codex:d4", {}, ["a"])])
+    await getDb().sessions.update("import:codex:d4", { importFrozen: true })
+    await applyImportedMerged([makeConv("import:codex:d4", {}, ["a", "b"])])
+    const first = (await getDb().sessions.get("import:codex:d4"))?.importDivergedAt
+
+    await applyImportedMerged([makeConv("import:codex:d4", {}, ["a", "b"])])
+    expect((await getDb().sessions.get("import:codex:d4"))?.importDivergedAt).toBe(first)
+  })
+
+  it("keeps an unacknowledged divergence across a later mirrored write", async () => {
+    // A row can be un-frozen (a fresh import of a session the user abandoned);
+    // the flag is Cognia's bookkeeping, not the source's, so a re-parse must not
+    // silently clear a warning the user has not seen.
+    await applyImportedMerged([makeConv("import:codex:d5")])
+    await getDb().sessions.update("import:codex:d5", { importDiverged: true })
+    await applyImportedMerged([makeConv("import:codex:d5", {}, ["hi", "yo", "more"])])
+    expect((await getDb().sessions.get("import:codex:d5"))?.importDiverged).toBe(true)
+  })
+
+  it("establishes a baseline for a legacy frozen row before detecting later divergence", async () => {
+    // Pre-existing installs have `importFrozen` but no `importSourceDigest`.
+    // The first observation is a baseline, not evidence of divergence.
+    const conv = makeConv("import:codex:d6")
+    await getDb().sessions.put({ ...conv.session, importFrozen: true } as never)
+    const baseline = makeConv("import:codex:d6", {}, ["hi", "yo", "more"])
+    await applyImportedMerged([baseline])
+    const observed = await getDb().sessions.get("import:codex:d6")
+    expect(observed?.importSourceDigest).toBe(importSourceDigest(baseline.messages))
+    expect(observed?.importDiverged).toBeUndefined()
+
+    await applyImportedMerged([makeConv("import:codex:d6", {}, ["hi", "yo", "more", "later"])])
+    expect((await getDb().sessions.get("import:codex:d6"))?.importDiverged).toBe(true)
   })
 })

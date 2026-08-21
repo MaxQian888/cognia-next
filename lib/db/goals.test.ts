@@ -1,4 +1,4 @@
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import type { Goal, GoalConfig } from "@/types/goal"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
@@ -131,7 +131,10 @@ describe("chatGoals CRUD", () => {
   it("keeps default-scope resolution read-only inside a liveQuery", async () => {
     const emissions: Goal[][] = []
     const errors: unknown[] = []
-    const subscription = liveQuery(() => listAllGoals()).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const subscription = Dexie.liveQuery(() => listAllGoals()).subscribe({
       next: (rows) => emissions.push(rows),
       error: (error) => errors.push(error),
     })

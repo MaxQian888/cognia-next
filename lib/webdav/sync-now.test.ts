@@ -20,7 +20,7 @@ const saveSettingsMock = jest.fn(async (..._a: unknown[]) => {})
 const setSyncPassphraseMock = jest.fn()
 const encryptBodyMock = jest.fn(async (..._a: unknown[]) => "ENC")
 const getSyncPassphraseMock = jest.fn<string | null, []>(() => null)
-const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown) => pkg)
+const attachPortableRetrievalKeysMock = jest.fn(async (pkg: unknown, _passphrase?: string) => pkg)
 
 jest.mock("@/lib/data/build-package", () => ({
   buildBackupPackage: (...a: unknown[]) => buildMock(...a),

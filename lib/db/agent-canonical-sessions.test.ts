@@ -90,3 +90,35 @@ describe("agentCanonicalSessions projection", () => {
     expect(codexOnly.map((r) => r.canonicalSessionId)).toEqual(["cs-codex"])
   })
 })
+
+describe("write-only dormancy (Working Rule 7)", () => {
+  it("has exactly one production writer and no production reader", async () => {
+    // The module doc claims this projection is written on import and read by
+    // nothing yet, and is kept for ADR-0090 §8's recovery lookup. That claim is
+    // only worth writing down if it is checked: when a reader lands, this test
+    // fails and the "WRITE-ONLY TODAY" note must be revisited rather than
+    // quietly becoming false.
+    const { execFileSync } = await import("node:child_process")
+    const callers = (pattern: string): string[] =>
+      execFileSync(
+        "rg",
+        ["--no-heading", "-l", pattern, "-g", "*.ts", "-g", "*.tsx", "-g", "!node_modules", "."],
+        { cwd: process.cwd(), encoding: "utf8" }
+      )
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.replace(/^\.\//, ""))
+        .filter(
+          (file) =>
+            !file.endsWith(".test.ts") &&
+            !file.endsWith(".test.tsx") &&
+            file !== "lib/db/agent-canonical-sessions.ts"
+        )
+
+    expect(callers("putCanonicalSessionHeader")).toEqual(["lib/session-import/index.ts"])
+    expect(callers("listCanonicalSessionHeaders")).toEqual([])
+    expect(callers("getCanonicalSessionHeader")).toEqual([])
+    expect(callers("findByNativeSessionId")).toEqual([])
+    expect(callers("deleteCanonicalSessionHeader")).toEqual([])
+  })
+})

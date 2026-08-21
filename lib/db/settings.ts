@@ -71,6 +71,9 @@ export const DEFAULTS: AppSettings = {
   // Multi-provider live voice — off until the user configures a deployment.
   liveVoice: { ...DEFAULT_LIVE_VOICE_SETTINGS },
   browserCookieImportEnabled: false,
+  // ADR-0062 live sync is opt-in: the watcher walks the user's agent history
+  // trees, so it never starts without an explicit switch.
+  sessionImportWatch: { enabled: false },
   remoteBrowserEnabled: false,
   cliBridge: { autoSync: false },
   webTools: { enabled: true },
@@ -191,12 +194,11 @@ export const DEFAULTS: AppSettings = {
   customSearchSources: [],
   defaultSearchSources: [],
 
-  // Appearance defaults
-  background: { ...DEFAULT_BACKGROUND_SETTINGS },
-  wallpapers: [],
-  customCss: "",
-  customCssEnabled: false,
-  importedVscodeThemes: [],
+  // Appearance defaults come from `DEFAULT_APPEARANCE_SLICE`, spread below.
+  // `background` / `wallpapers` / `customCss` / `customCssEnabled` /
+  // `importedVscodeThemes` were also listed here, ahead of that spread, so the
+  // slice overwrote all five — identical values, but two places to keep in step
+  // and only one of them load-bearing.
 
   // Network proxy defaults — disabled until the user configures one.
   networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS },

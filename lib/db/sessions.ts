@@ -348,6 +348,24 @@ export async function freezeImportedSession(id: string): Promise<void> {
     })
 }
 
+/**
+ * Clear the "the source moved after we froze this" flag (ADR-0062), once the
+ * user has seen the badge in the chat header. Idempotent.
+ *
+ * `importSourceDigest` is deliberately NOT cleared: it records what the source
+ * looked like when we last observed it, so a LATER change re-raises the flag
+ * while this same, already-acknowledged one does not.
+ */
+export async function acknowledgeImportDivergence(id: string): Promise<void> {
+  await getDb()
+    .sessions.where("id")
+    .equals(id)
+    .modify((s) => {
+      delete s.importDiverged
+      delete s.importDivergedAt
+    })
+}
+
 async function listOwnedAttachedDescendantIds(
   db: ReturnType<typeof getDb>,
   rootIds: readonly string[]

@@ -71,7 +71,10 @@ export function useFullBackup() {
         body = plaintext
         historyEncryption = "none"
       } else {
-        const env = await encryptBackupPackage(plaintext, passphrase, {
+        // Non-null by the guard above: this branch is `encryption !== "plaintext"`,
+        // and that combination already threw. TS cannot correlate the two
+        // conditions across the intervening statements.
+        const env = await encryptBackupPackage(plaintext, passphrase!, {
           version: pkg.manifest.version,
           schemaVersion: pkg.manifest.schemaVersion,
           traceId: pkg.manifest.traceId,

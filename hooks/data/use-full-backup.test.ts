@@ -11,7 +11,7 @@ import { decryptBackupPackage } from "@/lib/data/crypto"
 import { isEncryptedEnvelope } from "@/lib/data/migrate"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 
-const mockAttachPortableRetrievalKeys = jest.fn(async <T>(pkg: T) => pkg)
+const mockAttachPortableRetrievalKeys = jest.fn(async <T>(pkg: T, _passphrase?: string) => pkg)
 
 jest.mock("@/lib/data/retrieval-key-backup", () => ({
   attachPortableRetrievalKeys: (pkg: unknown, passphrase: string) =>

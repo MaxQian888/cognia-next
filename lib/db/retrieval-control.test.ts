@@ -187,7 +187,7 @@ describe("retrieval control repository", () => {
       {
         id: "kb-generation",
         corpusId: "knowledge_base:1:source:a",
-        domain: "knowledge_base",
+        domain: "kb",
         profileFingerprint: "fp",
         status: "active",
         createdAt: 1,

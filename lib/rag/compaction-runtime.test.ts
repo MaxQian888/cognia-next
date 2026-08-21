@@ -37,7 +37,7 @@ describe("captureCompactionCheckpoint", () => {
           },
         ],
       },
-    } as ChatSession
+    } as unknown as ChatSession
     const result = await captureCompactionCheckpoint(
       {
         boundaryId: "compact-1",
@@ -62,7 +62,7 @@ describe("captureCompactionCheckpoint", () => {
             proceduralCount: 1,
             degraded: false,
           },
-        } as SendOptions,
+        } as unknown as SendOptions,
       },
       {
         getSession: async () => session,

@@ -3,7 +3,7 @@
 // of `createSession` was tested implicitly through the broader app; we
 // exercise it directly here so the auto-apply branch can't regress.
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import type { ChatSession } from "@cognia/agent-config-types"
 import {
   createSession,
@@ -18,6 +18,7 @@ import {
   countBranchesAtMessage,
   bulkDeleteSessions,
   clearBranchSeed,
+  acknowledgeImportDivergence,
   freezeImportedSession,
   archiveSession,
   unarchiveSession,
@@ -275,7 +276,10 @@ describe("setSessionOrder", () => {
     const pid = (await getSession(a.id))!.projectId!
 
     const emissions: Array<Map<string, number | undefined>> = []
-    const sub = liveQuery(() => listScopedSessions(pid)).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const sub = Dexie.liveQuery(() => listScopedSessions(pid)).subscribe({
       next: (rows) => emissions.push(new Map(rows.map((r) => [r.id, r.manualOrder]))),
     })
     await waitUntil(() => emissions.length >= 1)
@@ -339,6 +343,32 @@ describe("createSession — default preset auto-apply", () => {
     // Re-freezing stays true (no throw, no flip).
     await freezeImportedSession("import:codex:x1")
     expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
+  })
+
+  it("acknowledgeImportDivergence clears the flag but keeps the observed digest", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "import:codex:x2",
+      title: "Imported",
+      createdAt: now,
+      updatedAt: now,
+      importFrozen: true,
+      importDiverged: true,
+      importDivergedAt: now,
+      importSourceDigest: "3:m2:1002",
+    })
+    await acknowledgeImportDivergence("import:codex:x2")
+    const row = await getSession("import:codex:x2")
+    expect(row?.importDiverged).toBeUndefined()
+    expect(row?.importDivergedAt).toBeUndefined()
+    // Kept on purpose: it is what stops the SAME divergence re-raising the badge
+    // on the next watch event, while a LATER change still does.
+    expect(row?.importSourceDigest).toBe("3:m2:1002")
+    expect(row?.importFrozen).toBe(true)
+
+    // Idempotent.
+    await acknowledgeImportDivergence("import:codex:x2")
+    expect((await getSession("import:codex:x2"))?.importDiverged).toBeUndefined()
   })
 
   it("does NOT auto-apply when a character is supplied", async () => {

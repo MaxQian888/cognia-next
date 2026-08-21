@@ -3,6 +3,7 @@
 // patches, and the alwaysAllow tool list helpers.
 
 import "fake-indexeddb/auto"
+import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import { DEFAULTS, addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -77,14 +78,10 @@ describe("getSettings", () => {
 
   it("fills appearance defaults when missing", async () => {
     const s = await getSettings()
-    expect(s.background).toEqual({
-      enabled: false,
-      activeId: null,
-      scope: "all",
-      blurPx: 0,
-      opacity: 1,
-      position: "cover",
-    })
+    // Asserted against the shared constant rather than a hand-copied literal,
+    // which is how `focalX` / `focalY` could be added to the defaults and leave
+    // this expectation stale (and the suite red) without anyone noticing.
+    expect(s.background).toEqual(DEFAULT_BACKGROUND_SETTINGS)
     expect(s.wallpapers).toEqual([])
     expect(s.customCss).toBe("")
     expect(s.customCssEnabled).toBe(false)

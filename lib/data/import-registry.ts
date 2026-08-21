@@ -15,6 +15,9 @@ import type {
   ImportedConversation,
 } from "./importers/types"
 
+/** What an importer that declares no `extensions` accepts. */
+const DEFAULT_IMPORT_EXTENSIONS = ["json"] as const
+
 const REGISTRY: ChatImporter[] = [
   {
     format: "chatgpt",
@@ -122,20 +125,89 @@ export function detectFormat(data: unknown): ChatImportFormat {
 }
 
 /**
+ * The union of every registered importer's accepted extensions, de-duped, bare
+ * (no leading dot) — the shape a file-picker filter wants. Importers that omit
+ * `extensions` contribute `json`.
+ *
+ * Deriving this is what makes a plugin-contributed format actually reachable:
+ * the dialog used to hard-code `["json"]`, so a `.zip` Slack export or a
+ * `.jsonl` transcript could not be selected at all.
+ */
+export function getAcceptedChatImportExtensions(): string[] {
+  const seen = new Set<string>()
+  for (const importer of getImporters()) {
+    for (const ext of importer.extensions ?? DEFAULT_IMPORT_EXTENSIONS) {
+      const bare = ext.replace(/^\./, "").toLowerCase()
+      if (bare) seen.add(bare)
+    }
+  }
+  return [...seen]
+}
+
+/**
+ * Why a payload could not be imported as a conversation export. `unrecognized`
+ * is the generic miss; the other two are payloads we DO recognize but that
+ * belong to a different flow, and saying so is the difference between "try
+ * another file" and "this is your backup — restore it instead".
+ */
+export type ChatImportRejection = "unrecognized" | "cognia-backup" | "encrypted"
+
+/** Thrown by {@link importChatExport} when no importer claims the payload. */
+export class ChatImportUnsupportedError extends Error {
+  readonly reason: ChatImportRejection
+  /** The sniffed format, when one was identified (`cognia-v3` / `cognia-v1`). */
+  readonly format: ChatImportFormat
+
+  constructor(reason: ChatImportRejection, format: ChatImportFormat = "unknown") {
+    super(`Could not import this file as a conversation export (${reason}).`)
+    this.name = "ChatImportUnsupportedError"
+    this.reason = reason
+    this.format = format
+  }
+}
+
+/**
+ * Parse one picked file's raw text into the payload the importers sniff.
+ *
+ * JSON when it parses, the raw string otherwise. The dialog used to
+ * `JSON.parse` before dispatching, so a non-JSON export could never reach an
+ * importer even when one was registered for it — the second half of the
+ * hard-coded-`json` problem `getAcceptedChatImportExtensions` fixes.
+ */
+export function parseChatImportPayload(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
+
+/**
  * Detect + parse in one call. Returns conversations + the recognized format.
- * Throws when the format isn't recognized.
+ *
+ * Detection routes through {@link detectFormat} rather than re-running its own
+ * loop: that is what makes the encrypted-envelope guard and the Cognia-backup
+ * classifications reachable. Before this, both were dead branches — a backup
+ * dropped into the chat-import dialog produced a generic "could not recognize"
+ * instead of pointing at the restore flow.
+ *
+ * Throws {@link ChatImportUnsupportedError} when nothing claims the payload.
  */
 export async function importChatExport(
   data: unknown,
   opts: ChatImportOptions = {}
 ): Promise<ChatImportResult> {
-  for (const importer of getImporters()) {
-    if (importer.detect(data)) {
-      const conversations = await importer.parse(data, opts)
-      return { format: importer.format, conversations }
-    }
+  if (isEncryptedEnvelope(data)) throw new ChatImportUnsupportedError("encrypted")
+  const format = detectFormat(data)
+  const importer = getImporters().find((candidate) => candidate.format === format)
+  if (!importer) {
+    throw new ChatImportUnsupportedError(
+      format === "cognia-v3" || format === "cognia-v1" ? "cognia-backup" : "unrecognized",
+      format
+    )
   }
-  throw new Error("Could not recognize the import file format.")
+  const conversations = await importer.parse(data, opts)
+  return { format, conversations }
 }
 
 /**

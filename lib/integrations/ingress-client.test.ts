@@ -4,6 +4,7 @@ import { publishIntegrationEvent } from "./events"
 import {
   drainIntegrationIngress,
   getIntegrationIngressDeadletter,
+  installIntegrationIngressRuntime,
   listIntegrationIngressDeadletters,
   requeueIntegrationIngressDeadletter,
   syncIntegrationIngressRoutes,
@@ -101,9 +102,12 @@ jest.mock("@/lib/diagnostics/bus", () => ({
 }))
 
 const mockedCall = jest.mocked(transport.call)
+const mockedSubscribe = jest.mocked(transport.subscribe)
+const unsubscribe = jest.fn()
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockedSubscribe.mockReturnValue(unsubscribe)
   jest.mocked(detectPlatform).mockReturnValue("tauri")
   mockedCall.mockImplementation(async (command) => {
     if (command === "integration_ingress_poll") {
@@ -244,4 +248,50 @@ it("lists, reads, and requeues only the plugin account's deadletters", async () 
       "delivery-2"
     )
   ).rejects.toThrow("does not belong")
+})
+
+it("subscribes to the delivery wake signal before the catch-up drain", async () => {
+  const dispose = await installIntegrationIngressRuntime()
+
+  expect(mockedSubscribe).toHaveBeenCalledWith(
+    "integration:delivery-available",
+    expect.any(Function)
+  )
+  // The spool has no polling timer: a delivery accepted between the drain and
+  // the subscribe used to raise its wake signal into a subscription that did
+  // not exist yet, and then sat until some later delivery drained it.
+  const pollCall = mockedCall.mock.calls.findIndex(
+    ([command]) => command === "integration_ingress_poll"
+  )
+  expect(pollCall).toBeGreaterThanOrEqual(0)
+  expect(mockedSubscribe.mock.invocationCallOrder[0]).toBeLessThan(
+    mockedCall.mock.invocationCallOrder[pollCall]
+  )
+
+  dispose()
+  expect(unsubscribe).toHaveBeenCalledTimes(1)
+})
+
+it("keeps the wake subscription live when the catch-up pass fails", async () => {
+  mockedCall.mockImplementation(async (command) => {
+    if (command === "integration_ingress_poll") throw new Error("poll rejected")
+    return undefined as never
+  })
+
+  const dispose = await installIntegrationIngressRuntime()
+
+  expect(dispatchDiagnostic).toHaveBeenCalledWith(
+    expect.objectContaining({
+      code: "serverError",
+      source: "connector",
+      message: "poll rejected",
+      meta: { extra: { stage: "startup", routeId: "runtime", deliveryId: "startup" } },
+    }),
+    { kind: "background" }
+  )
+  // Not a no-op dispose: a failed catch-up used to reject out of the installer,
+  // and the caller's `.catch` swallowed it into `() => undefined`, so ingress
+  // was dead for the life of the process.
+  expect(dispose).toBe(unsubscribe)
+  expect(mockedSubscribe).toHaveBeenCalledTimes(1)
 })

@@ -4,6 +4,7 @@
 // and behavior of the include* options.
 
 import "fake-indexeddb/auto"
+import { createRetrievalProfile } from "@cognia/rag"
 import { buildBackupPackage, defaultExportFileName, serializePackage } from "./build-package"
 import { canonicalStringify } from "./migrate"
 import { sha256Hex } from "./crypto"
@@ -94,19 +95,16 @@ it("backs up retrieval profiles and ciphertext while excluding rebuildable lexic
     id: "memory",
     schemaVersion: 1,
     fingerprint: "fingerprint",
-    profile: {
-      version: 1,
+    // Built by the package's own factory rather than hand-written: this literal
+    // was a snapshot of a long-gone schema (`version`, `embedding.locality`,
+    // boolean `expansion` / `rerank`, `correctiveFilter`, and three `safety`
+    // flags that no longer exist), and nothing checked it against the type.
+    profile: createRetrievalProfile({
       id: "memory",
-      embedding: { provider: "browser", model: "local", locality: "local" },
+      embedding: { provider: "transformersjs", model: "local" },
       vector: { backend: "native" },
       budgets: { topK: 8, tokenBudget: 2_000, timeoutMs: 500 },
-      retrieval: { expansion: false, rerank: false, correctiveFilter: true },
-      safety: {
-        allowOriginalTextForLocalProvider: false,
-        failClosedOnPii: true,
-        dataOnlyPromptBoundary: true,
-      },
-    },
+    }),
     active: true,
     createdAt: 1,
     updatedAt: 1,
