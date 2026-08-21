@@ -1,11 +1,15 @@
 import { getDb } from "@/lib/db/schema"
 import {
+  adoptExecutionRun,
   getExecutionRun,
   listExecutionRunEvents,
   runEventJournal,
   semanticRunEvent,
 } from "@/lib/db/execution-runs"
+import { reduceRunEvents } from "./run-reducer"
+import { getRunRetryHandler } from "./run-retry-registry"
 import type {
+  ExecutionRun,
   ExecutionRunInitiator,
   ExecutionRunInterrupt,
   ExecutionRunKind,
@@ -65,8 +69,22 @@ export interface RunControlResult {
     | "steer_degraded"
     /** The command itself is malformed (a `steer` with no message, say). */
     | "invalid_command"
+    /**
+     * This settled run already handed its work to a replacement.
+     *
+     * Not the same as a duplicate: the answer is not "you already did that", it
+     * is "retry the replacement instead" — which is why `retryRunId` comes back
+     * with it. Forking a second replacement off one settled run would give the
+     * same commitment two live descendants and no way to say which one is it.
+     */
+    | "already_retried"
   duplicate?: boolean
   currentRevision?: number
+  /**
+   * The replacement a `retry` minted, or the one that already existed. Present
+   * on an accepted retry, on its duplicate, and on `already_retried`.
+   */
+  retryRunId?: string
   /** Set with `steer_degraded`. */
   degradedReason?: SteerDegradedReason
   /** Durable receipts a successful steer produced, for correlation. */
@@ -221,6 +239,91 @@ async function reject(
   return { accepted: false, reason, currentRevision }
 }
 
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"])
+
+/**
+ * Re-dispatch a settled run as a NEW run linked back to it.
+ *
+ * Nothing here touches the settled journal. The refusals return directly
+ * instead of going through {@link reject}, because `reject` appends
+ * `control.rejected` — which a terminal journal correctly refuses, and which
+ * would turn every refusal into a thrown error instead of an answer.
+ *
+ * The provenance the settled run keeps is a ROW stamp, not an event: it is what
+ * makes a redelivered press idempotent, and what lets a card point at the run
+ * that took the work over instead of silently forking a second one.
+ */
+async function executeRetry(
+  run: ExecutionRun,
+  command: RunControlCommand,
+  options: { operatorIds?: readonly string[]; now?: number }
+): Promise<RunControlResult> {
+  if (run.retry) {
+    const duplicate = run.retry.idempotencyKey === command.idempotencyKey
+    return {
+      accepted: duplicate,
+      ...(duplicate ? { duplicate: true } : { reason: "already_retried" as const }),
+      currentRevision: run.currentRevision,
+      retryRunId: run.retry.runId,
+    }
+  }
+  if (!authorized(run.initiator, command.actor, options.operatorIds ?? [])) {
+    return { accepted: false, reason: "forbidden", currentRevision: run.currentRevision }
+  }
+  if (command.expectedRevision !== run.currentRevision) {
+    return { accepted: false, reason: "revision_conflict", currentRevision: run.currentRevision }
+  }
+  const handler = getRunRetryHandler(run.kind)
+  if (!handler) {
+    return { accepted: false, reason: "unsupported_for_kind", currentRevision: run.currentRevision }
+  }
+
+  let replacement: string
+  try {
+    replacement = (await handler({ run, command })).runId
+  } catch (error) {
+    const reason =
+      error instanceof Error && error.name === "UnsupportedForKindError"
+        ? "unsupported_for_kind"
+        : "source_rejected"
+    return { accepted: false, reason, currentRevision: run.currentRevision }
+  }
+
+  // Link first, stamp second. A replacement that exists but is unlinked is a
+  // recoverable orphan; a stamp pointing at a run nothing claims is a lie the
+  // next press would believe.
+  await adoptExecutionRun(replacement, run.id).catch(() => undefined)
+  await stampRetry(run, {
+    idempotencyKey: command.idempotencyKey,
+    runId: replacement,
+    at: options.now ?? Date.now(),
+  })
+  return { accepted: true, currentRevision: run.currentRevision, retryRunId: replacement }
+}
+
+/**
+ * Write the retry stamp and re-derive `latestSnapshot` from it.
+ *
+ * The snapshot has to be re-derived rather than left alone: `allowedActions`
+ * reads the stamp, so a stale snapshot keeps offering Retry on a run that has
+ * already been replaced. The revision deliberately does NOT move — no event was
+ * appended, and bumping it would make the presentation runner re-project a card
+ * whose content did not change.
+ */
+async function stampRetry(
+  run: ExecutionRun,
+  retry: NonNullable<ExecutionRun["retry"]>
+): Promise<void> {
+  const events = await listExecutionRunEvents(run.id)
+  const stamped = { ...run, retry }
+  const snapshot = reduceRunEvents({ ...stamped, currentRevision: 0 }, events)
+  await getDb().executionRuns.update(run.id, {
+    retry,
+    latestSnapshot: snapshot,
+    updatedAt: retry.at,
+  })
+}
+
 async function executeRunControlCommandUnlocked(
   command: RunControlCommand,
   options: { operatorIds?: readonly string[]; now?: number } = {}
@@ -244,18 +347,14 @@ async function executeRunControlCommandUnlocked(
     }
   }
 
-  // `retry` is still structurally unreachable, and deliberately left so.
-  //
-  // Its whole point is a terminal run, but the event journal closes on a
-  // settled run (`appendInsideTransaction` refuses every event once a run is
-  // completed/failed/cancelled) — a sound invariant, and accepting a control
-  // event past it would weaken the guarantee that a settled run's history is
-  // final. The correct shape is the one the recovery policy already uses: mint
-  // a NEW run linked by `parentRunId` and journal there, leaving the failed row
-  // untouched. That needs the `parentRunId` index, so retry stays declared and
-  // unimplemented rather than half-wired — and `allowedActions` never offers
-  // it, so no surface renders a button that cannot work.
-  if (["completed", "failed", "cancelled"].includes(run.status)) {
+  // `retry` is the one action whose whole point is a terminal run, so it is
+  // answered before the terminal refusal below — and entirely off the settled
+  // journal, which stays final. See `executeRetry`.
+  if (command.action === "retry" && TERMINAL_STATUSES.has(run.status)) {
+    return executeRetry(run, command, options)
+  }
+
+  if (TERMINAL_STATUSES.has(run.status)) {
     return {
       accepted: false,
       reason: "source_rejected",

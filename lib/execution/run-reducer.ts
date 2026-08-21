@@ -16,6 +16,7 @@ import {
   safeToolActivityMetadata,
   sanitizeActivityLabel,
 } from "./run-activity"
+import { canRetryRunKind } from "./run-retry-registry"
 
 const TERMINAL = new Set<ExecutionRunStatus>(["completed", "failed", "cancelled"])
 const RECENT_STEP_LIMIT = 3
@@ -32,14 +33,22 @@ function numberValue(value: unknown): number | undefined {
 function allowedActions(
   status: ExecutionRunStatus,
   kind: ExecutionRun["kind"],
-  hasPendingInterrupt: boolean
+  hasPendingInterrupt: boolean,
+  retry: { alreadyRetried: boolean } = { alreadyRetried: false }
 ): RunControlAction[] {
-  // No `retry` here, on purpose: the control exists in the vocabulary but the
-  // event journal closes on a settled run, so accepting it would need a NEW
-  // run linked by `parentRunId` rather than an event on the failed one. Until
-  // that lands, offering the button would render a control that always fails.
-  // See the note in `run-control.ts`.
-  if (TERMINAL.has(status)) return ["open_details"]
+  // `retry` is offered on exactly the runs it can work on, and nowhere else.
+  //
+  // Three conditions, each removing a button that would otherwise always fail:
+  // the run must be settled (a live run is steered or stopped, not retried);
+  // its kind must have a registered re-dispatch (`canRetryRunKind`); and it
+  // must not already have handed its work to a replacement, because a second
+  // fork off one settled run would leave the same commitment with two live
+  // descendants. `completed` is deliberately excluded — re-doing work that
+  // succeeded is a new request, not a retry of this one.
+  if (TERMINAL.has(status)) {
+    const retryable = status !== "completed" && !retry.alreadyRetried && canRetryRunKind(kind)
+    return retryable ? ["retry", "open_details"] : ["open_details"]
+  }
   // Kinds with a real steering track: the agent SDK's live input lane
   // (`agent-turn`), the team coordinator's durable receipts (`team`), and a
   // delegation, which fans out to whichever of those is carrying it. Every
@@ -529,6 +538,8 @@ export function reduceRunEvents(
     ...(waitingReason ? { waitingReason } : {}),
     ...(pendingInterrupt ? { pendingInterrupt } : {}),
     artifacts,
-    allowedActions: allowedActions(status, run.kind, pendingInterrupt !== undefined),
+    allowedActions: allowedActions(status, run.kind, pendingInterrupt !== undefined, {
+      alreadyRetried: run.retry !== undefined,
+    }),
   }
 }

@@ -656,6 +656,21 @@ export interface RetryWorkflowRunInput {
   operatedBy: string
   startStepId?: string
   signal?: AbortSignal
+  /**
+   * Origin to attach to the replacement, overriding the `{ source: "ui" }`
+   * default.
+   *
+   * A retry driven from the surface that ASKED for the work has to keep
+   * reporting there: dropping the seed's IM origin would start a run whose
+   * progress fans back to nobody, which is indistinguishable from the retry not
+   * having happened. The desktop history view keeps the default, because a
+   * retry pressed there is a desktop action.
+   */
+  triggeredBy?: WorkflowTriggeredFrom
+  /** Called after the admission ledger has durably reserved the run id. */
+  onAdmitted?: (runId: string) => void
+  /** Called after the orchestrator has persisted the WorkflowRun row. */
+  onPersisted?: (runId: string) => void
 }
 
 /**
@@ -687,7 +702,9 @@ export async function retryWorkflowRun(
     signal: input.signal,
     requestedRunId,
     ...(seed.traceId ? { traceId: seed.traceId } : {}),
-    triggeredBy: { source: "ui" },
+    triggeredBy: input.triggeredBy ?? { source: "ui" },
+    ...(input.onAdmitted ? { onAdmitted: input.onAdmitted } : {}),
+    ...(input.onPersisted ? { onPersisted: input.onPersisted } : {}),
     lineage: {
       rootRunId: seed.lineage?.rootRunId ?? seed.id,
       retryOfRunId: seed.id,

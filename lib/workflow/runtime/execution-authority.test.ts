@@ -305,6 +305,70 @@ describe("ExecutionAuthority", () => {
     expect(await getDb().workflowInvocations.count()).toBe(0)
   })
 
+  it("keeps the seed's origin when the retry is driven from the surface that asked", async () => {
+    // The default stays `{ source: "ui" }` — a retry pressed in the desktop
+    // history view IS a desktop action. But a retry driven from the thread that
+    // asked for the work has to keep reporting there: dropping the origin
+    // starts a run whose progress fans back to nobody, which the person waiting
+    // cannot tell from the retry never having happened.
+    const workflow = await createWorkflow({ name: "Origin", nodes: [], edges: [] })
+    await publishWorkflow(workflow.id, 10)
+    const seed = await executeDeployedWorkflow({
+      workflowId: workflow.id,
+      entrypoint: "http",
+      caller: "client:seed",
+      triggerKind: "trigger.manual",
+      payload: { input: {} },
+    })
+
+    const desktop = await retryWorkflowRun({
+      runId: seed.runId,
+      mode: "current-deployment",
+      operatedBy: "operator:alice",
+    })
+    const fromThread = await retryWorkflowRun({
+      runId: seed.runId,
+      mode: "current-deployment",
+      operatedBy: "operator:alice",
+      triggeredBy: {
+        source: "im",
+        adapterId: "lark-1",
+        conversationKey: "lark:lark-1:chat-1",
+      },
+    })
+
+    expect((await getDb().workflowRuns.get(desktop.runId))?.triggeredBy).toEqual({ source: "ui" })
+    expect((await getDb().workflowRuns.get(fromThread.runId))?.triggeredBy).toMatchObject({
+      source: "im",
+      conversationKey: "lark:lark-1:chat-1",
+    })
+  })
+
+  it("reserves the replacement run id before the workflow finishes", async () => {
+    // A control command that waited for `executeDeployedWorkflow` to resolve
+    // would hold the run-control gate's per-run lock for the length of the
+    // workflow, so the retry seam returns on admission instead.
+    const workflow = await createWorkflow({ name: "Admitted", nodes: [], edges: [] })
+    await publishWorkflow(workflow.id, 10)
+    const seed = await executeDeployedWorkflow({
+      workflowId: workflow.id,
+      entrypoint: "http",
+      caller: "client:seed",
+      triggerKind: "trigger.manual",
+      payload: { input: {} },
+    })
+
+    const admitted: string[] = []
+    const retry = await retryWorkflowRun({
+      runId: seed.runId,
+      mode: "current-deployment",
+      operatedBy: "operator:alice",
+      onAdmitted: (runId) => admitted.push(runId),
+    })
+
+    expect(admitted).toEqual([retry.runId])
+  })
+
   it("creates distinct original-version and current-deployment retry runs", async () => {
     const workflow = await createWorkflow({ name: "Version one", nodes: [], edges: [] })
     await publishWorkflow(workflow.id, 10)

@@ -1,4 +1,4 @@
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import {
   createExecutionRun,
@@ -52,6 +52,14 @@ export async function syncWorkflowExecutionRun(
       await createExecutionRun({
         id: runId,
         kind: executionKindForWorkflowRun(sourceRun),
+        // A retry is a REPLACEMENT, not a stranger: `lineage.retryOfRunId` is
+        // already persisted on the new workflow row, so the parent link is
+        // derived here rather than coordinated with whoever pressed the button.
+        // That also makes a retry started from the desktop history view join
+        // the same chain as one driven through the run-control gate.
+        ...(sourceRun.lineage?.retryOfRunId
+          ? { parentRunId: workflowExecutionRunId(sourceRun.lineage.retryOfRunId) }
+          : {}),
         sourceId: sourceRun.id,
         sessionId: sourceRun.triggeredBy?.sessionId,
         projectId: sourceRun.projectId,
@@ -143,7 +151,10 @@ let stopAgentStateBridge: (() => void) | null = null
 export function startWorkflowExecutionBridge(): () => void {
   if (subscription) return stopWorkflowExecutionBridge
   stopAgentStateBridge = startAgentStateExecutionBridge()
-  subscription = liveQuery(async () => {
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  subscription = Dexie.liveQuery(async () => {
     const runs = await getDb().workflowRuns.toArray()
     const rows = await Promise.all(
       runs.map(async (run) => ({

@@ -195,6 +195,23 @@ export interface ExecutionRunInitiator {
   accountId?: string
 }
 
+/**
+ * What a `retry` control left behind on the run it replaced.
+ *
+ * Stamped on the ROW, never in the journal. A settled run's history is final —
+ * `appendInsideTransaction` refuses every event past a terminal status, and
+ * that guarantee is worth keeping. But the row still has to remember, or a
+ * redelivered press forks a second replacement and nothing can point at the run
+ * that took the work over.
+ */
+export interface ExecutionRunRetryStamp {
+  /** The control command that minted the replacement. */
+  idempotencyKey: string
+  /** The replacement run. It links back through its own `parentRunId`. */
+  runId: string
+  at: number
+}
+
 export interface ExecutionRun {
   id: string
   /** Previous immutable journal run when this run continues a recovered attempt. */
@@ -211,6 +228,8 @@ export interface ExecutionRun {
   startedAt: number
   updatedAt: number
   endedAt?: number
+  /** Set once a `retry` control minted a replacement for this settled run. */
+  retry?: ExecutionRunRetryStamp
 }
 
 export interface RunEvent {

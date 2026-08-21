@@ -165,14 +165,55 @@ it says and what a rejection carries. A plan rejection's feedback lands in the
 lead's existing re-planning loop, so a reply in a chat thread becomes the next
 revision's instruction.
 
-### `retry` stays declared and unimplemented
+### `retry` mints a replacement; the settled journal stays final
 
-The index it was waiting for now exists, but the re-dispatch seam does not.
-`allowedActions` still never offers it: a button that always fails is worse than
-an absent one. The shape when it lands is the one the recovery policy already
-uses — mint a **new** run linked by `parentRunId` and journal there, leaving the
-settled row untouched, because a settled journal's history being final is a
-guarantee worth keeping.
+The shape is the one the recovery policy already uses: a **new** run linked by
+`parentRunId`, journalled there, with the settled row untouched. The journal
+still refuses every event past a terminal status, and that invariant is not
+relaxed — the whole design follows from keeping it.
+
+So the provenance a settled run keeps is a **row stamp**, not an event
+(`ExecutionRun.retry`). It carries the command's idempotency key and the
+replacement's id, which is what makes a redelivered press answer with the run
+that already exists instead of forking a second one. A press carrying a
+*different* key is refused as `already_retried` rather than accepted: two live
+descendants of one commitment leave nobody able to say which one is it, and the
+right answer is to retry the replacement.
+
+"Mint a new run" means something different per engine, so the seam is a
+**registry** (`registerRunRetryHandler`) rather than a switch. That also answers
+the second half honestly: `allowedActions` asks the registry whether a kind has a
+re-dispatch at all and simply does not offer the button otherwise. Three
+conditions gate it — settled, registered, not already retried — and `completed`
+is deliberately excluded, because redoing work that succeeded is a new request,
+not a retry of this one.
+
+Two kinds register one:
+
+- **workflow** (and `scheduled`) — through the existing operator retry,
+  `retryWorkflowRun`, so this adds a caller rather than a second retry path. Two
+  things it supplies that the desktop history view does not need: the seed's
+  `triggeredBy`, so a run retried from the thread that asked keeps reporting
+  there instead of starting invisibly; and `onAdmitted`, so the control returns
+  as soon as the run id is durably reserved — `executeDeployedWorkflow` resolves
+  at *completion*, and waiting for that would hold the control gate's per-run
+  lock for the length of the workflow.
+- **delegation** — which executes nothing itself, so it retries the newest
+  settled child and **adopts the replacement onto the commitment**. Hanging it
+  off the failed child instead would drift a second card away from the one
+  the person is watching.
+
+`agent-turn`, `team`, `goal` and `plan` deliberately register nothing. An agent
+turn's replacement is a new inbound turn rather than a new run of the same one,
+and a team/goal/plan retry would have to re-derive an objective and a permission
+ceiling that are not on the settled row — re-deriving a ceiling is exactly how a
+retry would silently widen what the original run was allowed to do. Their cards
+show no Retry, which is the honest rendering of "nothing here can restart this".
+
+The parent link for a workflow retry is derived in the bridge from
+`lineage.retryOfRunId`, which the new run already persists — not coordinated with
+whoever pressed the button. A retry started from the desktop history view
+therefore joins the same chain as one driven through the control gate.
 
 ## Reused ownership
 
@@ -188,10 +229,14 @@ the index, which is correct — they are roots.
 
 Every new field is additive and optional. `delegation` is a new kind, so no
 existing run changes shape or behaviour. `steer` appears in `allowedActions` only
-for the three kinds with a real steering track. `resolveGatePolicy` defaults to
-*no* approval channel, so every existing caller keeps its behaviour byte for
-byte. Rollback needs no reverse migration; the v176 index is inert without
-delegation rows.
+for the three kinds with a real steering track, and `retry` only for kinds with a
+registered re-dispatch — an empty registry reproduces the previous behaviour
+exactly. `ExecutionRun.retry` is an optional, non-indexed column, so it needs no
+Dexie version of its own. `retryWorkflowRun` keeps defaulting to
+`triggeredBy: { source: "ui" }`, so the desktop history view is unchanged.
+`resolveGatePolicy` defaults to *no* approval channel, so every existing caller
+keeps its behaviour byte for byte. Rollback needs no reverse migration; the v176
+index is inert without delegation rows.
 
 ## Consequences
 

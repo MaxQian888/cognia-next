@@ -1,4 +1,4 @@
-import { getExecutionRun, listChildExecutionRuns } from "@/lib/db/execution-runs"
+import { adoptExecutionRun, getExecutionRun, listChildExecutionRuns } from "@/lib/db/execution-runs"
 import { getDb } from "@/lib/db/schema"
 import type { ExecutionRun, ExecutionRunStatus, RunControlCommand } from "@/types/execution/run"
 import {
@@ -7,6 +7,7 @@ import {
   type RunControlHandlerOutcome,
   type SteerDegradedReason,
 } from "./run-control"
+import { registerRunRetryHandler, type RunRetryHandler } from "./run-retry-registry"
 
 /**
  * The action exists in the vocabulary but this run kind cannot perform it.
@@ -62,6 +63,16 @@ export interface ExecutionRunControlHandlerDeps {
   resumeAgentRun?: (runId: string) => Promise<{ resumed: boolean; reason?: string }>
 }
 
+/**
+ * A settled run whose kind has no re-dispatch.
+ *
+ * Reported through {@link UnsupportedForKindError} so the gate answers
+ * `unsupported_for_kind` rather than a generic engine refusal — and so
+ * `allowedActions`, which never registers a handler for these kinds, never
+ * offers the button in the first place.
+ */
+const TERMINAL_RETRY_STATUSES = new Set(["failed", "cancelled"])
+
 export function installExecutionRunControlHandlers(deps: ExecutionRunControlHandlerDeps = {}): {
   agent: RunControlHandler
   workflow: RunControlHandler
@@ -69,6 +80,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   goal: RunControlHandler
   plan: RunControlHandler
   delegation: RunControlHandler
+  workflowRetry: RunRetryHandler
+  delegationRetry: RunRetryHandler
   dispose(): void
 } {
   const agent: RunControlHandler = async (command) => {
@@ -372,6 +385,81 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     }
   }
 
+  /**
+   * Re-dispatch a settled workflow run as a fresh formal invocation.
+   *
+   * `retryWorkflowRun` is the existing operator-visible retry — the seed row is
+   * immutable and nothing in history is overwritten — so this adds a caller,
+   * not a second retry path. Two things are supplied that the desktop history
+   * view does not need:
+   *
+   *   - the seed's `triggeredBy`, so a run retried from the thread that asked
+   *     for it keeps reporting back there instead of starting invisibly;
+   *   - `onAdmitted`, so this returns as soon as the run id is durably
+   *     reserved. `executeDeployedWorkflow` resolves at COMPLETION, and a
+   *     control command that waited for that would hold the gate's per-run lock
+   *     for the length of the workflow.
+   */
+  const workflowRetry: RunRetryHandler = async ({ run }) => {
+    if (!TERMINAL_RETRY_STATUSES.has(run.status)) {
+      throw new UnsupportedForKindError("retry", run.kind)
+    }
+    const seed = await getDb().workflowRuns.get(run.sourceId)
+    if (!seed) throw new Error(`Workflow run not found: ${run.sourceId}`)
+
+    const [{ retryWorkflowRun }, { workflowExecutionRunId }] = await Promise.all([
+      import("@/lib/workflow/runtime/execution-authority"),
+      import("./workflow-bridge"),
+    ])
+
+    let admitted: string | undefined
+    let markAdmitted: () => void = () => undefined
+    const reserved = new Promise<void>((resolve) => {
+      markAdmitted = resolve
+    })
+    const execution = retryWorkflowRun({
+      runId: run.sourceId,
+      mode: "current-deployment",
+      operatedBy: run.initiator?.remoteUserId ?? run.initiator?.platformIdentityId ?? "run-control",
+      ...(seed.triggeredBy ? { triggeredBy: seed.triggeredBy } : {}),
+      onAdmitted: (runId) => {
+        admitted = runId
+        markAdmitted()
+      },
+    })
+    // The second arm is what keeps an admission failure (no deployment, invalid
+    // seed) from hanging here forever, and it owns the rejection of the
+    // detached run.
+    await Promise.race([reserved, execution.then(() => undefined)])
+    if (!admitted) admitted = (await execution).runId
+    return { runId: workflowExecutionRunId(admitted) }
+  }
+
+  /**
+   * A delegation does not execute, so it cannot itself be re-dispatched — it
+   * retries the child that carried the work and adopts the replacement.
+   *
+   * The newest settled child is the one that failed the commitment; older ones
+   * already handed off. Retrying all of them would multiply the work a single
+   * "try again" asked for exactly once.
+   */
+  const delegationRetry: RunRetryHandler = async ({ run, command }) => {
+    const settled = (await listChildExecutionRuns(run.id)).filter((child) =>
+      TERMINAL_RETRY_STATUSES.has(child.status)
+    )
+    const target = settled.find((child) => !child.retry)
+    if (!target) throw new UnsupportedForKindError("retry", "delegation")
+    const handler =
+      target.kind === "workflow" || target.kind === "scheduled" ? workflowRetry : undefined
+    if (!handler) throw new UnsupportedForKindError("retry", target.kind)
+    const replacement = await handler({ run: target, command })
+    // The replacement belongs to the COMMITMENT, not to the attempt it
+    // replaces: a delegation is one card, and a child hanging off the failed
+    // child would drift off it.
+    await adoptExecutionRun(replacement.runId, run.id).catch(() => undefined)
+    return replacement
+  }
+
   const handlerForKind = (kind: ExecutionRun["kind"]): RunControlHandler | undefined => {
     switch (kind) {
       case "agent-turn":
@@ -410,6 +498,16 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   const unregisterDelegation = registerRunControlHandler("delegation", delegation)
   const unregisterGoal = registerRunControlHandler("goal", goal)
   const unregisterPlan = registerRunControlHandler("plan", plan)
+  // Only the kinds with a real re-dispatch register one. `agent-turn`, `team`,
+  // `goal` and `plan` deliberately do not: an agent turn's replacement is a new
+  // inbound turn rather than a new run of the same one, and a team/goal/plan
+  // retry would have to re-derive a permission ceiling and an objective that
+  // are not on the settled row. `canRetryRunKind` reads this registry, so those
+  // cards simply never show the button.
+  const unregisterWorkflowRetry = (["workflow", "scheduled"] as const).map((kind) =>
+    registerRunRetryHandler(kind, workflowRetry)
+  )
+  const unregisterDelegationRetry = registerRunRetryHandler("delegation", delegationRetry)
   return {
     agent,
     workflow,
@@ -417,6 +515,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     goal,
     plan,
     delegation,
+    workflowRetry,
+    delegationRetry,
     dispose() {
       unregisterAgent()
       unregisterTeam()
@@ -424,6 +524,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       for (const unregister of unregisterWorkflows) unregister()
       unregisterGoal()
       unregisterPlan()
+      for (const unregister of unregisterWorkflowRetry) unregister()
+      unregisterDelegationRetry()
     },
   }
 }

@@ -1,4 +1,5 @@
 import { reduceRunEvents } from "./run-reducer"
+import { __resetRunRetryHandlersForTesting, registerRunRetryHandler } from "./run-retry-registry"
 import type { ExecutionRun, ExecutionRunKind, RunEvent } from "@/types/execution/run"
 
 const baseRun: ExecutionRun = {
@@ -523,5 +524,80 @@ describe("delegation allowed actions", () => {
       []
     )
     expect(paused.allowedActions).toEqual(["resume", "stop", "open_details"])
+  })
+})
+
+describe("retry is offered only where a re-dispatch exists", () => {
+  const retryHandler = async () => ({ runId: "run-2" })
+
+  beforeEach(__resetRunRetryHandlersForTesting)
+  afterAll(__resetRunRetryHandlersForTesting)
+
+  function snapshotFor(
+    kind: ExecutionRunKind,
+    status: "failed" | "cancelled" | "completed",
+    retry?: ExecutionRun["retry"]
+  ) {
+    return reduceRunEvents(
+      {
+        id: `execution:${kind}:r`,
+        kind,
+        sourceId: "r",
+        title: "t",
+        status,
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+        ...(retry ? { retry } : {}),
+      },
+      []
+    )
+  }
+
+  it("does not offer it for a kind nothing can re-dispatch", () => {
+    // The reason `retry` sat in the vocabulary unusable for so long: a button
+    // that always fails is worse than an absent one.
+    expect(snapshotFor("team", "failed").allowedActions).toEqual(["open_details"])
+    expect(snapshotFor("agent-turn", "failed").allowedActions).toEqual(["open_details"])
+  })
+
+  it("offers it once that kind registers one", () => {
+    registerRunRetryHandler("workflow", retryHandler)
+    expect(snapshotFor("workflow", "failed").allowedActions).toEqual(["retry", "open_details"])
+    expect(snapshotFor("workflow", "cancelled").allowedActions).toEqual(["retry", "open_details"])
+  })
+
+  it("never offers it on a run that succeeded", () => {
+    // Redoing work that worked is a new request, not a retry of this one.
+    registerRunRetryHandler("workflow", retryHandler)
+    expect(snapshotFor("workflow", "completed").allowedActions).toEqual(["open_details"])
+  })
+
+  it("withdraws it once the run has handed its work to a replacement", () => {
+    registerRunRetryHandler("workflow", retryHandler)
+    const retried = snapshotFor("workflow", "failed", {
+      idempotencyKey: "k",
+      runId: "run-2",
+      at: 5,
+    })
+    expect(retried.allowedActions).toEqual(["open_details"])
+  })
+
+  it("keeps a live run's controls unchanged", () => {
+    registerRunRetryHandler("workflow", retryHandler)
+    const running = reduceRunEvents(
+      {
+        id: "execution:workflow:live",
+        kind: "workflow",
+        sourceId: "r",
+        title: "t",
+        status: "running",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(running.allowedActions).toEqual(["stop", "open_details"])
   })
 })

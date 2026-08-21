@@ -49,6 +49,26 @@ jest.mock("@/lib/goal/runtime", () => ({
   }),
 }))
 
+const mockRetryWorkflowRun = jest.fn(
+  async (_input: {
+    runId: string
+    mode: string
+    operatedBy: string
+    triggeredBy?: unknown
+    onAdmitted?: (runId: string) => void
+  }) => {
+    _input.onAdmitted?.("wf-run-2")
+    // Deliberately never settles: `executeDeployedWorkflow` resolves at
+    // COMPLETION, and a control command that waited for that would hold the
+    // gate's per-run lock for the length of the workflow.
+    return new Promise<{ runId: string }>(() => undefined)
+  }
+)
+jest.mock("@/lib/workflow/runtime/execution-authority", () => ({
+  retryWorkflowRun: (...args: unknown[]) =>
+    mockRetryWorkflowRun(...(args as Parameters<typeof mockRetryWorkflowRun>)),
+}))
+
 const mockPausePlan = jest.fn(async (id: string) => ({ id, status: "paused" }))
 const mockResumePlan = jest.fn(async (id: string) => ({ id, status: "executing" }))
 const mockCancelPlan = jest.fn(async (id: string) => ({ id, status: "cancelled" }))
@@ -670,6 +690,181 @@ describe("delegation controls fan out to the runs carrying the work", () => {
 
     expect(result.reason).toBe("steer_degraded")
     expect(mockSteerSession).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+})
+
+describe("retry mints a replacement instead of reopening a settled run", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+  })
+
+  async function seedFailedWorkflow(over: Record<string, unknown> = {}): Promise<void> {
+    await getDb().workflowRuns.add({
+      id: "wf-run-1",
+      workflowId: "wf-1",
+      status: "failed",
+      triggerKind: "trigger.manual",
+      triggerPayload: { message: "publish" },
+      triggeredBy: {
+        source: "im",
+        adapterId: "lark-1",
+        conversationKey: "lark:lark-1:chat-1",
+      },
+      workflowSnapshot: { id: "wf-1", name: "Publish", nodes: [], edges: [] },
+      startedAt: 1,
+      ...over,
+    } as never)
+    await createExecutionRun({
+      id: "execution:workflow:wf-run-1",
+      kind: "workflow",
+      sourceId: "wf-run-1",
+      title: "Publish",
+      status: "failed",
+      initiator: { remoteUserId: "operator-1" },
+      currentRevision: 2,
+      startedAt: 1,
+      updatedAt: 5,
+      endedAt: 5,
+    })
+  }
+
+  it("re-dispatches through the existing operator retry and keeps the IM origin", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    await seedFailedWorkflow()
+
+    const result = await executeRunControlCommand({
+      runId: "execution:workflow:wf-run-1",
+      action: "retry",
+      idempotencyKey: "retry-1",
+      expectedRevision: 2,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result).toMatchObject({
+      accepted: true,
+      retryRunId: "execution:workflow:wf-run-2",
+    })
+    // Dropping the seed's origin would start a run whose progress fans back to
+    // nobody, which the person who asked cannot tell from "nothing happened".
+    expect(mockRetryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "wf-run-1",
+        mode: "current-deployment",
+        operatedBy: "operator-1",
+        triggeredBy: expect.objectContaining({
+          source: "im",
+          conversationKey: "lark:lark-1:chat-1",
+        }),
+      })
+    )
+    // The settled run keeps its history and gains a pointer, not an event.
+    expect(await listExecutionRunEvents("execution:workflow:wf-run-1")).toEqual([])
+    expect((await getDb().executionRuns.get("execution:workflow:wf-run-1"))?.retry).toMatchObject({
+      idempotencyKey: "retry-1",
+      runId: "execution:workflow:wf-run-2",
+    })
+    handlers.dispose()
+  })
+
+  it("refuses a run that succeeded", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    await seedFailedWorkflow()
+    await getDb().executionRuns.update("execution:workflow:wf-run-1", { status: "completed" })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:workflow:wf-run-1",
+      action: "retry",
+      idempotencyKey: "retry-completed",
+      expectedRevision: 2,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result).toMatchObject({ accepted: false, reason: "unsupported_for_kind" })
+    expect(mockRetryWorkflowRun).not.toHaveBeenCalled()
+    handlers.dispose()
+  })
+
+  it("a delegation retries the child that carried the work and adopts the replacement", async () => {
+    // A delegation executes nothing itself, so "try again" means re-dispatching
+    // the child that failed the commitment — and the replacement belongs to the
+    // COMMITMENT, or the person watching one card would gain a second.
+    const handlers = installExecutionRunControlHandlers()
+    await seedFailedWorkflow()
+    await createExecutionRun({
+      id: "execution:delegation:d1",
+      kind: "delegation",
+      sourceId: "d1",
+      title: "The brief",
+      status: "failed",
+      initiator: { remoteUserId: "operator-1" },
+      currentRevision: 4,
+      startedAt: 1,
+      updatedAt: 6,
+      endedAt: 6,
+    })
+    await getDb().executionRuns.update("execution:workflow:wf-run-1", {
+      parentRunId: "execution:delegation:d1",
+    })
+    // The engine's bridge mints the replacement row; stand in for it.
+    await createExecutionRun({
+      id: "execution:workflow:wf-run-2",
+      kind: "workflow",
+      sourceId: "wf-run-2",
+      title: "Publish",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 7,
+      updatedAt: 7,
+    })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:delegation:d1",
+      action: "retry",
+      idempotencyKey: "deleg-retry",
+      expectedRevision: 4,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result).toMatchObject({
+      accepted: true,
+      retryRunId: "execution:workflow:wf-run-2",
+    })
+    expect(mockRetryWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "wf-run-1" })
+    )
+    expect((await getDb().executionRuns.get("execution:workflow:wf-run-2"))?.parentRunId).toBe(
+      "execution:delegation:d1"
+    )
+    handlers.dispose()
+  })
+
+  it("a delegation with no settled child says so instead of failing opaquely", async () => {
+    const handlers = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "execution:delegation:d2",
+      kind: "delegation",
+      sourceId: "d2",
+      title: "The brief",
+      status: "failed",
+      initiator: { remoteUserId: "operator-1" },
+      currentRevision: 1,
+      startedAt: 1,
+      updatedAt: 2,
+      endedAt: 2,
+    })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:delegation:d2",
+      action: "retry",
+      idempotencyKey: "deleg-retry-empty",
+      expectedRevision: 1,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result).toMatchObject({ accepted: false, reason: "unsupported_for_kind" })
     handlers.dispose()
   })
 })

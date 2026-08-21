@@ -109,6 +109,34 @@ describe("workflow execution bridge", () => {
     expect(executionKindForWorkflowRun({ triggerKind } as WorkflowRunRow)).toBe(expectedKind)
   })
 
+  it("links a retry to the run it replaced, from the lineage the row already carries", async () => {
+    // A retry is a replacement, not a stranger. Deriving the link here — rather
+    // than coordinating with whoever pressed the button — is what makes a retry
+    // driven from the desktop history view join the same chain as one driven
+    // through the run-control gate.
+    await syncWorkflowExecutionRun(workflowRun(), [], [])
+    await syncWorkflowExecutionRun(
+      workflowRun({
+        id: "wf-run-2",
+        lineage: {
+          rootRunId: "wf-run-1",
+          retryOfRunId: "wf-run-1",
+          retryMode: "current-deployment",
+        },
+      }),
+      [],
+      []
+    )
+
+    expect((await getDb().executionRuns.get("execution:workflow:wf-run-2"))?.parentRunId).toBe(
+      "execution:workflow:wf-run-1"
+    )
+    // A first run is a root, and must not gain a parent it never had.
+    expect(
+      (await getDb().executionRuns.get("execution:workflow:wf-run-1"))?.parentRunId
+    ).toBeUndefined()
+  })
+
   it("projects UI-triggered runs without fanout subscriptions", async () => {
     const row = workflowRun({
       id: "wf-run-ui",
