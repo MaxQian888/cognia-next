@@ -45,6 +45,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use super::{
+    host_identity,
     jwt::{verify, JwtError, SERVICE_DEVICE_ID},
     oidc::{self, OidcAuthenticator},
     rate_limit::RateLimitDecision,
@@ -52,7 +53,6 @@ use super::{
 };
 
 const LOCAL_DEBUG_TOKEN_ENV: &str = "COGNIA_LOCAL_DEBUG_TOKEN";
-const LOCAL_DEBUG_ACCOUNT_ID: &str = "local_acct_a";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PrincipalRequirement {
@@ -317,7 +317,7 @@ async fn authenticate_request(
         }
         request.extensions_mut().insert(DeviceContext {
             device_id: SERVICE_DEVICE_ID.to_string(),
-            account_id: LOCAL_DEBUG_ACCOUNT_ID.to_string(),
+            account_id: host_identity::current_tenant_or_unbound(),
             scope: "service".to_string(),
             granted_scopes: Vec::new(),
             authorization_capabilities: None,

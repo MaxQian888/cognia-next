@@ -237,13 +237,27 @@ impl FleetRuntime {
     }
 
     pub fn snapshot(&self) -> FleetSnapshot {
-        self.snapshot_for_tenant("local_acct_a")
+        self.snapshot_for_tenant(&crate::companion_api::host_identity::current_tenant_or_unbound())
     }
 
     pub fn snapshot_for_tenant(&self, tenant_id: &str) -> FleetSnapshot {
-        let brain_tenant = crate::companion_api::ws_bridge::current_brain_account_id();
-        let projects_this_tenant = brain_tenant.as_deref() == Some(tenant_id)
-            || (brain_tenant.is_none() && tenant_id == "local_acct_a");
+        // The brain announces itself with a *local account namespace*, while
+        // callers here address a *tenant*. Those were the same hardcoded string
+        // before the host binding existed, so accept either spelling: the raw
+        // match keeps unmigrated installs working, the namespace lookup is what
+        // matches once an account has been bound.
+        let brain_account = crate::companion_api::ws_bridge::current_brain_account_id();
+        let projects_this_tenant = match brain_account.as_deref() {
+            Some(account) => {
+                account == tenant_id
+                    || crate::companion_api::host_identity::namespace_for_tenant(tenant_id)
+                        .as_deref()
+                        == Some(account)
+            }
+            // No brain has said hello. Only this host's own tenant projects —
+            // never a tenant that merely happens to be asked about.
+            None => tenant_id == crate::companion_api::host_identity::current_tenant_or_unbound(),
+        };
         let mut snapshot = if projects_this_tenant {
             self.registry.lock().snapshot(now_ms())
         } else {

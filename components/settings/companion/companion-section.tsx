@@ -153,10 +153,17 @@ async function stopServer(): Promise<void> {
   await transport.call<void>("companion_server_stop")
 }
 
-async function createOwnerInvitation(localAccountId: string): Promise<OwnerInvitationIssue> {
-  return transport.call<OwnerInvitationIssue>("companion_create_owner_invitation", {
-    localAccountId,
-  })
+/**
+ * Takes no arguments on purpose.
+ *
+ * This used to pass `localAccountId`, which the Rust command accepted and then
+ * ignored in favour of a hardcoded tenant — so the argument described a
+ * relationship that did not exist. The tenant now comes from the host binding
+ * that a verified unlock establishes, which is why the caller still refuses to
+ * generate a QR while the account is locked.
+ */
+async function createOwnerInvitation(): Promise<OwnerInvitationIssue> {
+  return transport.call<OwnerInvitationIssue>("companion_create_owner_invitation")
 }
 
 async function startMdnsBroadcast(args: {
@@ -864,7 +871,7 @@ function PairDeviceCard() {
     }
     setBusy(true)
     try {
-      const next = await createOwnerInvitation(localAccountId)
+      const next = await createOwnerInvitation()
       setIssue(next)
       setNow(Date.now())
     } catch (err) {

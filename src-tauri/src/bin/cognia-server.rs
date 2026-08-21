@@ -61,6 +61,13 @@ use parking_lot::RwLock;
 
 use clap::{Parser, Subcommand};
 
+/// Fallback local account for a deployment that names none.
+///
+/// Kept as a literal because the Node brain's own account registry defaults to
+/// the same id (`HEADLESS_LOCAL_ACCOUNT_ID` in `cli/src/serve/account.ts`); the
+/// two must agree or `desktop-sync-source` rejects the brain's pulls. It is a
+/// local account *namespace*, not a tenant — the tenant now comes from the host
+/// binding this id is bound to at startup.
 const HEADLESS_LOCAL_ACCOUNT_ID: &str = "local_acct_a";
 
 /// cognia-server — headless cognia companion API.
@@ -70,6 +77,17 @@ const HEADLESS_LOCAL_ACCOUNT_ID: &str = "local_acct_a";
 #[derive(Debug, Parser)]
 #[command(name = "cognia-server", version, about, long_about = None)]
 struct Cli {
+    /// Local account this deployment serves. A command line is a legitimate
+    /// trust root here — unlike the desktop, there is no renderer to lie about
+    /// it — so this value is bound directly, without a password verifier.
+    ///
+    /// Defaults to `COGNIA_LOCAL_ACCOUNT_ID`, else the historical
+    /// `local_acct_a`, which is also the id the Node brain creates in its own
+    /// account registry (`cli/src/serve/account.ts`). The two must agree or the
+    /// brain's sync pulls are rejected.
+    #[arg(long, global = true)]
+    local_account_id: Option<String>,
+
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -98,9 +116,10 @@ enum CliCommand {
         /// `--advertise-url` nor `COGNIA_PUBLIC_URL` is set.
         #[arg(long, default_value_t = app_lib::companion_api::server::DEFAULT_PORT)]
         port: u16,
-        /// Tenant/organization encoded into the cgnp3 payload.
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Tenant/organization encoded into the cgnp3 payload. Defaults to the
+        /// tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
     /// Boot the HTTPS companion server. Binds 0.0.0.0:<port> by default.
     Serve {
@@ -194,15 +213,17 @@ enum DevicesCommand {
     /// Create a one-time Companion API Owner invitation. This command is
     /// the single-user trust root and must be run by an OS-authorized operator.
     InviteOwner {
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
         #[arg(long, default_value_t = 600)]
         ttl_seconds: i64,
     },
     /// List Companion API devices for a tenant.
     List {
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
     /// Revoke a Companion API device through the local OS trust root.
     ///
@@ -210,13 +231,15 @@ enum DevicesCommand {
     /// deployment can be recovered with a fresh invitation.
     RevokeDevice {
         device_id: String,
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
     /// Print the current canonical SecurityStore grants.
     Grants {
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
     /// Grant a device an elevated capability. Pass at least one of the flags.
     Grant {
@@ -235,8 +258,9 @@ enum DevicesCommand {
         /// Create, attach to, and control interactive terminal sessions.
         #[arg(long)]
         terminal: bool,
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
     /// Revoke an elevated capability.
     Revoke {
@@ -247,8 +271,9 @@ enum DevicesCommand {
         agent_control: bool,
         #[arg(long)]
         terminal: bool,
-        #[arg(long, default_value = "local_acct_a")]
-        tenant_id: String,
+        /// Defaults to the tenant this host is bound to.
+        #[arg(long)]
+        tenant_id: Option<String>,
     },
 }
 
@@ -456,6 +481,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dir.join("companion-signaling.sqlite"),
     )?));
 
+    // Bind before anything resolves a tenant. Every `host_identity` reader
+    // below (the CLI tenant fallback, the service token, the brain's env) is a
+    // no-op-to-sentinel until this runs, so ordering it after
+    // `install_security_store` and before the first command is what makes the
+    // headless host serve a real account instead of the unclaimed bucket.
+    let local_account_id = cli
+        .local_account_id
+        .clone()
+        .or_else(|| std::env::var("COGNIA_LOCAL_ACCOUNT_ID").ok())
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or_else(|| HEADLESS_LOCAL_ACCOUNT_ID.to_string());
+    if let Err(error) =
+        app_lib::companion_api::host_identity::bind_local_account_from_operator(&local_account_id)
+    {
+        // Fatal: continuing would silently serve a different tenant than the
+        // operator named, which is exactly the confusion this replaces.
+        return Err(format!("local account binding failed: {error}").into());
+    }
+
     let tls_material = tls::ensure_certificate(&dir)?;
 
     match cli.command {
@@ -466,6 +510,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tenant_id,
         } => {
             let base_url = resolve_advertise_url(advertise_url, port);
+            let tenant_id = resolve_tenant(tenant_id);
             run_pair(&store, &tls_material, &device_name, &base_url, &tenant_id).await
         }
         CliCommand::Serve {
@@ -483,9 +528,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         CliCommand::IssueServiceToken => {
             let signing_secret = secret::load_or_generate()?;
+            // The `account` claim on a companion JWT is a *tenant*, so this
+            // must be the bound tenant and not the local account namespace.
             let (token, exp) = app_lib::companion_api::jwt::issue_service_jwt(
                 &signing_secret,
-                HEADLESS_LOCAL_ACCOUNT_ID,
+                &app_lib::companion_api::host_identity::current_tenant_or_unbound(),
             )?;
             // Token on stdout (script-friendly), metadata on stderr.
             println!("{token}");
@@ -531,6 +578,18 @@ fn selected_kinds(
     Ok(kinds)
 }
 
+/// The tenant a `devices` subcommand addresses.
+///
+/// `--tenant-id` used to default to the `local_acct_a` literal, which meant an
+/// operator who omitted the flag silently addressed a *different* tenant than
+/// the one this host actually serves once it is bound to an account. Falling
+/// back to the binding keeps the flagless form pointed at the running host.
+fn resolve_tenant(requested: Option<String>) -> String {
+    requested
+        .filter(|tenant| !tenant.trim().is_empty())
+        .unwrap_or_else(app_lib::companion_api::host_identity::current_tenant_or_unbound)
+}
+
 fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::Error>> {
     let security = app_lib::companion_api::security_store::security_store()
         .ok_or("security store is not initialized")?;
@@ -539,6 +598,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             tenant_id,
             ttl_seconds,
         } => {
+            let tenant_id = resolve_tenant(tenant_id);
             if ttl_seconds <= 0 || ttl_seconds > 3_600 {
                 return Err("ttl-seconds must be between 1 and 3600".into());
             }
@@ -557,6 +617,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             Ok(())
         }
         DevicesCommand::List { tenant_id } => {
+            let tenant_id = resolve_tenant(tenant_id);
             println!(
                 "{}",
                 serde_json::to_string_pretty(&security.list_devices(&tenant_id)?)?
@@ -567,6 +628,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             device_id,
             tenant_id,
         } => {
+            let tenant_id = resolve_tenant(tenant_id);
             security.revoke_device(
                 &tenant_id,
                 "local-cli-trust-root",
@@ -583,6 +645,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             Ok(())
         }
         DevicesCommand::Grants { tenant_id } => {
+            let tenant_id = resolve_tenant(tenant_id);
             println!(
                 "{}",
                 serde_json::to_string_pretty(&security.list_devices(&tenant_id)?)?
@@ -596,6 +659,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             terminal,
             tenant_id,
         } => {
+            let tenant_id = resolve_tenant(tenant_id);
             let mut capabilities = security
                 .capability_snapshot(&tenant_id, &device_id)?
                 .ok_or("device is unknown or revoked")?
@@ -634,6 +698,7 @@ fn run_devices_admin(command: DevicesCommand) -> Result<(), Box<dyn std::error::
             terminal,
             tenant_id,
         } => {
+            let tenant_id = resolve_tenant(tenant_id);
             let mut capabilities = security
                 .capability_snapshot(&tenant_id, &device_id)?
                 .ok_or("device is unknown or revoked")?
@@ -1137,7 +1202,14 @@ async fn run_serve(
                 entry,
                 handle.bound_port,
                 data_dir.clone(),
-                HEADLESS_LOCAL_ACCOUNT_ID.to_string(),
+                // The brain creates this id in its own account registry
+                // (`cli/src/serve/account.ts`), so it must be the local account
+                // *namespace* — deliberately not the tenant. Read back from the
+                // binding rather than threaded through, so there is one answer
+                // to "which account does this host serve".
+                app_lib::companion_api::host_identity::current()
+                    .map(|context| context.local_account_namespace)
+                    .unwrap_or_else(|_| HEADLESS_LOCAL_ACCOUNT_ID.to_string()),
                 headless_services()
                     .map(|services| services.code_server.host_id().to_string())
                     .unwrap_or_else(|| "headless".to_string()),

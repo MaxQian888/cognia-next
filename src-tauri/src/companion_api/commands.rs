@@ -15,6 +15,7 @@ use tauri::{Manager, State};
 use super::{
     browser_access, desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
+    host_identity,
     mdns::AutoStartConfig,
     reachability_config::{self, ReachabilityConfig},
     secret, security_store,
@@ -24,11 +25,18 @@ use super::{
     BindMode, CompanionServerState, CompanionState, SharedState,
 };
 
-/// The single local tenant every desktop-paired device belongs to. Spelled once
-/// here because the grant commands below must address the same tenant the
-/// pairing commands enrolled the device into — a mismatch would write grants
-/// nothing looks up.
-const PAIRED_TENANT_ID: &str = "local_acct_a";
+/// The tenant every desktop-paired device belongs to. Resolved once here
+/// because the grant commands below must address the same tenant the pairing
+/// commands enrolled the device into — a mismatch would write grants nothing
+/// looks up.
+///
+/// Used to be the `local_acct_a` literal, which made every install share one
+/// tenant id. It now comes from the host binding, and falls back to the
+/// unclaimed bucket before anyone has unlocked — the same tenant
+/// [`super::api::registration_authority`] enrols into, so the two stay paired.
+fn paired_tenant_id() -> String {
+    host_identity::current_tenant_or_unbound()
+}
 
 // ---------------------------------------------------------------------------
 // Tauri command
@@ -423,7 +431,7 @@ fn apply_device_grant(
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
     let mut capabilities: std::collections::BTreeSet<String> = security
-        .capability_snapshot(PAIRED_TENANT_ID, device_id)
+        .capability_snapshot(&paired_tenant_id(), device_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "paired device is unknown or revoked".to_string())?
         .into_iter()
@@ -437,7 +445,7 @@ fn apply_device_grant(
     }
     security
         .replace_device_capabilities(
-            PAIRED_TENANT_ID,
+            &paired_tenant_id(),
             "local-trust-root",
             device_id,
             &capabilities.into_iter().collect::<Vec<_>>(),
@@ -469,7 +477,7 @@ pub async fn companion_list_device_grants() -> Result<Vec<DeviceGrantSummary>, S
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
     let devices = security
-        .list_devices(PAIRED_TENANT_ID)
+        .list_devices(&paired_tenant_id())
         .map_err(|error| error.to_string())?;
     Ok(devices
         .into_iter()
@@ -947,7 +955,6 @@ pub async fn companion_create_worker_enrollment(
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<WorkerEnrollmentIssue, String> {
-    const TENANT_ID: &str = "local_acct_a";
     const ENROLLMENT_TTL_SECS: i64 = 10 * 60;
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
     let (base_url, is_tunnel) = if let Some(info) = state.tunnel.current() {
@@ -969,42 +976,45 @@ pub async fn companion_create_worker_enrollment(
     let now = unix_time_secs();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    // Same tenant the pairing commands enrol into: a worker filed under a
+    // different one would authenticate and then find no grants.
+    let tenant_id = paired_tenant_id();
     let enrollment = security
-        .create_worker_enrollment(TENANT_ID, "local-trust-root", now, ENROLLMENT_TTL_SECS)
+        .create_worker_enrollment(&tenant_id, "local-trust-root", now, ENROLLMENT_TTL_SECS)
         .map_err(|error| error.to_string())?;
     Ok(WorkerEnrollmentIssue {
         enrollment,
         expires_at_ms: now.saturating_add(ENROLLMENT_TTL_SECS) * 1_000,
         base_url,
         fingerprint,
-        tenant_id: TENANT_ID.to_string(),
+        tenant_id,
     })
 }
 
 #[tauri::command]
 pub async fn companion_list_workers() -> Result<Vec<super::ws_worker::WorkerDeviceSummary>, String>
 {
-    const TENANT_ID: &str = "local_acct_a";
+    let tenant_id = paired_tenant_id();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
     let devices = security
-        .list_worker_devices(TENANT_ID)
+        .list_worker_devices(&tenant_id)
         .map_err(|error| error.to_string())?;
     Ok(super::ws_worker::worker_device_summaries(
-        TENANT_ID, devices,
+        &tenant_id, devices,
     ))
 }
 
 #[tauri::command]
 pub async fn companion_set_worker(device_id: String, allowed: bool) -> Result<(), String> {
-    const TENANT_ID: &str = "local_acct_a";
     if device_id.trim().is_empty() {
         return Err("device_id is required".into());
     }
+    let tenant_id = paired_tenant_id();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
     let mut capabilities = security
-        .capability_snapshot(TENANT_ID, &device_id)
+        .capability_snapshot(&tenant_id, &device_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "worker device is unavailable".to_string())?;
     capabilities.retain(|capability| capability != "agent.worker");
@@ -1013,7 +1023,7 @@ pub async fn companion_set_worker(device_id: String, allowed: bool) -> Result<()
     }
     security
         .replace_device_capabilities(
-            TENANT_ID,
+            &tenant_id,
             "local-trust-root",
             &device_id,
             &capabilities,
@@ -1026,13 +1036,21 @@ pub async fn companion_set_worker(device_id: String, allowed: bool) -> Result<()
 /// Create the destructive-upgrade pairing payload. No bearer credential is
 /// placed in the QR; the invitation can be consumed exactly once by device-key
 /// registration.
+///
+/// Takes no account argument. It used to accept a `localAccountId` that the body
+/// ignored in favour of a hardcoded tenant, so the caller's account had no
+/// effect on which tenant the device was enrolled into. The tenant now comes
+/// from the host binding, which is the same source
+/// [`super::api::registration_authority`] uses to admit the device that redeems
+/// this invitation. A `renderer_never_supplies_an_account_id` pin test on each
+/// side keeps the argument from creeping back — `audit:command-parity` only
+/// diffs command *names*, so a stale TS argument would pass every gate and then
+/// fail at runtime.
 #[tauri::command]
 pub async fn companion_create_owner_invitation(
-    _local_account_id: String,
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<OwnerInvitationIssue, String> {
-    const TENANT_ID: &str = "local_acct_a";
     const INVITATION_TTL_SECS: i64 = 5 * 60;
 
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
@@ -1055,8 +1073,12 @@ pub async fn companion_create_owner_invitation(
     let now = unix_time_secs();
     let security = security_store::security_store()
         .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    // Resolve once: the tenant the invitation is filed under and the tenant
+    // stamped into the QR must be the same string, or the phone dials a tenant
+    // that holds no invitation.
+    let tenant_id = paired_tenant_id();
     let invitation = security
-        .create_owner_invitation(TENANT_ID, "local-trust-root", now, INVITATION_TTL_SECS)
+        .create_owner_invitation(&tenant_id, "local-trust-root", now, INVITATION_TTL_SECS)
         .map_err(|error| error.to_string())?;
     let signing_secret = secret::load_or_generate().map_err(|error| error.to_string())?;
 
@@ -1067,7 +1089,7 @@ pub async fn companion_create_owner_invitation(
         fingerprint,
         app_version: app_handle.package_info().version.to_string(),
         host_id: super::healthz::derive_server_id(&signing_secret),
-        tenant_id: TENANT_ID.to_string(),
+        tenant_id,
     })
 }
 
@@ -1720,20 +1742,138 @@ mod tests {
     #[test]
     fn commands_module_compiles() {}
 
+    /// `companion_create_owner_invitation` must not regrow an account argument.
+    ///
+    /// It used to take a `_local_account_id` the body threw away, so the
+    /// renderer believed it was choosing an account while the command enrolled
+    /// into a hardcoded tenant. `audit:command-parity` compares command *names*
+    /// only, so a re-added argument would pass every gate in the repo and then
+    /// fail at runtime with an arity error. The renderer half is pinned by
+    /// `companion-section.test.tsx`, which asserts the invoke carries no args.
+    #[test]
+    fn the_owner_invitation_command_takes_no_account_argument() {
+        let source = include_str!("commands.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production commands.rs source");
+        let signature = production
+            .split("pub async fn companion_create_owner_invitation(")
+            .nth(1)
+            .expect("the owner invitation command must exist")
+            .split(')')
+            .next()
+            .expect("a parameter list");
+        assert!(
+            !signature.contains("account"),
+            "companion_create_owner_invitation must take no account parameter, got: {signature}"
+        );
+    }
+
+    /// The tenant is resolved from the host binding, not spelled as a literal.
+    ///
+    /// Every device row, grant and audit event on this host is filed under it,
+    /// so a literal here means two installs share one tenant id and a bound
+    /// account addresses a tenant nothing enrolled into.
+    #[test]
+    fn no_command_addresses_a_hardcoded_tenant() {
+        let source = include_str!("commands.rs");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production commands.rs source");
+        // The quoted form only: the prose above `paired_tenant_id` names the
+        // literal it replaced, and a doc comment is not a call site.
+        assert!(
+            !production.contains(&format!("{q}local_acct_a{q}", q = '"')),
+            "companion commands must resolve the tenant through host_identity"
+        );
+    }
+
+    /// The QR must advertise the same tenant the invitation was filed under.
+    ///
+    /// These were two separately-written strings that happened to match. Once
+    /// the tenant came from a binding they could drift, and a phone dialling
+    /// the advertised tenant would find no invitation there.
+    #[tokio::test]
+    async fn the_invitation_tenant_matches_the_store_it_was_written_to() {
+        let _guard = security_store::test_guard();
+        let store = security_store::SecurityStore::in_memory().expect("in-memory store");
+        security_store::install_security_store(Some(store.clone()));
+        host_identity::unbind_local_account();
+
+        let tenant = paired_tenant_id();
+        let now = unix_time_secs();
+        let invitation = store
+            .create_owner_invitation(&tenant, "local-trust-root", now, 300)
+            .expect("invitation");
+
+        // Redeeming under the advertised tenant is the property that matters:
+        // the store only honours an invitation for the tenant it was filed
+        // under, so a successful challenge proves the two agree.
+        let challenge = store
+            .issue_challenge(&tenant, now, 300)
+            .expect("challenge for the advertised tenant");
+        store
+            .register_owner_device(
+                &tenant,
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "qr-device",
+                "Owner phone",
+                "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                "thumb-qr-device",
+                now,
+            )
+            .expect("the advertised tenant must be able to redeem the invitation");
+    }
+
+    /// Binding an account must not strand devices paired before the unlock.
+    ///
+    /// The unclaimed `__local__` bucket keeps its tenant when an account adopts
+    /// it, so a device enrolled while locked stays reachable afterwards. If
+    /// adoption minted a fresh tenant instead, every already-paired device would
+    /// silently stop authenticating on the next unlock.
+    #[tokio::test]
+    async fn a_device_paired_before_unlock_survives_the_account_binding() {
+        let _guard = security_store::test_guard();
+        let device = "pre-unlock-device";
+        let store = install_store_with_device(device);
+        let before = paired_tenant_id();
+
+        host_identity::bind_local_account("acct_late", "digest-late").expect("bind");
+
+        let after = paired_tenant_id();
+        assert_eq!(before, after, "adoption must keep the unclaimed tenant");
+        assert!(
+            store
+                .capability_snapshot(&after, device)
+                .expect("snapshot")
+                .is_some(),
+            "the device paired before the unlock must remain addressable"
+        );
+        host_identity::unbind_local_account();
+    }
+
     /// Register a paired owner device in a fresh in-memory store and install it
     /// as the process-global one. Returns the device id.
     fn install_store_with_device(device_id: &str) -> std::sync::Arc<security_store::SecurityStore> {
         let store = security_store::SecurityStore::in_memory().expect("in-memory store");
+        security_store::install_security_store(Some(store.clone()));
+        host_identity::unbind_local_account();
+        // Resolve the tenant the way the commands do, *after* installing the
+        // store. Enrolling under a literal would silently stop exercising the
+        // binding these commands now read.
+        let tenant = paired_tenant_id();
         let now = unix_time_secs();
-        let challenge = store
-            .issue_challenge(PAIRED_TENANT_ID, now, 600)
-            .expect("challenge");
+        let challenge = store.issue_challenge(&tenant, now, 600).expect("challenge");
         let invitation = store
-            .create_owner_invitation(PAIRED_TENANT_ID, "local-trust-root", now, 600)
+            .create_owner_invitation(&tenant, "local-trust-root", now, 600)
             .expect("invitation");
         store
             .register_owner_device(
-                PAIRED_TENANT_ID,
+                &tenant,
                 &invitation,
                 &challenge.id,
                 &challenge.nonce,
@@ -1744,13 +1884,12 @@ mod tests {
                 now,
             )
             .expect("register");
-        security_store::install_security_store(Some(store.clone()));
         store
     }
 
     fn holds(store: &security_store::SecurityStore, device_id: &str, capability: &str) -> bool {
         store
-            .has_capability(PAIRED_TENANT_ID, device_id, capability)
+            .has_capability(&paired_tenant_id(), device_id, capability)
             .expect("capability lookup")
     }
 
@@ -1874,7 +2013,7 @@ mod tests {
         let device = "locked-use-device";
         let store = install_store_with_device(device);
         let before = store
-            .capability_snapshot(PAIRED_TENANT_ID, device)
+            .capability_snapshot(&paired_tenant_id(), device)
             .expect("snapshot")
             .expect("device");
 
@@ -1884,7 +2023,7 @@ mod tests {
         assert!(super::super::locked_use_allow_list::global().is_allowed(device));
         assert_eq!(
             store
-                .capability_snapshot(PAIRED_TENANT_ID, device)
+                .capability_snapshot(&paired_tenant_id(), device)
                 .expect("snapshot")
                 .expect("device"),
             before,

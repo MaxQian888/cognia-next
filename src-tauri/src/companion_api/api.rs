@@ -23,13 +23,13 @@ use super::signaling::envelope::{
 use super::{
     command_manifest::{CommandApproval, CommandIdempotency, CommandTarget, CommandTransport},
     deployment::{deployment_mode, DeploymentMode},
+    host_identity,
     middleware::DeviceContext,
     replay_cache::ReplayCache,
     security_store::{security_store, SecurityStore, SecurityStoreError},
     SharedState,
 };
 
-const LOCAL_TENANT_ID: &str = "local_acct_a";
 const CHALLENGE_TTL_SECS: i64 = 60;
 const ACCESS_TOKEN_TTL_SECS: i64 = 5 * 60;
 const SOCKET_TICKET_TTL_SECS: i64 = 60;
@@ -124,7 +124,8 @@ async fn auth_config_handler(State(state): State<SharedState>, headers: HeaderMa
             DeploymentMode::MultiTenant => "multi-tenant",
         },
         host_id,
-        tenant_id: (mode == DeploymentMode::SingleUser).then(|| LOCAL_TENANT_ID.to_string()),
+        tenant_id: (mode == DeploymentMode::SingleUser)
+            .then(host_identity::current_tenant_or_unbound),
         oidc,
         signaling: SignalingPublicConfig {
             url: signaling_url,
@@ -1834,7 +1835,7 @@ async fn registration_authority(
 ) -> Result<RegistrationAuthority, ApiError> {
     match deployment_mode() {
         DeploymentMode::SingleUser => Ok(RegistrationAuthority {
-            tenant_id: LOCAL_TENANT_ID.to_string(),
+            tenant_id: host_identity::current_tenant_or_unbound(),
             actor_id: "local-trust-root".to_string(),
             role: "owner",
             requires_invitation: true,
@@ -1880,7 +1881,7 @@ async fn registration_authority(
 
 fn request_tenant(requested: Option<String>) -> Result<String, ApiError> {
     match deployment_mode() {
-        DeploymentMode::SingleUser => Ok(LOCAL_TENANT_ID.to_string()),
+        DeploymentMode::SingleUser => Ok(host_identity::current_tenant_or_unbound()),
         DeploymentMode::MultiTenant => requested
             .filter(|tenant| !tenant.trim().is_empty())
             .ok_or_else(|| {

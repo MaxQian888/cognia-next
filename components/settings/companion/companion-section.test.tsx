@@ -183,9 +183,11 @@ describe("CompanionSection", () => {
       expect(decoded.payload.serverVersion).toBe("0.1.0")
       expect(decoded.payload.fingerprint).toBe("sha256:paired-spki")
     }
-    expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation", {
-      localAccountId: "local_acct_a",
-    })
+    // No argument. The Rust command resolves the tenant from the host binding;
+    // an account id here would be an argument nothing reads, and
+    // `audit:command-parity` only diffs command names so nothing else would
+    // catch it.
+    expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation")
     expect(screen.getByText(/Expires in/i)).toBeInTheDocument()
     expect(screen.queryByTestId("pair-code-block")).toBeNull()
   })
@@ -238,11 +240,7 @@ describe("CompanionSection", () => {
 
     render(<CompanionSection />)
     await user.click(await screen.findByRole("button", { name: /Generate QR/i }))
-    await waitFor(() =>
-      expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation", {
-        localAccountId: "local_acct_a",
-      })
-    )
+    await waitFor(() => expect(callSpy).toHaveBeenCalledWith("companion_create_owner_invitation"))
 
     callSpy.mockImplementation(async (name: string) => {
       if (name === "companion_server_status") return STATUS_STOPPED
