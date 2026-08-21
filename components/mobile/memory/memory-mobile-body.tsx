@@ -4,7 +4,10 @@
  * Mobile companion long-term Memory view (closes the `/memory` desktop-only
  * gap). Read-mostly mirror of the desktop MemoryConsole: lists memories from
  * Dexie (warmed by the `memories` sync handler so it works offline) with a
- * text filter, reusing the same `MemoryRow` the desktop panel uses. The
+ * text filter, reusing the same `MemoryRow` the desktop panel uses. There is
+ * no hard-delete command on this surface, so the row is given `onArchive` and
+ * no `onDelete` — `memory_forget` has always invalidated rather than erased.
+ * The
  * mutations enter the durable mobile outbound queue and optimistically update
  * the local mirror only after enqueue succeeds. The desktop remains the
  * authority and applies the shared policy, PII, audit, and vector lifecycle.
@@ -150,9 +153,10 @@ export function MemoryMobileBody({ initialSelectedId }: MemoryMobileBodyProps = 
                   >
                     <MemoryRow
                       memory={m}
+                      density="compact"
                       onPinToggle={(id, pinned) => guarded(handlePinToggle(id, pinned))}
                       onSave={(id, text) => guarded(handleSave(id, text))}
-                      onDelete={(id) => guarded(handleForget(id))}
+                      onArchive={(id) => guarded(handleForget(id))}
                     />
                   </div>
                 )

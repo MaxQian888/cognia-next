@@ -41,7 +41,12 @@ export interface AddMemoryInput {
 export interface AddMemoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreate: (input: AddMemoryInput) => void | Promise<void>
+  /**
+   * Persist the memory. Resolving `false` keeps the dialog open with the draft
+   * intact — a PII-blocked or policy-denied add used to close the dialog and
+   * drop the text on the floor, because the result was never read.
+   */
+  onCreate: (input: AddMemoryInput) => Promise<boolean>
 }
 
 function parseTags(raw: string): string[] {
@@ -78,6 +83,7 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
   // "adjust state when a prop changes" pattern) rather than in an effect, so we
   // don't call setState synchronously inside useEffect. Setting prevOpen makes
   // the guard false on the re-render, so it converges after one extra pass.
+  const [submitting, setSubmitting] = useState(false)
   const [prevOpen, setPrevOpen] = useState(open)
   if (open !== prevOpen) {
     setPrevOpen(open)
@@ -92,6 +98,7 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
       setAgentId("")
       setBranch("")
       setPathPattern("")
+      setSubmitting(false)
     }
   }
 
@@ -103,7 +110,8 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
   const canSubmit = trimmed.length > 0 && hasRequiredNamespace
 
   const submit = () => {
-    if (!canSubmit) return
+    if (!canSubmit || submitting) return
+    setSubmitting(true)
     void onCreate({
       type,
       scope,
@@ -116,7 +124,10 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
       ...(branch.trim() ? { branch: branch.trim() } : {}),
       ...(pathPattern.trim() ? { pathPattern: pathPattern.trim() } : {}),
     })
-    onOpenChange(false)
+      .then((created) => {
+        if (created) onOpenChange(false)
+      })
+      .finally(() => setSubmitting(false))
   }
 
   return (
@@ -216,8 +227,14 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
             ) : null}
           </div>
 
+          {/*
+            Three optional namespace fields in a two-column grid left a ragged
+            2 + 1 row whenever the project field was present. The optional
+            project id gets its own full-width row instead, so branch and path
+            always pair up.
+          */}
           {scope !== "global" ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               {scope !== "workspace" ? (
                 <NamespaceInput
                   id="add-mem-project-optional"
@@ -226,18 +243,20 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
                   onChange={setProjectId}
                 />
               ) : null}
-              <NamespaceInput
-                id="add-mem-branch"
-                label={t("branchLabel")}
-                value={branch}
-                onChange={setBranch}
-              />
-              <NamespaceInput
-                id="add-mem-path"
-                label={t("pathPatternLabel")}
-                value={pathPattern}
-                onChange={setPathPattern}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <NamespaceInput
+                  id="add-mem-branch"
+                  label={t("branchLabel")}
+                  value={branch}
+                  onChange={setBranch}
+                />
+                <NamespaceInput
+                  id="add-mem-path"
+                  label={t("pathPatternLabel")}
+                  value={pathPattern}
+                  onChange={setPathPattern}
+                />
+              </div>
             </div>
           ) : null}
 
@@ -256,7 +275,7 @@ export function AddMemoryDialog({ open, onOpenChange, onCreate }: AddMemoryDialo
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("cancel")}
           </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
+          <Button onClick={submit} disabled={!canSubmit || submitting}>
             {t("submit")}
           </Button>
         </DialogFooter>

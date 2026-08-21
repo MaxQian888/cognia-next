@@ -85,21 +85,27 @@ jest.mock("@/lib/memory/history-filter", () => ({
   filterAndSortMemories: jest.fn((all: typeof mockMemories, _opts: unknown) => all),
 }))
 
-// Mock MemoryRow as a simple div with text + buttons
+// Mock MemoryRow as a simple div with text + buttons. The pin button forwards
+// `!memory.pinned` because that is the real component's contract — it hands the
+// callback the *desired* state. The stub used to forward the current value,
+// which is how a double negation in the panel went unnoticed.
 jest.mock("@/components/memory/memory-row", () => ({
   MemoryRow: ({
     memory,
     onPinToggle,
+    onArchive,
     onDelete,
   }: {
     memory: { id: string; text: string; pinned: boolean }
     onPinToggle: (id: string, pinned: boolean) => void
-    onDelete: (id: string) => void
+    onArchive?: (id: string) => void
+    onDelete?: (id: string) => void
   }) => (
     <div data-testid={`memory-row-${memory.id}`}>
       <span>{memory.text}</span>
-      <button onClick={() => onPinToggle(memory.id, memory.pinned)}>pin</button>
-      <button onClick={() => onDelete(memory.id)}>delete</button>
+      <button onClick={() => onPinToggle(memory.id, !memory.pinned)}>pin</button>
+      <button onClick={() => onArchive?.(memory.id)}>archive</button>
+      <button onClick={() => onDelete?.(memory.id)}>delete</button>
     </div>
   ),
 }))

@@ -30,7 +30,6 @@ import {
 } from "@/components/ui/select"
 import { MemoryRow } from "@/components/memory/memory-row"
 import { AddMemoryDialog, type AddMemoryInput } from "@/components/memory/add-memory-dialog"
-import { RetrievalControlPanel } from "@/components/rag/retrieval-control-panel"
 
 export interface MemoryWorkbenchPanelProps {
   /** Session id that provides scope context for newly added memories. */
@@ -59,12 +58,21 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
     [all, deferredQuery, sort]
   )
 
+  // `MemoryRow` hands over the *desired* pinned state. Negating it here made
+  // the pin button write back whatever the row already was, so pinning from
+  // this panel silently did nothing.
   const handlePin = useCallback((id: string, pinned: boolean) => {
-    void manageMemory({ kind: "pin", id, pinned: !pinned })
+    void manageMemory({ kind: "pin", id, pinned })
   }, [])
 
   const handleSave = useCallback((id: string, text: string) => {
     void manageMemory({ kind: "update", id, patch: { text } })
+  }, [])
+
+  // Archive, not hard-delete: the compact panel has no confirmation step, and
+  // `invalidate` keeps the row restorable from `/memory` → Archived.
+  const handleArchive = useCallback((id: string) => {
+    void manageMemory({ kind: "invalidate", id })
   }, [])
 
   const handleDelete = useCallback((id: string) => {
@@ -72,14 +80,14 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
   }, [])
 
   const handleCreate = useCallback(async (input: AddMemoryInput) => {
-    await manageMemory({ kind: "create", ...input })
+    const result = await manageMemory({ kind: "create", ...input })
+    return result.ok
   }, [])
 
   return (
     <div className="flex h-full flex-col">
       {/* Header controls */}
       <div className="flex shrink-0 flex-col gap-2 border-b p-3">
-        <RetrievalControlPanel corpusPrefixes={["memory:"]} compact />
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -129,13 +137,15 @@ export function MemoryWorkbenchPanel({ sessionId: _sessionId }: MemoryWorkbenchP
             <EmptyDescription className="text-xs">{t("emptyDescription")}</EmptyDescription>
           </Empty>
         ) : (
-          <div className="divide-y">
+          <div>
             {rows.map((memory) => (
               <MemoryRow
                 key={memory.id}
                 memory={memory}
+                density="compact"
                 onPinToggle={handlePin}
                 onSave={handleSave}
+                onArchive={handleArchive}
                 onDelete={handleDelete}
               />
             ))}

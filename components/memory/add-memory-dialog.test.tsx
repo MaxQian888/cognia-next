@@ -1,12 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AddMemoryDialog } from "./add-memory-dialog"
 
 function setup(open = true) {
   const onOpenChange = jest.fn()
-  const onCreate = jest.fn()
+  // `onCreate` resolves whether the command landed; the dialog only closes
+  // on `true`, so a rejected add keeps the draft on screen.
+  const onCreate = jest.fn<Promise<boolean>, unknown[]>(async () => true)
   const utils = render(
     <AddMemoryDialog open={open} onOpenChange={onOpenChange} onCreate={onCreate} />
   )
@@ -22,7 +24,7 @@ describe("AddMemoryDialog", () => {
     expect(submit.disabled).toBe(false)
   })
 
-  it("creates a memory with trimmed text, default type, importance and parsed tags", () => {
+  it("creates a memory with trimmed text, default type, importance and parsed tags", async () => {
     const { onCreate, onOpenChange } = setup()
     fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "  prefers pnpm  " } })
     fireEvent.change(screen.getByLabelText("Tags"), { target: { value: "tools, cli ,tools" } })
@@ -34,7 +36,19 @@ describe("AddMemoryDialog", () => {
       importance: 5,
       tags: ["tools", "cli"],
     })
-    expect(onOpenChange).toHaveBeenCalledWith(false)
+    // Closing now waits on the create result, so the dialog can stay open when
+    // the command is rejected.
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("stays open and keeps the draft when the create is rejected", async () => {
+    const { onCreate, onOpenChange } = setup()
+    onCreate.mockResolvedValue(false)
+    fireEvent.change(screen.getByLabelText("Memory"), { target: { value: "1234-5678" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }))
+    await waitFor(() => expect(onCreate).toHaveBeenCalled())
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    expect((screen.getByLabelText("Memory") as HTMLTextAreaElement).value).toBe("1234-5678")
   })
 
   it("requires and submits the workspace project namespace", () => {
@@ -85,7 +99,9 @@ describe("AddMemoryDialog", () => {
 
   it("resets the form each time it re-opens", () => {
     const onOpenChange = jest.fn()
-    const onCreate = jest.fn()
+    // `onCreate` resolves whether the command landed; the dialog only closes
+    // on `true`, so a rejected add keeps the draft on screen.
+    const onCreate = jest.fn<Promise<boolean>, unknown[]>(async () => true)
     const { rerender } = render(
       <AddMemoryDialog open onOpenChange={onOpenChange} onCreate={onCreate} />
     )

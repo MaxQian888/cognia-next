@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryBulkToolbar } from "./memory-bulk-toolbar"
 
 function setup(over: Partial<Parameters<typeof MemoryBulkToolbar>[0]> = {}) {
@@ -9,6 +10,7 @@ function setup(over: Partial<Parameters<typeof MemoryBulkToolbar>[0]> = {}) {
     onToggleSelectAll: jest.fn(),
     onPin: jest.fn(),
     onUnpin: jest.fn(),
+    onArchive: jest.fn(),
     onDelete: jest.fn(),
     onClear: jest.fn(),
   }
@@ -67,5 +69,33 @@ describe("MemoryBulkToolbar", () => {
     expect(screen.getByRole("button", { name: /^delete$/i })).toBeDisabled()
     fireEvent.click(pin)
     expect(onPin).not.toHaveBeenCalled()
+  })
+})
+
+describe("MemoryBulkToolbar — archive", () => {
+  // Archive is the softer default: `invalidate` keeps history and can be undone
+  // from the Archived view, so it is offered alongside the permanent delete
+  // rather than the permanent delete being the only bulk removal.
+  it("confirms before archiving the selection", async () => {
+    const { onArchive } = setup({ selectedCount: 4 })
+    await userEvent.click(screen.getByTestId("memory-bulk-archive"))
+    expect(onArchive).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog.textContent).toContain("4")
+    await userEvent.click(within(dialog).getByRole("button", { name: "Archive" }))
+    expect(onArchive).toHaveBeenCalled()
+  })
+
+  it("keeps archive and permanent delete as separate actions", () => {
+    setup()
+    expect(screen.getByTestId("memory-bulk-archive")).toBeTruthy()
+    expect(screen.getByTestId("memory-bulk-delete")).toBeTruthy()
+  })
+
+  it("disables every action while a bulk mutation is in flight", () => {
+    setup({ busy: true })
+    for (const testid of ["memory-bulk-archive", "memory-bulk-delete"]) {
+      expect(screen.getByTestId(testid).hasAttribute("disabled")).toBe(true)
+    }
   })
 })

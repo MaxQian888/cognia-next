@@ -65,18 +65,18 @@ jest.mock("@/components/memory/memory-row", () => ({
     memory,
     onPinToggle,
     onSave,
-    onDelete,
+    onArchive,
   }: {
     memory: { id: string; text: string }
     onPinToggle: (id: string, pinned: boolean) => void
     onSave: (id: string, text: string) => void
-    onDelete: (id: string) => void
+    onArchive: (id: string) => void
   }) => (
     <div data-testid={`memory-row-${memory.id}`}>
       {memory.text}
       <button onClick={() => onPinToggle(memory.id, true)}>pin</button>
       <button onClick={() => onSave(memory.id, "updated")}>save</button>
-      <button onClick={() => onDelete(memory.id)}>forget</button>
+      <button onClick={() => onArchive(memory.id)}>forget</button>
     </div>
   ),
 }))

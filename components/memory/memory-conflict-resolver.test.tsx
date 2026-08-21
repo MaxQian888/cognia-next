@@ -148,3 +148,18 @@ describe("MemoryConflictResolver", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })
+
+describe("MemoryConflictResolver — thrown failures", () => {
+  // A rejected command already toasted, but a *thrown* one left the dialog
+  // stuck in its busy state with no feedback at all.
+  it("recovers and toasts when the command throws rather than rejecting", async () => {
+    const user = userEvent.setup()
+    mockManage.mockRejectedValueOnce(new Error("dexie is down"))
+    setup()
+    const sideA = screen.getByTestId("conflict-side-a")
+    const keep = within(sideA).getByRole("button", { name: "Keep this one" })
+    await user.click(keep)
+    expect(toast.error).toHaveBeenCalledWith("The memory operation failed — please try again")
+    expect(keep.hasAttribute("disabled")).toBe(false)
+  })
+})

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { PinIcon, PinOffIcon, Trash2Icon, XIcon } from "lucide-react"
+import { ArchiveIcon, PinIcon, PinOffIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ConfirmActionDialog } from "@/components/agent/workspace/settings/confirm-action-dialog"
@@ -15,6 +15,9 @@ export interface MemoryBulkToolbarProps {
   onToggleSelectAll: (checked: boolean) => void
   onPin: () => void
   onUnpin: () => void
+  /** Soft delete — drops the rows out of recall but keeps them restorable. */
+  onArchive: () => void
+  /** Permanent delete. Confirmed inside this component. */
   onDelete: () => void
   onClear: () => void
   /** Disables every action while a bulk mutation is in flight. */
@@ -22,8 +25,10 @@ export interface MemoryBulkToolbarProps {
 }
 
 /**
- * Bulk-action bar shown above the memory list once ≥1 row is selected. Pins,
- * unpins, or hard-deletes (with confirmation) the current selection.
+ * Bulk-action bar shown above the memory list once at least one row is
+ * selected. Pins, unpins, archives, or permanently deletes the selection —
+ * both destructive paths confirm first, and archive is the softer default
+ * because it keeps history and can be undone from the Archived view.
  */
 export function MemoryBulkToolbar({
   selectedCount,
@@ -32,12 +37,14 @@ export function MemoryBulkToolbar({
   onToggleSelectAll,
   onPin,
   onUnpin,
+  onArchive,
   onDelete,
   onClear,
   busy = false,
 }: MemoryBulkToolbarProps) {
   const t = useTranslations("memory.bulk")
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
 
   return (
     <div
@@ -65,9 +72,20 @@ export function MemoryBulkToolbar({
       <Button
         size="sm"
         variant="outline"
+        disabled={busy}
+        onClick={() => setConfirmArchive(true)}
+        data-testid="memory-bulk-archive"
+      >
+        <ArchiveIcon className="size-4" />
+        {t("archive")}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
         className="text-destructive hover:text-destructive"
         disabled={busy}
         onClick={() => setConfirmDelete(true)}
+        data-testid="memory-bulk-delete"
       >
         <Trash2Icon className="size-4" />
         {t("delete")}
@@ -75,6 +93,17 @@ export function MemoryBulkToolbar({
       <Button size="sm" variant="ghost" disabled={busy} onClick={onClear} aria-label={t("clear")}>
         <XIcon className="size-4" />
       </Button>
+
+      <ConfirmActionDialog
+        open={confirmArchive}
+        onOpenChange={setConfirmArchive}
+        title={t("archiveConfirm.title")}
+        description={t("archiveConfirm.description", { count: selectedCount })}
+        confirmLabel={t("archiveConfirm.confirm")}
+        cancelLabel={t("archiveConfirm.cancel")}
+        tone="warning"
+        onConfirm={onArchive}
+      />
 
       <ConfirmActionDialog
         open={confirmDelete}

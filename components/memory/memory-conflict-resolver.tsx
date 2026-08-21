@@ -58,17 +58,25 @@ export function MemoryConflictResolver({
   const otherId = memory.conflictWithIds?.[0]
   const other = otherId ? resolveMemory(otherId) : undefined
 
+  // A rejected command already toasted; a *thrown* one used to leave the dialog
+  // stuck in its busy state with no feedback at all, which is what a Dexie
+  // failure or an empty merge draft produces.
   const run = async (command: Parameters<typeof manageMemory>[0], keptId: string) => {
     setBusy(true)
-    const result = await manageMemory(command)
-    setBusy(false)
-    if (!result.ok) {
-      toast.error(tErrors(result.reason))
-      return
+    try {
+      const result = await manageMemory(command)
+      if (!result.ok) {
+        toast.error(tErrors(result.reason))
+        return
+      }
+      toast.success(t("resolvedToast"))
+      onResolved?.(keptId)
+      onOpenChange(false)
+    } catch {
+      toast.error(tErrors("mutation_failed"))
+    } finally {
+      setBusy(false)
     }
-    toast.success(t("resolvedToast"))
-    onResolved?.(keptId)
-    onOpenChange(false)
   }
 
   return (
@@ -176,18 +184,23 @@ export function MemoryConflictResolver({
                 disabled={busy}
                 onClick={async () => {
                   setBusy(true)
-                  const result = await manageMemory({
-                    kind: "review",
-                    id: memory.id,
-                    status: "verified",
-                  })
-                  setBusy(false)
-                  if (!result.ok) {
-                    toast.error(tErrors(result.reason))
-                    return
+                  try {
+                    const result = await manageMemory({
+                      kind: "review",
+                      id: memory.id,
+                      status: "verified",
+                    })
+                    if (!result.ok) {
+                      toast.error(tErrors(result.reason))
+                      return
+                    }
+                    onResolved?.(memory.id)
+                    onOpenChange(false)
+                  } catch {
+                    toast.error(tErrors("mutation_failed"))
+                  } finally {
+                    setBusy(false)
                   }
-                  onResolved?.(memory.id)
-                  onOpenChange(false)
                 }}
               >
                 {t("clearStaleConflict")}
