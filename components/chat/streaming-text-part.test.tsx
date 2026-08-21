@@ -146,7 +146,7 @@ describe("StreamingTextPart", () => {
     expect(props.className).not.toContain("animate-pulse")
   })
 
-  it("supplies incremental parsing and off-screen block containment to Streamdown", () => {
+  it("supplies incremental parsing and a typeset-aware block wrapper to Streamdown", () => {
     render(<StreamingTextPart text="hello" isStreaming={true} />)
     const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
       parseMarkdownIntoBlocksFn?: (markdown: string) => string[]
@@ -161,11 +161,20 @@ describe("StreamingTextPart", () => {
     props.parseMarkdownIntoBlocksFn!(`${initial} tail`)
     expect(mockStreamdownParser.mock.calls[0]?.[0].length).toBeLessThan(100)
 
-    const { getByTestId } = render(createElement(props.BlockComponent!, { content: "contained" }))
-    expect(getByTestId("streamdown-block").parentElement).toHaveClass(
-      "[content-visibility:auto]",
-      "[contain-intrinsic-size:auto_160px]"
-    )
+    // ADR-0138 — no `content-visibility` on the streaming path: every block of
+    // the reply being streamed is on screen, so skipping render buys nothing,
+    // while the row IS measured, so blocks flipping rendered/skipped feed a
+    // height-change loop straight back into the virtualizer.
+    const plain = render(createElement(props.BlockComponent!, { content: "just prose" }))
+    const plainWrapper = plain.getByTestId("streamdown-block").parentElement!
+    expect(plainWrapper.className).not.toContain("content-visibility")
+    expect(plainWrapper.className).not.toContain("contain-intrinsic-size")
+    plain.unmount()
+
+    // A block that renders a <pre> still gets typeset's opt-out marker — that
+    // is the one thing this wrapper is for.
+    const fenced = render(createElement(props.BlockComponent!, { content: "```ts\nx\n```" }))
+    expect(fenced.getByTestId("streamdown-block").parentElement).toHaveClass("not-typeset")
   })
 
   it("uses native-safe external links while streaming", () => {

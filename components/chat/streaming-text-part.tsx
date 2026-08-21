@@ -10,9 +10,10 @@
  *      slots, action bar) stays out of the per-token render path conceptually.
  *      The memo equality on (text, isStreaming) is a no-op when text changes
  *      per token, but pairs with the heavy-block `next/dynamic` lazy-load in
- *      `markdown-renderer.tsx` and the per-block `content-visibility` wrapper
- *      below to keep the streaming subtree minimal. (An earlier plan mentioned
- *      React `<Activity>`; it was never adopted here — ADR-0127.)
+ *      `markdown-renderer.tsx` to keep the streaming subtree minimal. (An
+ *      earlier plan mentioned React `<Activity>`; it was never adopted here —
+ *      ADR-0127. The per-block `content-visibility` wrapper that used to live
+ *      here is gone — ADR-0138; only settled messages skip render now.)
  *
  * Pairs with the non-streaming text branch in `MessageRenderer`, which
  * routes through `<MarkdownRenderer>` for the finalised message.
@@ -91,14 +92,28 @@ export function blockRendersCode(content: unknown): boolean {
   return lines.length > 0 && lines.every((line) => /^(?: {4}|\t)/.test(line))
 }
 
-const ContainedStreamdownBlock = memo(function ContainedStreamdownBlock(props: BlockProps) {
+/**
+ * Per-block wrapper for the STREAMING branch. It exists for one reason: to hang
+ * typeset's opt-out on a block that renders a `<pre>` (see
+ * {@link blockRendersCode}).
+ *
+ * It used to also carry `content-visibility: auto` with a
+ * `contain-intrinsic-size: auto 160px` placeholder. That is wrong on this path
+ * and was a jitter source (ADR-0138): every block of the reply being streamed is
+ * on screen, so skipping render buys nothing — but the row IS measured, so each
+ * block flipping between rendered and skipped changes the row's height, which
+ * re-publishes the virtualizer's offsets, which moves the block, which flips it
+ * again. On first render it is worse still: the remembered size replaces the
+ * 160px guess, so every block lands with a height correction under the caret.
+ *
+ * Settled messages keep it — `FinalizedMarkdownSection` above — where blocks
+ * genuinely do leave the viewport and their remembered sizes are already true.
+ */
+const StreamingBlock = memo(function StreamingBlock(props: BlockProps) {
+  const rendersCode = blockRendersCode((props as { content?: unknown }).content)
+  if (!rendersCode) return <Block {...props} />
   return (
-    <div
-      className={cn(
-        "[content-visibility:auto] [contain-intrinsic-size:auto_160px]",
-        blockRendersCode((props as { content?: unknown }).content) && "not-typeset"
-      )}
-    >
+    <div className="not-typeset">
       <Block {...props} />
     </div>
   )
@@ -261,7 +276,7 @@ function StreamingTextPartInner({
   const { reduce } = useFlowMotion()
   return (
     <MessageResponse
-      BlockComponent={ContainedStreamdownBlock}
+      BlockComponent={StreamingBlock}
       caret="block"
       className={cn(
         "typeset typeset-chat",
