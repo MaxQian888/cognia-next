@@ -1,62 +1,77 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
-import { useSessionImportWatch, type UseSessionImportWatchDeps } from "./use-session-import-watch"
 
-type ChangedHandler = (event: { payload?: { path?: string } }) => void
+import type { AppSettings } from "@cognia/agent-config-types"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { useSessionImportWatch } from "./use-session-import-watch"
 
-function makeDeps(over: Partial<UseSessionImportWatchDeps> = {}) {
-  let handler: ChangedHandler | null = null
-  const unlisten = jest.fn()
-  const deps: UseSessionImportWatchDeps = {
-    isTauri: jest.fn(() => true),
-    invoke: jest.fn(async () => true) as unknown as UseSessionImportWatchDeps["invoke"],
-    listen: jest.fn(async (_event: string, cb: ChangedHandler) => {
-      handler = cb
-      return unlisten
-    }) as unknown as UseSessionImportWatchDeps["listen"],
-    collectWatchRoots: jest.fn(async () => ["/home/u/.claude/projects"]),
-    runWatchImport: jest.fn(async () => ({ sessions: 0, messages: 0 })),
-    ...over,
-  }
-  return { deps, fire: (path?: string) => handler?.({ payload: { path } }), unlisten }
+jest.mock("@/lib/db/settings", () => ({
+  saveSettings: jest.fn(async () => ({}) as AppSettings),
+}))
+
+const originalStoreSave = useSettingsStore.getState().save
+
+function seed(enabled: boolean | undefined) {
+  useSettingsStore.setState({
+    settings:
+      enabled === undefined
+        ? ({ id: "singleton" } as never)
+        : ({ id: "singleton", sessionImportWatch: { enabled } } as never),
+  })
 }
 
+afterEach(() => {
+  useSettingsStore.setState({ settings: null, save: originalStoreSave })
+})
+
 describe("useSessionImportWatch", () => {
-  it("is a no-op off Tauri", async () => {
-    const { deps } = makeDeps({ isTauri: jest.fn(() => false) })
-    const { result } = renderHook(() => useSessionImportWatch({ deps }))
-    await act(async () => {
-      await result.current.toggle(true)
-    })
+  it("reads the persisted preference, defaulting to off", () => {
+    seed(undefined)
+    const { result } = renderHook(() => useSessionImportWatch())
     expect(result.current.enabled).toBe(false)
-    expect(deps.invoke).not.toHaveBeenCalled()
   })
 
-  it("starts the watcher, imports on change, and stops cleanly", async () => {
-    const { deps, fire, unlisten } = makeDeps()
-    const { result } = renderHook(() => useSessionImportWatch({ projectId: "proj", deps }))
+  it("reflects a persisted enabled preference — the switch survives a remount", () => {
+    seed(true)
+    const { result, unmount } = renderHook(() => useSessionImportWatch())
+    expect(result.current.enabled).toBe(true)
+    unmount()
+    // Reopening the dialog must not re-read as "off" while the watch is on.
+    const again = renderHook(() => useSessionImportWatch())
+    expect(again.result.current.enabled).toBe(true)
+  })
+
+  it("persists the toggle rather than owning the watcher", async () => {
+    seed(false)
+    const saveSettings = jest.fn(async () => ({}) as AppSettings)
+    const { result } = renderHook(() => useSessionImportWatch({ deps: { saveSettings } }))
 
     await act(async () => {
       await result.current.toggle(true)
     })
-    expect(result.current.enabled).toBe(true)
-    expect(deps.invoke).toHaveBeenCalledWith("session_import_watch_start", {
-      roots: ["/home/u/.claude/projects"],
-    })
-
-    // A change event triggers a scoped background re-import.
-    await act(async () => {
-      fire("/home/u/.claude/projects/x.jsonl")
-    })
-    expect(deps.runWatchImport).toHaveBeenCalledWith({
-      changedPath: "/home/u/.claude/projects/x.jsonl",
-      projectId: "proj",
-    })
+    expect(saveSettings).toHaveBeenCalledWith({ sessionImportWatch: { enabled: true } })
 
     await act(async () => {
       await result.current.toggle(false)
     })
-    expect(result.current.enabled).toBe(false)
-    expect(unlisten).toHaveBeenCalled()
-    expect(deps.invoke).toHaveBeenCalledWith("session_import_watch_stop")
+    expect(saveSettings).toHaveBeenCalledWith({ sessionImportWatch: { enabled: false } })
+  })
+
+  it("updates the shared settings store so the app-level watcher reacts immediately", async () => {
+    seed(false)
+    const save = jest.fn(async (patch: Partial<AppSettings>) => {
+      useSettingsStore.setState((state) => ({
+        settings: { ...state.settings!, ...patch },
+      }))
+    })
+    useSettingsStore.setState({ save: save as never })
+    const { result } = renderHook(() => useSessionImportWatch())
+
+    await act(async () => {
+      await result.current.toggle(true)
+    })
+
+    expect(save).toHaveBeenCalledWith({ sessionImportWatch: { enabled: true } })
+    expect(result.current.enabled).toBe(true)
   })
 })

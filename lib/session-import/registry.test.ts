@@ -1,8 +1,10 @@
 import {
   __resetDynamicSessionSourcesForTesting,
   detectSourceForFiles,
+  detectSourcesForFiles,
   detectSourceForPath,
   getAcceptedPickerExtensions,
+  getPickerOnlySources,
   getSessionSource,
   getSessionSources,
   registerSessionSource,
@@ -137,5 +139,51 @@ describe("session-source registry", () => {
       )
       expect(detectSourceForPath("C:\\Users\\x\\.win\\sessions\\a.jsonl", "")?.id).toBe("p:win")
     })
+  })
+})
+
+describe("multi-source picks and declared dormancy", () => {
+  afterEach(() => __resetDynamicSessionSourcesForTesting())
+
+  const files = [{ name: "a.jsonl", path: "/p/a.jsonl", content: "{}" }]
+
+  function claiming(id: string, verdict: "match" | "maybe" | "no"): AgentSessionSourceAdapter {
+    return {
+      id,
+      displayName: id,
+      labelKey: id,
+      acceptedExtensions: [".jsonl"],
+      scanRoots: () => [],
+      detect: () => verdict,
+      listSessions: async () => [],
+      parseSession: async () => ({ session: {} as never, messages: [] }),
+    }
+  }
+
+  it("returns every claiming source, matches before maybes", () => {
+    registerSessionSource(claiming("guess", "maybe"), { pluginId: "p1" })
+    registerSessionSource(claiming("sure", "match"), { pluginId: "p2" })
+    const ids = detectSourcesForFiles(files)
+    // A mixed pick used to import only the single winner and drop the rest.
+    expect(ids).toContain("p1:guess")
+    expect(ids).toContain("p2:sure")
+    expect(ids.indexOf("p2:sure")).toBeLessThan(ids.indexOf("p1:guess"))
+  })
+
+  it("returns an empty list when nothing claims the files", () => {
+    expect(detectSourcesForFiles([{ name: "x.bin", path: "/x.bin", content: "" }])).toEqual([])
+  })
+
+  it("names Aider as picker-only, and picker-only sources scan nothing", () => {
+    const pickerOnly = getPickerOnlySources()
+    expect(pickerOnly.map((s) => s.id)).toContain("aider")
+    // The contract the flag carries: declaring it means there is no scan root.
+    for (const source of pickerOnly) {
+      expect(source.scanRoots("/home/u", undefined)).toEqual([])
+    }
+  })
+
+  it("no other built-in claims picker-only dormancy", () => {
+    expect(getPickerOnlySources().map((s) => s.id)).toEqual(["aider"])
   })
 })

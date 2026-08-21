@@ -10,6 +10,7 @@ import {
 
 import type { ImportedConversation } from "@/lib/data/importers/types"
 import { buildReplayPrompt, conversationToCanonical } from "./codec-types"
+import { getSessionSources } from "./registry"
 
 function conversation(): ImportedConversation {
   return {
@@ -250,5 +251,64 @@ describe("materialization fixture parity (conformance bridge)", () => {
     // The conformance case drives this exact string through the real sidecar;
     // if buildReplayPrompt's format changes, BOTH sides fail together.
     expect(buildReplayPrompt(session)).toBe(fixture.replayPrompt)
+  })
+})
+
+describe("materialize is deliberately dormant (Working Rule 7)", () => {
+  it("is declared by exactly the codecs that document a public reverse path", () => {
+    // Type axis. An adapter without `materialize` is an honest import-only
+    // source; these two declare the `contextual` replay-prompt path.
+    const declaring = getSessionSources()
+      .filter((source) => source.codec?.materialize)
+      .map((source) => source.id)
+      .sort()
+    expect(declaring).toEqual(["claude-code", "pi"])
+  })
+
+  it("has no production caller anywhere in the app", async () => {
+    // The claim the UI label rests on. If a runtime path is ever added, this
+    // fails and the `reverseFidelity` copy in `FidelityReport` must be revisited
+    // — dormancy that outlives its own truth is worse than no label at all.
+    const { execFileSync } = await import("node:child_process")
+    const hits = execFileSync(
+      "rg",
+      [
+        "--no-heading",
+        "-l",
+        "buildReplayPrompt|materialize\\.fidelity|codec\\?\\.materialize",
+        "-g",
+        "*.ts",
+        "-g",
+        "*.tsx",
+        "-g",
+        "!node_modules",
+        ".",
+      ],
+      { cwd: process.cwd(), encoding: "utf8" }
+    )
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.replace(/^\.\//, ""))
+
+    const ALLOWED = new Set([
+      // The definition, the two codecs that declare it, and `lib/claude/replay.ts`
+      // which only mentions it in a comment to disambiguate its own helper.
+      "lib/session-import/codec-types.ts",
+      "lib/session-import/codec-types.test.ts",
+      "lib/session-import/codecs/claude-code-codec.ts",
+      "lib/session-import/codecs/claude-code-codec.test.ts",
+      "lib/session-import/codecs/pi-codec.ts",
+      "lib/session-import/codecs/pi-codec.test.ts",
+      "lib/session-import/adapters/pi.test.ts",
+      "lib/claude/replay.ts",
+      "lib/claude/replay.test.ts",
+      // Generated SDK ambient types — a mirror of the contract, not a caller.
+      "plugins/impeccable/types/cognia-plugin-sdk.d.ts",
+      // The UI that LABELS the dormancy, and its tests.
+      "components/session-import/fidelity-report.tsx",
+      "components/session-import/fidelity-report.test.tsx",
+      "components/session-import/session-import-dialog.tsx",
+    ])
+    expect(hits.filter((file) => !ALLOWED.has(file))).toEqual([])
   })
 })

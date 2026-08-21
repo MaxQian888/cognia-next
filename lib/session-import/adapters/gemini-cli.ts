@@ -250,8 +250,12 @@ export const geminiCliSessionSource: AgentSessionSourceAdapter = {
   labelKey: "gemini-cli",
   acceptedExtensions: ACCEPTED,
 
-  scanRoots(home) {
-    return home ? [joinPath(joinPath(home, ".gemini"), "tmp")] : []
+  // `roots.geminiDir` first: it comes from the Rust resolver, which is the one
+  // place in the app allowed to know where a vendor's tree really lives. This
+  // adapter used to join onto a bare `home` — one of only two that still did.
+  scanRoots(home, roots) {
+    const base = roots?.geminiDir || (home ? joinPath(home, ".gemini") : "")
+    return base ? [joinPath(base, "tmp")] : []
   },
 
   detect(files: PickedSessionFile[]) {
@@ -279,7 +283,7 @@ export const geminiCliSessionSource: AgentSessionSourceAdapter = {
         .filter((s) => s.messageCount > 0)
     }
     const summaries: SessionSummary[] = []
-    for (const root of this.scanRoots(input.home)) {
+    for (const root of this.scanRoots(input.home, input.roots)) {
       const files = await walkFiles(input.fs, root, (n) => n.toLowerCase().endsWith(".jsonl"))
       for (const file of files) {
         try {

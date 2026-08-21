@@ -52,4 +52,24 @@ describe("walkFiles", () => {
     const fs = fakeFs({})
     expect(await walkFiles(fs, "/missing", () => true)).toEqual([])
   })
+
+  it("stops descending instead of following a symlink loop forever", async () => {
+    // A `~/.claude -> ~` style loop inside a watched agent directory would
+    // otherwise recurse until the scan blew the stack, on a path the user
+    // cannot see and did not choose.
+    let deepest = 0
+    const loopingFs = {
+      exists: async () => true,
+      readDir: async (dir: string) => {
+        deepest = Math.max(deepest, dir.split("/").length)
+        return ["loop"]
+      },
+      stat: async () => ({ size: 0, isFile: false }),
+      readTextFile: async () => "",
+    }
+    await expect(walkFiles(loopingFs, "/root", () => true)).resolves.toEqual([])
+    // Bounded, and generously above the deepest real layout (Codex's
+    // `sessions/YYYY/MM/DD`).
+    expect(deepest).toBeLessThan(20)
+  })
 })

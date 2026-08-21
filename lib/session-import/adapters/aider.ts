@@ -145,7 +145,10 @@ export const aiderSessionSource: AgentSessionSourceAdapter = {
   labelKey: "aider",
   acceptedExtensions: ACCEPTED,
 
-  // Per-repo file with no central home — picker only.
+  // Aider appends to `<repo>/.aider.chat.history.md`: there is no machine-wide
+  // location to walk, so this source is picker-only BY DESIGN — declared, not
+  // merely implied by an empty `scanRoots`, so the dialog can say so.
+  pickerOnly: true,
   scanRoots() {
     return []
   },

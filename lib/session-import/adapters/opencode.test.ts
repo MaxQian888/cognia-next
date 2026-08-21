@@ -224,6 +224,8 @@ describe("opencodeSessionSource", () => {
       opencodeDataDir: "/xdg/data/opencode",
       piAgentDir: "",
       piSessionDir: "",
+      geminiDir: "",
+      continueDir: "",
     })
     expect(scanned[0]).toBe("/xdg/data/opencode")
     expect(scanned).toContain("/home/u/.local/share/opencode")
@@ -236,6 +238,8 @@ describe("opencodeSessionSource", () => {
         opencodeDataDir: "/xdg/data/opencode",
         piAgentDir: "",
         piSessionDir: "",
+        geminiDir: "",
+        continueDir: "",
       })
     ).toEqual(["/xdg/data/opencode"])
   })
@@ -248,6 +252,8 @@ describe("opencodeSessionSource", () => {
       opencodeDataDir: "/home/u/.local/share/opencode",
       piAgentDir: "",
       piSessionDir: "",
+      geminiDir: "",
+      continueDir: "",
     })
     expect(scanned.filter((r) => r === "/home/u/.local/share/opencode")).toHaveLength(1)
   })
@@ -260,6 +266,8 @@ describe("opencodeSessionSource", () => {
       opencodeDataDir: "D:\\XDG\\opencode",
       piAgentDir: "",
       piSessionDir: "",
+      geminiDir: "",
+      continueDir: "",
       opencodePlatformDataDir: "E:\\Profiles\\u\\Roaming\\opencode",
     })
     expect(scanned).toEqual(
@@ -280,6 +288,33 @@ describe("opencodeSessionSource", () => {
     // A NEW scan input re-reads (no cross-run staleness).
     await opencodeSessionSource.listSessions({ fs, home: "/home/u" })
     expect(reads).toBe(2)
+  })
+
+  it("propagates a DB read failure instead of reporting an empty history", async () => {
+    // `scanAllSources` was built to collect per-source failures — its comment
+    // names OpenCode's DB as the example — but the reader swallowed the error
+    // and returned [], so a locked or corrupt database was indistinguishable
+    // from "you have no OpenCode sessions".
+    __setOpencodeReaderForTesting(async () => {
+      throw new Error("database is locked")
+    })
+    await expect(opencodeSessionSource.listSessions({ fs, home: "/home/u" })).rejects.toThrow(
+      "database is locked"
+    )
+  })
+
+  it("a failed read is not cached, so the next scan retries", async () => {
+    let attempt = 0
+    __setOpencodeReaderForTesting(async () => {
+      attempt += 1
+      if (attempt === 1) throw new Error("database is locked")
+      return [SESSION]
+    })
+    const input: SessionScanInput = { fs, home: "/home/u" }
+    await expect(opencodeSessionSource.listSessions(input)).rejects.toThrow()
+    // Same input object: a rejected promise left in the per-input cache would
+    // poison every later read of this scan.
+    await expect(opencodeSessionSource.listSessions(input)).resolves.toHaveLength(1)
   })
 
   it("nests child (subagent) sessions under their parent and hides them from the list", async () => {

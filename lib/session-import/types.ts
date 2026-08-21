@@ -112,6 +112,23 @@ export interface AgentSessionSourceAdapter {
    */
   scanRoots(home: string, roots?: VendorRoots): string[]
   /**
+   * DECLARED dormancy: this source has no machine-wide history location, so it
+   * can only ever be reached through the file picker — the desktop auto-scan
+   * and the fs-watch live sync do not apply to it and never will.
+   *
+   * Aider is the shipping case: it appends to a per-repository
+   * `.aider.chat.history.md`, so there is nothing to walk from `$HOME`. Before
+   * this flag the fact was inferable only from `scanRoots()` happening to
+   * return `[]`, which the UI could not distinguish from "this agent is not
+   * installed" — so Aider silently never appeared in a scan and nothing said
+   * why. Declaring it lets the dialog name these sources (see
+   * `sessionImport.pickerOnly`), which is the difference between a documented
+   * limitation and a feature that looks broken.
+   *
+   * An adapter that sets this MUST return `[]` from `scanRoots`.
+   */
+  pickerOnly?: boolean
+  /**
    * Heuristic used by `detectSourceForFiles` to pick the source for a batch of
    * hand-picked files. Path hints (e.g. ".codex/sessions") are the usual tell.
    */

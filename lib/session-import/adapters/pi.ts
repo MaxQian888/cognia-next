@@ -40,6 +40,7 @@ import {
   toolPart,
 } from "../to-parts"
 import { scanFileSummaries } from "../scan"
+import { importedUsageMetadata } from "../usage"
 import type {
   AgentSessionSourceAdapter,
   PickedSessionFile,
@@ -55,6 +56,49 @@ export const PI_SOURCE_ID = "pi"
 
 /** Format versions this adapter knows how to read. */
 const SUPPORTED_SESSION_VERSIONS = new Set([1, 2, 3])
+
+/**
+ * Normalize Pi's on-disk token counts into the canonical `UsageInfo` shape.
+ *
+ * Pi writes `{ input, output, reasoning, cacheRead, cacheWrite, costUsd }`;
+ * `deriveImportedUsageRows` reads `inputTokens` / `outputTokens` /
+ * `cacheReadInputTokens` / `cacheCreationInputTokens` / `totalCostUsd`. Passing
+ * the raw blob straight through — as this adapter used to, alone among the
+ * seven — produced a usage row per assistant turn whose every figure was ZERO,
+ * while `hasImportedUsage` still reported "yes". The Insights sheet therefore
+ * showed Pi sessions an imported-spend section full of zeros: a wrong number,
+ * which is worse than no number.
+ *
+ * Reasoning tokens are folded into output, matching `opencodeUsageMeta` and the
+ * live adapters (they are billed as output).
+ */
+function piUsageMetadata(message: PiMessage): { metadata: StoredMessage["metadata"] } | null {
+  const raw = message.usage
+  const num = (...keys: string[]): number => {
+    for (const key of keys) {
+      const value = raw?.[key]
+      if (typeof value === "number" && Number.isFinite(value)) return value
+    }
+    return 0
+  }
+  const hasUsage = !!raw && typeof raw === "object" && Object.keys(raw).length > 0
+  if (!hasUsage && !message.model) return null
+  if (!hasUsage) return { metadata: { model: message.model } }
+
+  const cost = num("costUsd", "totalCostUsd", "cost")
+  return {
+    metadata: importedUsageMetadata(
+      {
+        inputTokens: num("input", "inputTokens", "promptTokens"),
+        outputTokens: num("output", "outputTokens", "completionTokens") + num("reasoning"),
+        cacheReadInputTokens: num("cacheRead", "cacheReadInputTokens"),
+        cacheCreationInputTokens: num("cacheWrite", "cacheCreationInputTokens"),
+        ...(cost > 0 ? { totalCostUsd: cost } : {}),
+      },
+      message.model
+    ),
+  }
+}
 
 // ============================================================================
 // Wire types (docs/session-format.md, Pi 0.84.1)
@@ -322,9 +366,7 @@ function buildTurns(chain: PiEntry[], sessionId: string, projectId?: string): Bu
           role: role === "user" ? "user" : "assistant",
           parts,
           createdAt,
-          ...(message.usage || message.model
-            ? { metadata: { usage: message.usage, model: message.model } }
-            : {}),
+          ...(piUsageMetadata(message) ?? {}),
         })
         messages.push(stored)
 

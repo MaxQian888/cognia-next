@@ -144,4 +144,21 @@ describe("geminiCliSessionSource", () => {
       geminiCliSessionSource.detect([{ name: "s.jsonl", path: "/tmp/s.jsonl", content: meta }])
     ).toBe("maybe")
   })
+
+  describe("scan roots", () => {
+    it("prefers the resolved vendor root over a bare home join", () => {
+      // Only the Rust resolver can see where a vendor's tree really lives; this
+      // adapter used to derive the path itself from `home`, one of only two that
+      // still did (`lib/agent-roots/index.ts` was written to end exactly that).
+      const roots = { geminiDir: "/relocated/vendor" } as never
+      expect(geminiCliSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/vendor/tmp"])
+    })
+
+    it("falls back to the home-relative path when the root is unresolved", () => {
+      expect(geminiCliSessionSource.scanRoots("/home/u", { geminiDir: "" } as never)).toEqual([
+        "/home/u/.gemini/tmp",
+      ])
+      expect(geminiCliSessionSource.scanRoots("", undefined)).toEqual([])
+    })
+  })
 })

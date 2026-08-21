@@ -22,8 +22,10 @@ export {
   getSessionSources,
   getSessionSource,
   detectSourceForFiles,
+  detectSourcesForFiles,
   detectSourceForPath,
   getAcceptedPickerExtensions,
+  getPickerOnlySources,
   __resetDynamicSessionSourcesForTesting,
 } from "./registry"
 export { realSessionFs, walkFiles } from "./fs"
@@ -114,6 +116,16 @@ async function parseRefConversations(
   try {
     const conv = await source.parseSession(ref, input)
     const nested = conv.nested ?? []
+    // Stamp the originating adapter id. The session id encodes it, but a plugin
+    // source id may itself contain a colon, so `import:<source>:<originalId>`
+    // cannot be parsed back apart — and the UI needs to name the agent a
+    // conversation came from.
+    conv.session.importSource = source.id
+    conv.session.importSourceLabel = source.displayName
+    for (const n of nested) {
+      n.session.importSource = source.id
+      n.session.importSourceLabel = source.displayName
+    }
     if (projectId) {
       conv.session.projectId = projectId
       for (const m of conv.messages) m.projectId = projectId

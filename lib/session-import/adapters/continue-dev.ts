@@ -195,8 +195,10 @@ export const continueDevSessionSource: AgentSessionSourceAdapter = {
   labelKey: "continue-dev",
   acceptedExtensions: ACCEPTED,
 
-  scanRoots(home) {
-    return home ? [joinPath(joinPath(home, ".continue"), "sessions")] : []
+  // `roots.continueDir` first — see the note on the Gemini adapter.
+  scanRoots(home, roots) {
+    const base = roots?.continueDir || (home ? joinPath(home, ".continue") : "")
+    return base ? [joinPath(base, "sessions")] : []
   },
 
   detect(files: PickedSessionFile[]) {
@@ -222,7 +224,7 @@ export const continueDevSessionSource: AgentSessionSourceAdapter = {
         .filter((s) => s.messageCount > 0)
     }
     const summaries: SessionSummary[] = []
-    for (const root of this.scanRoots(input.home)) {
+    for (const root of this.scanRoots(input.home, input.roots)) {
       const files = await walkFiles(
         input.fs,
         root,

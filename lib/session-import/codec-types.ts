@@ -35,6 +35,16 @@ export interface SessionCodec {
    * Reverse direction, when a PUBLIC runtime path exists. Absent =
    * materialization unsupported (import-only source) — callers must not
    * fake it.
+   *
+   * DORMANT AT RUNTIME. `buildReplayPrompt` has no production caller: the only
+   * exercisers are `tests/conformance/cases/session-materialize.test.mjs` and
+   * this module's own unit test. It is kept because ADR-0090 §8 makes it part
+   * of the recovery design (canonical history may seed a new runtime session)
+   * and because the byte-pinned conformance case is the tripwire for an SDK
+   * that later grows a real import API. The dormancy is LABELLED in the UI —
+   * `FidelityReport`'s `reverseFidelity` line — so it cannot be mistaken for a
+   * capability the app actually offers, and pinned by the "no production
+   * caller" assertion in `codec-types.test.ts`.
    */
   materialize?: {
     fidelity: SessionFidelity

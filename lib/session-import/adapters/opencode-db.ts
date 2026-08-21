@@ -105,14 +105,23 @@ export function setOpencodeReader(fn: OpencodeReader | null): void {
 /** @deprecated Test alias for {@link setOpencodeReader}. */
 export const __setOpencodeReaderForTesting = setOpencodeReader
 
-/** Read every OpenCode session from the SQLite store. [] off-desktop. */
+/**
+ * Read every OpenCode session from the SQLite store.
+ *
+ * `[]` off-desktop (no Tauri command to call, and the picker path handles the
+ * share-export JSON instead) — but a real read FAILURE throws.
+ *
+ * It used to swallow the invoke error and return `[]`, which quietly defeated
+ * the one surface built for exactly this: `scanAllSources` collects per-source
+ * failures so the dialog can say "some sources couldn't be read", and its own
+ * comment names OpenCode's DB as the motivating example. Because nothing ever
+ * threw, OpenCode could only ever report "no sessions" — indistinguishable from
+ * "you have no OpenCode history" even when the database was locked, corrupt, or
+ * unreadable.
+ */
 export async function readOpencodeSessions(home: string): Promise<OpencodeSession[]> {
   if (reader) return reader(home)
   if (!isTauri()) return []
   const { invoke } = await import("@tauri-apps/api/core")
-  try {
-    return await invoke<OpencodeSession[]>("opencode_sessions_read", { home })
-  } catch {
-    return []
-  }
+  return invoke<OpencodeSession[]>("opencode_sessions_read", { home })
 }

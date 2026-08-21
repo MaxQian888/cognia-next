@@ -90,11 +90,14 @@ export function getSessionSource(id: string): AgentSessionSourceAdapter | undefi
  * Union of every registered source's `acceptedExtensions`, de-duped and without
  * the leading dot (the shape a file-picker filter wants).
  *
- * The picker used to hard-code `["jsonl", "json"]`, which silently made two
- * shipping sources unreachable through it: Aider stores `.md` and OpenCode a
- * `.db`, so their files could not even be selected. Deriving the list means a
- * source — including a plugin-contributed one — is pickable the moment it
- * registers, with no second place to update.
+ * The picker used to hard-code `["jsonl", "json"]`, which silently made Aider
+ * unreachable through it: its history is a `.md` file, so it could not even be
+ * selected. Deriving the list means a source — including a plugin-contributed
+ * one — is pickable the moment it registers, with no second place to update.
+ *
+ * Note OpenCode contributes `.json` here, not `.db`: its SQLite store is read
+ * by home directory through the Rust `opencode_sessions_read` command, never by
+ * picking the file, so the picker path accepts only its share-export JSON.
  */
 export function getAcceptedPickerExtensions(): string[] {
   const seen = new Set<string>()
@@ -145,4 +148,32 @@ export function detectSourceForFiles(files: PickedSessionFile[]): string | null 
     if (verdict === "maybe" && firstMaybe === null) firstMaybe = source.id
   }
   return firstMaybe
+}
+
+/**
+ * EVERY source that claims a batch of hand-picked files, static order first.
+ *
+ * {@link detectSourceForFiles} returns a single winner, and the picker listed
+ * only that one — so selecting a Claude Code transcript and a Codex rollout
+ * together silently imported one and dropped the other, with no warning and no
+ * way to tell from the result. A mixed selection is not exotic: "everything I
+ * have" is the obvious thing to drag in.
+ *
+ * Sources that answered "match" come first, then "maybe", so a confident claim
+ * outranks a guess when two sources both accept the same file.
+ */
+export function detectSourcesForFiles(files: PickedSessionFile[]): string[] {
+  const matched: string[] = []
+  const maybe: string[] = []
+  for (const source of getSessionSources()) {
+    const verdict = source.detect(files)
+    if (verdict === "match") matched.push(source.id)
+    else if (verdict === "maybe") maybe.push(source.id)
+  }
+  return [...matched, ...maybe]
+}
+
+/** Every source that can only be reached through the picker (never auto-scanned). */
+export function getPickerOnlySources(): AgentSessionSourceAdapter[] {
+  return getSessionSources().filter((source) => source.pickerOnly === true)
 }

@@ -241,6 +241,8 @@ describe("codexSessionSource", () => {
       opencodeDataDir: "",
       piAgentDir: "",
       piSessionDir: "",
+      geminiDir: "",
+      continueDir: "",
     }
     expect(codexSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/codex/sessions"])
     // A blank override falls back to the home-relative default.

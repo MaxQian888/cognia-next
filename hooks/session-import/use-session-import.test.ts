@@ -29,7 +29,7 @@ function deps(over: Parameters<typeof useSessionImport>[0] = {}) {
     listSessionsForSource: jest.fn(async () => [summary("a")]),
     importSessions: jest.fn(async () => ({ lossBySource: {}, sessions: 2, messages: 6 })),
     pick: jest.fn(async () => [{ name: "a.jsonl", path: "/p/a.jsonl", content: "{}" }]),
-    detect: jest.fn(() => "codex"),
+    detect: jest.fn(() => ["codex"]),
     ...over,
   }
 }
@@ -179,7 +179,7 @@ describe("useSessionImport", () => {
   })
 
   it("errors when picked files match no source", async () => {
-    const d = deps({ detect: jest.fn(() => null), listSessionsForSource: jest.fn(async () => []) })
+    const d = deps({ detect: jest.fn(() => []), listSessionsForSource: jest.fn(async () => []) })
     const { result } = renderHook(() => useSessionImport(d))
     await act(async () => {
       await result.current.pickFiles()
@@ -212,5 +212,52 @@ describe("useSessionImport", () => {
         filters: [expect.objectContaining({ extensions: ["jsonl", "json", "md", "db"] })],
       })
     )
+  })
+
+  it("lists across EVERY source that claims a mixed pick", async () => {
+    // Selecting a Claude Code transcript and a Codex rollout together used to
+    // import whichever source detection happened to name first and silently
+    // drop the other.
+    const d = deps({
+      detect: jest.fn(() => ["claude-code", "codex"]),
+      listSessionsForSource: jest.fn(async (id: string) => [summary(`${id}-1`)]),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.pickFiles()
+    })
+    expect(d.listSessionsForSource).toHaveBeenCalledTimes(2)
+    expect(result.current.state).toMatchObject({ status: "list" })
+    const state = result.current.state as { status: "list"; summaries: unknown[] }
+    expect(state.summaries).toHaveLength(2)
+  })
+
+  it("surfaces a claiming source that could not be read, instead of dropping it", async () => {
+    const d = deps({
+      detect: jest.fn(() => ["claude-code", "opencode"]),
+      listSessionsForSource: jest.fn(async (id: string) => {
+        if (id === "opencode") throw new Error("database is locked")
+        return [summary("ok")]
+      }),
+    })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.pickFiles()
+    })
+    expect(result.current.state).toMatchObject({
+      status: "list",
+      warnings: [{ sourceId: "opencode", message: "database is locked" }],
+    })
+  })
+
+  it("an explicit source id still narrows the pick to that source alone", async () => {
+    const d = deps({ detect: jest.fn(() => ["claude-code", "codex"]) })
+    const { result } = renderHook(() => useSessionImport(d))
+    await act(async () => {
+      await result.current.pickFiles("codex")
+    })
+    expect(d.detect).not.toHaveBeenCalled()
+    expect(d.listSessionsForSource).toHaveBeenCalledTimes(1)
+    expect(d.listSessionsForSource).toHaveBeenCalledWith("codex", expect.anything())
   })
 })

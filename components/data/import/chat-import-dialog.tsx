@@ -22,7 +22,11 @@ import {
 } from "@/components/ui/dialog"
 import { useChatImport } from "@/hooks/data/use-chat-import"
 import { toast } from "sonner"
-import { getImporterLabel, type ChatImportFormat } from "@/lib/data/import-registry"
+import {
+  getImporterLabel,
+  type ChatImportFormat,
+  type ChatImportRejection,
+} from "@/lib/data/import-registry"
 
 interface Props {
   trigger: React.ReactNode
@@ -117,7 +121,11 @@ export function ChatImportDialog({ trigger, defaultPlatform, open, onOpenChange 
 
           {flow.state.status === "error" && (
             <p className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
-              {flow.state.message}
+              {/* A recognized-but-wrong-flow file (a plain or encrypted Cognia
+                  backup) gets copy that names the right flow. Those branches
+                  existed in `detectFormat` all along but were unreachable —
+                  the dialog never routed through it. */}
+              {rejectionMessage(flow.state.rejection, t) ?? flow.state.message}
             </p>
           )}
         </div>
@@ -145,6 +153,23 @@ export function ChatImportDialog({ trigger, defaultPlatform, open, onOpenChange 
       </DialogContent>
     </Dialog>
   )
+}
+
+/** Copy for a typed rejection, or `null` to fall back to the raw error text. */
+function rejectionMessage(
+  rejection: ChatImportRejection | undefined,
+  t: ReturnType<typeof useTranslations<"import">>
+): string | null {
+  switch (rejection) {
+    case "cognia-backup":
+      return t("errors.cogniaBackup")
+    case "encrypted":
+      return t("errors.encrypted")
+    case "unrecognized":
+      return t("errors.unrecognized")
+    default:
+      return null
+  }
 }
 
 function formatLabel(format: ChatImportFormat): string {

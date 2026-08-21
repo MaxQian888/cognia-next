@@ -6,6 +6,7 @@ import {
   summarizePiFile,
 } from "./pi"
 import type { SessionRef } from "../types"
+import { deriveImportedUsageRows } from "../usage"
 
 const REF: SessionRef = {
   sourceId: PI_SOURCE_ID,
@@ -573,6 +574,8 @@ describe("piSessionSource", () => {
       opencodeDataDir: "",
       piAgentDir: "/relocated/pi-agent",
       piSessionDir: "/relocated/pi-agent/sessions",
+      geminiDir: "",
+      continueDir: "",
     }
     expect(piSessionSource.scanRoots("/home/u", roots)).toEqual(["/relocated/pi-agent/sessions"])
     // A blank resolution falls back to the home-relative default.
@@ -626,5 +629,53 @@ describe("piSessionSource", () => {
     // No create-from-messages API exists, so the reverse direction is a
     // replay prompt, not a forged session file.
     expect(piSessionSource.codec?.materialize?.fidelity).toBe("contextual")
+  })
+
+  describe("imported usage (ADR-0062 × session insights)", () => {
+    it("normalizes Pi's on-disk token names into the canonical UsageInfo shape", () => {
+      const conv = parsePiSession(REF, fixture())
+      const assistant = conv.messages.find((m) => m.role === "assistant")
+      // Pi writes `{ input, output }`. `deriveImportedUsageRows` reads
+      // `inputTokens` / `outputTokens`, so passing the raw blob through produced
+      // an all-zero usage row that the Insights sheet still rendered.
+      expect(deriveImportedUsageRows([assistant as never])).toEqual([
+        expect.objectContaining({
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "deepseek-v4-pro",
+          surface: "imported",
+          imported: true,
+        }),
+      ])
+    })
+
+    it("folds reasoning into output and carries cache + cost figures", () => {
+      const withCost = fixture().replace(
+        /"usage":\s*\{[^}]*\}/,
+        '"usage":{"input":10,"output":5,"reasoning":7,"cacheRead":3,"cacheWrite":2,"costUsd":0.25}'
+      )
+      const conv = parsePiSession(REF, withCost)
+      const assistant = conv.messages.find((m) => m.role === "assistant")
+      expect(deriveImportedUsageRows([assistant as never])[0]).toEqual(
+        expect.objectContaining({
+          inputTokens: 10,
+          outputTokens: 12,
+          cacheReadTokens: 3,
+          cacheCreationTokens: 2,
+          costUsd: 0.25,
+          costSource: "sdk",
+          costKnown: true,
+        })
+      )
+    })
+
+    it("keeps the per-message model when the turn reports no usage at all", () => {
+      const noUsage = fixture().replace(/,"usage":\{[^}]*\}/, "")
+      const conv = parsePiSession(REF, noUsage)
+      const assistant = conv.messages.find((m) => m.role === "assistant")
+      expect((assistant?.metadata as { model?: string } | undefined)?.model).toBe("deepseek-v4-pro")
+      // No usage blob → no row, rather than a row of zeros.
+      expect(deriveImportedUsageRows([assistant as never])).toEqual([])
+    })
   })
 })

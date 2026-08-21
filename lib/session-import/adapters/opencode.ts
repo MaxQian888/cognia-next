@@ -401,8 +401,15 @@ async function collectSessions(input: SessionScanInput): Promise<OpencodeSession
           .flatMap((f) => parseOpencodeExport(f.content))
       )
     : readOpencodeSessions(input.home)
-  sessionCache.set(input, promise)
-  return promise
+  // Evict a FAILED read so the next attempt actually retries. A rejected promise
+  // left in the cache would make one locked-database moment poison every later
+  // scan that happens to reuse this input.
+  const guarded = promise.catch((error: unknown) => {
+    sessionCache.delete(input)
+    throw error
+  })
+  sessionCache.set(input, guarded)
+  return guarded
 }
 
 import { opencodeCodec } from "@/lib/session-import/codecs/opencode-codec"

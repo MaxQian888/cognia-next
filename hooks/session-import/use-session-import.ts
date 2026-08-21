@@ -13,7 +13,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { pickAndReadFiles } from "@/lib/files/file-bridge"
 import { createLogger } from "@cognia/logging"
 import {
-  detectSourceForFiles,
+  detectSourcesForFiles,
   getAcceptedPickerExtensions as getAcceptedPickerExtensionsDefault,
   importSessions as importSessionsDefault,
   scanAllSources as scanAllSourcesDefault,
@@ -58,7 +58,7 @@ export interface UseSessionImportDeps {
   listSessionsForSource?: typeof listSessionsForSourceDefault
   importSessions?: typeof importSessionsDefault
   pick?: typeof pickAndReadFiles
-  detect?: typeof detectSourceForFiles
+  detect?: typeof detectSourcesForFiles
   acceptedExtensions?: typeof getAcceptedPickerExtensionsDefault
 }
 
@@ -68,7 +68,7 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
   const listSessionsForSource = deps.listSessionsForSource ?? listSessionsForSourceDefault
   const importSessions = deps.importSessions ?? importSessionsDefault
   const pick = deps.pick ?? pickAndReadFiles
-  const detect = deps.detect ?? detectSourceForFiles
+  const detect = deps.detect ?? detectSourcesForFiles
   const acceptedExtensions = deps.acceptedExtensions ?? getAcceptedPickerExtensionsDefault
 
   const [state, setState] = useState<SessionImportState>({ status: "idle" })
@@ -130,13 +130,34 @@ export function useSessionImport(deps: UseSessionImportDeps = {}) {
           content: p.content,
         }))
         const input = await resolveScanInput({ pickedFiles: files, home: "" })
-        const resolvedSource = sourceId ?? detect(files)
-        const summaries = resolvedSource ? await listSessionsForSource(resolvedSource, input) : []
+        // EVERY source that claims the batch, not just the first winner: a
+        // mixed selection (a Claude Code transcript plus a Codex rollout) used
+        // to import one and silently drop the rest.
+        const resolvedSources = sourceId ? [sourceId] : detect(files)
+        const perSource = await Promise.all(
+          resolvedSources.map(async (id) => {
+            try {
+              return { id, summaries: await listSessionsForSource(id, input) }
+            } catch (err) {
+              return {
+                id,
+                summaries: [] as SessionSummary[],
+                error: err instanceof Error ? err.message : String(err),
+              }
+            }
+          })
+        )
+        const summaries = perSource.flatMap((entry) => entry.summaries)
         if (summaries.length === 0) {
           setState({ status: "error", message: "unrecognized" })
           return
         }
-        showList(summaries, input)
+        // A source that claimed the files but could not read them is a warning,
+        // not a silent omission — same contract as the desktop scan.
+        const warnings = perSource
+          .filter((entry) => entry.error)
+          .map((entry) => ({ sourceId: entry.id, message: entry.error as string }))
+        showList(summaries, input, warnings)
       } catch (err) {
         log.error("session-import-pick-failed", { error: err })
         setState({ status: "error", message: err instanceof Error ? err.message : String(err) })

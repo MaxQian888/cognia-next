@@ -4,7 +4,7 @@
 // OpenCode) into Cognia as continuable conversations. Desktop auto-scans every
 // installed agent; the web fallback picks session files manually. See ADR-0062.
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { FolderSearchIcon, FilesIcon, Loader2Icon, CheckCircle2Icon } from "lucide-react"
@@ -28,7 +28,7 @@ import { isTauri } from "@/lib/tauri"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSessionImport, summaryKey } from "@/hooks/session-import/use-session-import"
 import { useSessionImportWatch } from "@/hooks/session-import/use-session-import-watch"
-import { getSessionSource, type SessionSummary } from "@/lib/session-import"
+import { getPickerOnlySources, getSessionSource, type SessionSummary } from "@/lib/session-import"
 
 /** Rows shown before the first "show more", and each page-step increment. */
 const INITIAL_VISIBLE = 50
@@ -36,9 +36,19 @@ const PAGE_STEP = 50
 
 export interface SessionImportDialogProps {
   trigger: React.ReactNode
+  /**
+   * Restrict the picker to one source instead of auto-detecting.
+   *
+   * `useSessionImport().pickFiles` has always accepted a source id and no
+   * caller passed one, because the dialog had no way to express it — so a
+   * surface that already knows which agent it is talking about (the fleet
+   * history panel, a per-agent entry point) could not narrow the pick, and a
+   * file that two sources both claim would be listed by both.
+   */
+  sourceId?: string
 }
 
-export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
+export function SessionImportDialog({ trigger, sourceId }: SessionImportDialogProps) {
   const t = useTranslations("sessionImport")
   const [open, setOpen] = useState(false)
   const desktop = isTauri()
@@ -55,9 +65,10 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
     cancelImport,
     reset,
   } = useSessionImport()
-  const { enabled: watching, toggle: toggleWatch } = useSessionImportWatch({
-    projectId: activeProjectId ?? undefined,
-  })
+  // The switch only writes the persisted preference; the watch itself is owned
+  // for the app's lifetime by `SessionImportWatchInitializer` (ADR-0062). That
+  // is what makes it survive this dialog closing — and a restart.
+  const { enabled: watching, toggle: toggleWatch } = useSessionImportWatch()
 
   const onOpenChange = (next: boolean) => {
     setOpen(next)
@@ -78,6 +89,15 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
     if (id.includes(":")) return getSessionSource(id)?.displayName ?? id
     return t(`sources.${id}` as never)
   }
+
+  // Sources that can only ever be reached through the picker, named so an empty
+  // scan is not mistaken for "this agent isn't installed".
+  const pickerOnly = useMemo(
+    () => getPickerOnlySources().map((source) => sourceLabel(source.id)),
+    // `sourceLabel` closes over `t`, which next-intl keeps stable per namespace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
 
   // Surface a terminal error/done toast is left to inline rendering below.
 
@@ -107,12 +127,23 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
               <Button
                 variant="outline"
                 className="h-auto flex-col items-start gap-1 p-3"
-                onClick={() => void pickFiles()}
+                onClick={() => void pickFiles(sourceId)}
               >
                 <FilesIcon className="size-5" />
                 <span className="text-sm font-medium">{t("pickButton")}</span>
               </Button>
             </div>
+            {/* A source that declares `pickerOnly` has no machine-wide history
+                location, so "Scan installed agents" can never surface it. Aider
+                keeps `.aider.chat.history.md` per repository. Saying so is the
+                difference between a documented limitation and a scan that looks
+                broken — the fact was previously inferable only from an adapter
+                returning an empty `scanRoots()`. */}
+            {desktop && pickerOnly.length > 0 && (
+              <p className="text-xs text-muted-foreground" data-testid="session-import-picker-only">
+                {t("pickerOnly", { sources: pickerOnly.join(", ") })}
+              </p>
+            )}
             {desktop && (
               <label className="flex items-start justify-between gap-3 rounded-md border p-3">
                 <span className="min-w-0">
@@ -164,6 +195,7 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
               onToggle={toggle}
               sourceLabel={sourceLabel}
               messagesLabel={(n) => t("messagesLabel", { count: n })}
+              onPickFiles={() => void pickFiles(sourceId)}
             />
           </div>
         )}
@@ -182,7 +214,14 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
                 {Object.entries(state.lossBySource).map(([sourceId, loss]) => (
                   <div key={sourceId} className="rounded-md border p-2">
                     <p className="pb-1 text-xs font-medium">{sourceLabel(sourceId)}</p>
-                    <FidelityReport loss={loss} />
+                    {/* The reverse direction is declared by some codecs and
+                        called by nothing outside the conformance suite — the
+                        report says so rather than leaving the capability
+                        silently dormant. */}
+                    <FidelityReport
+                      loss={loss}
+                      reverseFidelity={getSessionSource(sourceId)?.codec?.materialize?.fidelity}
+                    />
                   </div>
                 ))}
               </div>
@@ -213,14 +252,28 @@ export function SessionImportDialog({ trigger }: SessionImportDialogProps) {
               <Button
                 size="sm"
                 disabled={selectedCount === 0}
-                // `t("importing")` here announced "Importing…" as a SUCCESS
-                // toast after the run had already finished. The completion
-                // copy is what belongs on a completion toast.
+                // An earlier version toasted "Importing…" as a SUCCESS toast
+                // after the run had already finished. The completion copy is
+                // what belongs on a completion toast.
                 onClick={() => void onImport().then(() => toast.success(t("doneTitle")))}
               >
                 {t("importSelected", { count: selectedCount })}
               </Button>
             </>
+          )}
+          {state.status === "error" && (
+            // `sessionImport.retry` shipped in both message catalogs with no
+            // consumer: the error state offered nothing but Close, so an
+            // "unrecognized" pick — the most likely outcome of the picker path —
+            // was a dead end that cost the user the whole dialog.
+            <Button size="sm" variant="ghost" onClick={reset}>
+              {t("retry")}
+            </Button>
+          )}
+          {state.status === "list" && (
+            <Button size="sm" variant="ghost" onClick={reset}>
+              {t("back")}
+            </Button>
           )}
           {(state.status === "done" || state.status === "error") && (
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
@@ -239,12 +292,14 @@ function SessionList({
   onToggle,
   sourceLabel,
   messagesLabel,
+  onPickFiles,
 }: {
   summaries: SessionSummary[]
   selected: Set<string>
   onToggle: (key: string) => void
   sourceLabel: (id: string) => string
   messagesLabel: (n: number) => string
+  onPickFiles: () => void
 }) {
   const t = useTranslations("sessionImport")
   // Page the list so a history of hundreds of sessions doesn't render hundreds
@@ -252,7 +307,21 @@ function SessionList({
   // "select all" still covers the whole list.
   const [visible, setVisible] = useState(INITIAL_VISIBLE)
   if (summaries.length === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">{t("empty")}</p>
+    // An empty scan used to render this line and nothing else — no hint, no way
+    // forward but closing the dialog. `sessionImport.emptyHint` was already
+    // translated in both catalogs and had no consumer, and the hint is load
+    // bearing: sources with no fixed home (Aider keeps `.aider.chat.history.md`
+    // per repo) can ONLY be reached through the picker.
+    return (
+      <div className="space-y-3 py-8 text-center">
+        <p className="text-sm text-muted-foreground">{t("empty")}</p>
+        <p className="text-xs text-muted-foreground">{t("emptyHint")}</p>
+        <Button variant="outline" size="sm" onClick={onPickFiles}>
+          <FilesIcon className="mr-1 size-3.5" />
+          {t("pickButton")}
+        </Button>
+      </div>
+    )
   }
   const shown = summaries.slice(0, visible)
   const remaining = summaries.length - shown.length

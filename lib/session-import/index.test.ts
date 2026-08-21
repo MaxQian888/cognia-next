@@ -81,6 +81,8 @@ describe("session-import runner", () => {
       opencodeDataDir: "",
       piAgentDir: "",
       piSessionDir: "",
+      geminiDir: "",
+      continueDir: "",
     }
     const resolved = await resolveScanInput({ fs, roots })
     expect(resolved.roots).toBe(roots)
@@ -291,5 +293,46 @@ describe("session-import runner", () => {
     })
     expect(applyImportedMock).not.toHaveBeenCalled()
     expect(counts).toEqual({ sessions: 0, messages: 0, lossBySource: {} })
+  })
+
+  describe("provenance stamping", () => {
+    it("stamps the source id and display name onto every parsed conversation", async () => {
+      const adapter = source("acme", 1)
+      adapter.displayName = "Cursor (Acme)"
+      registerSessionSource(adapter, { pluginId: "acme" })
+
+      const [conv] = await parseSessions(
+        [{ sourceId: "acme:acme", originalSessionId: "s", locator: "s" }],
+        input
+      )
+      // The session id encodes the source, but a plugin id may itself contain a
+      // colon — `import:acme:acme:s` cannot be split back apart, so the fields
+      // are what let the UI name the origin.
+      expect(conv.session.importSource).toBe("acme:acme")
+      expect(conv.session.importSourceLabel).toBe("Cursor (Acme)")
+    })
+
+    it("stamps nested subagent transcripts with the same origin", async () => {
+      const adapter = source("nested-src", 1)
+      adapter.parseSession = async () => ({
+        session: { id: "root", title: "t", createdAt: 0, updatedAt: 0 } as never,
+        messages: [{ id: "m", sessionId: "root", role: "user", parts: [], createdAt: 0 } as never],
+        nested: [
+          {
+            session: { id: "child", title: "c", createdAt: 0, updatedAt: 0 } as never,
+            messages: [
+              { id: "m2", sessionId: "child", role: "user", parts: [], createdAt: 0 } as never,
+            ],
+          },
+        ],
+      })
+      registerSessionSource(adapter)
+
+      const convs = await parseSessions(
+        [{ sourceId: "nested-src", originalSessionId: "root", locator: "root" }],
+        input
+      )
+      expect(convs.map((c) => c.session.importSource)).toEqual(["nested-src", "nested-src"])
+    })
   })
 })

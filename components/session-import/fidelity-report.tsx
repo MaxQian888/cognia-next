@@ -7,6 +7,13 @@
  * its meaning, a provenance marker for rebuilt records, and every loss entry
  * by kind. An unsupported conversion is shown as unsupported — never dressed
  * up as success.
+ *
+ * `reverseFidelity` labels the OTHER direction — writing a canonical session
+ * back out as a new native runtime session. `SessionCodec.materialize` is
+ * declared by the claude-code and pi codecs and has no runtime caller anywhere
+ * in the app (only the conformance suite exercises it), so the honest label is
+ * "defined, not yet available here" rather than silence. Dormancy that is only
+ * true in a type is indistinguishable from a bug six months later.
  */
 
 import { useTranslations } from "next-intl"
@@ -16,6 +23,11 @@ import type { SessionLossReport } from "@cognia/agent-config-types/canonical-ses
 
 export interface FidelityReportProps {
   loss: SessionLossReport
+  /**
+   * The source codec's `materialize.fidelity`, when it declares one. Omitted =
+   * an honest import-only source with no reverse direction at all.
+   */
+  reverseFidelity?: SessionLossReport["fidelity"]
 }
 
 const BADGE_VARIANT: Record<
@@ -29,7 +41,7 @@ const BADGE_VARIANT: Record<
   unsupported: "destructive",
 }
 
-export function FidelityReport({ loss }: FidelityReportProps) {
+export function FidelityReport({ loss, reverseFidelity }: FidelityReportProps) {
   const t = useTranslations("sessionImport.fidelityReport")
 
   return (
@@ -47,6 +59,11 @@ export function FidelityReport({ loss }: FidelityReportProps) {
       </div>
       <p className="text-muted-foreground">{t(`fidelityHint.${loss.fidelity}`)}</p>
       {loss.rebuilt && <p className="text-muted-foreground">{t("rebuiltHint")}</p>}
+      {reverseFidelity && (
+        <p className="text-muted-foreground" data-testid="reverse-dormant">
+          {t("reverseDormant", { fidelity: t(`fidelity.${reverseFidelity}`) })}
+        </p>
+      )}
       {loss.losses.length === 0 ? (
         <p className="text-muted-foreground" data-testid="no-losses">
           {t("noLosses")}

@@ -10,9 +10,11 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (sel: (s: unknown) => unknown) => sel({ activeProjectId: "proj-1" }),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
+const pickerOnlySources: Array<{ id: string }> = []
 jest.mock("@/lib/session-import", () => ({
   getSessionSource: (id: string) =>
     id === "acme:cursor" ? { id, displayName: "Cursor (Acme)" } : undefined,
+  getPickerOnlySources: () => pickerOnlySources,
 }))
 
 const hookState: { current: Record<string, unknown> } = { current: {} }
@@ -165,5 +167,88 @@ describe("SessionImportDialog", () => {
     render(<SessionImportDialog trigger={<button>open</button>} />)
     fireEvent.click(screen.getByText("open"))
     expect(screen.getByText("unrecognized")).toBeInTheDocument()
+  })
+
+  describe("dead ends", () => {
+    it("offers the picker and a hint when a scan finds nothing", () => {
+      // An empty list used to render one line and a disabled Import button —
+      // no hint, no way to reach a picker-only source (Aider), no way back.
+      setHook({ state: { status: "list", summaries: [] } })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.getByText("empty")).toBeInTheDocument()
+      expect(screen.getByText("emptyHint")).toBeInTheDocument()
+    })
+
+    it("the empty state's picker button starts a pick", () => {
+      const pickFiles = jest.fn()
+      setHook({ state: { status: "list", summaries: [] }, pickFiles })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      fireEvent.click(screen.getByText("pickButton"))
+      expect(pickFiles).toHaveBeenCalled()
+    })
+
+    it("a list can be backed out of without closing the dialog", () => {
+      const reset = jest.fn()
+      setHook({ state: { status: "list", summaries: [] }, reset })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      fireEvent.click(screen.getByText("back"))
+      expect(reset).toHaveBeenCalled()
+    })
+
+    it("an error offers a retry instead of only Close", () => {
+      const reset = jest.fn()
+      setHook({ state: { status: "error", message: "unrecognized" }, reset })
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      fireEvent.click(screen.getByText("retry"))
+      expect(reset).toHaveBeenCalled()
+    })
+  })
+
+  it("narrows the pick to a given source instead of auto-detecting", () => {
+    // `pickFiles(sourceId)` existed from the start and no caller could pass one,
+    // because the dialog had no prop for it.
+    const pickFiles = jest.fn()
+    setHook({ pickFiles })
+    render(<SessionImportDialog trigger={<button>open</button>} sourceId="codex" />)
+    fireEvent.click(screen.getByText("open"))
+    fireEvent.click(screen.getByText("pickButton"))
+    expect(pickFiles).toHaveBeenCalledWith("codex")
+  })
+
+  it("auto-detects when no source is given", () => {
+    const pickFiles = jest.fn()
+    setHook({ pickFiles })
+    render(<SessionImportDialog trigger={<button>open</button>} />)
+    fireEvent.click(screen.getByText("open"))
+    fireEvent.click(screen.getByText("pickButton"))
+    expect(pickFiles).toHaveBeenCalledWith(undefined)
+  })
+
+  describe("picker-only sources", () => {
+    afterEach(() => {
+      pickerOnlySources.length = 0
+    })
+
+    it("names a source the scan can never reach", () => {
+      // Aider keeps its history per repository, so "Scan installed agents" can
+      // never surface it. Without this line an empty scan reads as "Aider isn't
+      // installed" — the fact was only inferable from an empty `scanRoots()`.
+      pickerOnlySources.push({ id: "aider" })
+      setHook({})
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.getByTestId("session-import-picker-only")).toHaveTextContent("sources.aider")
+    })
+
+    it("says nothing when every source is scannable", () => {
+      setHook({})
+      render(<SessionImportDialog trigger={<button>open</button>} />)
+      fireEvent.click(screen.getByText("open"))
+      expect(screen.queryByTestId("session-import-picker-only")).toBeNull()
+    })
   })
 })

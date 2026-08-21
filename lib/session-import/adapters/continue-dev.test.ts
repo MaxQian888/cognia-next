@@ -135,4 +135,23 @@ describe("continueDevSessionSource", () => {
     expect(conv.session.id).toBe("import:continue-dev:cont-1")
     expect(conv.session.workingDir).toBe("/repo")
   })
+
+  describe("scan roots", () => {
+    it("prefers the resolved vendor root over a bare home join", () => {
+      // Only the Rust resolver can see where a vendor's tree really lives; this
+      // adapter used to derive the path itself from `home`, one of only two that
+      // still did (`lib/agent-roots/index.ts` was written to end exactly that).
+      const roots = { continueDir: "/relocated/vendor" } as never
+      expect(continueDevSessionSource.scanRoots("/home/u", roots)).toEqual([
+        "/relocated/vendor/sessions",
+      ])
+    })
+
+    it("falls back to the home-relative path when the root is unresolved", () => {
+      expect(continueDevSessionSource.scanRoots("/home/u", { continueDir: "" } as never)).toEqual([
+        "/home/u/.continue/sessions",
+      ])
+      expect(continueDevSessionSource.scanRoots("", undefined)).toEqual([])
+    })
+  })
 })
