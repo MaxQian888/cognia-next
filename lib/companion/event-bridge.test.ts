@@ -131,6 +131,54 @@ describe("installCompanionEventBridge", () => {
     warnSpy.mockRestore()
   })
 
+  it("device-paired handler adopts a pre-unlock pairing into the active account", async () => {
+    // A device can pair before anyone has unlocked, so the Host stamps the
+    // `__local__` sentinel until a verified unlock binds it to an account. The
+    // renderer adopts that bucket rather than dropping the row — the same rule
+    // the credential book already applies to unclaimed pairings.
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-paired")!
+
+    handler({
+      device_id: "dev-pre-unlock",
+      label: "Pre-unlock phone",
+      platform: "ios",
+      pubkey: "k",
+      paired_at_ms: 1_700_000_000_000,
+      app_version: "0.1.0",
+      account_id: "__local__",
+    })
+    await flushMicrotasks()
+
+    const rows = await listPairedDevices()
+    expect(rows.map((row) => row.deviceId)).toEqual(["dev-pre-unlock"])
+  })
+
+  it("device-seen handler adopts a pre-unlock sighting into the active account", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const pairedHandler = handlers.get("companion://device-paired")!
+    const seenHandler = handlers.get("companion://device-seen")!
+
+    pairedHandler({
+      device_id: "dev-adopted",
+      label: "Phone",
+      platform: "android",
+      pubkey: "k",
+      paired_at_ms: 100,
+      app_version: "0.1.0",
+      account_id: "local_acct_a",
+    })
+    await flushMicrotasks()
+
+    seenHandler({ device_id: "dev-adopted", seen_at_ms: 900, account_id: "__local__" })
+    await flushMicrotasks()
+
+    const rows = await listPairedDevices()
+    expect(rows[0]?.lastSeenAt).toBe(900)
+  })
+
   it("device-paired handler rejects missing and locked local account payloads", async () => {
     const { handlers } = captureHandlers()
     installCompanionEventBridge()

@@ -25,14 +25,12 @@
 import type { RoomDescriptor } from "@/lib/signaling/crypto"
 
 /**
- * Namespace for a pairing that predates — or precedes — any account context.
+ * Re-exported so every existing importer keeps working.
  *
- * The pre-book world had exactly one pairing and no account concept, and the
- * mobile pair screen can still complete before an account is activated. Those
- * pairings are filed here rather than dropped or guessed onto someone's
- * account; the first account activation adopts the bucket.
+ * It lives in its own leaf module now because `lib/companion/event-bridge.ts`
+ * needs the same constant and must not pull this file's graph in with it.
  */
-export const DEFAULT_ACCOUNT_NAMESPACE = "__local__"
+export { DEFAULT_ACCOUNT_NAMESPACE } from "@/lib/companion/account-namespace"
 
 /** Address of exactly one pairing. */
 export interface CompanionHostKey {

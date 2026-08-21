@@ -314,12 +314,19 @@ pub(super) async fn dispatch(
             // degraded-store path.
             let transport = super::super::ws_bridge::resolve_bridge_transport(state)
                 .map_err(RpcError::service_unavailable)?;
+            // The principal's `account_id` is a *tenant*; the responder on the
+            // far side (`desktop-sync-source`) checks it against its unlocked
+            // local account id and refuses a mismatch. Translating here is the
+            // same fix applied to `companion://device-paired`: two id spaces
+            // that only matched while the tenant was a hardcoded literal.
+            let account_namespace =
+                crate::companion_api::host_identity::event_namespace_for_tenant(account_id);
             bridge
                 .pull(
                     transport.as_ref(),
                     table,
                     since,
-                    account_id.to_string(),
+                    account_namespace,
                     content_protocol_version,
                     crate::companion_api::sync_bridge::DEFAULT_TIMEOUT,
                 )

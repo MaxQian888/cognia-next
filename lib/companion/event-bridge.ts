@@ -11,6 +11,7 @@
  * Mounted once at app startup by `CompanionEventBridgeProvider`.
  */
 
+import { DEFAULT_ACCOUNT_NAMESPACE } from "@/lib/companion/account-namespace"
 import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -108,6 +109,22 @@ async function handleDeviceSeen(payload: DeviceSeenPayload): Promise<void> {
   }
 }
 
+/**
+ * Refuse a companion event that belongs to somebody else's account.
+ *
+ * `account_id` on these payloads is a **local account namespace**. It used to
+ * be the Rust-side *tenant*, which is a different id space — so under a real
+ * `acct_…` account this comparison could never succeed and no paired-device
+ * row was ever written. Rust now translates at the emit boundary
+ * (`host_identity::event_namespace_for_tenant`).
+ *
+ * {@link DEFAULT_ACCOUNT_NAMESPACE} is accepted and adopted into the unlocked
+ * account: a device can pair before anyone has unlocked, and the Host stamps
+ * the sentinel until a verified unlock binds it. This is exactly how the
+ * credential book already treats the unclaimed bucket — the first account
+ * activation takes it over — and `pair-onboarding-client` already assumes
+ * pairing can precede account context.
+ */
 function assertPayloadAccountMatchesActiveAccount(payloadAccountId: string | undefined): void {
   const activeAccountId = useAccountStore.getState().unlockedAccountId
   if (!activeAccountId) {
@@ -115,6 +132,9 @@ function assertPayloadAccountMatchesActiveAccount(payloadAccountId: string | und
   }
   if (!payloadAccountId) {
     throw new Error("companion event rejected: missing local account id")
+  }
+  if (payloadAccountId === DEFAULT_ACCOUNT_NAMESPACE) {
+    return
   }
   if (payloadAccountId !== activeAccountId) {
     throw new Error("companion event rejected: account mismatch")

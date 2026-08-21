@@ -1213,14 +1213,23 @@ struct SignalingRegistrationResponse {
 }
 
 /// Payload of `companion://device-paired` — mirrors `DevicePairedPayload` in
-/// `lib/companion/event-bridge.ts` (snake_case, `account_id` == tenant id, the
-/// same identity the device JWT carries as `account_id`).
+/// `lib/companion/event-bridge.ts`.
+///
+/// `account_id` used to carry the **tenant**, while the renderer compared it
+/// against its local account id (`assertPayloadAccountMatchesActiveAccount`).
+/// Two id spaces that could only ever be equal while the tenant was the
+/// hardcoded `local_acct_a`; under a real `acct_…` account the comparison
+/// always failed and no paired-device row was ever written. It now carries the
+/// **local account namespace**, translated at this boundary.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct DevicePairedEvent {
     pub device_id: String,
+    /// Local account namespace, or the `__local__` sentinel before anyone has
+    /// unlocked. The renderer adopts the sentinel into whatever account is
+    /// active, exactly as the credential book already does.
     pub account_id: String,
-    /// Same value as `account_id`, under the key `ws::frame_visible_to_tenant`
-    /// scopes on, so the frame only reaches subscribers of this tenant.
+    /// The tenant. `ws::frame_visible_to_tenant` scopes on this key, so it must
+    /// stay a tenant — deliberately no longer the same value as `account_id`.
     #[serde(rename = "tenantId")]
     pub tenant_id: String,
     pub label: String,
@@ -1339,7 +1348,7 @@ async fn register_handler(
         &state,
         DevicePairedEvent {
             device_id: request.device_id.clone(),
-            account_id: authority.tenant_id.clone(),
+            account_id: host_identity::event_namespace_for_tenant(&authority.tenant_id),
             tenant_id: authority.tenant_id.clone(),
             label: request.display_name.clone(),
             platform: request

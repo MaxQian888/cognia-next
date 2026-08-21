@@ -29,7 +29,9 @@
 //!
 //! After forwarding the request, a best-effort Tauri event is emitted with
 //! `{ device_id, account_id, seen_at_ms }` so the TS layer can call
-//! `touchPairedDevice`.
+//! `touchPairedDevice`. `account_id` there is the local account *namespace*,
+//! translated from the principal's tenant — the renderer compares it against
+//! its unlocked account id.
 //! Errors are silently absorbed — event delivery must not affect the response.
 
 use axum::{
@@ -465,13 +467,18 @@ async fn authenticate_request(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+        // Translate the tenant into the local account namespace the renderer
+        // compares against. Same fix as `companion://device-paired`: the
+        // renderer's `touchPairedDevice` is gated on this field matching its
+        // unlocked account id, and a tenant never matches one.
+        let account_namespace = host_identity::event_namespace_for_tenant(&account_id);
         tokio::spawn(async move {
             use tauri::Emitter as _;
             let _ = app.emit(
                 "companion://device-seen",
                 json!({
                     "device_id": device_id,
-                    "account_id": account_id,
+                    "account_id": account_namespace,
                     "seen_at_ms": seen_at_ms,
                 }),
             );
