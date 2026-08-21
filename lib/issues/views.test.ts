@@ -1,5 +1,5 @@
 import { statusCategoryOf } from "@/types/issues"
-import type { IssueActor } from "@/types/issues"
+import type { IssueActor, IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { FULL_ISSUE_CAPABILITIES, makeUnifiedIssueId } from "@/types/issues/unified"
 import {
@@ -7,8 +7,12 @@ import {
   applyViewScope,
   BUILTIN_ISSUE_VIEWS,
   DEFAULT_ISSUE_VIEW_ID,
+  DEFAULT_ISSUE_LIST_DENSITY,
   findIssueView,
   matchesViewScope,
+  resolveIssueViewPreferences,
+  resolveColumnCollapsed,
+  toggleColumnCollapse,
   type IssueViewerContext,
 } from "./views"
 
@@ -173,5 +177,89 @@ describe("applyIssueSort", () => {
     const snapshot = [...items]
     applyIssueSort(items, "title")
     expect(items).toEqual(snapshot)
+  })
+})
+
+describe("resolveIssueViewPreferences", () => {
+  const view = BUILTIN_ISSUE_VIEWS.find((candidate) => candidate.id === "created")!
+
+  it("falls back to the view's declared defaults when there are no overrides", () => {
+    const resolved = resolveIssueViewPreferences(view)
+    expect(resolved.layout).toBe("list")
+    expect(resolved.sort).toBe("created")
+    expect(resolved.groupBy).toBe("status")
+    expect(resolved.filter).toBe(view.filter)
+  })
+
+  it("defaults the two display-only fields the definition has no opinion about", () => {
+    const resolved = resolveIssueViewPreferences(view)
+    expect(resolved.columnCollapse).toEqual({})
+    expect(resolved.density).toBe(DEFAULT_ISSUE_LIST_DENSITY)
+  })
+
+  it("applies each override independently, leaving siblings on their defaults", () => {
+    const resolved = resolveIssueViewPreferences(view, { layout: "board" })
+    expect(resolved.layout).toBe("board")
+    // The other four still come from the definition.
+    expect(resolved.sort).toBe("created")
+    expect(resolved.groupBy).toBe("status")
+  })
+
+  it("keeps the built-ins' differing defaults apart", () => {
+    const all = BUILTIN_ISSUE_VIEWS.find((candidate) => candidate.id === "all")!
+    const agents = BUILTIN_ISSUE_VIEWS.find((candidate) => candidate.id === "my-agents")!
+    expect(resolveIssueViewPreferences(all).groupBy).toBe("status")
+    expect(resolveIssueViewPreferences(agents).groupBy).toBe("assignee")
+  })
+
+  it("treats an empty override object as no opinion at all", () => {
+    expect(resolveIssueViewPreferences(view, {})).toEqual(resolveIssueViewPreferences(view))
+  })
+})
+
+describe("resolveColumnCollapsed", () => {
+  it("collapses an empty column by default", () => {
+    expect(resolveColumnCollapsed("backlog", 0, {})).toBe(true)
+  })
+
+  it("expands a non-empty column by default", () => {
+    expect(resolveColumnCollapsed("backlog", 3, {})).toBe(false)
+  })
+
+  it("lets an explicit expand win over the empty default", () => {
+    expect(resolveColumnCollapsed("backlog", 0, { backlog: false })).toBe(false)
+  })
+
+  it("lets an explicit collapse win over a full column", () => {
+    expect(resolveColumnCollapsed("backlog", 9, { backlog: true })).toBe(true)
+  })
+
+  it("scopes the override to its own column", () => {
+    expect(resolveColumnCollapsed("done", 4, { backlog: true })).toBe(false)
+  })
+})
+
+describe("toggleColumnCollapse", () => {
+  it("writes an explicit override for a column that had none", () => {
+    expect(toggleColumnCollapse({}, "done", false)).toEqual({ done: true })
+  })
+
+  it("flips relative to the resolved state, not the absent key", () => {
+    // An empty column resolves to collapsed; toggling it must EXPAND it.
+    const collapsed = resolveColumnCollapsed("done", 0, {})
+    expect(toggleColumnCollapse({}, "done", collapsed)).toEqual({ done: false })
+  })
+
+  it("keeps other columns' overrides", () => {
+    expect(toggleColumnCollapse({ backlog: true }, "done", false)).toEqual({
+      backlog: true,
+      done: true,
+    })
+  })
+
+  it("does not mutate its input", () => {
+    const input = { backlog: true }
+    toggleColumnCollapse(input, "done", false)
+    expect(input).toEqual({ backlog: true })
   })
 })
