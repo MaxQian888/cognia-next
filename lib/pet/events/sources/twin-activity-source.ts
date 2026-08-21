@@ -10,7 +10,7 @@
 // Two independent Dexie observations, both injectable so the edge-detection
 // logic is unit-tested with plain fakes (mirrors `goal-source.ts`).
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { listActiveJobsByTwin, listJobsByTwinAndStatus } from "@/lib/db/twin-jobs"
 import type { TwinJob } from "@/types/twin"
 import type { PetEmit } from "../pet-event-bus"
@@ -40,7 +40,10 @@ export function newestMilestone(jobs: TwinJob[]): TwinJob | null {
 /* istanbul ignore next -- thin Dexie liveQuery wrapper, exercised at runtime */
 function defaultObserveActive(twinId: string): RowObserver<TwinJob> {
   return (onRows) => {
-    const sub = liveQuery(() => listActiveJobsByTwin(twinId)).subscribe({ next: onRows })
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const sub = Dexie.liveQuery(() => listActiveJobsByTwin(twinId)).subscribe({ next: onRows })
     return () => sub.unsubscribe()
   }
 }
@@ -48,7 +51,7 @@ function defaultObserveActive(twinId: string): RowObserver<TwinJob> {
 /* istanbul ignore next -- thin Dexie liveQuery wrapper, exercised at runtime */
 function defaultObserveCompleted(twinId: string): RowObserver<TwinJob> {
   return (onRows) => {
-    const sub = liveQuery(() => listJobsByTwinAndStatus(twinId, "completed")).subscribe({
+    const sub = Dexie.liveQuery(() => listJobsByTwinAndStatus(twinId, "completed")).subscribe({
       next: onRows,
     })
     return () => sub.unsubscribe()

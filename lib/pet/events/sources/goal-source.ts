@@ -5,7 +5,7 @@
 // The Dexie observation is injectable so the mapping logic is unit-tested with a
 // plain fake; the default observer uses Dexie's `liveQuery`.
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { getDb } from "@/lib/db/schema"
 import type { GoalEvent } from "@/types/goal"
 import type { PetEmit } from "../pet-event-bus"
@@ -23,7 +23,10 @@ export function goalEventToEmit(
 
 /* istanbul ignore next -- thin Dexie liveQuery wrapper, exercised at runtime */
 const defaultObserver: RowObserver<GoalEvent> = (onRows) => {
-  const sub = liveQuery(() =>
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const sub = Dexie.liveQuery(() =>
     getDb().chatGoalEvents.orderBy("ts").reverse().limit(1).toArray()
   ).subscribe({ next: onRows })
   return () => sub.unsubscribe()

@@ -3,7 +3,7 @@
 // Tracks the (id, status) pair so an in-place status flip on the same run is
 // detected. Dexie observation is injectable for testing.
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { getDb } from "@/lib/db/schema"
 import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
 import type { PetEmit } from "../pet-event-bus"
@@ -27,7 +27,10 @@ export function runStatusToEmit(
 
 /* istanbul ignore next -- thin Dexie liveQuery wrapper, exercised at runtime */
 const defaultObserver: RowObserver<WorkflowRunRow> = (onRows) => {
-  const sub = liveQuery(() =>
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const sub = Dexie.liveQuery(() =>
     getDb().workflowRuns.orderBy("startedAt").reverse().limit(1).toArray()
   ).subscribe({ next: onRows })
   return () => sub.unsubscribe()

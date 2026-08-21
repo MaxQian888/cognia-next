@@ -52,6 +52,13 @@ export function normalizeRadarOutput(raw: unknown, itemCount: number): RadarLlmO
   }
 }
 
+/**
+ * Lifecycle hooks: NOT covered by settings.json lifecycle hooks (ADR-0040 scope
+ * decision). This path builds a renderer-side `LlmClient` and calls the
+ * provider directly, so it never reaches the sidecar where SDK-native hooks
+ * are registered — wiring it up would mean a fourth hook rail, not a fire
+ * site. A hook author sees this in the Hooks settings coverage list.
+ */
 export async function generateRadarReport(
   client: LlmClient,
   { items, locale }: GenerateRadarArgs

@@ -111,6 +111,7 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
   const firer = input.firer ?? noopLifecycleFirer
   const hookCtx: AgentHookContext = input.hookContext ?? {
     agentId: "goal-judge",
+    agentKind: "goal-judge",
     sessionId: goal.id,
   }
 

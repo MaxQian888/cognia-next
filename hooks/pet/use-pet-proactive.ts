@@ -119,6 +119,13 @@ export function usePetProactive({ profile, view, enabled }: UsePetProactiveArgs)
       }
 
       // Gate chain: counters/DND → global limiter → PII → client.
+      //
+      // Lifecycle hooks: NOT covered by settings.json lifecycle hooks (ADR-0040 scope
+      // decision). This path builds a renderer-side `LlmClient` and calls the
+      // provider directly, so it never reaches the sidecar where SDK-native hooks
+      // are registered — wiring it up would mean a fourth hook rail, not a fire
+      // site. A hook author sees this in the Hooks settings coverage list.
+
       const prefs = resolvePreferences(current.appSettings?.notificationPreferences)
       const tz = resolveUserTimeZone(current.appSettings?.profile)
       const dndActive =

@@ -247,7 +247,11 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     maxTokens: goal.config.judgeMaxTokens,
     system: resolveJudgeSystemPrompt(goal),
     firer: input.firer,
-    hookContext: input.hookContext ?? { agentId: "goal-judge", sessionId: goalId },
+    hookContext: input.hookContext ?? {
+      agentId: "goal-judge",
+      agentKind: "goal-judge",
+      sessionId: goalId,
+    },
   })
 
   if (judgement.kind === "aborted") {
