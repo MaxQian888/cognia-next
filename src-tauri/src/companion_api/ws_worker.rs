@@ -706,8 +706,23 @@ async fn handle_worker_socket(
             }
             _ = authorization.tick() => {
                 if !worker_authorized(&tenant_id, &device_id) {
-                    detach_reason = "grant_revoked";
-                    close_with(&mut socket, CLOSE_POLICY_VIOLATION, "agent.worker capability revoked").await;
+                    // Distinguish "the capability was taken away" from "the
+                    // whole device was suspended or revoked": the worker's
+                    // operator does different things about each, and both
+                    // arrive here as the same `false`.
+                    let (reason, message) = match super::security_store::security_store()
+                        .and_then(|store| store.device_state(&tenant_id, &device_id).ok().flatten())
+                    {
+                        Some(super::security_store::DeviceLifecycleState::Suspended) => {
+                            ("device_suspended", "this device is suspended")
+                        }
+                        Some(super::security_store::DeviceLifecycleState::Active) => {
+                            ("grant_revoked", "agent.worker capability revoked")
+                        }
+                        _ => ("device_revoked", "this device has been revoked"),
+                    };
+                    detach_reason = reason;
+                    close_with(&mut socket, CLOSE_POLICY_VIOLATION, message).await;
                     break;
                 }
             }

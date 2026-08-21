@@ -44,11 +44,20 @@ pub fn install_hub(hub: Option<&Arc<SignalingHub>>) {
     *INSTALLED_HUB.write() = hub.map(Arc::downgrade);
 }
 
+/// Rebuild the hub's device set from the signaling registrations that are
+/// still *active*.
+///
+/// The status filter is what makes suspension take effect on WebRTC without a
+/// new hub API: `sync_devices` cancels whatever disappeared from the list, so a
+/// suspended device's client is torn down here, and a resumed device is
+/// re-created from the registration it kept. A suspended device's registration
+/// row is deliberately left in place — only the hub's view of it changes.
 pub fn refresh_installed_hub() -> Result<(), String> {
     let Some(store) = registration_store::installed() else {
         return Ok(());
     };
     let registrations = store.load_all().map_err(|error| error.to_string())?;
+    let registrations = filter_active_registrations(registrations);
     if let Some(hub) = INSTALLED_HUB
         .read()
         .as_ref()
@@ -57,6 +66,35 @@ pub fn refresh_installed_hub() -> Result<(), String> {
         hub.sync_devices(registrations);
     }
     Ok(())
+}
+
+/// Keep only registrations whose device is `active` in the security store.
+///
+/// Fails **open** when no store is installed: that is a process which cannot
+/// authenticate anyone anyway, and dropping every registration there would
+/// break the pre-store test and CLI paths that legitimately have registrations
+/// with no security database behind them.
+fn filter_active_registrations(registrations: Vec<DeviceRegistration>) -> Vec<DeviceRegistration> {
+    let Some(security) = crate::companion_api::security_store::security_store() else {
+        return registrations;
+    };
+    registrations
+        .into_iter()
+        .filter(|registration| {
+            match security.active_device_tenant(&registration.device_id) {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                // A lookup failure is not evidence the device is inactive.
+                Err(error) => {
+                    log::warn!(
+                        "signaling: could not resolve device {} state: {error}",
+                        registration.device_id
+                    );
+                    true
+                }
+            }
+        })
+        .collect()
 }
 
 /// Minimum spacing between two `reconnect_device` calls for the same

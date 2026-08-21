@@ -87,6 +87,14 @@ pub async fn companion_server_start(
         super::idempotency::IdempotencyCache::open(dir.join("companion-idempotency.sqlite"))
             .map_err(|error| CompanionServerError::Security(error.to_string()))?;
 
+    // Rebuild the deny-list cache before the listener accepts anything. The
+    // cache is process-memory, so without this a restart served every revoked
+    // and suspended device again until something re-revoked it. It used to be
+    // the renderer's job via `companion_seed_deny_list`, from a Dexie table
+    // that no renderer ever wrote under a real local account — and nothing in
+    // the TS tree calls that command at all.
+    state.seed_deny_list_from_store();
+
     // Clone the deny_list Arc so both the Tauri command layer and the axum
     // server share the same live deny list.
     let shared: SharedState = Arc::new(CompanionState {
@@ -327,67 +335,165 @@ pub fn companion_host_state_publish(
 }
 
 // ---------------------------------------------------------------------------
-// Deny-list management commands (M2.4)
+// Device lifecycle commands
 // ---------------------------------------------------------------------------
+//
+// Every one of these goes through [`device_lifecycle::apply`], which is what
+// makes the desktop and the Companion API's `DELETE /api/devices/:id` produce
+// the same effects. They used to diverge: this side wrote only the in-process
+// deny list, which the canonical DPoP plane never reads, so revoking a device
+// from Settings left it working.
 
-/// Bulk-load revoked device IDs into the in-memory deny list.
+/// Build the lifecycle context from whatever this process currently has.
 ///
-/// Called once at server startup so the Rust layer reflects the persisted
-/// Dexie `pairedDevices` rows without reading the database itself.
-/// Idempotent — existing entries are preserved (union semantics).
+/// `event_bus` and `app_handle` are `None` until the server has started; the
+/// store write still happens, which is the part that has to be durable.
+fn lifecycle_context(
+    state: &CompanionServerState,
+    app_handle: Option<tauri::AppHandle>,
+) -> super::device_lifecycle::LifecycleContext {
+    super::device_lifecycle::LifecycleContext {
+        // Only present while the public server is running. A revoke issued with
+        // the server stopped still writes the store, which is the durable half.
+        event_bus: state.event_bus.read().clone(),
+        deny_list: Some(Arc::clone(&state.deny_list)),
+        app_handle,
+    }
+}
+
+fn apply_lifecycle(
+    state: &CompanionServerState,
+    app_handle: tauri::AppHandle,
+    device_id: &str,
+    action: super::device_lifecycle::LifecycleAction,
+) -> Result<super::device_lifecycle::LifecycleOutcome, String> {
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    super::device_lifecycle::apply(
+        &lifecycle_context(state, Some(app_handle)),
+        // The desktop shell *is* the local OS operator, which is the trust root
+        // that may revoke the last owner so a lost deployment stays
+        // recoverable.
+        &super::device_lifecycle::LifecycleActor::local_trust_root(paired_tenant_id()),
+        device_id,
+        action,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Rebuild the deny-list cache from the security store.
+///
+/// Kept under its original name because the renderer calls it at boot, but it
+/// no longer takes the renderer's word for what is revoked. It used to seed
+/// from the Dexie `pairedDevices` mirror, which is empty under a real local
+/// account — so every restart silently un-revoked every device. The argument is
+/// accepted and ignored rather than removed so an older renderer bundle cannot
+/// fail the call; the store is the only input.
 #[tauri::command]
 pub async fn companion_seed_deny_list(
-    device_ids: Vec<String>,
+    #[allow(unused_variables)] device_ids: Vec<String>,
     state: State<'_, CompanionServerState>,
 ) -> Result<(), String> {
-    // The deny list lives on the SharedState inside the server, but the
-    // CompanionServerState wraps the server lifecycle, not the SharedState
-    // directly.  The deny list is therefore also mirrored on CompanionServerState
-    // itself so commands can mutate it regardless of whether the server is
-    // currently running.
-    //
-    // For M2.4 the canonical approach is: the TS layer calls
-    // `companion_server_start` first (which builds a fresh SharedState with an
-    // empty deny list), then calls `companion_seed_deny_list`.  The seed
-    // reaches the server-side deny list through the `CompanionServerState`
-    // accessor below.
-    state.seed_deny_list(device_ids);
+    if !device_ids.is_empty() {
+        log::debug!(
+            "companion_seed_deny_list: ignoring {} renderer-supplied id(s); seeding from the store",
+            device_ids.len()
+        );
+    }
+    state.seed_deny_list_from_store();
     Ok(())
 }
 
-/// Revoke a paired device so its JWT is rejected on the next request.
+/// Permanently revoke a paired device.
 ///
-/// The TS layer calls this when the user unpairs a device from the Settings
-/// UI.  The revocation takes effect immediately for all in-flight requests
-/// after this command returns.
+/// Writes the security store, tears down the signaling registration and its
+/// Host-side key, rebuilds the hub, mirrors into the deny-list cache and closes
+/// the device's live sockets.
 #[tauri::command]
 pub async fn companion_revoke_device(
     device_id: String,
     state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    state.revoke_device(device_id.clone());
-    if let Some(store) = super::signaling::registration_store::installed() {
-        if let Some(key_ref) = store
-            .remove_device(&device_id)
-            .map_err(|error| error.to_string())?
-        {
-            super::signaling::envelope::clear_signaling_key(&key_ref)?;
-        }
-        super::signaling::refresh_installed_hub()?;
-    }
+    apply_lifecycle(
+        &state,
+        app_handle,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Revoke,
+    )?;
     Ok(())
 }
 
-/// Un-revoke a device (e.g. after a re-pair).
+/// Temporarily stop serving a paired device, keeping its identity.
 ///
-/// Returns silently whether or not the device was previously revoked.
+/// The device key and signaling registration survive, so
+/// [`companion_resume_device`] brings the same device back without re-pairing.
+#[tauri::command]
+pub async fn companion_suspend_device(
+    device_id: String,
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    apply_lifecycle(
+        &state,
+        app_handle,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Suspend,
+    )?;
+    Ok(())
+}
+
+/// Serve a suspended device again.
+#[tauri::command]
+pub async fn companion_resume_device(
+    device_id: String,
+    state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    apply_lifecycle(
+        &state,
+        app_handle,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Resume,
+    )?;
+    Ok(())
+}
+
+/// Resume a suspended device. Retained under its historical name because the
+/// plugin API surface (`lib/plugin/api/companion-api.ts`) calls it.
+///
+/// Deliberately **fails** for a revoked device rather than silently restoring
+/// it. Revocation already tore down the signaling key and revoked the device
+/// key, so "un-revoke" never actually undid anything — it only cleared a cache
+/// entry and left the caller believing the device was back.
 #[tauri::command]
 pub async fn companion_unrevoke_device(
     device_id: String,
     state: State<'_, CompanionServerState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    state.unrevoke_device(&device_id);
+    apply_lifecycle(
+        &state,
+        app_handle,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Resume,
+    )?;
     Ok(())
+}
+
+/// Every device this host knows about, with its lifecycle state and grants.
+///
+/// The Device Center's read side. `list_devices` does not filter by status, so
+/// suspended devices appear here — which is the point: a device you cannot see
+/// is one you cannot resume.
+#[tauri::command]
+pub async fn companion_list_devices() -> Result<Vec<security_store::DeviceSummary>, String> {
+    let security = security_store::security_store()
+        .ok_or_else(|| "companion security store is unavailable".to_string())?;
+    security
+        .list_devices(&paired_tenant_id())
+        .map_err(|error| error.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -1742,6 +1848,29 @@ mod tests {
     #[test]
     fn commands_module_compiles() {}
 
+    /// The lifecycle commands are desktop-local and must stay off the wire.
+    ///
+    /// They carry `target: "client"` / `transports: ["internal"]` in the
+    /// manifest, matching `companion_revoke_device`. Adding one to
+    /// `rpc::KNOWN_COMMANDS` would expose "suspend any device on this host" to
+    /// a paired phone over HTTP, WebSocket and WebRTC. This pins the absence,
+    /// because nothing else would notice it appearing.
+    #[test]
+    fn the_lifecycle_commands_are_not_reachable_over_the_remote_rpc_plane() {
+        for command in [
+            "companion_revoke_device",
+            "companion_suspend_device",
+            "companion_resume_device",
+            "companion_unrevoke_device",
+            "companion_list_devices",
+        ] {
+            assert!(
+                !super::super::rpc::known_commands().contains(&command),
+                "{command} must not be remotely invocable"
+            );
+        }
+    }
+
     /// `companion_create_owner_invitation` must not regrow an account argument.
     ///
     /// It used to take a `_local_account_id` the body threw away, so the
@@ -1797,7 +1926,7 @@ mod tests {
     /// the advertised tenant would find no invitation there.
     #[tokio::test]
     async fn the_invitation_tenant_matches_the_store_it_was_written_to() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let store = security_store::SecurityStore::in_memory().expect("in-memory store");
         security_store::install_security_store(Some(store.clone()));
         host_identity::unbind_local_account();
@@ -1837,7 +1966,7 @@ mod tests {
     /// silently stop authenticating on the next unlock.
     #[tokio::test]
     async fn a_device_paired_before_unlock_survives_the_account_binding() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let device = "pre-unlock-device";
         let store = install_store_with_device(device);
         let before = paired_tenant_id();
@@ -1854,6 +1983,28 @@ mod tests {
             "the device paired before the unlock must remain addressable"
         );
         host_identity::unbind_local_account();
+    }
+
+    /// Holds the store lock and leaves the process-global store empty again.
+    ///
+    /// `server::challenge_fails_closed_without_security_store_after_spawn`
+    /// asserts the *absence* of an installed store and does not take this lock,
+    /// so a suite that installs one and walks away breaks it depending on test
+    /// ordering.
+    struct StoreScope(
+        // Never read — held for its lifetime, which is the whole point.
+        #[allow(dead_code)] std::sync::MutexGuard<'static, ()>,
+    );
+
+    impl Drop for StoreScope {
+        fn drop(&mut self) {
+            // Runs before the field, so the lock is still held here.
+            security_store::install_security_store(None);
+        }
+    }
+
+    fn store_scope() -> StoreScope {
+        StoreScope(security_store::test_guard())
     }
 
     /// Register a paired owner device in a fresh in-memory store and install it
@@ -1900,7 +2051,7 @@ mod tests {
     /// that writes anywhere else grants nothing while claiming to.
     #[tokio::test]
     async fn revoking_terminal_access_refuses_the_device_at_the_terminal_gate() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let device = "terminal-gate-device";
         let store = install_store_with_device(device);
 
@@ -1934,7 +2085,7 @@ mod tests {
     /// terminal access would silently also revoke file writes.
     #[tokio::test]
     async fn each_grant_moves_only_its_own_capabilities() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let device = "grant-isolation-device";
         let store = install_store_with_device(device);
 
@@ -1972,7 +2123,7 @@ mod tests {
 
     #[tokio::test]
     async fn grants_refuse_an_empty_device_id_rather_than_widening_to_every_caller() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         install_store_with_device("some-other-device");
         // An empty id is what an unauthenticated or malformed context carries.
         for allowed in [true, false] {
@@ -1994,7 +2145,7 @@ mod tests {
     /// change exists to remove.
     #[tokio::test]
     async fn granting_to_an_unknown_device_surfaces_instead_of_succeeding_silently() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         install_store_with_device("known-device");
         assert!(companion_set_remote_terminal("never-paired".into(), true)
             .await
@@ -2009,7 +2160,7 @@ mod tests {
     /// `locked_use_allow_list`'s module docs.
     #[tokio::test]
     async fn locked_use_stays_out_of_the_capability_store() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let device = "locked-use-device";
         let store = install_store_with_device(device);
         let before = store
@@ -2044,7 +2195,7 @@ mod tests {
     /// position and the permission it describes are the same fact.
     #[tokio::test]
     async fn listed_grants_report_the_store() {
-        let _guard = security_store::test_guard();
+        let _scope = store_scope();
         let device = "listed-grants-device";
         install_store_with_device(device);
 

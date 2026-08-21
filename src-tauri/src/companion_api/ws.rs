@@ -284,19 +284,34 @@ async fn handle_socket(
                         {
                             continue;
                         }
-                        if frame.event_type == "security://device-revoked" {
+                        if frame.event_type
+                            == crate::companion_api::device_lifecycle::LIFECYCLE_EVENT
+                        {
                             let targets_this_socket =
                                 revocation_targets(&frame, tenant_id.as_deref(), &device_id);
-                            if targets_this_socket {
+                            // A resume must not close the socket it just
+                            // re-authorized — only a transition *away* from
+                            // active tears the connection down.
+                            let state = frame
+                                .payload
+                                .get("state")
+                                .and_then(Value::as_str)
+                                .unwrap_or("revoked");
+                            if targets_this_socket && state != "active" {
+                                let reason = if state == "suspended" {
+                                    "device suspended"
+                                } else {
+                                    "device revoked"
+                                };
                                 let _ = socket
                                     .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                         code: 1008,
-                                        reason: "device revoked".into(),
+                                        reason: reason.into(),
                                     })))
                                     .await;
                                 return;
                             }
-                            // Revocation notifications are control-plane data,
+                            // Lifecycle notifications are control-plane data,
                             // never part of another device's event stream.
                             continue;
                         }
@@ -561,7 +576,7 @@ mod tests {
     #[test]
     fn revocation_control_event_only_targets_the_bound_v2_identity() {
         let frame = crate::companion_api::event_bus::EventFrame {
-            event_type: "security://device-revoked".into(),
+            event_type: crate::companion_api::device_lifecycle::LIFECYCLE_EVENT.into(),
             seq: 1,
             payload: json!({
                 "tenantId": "tenant-a",

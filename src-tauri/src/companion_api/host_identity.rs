@@ -226,6 +226,28 @@ mod tests {
     use super::*;
     use crate::companion_api::security_store::{install_security_store, test_guard, SecurityStore};
 
+    /// Holds the store lock and leaves the process-global store empty again.
+    ///
+    /// `server::challenge_fails_closed_without_security_store_after_spawn`
+    /// asserts the *absence* of an installed store and does not take this lock,
+    /// so a suite that installs one and walks away breaks it depending on test
+    /// ordering.
+    struct StoreScope(
+        // Never read — held for its lifetime, which is the whole point.
+        #[allow(dead_code)] std::sync::MutexGuard<'static, ()>,
+    );
+
+    impl Drop for StoreScope {
+        fn drop(&mut self) {
+            // Runs before the field, so the lock is still held here.
+            install_security_store(None);
+        }
+    }
+
+    fn store_scope() -> StoreScope {
+        StoreScope(test_guard())
+    }
+
     fn install() -> std::sync::Arc<SecurityStore> {
         let store = SecurityStore::in_memory().unwrap();
         install_security_store(Some(store.clone()));
@@ -235,7 +257,7 @@ mod tests {
 
     #[test]
     fn an_unbound_host_serves_the_sentinel_namespace() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
 
         let context = current().unwrap();
@@ -247,7 +269,7 @@ mod tests {
 
     #[test]
     fn the_first_bind_adopts_the_unclaimed_bucket_and_keeps_its_tenant() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
 
         let unbound = current().unwrap().remote_tenant_id;
@@ -262,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_second_account_receives_a_distinct_tenant() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
 
         let first = bind_local_account("acct_one", "digest-one").unwrap();
@@ -274,7 +296,7 @@ mod tests {
 
     #[test]
     fn rebinding_with_a_different_verifier_digest_is_refused() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
         bind_local_account("acct_one", "digest-one").unwrap();
 
@@ -290,7 +312,7 @@ mod tests {
 
     #[test]
     fn an_operator_bind_records_no_digest_and_arms_it_on_first_verified_unlock() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         let store = install();
 
         bind_local_account_from_operator("acct_headless").unwrap();
@@ -328,7 +350,7 @@ mod tests {
         // accepted — and lands on a fresh, empty tenant, which is what bounds
         // the damage. If this ever starts failing, the trust root moved and the
         // module doc above needs rewriting.
-        let _guard = test_guard();
+        let _scope = store_scope();
         let store = install();
 
         let forged = bind_local_account("acct_never_seen_before", "whatever").unwrap();
@@ -341,7 +363,7 @@ mod tests {
 
     #[test]
     fn unbinding_returns_the_host_to_the_sentinel_without_dropping_the_row() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         let store = install();
         let bound = bind_local_account("acct_one", "digest-one").unwrap();
 
@@ -359,7 +381,7 @@ mod tests {
 
     #[test]
     fn a_tenant_resolves_back_to_the_namespace_that_owns_it() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
         let bound = bind_local_account("acct_one", "digest-one").unwrap();
 
@@ -378,7 +400,7 @@ mod tests {
 
     #[test]
     fn multi_tenant_deployments_never_read_the_process_binding() {
-        let _guard = test_guard();
+        let _scope = store_scope();
         install();
         bind_local_account("acct_one", "digest-one").unwrap();
 

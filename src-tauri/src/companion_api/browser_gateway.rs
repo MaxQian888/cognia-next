@@ -1331,7 +1331,9 @@ pub async fn browser_ws_handler(
         };
     match gateway().session_for_principal(&identity.tenant_id, &identity.device_id, &session_id) {
         Ok(_) => ws
-            .on_upgrade(move |socket| handle_browser_socket(socket, session_id, identity.device_id))
+            .on_upgrade(move |socket| {
+                handle_browser_socket(socket, session_id, identity.tenant_id, identity.device_id)
+            })
             .into_response(),
         Err(error) => super::api::public_error_response(
             axum::http::StatusCode::UNAUTHORIZED,
@@ -1350,7 +1352,12 @@ fn unix_time_secs() -> i64 {
         .as_secs() as i64
 }
 
-async fn handle_browser_socket(mut socket: WebSocket, session_id: String, device_id: String) {
+async fn handle_browser_socket(
+    mut socket: WebSocket,
+    session_id: String,
+    tenant_id: String,
+    device_id: String,
+) {
     if gateway().enter_viewer(&session_id).is_err() {
         let _ = socket
             .send(Message::Text(
@@ -1388,8 +1395,27 @@ async fn handle_browser_socket(mut socket: WebSocket, session_id: String, device
         gateway().leave_viewer(&session_id);
         return;
     }
+    // Re-check authorization once a second. Until this existed the browser
+    // stream was authorized exactly once, at ticket redemption, and then ran
+    // for as long as the client kept it open — so suspending or revoking a
+    // device left its live screen share running. Matches the cadence
+    // `/ws/terminal` and `/ws/worker` already use.
+    let mut authorization = tokio::time::interval(std::time::Duration::from_secs(1));
+    authorization.tick().await;
     loop {
         tokio::select! {
+            _ = authorization.tick() => {
+                if !super::device_lifecycle::still_authorized(&tenant_id, &device_id) {
+                    let reason = super::device_lifecycle::close_reason(&tenant_id, &device_id);
+                    let _ = socket
+                        .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                            code: 1008,
+                            reason: reason.into(),
+                        })))
+                        .await;
+                    break;
+                }
+            }
             event = events.recv() => {
                 if let Ok(payload) = event {
                     let outgoing = json!({ "version": 1, "type": "event", "payload": payload });

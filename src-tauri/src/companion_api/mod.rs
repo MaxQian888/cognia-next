@@ -35,6 +35,7 @@ pub mod deployment;
 pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
 pub mod device_grants;
+pub mod device_lifecycle;
 pub mod dispatch_host;
 pub mod dispatchers;
 pub mod event_batcher;
@@ -511,16 +512,21 @@ impl CompanionServerState {
 
     // ── Deny-list pass-throughs (used by Tauri commands) ───────────────────
 
-    pub fn seed_deny_list(&self, device_ids: Vec<String>) {
-        self.deny_list.seed(device_ids);
-    }
-
-    pub fn revoke_device(&self, device_id: String) {
-        self.deny_list.revoke(device_id);
-    }
-
-    pub fn unrevoke_device(&self, device_id: &str) {
-        self.deny_list.unrevoke(device_id);
+    /// Rebuild the deny-list cache from the security store.
+    ///
+    /// Called at server start. Replaces the renderer-driven seed, which read a
+    /// Dexie table that stayed empty under a real local account — so every
+    /// restart silently un-revoked every device.
+    pub fn seed_deny_list_from_store(&self) {
+        match self.deny_list.seed_from_store() {
+            Some(loaded) => {
+                log::info!("companion deny-list seeded from the store: {loaded} inactive device(s)")
+            }
+            None => log::warn!(
+                "companion deny-list could not be seeded; the security store is authoritative, \
+                 so authorization is unaffected"
+            ),
+        }
     }
 }
 

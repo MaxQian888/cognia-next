@@ -254,9 +254,14 @@ impl FleetRuntime {
                         .as_deref()
                         == Some(account)
             }
-            // No brain has said hello. Only this host's own tenant projects —
-            // never a tenant that merely happens to be asked about.
-            None => tenant_id == crate::companion_api::host_identity::current_tenant_or_unbound(),
+            // No brain has said hello, so the local runtime is the only source
+            // there is. Single-user hosts serve exactly one tenant, and the
+            // caller's id came from an authenticated principal, so it is that
+            // one. Multi-tenant deployments have no local runtime to project.
+            None => {
+                crate::companion_api::deployment::deployment_mode()
+                    == crate::companion_api::deployment::DeploymentMode::SingleUser
+            }
         };
         let mut snapshot = if projects_this_tenant {
             self.registry.lock().snapshot(now_ms())

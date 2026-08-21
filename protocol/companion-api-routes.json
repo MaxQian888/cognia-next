@@ -27,6 +27,16 @@
     { "path": "/api/devices", "method": "get", "document": "public" },
     { "path": "/api/devices/{device_id}", "method": "delete", "document": "public" },
     {
+      "path": "/api/devices/{device_id}/suspend",
+      "method": "post",
+      "document": "public"
+    },
+    {
+      "path": "/api/devices/{device_id}/resume",
+      "method": "post",
+      "document": "public"
+    },
+    {
       "path": "/api/devices/{device_id}/capabilities",
       "method": "put",
       "document": "public"

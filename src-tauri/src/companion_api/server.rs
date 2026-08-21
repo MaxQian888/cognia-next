@@ -486,6 +486,14 @@ fn build_router_for_mode(
             delete(super::api::revoke_device_handler),
         )
         .route(
+            "/api/devices/{device_id}/suspend",
+            post(super::api::suspend_device_handler),
+        )
+        .route(
+            "/api/devices/{device_id}/resume",
+            post(super::api::resume_device_handler),
+        )
+        .route(
             "/api/devices/{device_id}/capabilities",
             put(super::api::replace_device_capabilities_handler),
         )

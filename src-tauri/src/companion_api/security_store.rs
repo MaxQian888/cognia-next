@@ -591,6 +591,29 @@ impl SecurityStore {
         Ok(count > 0)
     }
 
+    /// Every device that is not `active`, across all tenants.
+    ///
+    /// Feeds [`super::deny_list::DenyList::seed_from_store`] at startup. The
+    /// deny list used to be seeded from the renderer's Dexie mirror, which
+    /// meant a revocation survived a restart only if the renderer had written
+    /// that row — and under a real local account it never did, so every reboot
+    /// silently un-revoked everything. Reading the store is the fix: the store
+    /// is where the revocation was actually recorded.
+    ///
+    /// Returns `(tenant_id, device_id)` because the deny list is keyed by both;
+    /// a bare device id would let one tenant's revocation reject another
+    /// tenant's device of the same id.
+    pub fn list_inactive_devices(&self) -> Result<Vec<(String, String)>, SecurityStoreError> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT tenant_id, id FROM devices
+             WHERE status != 'active'
+             ORDER BY tenant_id, id",
+        )?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn list_devices(&self, tenant_id: &str) -> Result<Vec<DeviceSummary>, SecurityStoreError> {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(

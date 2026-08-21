@@ -2918,6 +2918,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "companion_list_devices",
+      "target": "client",
+      "operation": "read",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_resume_device",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "companion_revoke_device",
       "target": "client",
       "operation": "side-effect",
@@ -3219,6 +3243,18 @@
     },
     {
       "name": "companion_tunnel_stop",
+      "target": "client",
+      "operation": "side-effect",
+      "capability": "client.local",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "companion_suspend_device",
       "target": "client",
       "operation": "side-effect",
       "capability": "client.local",

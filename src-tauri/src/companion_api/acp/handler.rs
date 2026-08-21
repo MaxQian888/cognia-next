@@ -1225,8 +1225,41 @@ async fn handle_acp_socket(
     let idle_timeout = Duration::from_secs(IDLE_TIMEOUT_SECS);
     let mut last_client_activity = Instant::now();
 
+    // Re-check authorization once a second. The capability snapshot above is
+    // taken exactly once at upgrade; before this arm existed an ACP connection
+    // held whatever it was granted at handshake time for the life of the
+    // socket, so suspending or revoking the device changed nothing until it
+    // reconnected. Same cadence as `/ws/terminal` and `/ws/worker`.
+    let mut authorization = interval(Duration::from_secs(1));
+    authorization.tick().await;
+    let lifecycle_identity = conn
+        .account_id
+        .clone()
+        .map(|tenant| (tenant, conn.device_id.clone()));
+
     loop {
         tokio::select! {
+            _ = authorization.tick() => {
+                // A connection with no tenant is the loopback service
+                // principal, which has no device row to suspend.
+                if let Some((tenant_id, device_id)) = lifecycle_identity.as_ref() {
+                    if !crate::companion_api::device_lifecycle::still_authorized(tenant_id, device_id) {
+                        let reason = crate::companion_api::device_lifecycle::close_reason(
+                            tenant_id,
+                            device_id,
+                        );
+                        let _ = socket
+                            .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                                code: 1008,
+                                reason: reason.into(),
+                            })))
+                            .await;
+                        conn.cleanup().await;
+                        return;
+                    }
+                }
+            }
+
             // Sidecar events → session/update etc.
             result = receiver.recv() => {
                 match result {

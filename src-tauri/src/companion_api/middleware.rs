@@ -334,7 +334,7 @@ async fn authenticate_request(
             match authn.authenticate(&token).await {
                 Ok(claims) => {
                     let ctx = oidc_device_context(&claims);
-                    if state.deny_list.is_revoked(&ctx.device_id) {
+                    if state.deny_list.is_revoked(&ctx.account_id, &ctx.device_id) {
                         return error_response("device_revoked", "this device has been revoked");
                     }
                     request.extensions_mut().insert(ctx);
@@ -443,7 +443,7 @@ async fn authenticate_request(
     };
 
     // ── 4. Deny-list check ──────────────────────────────────────────────────
-    if state.deny_list.is_revoked(&device_id) {
+    if state.deny_list.is_revoked(&account_id, &device_id) {
         return error_response("device_revoked", "this device has been revoked");
     }
 
@@ -893,7 +893,9 @@ mod tests {
     #[tokio::test]
     async fn revoked_device_returns_401_device_revoked() {
         let state = test_state();
-        state.deny_list.revoke("revoked-device".to_string());
+        // Keyed by the same tenant the JWT carries — the gate now compares
+        // both, so a bare device id would no longer match.
+        state.deny_list.revoke(ACCOUNT_ID, "revoked-device");
         let router = build_router(Arc::clone(&state));
         let jwt = device_jwt("revoked-device");
         let req = Request::builder()
@@ -905,6 +907,26 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 401);
         let body = body_json(resp).await;
         assert_eq!(body["code"], "device_revoked");
+    }
+
+    /// A revocation belongs to one tenant.
+    ///
+    /// Device ids are unique within a tenant, not across them. Before the deny
+    /// list carried a tenant, revoking a device here would have refused a
+    /// same-named device belonging to somebody else.
+    #[tokio::test]
+    async fn a_revocation_in_another_tenant_does_not_refuse_this_one() {
+        let state = test_state();
+        state.deny_list.revoke("tnt_someone_else", "revoked-device");
+        let router = build_router(Arc::clone(&state));
+        let jwt = device_jwt("revoked-device");
+        let req = Request::builder()
+            .uri("/protected")
+            .header("Authorization", format!("Bearer {jwt}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
     }
 
     // ── Query-string auth (WS upgrade path) ─────────────────────────────────

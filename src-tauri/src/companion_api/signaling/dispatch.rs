@@ -576,7 +576,11 @@ async fn handle_binary_resource(
     {
         return send_binary_resource_error(peer, request.id, "INVALID_PARAMS").await;
     }
-    if state.deny_list.is_revoked(device_id) {
+    // Tenant-agnostic on purpose: this path has no tenant until the
+    // `active_device_tenant` lookup further down, and that lookup is strict
+    // about `status = 'active'`, so a suspended or revoked device is refused
+    // there regardless. See `DenyList::is_revoked_in_any_tenant`.
+    if state.deny_list.is_revoked_in_any_tenant(device_id) {
         return send_binary_resource_error(peer, request.id, "device_revoked").await;
     }
     if !matches!(
@@ -636,7 +640,9 @@ fn revocation_reject(
     device_id: &str,
     request_id: &str,
 ) -> Option<OutboundFrame> {
-    if deny_list.is_revoked(device_id) {
+    // See the note on the binary-resource gate above: no tenant is available
+    // this early, and the authoritative per-tenant check follows immediately.
+    if deny_list.is_revoked_in_any_tenant(device_id) {
         Some(OutboundFrame::Response(ResponseFrame {
             id: request_id.to_string(),
             ok: false,
@@ -840,7 +846,7 @@ mod tests {
     #[test]
     fn revocation_reject_builds_error_frame_for_revoked_device() {
         let deny = crate::companion_api::deny_list::DenyList::new();
-        deny.revoke("revoked-device".to_string());
+        deny.revoke("tnt_alpha", "revoked-device");
         let frame = revocation_reject(&deny, "revoked-device", "req-2")
             .expect("a revoked device must be rejected on the DataChannel path too");
         let text = serde_json::to_string(&frame).unwrap();

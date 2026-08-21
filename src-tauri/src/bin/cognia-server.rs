@@ -1023,9 +1023,22 @@ async fn run_serve(
     // Build a SharedState with `app_handle: None`; dispatch resolves the
     // headless services registry instead (ADR-0059 R5/R7).
     let signing_secret = secret::load_or_generate()?;
+    // Rebuild the deny-list cache from the store before the listener starts.
+    // It lives in process memory, so a restart without this served every
+    // revoked and suspended device again.
+    let deny_list = Arc::new(DenyList::new());
+    match deny_list.seed_from_store() {
+        Some(loaded) => {
+            println!("[cognia-server] deny-list seeded: {loaded} inactive device(s)")
+        }
+        None => eprintln!(
+            "[cognia-server] deny-list could not be seeded; the security store remains \
+             authoritative for every authorization decision"
+        ),
+    }
     let shared: SharedState = Arc::new(CompanionState {
         secret: RwLock::new(signing_secret),
-        deny_list: Arc::new(DenyList::new()),
+        deny_list,
         app_handle: None,
         idempotency: Arc::new(idempotency),
         event_bus: EventBus::new(),

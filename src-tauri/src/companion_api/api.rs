@@ -415,39 +415,123 @@ pub struct DeviceRevocationResponse {
     revoked_device_id: String,
 }
 
+/// Result of a suspend or resume.
+///
+/// Reports `changed: false` when the device was already in the target state.
+/// The request still succeeded — its intent holds — but the caller can tell
+/// that nothing was torn down, which matters for a UI that renders a toast.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLifecycleResponse {
+    device_id: String,
+    previous_state: &'static str,
+    state: &'static str,
+    changed: bool,
+}
+
+impl From<super::device_lifecycle::LifecycleOutcome> for DeviceLifecycleResponse {
+    fn from(outcome: super::device_lifecycle::LifecycleOutcome) -> Self {
+        Self {
+            device_id: outcome.device_id,
+            previous_state: outcome.previous.as_str(),
+            state: outcome.current.as_str(),
+            changed: outcome.changed,
+        }
+    }
+}
+
 pub(crate) async fn revoke_device_handler(
     Path(device_id): Path<String>,
     Extension(context): Extension<DeviceContext>,
     State(state): State<SharedState>,
 ) -> ApiResult<DeviceRevocationResponse> {
-    store()?
-        .revoke_device(
-            &context.account_id,
-            &context.device_id,
-            &device_id,
-            false,
-            unix_time_secs(),
-        )
-        .map_err(store_error)?;
-    cleanup_signaling(&device_id)?;
-    super::signaling::refresh_installed_hub().map_err(|error| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "signaling_revocation_activate_failed",
-            error,
-        )
-    })?;
-    state.deny_list.revoke(device_id.clone());
-    state.event_bus.publish(
-        "security://device-revoked".to_string(),
-        json!({
-            "tenantId": context.account_id,
-            "deviceId": device_id,
-        }),
-    );
+    apply_lifecycle(
+        &state,
+        &context,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Revoke,
+    )?;
     Ok(Json(DeviceRevocationResponse {
         revoked_device_id: device_id,
     }))
+}
+
+pub(crate) async fn suspend_device_handler(
+    Path(device_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+    State(state): State<SharedState>,
+) -> ApiResult<DeviceLifecycleResponse> {
+    let outcome = apply_lifecycle(
+        &state,
+        &context,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Suspend,
+    )?;
+    Ok(Json(DeviceLifecycleResponse::from(outcome)))
+}
+
+pub(crate) async fn resume_device_handler(
+    Path(device_id): Path<String>,
+    Extension(context): Extension<DeviceContext>,
+    State(state): State<SharedState>,
+) -> ApiResult<DeviceLifecycleResponse> {
+    let outcome = apply_lifecycle(
+        &state,
+        &context,
+        &device_id,
+        super::device_lifecycle::LifecycleAction::Resume,
+    )?;
+    Ok(Json(DeviceLifecycleResponse::from(outcome)))
+}
+
+/// The Companion API's half of the shared lifecycle service.
+///
+/// The desktop half is `commands::apply_lifecycle`. Both build a
+/// [`super::device_lifecycle::LifecycleActor`] and hand off; nothing else here
+/// touches device state, which is what keeps the two paths from drifting.
+fn apply_lifecycle(
+    state: &SharedState,
+    context: &DeviceContext,
+    device_id: &str,
+    action: super::device_lifecycle::LifecycleAction,
+) -> Result<super::device_lifecycle::LifecycleOutcome, ApiError> {
+    super::device_lifecycle::apply(
+        &super::device_lifecycle::LifecycleContext {
+            event_bus: Some(std::sync::Arc::clone(&state.event_bus)),
+            deny_list: Some(std::sync::Arc::clone(&state.deny_list)),
+            app_handle: state.app_handle.clone(),
+        },
+        // Never the trust root: a remote owner must not be able to revoke the
+        // last owner device and lock the deployment out of its own API. The
+        // local operator can, through the CLI.
+        &super::device_lifecycle::LifecycleActor::owner_device(
+            &context.account_id,
+            &context.device_id,
+        ),
+        device_id,
+        action,
+    )
+    .map_err(lifecycle_error)
+}
+
+fn lifecycle_error(error: super::device_lifecycle::LifecycleError) -> ApiError {
+    use super::device_lifecycle::LifecycleError;
+    match error {
+        LifecycleError::StoreUnavailable => {
+            ApiError::unavailable("the security database is unavailable")
+        }
+        LifecycleError::UnknownDevice => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "device_not_found",
+            "the requested device does not exist for this tenant",
+        ),
+        LifecycleError::Store(error) => store_error(error),
+        LifecycleError::Signaling(message) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_revocation_activate_failed",
+            message,
+        ),
+    }
 }
 
 pub(crate) async fn operation_handler(
