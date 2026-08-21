@@ -377,11 +377,7 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
         .map_err(|e| format!("write_text_file task failed: {e}"))?
 }
 
-pub fn write_text_file_impl(
-    path: String,
-    content: String,
-    origin: FsOrigin,
-) -> Result<(), String> {
+pub fn write_text_file_impl(path: String, content: String, origin: FsOrigin) -> Result<(), String> {
     enforce_check_path(&path, "write_text_file", origin)?;
     let p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
@@ -1215,10 +1211,7 @@ fn reject_symlinked_final(final_path: &Path) -> Result<(), String> {
 /// inside one of `allowed_roots`, and reject a symlinked final component.
 /// Returns the absolute path to write to. Empty `allowed_roots` => `Err` (no
 /// implicit any-path).
-pub fn validate_confined_path(
-    path: &str,
-    allowed_roots: &[String],
-) -> Result<PathBuf, String> {
+pub fn validate_confined_path(path: &str, allowed_roots: &[String]) -> Result<PathBuf, String> {
     let roots = canonicalize_roots(allowed_roots);
     if roots.is_empty() {
         return Err("no allowed roots configured".into());

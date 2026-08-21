@@ -358,10 +358,7 @@ async fn execute_template(
     Err("redirect limit exceeded".into())
 }
 
-pub fn migrate_balance_token(
-    source_id: String,
-    token: String,
-) -> Result<String, String> {
+pub fn migrate_balance_token(source_id: String, token: String) -> Result<String, String> {
     validate_source_id(&source_id)?;
     if token.is_empty() || token.len() > 16 * 1024 {
         return Err("balance token is empty or too large".into());
