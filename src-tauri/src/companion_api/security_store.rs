@@ -35,6 +35,8 @@ pub enum SecurityStoreError {
     Migration(String),
     #[error("device lifecycle transition is invalid")]
     InvalidDeviceTransition,
+    #[error("the local account does not match this host's recorded binding")]
+    HostBindingMismatch,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -55,6 +57,42 @@ pub struct AuthorizationSnapshot {
     pub public_key_pem: String,
     pub key_thumbprint: String,
     pub capabilities: Vec<String>,
+}
+
+/// The sentinel namespace for a binding that predates any local account.
+///
+/// Mirrors `DEFAULT_ACCOUNT_NAMESPACE` in the client credential book, and for
+/// the same reason: pairing can legitimately happen before anyone has unlocked
+/// an account, and the first unlock adopts the bucket.
+pub const LOCAL_NAMESPACE_UNBOUND: &str = "__local__";
+
+/// One host's mapping from a local account namespace to a store tenant.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostBinding {
+    pub local_account_namespace: String,
+    pub tenant_id: String,
+    pub verifier_digest: Option<String>,
+    pub pair_host_id: Option<String>,
+}
+
+impl HostBinding {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            local_account_namespace: row.get(0)?,
+            tenant_id: row.get(1)?,
+            verifier_digest: row.get(2)?,
+            pair_host_id: row.get(3)?,
+        })
+    }
+}
+
+/// Mint a tenant id.
+///
+/// Deliberately not the `acct_` shape that `generateAccountId` produces: the
+/// tenant and the local account are different id spaces, and giving them
+/// different prefixes keeps a confusion of the two visible instead of silent.
+fn mint_tenant_id() -> String {
+    format!("tnt_{}", uuid::Uuid::new_v4().simple())
 }
 
 /// The three states a device row can be in.
@@ -1207,6 +1245,203 @@ impl SecurityStore {
             .map_err(Into::into)
     }
 
+    /// The binding row for a local account namespace, if one exists.
+    pub fn host_binding(
+        &self,
+        local_account_namespace: &str,
+    ) -> Result<Option<HostBinding>, SecurityStoreError> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id
+                 FROM host_bindings WHERE local_account_namespace = ?1",
+                [local_account_namespace],
+                HostBinding::from_row,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Bind a local account namespace to a tenant, minting or adopting one.
+    ///
+    /// The adoption order is what keeps existing installs working:
+    /// 1. this namespace already has a row — reuse it;
+    /// 2. the unclaimed `__local__` bucket exists — move the namespace onto it
+    ///    and **keep its tenant**, so every device paired before there was an
+    ///    account keeps authenticating;
+    /// 3. otherwise mint a fresh `tnt_…` tenant.
+    ///
+    /// `verifier_digest` is the security boundary. Rust cannot prove that a
+    /// renderer-supplied `local_account_namespace` is genuine — the account
+    /// registry lives in IndexedDB — so instead it pins the namespace to the
+    /// password verifier it was first seen with. A compromised renderer can
+    /// still mint a *new* namespace (which gets an empty tenant and no
+    /// devices), but it can never re-point an established one at a verifier of
+    /// its own choosing. Rotating a password therefore has to go through
+    /// [`Self::rebind_host_verifier`].
+    pub fn bind_host_account(
+        &self,
+        local_account_namespace: &str,
+        verifier_digest: Option<&str>,
+        now: i64,
+    ) -> Result<HostBinding, SecurityStoreError> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let existing: Option<HostBinding> = tx
+            .query_row(
+                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id
+                 FROM host_bindings WHERE local_account_namespace = ?1",
+                [local_account_namespace],
+                HostBinding::from_row,
+            )
+            .optional()?;
+
+        if let Some(binding) = existing {
+            match (binding.verifier_digest.as_deref(), verifier_digest) {
+                (Some(recorded), Some(presented)) if recorded != presented => {
+                    return Err(SecurityStoreError::HostBindingMismatch);
+                }
+                // First verified unlock after a legacy adoption records the
+                // digest, which is what arms the pin for every later bind.
+                (None, Some(presented)) => {
+                    tx.execute(
+                        "UPDATE host_bindings SET verifier_digest = ?1, updated_at = ?2
+                         WHERE local_account_namespace = ?3",
+                        params![presented, now, local_account_namespace],
+                    )?;
+                    tx.commit()?;
+                    return Ok(HostBinding {
+                        verifier_digest: Some(presented.to_string()),
+                        ..binding
+                    });
+                }
+                _ => {}
+            }
+            tx.commit()?;
+            return Ok(binding);
+        }
+
+        // Adopt the unclaimed legacy bucket, tenant and all.
+        let unclaimed: Option<String> = tx
+            .query_row(
+                "SELECT tenant_id FROM host_bindings WHERE local_account_namespace = ?1",
+                [LOCAL_NAMESPACE_UNBOUND],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let binding = if let Some(tenant_id) = unclaimed {
+            tx.execute(
+                "UPDATE host_bindings
+                 SET local_account_namespace = ?1, verifier_digest = ?2, updated_at = ?3
+                 WHERE local_account_namespace = ?4",
+                params![
+                    local_account_namespace,
+                    verifier_digest,
+                    now,
+                    LOCAL_NAMESPACE_UNBOUND
+                ],
+            )?;
+            HostBinding {
+                local_account_namespace: local_account_namespace.to_string(),
+                tenant_id,
+                verifier_digest: verifier_digest.map(str::to_string),
+                pair_host_id: None,
+            }
+        } else {
+            let tenant_id = mint_tenant_id();
+            tx.execute(
+                "INSERT INTO host_bindings
+                 (local_account_namespace, tenant_id, verifier_digest, bound_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                params![local_account_namespace, tenant_id, verifier_digest, now],
+            )?;
+            HostBinding {
+                local_account_namespace: local_account_namespace.to_string(),
+                tenant_id,
+                verifier_digest: verifier_digest.map(str::to_string),
+                pair_host_id: None,
+            }
+        };
+        tx.commit()?;
+        Ok(binding)
+    }
+
+    /// Re-pin a binding to a new password verifier. This is the deliberate
+    /// escape hatch for a password rotation, and the only way an established
+    /// digest ever changes.
+    pub fn rebind_host_verifier(
+        &self,
+        local_account_namespace: &str,
+        verifier_digest: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let changed = self.conn.lock().execute(
+            "UPDATE host_bindings SET verifier_digest = ?1, updated_at = ?2
+             WHERE local_account_namespace = ?3",
+            params![verifier_digest, now, local_account_namespace],
+        )?;
+        if changed == 0 {
+            return Err(SecurityStoreError::HostBindingMismatch);
+        }
+        Ok(())
+    }
+
+    /// Resolve a tenant back to the local account namespace that owns it.
+    pub fn host_namespace_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<String>, SecurityStoreError> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT local_account_namespace FROM host_bindings WHERE tenant_id = ?1",
+                [tenant_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// The tenant a host with no unlocked account should serve.
+    ///
+    /// The companion server can start before anyone unlocks, and devices paired
+    /// earlier still have to authenticate, so this resolves to the unclaimed
+    /// `__local__` bucket when one exists rather than refusing.
+    pub fn unbound_host_tenant(&self) -> Result<Option<String>, SecurityStoreError> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT tenant_id FROM host_bindings WHERE local_account_namespace = ?1",
+                [LOCAL_NAMESPACE_UNBOUND],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Record the host id that this tenant's QR pair payload advertises.
+    ///
+    /// The repo derives a host id three different ways and the pair payload's
+    /// form is load-bearing on the client: mobile derives an explicitly
+    /// immutable `cursorNamespace` from it. Unifying them would break every
+    /// existing pairing, so for now the payload form is only recorded, ready
+    /// for a later reconciliation.
+    pub fn record_pair_host_id(
+        &self,
+        local_account_namespace: &str,
+        pair_host_id: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        self.conn.lock().execute(
+            "UPDATE host_bindings SET pair_host_id = ?1, updated_at = ?2
+             WHERE local_account_namespace = ?3",
+            params![pair_host_id, now, local_account_namespace],
+        )?;
+        Ok(())
+    }
+
     /// Read a device's lifecycle state. `None` when the device does not exist.
     pub fn device_state(
         &self,
@@ -1723,6 +1958,10 @@ fn upsert_capability_grant(
 /// documented 12-step table rebuild.
 const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 
+/// Files every pre-existing tenant under a `host_bindings` row so the first
+/// account unlock has something to adopt.
+const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
+
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
 /// silently transpose two values.
@@ -1781,6 +2020,50 @@ fn apply_schema_migrations(
     backup_target: Option<&Path>,
 ) -> Result<(), SecurityStoreError> {
     migrate_device_status_suspended(conn, now, backup_target)?;
+    migrate_host_binding_legacy(conn, now)?;
+    Ok(())
+}
+
+/// Give every tenant that already has devices a `host_bindings` row.
+///
+/// In practice there is exactly one, the hardcoded `local_acct_a`, and it is
+/// filed under the `__local__` sentinel so the first account unlock can adopt
+/// it — keeping the tenant, and therefore every existing pairing, in place. The
+/// loop is still total, because "in practice one" is not an invariant.
+fn migrate_host_binding_legacy(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_HOST_BINDING_LEGACY)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let existing: i64 = tx.query_row("SELECT COUNT(*) FROM host_bindings", [], |row| row.get(0))?;
+    if existing == 0 {
+        let tenants = {
+            let mut statement =
+                tx.prepare("SELECT DISTINCT tenant_id FROM devices ORDER BY tenant_id")?;
+            let collected = statement
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            collected
+        };
+        for (index, tenant_id) in tenants.iter().enumerate() {
+            // Only one bucket can be the unclaimed one. Any additional tenant
+            // is parked under a namespace nothing will ever adopt by accident,
+            // so it stays reachable but never silently attaches to an account.
+            let namespace = if index == 0 {
+                LOCAL_NAMESPACE_UNBOUND.to_string()
+            } else {
+                format!("__legacy__:{tenant_id}")
+            };
+            tx.execute(
+                "INSERT OR IGNORE INTO host_bindings
+                 (local_account_namespace, tenant_id, bound_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?3)",
+                params![namespace, tenant_id, now],
+            )?;
+        }
+    }
+    mark_migration(&tx, MIGRATION_HOST_BINDING_LEGACY, now)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -1916,6 +2199,22 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS security_migrations (
     key TEXT PRIMARY KEY NOT NULL,
     applied_at INTEGER NOT NULL
+);
+-- Which local account owns which SecurityStore tenant on this host.
+--
+-- `local_account_namespace` is the renderer's Dexie account id (`acct_…`), or
+-- the `__local__` sentinel for a binding that predates any account. `tenant_id`
+-- is this store's own tenant and is assigned once and never moved — every
+-- already-paired device authenticates against it. The two are deliberately
+-- separate id spaces; see `lib/companion/credential-book/types.ts`, which got
+-- this layering right on the client first.
+CREATE TABLE IF NOT EXISTS host_bindings (
+    local_account_namespace TEXT PRIMARY KEY NOT NULL,
+    tenant_id               TEXT NOT NULL UNIQUE,
+    verifier_digest         TEXT,
+    pair_host_id            TEXT,
+    bound_at                INTEGER NOT NULL,
+    updated_at              INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS device_keys (
     id TEXT PRIMARY KEY,
@@ -2252,6 +2551,47 @@ CREATE TABLE devices (
             .query_row("SELECT COUNT(*) FROM devices", [], |row| row.get(0))
             .unwrap();
         assert_eq!(device_count, 2, "the second open re-ran the rebuild");
+    }
+
+    #[test]
+    fn a_legacy_tenant_is_filed_under_the_unclaimed_sentinel() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("security.sqlite");
+        seed_legacy_database(&path);
+
+        let store = SecurityStore::open(&path).unwrap();
+
+        // The tenant every pre-binding install used is now adoptable, and still
+        // owns its devices. The first account unlock takes this bucket over
+        // without the tenant moving, which is what keeps existing pairings alive.
+        assert_eq!(
+            store.unbound_host_tenant().unwrap().as_deref(),
+            Some("tenant-a")
+        );
+        let adopted = store
+            .bind_host_account("acct_real", Some("digest-a"), 200)
+            .unwrap();
+        assert_eq!(adopted.tenant_id, "tenant-a");
+        assert_eq!(
+            store
+                .host_namespace_for_tenant("tenant-a")
+                .unwrap()
+                .as_deref(),
+            Some("acct_real")
+        );
+        assert_eq!(store.list_devices("tenant-a").unwrap().len(), 2);
+        // The bucket is no longer unclaimed, so a second account cannot take it.
+        assert_eq!(store.unbound_host_tenant().unwrap(), None);
+    }
+
+    #[test]
+    fn a_fresh_install_has_nothing_to_adopt() {
+        let store = SecurityStore::in_memory().unwrap();
+        assert_eq!(store.unbound_host_tenant().unwrap(), None);
+        let minted = store
+            .bind_host_account("acct_first", Some("digest-a"), 100)
+            .unwrap();
+        assert!(minted.tenant_id.starts_with("tnt_"));
     }
 
     #[test]

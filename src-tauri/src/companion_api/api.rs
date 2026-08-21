@@ -1958,6 +1958,11 @@ fn store_error(error: SecurityStoreError) -> ApiError {
             "invalid_device_capabilities",
             "the requested capability snapshot contains an invalid grant or removes required Owner authority",
         ),
+        SecurityStoreError::HostBindingMismatch => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "host_binding_mismatch",
+            "the local account does not match this host's recorded binding",
+        ),
         SecurityStoreError::InvalidDeviceTransition => ApiError::new(
             StatusCode::CONFLICT,
             "invalid_device_transition",
