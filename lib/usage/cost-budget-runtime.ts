@@ -104,7 +104,8 @@ export async function notifyCostBudgetThreshold(
     // the numeric badge rather than in ambient activity.
     directed: exceeded,
     icon: "wallet",
-    href: "/observability",
+    // The spend breakdown lives on the Traces channel's dashboard sub-view.
+    href: "/logs?channel=traces&view=dashboard",
   })
 }
 

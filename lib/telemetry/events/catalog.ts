@@ -40,7 +40,15 @@ export interface TelemetryEventCatalog {
   "chat.list.created": { kind: "direct" | "team" }
   /** A (debounced) search query produced results. Carries the query *length*, never its text. */
   "chat.list.searched": {
-    scope: "title" | "titleAndContent"
+    /**
+     * How far the search reached: `"title"` for the unwidened default (the
+     * value the old two-state scope reported, kept so the metric stays
+     * comparable), otherwise the widened axes joined with `+` —
+     * `content`, `archived`, `allWorkspaces`. Built by
+     * `lib/chat/conversation-search-scope.ts:describeConversationSearchScope`,
+     * which never includes anything the user typed.
+     */
+    scope: string
     queryLength: number
     resultCount: number
     /** True when the content index reported more history than it searched. */

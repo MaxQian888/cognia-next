@@ -56,7 +56,8 @@ export function trackConversationCreated(kind: "direct" | "team"): Promise<boole
 }
 
 export function trackConversationSearched(input: {
-  scope: "title" | "titleAndContent"
+  /** See the catalog entry — the widened axes, never the query text. */
+  scope: string
   query: string
   resultCount: number
   truncated: boolean
