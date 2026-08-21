@@ -21,6 +21,7 @@ import path from "node:path"
 
 import { classifyEvent } from "../../hooks/classify"
 import { loadHooks, type FileReader } from "../../hooks/load-hooks"
+import { hasAnyHookGroup } from "../../hooks/resolve-hooks-config"
 import { runHooks } from "../../hooks/run-hooks"
 import type { HookEvent, HooksConfig } from "../../hooks/types"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
@@ -41,6 +42,18 @@ export interface HookRunnerDeps {
   builtinHooksDir?: string
   /** Per-id enable/disable overrides for the built-in hooks. */
   builtinHookOverrides?: BuiltinHookOverrides
+  /**
+   * True once the CLI injects `sendOptions.hooks` (see
+   * `cli/src/hooks/resolve-hooks-config.ts`), which makes the sidecar register
+   * the user's hooks as SDK-native — with real blocking, `additionalContext`
+   * injection and coverage of all 31 events, none of which this runner has.
+   *
+   * When set, every event the SDK now owns becomes a no-op here so a hook does
+   * not run twice per turn. The runner is kept (rather than deleted) because
+   * injection is conditional: with no hooks configured, `sendOptions.hooks` is
+   * omitted and this fallback still serves the CLI-local fire sites.
+   */
+  sdkNativeHooks?: boolean
 }
 
 export interface PreToolHookDecision {
@@ -94,7 +107,17 @@ export function createHookRunner(deps: HookRunnerDeps): HookRunner {
   }) as HooksConfig
   const config: HooksConfig = loadHooks({ home: deps.home, claudeHome, readFile, builtin })
 
-  const groupsFor = (event: HookEvent) => config[event] ?? []
+  // The sidecar owns every SDK lifecycle event once the CLI injects the config,
+  // so this runner must stand down or each hook fires twice per turn.
+  //
+  // Derived from the SAME read the injection uses rather than wired in from the
+  // TUI: injection happens exactly when there is a group to inject, so asking
+  // the config directly cannot drift out of step with `session-context.ts`.
+  // `deps.sdkNativeHooks` stays as an explicit override for tests and for a
+  // future rail that cannot inject.
+  const sdkOwnsEvents = deps.sdkNativeHooks ?? hasAnyHookGroup(config)
+
+  const groupsFor = (event: HookEvent) => (sdkOwnsEvents ? [] : (config[event] ?? []))
 
   const fireLifecycle = (event: HookEvent, payload: Record<string, unknown>): void => {
     const groups = groupsFor(event)

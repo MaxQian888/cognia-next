@@ -18,7 +18,11 @@ function settings(hooks: Record<string, unknown>): string {
 }
 
 describe("createHookRunner", () => {
-  function harness(configHooks: Record<string, unknown>, exitCode = 0) {
+  function harness(
+    configHooks: Record<string, unknown>,
+    exitCode = 0,
+    opts: { sdkNativeHooks?: boolean } = {}
+  ) {
     const spawned: string[] = []
     const spawn = ((cmd: string) => {
       spawned.push(cmd)
@@ -27,11 +31,18 @@ describe("createHookRunner", () => {
     const readFile = (p: string): string | null =>
       p.endsWith("config.json") ? settings(configHooks) : null
     // Disable the default-on built-in hooks so these tests isolate user config.
+    //
+    // `sdkNativeHooks: false` keeps this runner active. In production the CLI
+    // injects the same config into `sendOptions.hooks` so the sidecar runs it
+    // SDK-natively, and this runner stands down (see the dedicated describe
+    // block below). These cases pin the fallback path that still serves a rail
+    // which cannot inject.
     const runner = createHookRunner({
       home: "/home/.cognia",
       osHome: "/home",
       spawn,
       readFile,
+      sdkNativeHooks: opts.sdkNativeHooks ?? false,
       builtinHookOverrides: {
         "auto-context-loader": false,
         "auto-context-loader-prompt": false,
@@ -74,11 +85,16 @@ describe("createHookRunner", () => {
       return fakeChild(0)
     }) as never
     // No user hooks at all — only the bundled built-ins should fire.
+    // `sdkNativeHooks: false` because in production these built-ins are
+    // INJECTED instead: `auto-context-loader` ships enabled and emits
+    // `additionalContext`, which this runner never parses — the exact reason
+    // the CLI now hands its config to the sidecar.
     const runner = createHookRunner({
       home: "/home/.cognia",
       osHome: "/home",
       spawn,
       readFile: () => null,
+      sdkNativeHooks: false,
       builtinHooksDir: "/bundle/hooks/builtin",
     })
     runner.onPrompt("hi")
@@ -92,11 +108,15 @@ describe("createHookRunner", () => {
       spawned.push(cmd)
       return fakeChild(0)
     }) as never
+    // Without the flag this would pass for the wrong reason: the runner would
+    // stand down anyway. Keep it active so the assertion really tests the
+    // override.
     const runner = createHookRunner({
       home: "/home/.cognia",
       osHome: "/home",
       spawn,
       readFile: () => null,
+      sdkNativeHooks: false,
       builtinHooksDir: "/bundle/hooks/builtin",
       builtinHookOverrides: { "auto-context-loader-prompt": false },
     })
@@ -177,5 +197,70 @@ describe("createHookRunner", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(spawned).toContain("denied.sh")
+  })
+})
+
+describe("createHookRunner — standing down for SDK-native hooks", () => {
+  function harness(configHooks: Record<string, unknown>, deps: { sdkNativeHooks?: boolean } = {}) {
+    const spawned: string[] = []
+    const spawn = ((cmd: string) => {
+      spawned.push(cmd)
+      return fakeChild(0)
+    }) as never
+    const readFile = (p: string): string | null =>
+      p.endsWith("config.json") ? settings(configHooks) : null
+    const runner = createHookRunner({
+      home: "/home/.cognia",
+      osHome: "/home",
+      spawn,
+      readFile,
+      builtinHookOverrides: {
+        "auto-context-loader": false,
+        "auto-context-loader-prompt": false,
+      },
+      ...deps,
+    })
+    return { spawned, runner }
+  }
+
+  const userHooks = {
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: "prompt.sh" }] }],
+    PreToolUse: [{ hooks: [{ type: "command", command: "pre.sh" }] }],
+  }
+
+  it("defaults to standing down when there is a group to inject", async () => {
+    // The CLI injects exactly when a group exists, so the presence of one means
+    // the sidecar already owns the event — firing here would double-run it.
+    const { spawned, runner } = harness(userHooks)
+    runner.onPrompt("hello")
+    runner.onSessionStart("s1")
+    runner.onStop(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawned).toEqual([])
+  })
+
+  it("stands down for the blocking PreToolUse path too", async () => {
+    const { spawned, runner } = harness(userHooks)
+    // The sidecar's SDK-native PreToolUse denies before `canUseTool`; a second
+    // deny here would double-prompt the user.
+    await expect(runner.preToolUse("Bash", {})).resolves.toEqual({ deny: false })
+    expect(spawned).toEqual([])
+  })
+
+  it("still runs when there is nothing to inject and the flag is off", async () => {
+    const { spawned, runner } = harness(userHooks, { sdkNativeHooks: false })
+    runner.onPrompt("hello")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawned).toContain("prompt.sh")
+  })
+
+  it("an empty config is inert either way", async () => {
+    const { spawned, runner } = harness({})
+    runner.onPrompt("hello")
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(spawned).toEqual([])
   })
 })

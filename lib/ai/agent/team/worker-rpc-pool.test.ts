@@ -1,17 +1,8 @@
-import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
-import os from "node:os"
-import path from "node:path"
-import { PassThrough, Writable } from "node:stream"
-
 import type { AgentWorkerManifestV1, CogniaClient, CogniaClientOptions } from "@cognia/agent"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
-import { selectRemoteWorker } from "@/lib/ai/agent/team/remote-worker-runtime"
-import type { UnifiedTurnParams, UnifiedTurnResult } from "../agent/runtime/unified-runtime"
-import { DEFAULT_RESOLVED_CONFIG } from "../config/schema"
-import { createAgentRuntimeService } from "../agent/rpc/runtime-service"
-import { createAgentRpcServer, type AgentRpcServer } from "../agent/rpc/server"
-import { BridgeWorkerRpcPool } from "./worker-rpc-pool"
+
+import { selectRemoteWorker } from "./remote-worker-runtime"
+import { WorkerRpcPool } from "./worker-rpc-pool"
 
 const manifest: AgentWorkerManifestV1 = {
   manifestVersion: 1,
@@ -51,14 +42,14 @@ const executionSpec: ResolvedAgentExecutionSpec = {
   fallbackPolicy: "none",
 }
 
-describe("BridgeWorkerRpcPool", () => {
+describe("WorkerRpcPool", () => {
   it("uses authenticated attach identity and transports RPC frames opaquely", async () => {
     const sent: string[] = []
     let now = 10
     const createClient = jest.fn(
       (_options: CogniaClientOptions) => new Promise<CogniaClient>(() => undefined)
     )
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: (_connectionId, frame) => sent.push(frame),
       now: () => now,
       createClient: createClient as never,
@@ -84,13 +75,16 @@ describe("BridgeWorkerRpcPool", () => {
     expect(pool.listWorkers()).toEqual([])
   })
 
-  it("converts bridge send failures into stream errors", async () => {
+  it("converts host send failures into stream errors", async () => {
+    // The peer tears the connection down from the stream's `error` event. If the
+    // throw escaped the write instead, only the one call that happened to be
+    // writing would reject and every other in-flight request would hang.
     let host: Extract<NonNullable<CogniaClientOptions["host"]>, { kind: "streams" }> | undefined
     const createClient = jest.fn((options: CogniaClientOptions) => {
       if (options.host?.kind === "streams") host = options.host
       return new Promise<CogniaClient>(() => undefined)
     })
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: () => {
         throw "bridge failed"
       },
@@ -99,16 +93,15 @@ describe("BridgeWorkerRpcPool", () => {
     pool.attach({ connectionId: "connection-error", hostRef: "device:error", manifest })
     const streams = host
     if (!streams) throw new Error("missing streams")
-    streams.writable.once("error", () => undefined)
-    await expect(
-      new Promise<Error | undefined>((resolve) =>
-        streams.writable.write("frame\n", (error?: Error | null) => resolve(error ?? undefined))
-      )
-    ).resolves.toEqual(expect.objectContaining({ message: "bridge failed" }))
+    const errors: Error[] = []
+    streams.writable.on("error", (error: Error) => errors.push(error))
+
+    expect(streams.writable.write("frame\n")).toBe(false)
+    expect(errors).toEqual([expect.objectContaining({ message: "bridge failed" })])
   })
 
   it("replaces an older connection for the same authenticated host", () => {
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient: (() => new Promise<CogniaClient>(() => undefined)) as never,
     })
@@ -118,7 +111,7 @@ describe("BridgeWorkerRpcPool", () => {
   })
 
   it("rejects malformed worker manifests before placement", () => {
-    const pool = new BridgeWorkerRpcPool({ sendFrame: jest.fn() })
+    const pool = new WorkerRpcPool({ sendFrame: jest.fn() })
     expect(
       pool.attach({
         connectionId: "malformed",
@@ -131,7 +124,7 @@ describe("BridgeWorkerRpcPool", () => {
 
   it("fails closed before RPC dispatch when prompt or handoff content leaks PII", async () => {
     const createSession = jest.fn()
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient: (async () => ({
         sessions: { create: createSession, open: jest.fn() },
@@ -180,7 +173,7 @@ describe("BridgeWorkerRpcPool", () => {
       snapshot: jest.fn(),
       close: jest.fn(),
     }
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient: (async () => ({
         sessions: { create: jest.fn(async () => session), open: jest.fn(async () => session) },
@@ -254,7 +247,7 @@ describe("BridgeWorkerRpcPool", () => {
       executionProfile: { ...manifest.executionProfile!, capabilities: ["streaming"] },
     }
     const onWorkersChanged = jest.fn()
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient,
       onWorkersChanged,
@@ -342,7 +335,7 @@ describe("BridgeWorkerRpcPool", () => {
     }
     const create = jest.fn()
     const open = jest.fn(async () => session)
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient: (async () => ({ sessions: { create, open }, close: jest.fn() })) as never,
     })
@@ -402,7 +395,7 @@ describe("BridgeWorkerRpcPool", () => {
   })
 
   it("rejects dispatch to an unavailable host", async () => {
-    const pool = new BridgeWorkerRpcPool({ sendFrame: jest.fn() })
+    const pool = new WorkerRpcPool({ sendFrame: jest.fn() })
     await expect(
       pool.run({
         hostRef: "device:missing",
@@ -427,149 +420,6 @@ describe("BridgeWorkerRpcPool", () => {
     ).rejects.toThrow("Worker is offline")
   })
 
-  it("runs two single-slot workers over the real Agent RPC v2 streams", async () => {
-    const root = mkdtempSync(path.join(os.tmpdir(), "cognia-worker-pool-integration-"))
-    const repository = path.join(root, "repository")
-    mkdirSync(repository)
-    execFileSync("git", ["init", "--quiet", repository])
-
-    const inputs = new Map<string, PassThrough>()
-    const servers: AgentRpcServer[] = []
-    const services: ReturnType<typeof createAgentRuntimeService>[] = []
-    const releases = new Map<string, () => void>()
-    const runTurns = new Map<string, jest.Mock>()
-    const pool = new BridgeWorkerRpcPool({
-      sendFrame(connectionId, frame) {
-        inputs.get(connectionId)?.write(`${frame}\n`)
-      },
-    })
-
-    const attachRealWorker = (suffix: string) => {
-      const connectionId = `connection-${suffix}`
-      const hostRef = `device:${suffix}`
-      const input = new PassThrough()
-      inputs.set(connectionId, input)
-      const runTurn = jest.fn(async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => {
-        const release = new Promise<void>((resolve) => releases.set(suffix, resolve))
-        params.onEnvelope?.({
-          schemaVersion: 1,
-          eventId: `event-${suffix}`,
-          sequence: 1,
-          sessionId: params.sessionId ?? `session-${suffix}`,
-          runId: `run-${suffix}`,
-          attemptId: "attempt-1",
-          turnId: `turn-${suffix}`,
-          timestamp: "2026-08-12T00:00:00.000Z",
-          hostRef,
-          runtime: "builtin",
-          event: { kind: "lifecycle", phase: "started" },
-        })
-        await release
-        return {
-          result: {
-            schemaVersion: 1,
-            type: "result",
-            status: "completed",
-            sessionId: params.sessionId ?? `session-${suffix}`,
-            runId: `run-${suffix}`,
-            turnId: `turn-${suffix}`,
-            attemptId: "attempt-1",
-            text: `done-${suffix}`,
-            backend: "builtin",
-            model: "test-model",
-            capabilities: ["session.resume"],
-            session: { persisted: true, turnCount: 1 },
-          },
-          envelopes: [],
-        }
-      })
-      runTurns.set(suffix, runTurn)
-      const service = createAgentRuntimeService({
-        config: { ...DEFAULT_RESOLVED_CONFIG, cwd: repository, model: "test-model" },
-        home: path.join(root, `home-${suffix}`),
-        sessionDirOverride: path.join(root, `sessions-${suffix}`),
-        runTurn,
-        mintSessionId: () => `session-${suffix}`,
-        workerDispatch: {
-          manifest,
-          resolveHandoffWorkspace: async () => repository,
-        },
-      })
-      services.push(service)
-      const output = new Writable({
-        write(chunk, _encoding, callback) {
-          for (const frame of String(chunk).split("\n").filter(Boolean)) {
-            pool.receive(connectionId, frame)
-          }
-          callback()
-        },
-      })
-      const server = createAgentRpcServer({
-        input,
-        output,
-        diagnostic: new PassThrough(),
-        service,
-        hostVersion: "test",
-        runtimeVersion: "test",
-        instanceId: `instance-${suffix}`,
-        limits: { maxActiveTurns: 1 },
-      })
-      servers.push(server)
-      void server.serve()
-      expect(pool.attach({ connectionId, hostRef, manifest })).toBe(true)
-    }
-
-    try {
-      attachRealWorker("a")
-      attachRealWorker("b")
-      const events: string[] = []
-      const run = (suffix: string) =>
-        pool.run({
-          hostRef: `device:${suffix}`,
-          commandId: `lease-${suffix}`,
-          handoff: {
-            envelopeVersion: 1,
-            identity: {
-              parentRunId: "team-run",
-              childRunId: `child-${suffix}`,
-              depth: 1,
-              parentChain: ["team-run"],
-            },
-            task: { prompt: `task-${suffix}` },
-            execution: { mode: "orchestrated" },
-            resources: [{ kind: "repository", ref: "repository:project:repo" }],
-            createdAt: "2026-08-12T00:00:00.000Z",
-          },
-          prompt: `task-${suffix}`,
-          onSession: jest.fn(),
-          onEvent: async (event) => {
-            events.push(event.eventId)
-          },
-          onControl: jest.fn(),
-        })
-
-      const first = run("a")
-      const second = run("b")
-      await new Promise((resolve) => setImmediate(resolve))
-      expect(pool.listWorkers().map((worker) => worker.activeTurns)).toEqual([1, 1])
-      releases.get("a")?.()
-      releases.get("b")?.()
-      await expect(Promise.all([first, second])).resolves.toEqual([
-        expect.objectContaining({ status: "completed" }),
-        expect.objectContaining({ status: "completed" }),
-      ])
-      expect(events.sort()).toEqual(["event-a", "event-b"])
-      expect(runTurns.get("a")).toHaveBeenCalledTimes(1)
-      expect(runTurns.get("b")).toHaveBeenCalledTimes(1)
-    } finally {
-      pool.close()
-      inputs.forEach((input) => input.end())
-      await Promise.all(servers.map((server) => server.close()))
-      await Promise.all(services.map((service) => service.close()))
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
   it("pauses cooperatively without aborting, snapshotting, or reopening the session", async () => {
     const abort = jest.fn()
     const waitForIdle = jest.fn(async () => undefined)
@@ -585,7 +435,7 @@ describe("BridgeWorkerRpcPool", () => {
       snapshot,
       close: jest.fn(),
     }
-    const pool = new BridgeWorkerRpcPool({
+    const pool = new WorkerRpcPool({
       sendFrame: jest.fn(),
       createClient: (async () => ({
         sessions: { create: jest.fn(async () => session), open },

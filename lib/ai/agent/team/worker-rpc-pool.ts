@@ -1,53 +1,48 @@
-import { PassThrough, Writable } from "node:stream"
-
-import { createCogniaClient, isAgentWorkerManifestV1, type CogniaClient } from "@cognia/agent"
+import {
+  createCogniaClient,
+  isAgentWorkerManifestV1,
+  RpcFrameSink,
+  RpcStreamSource,
+  type CogniaClient,
+} from "@cognia/agent"
 import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
+
 import type {
   RemoteWorkerDescriptor,
   RemoteWorkerRunInput,
   RemoteWorkerRuntime,
-} from "@/lib/ai/agent/team/remote-worker-runtime"
+} from "./remote-worker-runtime"
 
 interface WorkerConnection {
   descriptor: RemoteWorkerDescriptor
-  readable: PassThrough
-  writable: Writable
+  readable: RpcStreamSource
+  writable: RpcFrameSink
   clientPromise: Promise<CogniaClient>
 }
 
-export interface BridgeWorkerRpcPoolOptions {
+export interface WorkerRpcPoolOptions {
   sendFrame(connectionId: string, frame: string): void
   onWorkersChanged?(workers: readonly RemoteWorkerDescriptor[]): void
   now?: () => number
   createClient?: typeof createCogniaClient
 }
 
-function frameWritable(connectionId: string, sendFrame: BridgeWorkerRpcPoolOptions["sendFrame"]) {
-  let buffer = ""
-  return new Writable({
-    write(chunk, _encoding, callback) {
-      buffer += String(chunk)
-      const frames = buffer.split("\n")
-      buffer = frames.pop() ?? ""
-      try {
-        for (const frame of frames) {
-          if (frame) sendFrame(connectionId, frame)
-        }
-        callback()
-      } catch (error) {
-        callback(error instanceof Error ? error : new Error(String(error)))
-      }
-    },
-  })
-}
-
-/** Agent RPC stays the runtime protocol; the bridge only multiplexes frames. */
-export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
+/**
+ * Agent RPC stays the runtime protocol; the host only multiplexes frames.
+ *
+ * One pool serves both brains. The headless brain pushes frames over the bridge
+ * socket and the desktop brain pushes them over a Tauri IPC channel, but
+ * everything above the wire — session lifecycle, event replay, steering,
+ * capacity accounting — is identical, so it lives here exactly once. The
+ * transport differences are confined to the injected `sendFrame` and to
+ * whichever caller feeds {@link WorkerRpcPool.receive}.
+ */
+export class WorkerRpcPool implements RemoteWorkerRuntime {
   private readonly workers = new Map<string, WorkerConnection>()
   private readonly now: () => number
   private readonly createClient: typeof createCogniaClient
 
-  constructor(private readonly options: BridgeWorkerRpcPoolOptions) {
+  constructor(private readonly options: WorkerRpcPoolOptions) {
     this.now = options.now ?? Date.now
     this.createClient = options.createClient ?? createCogniaClient
   }
@@ -58,8 +53,8 @@ export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
     for (const [connectionId, worker] of this.workers) {
       if (worker.descriptor.hostRef === input.hostRef) this.detach(connectionId, "replaced")
     }
-    const readable = new PassThrough()
-    const writable = frameWritable(input.connectionId, this.options.sendFrame)
+    const readable = new RpcStreamSource()
+    const writable = new RpcFrameSink((frame) => this.options.sendFrame(input.connectionId, frame))
     const descriptor: RemoteWorkerDescriptor = {
       connectionId: input.connectionId,
       hostRef: input.hostRef,
@@ -71,7 +66,7 @@ export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
     const clientPromise = this.createClient({
       host: { kind: "streams", readable, writable },
       requestTimeoutMs: 30_000,
-      client: { name: "cognia-headless-worker-pool" },
+      client: { name: "cognia-worker-pool" },
     })
     clientPromise.catch(() => this.detach(input.connectionId, "rpc_initialize_failed"))
     this.workers.set(input.connectionId, { descriptor, readable, writable, clientPromise })
@@ -83,7 +78,7 @@ export class BridgeWorkerRpcPool implements RemoteWorkerRuntime {
     const worker = this.workers.get(connectionId)
     if (!worker || frame.includes("\n")) return
     worker.descriptor.lastSeenAt = this.now()
-    worker.readable.write(`${frame}\n`)
+    worker.readable.push(`${frame}\n`)
   }
 
   detach(connectionId: string, _reason: string): void {

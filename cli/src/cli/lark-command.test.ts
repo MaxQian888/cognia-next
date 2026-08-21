@@ -80,6 +80,33 @@ describe("larkCommand", () => {
     expect(text).toContain("10 minutes")
   })
 
+  it("names the platform's own console, not always Feishu", async () => {
+    // The op dispatches on the adapter's type, so this verb authorizes any
+    // OAuth connector. Telling a Slack operator to open the Feishu console
+    // would send them to the wrong place.
+    const { out, stdout } = sink()
+    const { doFetch } = fetchScript({
+      status: "done",
+      result: {
+        kind: "slack",
+        authorizeUrl: "https://slack.com/oauth/v2/authorize?x=1",
+        redirectUri: "https://cognia.example/connectors/oauth/connector/slack/callback",
+        state: "slack:sl-1:nonce",
+      },
+    })
+    const code = await larkCommand(parseArgv(["lark", "authorize"]), {
+      out,
+      env: ENV,
+      fetch: doFetch as never,
+      sleep,
+    })
+    expect(code).toBe(0)
+    const text = stdout.join("")
+    expect(text).toContain("Slack console")
+    expect(text).not.toContain("Feishu")
+    expect(text).toContain("https://cognia.example/connectors/oauth/connector/slack/callback")
+  })
+
   it("forwards an explicit --redirect for a proxied deployment", async () => {
     const { out } = sink()
     const { doFetch, calls } = fetchScript({ status: "done", result: { authorizeUrl: "u" } })

@@ -1,7 +1,10 @@
 /** @jest-environment node */
 import { EventEmitter } from "node:events"
 
-import { matchGroups, runHooks, type Spawn } from "./run-hooks"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+import { agentsMatch, matcherMatches, matchGroups, runHooks, type Spawn } from "./run-hooks"
 import type { HookGroup } from "./types"
 
 /** A fake child process that records the piped stdin + a scripted close code. */
@@ -235,5 +238,108 @@ describe("runHooks", () => {
       spawn,
     })
     expect(res.deny).toBe(false)
+  })
+})
+
+// --- Cross-rail matcher conformance ----------------------------------------
+
+describe("matcher conformance", () => {
+  // Same table the sidecar and Rust suites read. This rail used to split on
+  // commas only and then anchor the regex fallback, so an author's
+  // `"^Notebook"` matched on the desktop and silently matched nothing here.
+  const table = JSON.parse(
+    readFileSync(join(__dirname, "../../../hooks/matcher-conformance.json"), "utf8")
+  ) as {
+    cases: { matcher: string | null; target: string; expected: boolean; why: string }[]
+    narrowCases: { matcher: string | null; target: string; expected: boolean; why: string }[]
+  }
+
+  it.each(table.cases)("wide: $matcher vs $target → $expected ($why)", (c) => {
+    // An absent matcher is handled by matchGroups, not matcherMatches.
+    if (c.matcher == null) {
+      expect(matchGroups([{ hooks: [] }], c.target)).toHaveLength(1)
+      return
+    }
+    expect(matcherMatches(c.matcher, c.target)).toBe(c.expected)
+  })
+
+  it.each(table.narrowCases)("narrow: $matcher vs $target → $expected ($why)", (c) => {
+    if (c.matcher == null) {
+      expect(matchGroups([{ hooks: [] }], c.target)).toHaveLength(1)
+      return
+    }
+    expect(matcherMatches(c.matcher, c.target, true)).toBe(c.expected)
+  })
+
+  it("routes the narrow alphabet by event, not by caller", () => {
+    const group: HookGroup = { matcher: "a,b", hooks: [] }
+    // Tool events use the wide alphabet, so the comma separates alternatives.
+    expect(matchGroups([group], "a", { event: "PostToolUse" })).toHaveLength(1)
+    // FileChanged targets are paths — the comma stays regex-literal.
+    expect(matchGroups([group], "a", { event: "FileChanged" })).toHaveLength(0)
+  })
+})
+
+describe("agents selector", () => {
+  const identity = { agentKind: "teammate", agentRef: "reviewer" }
+
+  it("absent or star matches every agent, including unidentified turns", () => {
+    expect(agentsMatch(undefined, identity)).toBe(true)
+    expect(agentsMatch("*", identity)).toBe(true)
+    expect(agentsMatch("", identity)).toBe(true)
+    expect(agentsMatch(undefined, undefined)).toBe(true)
+  })
+
+  it("matches the kind or the ref, using matcher syntax", () => {
+    expect(agentsMatch("teammate", identity)).toBe(true)
+    expect(agentsMatch("reviewer", identity)).toBe(true)
+    expect(agentsMatch("chat|teammate", identity)).toBe(true)
+    expect(agentsMatch("chat", identity)).toBe(false)
+  })
+
+  it("a present selector never matches an unidentified turn", () => {
+    expect(agentsMatch("teammate", undefined)).toBe(false)
+    expect(agentsMatch("teammate", { agentKind: "" })).toBe(false)
+  })
+
+  it("narrows independently of the matcher, and on matcher-less events too", () => {
+    const toolGroup: HookGroup = { matcher: "Bash", agents: "teammate", hooks: [] }
+    expect(matchGroups([toolGroup], "Bash", { identity })).toHaveLength(1)
+    expect(matchGroups([toolGroup], "Bash", { identity: { agentKind: "chat" } })).toHaveLength(0)
+    expect(matchGroups([toolGroup], "Read", { identity })).toHaveLength(0)
+
+    // UserPromptSubmit carries no tool name, so `matcher` cannot narrow it —
+    // `agents` still must, or the selector would be inert on exactly the
+    // events guards care about most.
+    const promptGroup: HookGroup = { agents: "chat", hooks: [] }
+    expect(matchGroups([promptGroup], undefined, { identity: { agentKind: "chat" } })).toHaveLength(
+      1
+    )
+    expect(matchGroups([promptGroup], undefined, { identity })).toHaveLength(0)
+  })
+
+  it("forwards the identity to the hook script as payload fields", async () => {
+    const children: { written?: string }[] = []
+    const spawn = ((): unknown => {
+      const child = fakeChild(0)
+      children.push(child)
+      return child
+    }) as unknown as Spawn
+
+    await runHooks({
+      event: "PostToolUse",
+      toolName: "Bash",
+      payload: { tool_response: "ok" },
+      groups: [{ hooks: [{ type: "command", command: "guard.mjs" }] }],
+      spawn,
+      identity,
+    })
+
+    expect(JSON.parse(children[0]!.written!)).toMatchObject({
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      agent_kind: "teammate",
+      agent_ref: "reviewer",
+    })
   })
 })

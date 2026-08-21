@@ -7,7 +7,11 @@ import { existsSync, readFileSync } from "node:fs"
 // static-export-exempt: Agent host lifecycle runs exclusively in the Node CLI/sidecar.
 import path from "node:path"
 
+import { HostNotFoundError } from "./host-errors"
+import type { RpcReadable, RpcWritable } from "./rpc/duplex"
 import type { CogniaDiagnostic } from "./types"
+
+export { HostNotFoundError }
 
 export type CogniaHostOption =
   | { kind: "bundled"; startupTimeoutMs?: number }
@@ -21,29 +25,18 @@ export type CogniaHostOption =
     }
   | {
       kind: "streams"
-      readable: NodeJS.ReadableStream
-      writable: NodeJS.WritableStream
+      readable: RpcReadable
+      writable: RpcWritable
     }
 
 export interface OpenHostResult {
-  readable: NodeJS.ReadableStream
-  writable: NodeJS.WritableStream
+  readable: RpcReadable
+  writable: RpcWritable
   startupTimeoutMs: number
   close(): Promise<void>
   process?: ChildProcessWithoutNullStreams
   startupFailure?: Promise<never>
   searchedLocations: readonly string[]
-}
-
-export class HostNotFoundError extends Error {
-  readonly code = "host_not_found"
-  readonly searchedLocations: readonly string[]
-
-  constructor(searchedLocations: readonly string[]) {
-    super(`Cognia agent host not found; searched: ${searchedLocations.join(", ")}`)
-    this.name = "HostNotFoundError"
-    this.searchedLocations = searchedLocations
-  }
 }
 
 const PLATFORM_PACKAGES: Partial<Record<`${NodeJS.Platform}-${string}`, string>> = {

@@ -12,6 +12,7 @@ import { reconnectDelayMs, waitForReconnectDelay } from "../runtime/reconnect-de
 import { createAgentRpcServer } from "../agent/rpc/server"
 import { createAgentRuntimeService } from "../agent/rpc/runtime-service"
 import { resolveWorkerExecutionProfile } from "../agent/runtime/resolve-worker-execution"
+import { resolveWakeIdentity } from "./wake-identity"
 import type { WorkerWorkspaceClient } from "./workspace-client"
 import {
   CompanionWorkerTransport,
@@ -48,6 +49,14 @@ export interface WorkerConnectOptions {
   reconnect?: boolean
   random?: () => number
   wait?: typeof waitForReconnectDelay
+  /**
+   * Observe the live runtime for the duration of one connection.
+   *
+   * The worker daemon uses this to restart onto a newer CLI only while no turn
+   * is in flight. It is called on every (re)connection and the previous probe
+   * must be treated as dead once it fires again.
+   */
+  onRuntimeReady?: (probe: { activeTurns(): number }) => void
 }
 
 export interface WorkerEnrollmentOptions {
@@ -183,6 +192,7 @@ async function serveWorkerConnection(
       },
     },
   })
+  options.onRuntimeReady?.({ activeTurns: () => service.activeTurns?.() ?? 0 })
   const server = (options.createServer ?? createAgentRpcServer)({
     input,
     output,
@@ -294,6 +304,7 @@ export function buildWorkerManifest(
     ? Math.floor(requestedMaxActiveTurns)
     : 1
   const maxActiveTurns = Math.max(1, Math.min(32, requestedCapacity))
+  const wake = resolveWakeIdentity()
   const resolved = resolveWorkerExecutionProfile(config)
   const credentialProfileRefs = resolved.spec.credential
     ? [resolved.spec.credential.profileRef]
@@ -319,6 +330,7 @@ export function buildWorkerManifest(
     },
     platform: { os: process.platform, arch: process.arch },
     executionProfile: resolved.profile,
+    ...(wake ? { wake } : {}),
   }
 }
 

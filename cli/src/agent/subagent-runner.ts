@@ -39,6 +39,7 @@ import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 
 import { type ResolvedConfig } from "../config/schema"
 import { toBuildContext } from "../config/to-build-context"
+import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
 import { type PermissionResponder } from "./permission-gate"
 import { withCliAutoApprovedTools, withCliDisabledMcpTools } from "./tool-suppression"
 
@@ -87,6 +88,8 @@ export interface RunCliSubagentDeps {
    * context for the duration of the run. Omitted ⇒ the child is a leaf. */
   nesting?: CliSubagentNesting
   // ── Injected seams (tests) ──────────────────────────────────────────────────
+  /** The merged lifecycle-hook config to hand the child turn. */
+  resolveHooks?: () => SendOptions["hooks"]
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
   capture?: typeof defaultCapture
   closeSession?: (sessionId: string) => Promise<void>
@@ -211,6 +214,15 @@ export async function runCliSubagent(
     withCliAutoApprovedTools(sendOptions, deps.approvedTools),
     deps.disabledMcpTools
   )
+  // Hand the child the same hook engine the parent turn gets. Without this a
+  // CLI subagent ran completely hook-blind: the CLI transport bypasses the
+  // desktop's host-side injection, and the CLI's own `hook-runner` is wired
+  // into the TUI only. Identity marks it a subagent so an `agents: "subagent"`
+  // selector scopes to exactly these turns.
+  const hooks = (deps.resolveHooks ?? (() => resolveCliHooksConfig({ home: deps.home })))()
+  if (hasAnyHookGroup(hooks)) sendOptions.hooks = hooks
+  sendOptions.agentKind = "subagent"
+  sendOptions.agentRef = def.id
   // Nested delegation (depth-gated by the dispatcher): advertise the
   // `dispatch_agent` tool to the child and publish its dispatch context under
   // the child session id so a mid-run dispatch resolves its depth/chain/gate.

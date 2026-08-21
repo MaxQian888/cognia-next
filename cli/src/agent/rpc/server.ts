@@ -34,6 +34,12 @@ export interface AgentRpcService {
   readonly methods: readonly RpcMethod[]
   readonly capabilities: readonly string[]
   readonly workerManifest?: AgentWorkerManifestV1
+  /**
+   * Turns currently running, for callers that must wait for quiescence — the
+   * worker daemon restarts itself onto a newer CLI only between turns, never
+   * mid-run. Optional so a service that never runs turns need not implement it.
+   */
+  activeTurns?(): number
   handle<Method extends RpcMethod>(
     method: Method,
     params: RpcMethodMap[Method]["params"],

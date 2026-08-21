@@ -215,7 +215,7 @@ describe("piExtensionOverrideAllowed", () => {
   it("is a development affordance only", () => {
     expect(piExtensionOverrideAllowed({ NODE_ENV: "production" })).toBe(false)
     expect(piExtensionOverrideAllowed({ NODE_ENV: "development" })).toBe(true)
-    expect(piExtensionOverrideAllowed({})).toBe(true)
+    expect(piExtensionOverrideAllowed({} as NodeJS.ProcessEnv)).toBe(true)
   })
 
   it("ignores the override path in production", () => {

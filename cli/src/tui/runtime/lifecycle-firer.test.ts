@@ -15,7 +15,11 @@ function fakeChild(code: number) {
   return ee
 }
 
-const ctx: AgentHookContext = { agentId: "goal-judge", sessionId: "s1" }
+const ctx: AgentHookContext = {
+  agentId: "goal-judge",
+  agentKind: "goal-judge",
+  sessionId: "s1",
+}
 
 /** A readFile that returns a cognia config.json with one UserPromptSubmit hook. */
 function configWithUserPromptSubmit(command: string) {

@@ -145,9 +145,14 @@ function buildRequest(args: ParsedArgs, adapterId: string): AdminRequest | { err
 
 function renderResult(out: OutputSink, op: string, result: Record<string, unknown>): void {
   if (op === "oauth-begin") {
-    out.write(`redirect_uri (must be registered in the Feishu console):\n`)
+    // The op dispatches on the adapter's own type, so this verb authorizes any
+    // OAuth connector, not just Feishu. Name the console the operator actually
+    // has to open instead of always saying "Feishu".
+    const kind = typeof result.kind === "string" ? result.kind : "lark"
+    const console_ = kind === "lark" ? "Feishu" : kind === "slack" ? "Slack" : kind
+    out.write(`redirect_uri (must be registered in the ${console_} console):\n`)
     out.write(`  ${String(result.redirectUri)}\n\n`)
-    out.write("Open this URL in a browser signed in to Feishu:\n")
+    out.write(`Open this URL in a browser signed in to ${console_}:\n`)
     out.write(`  ${String(result.authorizeUrl)}\n\n`)
     out.write("The link is valid for 10 minutes. Completion lands in the running brain.\n")
     return

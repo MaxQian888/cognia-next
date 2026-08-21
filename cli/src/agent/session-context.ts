@@ -49,6 +49,7 @@ import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { buildCliSubagentToolManifest } from "./subagent-dispatch"
 import { buildLoadSkillManifestEntry, type LoadableSkill } from "./skill-load-tool"
 import { hashContextVersion } from "./context-version"
+import { hasAnyHookGroup, resolveCliHooksConfig } from "../hooks/resolve-hooks-config"
 
 /** What the attachment builder did with this turn's `@<path>` references. */
 export interface AttachmentSummary {
@@ -145,6 +146,20 @@ export interface CliContextAssemblerParams {
   resolveAgentMode?: () => Promise<AgentModeConfig | null>
   fetchTwin?: typeof defaultFetchTwinContext
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
+  /**
+   * The user's merged lifecycle-hook config, injected into `sendOptions.hooks`
+   * so the sidecar registers them as SDK-native hooks. See
+   * `cli/src/hooks/resolve-hooks-config.ts` for why the CLI has to do this
+   * itself (the desktop's host-side injection is bypassed by the CLI transport).
+   */
+  resolveHooks?: () => SendOptions["hooks"]
+  /**
+   * Which agent these turns belong to, for the `agents` hook selector.
+   * Defaults to whatever `resolveSendOptions` decides (`"chat"`); the subagent
+   * runner passes `"subagent"`.
+   */
+  agentKind?: SendOptions["agentKind"]
+  agentRef?: SendOptions["agentRef"]
 }
 
 export interface CliContextAssembler {
@@ -169,6 +184,13 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
   const now = params.now ?? Date.now
   const { config, home, sessionId } = params
   const resolveOptions = params.resolveOptions ?? defaultResolveSendOptions
+  const resolveHooks =
+    params.resolveHooks ??
+    (() =>
+      resolveCliHooksConfig({
+        home,
+        builtinHookOverrides: config.builtinHookOverrides,
+      }) as SendOptions["hooks"])
   const resolveMcpServers =
     params.resolveMcpServers ??
     (() => applyDisabled(loadMcpServers([config.cwd, home]), readDisabled(home)))
@@ -255,6 +277,14 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
       resolveDisabledMcpTools()
     )
+    // Hand the sidecar the real hook engine. The desktop gets this injected
+    // host-side after its trust gate; the CLI transport bypasses that, so
+    // without this line every CLI turn — TUI, subagent and headless alike —
+    // runs with no SDK-native hooks at all.
+    const hooks = resolveHooks()
+    if (hasAnyHookGroup(hooks)) sendOptions.hooks = hooks
+    if (params.agentKind) sendOptions.agentKind = params.agentKind
+    if (params.agentRef) sendOptions.agentRef = params.agentRef
     // Surface the `dispatch_agent` (Task) tool so the model can launch a
     // subagent. The CLI's dispatch is ALWAYS its own: a model call round-trips
     // (`plugin_tool_exec` → the CLI handle → `runCliSubagent`) and runs over THIS

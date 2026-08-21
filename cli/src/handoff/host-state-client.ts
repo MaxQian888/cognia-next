@@ -10,7 +10,6 @@ import type {
   HostStateSubmitResponseV1,
 } from "@cognia/agent-config-types/host-state"
 import {
-  hostStateMigrationStageAllowsWrites,
   isHostStateActionV1,
   isHostStateAppliedActionV1,
   isHostStateSnapshotV1,
@@ -331,7 +330,6 @@ export async function flushAttachedHostStateOutbox(
     runtimeTargetId: connection.record.runtimeTargetId,
   })
   if (
-    !hostStateMigrationStageAllowsWrites(status.migrationStage) ||
     status.hostId !== connection.record.hostId ||
     status.hostGeneration !== connection.record.hostGeneration
   ) {

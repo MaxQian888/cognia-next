@@ -24,37 +24,82 @@ const BLOCKING_EVENTS: ReadonlySet<HookEvent> = new Set<HookEvent>([
 ])
 
 /**
- * Does a `matcher` match `toolName`? A matcher is either a comma-separated list
- * of literal tool names (case-sensitive exact match) or a regex. The literal
- * list is tried first; if no comma-separated token matches AND the matcher is a
- * valid regex, the regex is tried as a fallback. A bare single token is treated
- * as both a literal and (if valid) a regex.
+ * Does a `matcher` apply to `target`?
+ *
+ * The canonical rule lives in `sidecar/dispatch/agent-hooks.mjs`; this is a port
+ * of it, pinned by the shared table in `hooks/matcher-conformance.json`.
+ *
+ * This rail used to disagree with the other two: it split on commas ONLY (so
+ * `"Bash|Edit"` never took the literal path) and then fell back to an ANCHORED
+ * regex, so an author's `"^Notebook"` matched `NotebookEdit` on the desktop and
+ * silently matched nothing here.
+ *
+ *   - `""` / `"*"` → match everything
+ *   - `[A-Za-z0-9_-, |]` only → exact set, split on `[|,]`, alternatives trimmed
+ *   - anything else → unanchored regex; an invalid regex matches nothing
+ *
+ * `narrow` tightens the exact-set alphabet to `[A-Za-z0-9_|]` for the events
+ * whose target is a path or free text rather than a tool name.
  */
-function matcherMatches(matcher: string, toolName: string): boolean {
-  const literals = matcher
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-  if (literals.includes(toolName)) return true
-  // Fallback: treat the whole matcher as a regex (anchored full-string match).
+export function matcherMatches(matcher: string, target: string, narrow = false): boolean {
+  const m = matcher.trim()
+  if (m === "" || m === "*") return true
+  const exactPattern = narrow ? /^[A-Za-z0-9_|]+$/ : /^[A-Za-z0-9_\-, |]+$/
+  if (exactPattern.test(m)) {
+    const separator = narrow ? /\|/ : /[|,]/
+    return m.split(separator).some((alt) => alt.trim() === target)
+  }
   try {
-    return new RegExp(`^(?:${matcher})$`).test(toolName)
+    return new RegExp(m).test(target)
   } catch {
     return false
   }
+}
+
+/** Events whose matcher target is a path / free text rather than a tool name. */
+const NARROW_EXACT_SET_EVENTS: ReadonlySet<HookEvent> = new Set<HookEvent>([
+  "FileChanged",
+  "StopFailure",
+])
+
+/**
+ * Test a group's `agents` selector against the turn's agent identity. Absent
+ * selector matches everything, so every pre-existing config is untouched; a
+ * present selector matches the `agentKind` OR the `agentRef`.
+ *
+ * An unidentified turn never matches a present selector — a hook that asked to
+ * be narrowed must not fire on a turn whose agent we cannot name.
+ */
+export function agentsMatch(
+  selector: string | undefined,
+  identity?: { agentKind?: string; agentRef?: string }
+): boolean {
+  if (selector == null) return true
+  const sel = selector.trim()
+  if (sel === "" || sel === "*") return true
+  return [identity?.agentKind, identity?.agentRef]
+    .filter((v): v is string => typeof v === "string" && v.length > 0)
+    .some((target) => matcherMatches(sel, target))
 }
 
 /**
  * Select the groups that apply to an event. A group with no `matcher` matches
  * everything. A group WITH a matcher only applies when a `toolName` is present
  * and the matcher matches it — so for non-tool events (no `toolName`), only
- * null-matcher groups apply.
+ * null-matcher groups apply. The `agents` selector is orthogonal and applies to
+ * EVERY event, including the ones with no tool name.
  */
-export function matchGroups(groups: HookGroup[], toolName?: string): HookGroup[] {
+export function matchGroups(
+  groups: HookGroup[],
+  toolName?: string,
+  opts?: { event?: HookEvent; identity?: { agentKind?: string; agentRef?: string } }
+): HookGroup[] {
+  const narrow = opts?.event != null && NARROW_EXACT_SET_EVENTS.has(opts.event)
   return groups.filter((g) => {
+    if (!agentsMatch(g.agents, opts?.identity)) return false
     if (g.matcher == null || g.matcher === "") return true
     if (toolName == null) return false
-    return matcherMatches(g.matcher, toolName)
+    return matcherMatches(g.matcher, toolName, narrow)
   })
 }
 
@@ -132,15 +177,26 @@ export async function runHooks(opts: {
   groups: HookGroup[]
   spawn: Spawn
   timeoutMsDefault?: number
+  /**
+   * Which agent this event came from. Matched by a group's `agents` selector
+   * and forwarded to the hook script as `agent_kind` / `agent_ref`, exactly as
+   * the desktop rails emit them.
+   */
+  identity?: { agentKind?: string; agentRef?: string }
 }): Promise<{ deny: boolean; reason?: string }> {
   const defaultTimeoutMs = opts.timeoutMsDefault ?? DEFAULT_TIMEOUT_MS
   const blocking = BLOCKING_EVENTS.has(opts.event)
-  const matched = matchGroups(opts.groups, opts.toolName)
+  const matched = matchGroups(opts.groups, opts.toolName, {
+    event: opts.event,
+    identity: opts.identity,
+  })
   let payloadJson: string
   try {
     payloadJson = JSON.stringify({
       hook_event_name: opts.event,
       ...(opts.toolName != null ? { tool_name: opts.toolName } : {}),
+      ...(opts.identity?.agentKind ? { agent_kind: opts.identity.agentKind } : {}),
+      ...(opts.identity?.agentRef ? { agent_ref: opts.identity.agentRef } : {}),
       ...opts.payload,
     })
   } catch {

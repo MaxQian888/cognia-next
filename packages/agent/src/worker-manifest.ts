@@ -27,6 +27,22 @@ export const agentWorkerManifestV1Schema = v.looseObject({
   sandbox: v.object({ capabilities: v.array(nonEmptyString) }),
   platform: v.object({ os: nonEmptyString, arch: nonEmptyString }),
   executionProfile: v.optional(agentWorkerExecutionProfileV1Schema),
+  /**
+   * How this machine can be brought back when it is asleep.
+   *
+   * A sleeping worker is indistinguishable from a decommissioned one: the
+   * socket is gone, placement rejects it as offline, and nothing ever tries to
+   * change that. Advertising its MAC addresses lets the host send a magic
+   * packet before it gives up. Optional because Wake-on-LAN also has to be
+   * enabled in the machine's firmware, which we cannot detect.
+   */
+  wake: v.optional(
+    v.object({
+      macAddresses: v.array(nonEmptyString),
+      /** Directed broadcast for the worker's subnet, when it knows one. */
+      broadcastAddress: v.optional(nonEmptyString),
+    })
+  ),
 })
 
 export type AgentWorkerExecutionProfileV1 = v.InferOutput<

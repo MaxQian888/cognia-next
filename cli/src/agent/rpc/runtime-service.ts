@@ -322,7 +322,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         return result({
           status: "ready",
           openSessions: sessions.size,
-          activeTurns: [...sessions.values()].filter((session) => session.busy).length,
+          activeTurns: countActiveTurns(),
           ...(options.workerDispatch ? { workerManifest: options.workerDispatch.manifest } : {}),
         })
       case "runtime/capabilities":
@@ -1552,7 +1552,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     capabilities: serviceCapabilities,
     ...(options.workerDispatch ? { workerManifest: options.workerDispatch.manifest } : {}),
     handle,
+    activeTurns: countActiveTurns,
     close,
+  }
+
+  /** Sessions with a turn in flight — the same count `runtime/status` reports. */
+  function countActiveTurns(): number {
+    return [...sessions.values()].filter((session) => session.busy).length
   }
 
   function uniqueSessionId(): string {

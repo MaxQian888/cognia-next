@@ -1,13 +1,16 @@
 /**
  * Subscription glue between the durable `workflowRunEvents` stream and the TUI
- * run panel. The default `subscribe` wraps Dexie `liveQuery(listRunEvents)` —
+ // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+ // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+ // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+ * run panel. The default `subscribe` wraps Dexie `Dexie.liveQuery(listRunEvents)` —
  * the same seam the desktop Runs panel and the IM progress runner use. Tests
  * inject a synchronous emitter. Folding is delegated to `foldRunEvents`.
  *
  * Failure to subscribe (liveQuery unavailable in some host) degrades silently:
  * the run still completes; the panel simply never populates.
  */
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import { listRunEvents } from "@/lib/workflow/runtime/event-log"
 import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import { foldRunEvents, type RunFoldState, type RunStepView } from "./workflow-run-fold"
@@ -31,7 +34,7 @@ function defaultSubscribe(
   runId: string,
   next: (events: WorkflowRunEventRow[]) => void
 ): () => void {
-  const sub: Subscription = liveQuery(() => listRunEvents(runId)).subscribe({
+  const sub: Subscription = Dexie.liveQuery(() => listRunEvents(runId)).subscribe({
     next,
     error: () => {},
   })

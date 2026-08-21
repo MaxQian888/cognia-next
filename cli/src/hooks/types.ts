@@ -96,12 +96,28 @@ export type HookHandler =
   | { type: "command"; command: string; timeout?: number }
   | { type: "webhook"; url: string; headers?: Record<string, string>; timeout?: number }
   | { type: "http"; url: string; headers?: Record<string, string>; timeout?: number }
+  /**
+   * Plugin handler. Recognised so settings.json round-trips, but INERT on this
+   * rail: it needs the renderer round-trip only the sidecar performs. A CLI
+   * turn gets it anyway, because the CLI injects its config into
+   * `sendOptions.hooks` and the sidecar runs it there.
+   */
+  | { type: "plugin"; pluginId: string; hookId: string; timeout?: number }
   | ({ type: string } & Record<string, unknown>)
 
 /** One hook block in a `settings.json` `hooks.{Event}` array. */
 export interface HookGroup {
   /** Tool-name regex (or comma-separated literal list). Omitted = match all. */
   matcher?: string
+  /**
+   * Agent selector, orthogonal to {@link matcher}: same syntax, tested against
+   * the event's `agent_kind` and `agent_ref`. Omitted = match every agent.
+   *
+   * A cognia extension to the settings.json vocabulary. Real Claude Code reads
+   * the same file and ignores the unknown key, so a group narrowed here runs
+   * UNCONDITIONALLY there — the settings UI states this explicitly.
+   */
+  agents?: string
   /** Handlers run sequentially; the first blocking command handler wins. */
   hooks: HookHandler[]
 }
@@ -154,6 +170,7 @@ const hookHandlerSchema: z.ZodType<HookHandler> = z.union([
 export const hookGroupSchema: z.ZodType<HookGroup> = z
   .object({
     matcher: z.string().optional(),
+    agents: z.string().optional(),
     hooks: z.array(hookHandlerSchema),
   })
   .passthrough() as unknown as z.ZodType<HookGroup>

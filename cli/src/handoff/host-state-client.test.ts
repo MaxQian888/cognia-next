@@ -16,7 +16,6 @@ function writableStatus(hostId = "host-a", hostGeneration = 3) {
     hostId,
     hostGeneration,
     hostSeq: 7,
-    migrationStage: "hoststate-authoritative" as const,
     leaseExpiresAt: 100,
     pendingDispatch: 0,
     pendingBroadcast: 0,
@@ -44,7 +43,6 @@ describe("local HostState attach client", () => {
             hostId: "host-a",
             hostGeneration: 2,
             hostSeq: 5,
-            migrationStage: "shadow",
             leaseExpiresAt: 100,
             pendingDispatch: 0,
             pendingBroadcast: 0,
@@ -234,7 +232,7 @@ describe("local HostState attach client", () => {
     expect(otherSubmit).not.toHaveBeenCalled()
   })
 
-  it("freezes attached actions while the Host is not authoritative", async () => {
+  it("freezes attached actions when the Host generation moved on", async () => {
     const files = new Map<string, string>()
     const io = {
       home: "/tmp/cognia-host-state-frozen-test",
@@ -257,9 +255,7 @@ describe("local HostState attach client", () => {
       {
         record,
         client: {
-          status: jest
-            .fn()
-            .mockResolvedValue({ ...writableStatus(), migrationStage: "hoststate-read" }),
+          status: jest.fn().mockResolvedValue({ ...writableStatus(), hostGeneration: 99 }),
           submit,
         } as never,
       },

@@ -1,11 +1,14 @@
 /**
  * Live subscription over a workflow's run history, mirroring `workflow-run-watch`
  * but for the run-LIST (used by an auto-refreshing `/workflow inspect`). The
- * default `subscribe` wraps Dexie `liveQuery(listWorkflowRuns)`; tests inject a
+ // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+ // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+ // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+ * default `subscribe` wraps Dexie `Dexie.liveQuery(listWorkflowRuns)`; tests inject a
  * synchronous emitter. Failure to subscribe degrades silently — the overlay
  * simply shows its first (static) snapshot.
  */
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 import { listWorkflowRuns } from "@/lib/db/workflows"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 
@@ -22,7 +25,7 @@ export interface RunsWatchDeps {
 }
 
 function defaultSubscribe(workflowId: string, next: (runs: WorkflowRunRow[]) => void): () => void {
-  const sub: Subscription = liveQuery(() => listWorkflowRuns({ workflowId })).subscribe({
+  const sub: Subscription = Dexie.liveQuery(() => listWorkflowRuns({ workflowId })).subscribe({
     next,
     error: () => {},
   })

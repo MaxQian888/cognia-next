@@ -32,6 +32,7 @@ import {
   installRemoteWorkerRuntime,
   type RemoteWorkerDescriptor,
 } from "@/lib/ai/agent/team/remote-worker-runtime"
+import { WorkerRpcPool } from "@/lib/ai/agent/team/worker-rpc-pool"
 import { loadMessageResolver } from "@/lib/headless/i18n"
 import { installFakeIndexedDb } from "@/lib/headless/node-indexeddb"
 import { setTransport } from "@/lib/tauri"
@@ -46,7 +47,6 @@ import { createNodeBackupFilesystem } from "./backup-filesystem"
 import { BridgeClient, type WebSocketLike } from "./bridge-client"
 import { startDurability } from "./durability"
 import { createNodePluginRuntimeAdapter } from "./plugin-runtime-adapter"
-import { BridgeWorkerRpcPool } from "./worker-rpc-pool"
 
 export interface ServeDeps {
   out: OutputSink
@@ -139,7 +139,7 @@ export async function serveCommand(args: ParsedArgs, deps: ServeDeps): Promise<n
 
   // ── 5. Data plane: the bridge WS ───────────────────────────────────────────
   const bridgeRef: { current: BridgeClient | null } = { current: null }
-  const workerPool = new BridgeWorkerRpcPool({
+  const workerPool = new WorkerRpcPool({
     sendFrame: (connectionId, frame) => {
       if (!bridgeRef.current) throw new Error("brain bridge is not connected")
       bridgeRef.current.sendWorkerFrame(connectionId, frame)

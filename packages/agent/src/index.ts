@@ -21,6 +21,15 @@ export {
 } from "./client"
 export type { CogniaHostOption } from "./host"
 export {
+  createLineReader,
+  RpcFrameSink,
+  RpcStreamSource,
+  utf8ByteLength,
+  type LineReader,
+  type RpcReadable,
+  type RpcWritable,
+} from "./rpc/duplex"
+export {
   isHandoffEnvelope,
   validateHandoffEnvelope,
   type HandoffEnvelope,

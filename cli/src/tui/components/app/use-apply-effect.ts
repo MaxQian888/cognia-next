@@ -259,6 +259,8 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
             "PreCompact",
             {
               agentId: "cli",
+              // A CLI-local shell event, not an agent turn.
+              agentKind: "system",
               sessionId: state.sessionId,
             },
             { payload: { focus: effect.focus ?? null } }
@@ -442,6 +444,8 @@ export function useApplyEffect(deps: ApplyEffectDeps): (effect: CommandEffect) =
               "CwdChanged",
               {
                 agentId: "cli",
+                // A CLI-local shell event, not an agent turn.
+                agentKind: "system",
                 sessionId: state.sessionId,
               },
               { payload: { roots: r.roots } }

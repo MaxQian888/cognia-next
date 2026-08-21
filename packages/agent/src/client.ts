@@ -1,8 +1,7 @@
-// static-export-exempt: Node-only SDK client; browser code imports only the handoff-envelope subpath.
-import { randomUUID } from "node:crypto"
-import type { Readable, Writable } from "node:stream"
-
-import { HostNotFoundError, openHost, type CogniaHostOption, type OpenHostResult } from "./host"
+import { HostNotFoundError } from "./host-errors"
+import type { CogniaHostOption, OpenHostResult } from "./host"
+import { randomUUID } from "./ids"
+import type { RpcReadable, RpcWritable } from "./rpc/duplex"
 import { RpcError, RpcPeer } from "./rpc/peer"
 import { RPC_ERROR_CODES, RPC_PROTOCOL_VERSION, type RpcMethodMap } from "./rpc/protocol"
 import type {
@@ -585,18 +584,36 @@ class CogniaSessionImpl implements CogniaSession {
   }
 }
 
+/**
+ * Attach to a host that the caller already has a transport for.
+ *
+ * Kept out of `openHost` so that a caller supplying its own streams never
+ * reaches `host.ts` — that module spawns the agent binary and its Node imports
+ * would otherwise land in every bundle, including the WebView's. The shape
+ * mirrors `openHost`'s own `kind: "streams"` branch exactly.
+ */
+function attachInjectedStreams(host: Extract<CogniaHostOption, { kind: "streams" }>) {
+  return {
+    readable: host.readable,
+    writable: host.writable,
+    startupTimeoutMs: 15_000,
+    searchedLocations: ["injected streams"] as readonly string[],
+    async close() {},
+  }
+}
+
 export async function createCogniaClient(options: CogniaClientOptions = {}): Promise<CogniaClient> {
-  let host: OpenHostResult
-  try {
+  let host: OpenHostResult | ReturnType<typeof attachInjectedStreams>
+  if (options.host?.kind === "streams") {
+    host = attachInjectedStreams(options.host)
+  } else {
+    const { openHost } = await import("./host")
     host = openHost(options.host, options.onDiagnostic)
-  } catch (error) {
-    if (error instanceof HostNotFoundError) throw error
-    throw error
   }
 
   const peer = new RpcPeer({
-    readable: host.readable as Readable,
-    writable: host.writable as Writable,
+    readable: host.readable as unknown as RpcReadable,
+    writable: host.writable as unknown as RpcWritable,
   })
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000
   const sessions = new Map<string, CogniaSessionImpl>()
@@ -668,8 +685,9 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
       },
       { timeoutMs: host.startupTimeoutMs }
     )
-    const result = await (host.startupFailure
-      ? Promise.race([initializeCall, host.startupFailure])
+    const startupFailure = "startupFailure" in host ? host.startupFailure : undefined
+    const result = await (startupFailure
+      ? Promise.race([initializeCall, startupFailure])
       : initializeCall)
     if (result.protocolVersion !== RPC_PROTOCOL_VERSION) {
       throw new IncompatibleHostError(result.protocolVersion)

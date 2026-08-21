@@ -1,7 +1,10 @@
-// static-export-exempt: JSON-RPC peer transport runs exclusively in the Node CLI/sidecar.
-import { createInterface, type Interface as ReadLineInterface } from "node:readline"
-import type { Readable, Writable } from "node:stream"
-
+import {
+  createLineReader,
+  utf8ByteLength,
+  type LineReader,
+  type RpcReadable,
+  type RpcWritable,
+} from "./duplex"
 import {
   HOST_NOTIFICATION_METHODS,
   HOST_REQUEST_METHODS,
@@ -26,8 +29,8 @@ export interface RpcCallOptions {
 }
 
 export interface RpcPeerOptions {
-  readable: Readable
-  writable: Writable
+  readable: RpcReadable
+  writable: RpcWritable
   maxFrameBytes?: number
   maxOutboundBufferBytes?: number
   onClose?: (error?: Error) => void
@@ -58,8 +61,8 @@ type RequestHandler<Method extends HostRequestMethod> = (
 ) => Promise<HostRequestMethodMap[Method]["result"]> | HostRequestMethodMap[Method]["result"]
 
 export class RpcPeer {
-  private readonly writable: Writable
-  private readonly lines: ReadLineInterface
+  private readonly writable: RpcWritable
+  private readonly lines: LineReader
   private readonly maxFrameBytes: number
   private readonly maxOutboundBufferBytes: number
   private readonly pending = new Map<JsonRpcId, PendingRequest>()
@@ -76,11 +79,12 @@ export class RpcPeer {
     this.writable = options.writable
     this.maxFrameBytes = options.maxFrameBytes ?? 16 * 1024 * 1024
     this.maxOutboundBufferBytes = options.maxOutboundBufferBytes ?? 32 * 1024 * 1024
-    this.lines = createInterface({ input: options.readable, crlfDelay: Infinity })
-    this.lines.on("line", (line) => void this.consumeLine(line))
-    this.lines.on("close", () => this.close(new RpcError(-1, "connection closed")))
-    options.readable.on("error", (error) => this.close(error))
-    options.writable.on("error", (error) => this.close(error))
+    this.lines = createLineReader(options.readable, {
+      onLine: (line) => void this.consumeLine(line),
+      onClose: () => this.close(new RpcError(-1, "connection closed")),
+    })
+    options.readable.on("error", (error: Error) => this.close(error))
+    options.writable.on("error", (error: Error) => this.close(error))
     if (options.onClose) {
       const callback = options.onClose
       options.readable.once("close", () => callback())
@@ -170,7 +174,7 @@ export class RpcPeer {
   }
 
   private async consumeLine(line: string): Promise<void> {
-    if (Buffer.byteLength(line) > this.maxFrameBytes) {
+    if (utf8ByteLength(line) > this.maxFrameBytes) {
       this.close(
         new RpcError(
           RPC_ERROR_CODES.backpressureExceeded,
@@ -275,7 +279,7 @@ export class RpcPeer {
   private async write(message: Record<string, unknown>): Promise<void> {
     if (this.closed) throw new RpcError(-1, "connection closed")
     const frame = `${JSON.stringify(message)}\n`
-    const bytes = Buffer.byteLength(frame)
+    const bytes = utf8ByteLength(frame)
     if (bytes > this.maxFrameBytes) {
       throw new RpcError(RPC_ERROR_CODES.invalidRequest, "outgoing frame exceeds negotiated limit")
     }

@@ -125,7 +125,11 @@ export async function runGoalStreaming(objective: string, deps: GoalRunDeps): Pr
       signal: deps.signal,
       capturedGenerationId: current.generationId,
       firer: deps.firer,
-      hookContext: { agentId: "goal-judge", sessionId: deps.sessionId },
+      hookContext: {
+        agentId: "goal-judge",
+        agentKind: "goal-judge",
+        sessionId: deps.sessionId,
+      },
     })
     switch (outcome.kind) {
       case "continue":
