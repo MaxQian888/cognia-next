@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const values: Record<string, boolean> = {
-  agentExecutionResolverV2: false,
   claudeSdkParityV1: false,
   claudeSdkSessionStore: false,
   claudeSdkCheckpoint: false,
@@ -49,16 +48,15 @@ describe("SdkParityCard", () => {
     expect(screen.getByRole("switch", { name: "Session store" })).toBeDisabled()
     expect(screen.getByRole("switch", { name: "File checkpointing" })).toBeDisabled()
     expect(screen.getByRole("switch", { name: "Prewarm pool" })).toBeDisabled()
-    expect(screen.getByRole("switch", { name: "Unified execution resolver" })).not.toBeChecked()
+    // ADR-0090 retirement: the unified execution resolver is no longer a
+    // switch — it is the only execution path — so the card must not offer one.
+    expect(screen.queryByRole("switch", { name: "Unified execution resolver" })).toBeNull()
   })
 
   it("writes the master and child flags through the shared feature-flag store", async () => {
     values.claudeSdkParityV1 = true
     const user = userEvent.setup()
     render(<SdkParityCard />)
-
-    await user.click(screen.getByRole("switch", { name: "Unified execution resolver" }))
-    expect(setAgentExecutionFlag).toHaveBeenCalledWith("agentExecutionResolverV2", true)
 
     await user.click(screen.getByRole("switch", { name: "Session store" }))
     expect(setAgentExecutionFlag).toHaveBeenCalledWith("claudeSdkSessionStore", true)

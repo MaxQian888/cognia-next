@@ -769,6 +769,108 @@ describe("CompanionSection", () => {
     await waitFor(() => expect(callSpy).toHaveBeenCalledWith("companion_mdns_stop"))
   })
 
+  // -------------------------------------------------------------------------
+  // Reachability preference
+  //
+  // The server and mDNS switches used to be pure session state: nothing wrote
+  // them down and nothing restored them, so a phone that had auto-discovered
+  // this desktop silently lost it on the next restart. These pin that each
+  // intent surface records the choice for the Rust boot restore.
+  // -------------------------------------------------------------------------
+
+  /** The config from the last `companion_reachability_set`, or null. */
+  function lastSavedPrefs(): Record<string, unknown> | null {
+    const saves = callSpy.mock.calls.filter((call) => call[0] === "companion_reachability_set")
+    const last = saves.at(-1)
+    return last ? ((last[1] as { config: Record<string, unknown> }).config ?? null) : null
+  }
+
+  it("remembers the server binding so the next boot restores it", async () => {
+    const user = userEvent.setup()
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_server_start") return 27890
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    await user.click(await screen.findByLabelText(/Enable companion server/i))
+
+    await waitFor(() =>
+      expect(lastSavedPrefs()).toEqual({
+        serverEnabled: true,
+        port: 27890,
+        bindLoopbackOnly: true,
+        mdnsEnabled: false,
+      })
+    )
+  })
+
+  it("stops remembering the server once it is switched off", async () => {
+    const user = userEvent.setup()
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") {
+        return { running: true, bindMode: "loopback" as const, boundPort: 27890 }
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    const toggle = await screen.findByLabelText(/Enable companion server/i)
+    await waitFor(() => expect(toggle).toBeChecked())
+    await user.click(toggle)
+
+    await waitFor(() => expect(callSpy).toHaveBeenCalledWith("companion_server_stop"))
+    await waitFor(() => expect(lastSavedPrefs()).toMatchObject({ serverEnabled: false }))
+  })
+
+  it("persists a LAN binding chosen while the server is stopped", async () => {
+    // The radio is the *desired* binding whether or not the server is running.
+    // Picking LAN while stopped and enabling later must not come back on
+    // loopback — which is what happens if the preference is only written on
+    // the restart path.
+    const user = userEvent.setup()
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    await user.click(await screen.findByLabelText(/LAN \(phones on the same Wi-Fi\)/i))
+
+    await waitFor(() => expect(lastSavedPrefs()).toMatchObject({ bindLoopbackOnly: false }))
+    // Stopped: rebinding would be a no-op restart of a server that is not up.
+    expect(callSpy.mock.calls.map((call) => call[0])).not.toContain("companion_server_start")
+  })
+
+  it("remembers the mDNS switch in both directions", async () => {
+    const user = userEvent.setup()
+    let running = false
+    callSpy.mockImplementation(async (name: string) => {
+      if (name === "companion_server_status") return STATUS_STOPPED
+      if (name === "companion_mdns_status") return running
+      if (name === "companion_get_tls_fingerprint") return "sha256:fp"
+      if (name === "companion_mdns_start") {
+        running = true
+        return "ok"
+      }
+      if (name === "companion_mdns_stop") {
+        running = false
+        return undefined as unknown as never
+      }
+      return undefined as unknown as never
+    })
+
+    render(<CompanionSection />)
+    const toggle = await screen.findByLabelText(/Enable mDNS broadcast/i)
+
+    await user.click(toggle)
+    await waitFor(() => expect(lastSavedPrefs()).toMatchObject({ mdnsEnabled: true }))
+
+    await user.click(toggle)
+    await waitFor(() => expect(lastSavedPrefs()).toMatchObject({ mdnsEnabled: false }))
+  })
+
   it("surfaces mDNS start failures", async () => {
     const user = userEvent.setup()
     callSpy.mockImplementation(async (name: string) => {

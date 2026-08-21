@@ -6,39 +6,33 @@ import { PanelLeftIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore, SIDEBAR_WIDTH_DEFAULT } from "@/stores/ui"
 import type {
-  ConversationGroupBy,
   ConversationSidebarMetadata,
   ConversationSidebarSettings,
-  ConversationSortBy,
 } from "@cognia/agent-config-types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import {
-  CONVERSATION_GROUP_BY_OPTIONS,
   CONVERSATION_SIDEBAR_METADATA_OPTIONS,
-  resolveConversationGroupBy,
   resolveConversationSidebarMetadata,
   toggleConversationSidebarMetadata,
 } from "@/lib/chat/conversation-grouping"
-import {
-  CONVERSATION_SORT_BY_OPTIONS,
-  resolveConversationSortBy,
-} from "@/lib/chat/conversation-filters"
 import { SettingsCard } from "../common/settings-section"
 
 /**
- * Settings → Conversation → "Conversation sidebar": behavior toggles for the
- * chat page's ChannelList. Behavior prefs persist to `AppSettings` via the
- * settings store; the "reset width" action writes the layout width in the UI
- * store (localStorage) since that's where the draggable width lives.
+ * Settings → Conversation → "Conversation sidebar": how a conversation row
+ * *looks* — density, preview line, icons, timestamps, unread badges, and which
+ * metadata fields ride under the title.
+ *
+ * Deliberately not what the list *contains*. Grouping, sort and the search
+ * reach used to sit here as three more rows; they live in the list's own
+ * toolbar now, beside the rows they rearrange and inside the saved views that
+ * can carry them. A settings page is the wrong place to answer "where did my
+ * conversation go".
+ *
+ * Display prefs persist to `AppSettings` via the settings store; the "reset
+ * width" action writes the layout width in the UI store (localStorage) since
+ * that's where the draggable width lives.
  */
 export function ConversationSidebarCard() {
   const t = useTranslations("settings.conversation.sidebar")
@@ -51,12 +45,9 @@ export function ConversationSidebarCard() {
 
   const compact = settings?.density === "compact"
   const showPreview = settings?.showPreview ?? false
-  const groupBy = resolveConversationGroupBy(settings)
-  const sortBy = resolveConversationSortBy(settings)
   const showCustomIcons = settings?.showCustomIcons !== false
   const showTimestamps = settings?.showTimestamps !== false
   const showUnreadBadges = settings?.showUnreadBadges !== false
-  const contentSearch = settings?.searchScope === "titleAndContent"
   const metadata = resolveConversationSidebarMetadata(settings)
   const titleMotion = settings?.titleMotion ?? "hover"
 
@@ -110,14 +101,6 @@ export function ConversationSidebarCard() {
       checked: showUnreadBadges,
       onCheckedChange: (v) => saveSidebar({ showUnreadBadges: v }),
     },
-    {
-      id: "sidebar-content-search",
-      heading: t("contentSearch.heading"),
-      description: t("contentSearch.description"),
-      label: t("contentSearch.label"),
-      checked: contentSearch,
-      onCheckedChange: (v) => saveSidebar({ searchScope: v ? "titleAndContent" : "title" }),
-    },
   ]
 
   const metadataRows = CONVERSATION_SIDEBAR_METADATA_OPTIONS.map((field) => ({
@@ -139,50 +122,11 @@ export function ConversationSidebarCard() {
       description={t("description")}
     >
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="sidebar-group-by">{t("groupBy.heading")}</Label>
-            <p className="text-sm text-muted-foreground">{t("groupBy.description")}</p>
-          </div>
-          <Select
-            value={groupBy}
-            onValueChange={(value) => saveSidebar({ groupBy: value as ConversationGroupBy })}
-          >
-            <SelectTrigger id="sidebar-group-by" className="w-44" aria-label={t("groupBy.label")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CONVERSATION_GROUP_BY_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {t(`groupBy.options.${option}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="sidebar-sort-by">{t("sortBy.heading")}</Label>
-            <p className="text-sm text-muted-foreground">{t("sortBy.description")}</p>
-          </div>
-          <Select
-            value={sortBy}
-            onValueChange={(value) => saveSidebar({ sortBy: value as ConversationSortBy })}
-          >
-            <SelectTrigger id="sidebar-sort-by" className="w-44" aria-label={t("sortBy.label")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CONVERSATION_SORT_BY_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {t(`sortBy.options.${option}`)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
+        {/* Grouping, sort and the search reach used to live here as three more
+            rows. They moved to the list's own toolbar, where the difference
+            they make is visible: this card decides how a row *looks*, the
+            toolbar decides which rows exist and in what order — and a saved
+            view can carry the latter, which a settings page cannot. */}
         {rows.map((row) => (
           <div key={row.id} className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">

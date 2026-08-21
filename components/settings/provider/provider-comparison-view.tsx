@@ -31,6 +31,7 @@ import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
 import { mergePricing } from "@cognia/provider-core/providers/model-discovery"
 import type { ModelsDevCatalogModel } from "@cognia/provider-core/providers/models-dev"
+import type { BuiltInProviderModelPricing } from "@cognia/provider-types/built-in-provider-catalog"
 import type { ModelPricing } from "@cognia/provider-types/provider"
 import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 import type {
@@ -77,8 +78,14 @@ function formatContext(tokens: number, notAvailable = "—"): string {
   return String(tokens)
 }
 
-/** Numeric per-1M pricing fields (everything on ModelPricing except `currency`). */
-type NumericPricingField = Exclude<keyof ModelPricing, "currency">
+/**
+ * Numeric per-1M pricing fields, keyed off the catalog's own pricing shape —
+ * which is what `entry.pricing` actually is. Keying off `ModelPricing` stopped
+ * working when that type gained ADR-0130's non-token billing units (per
+ * request / container-hour / page / character), none of which the catalog
+ * carries.
+ */
+type NumericPricingField = Exclude<keyof BuiltInProviderModelPricing, "currency">
 
 function formatLatency(ms: number | undefined): string {
   if (!ms) return "—"

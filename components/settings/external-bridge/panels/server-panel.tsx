@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CircleIcon, CopyIcon, KeyRoundIcon, RefreshCwIcon } from "lucide-react"
+import { BanIcon, CircleIcon, CopyIcon, KeyRoundIcon, RefreshCwIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
@@ -49,6 +49,7 @@ import {
   listExternalBridgeClients,
   restartExternalBridge,
   restartMcpServer,
+  revokeExternalBridgeClient,
   rotateExternalBridgeClient,
   startExternalBridge,
   startMcpServer,
@@ -76,6 +77,7 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [rotateConfirming, setRotateConfirming] = useState(false)
+  const [revokeConfirming, setRevokeConfirming] = useState(false)
   const [oneTimeCredential, setOneTimeCredential] = useState<string | null>(null)
   const [serverStatus, setServerStatus] = useState<McpServerStatus>({
     running: false,
@@ -238,6 +240,41 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
     }
   }, [settings, onChange, hostManaged, t])
 
+  /**
+   * Kill switch for a leaked credential.
+   *
+   * Rotation issues a replacement and is what you reach for on a schedule;
+   * revocation ends the grant outright and is what you reach for when the
+   * credential is in someone else's hands. Rust already answered both
+   * (`external_bridge_client_revoke` closes the client's live sessions via
+   * `replace_bridge_clients`), and `ExternalBridgeClient.revokedAt` was
+   * already read here to pick the active client — only the way to *produce*
+   * that state was missing.
+   *
+   * Host-managed mode only: the local MCP path has a single bearer token with
+   * no client identity to revoke, and there rotation already invalidates the
+   * old value.
+   */
+  const onRevokeClient = useCallback(async () => {
+    setRevokeConfirming(false)
+    setBusy(true)
+    try {
+      const client = (await listExternalBridgeClients()).find((candidate) => !candidate.revokedAt)
+      if (!client) throw new Error(t("server.noActiveClientError"))
+      const lease = await issueHostAdminLease(["external_bridge_client_revoke"])
+      await revokeExternalBridgeClient(client.id, lease.token)
+      // The plaintext shown after create/rotate belongs to the grant that just
+      // ended — keeping it on screen would invite pasting a dead credential.
+      setOneTimeCredential(null)
+      setShowToken(false)
+      toast.success(t("server.toastClientRevoked", { name: client.name }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }, [t])
+
   // Editing the port used to persist and stop there: the listener kept serving
   // the old port with nothing saying so, and the setup snippet immediately
   // started advertising the new one. Restart the running server so the two
@@ -369,6 +406,19 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
             >
               <RefreshCwIcon className="h-3.5 w-3.5" />
             </Button>
+            {/* Host-managed only — see `onRevokeClient`. */}
+            {hostManaged ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setRevokeConfirming(true)}
+                disabled={busy}
+                aria-label={t("server.revokeClientAria")}
+                data-testid="bridge-revoke-client"
+              >
+                <BanIcon className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -415,6 +465,21 @@ export function BridgeServerPanel({ settings, onChange }: BridgeServerPanelProps
             <AlertDialogCancel>{t("server.rotateConfirmCancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void onRotateToken()}>
               {t("server.rotateConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={revokeConfirming} onOpenChange={setRevokeConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("server.revokeConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("server.revokeConfirmDesc")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("server.revokeConfirmCancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void onRevokeClient()}>
+              {t("server.revokeConfirmAction")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

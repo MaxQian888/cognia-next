@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useTranslations } from "next-intl"
 import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
@@ -10,6 +10,10 @@ import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatusBadge } from "@/components/status-badge"
 import { Snippet, SnippetCopyButton, SnippetInput } from "@/components/ai-elements/snippet"
+import {
+  isRemoteWorkerDispatchAvailable,
+  subscribeToRemoteWorkerRuntime,
+} from "@/lib/ai/agent/team/remote-worker-runtime"
 import {
   createWorkerEnrollment,
   listExecutionWorkers,
@@ -44,6 +48,15 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
 
   const command = useMemo(() => (issue ? workerEnrollmentCommand(issue) : ""), [issue])
   const onlineByHost = new Map(hosts.map((host) => [host.hostRef, host]))
+  // A host with no attached brain still authenticates workers and still shows
+  // them online — it just cannot send them anything. Saying so is the whole
+  // point: this was silent before, and an enrolled worker that never receives a
+  // frame is indistinguishable from a healthy idle one.
+  const canDispatch = useSyncExternalStore(
+    subscribeToRemoteWorkerRuntime,
+    isRemoteWorkerDispatchAvailable,
+    () => true
+  )
 
   const create = async () => {
     setBusy(true)
@@ -91,6 +104,10 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
           </div>
           <QRCodeSVG value={JSON.stringify(issue)} size={128} level="M" aria-label={t("qrAria")} />
         </div>
+      ) : null}
+
+      {!canDispatch && devices.length > 0 ? (
+        <SettingsAlert variant="destructive">{t("dispatchUnavailable")}</SettingsAlert>
       ) : null}
 
       {devices.length === 0 ? (

@@ -212,7 +212,7 @@ export function DefaultsTab() {
     setPlanAgentAuthoring(value)
     // Default ON: persist the explicit boolean so the send spec can carry the
     // opt-out (`SendOptions.planTools === false`) to the sidecar.
-    void update({
+    void save({
       planSettings: { ...settings?.planSettings, agentAuthoring: value },
     })
   }

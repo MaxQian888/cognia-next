@@ -4,8 +4,9 @@ import { fn } from "storybook/test"
 import { ProviderConfigTab, type TestResult } from "./provider-config-tab"
 import { makeUserProviderSettings } from "@/lib/storybook/fixtures/settings-provider"
 
-// Pure config tab: API key + base URL + default model + connection status +
-// optional key-rotation section. All persistence is via callback props.
+// Pure config tab: a stack of titled blocks — credentials + endpoint (with the
+// verify action in the block header), default model, protocol & transport,
+// key rotation. All persistence is via callback props.
 const PROVIDER_MODELS = [
   { id: "gpt-4.1", name: "GPT-4.1" },
   { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
@@ -39,7 +40,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Configured key, no test run yet — the standalone Test button is shown.
+// Configured key, no test run yet — the credentials block says so instead of
+// leaving its status area blank.
 export const Default: Story = {}
 
 // A successful connection test (green status card with latency + timestamp).
@@ -67,12 +69,12 @@ export const LimitedVerification: Story = {
   },
 }
 
-// A test is in flight — the Test button shows a spinner and is disabled.
+// A test is in flight — the header Test button shows a spinner and is disabled.
 export const Testing: Story = {
   args: { isTesting: true },
 }
 
-// No API key entered yet — the standalone Test button is disabled.
+// No API key entered yet — the header Test button is disabled with a reason.
 export const Unconfigured: Story = {
   args: {
     settings: makeUserProviderSettings({ providerId: "openai", apiKey: undefined, enabled: false }),
@@ -100,7 +102,24 @@ export const WithKeyRotation: Story = {
   },
 }
 
-// Provider with no published model list — the default-model select is hidden.
+// Provider with no published model list — the default-model block is hidden.
 export const NoModelList: Story = {
   args: { providerModels: [] },
+}
+
+// Gateway-style setup: protocol, endpoint flavor and static headers share one
+// disclosure, which opens itself because overrides are already stored.
+export const WithTransportOverrides: Story = {
+  args: {
+    providerId: "azure",
+    settings: makeUserProviderSettings({
+      providerId: "azure",
+      apiProtocol: "openai",
+      apiFlavor: "responses",
+      customHeaders: { "anthropic-beta": "context-1m-2025-08-07" },
+    }),
+    onApiProtocolChange: fn(),
+    onApiFlavorChange: fn(),
+    onCustomHeadersChange: fn(),
+  },
 }

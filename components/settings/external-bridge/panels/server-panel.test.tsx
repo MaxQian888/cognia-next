@@ -17,6 +17,8 @@ const mockHostConfig = jest.fn()
 const mockHostConfigUpdate = jest.fn()
 const mockHostClients = jest.fn()
 const mockHostClientCreate = jest.fn()
+const mockHostClientRevoke = jest.fn()
+const mockHostClientRotate = jest.fn()
 const mockHostStart = jest.fn()
 let mockHostManaged = false
 jest.mock("@/lib/external-bridge/tauri-control", () => ({
@@ -26,6 +28,8 @@ jest.mock("@/lib/external-bridge/tauri-control", () => ({
   updateExternalBridgeConfig: (...a: unknown[]) => mockHostConfigUpdate(...a),
   listExternalBridgeClients: () => mockHostClients(),
   createExternalBridgeClient: (...a: unknown[]) => mockHostClientCreate(...a),
+  revokeExternalBridgeClient: (...a: unknown[]) => mockHostClientRevoke(...a),
+  rotateExternalBridgeClient: (...a: unknown[]) => mockHostClientRotate(...a),
   startExternalBridge: () => mockHostStart(),
   isHostManagedBridgeAvailable: () => mockHostManaged,
   startMcpServer: (...a: unknown[]) => mockStart(...a),
@@ -95,6 +99,17 @@ beforeEach(() => {
   mockHostClientCreate.mockReset().mockResolvedValue({
     client: { id: "client-1" },
     credential: "cognia_once",
+  })
+  mockHostClientRevoke.mockReset().mockResolvedValue({
+    id: "client-1",
+    name: "Cognia controller",
+    scopes: [],
+    createdAt: 1,
+    revokedAt: 2,
+  })
+  mockHostClientRotate.mockReset().mockResolvedValue({
+    client: { id: "client-1" },
+    credential: "cognia_rotated",
   })
   mockHostStart.mockReset().mockResolvedValue(47890)
   mockStart.mockReset().mockResolvedValue(3001)
@@ -302,6 +317,84 @@ describe("BridgeServerPanel", () => {
         expect.objectContaining({ bearerToken: "tok_generated" })
       )
     )
+  })
+
+  it("revokes the active host-managed client after confirmation", async () => {
+    const { toast } = jest.requireMock("sonner")
+    capability = false
+    mockHostManaged = true
+    mockRemoteActive = true
+    mockHostClients.mockResolvedValue([
+      { id: "client-old", name: "Retired laptop", scopes: [], createdAt: 1, revokedAt: 2 },
+      { id: "client-1", name: "Cognia controller", scopes: [], createdAt: 3 },
+    ])
+    setup({ enabled: true, enabledScopes: ["wiki:cognia"] })
+    await settleInitialStatus()
+
+    fireEvent.click(screen.getByTestId("bridge-revoke-client"))
+    expect(mockHostClientRevoke).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByText("server.revokeConfirmAction"))
+
+    // The already-revoked row must be skipped — revoking it again would be a
+    // no-op while the live credential kept working.
+    await waitFor(() => expect(mockHostClientRevoke).toHaveBeenCalledWith("client-1", "lease-1"))
+    expect(toast.success).toHaveBeenCalledWith("server.toastClientRevoked:Cognia controller")
+  })
+
+  it("clears the one-time credential from the screen once revoked", async () => {
+    capability = false
+    mockHostManaged = true
+    mockRemoteActive = true
+    mockHostClients
+      // Enable mints one because nothing active exists yet; the revoke lookup
+      // then finds it.
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: "client-1", name: "Ctl", scopes: [], createdAt: 3 }])
+    // Port must match the host config, or enabling takes the update-config
+    // branch instead of the client-create one.
+    setup({ enabled: false, enabledScopes: ["wiki:cognia"], httpPort: 47890 })
+    await settleInitialStatus()
+
+    // Enabling mints a credential and shows it.
+    fireEvent.click(screen.getByRole("switch", { name: "server.toggleAriaLabel" }))
+    await waitFor(() => expect(mockHostStart).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: "server.show" }))
+    expect(screen.getByText("cognia_once")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("bridge-revoke-client"))
+    fireEvent.click(await screen.findByText("server.revokeConfirmAction"))
+
+    await waitFor(() => expect(screen.queryByText("cognia_once")).not.toBeInTheDocument())
+    expect(screen.getByText("server.tokenNone")).toBeInTheDocument()
+  })
+
+  it("reports no active client instead of calling revoke", async () => {
+    const { toast } = jest.requireMock("sonner")
+    capability = false
+    mockHostManaged = true
+    mockRemoteActive = true
+    mockHostClients.mockResolvedValue([
+      { id: "client-old", name: "Retired", scopes: [], createdAt: 1, revokedAt: 2 },
+    ])
+    setup({ enabled: true, enabledScopes: ["wiki:cognia"] })
+    await settleInitialStatus()
+
+    fireEvent.click(screen.getByTestId("bridge-revoke-client"))
+    fireEvent.click(await screen.findByText("server.revokeConfirmAction"))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("server.noActiveClientError"))
+    expect(mockHostClientRevoke).not.toHaveBeenCalled()
+  })
+
+  it("offers no revoke control on the local MCP path", async () => {
+    setup({ enabled: true, bearerToken: "tok_abc" })
+    await settleInitialStatus()
+
+    // The local path has one bearer token and no client identity to revoke;
+    // rotation already invalidates the old value there.
+    expect(screen.queryByTestId("bridge-revoke-client")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "server.rotateTokenAria" })).toBeInTheDocument()
   })
 
   it("surfaces a failed start rather than leaving the toggle looking successful", async () => {

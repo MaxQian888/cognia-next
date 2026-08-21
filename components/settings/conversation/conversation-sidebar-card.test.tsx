@@ -35,9 +35,7 @@ test("groups the sidebar behavior controls under one card", () => {
   render(<ConversationSidebarCard />)
   expect(screen.getByLabelText("density.label")).toBeInTheDocument()
   expect(screen.getByLabelText("preview.label")).toBeInTheDocument()
-  expect(screen.getByLabelText("groupBy.label")).toBeInTheDocument()
   expect(screen.getByLabelText("unread.label")).toBeInTheDocument()
-  expect(screen.getByLabelText("contentSearch.label")).toBeInTheDocument()
   // Was sidebar-menu-only until now, so Settings could not answer "where do I
   // turn the avatars off?".
   expect(screen.getByLabelText("customIcons.label")).toBeInTheDocument()
@@ -48,13 +46,11 @@ test("groups the sidebar behavior controls under one card", () => {
   expect(screen.getByLabelText("titleMotion.label")).toBeInTheDocument()
 })
 
-test("defaults: workspace grouping + unread on, preview + compact + content-search off", () => {
+test("defaults: unread on, preview + compact off", () => {
   render(<ConversationSidebarCard />)
-  expect(screen.getByLabelText("groupBy.label")).toHaveTextContent("groupBy.options.workspace")
   expect(screen.getByLabelText("unread.label")).toBeChecked()
   expect(screen.getByLabelText("preview.label")).not.toBeChecked()
   expect(screen.getByLabelText("density.label")).not.toBeChecked()
-  expect(screen.getByLabelText("contentSearch.label")).not.toBeChecked()
   expect(screen.getByLabelText("metadata.agent.label")).toBeChecked()
   expect(screen.getByLabelText("metadata.model.label")).toBeChecked()
   expect(screen.getByLabelText("metadata.provider.label")).not.toBeChecked()
@@ -62,28 +58,13 @@ test("defaults: workspace grouping + unread on, preview + compact + content-sear
   expect(screen.getByLabelText("titleMotion.label")).toBeChecked()
 })
 
-test("folds the retired groupByDate=false into the no-grouping option", () => {
-  settingsValue = { groupByDate: false }
+test("does not decide what the list contains — that lives in the list's toolbar", () => {
+  // Grouping, sort and the search reach moved beside the rows they rearrange,
+  // where a saved view can carry them. This card is about how a row *looks*.
   render(<ConversationSidebarCard />)
-  expect(screen.getByLabelText("groupBy.label")).toHaveTextContent("groupBy.options.none")
-})
-
-test("picking a grouping axis saves it without dropping siblings", async () => {
-  settingsValue = { showPreview: true }
-  const user = userEvent.setup()
-  render(<ConversationSidebarCard />)
-  await user.click(screen.getByLabelText("groupBy.label"))
-  await user.click(screen.getByRole("option", { name: "groupBy.options.date" }))
-  expect(save).toHaveBeenCalledWith({
-    conversationSidebar: { showPreview: true, groupBy: "date" },
-  })
-})
-
-test("enabling content search saves searchScope=titleAndContent", async () => {
-  const user = userEvent.setup()
-  render(<ConversationSidebarCard />)
-  await user.click(screen.getByLabelText("contentSearch.label"))
-  expect(save).toHaveBeenCalledWith({ conversationSidebar: { searchScope: "titleAndContent" } })
+  expect(screen.queryByLabelText("groupBy.label")).toBeNull()
+  expect(screen.queryByLabelText("sortBy.label")).toBeNull()
+  expect(screen.queryByLabelText("contentSearch.label")).toBeNull()
 })
 
 test("enabling compact density saves density=compact and merges existing settings", async () => {
@@ -146,21 +127,12 @@ test("reset width button restores the default width", async () => {
   expect(setSidebarWidth).toHaveBeenCalledWith(256)
 })
 
-test("exposes the conversation sort so mobile can reach it too", async () => {
-  const user = userEvent.setup()
+test("leaves a persisted grouping or sort untouched — the toolbar still reads it", () => {
+  // The entry point moved; the stored value did not. Rendering must not
+  // silently rewrite settings this card no longer edits.
+  settingsValue = { sortBy: "title", groupBy: "date", searchScope: "titleAndContent" }
   render(<ConversationSidebarCard />)
-  const trigger = screen.getByLabelText("sortBy.label")
-  // Defaults to recency, matching the sidebar's own default.
-  expect(trigger).toHaveTextContent("sortBy.options.recent")
-  await user.click(trigger)
-  await user.click(await screen.findByRole("option", { name: "sortBy.options.unread" }))
-  expect(save).toHaveBeenCalledWith({ conversationSidebar: { sortBy: "unread" } })
-})
-
-test("reflects a persisted sort choice", () => {
-  settingsValue = { sortBy: "title" }
-  render(<ConversationSidebarCard />)
-  expect(screen.getByLabelText("sortBy.label")).toHaveTextContent("sortBy.options.title")
+  expect(save).not.toHaveBeenCalled()
 })
 
 test("activity timestamps default on and can be switched off", async () => {

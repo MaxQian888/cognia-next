@@ -7,9 +7,12 @@
  * and app restart, so this is where a user reviews what ran when the overlay
  * wasn't open.
  *
- * "Open in Cognia" reuses the existing SessionImportDialog (ADR-0062) — the
- * one path that pulls an external agent's full transcript into a cognia
- * conversation — rather than reimplementing per-session import. "Clear"
+ * The header's "Import" button opens the existing SessionImportDialog
+ * (ADR-0062) — the one path that pulls an external agent's full transcript into
+ * a cognia conversation — rather than reimplementing session import here. It is
+ * panel-level, not per-row: the dialog scans or picks, it does not take a
+ * specific monitored session (it can be narrowed to a SOURCE via `sourceId`,
+ * but a fleet row is a live run, not an on-disk transcript locator). "Clear"
  * empties the history table (not the source transcripts); "Clear ended"
  * removes finished rows while keeping live ones; single rows can be removed
  * with their inline delete button. When more than one agent kind is present

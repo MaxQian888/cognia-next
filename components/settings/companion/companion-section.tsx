@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { isTauri, transport } from "@/lib/tauri"
+import { patchReachabilityPrefs } from "@/lib/connectivity/reachability-prefs"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
@@ -590,6 +591,10 @@ function MdnsCard() {
           setRunning(false)
           toast.success(t("stopped"))
         }
+        // Remember the choice so the boot restore re-advertises. Without this
+        // the broadcast dies with the process and the phone that paired over
+        // the LAN silently loses discovery on the next restart.
+        await patchReachabilityPrefs({ mdnsEnabled: enabled })
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       } finally {
@@ -678,10 +683,20 @@ function ServerStatusCard() {
             boundPort: port,
           })
           toast.success(t("started", { port }))
+          // This switch is the user's intent surface for "be reachable", so it
+          // is one of the few places allowed to write the boot preference —
+          // internal starts (the fleet monitor's loopback ingress) deliberately
+          // do not, or they would downgrade a saved LAN binding.
+          await patchReachabilityPrefs({
+            serverEnabled: true,
+            port,
+            bindLoopbackOnly: desiredBind === "loopback",
+          })
         } else {
           await stopServer()
           setStatus({ running: false, bindMode: "none", boundPort: null })
           toast.success(t("stopped"))
+          await patchReachabilityPrefs({ serverEnabled: false })
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
@@ -697,7 +712,12 @@ function ServerStatusCard() {
     async (next: string) => {
       const mode = next as BindMode
       setDesiredBind(mode)
-      if (!desktop || !status.running) return
+      if (!desktop) return
+      // Persist before the running-check: the radio is the desired binding
+      // whether or not the server is up right now, and a user who picks LAN
+      // while stopped then enables at boot must not come back on loopback.
+      await patchReachabilityPrefs({ bindLoopbackOnly: mode === "loopback" })
+      if (!status.running) return
       setBusy(true)
       try {
         await stopServer()

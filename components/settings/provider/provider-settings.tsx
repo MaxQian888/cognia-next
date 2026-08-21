@@ -9,8 +9,8 @@ import {
   Menu,
   Settings,
   Key,
-  Globe,
   PlugZap,
+  Sparkles,
   Loader2,
   Route,
   RotateCcw,
@@ -22,8 +22,12 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import {
+  SettingsStack,
+  SettingsBlock,
+  SettingsField,
+} from "@/components/settings/common/settings-block"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   AlertDialog,
@@ -227,67 +231,151 @@ function CustomProviderInlineConfig({
   const apiKeyField = useDraftField(cp.apiKey ?? "", onApiKeyChange, { identity: cp.id })
   const baseURLField = useDraftField(cp.baseURL ?? "", onBaseURLChange, { identity: cp.id })
 
+  // Same block layout the built-in config tab uses — selecting a custom
+  // provider used to swap the whole first tab for a differently-shaped flat
+  // form, so the pane's structure changed under the user with the row.
+  const testStatus = testResult ? (
+    <span
+      data-testid="custom-provider-test-result"
+      title={testMessage ?? undefined}
+      className={
+        testResult === "success"
+          ? "text-xs text-emerald-600 dark:text-emerald-400"
+          : testResult === "limited"
+            ? "text-xs text-amber-600 dark:text-amber-400"
+            : "text-xs text-destructive"
+      }
+    >
+      {testResult === "success"
+        ? t("customTestSuccess")
+        : testResult === "limited"
+          ? t("customTestLimited")
+          : t("customTestError")}
+      {/* The hook has carried the provider's actual error text since the test
+          path was written; it was never rendered, so a failed custom test only
+          ever said "failed". */}
+      {testMessage && testResult !== "success" ? (
+        <span className="ml-1 font-normal opacity-80" data-testid="custom-provider-test-message">
+          · {testMessage}
+        </span>
+      ) : null}
+    </span>
+  ) : (
+    <p className="text-xs text-muted-foreground">{t("configTab.notVerifiedHint")}</p>
+  )
+
   return (
-    <div className="space-y-5">
-      {/* API Key */}
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1.5 text-sm font-medium">
-          <Key className="h-3.5 w-3.5" />
-          {t("configTab.apiKeyLabel")}
-        </Label>
-        <div className="relative">
+    <SettingsStack>
+      <SettingsBlock
+        icon={<Key />}
+        title={t("configTab.credentialsTitle")}
+        description={t("configTab.credentialsDescription")}
+        badge={
+          <Badge variant="secondary" className="text-[10px]">
+            {cp.apiProtocol}
+          </Badge>
+        }
+        action={
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* `testCustomProvider` was fully implemented but had zero callers,
+                so `customTestResults` stayed empty forever and a custom
+                provider's status badge could never leave "warning". */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={onTestConnection}
+              disabled={isTesting}
+              data-testid="custom-provider-test"
+            >
+              {isTesting ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <PlugZap className="h-3 w-3" />
+              )}
+              {t("testConnection")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={onEditClick}
+              data-testid="custom-provider-edit"
+            >
+              <Settings className="h-3 w-3" />
+              {t("editCustomProvider")}
+            </Button>
+          </div>
+        }
+        testid="custom-provider-credentials"
+      >
+        <SettingsField
+          stacked
+          htmlFor={`custom-${cp.id}-api-key`}
+          label={t("configTab.apiKeyLabel")}
+          description={t("configTab.apiKeyDescription")}
+        >
+          <div className="relative">
+            <Input
+              id={`custom-${cp.id}-api-key`}
+              type={showKey ? "text" : "password"}
+              value={apiKeyField.value}
+              onChange={(e) => apiKeyField.onChange(e.target.value)}
+              onBlur={apiKeyField.onBlur}
+              onKeyDown={apiKeyField.onKeyDown}
+              placeholder={t("configTab.apiKeyPlaceholder")}
+              className="pr-10 font-mono"
+              autoComplete="new-password"
+              data-lpignore="true"
+              data-form-type="other"
+              data-testid="custom-provider-api-key-input"
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
+              onClick={() => setShowKey((prev) => !prev)}
+              type="button"
+              aria-label={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
+              title={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
+              data-testid="custom-provider-toggle-key"
+            >
+              {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </SettingsField>
+
+        <SettingsField
+          stacked
+          htmlFor={`custom-${cp.id}-base-url`}
+          label={t("baseURL")}
+          description={t("baseURLHint")}
+        >
           <Input
-            type={showKey ? "text" : "password"}
-            value={apiKeyField.value}
-            onChange={(e) => apiKeyField.onChange(e.target.value)}
-            onBlur={apiKeyField.onBlur}
-            onKeyDown={apiKeyField.onKeyDown}
-            placeholder={t("configTab.apiKeyPlaceholder")}
-            className="pr-10"
-            autoComplete="new-password"
-            data-lpignore="true"
-            data-form-type="other"
-            data-testid="custom-provider-api-key-input"
+            id={`custom-${cp.id}-base-url`}
+            type="text"
+            value={baseURLField.value}
+            onChange={(e) => baseURLField.onChange(e.target.value)}
+            onBlur={baseURLField.onBlur}
+            onKeyDown={baseURLField.onKeyDown}
+            placeholder={cp.baseURL}
+            className="font-mono"
+            data-testid="custom-provider-base-url-input"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-            onClick={() => setShowKey((prev) => !prev)}
-            type="button"
-            aria-label={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
-            title={showKey ? t("configTab.hideKey") : t("configTab.showKey")}
-            data-testid="custom-provider-toggle-key"
-          >
-            {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-      </div>
+        </SettingsField>
 
-      {/* Base URL */}
-      <div className="space-y-2">
-        <Label className="flex items-center gap-1.5 text-sm font-medium">
-          <Globe className="h-3.5 w-3.5" />
-          {t("baseURL")}
-        </Label>
-        <Input
-          type="text"
-          value={baseURLField.value}
-          onChange={(e) => baseURLField.onChange(e.target.value)}
-          onBlur={baseURLField.onBlur}
-          onKeyDown={baseURLField.onKeyDown}
-          placeholder={cp.baseURL}
-          data-testid="custom-provider-base-url-input"
-        />
-        <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
-      </div>
+        {testStatus}
+      </SettingsBlock>
 
-      {/* Default model */}
       {cp.customModels && cp.customModels.length > 0 && (
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">{t("defaultModel")}</Label>
+        <SettingsBlock
+          icon={<Sparkles />}
+          title={t("defaultModel")}
+          description={t("configTab.defaultModelDescription")}
+          testid="custom-provider-default-model"
+        >
           <Select value={cp.defaultModel ?? ""} onValueChange={onDefaultModelChange}>
-            <SelectTrigger className="h-9 text-sm">
+            <SelectTrigger className="w-full text-sm" aria-label={t("defaultModel")}>
               <SelectValue placeholder={t("selectModel")} />
             </SelectTrigger>
             <SelectContent>
@@ -298,78 +386,9 @@ function CustomProviderInlineConfig({
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </SettingsBlock>
       )}
-
-      {/* Protocol badge + test/edit buttons */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary" className="text-[10px]">
-            {cp.apiProtocol}
-          </Badge>
-          {testResult && (
-            <span
-              data-testid="custom-provider-test-result"
-              title={testMessage ?? undefined}
-              className={
-                testResult === "success"
-                  ? "truncate text-[11px] text-emerald-600 dark:text-emerald-400"
-                  : testResult === "limited"
-                    ? "truncate text-[11px] text-amber-600 dark:text-amber-400"
-                    : "truncate text-[11px] text-destructive"
-              }
-            >
-              {testResult === "success"
-                ? t("customTestSuccess")
-                : testResult === "limited"
-                  ? t("customTestLimited")
-                  : t("customTestError")}
-              {/* The hook has carried the provider's actual error text since
-                  the test path was written; it was never rendered, so a failed
-                  custom test only ever said "failed". */}
-              {testMessage && testResult !== "success" ? (
-                <span
-                  className="ml-1 font-normal opacity-80"
-                  data-testid="custom-provider-test-message"
-                >
-                  · {testMessage}
-                </span>
-              ) : null}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {/* `testCustomProvider` was fully implemented but had zero callers, so
-              `customTestResults` stayed empty forever and a custom provider's
-              status badge could never leave "warning". */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={onTestConnection}
-            disabled={isTesting}
-            data-testid="custom-provider-test"
-          >
-            {isTesting ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <PlugZap className="h-3 w-3" />
-            )}
-            {t("testConnection")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={onEditClick}
-            data-testid="custom-provider-edit"
-          >
-            <Settings className="h-3 w-3" />
-            {t("editCustomProvider")}
-          </Button>
-        </div>
-      </div>
-    </div>
+    </SettingsStack>
   )
 }
 

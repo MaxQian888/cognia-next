@@ -22,7 +22,6 @@ const CHILD_FLAGS = [
 
 export function SdkParityCard() {
   const t = useTranslations("settings.agentRuntimeSection.sidecar.parity")
-  const resolverEnabled = useAgentExecutionFlag("agentExecutionResolverV2")
   const enabled = useAgentExecutionFlag("claudeSdkParityV1")
   const sessionStore = useAgentExecutionFlag("claudeSdkSessionStore")
   const checkpoint = useAgentExecutionFlag("claudeSdkCheckpoint")
@@ -58,18 +57,6 @@ export function SdkParityCard() {
       testid="sdk-parity-card"
       contentClassName="space-y-4"
     >
-      <div className="flex items-center justify-between gap-3 rounded-md border p-3">
-        <div className="space-y-1">
-          <p className="text-sm font-medium">{t("resolver.label")}</p>
-          <p className="text-xs text-muted-foreground">{t("resolver.description")}</p>
-        </div>
-        <Switch
-          checked={resolverEnabled}
-          onCheckedChange={(value) => setAgentExecutionFlag("agentExecutionResolverV2", value)}
-          aria-label={t("resolver.label")}
-        />
-      </div>
-
       <div className="flex items-center justify-between gap-3 rounded-md border p-3">
         <div className="space-y-1">
           <p className="text-sm font-medium">{t("master.label")}</p>

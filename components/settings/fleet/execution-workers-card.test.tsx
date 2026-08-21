@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ExecutionWorkersCard } from "./execution-workers-card"
 
 jest.mock("next-intl", () => ({
@@ -33,6 +33,12 @@ jest.mock("@/lib/fleet/execution-workers", () => ({
   revokeExecutionWorker: (id: string) => api.revoke(id),
   workerEnrollmentCommand: () => "cognia-agent worker enroll --enrollment once",
 }))
+
+import {
+  installRemoteWorkerRuntime,
+  __resetRemoteWorkerRuntimeForTesting,
+  type RemoteWorkerRuntime,
+} from "@/lib/ai/agent/team/remote-worker-runtime"
 
 describe("ExecutionWorkersCard", () => {
   beforeEach(() => {
@@ -121,6 +127,33 @@ describe("ExecutionWorkersCard", () => {
     )
     expect(await screen.findByText("offline")).toBeInTheDocument()
     expect(screen.queryByText("capacity")).not.toBeInTheDocument()
+  })
+
+  it("says so when the host has enrolled workers but cannot dispatch to them", async () => {
+    // Before desktop dispatch existed this was the silent failure: a worker
+    // authenticated, showed "online", and never received a frame, because no
+    // brain was attached on the host. Rule 7 — dormancy has to be visible.
+    __resetRemoteWorkerRuntimeForTesting()
+    render(<ExecutionWorkersCard hosts={[]} />)
+
+    expect(await screen.findByText("dispatchUnavailable")).toBeInTheDocument()
+  })
+
+  it("drops the warning once a brain attaches on this host", async () => {
+    __resetRemoteWorkerRuntimeForTesting()
+    render(<ExecutionWorkersCard hosts={[]} />)
+    expect(await screen.findByText("dispatchUnavailable")).toBeInTheDocument()
+
+    let uninstall = () => undefined as void
+    act(() => {
+      uninstall = installRemoteWorkerRuntime({
+        listWorkers: () => [],
+        run: jest.fn(),
+      } as unknown as RemoteWorkerRuntime)
+    })
+
+    await waitFor(() => expect(screen.queryByText("dispatchUnavailable")).not.toBeInTheDocument())
+    act(() => uninstall())
   })
 
   it("revokes only the worker capability through the management API", async () => {

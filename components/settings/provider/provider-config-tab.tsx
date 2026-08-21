@@ -3,21 +3,32 @@
 /**
  * ProviderConfigTab — "Config" tab in the provider detail panel.
  *
- * Sections (vertical layout):
- *  1. API Key (password input + show/hide + "Get API Key" link)
- *  2. Base URL (text input, optional)
- *  3. Default Model (select dropdown)
- *  4. Connection Status card (success / failure)
- *  5. Key Rotation (collapsible) — enable toggle, strategy, key list, add-key input
- *  6. Children slot for provider-specific extras
+ * Laid out as a `SettingsStack` of titled blocks rather than the flat run of
+ * unlabelled rows it used to be. The old order put the key, the endpoint, the
+ * protocol override, the status card and the test button at the same visual
+ * level, so nothing said which controls are needed to connect and which are
+ * escape hatches — and the test button moved between the top and the bottom of
+ * the pane depending on whether a result existed.
+ *
+ * Blocks, in order:
+ *  0. Anthropic auth extras (subscription reuse) — provider-gated
+ *  1. Credentials — API key / Bedrock auth + base URL, verify action in the
+ *     header, connection status at the foot. Everything one request needs.
+ *  2. Default model — what a new chat picks under this provider
+ *  3. Protocol & transport (collapsible) — wire protocol, OpenAI endpoint
+ *     flavor, static headers. Opens itself when an override is already set.
+ *  4. Key rotation (collapsible) — pool, strategy, ordering
+ *  5. Provider-specific extras (`children`)
+ *  6. Execution path (collapsible) — read-only ADR-0090 profile + certification,
+ *     rendered only when the projection actually has rows for this provider.
  */
 
 import React, { useState, useCallback, useEffect } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import {
   Eye,
   EyeOff,
   Key,
-  Globe,
   ChevronDown,
   Plus,
   Trash2,
@@ -27,14 +38,16 @@ import {
   AlertTriangle,
   ExternalLink,
   Loader2,
+  PlugZap,
+  RefreshCw,
+  Route,
+  Sparkles,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -42,7 +55,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { cn } from "@/lib/utils"
+import {
+  SettingsStack,
+  SettingsBlock,
+  SettingsField,
+} from "@/components/settings/common/settings-block"
+import { getDb } from "@/lib/db/schema"
 import {
   getBuiltInProviderSettingsBaseURL,
   getBuiltInProviderProtocol,
@@ -259,7 +277,6 @@ function KeyRotationSection({
   onRotationStrategyChange,
 }: KeyRotationSectionProps) {
   const t = useTranslations("providers")
-  const [open, setOpen] = useState(false)
   const [newKey, setNewKey] = useState("")
   const [addingKey, setAddingKey] = useState(false)
 
@@ -294,171 +311,209 @@ function KeyRotationSection({
   )
 
   return (
-    <>
-      <Separator />
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="flex w-full items-center gap-2 py-1 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-          <Key className="h-3.5 w-3.5" />
-          <span>{t("configTab.keyRotation")}</span>
-          {apiKeys.length > 0 && (
-            <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
-              {apiKeys.length}
-            </span>
-          )}
-          <ChevronDown
-            className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+    <SettingsBlock
+      collapsible
+      defaultOpen={false}
+      icon={<RefreshCw />}
+      title={t("configTab.keyRotation")}
+      description={t("configTab.keyRotationDescription")}
+      badge={
+        apiKeys.length > 0 ? (
+          <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal tabular-nums">
+            {apiKeys.length}
+          </Badge>
+        ) : undefined
+      }
+      testid="provider-key-rotation"
+    >
+      {/* Enable toggle — the "needs 2 keys" reason is spelled out instead of
+          leaving a switch that silently refuses to move. */}
+      {onToggleRotation && (
+        <SettingsField
+          label={t("configTab.keyRotationEnabled")}
+          description={apiKeys.length < 2 ? t("configTab.rotationNeedsTwoKeys") : undefined}
+        >
+          <Switch
+            checked={rotationEnabled}
+            onCheckedChange={onToggleRotation}
+            disabled={apiKeys.length < 2}
           />
-        </CollapsibleTrigger>
+        </SettingsField>
+      )}
 
-        <CollapsibleContent className="space-y-3 pt-3">
-          {/* Enable toggle */}
-          {onToggleRotation && (
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">{t("configTab.keyRotationEnabled")}</Label>
-              <Switch
-                checked={rotationEnabled}
-                onCheckedChange={onToggleRotation}
-                disabled={apiKeys.length < 2}
-              />
-            </div>
-          )}
+      {/* Strategy selector — only when rotation is on */}
+      {rotationEnabled && onRotationStrategyChange && (
+        <SettingsField
+          label={t("configTab.rotationStrategy")}
+          description={t("configTab.rotationStrategyDescription")}
+        >
+          <Select
+            value={rotationStrategy}
+            onValueChange={(v) => onRotationStrategyChange(v as ApiKeyRotationStrategy)}
+          >
+            <SelectTrigger
+              className="h-8 w-[180px] text-xs"
+              aria-label={t("configTab.rotationStrategy")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="round-robin">{t("configTab.strategyRoundRobin")}</SelectItem>
+              <SelectItem value="random">{t("configTab.strategyRandom")}</SelectItem>
+              <SelectItem value="least-used">{t("configTab.strategyLeastUsed")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingsField>
+      )}
 
-          {/* Strategy selector — only when rotation is on */}
-          {rotationEnabled && onRotationStrategyChange && (
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">
-                {t("configTab.rotationStrategy")}
-              </Label>
-              <Select
-                value={rotationStrategy}
-                onValueChange={(v) => onRotationStrategyChange(v as ApiKeyRotationStrategy)}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="round-robin">{t("configTab.strategyRoundRobin")}</SelectItem>
-                  <SelectItem value="random">{t("configTab.strategyRandom")}</SelectItem>
-                  <SelectItem value="least-used">{t("configTab.strategyLeastUsed")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Key list */}
-          {apiKeys.length > 0 && (
-            <div className="space-y-2">
-              {apiKeys.map((key, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs"
-                >
-                  <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate font-mono">
-                    {key.slice(0, 8)}
-                    {"*".repeat(Math.max(0, key.length - 12))}
-                    {key.slice(-4)}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    {onReorderApiKeys && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          onClick={() => handleMoveUp(index)}
-                          disabled={index === 0}
-                          title={t("configTab.moveUp")}
-                        >
-                          <ChevronDown className="h-3 w-3 rotate-180" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-5 w-5"
-                          onClick={() => handleMoveDown(index)}
-                          disabled={index === apiKeys.length - 1}
-                          title={t("configTab.moveDown")}
-                        >
-                          <ChevronDown className="h-3 w-3" />
-                        </Button>
-                      </>
-                    )}
-                    {onRemoveApiKey && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 text-destructive hover:text-destructive"
-                        onClick={() => onRemoveApiKey(index)}
-                        title={t("configTab.removeKey")}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Add key input */}
-          {onAddApiKey && (
-            <>
-              {addingKey ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={newKey}
-                    onChange={(e) => setNewKey(e.target.value)}
-                    placeholder={t("configTab.newKeyPlaceholder")}
-                    className="h-8 flex-1 text-xs font-mono"
-                    autoComplete="new-password"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleAddKey()
-                      if (e.key === "Escape") {
-                        setAddingKey(false)
-                        setNewKey("")
-                      }
-                    }}
-                  />
+      {/* Key pool */}
+      <div className="space-y-2">
+        {apiKeys.map((key, index) => (
+          <div
+            key={index}
+            className="flex items-center gap-2 rounded-md border bg-muted/30 px-2 py-1.5 text-xs"
+          >
+            <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate font-mono">
+              {key.slice(0, 8)}
+              {"*".repeat(Math.max(0, key.length - 12))}
+              {key.slice(-4)}
+            </span>
+            <div className="flex items-center gap-1">
+              {onReorderApiKeys && (
+                <>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={handleAddKey}
-                    disabled={!newKey.trim()}
+                    className="h-5 w-5"
+                    onClick={() => handleMoveUp(index)}
+                    disabled={index === 0}
+                    title={t("configTab.moveUp")}
                   >
-                    <Check className="h-3.5 w-3.5" />
+                    <ChevronDown className="h-3 w-3 rotate-180" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => {
-                      setAddingKey(false)
-                      setNewKey("")
-                    }}
+                    className="h-5 w-5"
+                    onClick={() => handleMoveDown(index)}
+                    disabled={index === apiKeys.length - 1}
+                    title={t("configTab.moveDown")}
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <ChevronDown className="h-3 w-3" />
                   </Button>
-                </div>
-              ) : (
+                </>
+              )}
+              {onRemoveApiKey && (
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 w-full gap-1.5 text-xs"
-                  onClick={() => setAddingKey(true)}
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 text-destructive hover:text-destructive"
+                  onClick={() => onRemoveApiKey(index)}
+                  title={t("configTab.removeKey")}
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  {t("configTab.addKey")}
+                  <Trash2 className="h-3 w-3" />
                 </Button>
               )}
-            </>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
-    </>
+            </div>
+          </div>
+        ))}
+
+        {/* Add key input */}
+        {onAddApiKey &&
+          (addingKey ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                placeholder={t("configTab.newKeyPlaceholder")}
+                className="h-8 flex-1 text-xs font-mono"
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-form-type="other"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddKey()
+                  if (e.key === "Escape") {
+                    setAddingKey(false)
+                    setNewKey("")
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={handleAddKey}
+                disabled={!newKey.trim()}
+              >
+                <Check className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => {
+                  setAddingKey(false)
+                  setNewKey("")
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 w-full gap-1.5 text-xs"
+              onClick={() => setAddingKey(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("configTab.addKey")}
+            </Button>
+          ))}
+      </div>
+    </SettingsBlock>
+  )
+}
+
+/* ── Execution Path Block ────────────────────────────────────────────────── */
+
+/**
+ * Collapsible home for the two read-only ADR-0090 panels. Both self-hide when
+ * the projection has no row for this provider, so the block repeats their
+ * existence checks: a titled, empty disclosure is worse than no section at all.
+ */
+function ExecutionPathBlock({ providerId }: { providerId: string }) {
+  const t = useTranslations("providers")
+
+  const hasDeployment = useLiveQuery(
+    async () =>
+      (await getDb().deploymentProfiles.where("legacyProviderId").equals(providerId).count()) > 0,
+    [providerId],
+    false
+  )
+  const hasCertification = useLiveQuery(
+    async () =>
+      (await getDb().agentCompatibilityRecords.where("deploymentRef").equals(providerId).count()) >
+      0,
+    [providerId],
+    false
+  )
+
+  if (!hasDeployment && !hasCertification) return null
+
+  return (
+    <SettingsBlock
+      collapsible
+      defaultOpen={false}
+      icon={<Route />}
+      title={t("configTab.executionTitle")}
+      description={t("configTab.executionDescription")}
+      testid="provider-execution-path"
+    >
+      <DeploymentProfileCard providerId={providerId} />
+      <DeploymentCertificationPanel deploymentRef={providerId} />
+    </SettingsBlock>
   )
 }
 
@@ -545,210 +600,183 @@ export function ProviderConfigTab({
     identity: providerId,
   })
 
+  // Everything the transport block owns. Counting the live overrides drives
+  // both the badge and whether the block opens itself — a stored override the
+  // user has to hunt for behind a closed disclosure is how endpoints silently
+  // drift from what the settings pane appears to say.
+  const showTransportBlock =
+    !isBedrock && (showProtocolSelector || showFlavorSelector || !!onCustomHeadersChange)
+  const transportOverrideCount =
+    (settings.apiProtocol ? 1 : 0) +
+    (settings.apiFlavor && settings.apiFlavor !== "auto" ? 1 : 0) +
+    Object.keys(settings.customHeaders ?? {}).length
+
+  const canTest = isBedrock
+    ? !!settings.bedrock && validateBedrockConnectionSettings(settings.bedrock).valid
+    : !!settings.apiKey
+
+  // One verification affordance, always in the same place (the credentials
+  // block header) whether or not a result exists — it used to sit bottom-right
+  // before the first test and top-right after it.
+  const testAction = (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-8 gap-1.5"
+      onClick={handleTest}
+      disabled={isTesting || !canTest}
+      title={canTest ? undefined : t("configTab.testDisabledHint")}
+      data-testid="config-test-connection"
+    >
+      {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+      {t("detailPanel.testButton")}
+    </Button>
+  )
+
+  const apiKeyInputId = `provider-${providerId}-api-key`
+  const baseURLInputId = `provider-${providerId}-base-url`
+  const defaultModelInputId = `provider-${providerId}-default-model`
+
   return (
-    <div className="space-y-5">
+    <SettingsStack>
       {/* ── 0. Anthropic auth extras (subscription reuse, privacy, ccswitch) ── */}
-      {providerId === "anthropic" && <AnthropicSubscriptionReuseCard />}
-
-      {isBedrock && onBedrockSettingsChange && (
-        <BedrockSettingsFields
-          value={settings.bedrock ?? { authMode: "default-chain", region: "us-east-1" }}
-          onChange={onBedrockSettingsChange}
-        />
+      {providerId === "anthropic" && (
+        <div className="min-w-0">
+          <AnthropicSubscriptionReuseCard />
+        </div>
       )}
 
-      {/* ── 1. API Key ─────────────────────────────────────────────── */}
-      {!isBedrock && (
-        <div className="space-y-2">
-          <Label className="flex items-center gap-1.5 text-sm font-medium">
-            <Key className="h-3.5 w-3.5" />
-            {t("configTab.apiKeyLabel")}
-          </Label>
-
-          <div className="relative">
-            <Input
-              type={showApiKey ? "text" : "password"}
-              value={apiKeyField.value}
-              onChange={(e) => apiKeyField.onChange(e.target.value)}
-              onBlur={apiKeyField.onBlur}
-              onKeyDown={apiKeyField.onKeyDown}
-              placeholder={t("configTab.apiKeyPlaceholder")}
-              className="pr-10"
-              autoComplete="new-password"
-              data-lpignore="true"
-              data-form-type="other"
+      {/* ── 1. Credentials + reachability ─────────────────────────────────
+          Credentials, endpoint, verify action and status live together: these
+          are exactly the controls that decide whether one request can succeed. */}
+      <SettingsBlock
+        icon={<Key />}
+        title={t("configTab.credentialsTitle")}
+        description={t("configTab.credentialsDescription")}
+        action={testAction}
+        testid="provider-credentials"
+        settingId={`provider-${providerId}-credentials`}
+      >
+        {isBedrock ? (
+          onBedrockSettingsChange ? (
+            <BedrockSettingsFields
+              value={settings.bedrock ?? { authMode: "default-chain", region: "us-east-1" }}
+              onChange={onBedrockSettingsChange}
             />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-              onClick={() => setShowApiKey((prev) => !prev)}
-              title={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
-              type="button"
+          ) : null
+        ) : (
+          <>
+            <SettingsField
+              stacked
+              htmlFor={apiKeyInputId}
+              label={t("configTab.apiKeyLabel")}
+              description={t("configTab.apiKeyDescription")}
             >
-              {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
-
-          {/* Dashboard / docs links */}
-          {(providerDashboardUrl || providerDocsUrl) && (
-            <div className="flex flex-wrap gap-3">
-              {providerDashboardUrl && (
-                <a
-                  href={providerDashboardUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {t("configTab.getApiKey")}
-                </a>
-              )}
-              {providerDocsUrl && (
-                <a
-                  href={providerDocsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  {t("configTab.docs")}
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── 2. Base URL ────────────────────────────────────────────── */}
-      {!isBedrock && (
-        <div className="space-y-2">
-          <Label className="flex items-center gap-1.5 text-sm font-medium">
-            <Globe className="h-3.5 w-3.5" />
-            {t("configTab.baseURLLabel")}
-            <span className="font-normal text-muted-foreground text-xs">
-              ({t("configTab.baseURLOptional")})
-            </span>
-          </Label>
-          <Input
-            type="text"
-            value={baseURLField.value}
-            onChange={(e) => baseURLField.onChange(e.target.value)}
-            onBlur={baseURLField.onBlur}
-            onKeyDown={baseURLField.onKeyDown}
-            placeholder={defaultBaseURL || t("configTab.baseURLPlaceholder")}
-          />
-          <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
-        </div>
-      )}
-
-      {/* ── 2b. API Protocol override (non-Anthropic built-ins only) ─── */}
-      {!isBedrock && showProtocolSelector && (
-        <div className="space-y-2">
-          <Label htmlFor={`api-protocol-${providerId}`} className="text-sm font-medium">
-            {t("apiProtocol")}
-          </Label>
-          <Select
-            value={settings.apiProtocol ?? catalogProtocol ?? "openai"}
-            onValueChange={(v) => onApiProtocolChange?.(v)}
-          >
-            <SelectTrigger id={`api-protocol-${providerId}`}>
-              <SelectValue placeholder={t("selectProtocol")} />
-            </SelectTrigger>
-            <ProtocolSelectContent />
-          </Select>
-          <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
-        </div>
-      )}
-
-      {/* ── 2c. OpenAI endpoint flavor (Responses / Chat) ────────────────
-          `UserProviderSettings.apiFlavor` has been honoured by the resolver
-          for built-ins all along, but only the custom-provider dialog could
-          set it — Azure OpenAI / gateway users had no way to opt into the
-          Responses API from here. */}
-      {!isBedrock && showFlavorSelector && (
-        <div className="space-y-2">
-          <Label htmlFor={`api-flavor-${providerId}`} className="text-sm font-medium">
-            {t("apiFlavor")}
-          </Label>
-          <Select
-            value={settings.apiFlavor ?? "auto"}
-            onValueChange={(v) => onApiFlavorChange?.(v as ApiFlavor)}
-          >
-            <SelectTrigger id={`api-flavor-${providerId}`} data-testid="config-api-flavor">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">
-                <div className="flex flex-col">
-                  <span>{t("apiFlavorAuto")}</span>
-                  <span className="text-xs text-muted-foreground">{t("apiFlavorAutoDesc")}</span>
+              <div className="space-y-2">
+                <div className="relative">
+                  <Input
+                    id={apiKeyInputId}
+                    type={showApiKey ? "text" : "password"}
+                    value={apiKeyField.value}
+                    onChange={(e) => apiKeyField.onChange(e.target.value)}
+                    onBlur={apiKeyField.onBlur}
+                    onKeyDown={apiKeyField.onKeyDown}
+                    placeholder={t("configTab.apiKeyPlaceholder")}
+                    className="pr-10 font-mono"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-form-type="other"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                    onClick={() => setShowApiKey((prev) => !prev)}
+                    title={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
+                    aria-label={showApiKey ? t("configTab.hideKey") : t("configTab.showKey")}
+                    type="button"
+                  >
+                    {showApiKey ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
                 </div>
-              </SelectItem>
-              <SelectItem value="responses">
-                <div className="flex flex-col">
-                  <span>{t("apiFlavorResponses")}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t("apiFlavorResponsesDesc")}
-                  </span>
-                </div>
-              </SelectItem>
-              <SelectItem value="chat">
-                <div className="flex flex-col">
-                  <span>{t("apiFlavorChat")}</span>
-                  <span className="text-xs text-muted-foreground">{t("apiFlavorChatDesc")}</span>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{t("apiFlavorHint")}</p>
-        </div>
-      )}
 
-      {/* ── 2d. Static transport headers ─────────────────────────────────
-          Same policy-validated editor the custom and local providers get;
-          built-in cloud providers had no way to add e.g. a gateway auth
-          header even though the connection test and the runtime read
-          `customHeaders`. Folded so it stays out of the way until needed. */}
-      {!isBedrock && onCustomHeadersChange && (
-        <Collapsible
-          defaultOpen={Boolean(
-            settings.customHeaders && Object.keys(settings.customHeaders).length > 0
-          )}
-        >
-          <CollapsibleTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-xs"
-              data-testid="config-headers-toggle"
+                {/* Dashboard / docs links */}
+                {(providerDashboardUrl || providerDocsUrl) && (
+                  <div className="flex flex-wrap gap-3">
+                    {providerDashboardUrl && (
+                      <a
+                        href={providerDashboardUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        {t("configTab.getApiKey")}
+                      </a>
+                    )}
+                    {providerDocsUrl && (
+                      <a
+                        href={providerDocsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        {t("configTab.docs")}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            </SettingsField>
+
+            <SettingsField
+              stacked
+              htmlFor={baseURLInputId}
+              label={`${t("configTab.baseURLLabel")} · ${t("configTab.baseURLOptional")}`}
+              description={t("baseURLHint")}
             >
-              <ChevronDown className="h-3.5 w-3.5" />
-              {t("transportHeadersLabel")}
-              {settings.customHeaders && Object.keys(settings.customHeaders).length > 0 ? (
-                <span className="text-muted-foreground">
-                  ({Object.keys(settings.customHeaders).length})
-                </span>
-              ) : null}
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-2">
-            <TransportHeadersEditor
-              idPrefix={`provider-${providerId}-headers`}
-              value={settings.customHeaders}
-              onChange={onCustomHeadersChange}
-            />
-          </CollapsibleContent>
-        </Collapsible>
-      )}
+              <Input
+                id={baseURLInputId}
+                type="text"
+                value={baseURLField.value}
+                onChange={(e) => baseURLField.onChange(e.target.value)}
+                onBlur={baseURLField.onBlur}
+                onKeyDown={baseURLField.onKeyDown}
+                placeholder={defaultBaseURL || t("configTab.baseURLPlaceholder")}
+                className="font-mono"
+              />
+            </SettingsField>
+          </>
+        )}
 
-      {/* ── 3. Default Model ───────────────────────────────────────── */}
+        {testResult !== null && testResult !== undefined ? (
+          <ConnectionStatusCard result={testResult} />
+        ) : (
+          <p className="text-xs text-muted-foreground" data-testid="config-not-verified-hint">
+            {t("configTab.notVerifiedHint")}
+          </p>
+        )}
+      </SettingsBlock>
+
+      {/* ── 2. Default model ───────────────────────────────────────────── */}
       {providerModels.length > 0 && (
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">{t("configTab.defaultModelLabel")}</Label>
+        <SettingsBlock
+          icon={<Sparkles />}
+          title={t("configTab.defaultModelLabel")}
+          description={t("configTab.defaultModelDescription")}
+          testid="provider-default-model"
+        >
           <Select value={defaultModel} onValueChange={onDefaultModelChange}>
-            <SelectTrigger className="h-9 text-sm">
+            <SelectTrigger
+              id={defaultModelInputId}
+              className="w-full text-sm"
+              aria-label={t("configTab.defaultModelLabel")}
+            >
               <SelectValue placeholder={t("configTab.selectModel")} />
             </SelectTrigger>
             <SelectContent>
@@ -759,53 +787,121 @@ export function ProviderConfigTab({
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </SettingsBlock>
       )}
 
-      {/* ── 4. Connection Status ───────────────────────────────────── */}
-      {testResult !== null && testResult !== undefined && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label className="text-sm font-medium">{t("configTab.connectionStatus")}</Label>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 text-xs"
-              onClick={handleTest}
-              disabled={isTesting}
+      {/* ── 3. Protocol & transport ────────────────────────────────────────
+          The wire protocol, the OpenAI endpoint flavor and the static headers
+          all answer the same question — how the request is shaped on the way
+          out — so they share one disclosure instead of three sibling rows.
+          `apiFlavor` has been honoured by the resolver for built-ins all along
+          but only the custom-provider dialog could set it; `customHeaders` was
+          likewise read by the runtime with no built-in editor. */}
+      {showTransportBlock && (
+        <SettingsBlock
+          key={`transport-${providerId}`}
+          collapsible
+          defaultOpen={transportOverrideCount > 0}
+          icon={<PlugZap />}
+          title={t("configTab.transportTitle")}
+          description={t("configTab.transportDescription")}
+          badge={
+            transportOverrideCount > 0 ? (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                {t("configTab.transportOverrides", { count: transportOverrideCount })}
+              </Badge>
+            ) : undefined
+          }
+          testid="provider-transport"
+        >
+          {showProtocolSelector && (
+            <SettingsField
+              stacked
+              htmlFor={`api-protocol-${providerId}`}
+              label={t("apiProtocol")}
+              description={t("apiProtocolHint")}
             >
-              {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {t("detailPanel.testButton")}
-            </Button>
-          </div>
-          <ConnectionStatusCard result={testResult} />
-        </div>
+              <Select
+                value={settings.apiProtocol ?? catalogProtocol ?? "openai"}
+                onValueChange={(v) => onApiProtocolChange?.(v)}
+              >
+                <SelectTrigger
+                  id={`api-protocol-${providerId}`}
+                  className="w-full [&_[data-select-desc]]:hidden"
+                >
+                  <SelectValue placeholder={t("selectProtocol")} />
+                </SelectTrigger>
+                <ProtocolSelectContent />
+              </Select>
+            </SettingsField>
+          )}
+
+          {showFlavorSelector && (
+            <SettingsField
+              stacked
+              htmlFor={`api-flavor-${providerId}`}
+              label={t("apiFlavor")}
+              description={t("apiFlavorHint")}
+            >
+              <Select
+                value={settings.apiFlavor ?? "auto"}
+                onValueChange={(v) => onApiFlavorChange?.(v as ApiFlavor)}
+              >
+                <SelectTrigger
+                  id={`api-flavor-${providerId}`}
+                  className="w-full [&_[data-select-desc]]:hidden"
+                  data-testid="config-api-flavor"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorAuto")}</span>
+                      <span data-select-desc="" className="text-xs text-muted-foreground">
+                        {t("apiFlavorAutoDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="responses">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorResponses")}</span>
+                      <span data-select-desc="" className="text-xs text-muted-foreground">
+                        {t("apiFlavorResponsesDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="chat">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorChat")}</span>
+                      <span data-select-desc="" className="text-xs text-muted-foreground">
+                        {t("apiFlavorChatDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </SettingsField>
+          )}
+
+          {/* The editor prints its own label and policy hint, so it is NOT
+              wrapped in a `SettingsField` — that duplicated both. */}
+          {onCustomHeadersChange && (
+            <div className="min-w-0" data-testid="config-headers-field">
+              <TransportHeadersEditor
+                idPrefix={`provider-${providerId}-headers`}
+                value={settings.customHeaders}
+                onChange={onCustomHeadersChange}
+              />
+            </div>
+          )}
+        </SettingsBlock>
       )}
 
-      {/* Test button when no result yet */}
-      {(testResult === null || testResult === undefined) && (
-        <div className="flex justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={handleTest}
-            disabled={
-              isTesting ||
-              (isBedrock
-                ? !settings.bedrock || !validateBedrockConnectionSettings(settings.bedrock).valid
-                : !settings.apiKey)
-            }
-          >
-            {isTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {t("detailPanel.testButton")}
-          </Button>
-        </div>
-      )}
-
-      {/* ── 5. Key Rotation ────────────────────────────────────────── */}
+      {/* ── 4. Key rotation ────────────────────────────────────────────── */}
       {!isBedrock && hasRotationSupport && (
         <KeyRotationSection
+          key={`rotation-${providerId}`}
           settings={settings}
           onAddApiKey={onAddApiKey}
           onRemoveApiKey={onRemoveApiKey}
@@ -815,15 +911,12 @@ export function ProviderConfigTab({
         />
       )}
 
-      {/* ── 6. Provider-specific extras ────────────────────────────── */}
-      {children}
+      {/* ── 5. Provider-specific extras ────────────────────────────────── */}
+      {children ? <div className="min-w-0 space-y-4">{children}</div> : null}
 
-      {/* ── 7. Derived unified-execution profile (ADR-0090 Phase 1) ── */}
-      <DeploymentProfileCard providerId={providerId} />
-
-      {/* ── 8. Execution-path certification status (ADR-0090 Phase 5) ── */}
-      <DeploymentCertificationPanel deploymentRef={providerId} />
-    </div>
+      {/* ── 6. Derived execution profile + certification (ADR-0090) ─────── */}
+      <ExecutionPathBlock key={`execution-${providerId}`} providerId={providerId} />
+    </SettingsStack>
   )
 }
 

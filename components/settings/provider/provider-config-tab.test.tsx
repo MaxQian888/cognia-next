@@ -293,9 +293,11 @@ describe("ProviderConfigTab", () => {
         onRemoveApiKey={jest.fn()}
       />
     )
-    const collapsible = screen.getByTestId("collapsible")
-    // The collapsible should not be open (data-open="false" or absent)
-    expect(collapsible.getAttribute("data-open")).not.toBe("true")
+    // The rotation block owns its own disclosure now, so assert on the block
+    // rather than "the only collapsible on the page" — the transport and
+    // execution-path blocks are collapsibles too.
+    const rotation = screen.getByTestId("provider-key-rotation")
+    expect(rotation.getAttribute("data-open")).not.toBe("true")
   })
 
   // Bonus: Get API Key link renders when dashboardUrl provided
@@ -463,9 +465,64 @@ describe("ProviderConfigTab", () => {
 
   it("mounts the transport-headers editor for built-ins when a handler is supplied", () => {
     const { rerender } = render(<ProviderConfigTab {...defaultProps} />)
-    expect(screen.queryByTestId("config-headers-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("config-headers-field")).not.toBeInTheDocument()
     rerender(<ProviderConfigTab {...defaultProps} onCustomHeadersChange={jest.fn()} />)
-    expect(screen.getByTestId("config-headers-toggle")).toBeInTheDocument()
+    expect(screen.getByTestId("config-headers-field")).toBeInTheDocument()
+  })
+
+  // ── Layout: titled blocks ────────────────────────────────────────────────
+  describe("block layout", () => {
+    it("keeps one verify action in the credentials block, disabled until there are credentials", () => {
+      const { rerender } = render(<ProviderConfigTab {...defaultProps} />)
+      const credentials = screen.getByTestId("provider-credentials")
+      const test = screen.getByTestId("config-test-connection")
+      expect(credentials).toContainElement(test)
+      expect(test).not.toBeDisabled()
+
+      rerender(
+        <ProviderConfigTab {...defaultProps} settings={{ ...mockSettings, apiKey: undefined }} />
+      )
+      expect(screen.getByTestId("config-test-connection")).toBeDisabled()
+    })
+
+    it("says the connection is unverified instead of leaving the status area blank", () => {
+      render(<ProviderConfigTab {...defaultProps} testResult={null} />)
+      expect(screen.getByTestId("config-not-verified-hint")).toBeInTheDocument()
+    })
+
+    it("hides the unverified hint once a result exists", () => {
+      render(<ProviderConfigTab {...defaultProps} testResult={{ success: true, latency: 245 }} />)
+      expect(screen.queryByTestId("config-not-verified-hint")).not.toBeInTheDocument()
+    })
+
+    it("renders no transport block when the provider exposes no transport control", () => {
+      render(<ProviderConfigTab {...defaultProps} />)
+      expect(screen.queryByTestId("provider-transport")).not.toBeInTheDocument()
+    })
+
+    it("opens the transport block when an override is already stored", () => {
+      // Separate mounts, not a rerender: the disclosure seeds its open state
+      // once, so a prop flip on a live instance would prove nothing.
+      const { unmount } = render(
+        <ProviderConfigTab {...defaultProps} onCustomHeadersChange={jest.fn()} />
+      )
+      expect(screen.getByTestId("provider-transport").getAttribute("data-open")).toBe("false")
+      unmount()
+
+      render(
+        <ProviderConfigTab
+          {...defaultProps}
+          settings={{ ...mockSettings, customHeaders: { "anthropic-beta": "x" } }}
+          onCustomHeadersChange={jest.fn()}
+        />
+      )
+      expect(screen.getByTestId("provider-transport").getAttribute("data-open")).toBe("true")
+    })
+
+    it("omits the execution-path block while the ADR-0090 projection has no rows", () => {
+      render(<ProviderConfigTab {...defaultProps} />)
+      expect(screen.queryByTestId("provider-execution-path")).not.toBeInTheDocument()
+    })
   })
 
   // ── API Protocol override selector ──────────────────────────────────────
