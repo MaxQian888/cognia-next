@@ -62,6 +62,7 @@ describe("connectSshFromDock", () => {
     }
     const result = await connectSshFromDock({
       profile,
+      allProfiles: [profile],
       rows: 30,
       cols: 100,
       projectId: "project-1",
@@ -93,6 +94,7 @@ describe("connectSshFromDock", () => {
     const connect = jest.fn()
     const result = await connectSshFromDock({
       profile: { ...profile, host: "" },
+      allProfiles: [profile],
       rows: 24,
       cols: 80,
       store: store(),
@@ -109,6 +111,7 @@ describe("connectSshFromDock", () => {
     const terminalStore = store()
     const result = await connectSshFromDock({
       profile,
+      allProfiles: [profile],
       rows: 24,
       cols: 80,
       store: terminalStore,
@@ -127,6 +130,7 @@ describe("connectSshFromDock", () => {
     await expect(
       connectSshFromDock({
         profile,
+        allProfiles: [profile],
         rows: 24,
         cols: 80,
         store: store(),

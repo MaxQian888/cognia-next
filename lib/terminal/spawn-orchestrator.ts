@@ -22,6 +22,7 @@
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 
 import type { BaseTerminalSession } from "./base-session"
+import type { SessionInfo } from "./types"
 import { selectTerminalTransportChain } from "./pick-transport"
 import { TerminalSession } from "./session"
 import { getLiveSession, registerLiveSession, unregisterLiveSession } from "./session-registry"
@@ -35,14 +36,15 @@ export type SpawnOutcome =
   | { kind: "error"; message: string }
 
 export interface TerminalStoreLike {
+  /**
+   * Takes `SessionInfo` itself rather than a hand-copied subset of its fields.
+   * The copy had drifted: `kind` / `profileId` / `hostId` arrived with SSH tabs
+   * and never made it here, so `rehydrate.ts` — which must pass them or a
+   * restored SSH tab renders as a local shell called "ssh" — could not type-check
+   * against this seam.
+   */
   registerSession(
-    info: {
-      id: string
-      projectId: string | null
-      extensionId: string | null
-      origin: "local" | "remote"
-      shell: string
-    },
+    info: SessionInfo,
     opts?: { title?: string; agentSpawner?: string; agentSpawnerMessageId?: string }
   ): void
   removeSession(id: string): void

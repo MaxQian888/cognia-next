@@ -127,7 +127,7 @@ describe("terminal host profile synchronization", () => {
   })
 
   it("replaces the host profile set, including clearing deleted profiles", async () => {
-    const call = jest.fn(async () => undefined)
+    const call = jest.fn(async (_method: string, _payload: unknown) => undefined)
     await syncTerminalHostProfiles([], {}, call as never)
     expect(call).toHaveBeenCalledWith("terminal_host_service", {
       action: { kind: "syncProfiles", profiles: [], sshProfiles: [] },
@@ -139,7 +139,7 @@ describe("terminal host profile synchronization", () => {
   // `terminal.open` and scoped to the calling device.
   it("uses the capability-gated RPC against a remote host", async () => {
     mockChain = ["ws", "webrtc"]
-    const call = jest.fn(async () => undefined)
+    const call = jest.fn(async (_method: string, _payload: unknown) => undefined)
     await syncTerminalHostProfiles(
       [{ id: "build", name: "Build", shell: "/bin/bash" }],
       {},
@@ -158,7 +158,7 @@ describe("terminal host profile synchronization", () => {
   // Rust arm refuses them and the client must not send them either.
   it("never sends SSH profiles to a remote host", async () => {
     mockChain = ["ws"]
-    const call = jest.fn(async () => undefined)
+    const call = jest.fn(async (_method: string, _payload: unknown) => undefined)
     await syncTerminalHostProfiles(
       [],
       {
@@ -182,7 +182,7 @@ describe("terminal host profile synchronization", () => {
   // host's bootstrap default.
   it("carries an ad-hoc spawn alongside the saved profiles, never instead of them", async () => {
     mockChain = ["ws"]
-    const call = jest.fn(async () => undefined)
+    const call = jest.fn(async (_method: string, _payload: unknown) => undefined)
     await syncTerminalHostProfiles(
       [{ id: "build", name: "Build", shell: "/bin/bash" }],
       { adHoc: { shell: "/bin/zsh", rows: 24, cols: 80 } },
