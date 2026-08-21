@@ -65,6 +65,7 @@
     "authorInfo": "作者信息",
     "authorName": "作者名称",
     "authorUrl": "网址",
+    "back": "返回",
     "basicInfo": "基本信息",
     "blankAppName": "未命名应用",
     "blankAppPlaceholder": "空白应用——从左侧组件树添加组件。",
@@ -80,6 +81,7 @@
     "categorySocial": "社交",
     "categoryUtility": "实用工具",
     "checkPublish": "检查发布要求",
+    "clearAgent": "改用默认角色",
     "clearErrors": "全部清除",
     "clearThumbnail": "清除缩略图",
     "close": "关闭",
@@ -112,6 +114,7 @@
     "dataModel": "数据模型",
     "dataModelKeyCount": "{count} 个键",
     "dataObjectType": "对象（{count}）",
+    "defaultAgent": "默认角色",
     "delete": "删除",
     "deleteApp": "删除应用",
     "deleteComponent": "删除组件",
@@ -179,6 +182,7 @@
     "gallery": "应用画廊",
     "generating": "生成中……",
     "generationFailed": "生成应用失败",
+    "generationOptions": "生成选项",
     "gridView": "网格视图",
     "heroSubtitle": "一句话描述你想要的应用，AI 秒速生成",
     "heroTitle": "即刻构建迷你应用",
@@ -247,6 +251,7 @@
     "manageApps": "管理已创建的应用",
     "metadata": "元数据",
     "missingFields": "缺少必填字段",
+    "moreActions": "更多操作",
     "move": "移动",
     "moveComponent": "移动组件",
     "moveComponentDescription": "将所选组件移动到精确的父级槽位和最终位置。",
@@ -277,6 +282,7 @@
     "paperCardOpenAccess": "开放获取",
     "paperCardPdf": "PDF",
     "papersCount": "{count} 篇论文",
+    "pickAgent": "选择构建这个应用的角色",
     "position": "位置",
     "positionHelp": "最终的从零开始位置（0–{max}）。",
     "previewMode": "预览",
@@ -332,6 +338,7 @@
     "saveFailed": "保存应用更改失败",
     "savedAsTemplate": "已存为模板",
     "saving": "正在保存",
+    "scrollToTop": "回到顶部",
     "searchAndManageApps": "搜索、排序并快速回到已有应用，保持管理链路顺手。",
     "searchComponents": "搜索组件类型...",
     "searchLoadMore": "加载更多结果",
@@ -360,7 +367,9 @@
     "shareToTelegram": "分享到 Telegram",
     "shareToTwitter": "分享到 Twitter",
     "shortcuts": "键盘快捷键",
+    "showAll": "查看全部",
     "showComponentTree": "显示组件树",
+    "showLess": "收起",
     "showPropertiesPanel": "显示属性面板",
     "slotAccordionItem": "手风琴项 {index}",
     "slotActions": "操作区",
@@ -3020,7 +3029,6 @@
         "deploymentRef": "部署档案",
         "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
         "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
-        "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
         "hostAuto": "任一就绪 Worker",
         "hostLocal": "随协调器运行",
         "hostPinned": "{host}（在线）",
@@ -5580,6 +5588,13 @@
       },
       "toggle": "展开/折叠 Hook 详情"
     },
+    "imported": {
+      "diverged": "{source} 已另有改动",
+      "divergedHint": "自 Cognia 接管以来，该对话在 {source} 一侧也发生了变化。Cognia 不会合并两边——你看到的是 Cognia 这一份。点击可忽略此提示。",
+      "origin": "来自 {source}",
+      "originHint": "该对话从 {source} 导入。在这里继续之后由 Cognia 接管，{source} 一侧之后的改动不再同步过来。",
+      "unknownSource": "其他助手"
+    },
     "inlineError": {
       "dismiss": "忽略",
       "environmentSetupFailed": "项目环境初始化失败。请重试，或仅为当前交互回合明确绕过初始化。",
@@ -6082,17 +6097,30 @@
     },
     "runPanel": {
       "ariaDiscardQueue": "丢弃排队的消息",
+      "ariaEditQueued": "修改这条排队的消息",
       "ariaInterrupt": "中断当前回合",
       "ariaLocateSteer": "跳到第一条未送达的消息",
+      "ariaManageSteer": "查看排队的消息",
+      "ariaRemoveQueued": "移除这条排队的消息",
+      "ariaReorderQueued": "调整顺序 —— 当前排在第 {index} 位",
       "ariaSteerQueue": "待发送消息",
       "ariaSubagent": "子智能体",
       "collapse": "收起运行详情",
       "discardQueue": "丢弃",
+      "dndCancelled": "已取消排序。",
+      "dndDropped": "已放到第 {position} 位，共 {total} 条。",
+      "dndInstructions": "按空格键拾起一条排队的消息，用方向键移动，再按一次空格键放下。",
+      "dndOver": "当前移动到第 {position} 位，共 {total} 条。",
+      "dndPickedUp": "已拾起第 {index} 条，共 {total} 条。",
       "expand": "展开运行详情",
       "lastRun": "上一轮",
       "lastRunSummary": "{count} 个工具 · {elapsed}",
+      "queueAttachments": "{count} 个附件",
+      "queueAttachmentsOnly": "{count} 个附件，无文字",
+      "queueMergeHint": "本回合结束后，按从上到下的顺序合并成一条发送。",
       "runFailedQueued": "运行失败 · {count} 条排队中",
       "sectionPlan": "计划",
+      "sectionQueue": "待发送",
       "sectionSubagents": "子智能体",
       "sectionSummary": "概要",
       "sectionTools": "工具",
@@ -6259,6 +6287,8 @@
       "discard": "删除",
       "failed": "未送达",
       "failedHint": "这一轮在它发出前就结束了",
+      "position": "{index}/{total}",
+      "positionHint": "发送顺序中的位置 —— 可在运行面板里调整",
       "putBack": "放回输入框",
       "queued": "排队中",
       "queuedHint": "会在当前回合结束后发送"
@@ -6284,7 +6314,8 @@
       "tokens": "{n} tokens",
       "tokensBreakdown": "{prompt} 输入 · {completion} 输出 · 共 {total} tokens",
       "toolsRunCount": "{n} 次工具调用",
-      "toolsTailNote": "仅显示最近 {n} 次工具调用"
+      "toolsTailNote": "仅显示最近 {n} 次工具调用",
+      "transcriptMissing": "这份对话副本中没有该子代理的完整记录。"
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -6534,6 +6565,13 @@
       "primaryBadge": "主",
       "secondary": "次身份：",
       "title": "合并平台身份"
+    },
+    "oauth": {
+      "failed": "{platform} 登录失败：{reason}",
+      "noHandler": "“{platform}”不使用这种登录方式。",
+      "stateMismatch": "这个登录回跳与本应用发起的那次不匹配。请回到设置里重新发起连接。",
+      "succeeded": "{platform} 已连接。",
+      "unknownPlatform": "没有“{platform}”的登录处理器，这个连接器可能不在当前版本里。"
     }
   },
   "contextWorkbench": {
@@ -6846,6 +6884,7 @@
         "file": "文件",
         "footnote": "注释",
         "memory": "记忆",
+        "projectKnowledge": "工作区知识",
         "tool": "工具",
         "twinRag": "孪生",
         "twinStyle": "风格",
@@ -6948,28 +6987,25 @@
       "label": "模型",
       "unassigned": "未知模型"
     },
-    "presets": {
-      "delete": "删除预设 {name}",
-      "empty": "还没有保存的预设。",
-      "label": "预设",
-      "manage": "管理预设…",
-      "manageDescription": "重命名或删除已保存的筛选组合，更改立即生效。",
-      "manageTitle": "管理预设",
-      "namePlaceholder": "预设名称",
-      "rename": "重命名预设 {name}",
-      "save": "保存当前筛选…",
-      "saveAction": "保存预设",
-      "saveDescription": "为这组筛选条件命名，之后可在任意设备上一键套用。",
-      "saveRejected": "请输入名称，并至少保留一项筛选条件。",
-      "saveShort": "保存",
-      "saveTitle": "保存筛选预设"
-    },
     "provider": {
       "any": "任意提供商",
       "label": "提供商",
       "unassigned": "未知提供商"
     },
     "remove": "移除“{name}”筛选",
+    "searchScope": {
+      "content": "搜索消息内容",
+      "contentHint": "需要 {count} 个字符，读取本机消息索引。",
+      "hint": "决定搜索框能找到哪些会话。",
+      "includeArchived": "包含已归档会话",
+      "label": "搜索范围",
+      "labelActive": "搜索范围 — 已放宽 {count} 项",
+      "workspace": {
+        "all": "全部工作区",
+        "current": "当前工作区",
+        "label": "工作区"
+      }
+    },
     "sections": {
       "agent": "Agent 与团队",
       "location": "工作区与文件夹",
@@ -6990,6 +7026,43 @@
       "any": "任意团队",
       "label": "团队",
       "unassigned": "无团队"
+    },
+    "views": {
+      "builtIn": {
+        "globalSearch": "全局检索",
+        "recentlyCreated": "最近创建",
+        "unread": "未读"
+      },
+      "builtInBadge": "内置",
+      "clear": "退出视图",
+      "delete": "删除视图 {name}",
+      "dimensions": {
+        "filters": "筛选",
+        "groupBy": "分组",
+        "legend": "固定",
+        "search": "搜索范围",
+        "sortBy": "排序"
+      },
+      "empty": "还没有保存的视图。",
+      "hidden": "已隐藏的内置视图",
+      "hide": "隐藏视图 {name}",
+      "label": "视图",
+      "manage": "管理视图…",
+      "manageDescription": "重命名或删除你保存的视图，也可以恢复被隐藏的内置视图。改动立即生效。",
+      "manageTitle": "管理视图",
+      "modified": "已修改",
+      "modifiedChip": "{name} · 已修改",
+      "namePlaceholder": "视图名称",
+      "rename": "重命名视图 {name}",
+      "restore": "恢复视图 {name}",
+      "revert": "恢复视图",
+      "save": "保存当前视图…",
+      "saveAction": "保存视图",
+      "saveDescription": "为当前看到的列表命名。视图只固定你勾选的部分，其余维度仍跟随你之后的设置。",
+      "saveRejected": "请填写名称，并至少固定一个维度。",
+      "saveShort": "保存",
+      "saveTitle": "保存视图",
+      "update": "更新此视图"
     },
     "workspace": {
       "any": "任意工作区",
@@ -7389,13 +7462,16 @@
       "newFolder": "新建文件夹",
       "newFolderName": "新建文件夹",
       "openSessions": "打开会话列表",
+      "orderPending": "{count} 条更新",
       "renameFolder": "重命名文件夹",
       "resizeHandle": "调整侧边栏宽度",
       "searchAria": "搜索对话",
+      "searchContentMinQuery": "输入 {count} 个字符以搜索消息内容",
       "searchMessageContent": "搜索消息正文",
       "searchPlaceholder": "搜索对话…",
       "searchShortcutHint": "按 / 开始搜索",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
+      "searchingMessages": "正在搜索消息内容…",
       "sectionPinned": "置顶",
       "sectionRecent": "最近",
       "sectionResults": "搜索结果",
@@ -7416,6 +7492,7 @@
       "teamFallback": "团队",
       "titleMotion": "悬停时滚动长标题",
       "ungroupedAgent": "未绑定角色",
+      "ungroupedTeam": "对话",
       "ungroupedWorkspace": "未归属工作区",
       "viewActive": "显示活跃会话",
       "viewArchived": "显示已归档会话"
@@ -7450,6 +7527,9 @@
       "a2ui": "小应用",
       "agentRuns": "智能体运行",
       "agentTeams": "智能体团队",
+      "aliases": {
+        "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
+      },
       "auxiliaryGroup": "个人与日志",
       "browser": "浏览器",
       "canvas": "画布",
@@ -7490,7 +7570,6 @@
       "memory": "记忆",
       "more": "更多",
       "navigation": "导航",
-      "observability": "可观测性",
       "openSettings": "打开设置",
       "performance": "性能",
       "pet": "宠物",
@@ -7620,12 +7699,14 @@
       "defaultModel": "会话默认模型",
       "empty": "暂无成员。",
       "heading": "成员 — {count}",
+      "hide": "隐藏成员",
       "label": "团队成员",
       "mentionTitle": "@提及 {name}",
       "noTeamSession": "打开一个团队会话即可查看其成员。",
       "notesPlaceholder": "笔记会在每轮对话中注入到所有成员的对话上下文中…",
       "openChat": "打开与 {name} 的对话",
       "sharedNotes": "共享笔记",
+      "show": "显示成员",
       "status": {
         "errored": "出错",
         "idle": "空闲",
@@ -7876,6 +7957,7 @@
         "remoteRuntime": "远程 Host",
         "runtimeTarget": "执行位置",
         "serverVersion": "Host 版本",
+        "standaloneScope": "当前浏览器可运行对话和本地数据。源代码管理、内置浏览器和远程会话需要连接 Host。",
         "thisBrowser": "当前浏览器",
         "thisDesktop": "当前桌面",
         "tier": {
@@ -8705,6 +8787,9 @@
       "description": "在聊天中用 @ 引用飞书与 Google 文档。",
       "desktopOnly": "仅桌面端可用。",
       "disconnect": "断开连接",
+      "disconnectNotRevoked": "已在本地断开，但向 Google 吊销失败（{reason}）。请到 Google 账号的第三方访问设置里移除 Cognia 以彻底完成。",
+      "disconnectRevoked": "已断开连接，Google 侧的授权也已吊销。",
+      "disconnecting": "正在断开…",
       "googleClientHint": "请在 Google Cloud Console 创建「桌面应用」类型的凭据。",
       "googleClientId": "OAuth 客户端 ID",
       "googleClientSecret": "OAuth 客户端密钥",
@@ -10860,9 +10945,14 @@
       "done": "完成",
       "loading": "读取文件中…",
       "pickButton": "选择文件…",
-      "pickPrompt": "选择 JSON 导出文件以开始。",
+      "pickPrompt": "选择一个导出文件开始。",
       "title": "导入会话",
       "tryAgain": "重新选择文件"
+    },
+    "errors": {
+      "cogniaBackup": "这是 Cognia 备份文件，不是对话导出文件。请在「备份与恢复」中恢复它。",
+      "encrypted": "该备份已加密。请在「备份与恢复」中恢复，那里可以输入密码。",
+      "unrecognized": "无法识别该文件，它不是受支持助手的对话导出文件。"
     },
     "platform": {
       "chatgpt": {
@@ -13091,6 +13181,11 @@
           "usage": "用量"
         },
         "spanCount": "{count, plural, other {# 个 span}}",
+        "subViewLabel": "追踪工作区视图",
+        "subViews": {
+          "dashboard": "观测台",
+          "explore": "探索"
+        },
         "timeline": {
           "blockAria": "{lane} 中的 {label}，耗时 {duration}",
           "blockError": "该 span 失败",
@@ -14736,6 +14831,7 @@
       "search": "搜索聊天…",
       "searchAria": "搜索聊天",
       "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
+      "searchingMessages": "正在搜索消息内容…",
       "sections": {
         "activeRuns": "运行中",
         "recents": "最近会话"
@@ -14745,6 +14841,9 @@
       "swipePin": "置顶",
       "swipeUnarchive": "取消归档",
       "swipeUnpin": "取消置顶",
+      "ungroupedAgent": "未绑定角色",
+      "ungroupedTeam": "对话",
+      "ungroupedWorkspace": "未归属工作区",
       "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
       "viewActive": "显示活跃聊天",
       "viewArchived": "显示已归档聊天"
@@ -15305,6 +15404,8 @@
           "trigger": "找不到桌面？"
         },
         "latencyMs": "{ms} 毫秒",
+        "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → Companion → 浏览器访问，把 {origin} 加进允许的来源。",
+        "loopbackBlockedTitle": "这台电脑上有一个 Host 在运行",
         "nearbyTitle": "本网络内",
         "precheckOk": "可连接 · v{version} · {ms} 毫秒",
         "precheckUnreachable": "无法连接该服务器，请确认它已在线。",
@@ -15319,6 +15420,7 @@
         "tlsPinned": "身份已验证",
         "tlsUnverified": "未验证",
         "viaHistory": "历史",
+        "viaLoopback": "本机",
         "viaMdns": "mDNS",
         "viaPaired": "已配对",
         "viaProbe": "局域网探测"
@@ -16217,15 +16319,19 @@
       "tracesCsv": "导出 Trace 为 CSV"
     },
     "filters": {
+      "back": "返回",
       "clear": "清除",
       "dims": {
         "model": "模型",
         "operation": "操作",
+        "project": "项目",
+        "provider": "供应商",
         "session": "会话",
         "surface": "来源",
         "tool": "工具"
       },
       "empty": "无可选项",
+      "label": "筛选",
       "search": "搜索…"
     },
     "metricToggle": {
@@ -16237,18 +16343,22 @@
     "noData": "该时间窗口内暂无数据",
     "panels": {
       "byModel": "按模型分布",
+      "byOperation": "按操作分布",
       "byProject": "按项目",
       "byProvider": "按提供商",
       "bySurface": "按来源分布",
+      "byTool": "按工具",
       "cacheHitRate": "缓存命中率",
       "costOverTime": "成本走势",
       "errorRate": "错误率",
       "errorRateOverTime": "错误率",
       "latencyPercentiles": "延迟分位",
       "p95Latency": "延迟 (p95)",
-      "recentTraces": "最近 Trace",
+      "reqPerMin": "请求数 / 分钟",
       "requestRate": "请求速率",
       "tokenThroughput": "Token 吞吐",
+      "toolCalls": "工具调用",
+      "toolFailures": "工具失败",
       "totalCost": "总成本",
       "totalSpans": "Span 总数"
     },
@@ -16332,31 +16442,16 @@
       "unitMs": "毫秒",
       "unitUsd": "美元"
     },
-    "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
-    "title": "可观测性",
     "toolbar": {
       "edit": "编辑布局",
       "lock": "锁定布局",
       "resetLayout": "重置布局",
       "settings": "仪表盘设置"
     },
-    "traces": {
-      "cost": "成本",
-      "duration": "耗时",
-      "empty": "该时间窗口内暂无 Trace",
-      "root": "Trace",
-      "spans": "Span 数",
-      "started": "开始时间",
-      "surface": "来源"
-    },
     "waterfall": {
       "cost": "成本 {value}",
-      "empty": "该 Trace 暂无 span",
-      "spanCount": "{count} 个 span",
-      "title": "Trace 详情",
       "toggleEvents": "展开/收起 span 详情",
-      "tokens": "{count} tokens",
-      "totalDuration": "耗时 {value}"
+      "tokens": "{count} tokens"
     }
   },
   "ocr": {
@@ -16926,10 +17021,10 @@
   },
   "onboarding": {
     "apiKeyHintHost": "console.anthropic.com",
-    "apiKeyHintPrefix": "在 ",
-    "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
-    "apiKeyLabel": "Anthropic API 密钥",
-    "apiKeyPlaceholder": "sk-ant-…",
+    "apiKeyHintPrefix": "在此获取：",
+    "apiKeyHintSuffix": "密钥不会离开你的设备。",
+    "apiKeyLabel": "API 密钥",
+    "apiKeyPlaceholder": "sk-…",
     "back": "返回",
     "cards": {
       "extractText": {
@@ -16959,8 +17054,10 @@
     },
     "firstRun": {
       "changeCharacter": "更换",
+      "connectCta": "先去连接模型",
       "description": "挑一个试试。Agent 现在就做，结果你自己判断。",
       "failed": "这次没成功。可以换一个，或者先跳过稍后再试。",
+      "needsModel": "Cognia 还连不上模型，这些任务没有可用的执行方。",
       "runningWith": "以 {name} 的身份运行",
       "runtimeLine": "正在使用 {runtime}",
       "starting": "正在启动…",
@@ -16968,11 +17065,22 @@
     },
     "provider": {
       "apiKey": {
-        "cta": "使用 API 密钥",
-        "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
-        "title": "粘贴 Anthropic API 密钥"
+        "cta": "选择 provider",
+        "description": "OpenAI、Google、DeepSeek、跑在本机的模型，或目录里的任意其它 provider。",
+        "save": "保存并继续",
+        "title": "使用 API 密钥"
       },
       "backToChooser": "换一种登录方式",
+      "baseUrlLabel": "Base URL",
+      "byokNote": "本设备用你自己的密钥直连 provider。订阅登录需要桌面端 —— 那些凭据保存在系统钥匙串里。",
+      "byokTitle": "连接模型",
+      "category": {
+        "aggregator": "网关与聚合",
+        "enterprise": "企业",
+        "flagship": "主要 provider",
+        "local": "本机运行",
+        "specialized": "其它 provider"
+      },
       "claude": {
         "cta": "使用 Anthropic 登录",
         "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
@@ -16983,15 +17091,26 @@
         "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
         "title": "ChatGPT Plus / Pro（Codex）"
       },
+      "connected": {
+        "description": "Cognia 将通过它访问模型。之后可以在 设置 → 订阅 里添加或切换账号。",
+        "plan": "套餐 {plan}",
+        "title": "已连接"
+      },
       "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+      "localHint": "跑在本机，不需要密钥 —— 确认服务已经启动即可。",
       "loggedInBadge": "已连接",
       "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+      "needsSettings": "这个 provider 需要的不止一把密钥 —— 还有区域和它自己的凭据。等装好之后在 设置 → Providers 里添加。",
       "opencode": {
         "cta": "粘贴 OpenCode 密钥",
         "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
         "title": "OpenCode Zen"
       },
-      "title": "选择登录方式"
+      "pickerEmpty": "没有匹配的 provider。",
+      "pickerLabel": "Provider",
+      "pickerSearch": "搜索 provider…",
+      "title": "选择登录方式",
+      "toastIncomplete": "先把这个 provider 需要的内容填完整。"
     },
     "rail": {
       "first-run": {
@@ -17041,7 +17160,7 @@
       "title": "这台机器上已经有什么"
     },
     "skip": "暂时跳过",
-    "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+    "toastNeedKey": "粘贴 API 密钥后才能继续。",
     "tour": {
       "computerUse": {
         "cta": "打开自动化设置",
@@ -20025,14 +20144,36 @@
       "cognia": "Cognia"
     },
     "command": {
-      "chat.addFile.title": "将文件添加到 Cognia 上下文",
-      "chat.addSelection.title": "将选区添加到 Cognia 对话",
-      "chat.customAction.title": "运行 Cognia 模板…",
-      "chat.explain.title": "解释这段代码",
-      "chat.fix.title": "修复这段代码",
-      "chat.review.title": "审阅这段代码",
-      "diagnostics.send.title": "把问题发送到 Cognia",
-      "workspace.focus.title": "显示 Cognia 面板"
+      "chat": {
+        "addFile": {
+          "title": "将文件添加到 Cognia 上下文"
+        },
+        "addSelection": {
+          "title": "将选区添加到 Cognia 对话"
+        },
+        "customAction": {
+          "title": "运行 Cognia 模板…"
+        },
+        "explain": {
+          "title": "解释这段代码"
+        },
+        "fix": {
+          "title": "修复这段代码"
+        },
+        "review": {
+          "title": "审阅这段代码"
+        }
+      },
+      "diagnostics": {
+        "send": {
+          "title": "把问题发送到 Cognia"
+        }
+      },
+      "workspace": {
+        "focus": {
+          "title": "显示 Cognia 面板"
+        }
+      }
     },
     "panel": {
       "chooseAction": "选择一个 Cognia 模板",
@@ -20633,6 +20774,7 @@
     "configDescription": "配置服务器主机、端口和高级设置",
     "configTab": {
       "addKey": "添加密钥",
+      "apiKeyDescription": "服务商控制台签发的密钥。",
       "apiKeyLabel": "API 密钥",
       "apiKeyPlaceholder": "输入您的 API 密钥",
       "baseURLLabel": "Base URL",
@@ -20660,11 +20802,17 @@
       "connectionFailed": "连接失败",
       "connectionStatus": "连接状态",
       "connectionSuccess": "已连接",
+      "credentialsDescription": "本机访问该服务商所需的信息。凭据仅保存在本机，导出诊断时绝不会带出。",
+      "credentialsTitle": "凭据与端点",
+      "defaultModelDescription": "在该服务商下新建会话时默认选中的模型。",
       "defaultModelLabel": "默认模型",
       "docs": "文档",
+      "executionDescription": "只读：该服务商的请求实际由哪条链路发出，以及各链路的认证状态。",
+      "executionTitle": "执行路径",
       "getApiKey": "获取 API Key →",
       "hideKey": "隐藏密钥",
       "keyRotation": "密钥轮换",
+      "keyRotationDescription": "在多把密钥之间轮换请求，突破单把密钥的速率上限。",
       "keyRotationEnabled": "启用轮换",
       "lastTested": "上次测试",
       "lastVerified": "上次验证",
@@ -20673,15 +20821,22 @@
       "moveDown": "下移",
       "moveUp": "上移",
       "newKeyPlaceholder": "sk-...",
+      "notVerifiedHint": "尚未验证 — 运行一次连接测试，确认密钥与端点可用。",
       "random": "随机",
       "removeKey": "移除",
+      "rotationNeedsTwoKeys": "再添加一把密钥后才能启用轮换。",
       "rotationStrategy": "轮换策略",
+      "rotationStrategyDescription": "下一次请求按哪种方式从密钥池中挑选。",
       "roundRobin": "轮询",
       "selectModel": "选择模型",
       "showKey": "显示密钥",
       "strategyLeastUsed": "最少使用",
       "strategyRandom": "随机",
-      "strategyRoundRobin": "轮询"
+      "strategyRoundRobin": "轮询",
+      "testDisabledHint": "请先填写凭据，然后再测试连接。",
+      "transportDescription": "决定请求发出时的形态。通常只有网关、Azure 或自建端点才需要调整。",
+      "transportOverrides": "{count, plural, other {# 项覆盖}}",
+      "transportTitle": "协议与传输"
     },
     "configuration": "配置",
     "configureApiKey": "配置 API 密钥",
@@ -22345,6 +22500,7 @@
       "executionChart": "执行历史（7天）",
       "failed": "失败",
       "noData": "暂无执行数据",
+      "noRunsYet": "尚无运行记录",
       "running": "运行中",
       "title": "仪表盘"
     },
@@ -22359,6 +22515,7 @@
     "dateTimeRequired": "日期和时间为必填项",
     "days": "天",
     "delete": "删除",
+    "deleteItemConfirm": "确定删除「{name}」（{kind}）吗？此操作无法撤销。",
     "deleteTask": "删除任务",
     "deleteTaskConfirm": "确定要删除此任务吗？此操作无法撤销。",
     "dependencies": {
@@ -22466,6 +22623,11 @@
       "loop": "循环",
       "statusLabel": "状态",
       "typeLabel": "类型"
+    },
+    "filterBar": {
+      "clear": "清除筛选",
+      "kindMenu": "按类型筛选",
+      "loopOnly": "仅 /loop 任务"
     },
     "finishedAt": "结束时间",
     "footerSuccess": "成功率",
@@ -23018,6 +23180,10 @@
     },
     "showLess": "显示更少",
     "showMore": "显示更多",
+    "sidebarFooter": {
+      "filtered": "已显示 {shown} / {total}",
+      "total": "共 {total} 项"
+    },
     "slashCommand": {
       "description": "创建定时任务或提醒"
     },
@@ -23752,10 +23918,10 @@
     "back": "返回",
     "cancel": "取消",
     "cancelledTitle": "已停止导入",
-    "cardBody": "从 Claude Code、Codex 或 OpenCode 导入历史会话。",
+    "cardBody": "从本机已安装的编程助手导入历史会话，或导入导出的会话文件。",
     "cardTitle": "编程 Agent 会话",
     "close": "关闭",
-    "description": "将你的 Claude Code、Codex 和 OpenCode 命令行历史导入 Cognia，作为可继续的对话。",
+    "description": "把命令行编程助手的会话记录导入 Cognia，成为可继续对话的会话。",
     "deselectAll": "清除选择",
     "doneBody": "已添加 {sessions, plural, one {# 个对话} other {# 个对话}}，共 {messages, plural, one {# 条消息} other {# 条消息}}。",
     "doneTitle": "导入完成",
@@ -23786,16 +23952,17 @@
       "noLosses": "转换无损。",
       "rebuilt": "重建",
       "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
+      "reverseDormant": "把这份记录反向写回原助手、生成一个新会话的能力已定义（{fidelity}），但 Cognia 尚未提供该入口。",
       "title": "转换保真度"
     },
     "importSelected": "导入选中的 {count} 项",
-    "importing": "正在导入…",
     "liveSync": "实时同步",
     "liveSyncHint": "持续监视这些 Agent 并自动导入新会话。已在 Cognia 中续聊的会话会被冻结，永不被覆盖。",
     "loadMore": "再显示 {count} 个",
     "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
     "parsingProgress": "正在解析 {done}/{total}…",
     "pickButton": "选择文件…",
+    "pickerOnly": "{sources} 的记录保存在各个仓库内部，扫描无法找到，请手动选择文件。",
     "retry": "重试",
     "scanButton": "扫描已安装的 Agent",
     "scanning": "正在查找会话…",
@@ -24579,10 +24746,6 @@
           "prewarm": {
             "description": "保留相互隔离的预热 SDK 进程，以处理下一次兼容请求。",
             "label": "预热池"
-          },
-          "resolver": {
-            "description": "使用统一执行解析器选择正确的智能体运行时。",
-            "label": "统一执行解析器"
           },
           "sessionStore": {
             "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
@@ -26858,6 +27021,8 @@
         "source_assignment": "会话分配",
         "source_conversation-override": "会话覆盖",
         "source_dispatch-rule": "调度规则",
+        "source_escalation": "SLA 升级",
+        "source_session": "会话",
         "source_system-default": "系统默认值",
         "source_target-managed": "由执行目标管理",
         "title": "会话行为"
@@ -27106,15 +27271,6 @@
         "welcomeTextHelp": "可选，显示在欢迎卡片顶部。留空则使用内置文案。",
         "welcomeTextLabel": "欢迎语",
         "welcomeTextPlaceholder": "例如：你好！我是你的助手，下面是我能帮你做的事。"
-      },
-      "inbox": {
-        "archivedLabel": "归档",
-        "noAdapters": "尚未配置任何适配器。",
-        "openInbox": "打开收件箱",
-        "pinnedLabel": "置顶",
-        "summary": "按适配器分组的会话汇总。完整视图请到收件箱。",
-        "totalLabel": "总数",
-        "unreadLabel": "未读"
       },
       "inboxAssets": {
         "cannedResponses": "快捷回复",
@@ -27778,6 +27934,9 @@
         "botTokenPlaceholder": "xoxb-...",
         "botTokenRequired": "Bot Token 不能为空。",
         "cancel": "取消",
+        "clientIdLabel": "OAuth Client ID",
+        "clientIdPlaceholder": "1234567890.1234567890123",
+        "clientSecretLabel": "OAuth Client Secret",
         "connectedAs": "{user} @ {team}（id: {userId}）",
         "connectedToast": "已连接：{user} @ {team}",
         "connectionFailedLabel": "连接失败",
@@ -27792,8 +27951,13 @@
         "historyMaxPagesLabel": "每次加载的历史页数",
         "oauthButton": "通过 OAuth 连接",
         "oauthButtonAria": "通过 OAuth 连接",
-        "oauthClientIdMissing": "未设置 NEXT_PUBLIC_SLACK_CLIENT_ID。",
+        "oauthConnecting": "正在打开 Slack…",
         "oauthHint": "也可以通过 OAuth 授权，让 Slack 自动生成 Bot Token。",
+        "oauthNeedsClientId": "请先填写并保存 OAuth Client ID，再发起授权。",
+        "oauthNeedsRelay": "OAuth 需要一个 Slack 能回跳的公网地址。请启动隧道（桌面端）或配置公网源（自托管）。",
+        "oauthNeedsSavedAdapter": "请先保存这个连接 —— 授权要绑定到它。",
+        "oauthOpened": "已在浏览器中打开 Slack 授权页。",
+        "oauthRedirectHint": "请在你的 Slack 应用里注册这个完全一致的回调地址：{url}",
         "openCompanion": "打开伴侣设置",
         "openConsole": "打开 Slack 应用控制台",
         "quietHoursIncomplete": "免打扰时段需要同时填写开始、结束与时区。",
@@ -27839,7 +28003,6 @@
         "canned": "快捷回复",
         "capability": "能力矩阵",
         "conversations": "会话",
-        "inbox": "收件箱",
         "labels": "标签",
         "outbound": "出站",
         "overrides": "覆盖配置",
@@ -28186,11 +28349,6 @@
         }
       },
       "sidebar": {
-        "contentSearch": {
-          "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",
-          "heading": "搜索消息内容",
-          "label": "在消息内容中搜索"
-        },
         "customIcons": {
           "description": "在列表中显示每个会话的角色或团队头像；关闭后使用中性图标。",
           "heading": "角色与团队图标",
@@ -28202,18 +28360,6 @@
           "label": "使用紧凑会话行"
         },
         "description": "调整聊天侧边栏列出和搜索会话的方式。",
-        "groupBy": {
-          "description": "选择会话列表的主分组维度。按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
-          "heading": "会话分组方式",
-          "label": "会话分组",
-          "options": {
-            "agent": "角色",
-            "date": "日期",
-            "none": "不分组",
-            "team": "对话 / 团队",
-            "workspace": "工作区"
-          }
-        },
         "metadata": {
           "agent": {
             "description": "显示负责该会话的角色或团队。",
@@ -28247,18 +28393,6 @@
           "button": "重置宽度",
           "description": "将可拖拽的侧边栏恢复到默认宽度。",
           "heading": "侧边栏宽度"
-        },
-        "sortBy": {
-          "description": "应用于每个分组内部的排序。仅「最近活动」会保留手动拖拽的顺序。",
-          "heading": "会话排序方式",
-          "label": "会话排序",
-          "options": {
-            "created": "创建时间",
-            "oldest": "最早活动",
-            "recent": "最近活动",
-            "title": "标题（A–Z）",
-            "unread": "未读优先"
-          }
         },
         "timestamps": {
           "description": "在会话标题末尾显示最近一次活动的时间。",
@@ -29355,6 +29489,11 @@
         "httpPortHelp": "HTTP 传输监听的端口，下方的接入片段会使用该值。",
         "noActiveClientError": "没有可用的 External Bridge 客户端。",
         "regenerateWarning": "⚠ 重新生成将立即作废旧 Token。",
+        "revokeClientAria": "吊销客户端凭据",
+        "revokeConfirmAction": "吊销凭据",
+        "revokeConfirmCancel": "取消",
+        "revokeConfirmDesc": "凭据会立即失效，它的活跃会话一并关闭。与轮换不同，这里不会签发替代凭据 —— 重新启用外部桥才会生成新的。凭据泄露时用它。",
+        "revokeConfirmTitle": "吊销这个客户端凭据？",
         "rotateConfirmAction": "轮换 Token",
         "rotateConfirmCancel": "取消",
         "rotateConfirmDesc": "所有已用当前 Token 配置的客户端都将停止工作，直到你粘贴新 Token。此操作无法撤销。",
@@ -29365,6 +29504,7 @@
         "statusOff": "服务器已关闭，不接受任何外部流量。",
         "statusStdioActive": "Stdio 传输已激活。Tauri HTTP 服务器离线 — 关闭再开启以重启。",
         "title": "MCP 服务器",
+        "toastClientRevoked": "已吊销“{name}”，其会话已关闭。",
         "toastRestartFailed": "无法重启 MCP 服务器，请检查主机状态后重试。",
         "toastServerStarted": "MCP HTTP 服务器已在 127.0.0.1:{port} 启动",
         "toastServerStopped": "MCP 服务器已停止。",
@@ -29616,6 +29756,7 @@
         "copy": "复制注册命令",
         "copyFailed": "无法复制注册命令。",
         "description": "注册最小权限 CLI worker，并检查其调度就绪状态。",
+        "dispatchUnavailable": "本宿主当前无法向 worker 派发。它们仍保持连接，但在宿主的执行大脑可用之前，不会有任何运行被发送过去。",
         "empty": "尚未注册执行 worker。",
         "enroll": "注册 worker",
         "error": "Worker 操作失败：{detail}",
@@ -29922,12 +30063,6 @@
         "ultracode": "ultracode",
         "xhigh": "xhigh"
       },
-      "model": {
-        "claude-haiku-4-5": "Claude Haiku 4.5",
-        "claude-opus-4-5": "Claude Opus 4.5",
-        "claude-opus-4-7": "Claude Opus 4.7",
-        "claude-sonnet-4-5": "Claude Sonnet 4.5"
-      },
       "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
       "orPasteModelId": "或粘贴自定义模型 id",
       "permission": {
@@ -29993,10 +30128,33 @@
         "discard": "放弃并切换",
         "title": "放弃未保存的更改?"
       },
+      "coverage": {
+        "description": "其他所有 Agent 场景（聊天、队友、连接器回复、定时任务、工作流 Agent 节点、计划步骤、Issue 执行）都会经过 Hook 运行时。下面这三处直接在渲染端调用模型服务商，因此不会触发任何 Hook。",
+        "surfaces": {
+          "completionRail": {
+            "label": "纯文本降级通道（Web / 移动端）",
+            "reason": "正是在 Hook 运行时不可用时才启用"
+          },
+          "petProactive": {
+            "label": "桌面宠物主动消息",
+            "reason": "渲染端模型客户端，不经过 Hook 运行时"
+          },
+          "radar": {
+            "label": "注意力雷达报告",
+            "reason": "渲染端模型客户端，不经过 Hook 运行时"
+          }
+        },
+        "title": "生命周期 Hook 未覆盖的范围"
+      },
       "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
       "eventListLabel": "事件",
       "group": {
         "addHandler": "新建处理器",
+        "agentsHint": "按产生该轮次的 agent 收窄，与 Matcher 相互独立。语法相同，匹配 agent 类别或其 id。类别：{kinds}",
+        "agentsInvalid": "正则无效：{detail}",
+        "agentsLabel": "Agents",
+        "agentsPlaceholder": "teammate|subagent 或某个具体 agent（留空匹配所有）",
+        "agentsPortabilityWarning": "仅 Cognia 生效：Claude Code 读取同一份 settings.json 但会忽略此字段，在那里该 Hook 对所有 agent 都会执行。",
         "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
         "matcherHint": "工具名正则、用 | 分隔的备选项,或留空 / '*' 匹配所有。",
         "matcherInvalid": "正则无效：{detail}",
@@ -30015,9 +30173,17 @@
         "headersAdd": "新建头部",
         "headersEmpty": "暂无自定义头部。",
         "headersLabel": "请求头",
+        "hookIdLabel": "Hook",
+        "hookIdPlaceholder": "onPreToolUse",
+        "hookIdRequired": "必须填写 Hook 名称",
         "httpCapability": "HTTP 请求需要网络能力。",
+        "inertFields": "所有运行时都会忽略：{fields}。这些键会在 settings.json 中原样保留，但没有任何 Hook 运行器会执行它们。",
         "inputLabel": "输入 JSON",
         "modelLabel": "模型（可选）",
+        "pluginHint": "执行已安装插件自己的 Hook 处理器。仅桌面端与 CLI 生效；插件必须处于启用状态，且若要拦截工具或提示词，还需声明 hooks:chat-intercept。",
+        "pluginIdLabel": "插件",
+        "pluginIdPlaceholder": "my-plugin",
+        "pluginIdRequired": "必须填写插件 id",
         "promptLabel": "提示词",
         "promptRequired": "提示词不能为空。",
         "removeAria": "移除处理器",
@@ -30037,6 +30203,7 @@
           "command": "命令",
           "http": "HTTP",
           "mcp_tool": "MCP 工具",
+          "plugin": "插件",
           "prompt": "提示词"
         },
         "urlInvalid": "请输入有效的 http(s) URL。",
@@ -31279,6 +31446,19 @@
         "baseUrlLabel": "服务器 URL",
         "baseUrlPlaceholder": "https://your-host:27890",
         "connectAfter": "配对后立即连接",
+        "discover": {
+          "empty": "本网络内没有正在广播的 Cognia 主机。",
+          "emptyHint": "对方需要开着 companion 服务并打开 mDNS（它的 设置 → Companion）。",
+          "matchLive": "这台主机正在 {url} 广播。",
+          "matchStale": "邀请里的地址是 {claimed}，但这台主机现在广播的是 {live}。",
+          "notAdvertising": "这台主机没有在本网络广播——配对会使用邀请里的地址。",
+          "scan": "扫描局域网",
+          "scanning": "扫描中…",
+          "self": "本机",
+          "title": "本网络内的主机",
+          "useAddress": "改用这个地址",
+          "version": "cognia {version}"
+        },
         "errBaseUrl": "请输入形如 https://your-host:27890 的 URL。",
         "errGeneric": "配对失败,请重试。",
         "errHttp": "配对失败(HTTP {status})。请在主机上生成新的 pair token 后重试。",

@@ -7,9 +7,14 @@
     "done": "完成",
     "loading": "读取文件中…",
     "pickButton": "选择文件…",
-    "pickPrompt": "选择 JSON 导出文件以开始。",
+    "pickPrompt": "选择一个导出文件开始。",
     "title": "导入会话",
     "tryAgain": "重新选择文件"
+  },
+  "errors": {
+    "cogniaBackup": "这是 Cognia 备份文件，不是对话导出文件。请在「备份与恢复」中恢复它。",
+    "encrypted": "该备份已加密。请在「备份与恢复」中恢复，那里可以输入密码。",
+    "unrecognized": "无法识别该文件，它不是受支持助手的对话导出文件。"
   },
   "platform": {
     "chatgpt": {

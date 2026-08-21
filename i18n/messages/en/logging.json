@@ -916,6 +916,11 @@
       "searchLabel": "Filter traces by name, id, or surface",
       "searchPlaceholder": "Filter traces…",
       "selectPrompt": "Select a trace to see its span waterfall.",
+      "subViewLabel": "Trace workspace view",
+      "subViews": {
+        "explore": "Explore",
+        "dashboard": "Dashboard"
+      },
       "span": {
         "empty": "Select a span in the waterfall.",
         "status": {

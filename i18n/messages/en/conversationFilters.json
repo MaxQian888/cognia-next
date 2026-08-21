@@ -1,6 +1,27 @@
 {
+  "activity": {
+    "label": "Last activity",
+    "options": {
+      "any": "Any time",
+      "today": "Today",
+      "week": "Past 7 days",
+      "month": "Past 30 days",
+      "older": "Older than 30 days"
+    }
+  },
+  "agent": {
+    "label": "Agent",
+    "any": "Any agent",
+    "unassigned": "No agent"
+  },
+  "cancel": "Cancel",
   "clearAll": "Clear filters",
   "count": "{shown} / {total}",
+  "drawer": {
+    "title": "Filter and sort",
+    "hint": "Narrow the list, then tap Done.",
+    "done": "Done"
+  },
   "filters": {
     "label": "Filters",
     "options": {
@@ -8,6 +29,11 @@
       "pinned": "Pinned",
       "unread": "Unread"
     }
+  },
+  "folder": {
+    "label": "Folder",
+    "any": "Any folder",
+    "unassigned": "Not in a folder"
   },
   "kind": {
     "label": "Conversation type",
@@ -19,44 +45,6 @@
   },
   "label": "Filter and sort",
   "labelActive": "{count, plural, one {Filter and sort (# filter active)} other {Filter and sort (# filters active)}}",
-  "remove": "Remove the {name} filter",
-  "sort": {
-    "label": "Sort by",
-    "options": {
-      "created": "Date created",
-      "oldest": "Oldest activity",
-      "recent": "Recent activity",
-      "title": "Title (A–Z)",
-      "unread": "Unread first"
-    }
-  },
-  "cancel": "Cancel",
-  "selectedSummary": "{count, plural, one {# selected} other {# selected}}",
-  "sections": {
-    "location": "Workspace & folder",
-    "agent": "Agent & team",
-    "model": "Model & provider"
-  },
-  "workspace": {
-    "label": "Workspace",
-    "any": "Any workspace",
-    "unassigned": "No workspace"
-  },
-  "folder": {
-    "label": "Folder",
-    "any": "Any folder",
-    "unassigned": "Not in a folder"
-  },
-  "agent": {
-    "label": "Agent",
-    "any": "Any agent",
-    "unassigned": "No agent"
-  },
-  "team": {
-    "label": "Team",
-    "any": "Any team",
-    "unassigned": "No team"
-  },
   "model": {
     "label": "Model",
     "any": "Any model",
@@ -67,35 +55,81 @@
     "any": "Any provider",
     "unassigned": "Unknown provider"
   },
-  "activity": {
-    "label": "Last activity",
+  "remove": "Remove the {name} filter",
+  "searchScope": {
+    "label": "Search reach",
+    "labelActive": "Search reach — {count} widened",
+    "hint": "How far the search field looks.",
+    "workspace": {
+      "label": "Workspaces",
+      "current": "This workspace",
+      "all": "All workspaces"
+    },
+    "includeArchived": "Include archived conversations",
+    "content": "Search message content",
+    "contentHint": "Needs {count} characters, and reads the local message index."
+  },
+  "sections": {
+    "location": "Workspace & folder",
+    "agent": "Agent & team",
+    "model": "Model & provider"
+  },
+  "selectedSummary": "{count, plural, one {# selected} other {# selected}}",
+  "sort": {
+    "label": "Sort by",
     "options": {
-      "any": "Any time",
-      "today": "Today",
-      "week": "Past 7 days",
-      "month": "Past 30 days",
-      "older": "Older than 30 days"
+      "created": "Date created",
+      "oldest": "Oldest activity",
+      "recent": "Recent activity",
+      "title": "Title (A–Z)",
+      "unread": "Unread first"
     }
   },
-  "presets": {
-    "label": "Presets",
-    "empty": "No saved presets yet.",
-    "save": "Save current filters…",
-    "saveShort": "Save",
-    "manage": "Manage presets…",
-    "saveTitle": "Save filter preset",
-    "saveDescription": "Name this combination to reapply it in one click, on every device.",
-    "namePlaceholder": "Preset name",
-    "saveAction": "Save preset",
-    "saveRejected": "Enter a name — and keep at least one filter active.",
-    "manageTitle": "Manage presets",
-    "manageDescription": "Rename or remove saved filter combinations. Changes apply immediately.",
-    "rename": "Rename preset {name}",
-    "delete": "Delete preset {name}"
+  "team": {
+    "label": "Team",
+    "any": "Any team",
+    "unassigned": "No team"
   },
-  "drawer": {
-    "title": "Filter and sort",
-    "hint": "Narrow the list, then tap Done.",
-    "done": "Done"
+  "views": {
+    "label": "Views",
+    "empty": "No saved views yet.",
+    "save": "Save this view…",
+    "saveShort": "Save",
+    "manage": "Manage views…",
+    "saveTitle": "Save view",
+    "saveDescription": "Name what you are looking at. A view pins only the parts you tick — everything else keeps following whatever you set later.",
+    "namePlaceholder": "View name",
+    "saveAction": "Save view",
+    "saveRejected": "Enter a name, and pin at least one part of the view.",
+    "manageTitle": "Manage views",
+    "manageDescription": "Rename or remove your saved views, and put back any built-in ones you have hidden. Changes apply immediately.",
+    "rename": "Rename view {name}",
+    "delete": "Delete view {name}",
+    "hide": "Hide view {name}",
+    "restore": "Restore view {name}",
+    "hidden": "Hidden built-in views",
+    "builtInBadge": "Built in",
+    "modified": "Modified",
+    "modifiedChip": "{name} · modified",
+    "revert": "Reset to view",
+    "update": "Update this view",
+    "clear": "Leave view",
+    "dimensions": {
+      "legend": "Pin",
+      "filters": "Filters",
+      "sortBy": "Sort order",
+      "groupBy": "Grouping",
+      "search": "Search reach"
+    },
+    "builtIn": {
+      "unread": "Unread",
+      "recentlyCreated": "Recently created",
+      "globalSearch": "Search everything"
+    }
+  },
+  "workspace": {
+    "label": "Workspace",
+    "any": "Any workspace",
+    "unassigned": "No workspace"
   }
 }

@@ -192,6 +192,7 @@
     "executionChart": "Execution History (7 days)",
     "failed": "Failed",
     "noData": "No execution data available",
+    "noRunsYet": "No runs recorded yet",
     "running": "Running",
     "title": "Dashboard"
   },
@@ -206,6 +207,7 @@
   "dateTimeRequired": "Date and time are required",
   "days": "days",
   "delete": "Delete",
+  "deleteItemConfirm": "Delete “{name}” ({kind})? This cannot be undone.",
   "deleteTask": "Delete Task",
   "deleteTaskConfirm": "Are you sure you want to delete this task? This action cannot be undone.",
   "dependencies": {
@@ -313,6 +315,11 @@
     "loop": "Loop",
     "statusLabel": "Status",
     "typeLabel": "Type"
+  },
+  "filterBar": {
+    "clear": "Clear filters",
+    "kindMenu": "Filter by type",
+    "loopOnly": "Only /loop tasks"
   },
   "finishedAt": "Finished at",
   "footerSuccess": "Success",
@@ -865,6 +872,10 @@
   },
   "showLess": "Show less",
   "showMore": "Show more",
+  "sidebarFooter": {
+    "filtered": "{shown} of {total} shown",
+    "total": "{total, plural, one {# item} other {# items}}"
+  },
   "slashCommand": {
     "description": "Create a scheduled task or reminder"
   },

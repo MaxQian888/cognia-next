@@ -47,6 +47,7 @@
   "search": "搜索聊天…",
   "searchAria": "搜索聊天",
   "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
+  "searchingMessages": "正在搜索消息内容…",
   "sections": {
     "activeRuns": "运行中",
     "recents": "最近会话"
@@ -56,6 +57,9 @@
   "swipePin": "置顶",
   "swipeUnarchive": "取消归档",
   "swipeUnpin": "取消置顶",
+  "ungroupedAgent": "未绑定角色",
+  "ungroupedTeam": "对话",
+  "ungroupedWorkspace": "未归属工作区",
   "unreadCount": "{count, plural, =1 {1 条未读} other {# 条未读}}",
   "viewActive": "显示活跃聊天",
   "viewArchived": "显示已归档聊天"

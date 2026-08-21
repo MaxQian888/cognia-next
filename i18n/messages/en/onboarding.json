@@ -1,9 +1,9 @@
 {
   "apiKeyHintHost": "console.anthropic.com",
   "apiKeyHintPrefix": "Get one at ",
-  "apiKeyHintSuffix": ". The key never leaves your machine.",
-  "apiKeyLabel": "Anthropic API key",
-  "apiKeyPlaceholder": "sk-ant-…",
+  "apiKeyHintSuffix": "The key never leaves your machine.",
+  "apiKeyLabel": "API key",
+  "apiKeyPlaceholder": "sk-…",
   "back": "Back",
   "cards": {
     "readFolder": {
@@ -32,21 +32,34 @@
     "dismiss": "Dismiss"
   },
   "firstRun": {
-    "title": "Let's do one real thing",
-    "description": "Pick something to try. The agent will do it now, and you can judge the result yourself.",
-    "runningWith": "Running as {name}",
     "changeCharacter": "Change",
+    "connectCta": "Connect a model first",
+    "description": "Pick something to try. The agent will do it now, and you can judge the result yourself.",
+    "failed": "That didn't work. You can pick another, or skip and try later.",
+    "needsModel": "Cognia can't reach a model yet, so there is nothing to run these with.",
+    "runningWith": "Running as {name}",
     "runtimeLine": "Using {runtime}",
     "starting": "Starting…",
-    "failed": "That didn't work. You can pick another, or skip and try later."
+    "title": "Let's do one real thing"
   },
   "provider": {
     "apiKey": {
-      "cta": "Use API key",
-      "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
-      "title": "Paste an Anthropic API key"
+      "cta": "Choose a provider",
+      "description": "OpenAI, Google, DeepSeek, a model running on this machine, or any other provider in the catalog.",
+      "save": "Save and continue",
+      "title": "Use an API key"
     },
     "backToChooser": "Choose a different sign-in method",
+    "baseUrlLabel": "Base URL",
+    "byokNote": "This device talks to a provider directly with your own key. Subscription sign-in needs the desktop app, which holds those credentials in the OS keyring.",
+    "byokTitle": "Connect a model",
+    "category": {
+      "aggregator": "Gateways and aggregators",
+      "enterprise": "Enterprise",
+      "flagship": "Major providers",
+      "local": "On this machine",
+      "specialized": "Other providers"
+    },
     "claude": {
       "cta": "Sign in with Anthropic",
       "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
@@ -57,15 +70,26 @@
       "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
       "title": "ChatGPT Plus / Pro (Codex)"
     },
+    "connected": {
+      "description": "Cognia will reach a model through this. You can add or switch accounts any time in Settings → Subscription.",
+      "plan": "Plan {plan}",
+      "title": "You're connected"
+    },
     "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+    "localHint": "Runs on this machine, so it needs no key — just make sure the server is running.",
     "loggedInBadge": "Connected",
     "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+    "needsSettings": "This one needs more than a key — a region and credentials of its own. Add it in Settings → Providers once you are set up.",
     "opencode": {
       "cta": "Paste OpenCode key",
       "description": "Paste an OpenCode Zen API key. Optional region override available.",
       "title": "OpenCode Zen"
     },
-    "title": "How do you want to sign in?"
+    "pickerEmpty": "No provider matches that.",
+    "pickerLabel": "Provider",
+    "pickerSearch": "Search providers…",
+    "title": "How do you want to sign in?",
+    "toastIncomplete": "Fill in what this provider needs before continuing."
   },
   "rail": {
     "label": "Setup progress",
@@ -115,7 +139,7 @@
     "title": "What's already on this machine"
   },
   "skip": "Skip for now",
-  "toastNeedKey": "Paste your Anthropic API key to continue.",
+  "toastNeedKey": "Paste your API key to continue.",
   "tour": {
     "computerUse": {
       "cta": "Open automation settings",

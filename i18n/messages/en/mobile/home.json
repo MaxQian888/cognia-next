@@ -47,6 +47,7 @@
   "search": "Search chats…",
   "searchAria": "Search chats",
   "searchTruncated": "Some results may be hidden — refine your search.",
+  "searchingMessages": "Searching messages…",
   "sections": {
     "activeRuns": "Active runs",
     "recents": "Recent chats"
@@ -56,6 +57,9 @@
   "swipePin": "Pin",
   "swipeUnarchive": "Unarchive",
   "swipeUnpin": "Unpin",
+  "ungroupedAgent": "No agent",
+  "ungroupedTeam": "Chats",
+  "ungroupedWorkspace": "No workspace",
   "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
   "viewActive": "Show active chats",
   "viewArchived": "Show archived chats"

@@ -308,6 +308,7 @@
       "file": "File",
       "footnote": "Note",
       "memory": "Memory",
+      "projectKnowledge": "Workspace knowledge",
       "tool": "Tool",
       "twinRag": "Twin",
       "twinStyle": "Style",

@@ -61,5 +61,12 @@
     "primaryBadge": "主",
     "secondary": "次身份：",
     "title": "合并平台身份"
+  },
+  "oauth": {
+    "stateMismatch": "这个登录回跳与本应用发起的那次不匹配。请回到设置里重新发起连接。",
+    "unknownPlatform": "没有“{platform}”的登录处理器，这个连接器可能不在当前版本里。",
+    "noHandler": "“{platform}”不使用这种登录方式。",
+    "succeeded": "{platform} 已连接。",
+    "failed": "{platform} 登录失败：{reason}"
   }
 }

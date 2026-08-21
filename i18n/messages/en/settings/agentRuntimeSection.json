@@ -312,10 +312,6 @@
         "description": "Keep isolated warm SDK processes ready for the next compatible request.",
         "label": "Prewarm pool"
       },
-      "resolver": {
-        "description": "Use the unified execution resolver to select the correct agent runtime.",
-        "label": "Unified execution resolver"
-      },
       "sessionStore": {
         "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
         "label": "Session store"

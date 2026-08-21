@@ -167,12 +167,12 @@
     "title": "Restore file checkpoint"
   },
   "compactBoundary": {
-    "auto": "automatic",
     "checkpoint": {
       "failed": "checkpoint failed",
       "locked": "Vault locked",
       "stored": "checkpoint saved"
     },
+    "auto": "automatic",
     "detail": "{from} → {to} tokens",
     "effectiveness": "reclaimed {pct}%",
     "label": "Context compacted",
@@ -302,19 +302,19 @@
       "faster": "Faster",
       "hint": "Choose how much reasoning the model should use for this conversation.",
       "hintAria": "About thinking levels",
-      "hintExternal": "Choose how much reasoning the external agent should use. The agent folds this onto whatever depth levels its own model publishes.",
-      "level": {
-        "high": "High",
-        "low": "Low",
-        "max": "Max",
-        "medium": "Medium",
-        "off": "Auto",
-        "ultracode": "Ultracode",
-        "xhigh": "Extra"
-      },
       "smarter": "Smarter",
       "title": "Effort",
-      "triggerAria": "Thinking level: {level}"
+      "triggerAria": "Thinking level: {level}",
+      "hintExternal": "Choose how much reasoning the external agent should use. The agent folds this onto whatever depth levels its own model publishes.",
+      "level": {
+        "off": "Auto",
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra",
+        "max": "Max",
+        "ultracode": "Ultracode"
+      }
     },
     "enhance": {
       "modes": {
@@ -980,6 +980,13 @@
     },
     "toggle": "Toggle hook details"
   },
+  "imported": {
+    "diverged": "{source} moved on",
+    "divergedHint": "This conversation has also changed in {source} since Cognia took ownership of it. Cognia does not merge the two — the copy you are reading is Cognia's. Click to dismiss.",
+    "origin": "From {source}",
+    "originHint": "This conversation was imported from {source}. Continuing it here makes Cognia its owner — later changes on the {source} side are no longer mirrored.",
+    "unknownSource": "another agent"
+  },
   "inlineError": {
     "dismiss": "Dismiss",
     "environmentSetupFailed": "Project environment setup failed. Retry, or explicitly bypass setup for this interactive turn.",
@@ -1482,17 +1489,30 @@
   },
   "runPanel": {
     "ariaDiscardQueue": "Discard queued messages",
+    "ariaEditQueued": "Edit this queued message",
     "ariaInterrupt": "Interrupt the current turn",
     "ariaLocateSteer": "Go to the first undelivered message",
+    "ariaManageSteer": "Show the queued messages",
+    "ariaRemoveQueued": "Remove this queued message",
+    "ariaReorderQueued": "Reorder — currently {index} in the send order",
     "ariaSteerQueue": "Queued messages",
     "ariaSubagent": "Sub-agent",
     "collapse": "Hide run details",
     "discardQueue": "Discard",
+    "dndCancelled": "Reordering cancelled.",
+    "dndDropped": "Dropped at position {position} of {total}.",
+    "dndInstructions": "Press Space to pick up a queued message, the arrow keys to move it, and Space again to drop it.",
+    "dndOver": "Now at position {position} of {total}.",
+    "dndPickedUp": "Picked up the message at position {index} of {total}.",
     "expand": "Show run details",
     "lastRun": "Last run",
     "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
+    "queueAttachments": "{count, plural, one {# attachment} other {# attachments}}",
+    "queueAttachmentsOnly": "{count, plural, one {# attachment} other {# attachments}}, no text",
+    "queueMergeHint": "Sent as one message, top to bottom, when this turn ends.",
     "runFailedQueued": "Run failed · {count} queued",
     "sectionPlan": "Plan",
+    "sectionQueue": "Queued",
     "sectionSubagents": "Sub-agents",
     "sectionSummary": "Summary",
     "sectionTools": "Tools",
@@ -1643,8 +1663,8 @@
       "twinRag": "Twin",
       "twinStyle": "Style"
     },
-    "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
     "recalledMemoriesHeader": "Recalled memories ({count})",
+    "projectKnowledgeHeader": "Project knowledge excerpts ({count})",
     "retrievedChunksHeader": "Retrieved chunks ({count})",
     "styleSamplesHeader": "Style samples ({count})",
     "usedSources": "{count, plural, =0 {No sources} =1 {Used 1 source} other {Used # sources}}",
@@ -1659,6 +1679,8 @@
     "discard": "Discard",
     "failed": "Not delivered",
     "failedHint": "The run ended before this could be sent",
+    "position": "{index}/{total}",
+    "positionHint": "Position in the send order — reorder it in the run panel",
     "putBack": "Put back",
     "queued": "Queued",
     "queuedHint": "Will be sent when the current turn finishes"
@@ -1684,7 +1706,8 @@
     "tokens": "{n} tokens",
     "tokensBreakdown": "{prompt} prompt · {completion} completion · {total} total tokens",
     "toolsRunCount": "{n, plural, one {# tool} other {# tools}}",
-    "toolsTailNote": "Showing the last {n} tool calls"
+    "toolsTailNote": "Showing the last {n} tool calls",
+    "transcriptMissing": "This subagent's transcript isn't in this copy of the conversation."
   },
   "terminalTool": {
     "bashLabel": "Bash",
@@ -1725,30 +1748,30 @@
     "toolLabel": "Tool"
   },
   "toolCards": {
-    "clipboardHistory": {
-      "copy": "Copy entry",
-      "count": "{count, plural, =1 {1 entry} other {# entries}}",
-      "empty": "No clipboard entries yet.",
-      "showAll": "Show all {count}",
-      "showLess": "Show less",
-      "title": "Clipboard history"
-    },
-    "screenshot": {
-      "alt": "Captured screen",
-      "title": "Screenshot"
+    "webSearch": {
+      "title": "Web search",
+      "via": "via {provider}",
+      "failed": "Search failed.",
+      "noResults": "No results."
     },
     "webFetch": {
-      "failed": "Fetch failed.",
-      "showLess": "Show less",
-      "showMore": "Show all ({chars} characters)",
+      "title": "Web fetch",
       "status": "HTTP {status}",
-      "title": "Web fetch"
+      "failed": "Fetch failed.",
+      "showMore": "Show all ({chars} characters)",
+      "showLess": "Show less"
     },
-    "webSearch": {
-      "failed": "Search failed.",
-      "noResults": "No results.",
-      "title": "Web search",
-      "via": "via {provider}"
+    "screenshot": {
+      "title": "Screenshot",
+      "alt": "Captured screen"
+    },
+    "clipboardHistory": {
+      "title": "Clipboard history",
+      "count": "{count, plural, =1 {1 entry} other {# entries}}",
+      "empty": "No clipboard entries yet.",
+      "copy": "Copy entry",
+      "showAll": "Show all {count}",
+      "showLess": "Show less"
     }
   },
   "transcript": {
@@ -1794,17 +1817,17 @@
     "translate": "Translate"
   },
   "workSubmission": {
-    "blocked": {
-      "body": "Your message is saved. It will run automatically once this device reaches the execution host again.",
-      "title": "Waiting to reconnect"
-    },
     "queued": {
-      "body": "Your message is saved and will run as soon as a runtime is free.",
-      "title": "Waiting to start"
+      "title": "Waiting to start",
+      "body": "Your message is saved and will run as soon as a runtime is free."
+    },
+    "blocked": {
+      "title": "Waiting to reconnect",
+      "body": "Your message is saved. It will run automatically once this device reaches the execution host again."
     },
     "recoveryRequired": {
-      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again.",
-      "title": "Needs your attention"
+      "title": "Needs your attention",
+      "body": "This turn stopped after it had already started using tools, so it was not retried automatically — repeating it could redo work that cannot be undone. Review what happened before sending it again."
     }
   },
   "workspaceRestricted": {

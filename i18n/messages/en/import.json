@@ -7,9 +7,14 @@
     "done": "Close",
     "loading": "Reading file…",
     "pickButton": "Choose file…",
-    "pickPrompt": "Pick a JSON export to begin.",
+    "pickPrompt": "Pick an export file to begin.",
     "title": "Import conversations",
     "tryAgain": "Try another file"
+  },
+  "errors": {
+    "cogniaBackup": "This is a Cognia backup, not a conversation export. Restore it from Backup & restore.",
+    "encrypted": "This backup is encrypted. Restore it from Backup & restore, where you can enter its password.",
+    "unrecognized": "This file wasn't recognized as a conversation export from a supported assistant."
   },
   "platform": {
     "chatgpt": {

@@ -167,12 +167,12 @@
     "title": "恢复文件检查点"
   },
   "compactBoundary": {
-    "auto": "自动",
     "checkpoint": {
       "failed": "检查点保存失败",
       "locked": "保险库已锁定",
       "stored": "检查点已保存"
     },
+    "auto": "自动",
     "detail": "{from} → {to} tokens",
     "effectiveness": "已回收 {pct}%",
     "label": "上下文已压缩",
@@ -302,19 +302,19 @@
       "faster": "更快",
       "hint": "选择模型在本会话中使用的推理强度。",
       "hintAria": "关于思考等级",
-      "hintExternal": "选择外部 Agent 使用的推理深度。Agent 会将其折算到自身模型公布的档位上。",
-      "level": {
-        "high": "深度",
-        "low": "轻度",
-        "max": "最大",
-        "medium": "均衡",
-        "off": "自动",
-        "ultracode": "Ultracode",
-        "xhigh": "极深"
-      },
       "smarter": "更智能",
       "title": "思考强度",
-      "triggerAria": "思考强度：{level}"
+      "triggerAria": "思考强度：{level}",
+      "hintExternal": "选择外部 Agent 使用的推理深度。Agent 会将其折算到自身模型公布的档位上。",
+      "level": {
+        "off": "自动",
+        "low": "轻度",
+        "medium": "均衡",
+        "high": "深度",
+        "xhigh": "极深",
+        "max": "最大",
+        "ultracode": "Ultracode"
+      }
     },
     "enhance": {
       "modes": {
@@ -980,6 +980,13 @@
     },
     "toggle": "展开/折叠 Hook 详情"
   },
+  "imported": {
+    "diverged": "{source} 已另有改动",
+    "divergedHint": "自 Cognia 接管以来，该对话在 {source} 一侧也发生了变化。Cognia 不会合并两边——你看到的是 Cognia 这一份。点击可忽略此提示。",
+    "origin": "来自 {source}",
+    "originHint": "该对话从 {source} 导入。在这里继续之后由 Cognia 接管，{source} 一侧之后的改动不再同步过来。",
+    "unknownSource": "其他助手"
+  },
   "inlineError": {
     "dismiss": "忽略",
     "environmentSetupFailed": "项目环境初始化失败。请重试，或仅为当前交互回合明确绕过初始化。",
@@ -1482,17 +1489,30 @@
   },
   "runPanel": {
     "ariaDiscardQueue": "丢弃排队的消息",
+    "ariaEditQueued": "修改这条排队的消息",
     "ariaInterrupt": "中断当前回合",
     "ariaLocateSteer": "跳到第一条未送达的消息",
+    "ariaManageSteer": "查看排队的消息",
+    "ariaRemoveQueued": "移除这条排队的消息",
+    "ariaReorderQueued": "调整顺序 —— 当前排在第 {index} 位",
     "ariaSteerQueue": "待发送消息",
     "ariaSubagent": "子智能体",
     "collapse": "收起运行详情",
     "discardQueue": "丢弃",
+    "dndCancelled": "已取消排序。",
+    "dndDropped": "已放到第 {position} 位，共 {total} 条。",
+    "dndInstructions": "按空格键拾起一条排队的消息，用方向键移动，再按一次空格键放下。",
+    "dndOver": "当前移动到第 {position} 位，共 {total} 条。",
+    "dndPickedUp": "已拾起第 {index} 条，共 {total} 条。",
     "expand": "展开运行详情",
     "lastRun": "上一轮",
     "lastRunSummary": "{count} 个工具 · {elapsed}",
+    "queueAttachments": "{count} 个附件",
+    "queueAttachmentsOnly": "{count} 个附件，无文字",
+    "queueMergeHint": "本回合结束后，按从上到下的顺序合并成一条发送。",
     "runFailedQueued": "运行失败 · {count} 条排队中",
     "sectionPlan": "计划",
+    "sectionQueue": "待发送",
     "sectionSubagents": "子智能体",
     "sectionSummary": "概要",
     "sectionTools": "工具",
@@ -1643,8 +1663,8 @@
       "twinRag": "数字分身",
       "twinStyle": "风格"
     },
-    "projectKnowledgeHeader": "项目知识片段（{count}）",
     "recalledMemoriesHeader": "召回的记忆（{count}）",
+    "projectKnowledgeHeader": "项目知识片段（{count}）",
     "retrievedChunksHeader": "检索片段（{count}）",
     "styleSamplesHeader": "风格样本（{count}）",
     "usedSources": "{count, plural, =0 {未引用来源} =1 {引用 1 项来源} other {引用 # 项来源}}",
@@ -1659,6 +1679,8 @@
     "discard": "删除",
     "failed": "未送达",
     "failedHint": "这一轮在它发出前就结束了",
+    "position": "{index}/{total}",
+    "positionHint": "发送顺序中的位置 —— 可在运行面板里调整",
     "putBack": "放回输入框",
     "queued": "排队中",
     "queuedHint": "会在当前回合结束后发送"
@@ -1684,7 +1706,8 @@
     "tokens": "{n} tokens",
     "tokensBreakdown": "{prompt} 输入 · {completion} 输出 · 共 {total} tokens",
     "toolsRunCount": "{n} 次工具调用",
-    "toolsTailNote": "仅显示最近 {n} 次工具调用"
+    "toolsTailNote": "仅显示最近 {n} 次工具调用",
+    "transcriptMissing": "这份对话副本中没有该子代理的完整记录。"
   },
   "terminalTool": {
     "bashLabel": "Bash",
@@ -1725,30 +1748,30 @@
     "toolLabel": "工具"
   },
   "toolCards": {
-    "clipboardHistory": {
-      "copy": "复制该条",
-      "count": "{count} 条",
-      "empty": "暂无剪贴板记录。",
-      "showAll": "显示全部 {count} 条",
-      "showLess": "收起",
-      "title": "剪贴板历史"
-    },
-    "screenshot": {
-      "alt": "屏幕截图",
-      "title": "截图"
+    "webSearch": {
+      "title": "网页搜索",
+      "via": "来自 {provider}",
+      "failed": "搜索失败。",
+      "noResults": "没有结果。"
     },
     "webFetch": {
-      "failed": "抓取失败。",
-      "showLess": "收起",
-      "showMore": "展开全部（{chars} 字符）",
+      "title": "网页抓取",
       "status": "HTTP {status}",
-      "title": "网页抓取"
+      "failed": "抓取失败。",
+      "showMore": "展开全部（{chars} 字符）",
+      "showLess": "收起"
     },
-    "webSearch": {
-      "failed": "搜索失败。",
-      "noResults": "没有结果。",
-      "title": "网页搜索",
-      "via": "来自 {provider}"
+    "screenshot": {
+      "title": "截图",
+      "alt": "屏幕截图"
+    },
+    "clipboardHistory": {
+      "title": "剪贴板历史",
+      "count": "{count} 条",
+      "empty": "暂无剪贴板记录。",
+      "copy": "复制该条",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起"
     }
   },
   "transcript": {
@@ -1794,17 +1817,17 @@
     "translate": "翻译"
   },
   "workSubmission": {
-    "blocked": {
-      "body": "消息已保存。设备重新连上执行主机后会自动开始。",
-      "title": "等待重新连接"
-    },
     "queued": {
-      "body": "消息已保存，等到有空闲运行时就会开始。",
-      "title": "等待开始"
+      "title": "等待开始",
+      "body": "消息已保存，等到有空闲运行时就会开始。"
+    },
+    "blocked": {
+      "title": "等待重新连接",
+      "body": "消息已保存。设备重新连上执行主机后会自动开始。"
     },
     "recoveryRequired": {
-      "body": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。",
-      "title": "需要你处理"
+      "title": "需要你处理",
+      "body": "这一轮在已经开始调用工具之后中断，因此没有自动重试——重放可能重复执行无法撤销的操作。请先确认发生了什么，再决定是否重新发送。"
     }
   },
   "workspaceRestricted": {

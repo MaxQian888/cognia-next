@@ -20,15 +20,19 @@
     "tracesCsv": "Traces as CSV"
   },
   "filters": {
+    "back": "Back",
     "clear": "Clear",
     "dims": {
       "model": "Model",
       "operation": "Operation",
+      "project": "Project",
+      "provider": "Provider",
       "session": "Session",
       "surface": "Surface",
       "tool": "Tool"
     },
     "empty": "No options",
+    "label": "Filters",
     "search": "Search…"
   },
   "metricToggle": {
@@ -40,18 +44,22 @@
   "noData": "No data in this window",
   "panels": {
     "byModel": "Spans by model",
+    "byOperation": "Spans by operation",
     "byProject": "By project",
     "byProvider": "By provider",
     "bySurface": "Spans by surface",
+    "byTool": "By tool",
     "cacheHitRate": "Cache hit rate",
     "costOverTime": "Cost over time",
     "errorRate": "Error rate",
     "errorRateOverTime": "Error rate",
     "latencyPercentiles": "Latency percentiles",
     "p95Latency": "Latency (p95)",
-    "recentTraces": "Recent traces",
+    "reqPerMin": "Requests / min",
     "requestRate": "Request rate",
     "tokenThroughput": "Token throughput",
+    "toolCalls": "Tool calls",
+    "toolFailures": "Tool failures",
     "totalCost": "Total cost",
     "totalSpans": "Total spans"
   },
@@ -135,30 +143,15 @@
     "unitMs": "milliseconds",
     "unitUsd": "USD"
   },
-  "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
-  "title": "Observability",
   "toolbar": {
     "edit": "Edit layout",
     "lock": "Lock layout",
     "resetLayout": "Reset layout",
     "settings": "Dashboard settings"
   },
-  "traces": {
-    "cost": "Cost",
-    "duration": "Duration",
-    "empty": "No traces in this window",
-    "root": "Trace",
-    "spans": "Spans",
-    "started": "Started",
-    "surface": "Surface"
-  },
   "waterfall": {
     "cost": "Cost {value}",
-    "empty": "No spans for this trace",
-    "spanCount": "{count} spans",
-    "title": "Trace detail",
     "toggleEvents": "Toggle span details",
-    "tokens": "{count} tokens",
-    "totalDuration": "Duration {value}"
+    "tokens": "{count} tokens"
   }
 }

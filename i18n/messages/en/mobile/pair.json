@@ -41,6 +41,8 @@
       "trigger": "Can't find your desktop?"
     },
     "latencyMs": "{ms} ms",
+    "loopbackBlockedBody": "It refused this browser. Open its Settings → Companion → browser access and add {origin} to the allowed origins.",
+    "loopbackBlockedTitle": "A Host is running on this computer",
     "nearbyTitle": "On this network",
     "precheckOk": "Reachable · v{version} · {ms} ms",
     "precheckUnreachable": "Couldn't reach this server. Make sure it's online.",
@@ -55,6 +57,7 @@
     "tlsPinned": "Identity verified",
     "tlsUnverified": "Unverified",
     "viaHistory": "History",
+    "viaLoopback": "On this computer",
     "viaMdns": "mDNS",
     "viaPaired": "Paired",
     "viaProbe": "LAN probe"

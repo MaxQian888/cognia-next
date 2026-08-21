@@ -37,10 +37,33 @@
     "discard": "Discard & switch",
     "title": "Discard unsaved changes?"
   },
+  "coverage": {
+    "title": "Not covered by lifecycle hooks",
+    "description": "Every other agent surface — chat, teammates, connector replies, scheduled runs, workflow agent nodes, plan steps and issue runs — passes through the hook runtime. These three call the model provider directly from the renderer, so no hook fires for them.",
+    "surfaces": {
+      "petProactive": {
+        "label": "Desktop pet proactive messages",
+        "reason": "renderer-side model client, never reaches the hook runtime"
+      },
+      "radar": {
+        "label": "Attention Radar reports",
+        "reason": "renderer-side model client, never reaches the hook runtime"
+      },
+      "completionRail": {
+        "label": "Text-only fallback (web / mobile)",
+        "reason": "used exactly when the hook runtime is unavailable"
+      }
+    }
+  },
   "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
   "eventListLabel": "Events",
   "group": {
     "addHandler": "Add handler",
+    "agentsHint": "Narrows by which agent produced the turn — independent of Matcher. Same syntax, matched against the agent kind or its id. Kinds: {kinds}",
+    "agentsInvalid": "Invalid regex: {detail}",
+    "agentsLabel": "Agents",
+    "agentsPlaceholder": "teammate|subagent or a specific agent (leave empty for all)",
+    "agentsPortabilityWarning": "Cognia-only: Claude Code reads the same settings.json, ignores this field, and will run this hook for every agent.",
     "emptyHandlers": "No handlers — add one below.",
     "matcherHint": "Tool-name regex, pipe alternation, or empty / '*' to match every event.",
     "matcherInvalid": "Invalid regex: {detail}",
@@ -59,9 +82,17 @@
     "headersAdd": "Add header",
     "headersEmpty": "No custom headers.",
     "headersLabel": "Headers",
+    "hookIdLabel": "Hook",
+    "hookIdPlaceholder": "onPreToolUse",
+    "hookIdRequired": "Hook name is required",
     "httpCapability": "HTTP requests require the network capability.",
+    "inertFields": "Ignored by every runtime: {fields}. These keys round-trip in settings.json but no hook runner acts on them.",
     "inputLabel": "Input JSON",
     "modelLabel": "Model (optional)",
+    "pluginHint": "Runs the installed plugin's own hook handler. Desktop and CLI only — the plugin must be enabled, and gating a tool or prompt also requires it to declare hooks:chat-intercept.",
+    "pluginIdLabel": "Plugin",
+    "pluginIdPlaceholder": "my-plugin",
+    "pluginIdRequired": "Plugin id is required",
     "promptLabel": "Prompt",
     "promptRequired": "Prompt can't be empty.",
     "removeAria": "Remove handler",
@@ -81,7 +112,8 @@
       "command": "Command",
       "http": "HTTP",
       "mcp_tool": "MCP tool",
-      "prompt": "Prompt"
+      "prompt": "Prompt",
+      "plugin": "Plugin"
     },
     "urlInvalid": "Enter a valid http(s) URL.",
     "urlLabel": "URL",

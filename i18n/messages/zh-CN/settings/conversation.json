@@ -91,11 +91,6 @@
     }
   },
   "sidebar": {
-    "contentSearch": {
-      "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",
-      "heading": "搜索消息内容",
-      "label": "在消息内容中搜索"
-    },
     "customIcons": {
       "description": "在列表中显示每个会话的角色或团队头像；关闭后使用中性图标。",
       "heading": "角色与团队图标",
@@ -107,18 +102,6 @@
       "label": "使用紧凑会话行"
     },
     "description": "调整聊天侧边栏列出和搜索会话的方式。",
-    "groupBy": {
-      "description": "选择会话列表的主分组维度。按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
-      "heading": "会话分组方式",
-      "label": "会话分组",
-      "options": {
-        "agent": "角色",
-        "date": "日期",
-        "none": "不分组",
-        "team": "对话 / 团队",
-        "workspace": "工作区"
-      }
-    },
     "metadata": {
       "agent": {
         "description": "显示负责该会话的角色或团队。",
@@ -152,18 +135,6 @@
       "button": "重置宽度",
       "description": "将可拖拽的侧边栏恢复到默认宽度。",
       "heading": "侧边栏宽度"
-    },
-    "sortBy": {
-      "description": "应用于每个分组内部的排序。仅「最近活动」会保留手动拖拽的顺序。",
-      "heading": "会话排序方式",
-      "label": "会话排序",
-      "options": {
-        "created": "创建时间",
-        "oldest": "最早活动",
-        "recent": "最近活动",
-        "title": "标题（A–Z）",
-        "unread": "未读优先"
-      }
     },
     "timestamps": {
       "description": "在会话标题末尾显示最近一次活动的时间。",

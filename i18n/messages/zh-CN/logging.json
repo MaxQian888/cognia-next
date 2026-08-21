@@ -916,6 +916,11 @@
       "searchLabel": "按名称、ID 或来源面筛选追踪",
       "searchPlaceholder": "筛选追踪…",
       "selectPrompt": "选择一条追踪以查看它的 span 瀑布图。",
+      "subViewLabel": "追踪工作区视图",
+      "subViews": {
+        "explore": "探索",
+        "dashboard": "观测台"
+      },
       "span": {
         "empty": "在瀑布图中选择一个 span。",
         "status": {

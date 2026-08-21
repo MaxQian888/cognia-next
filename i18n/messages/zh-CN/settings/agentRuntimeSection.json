@@ -312,10 +312,6 @@
         "description": "保留相互隔离的预热 SDK 进程，以处理下一次兼容请求。",
         "label": "预热池"
       },
-      "resolver": {
-        "description": "使用统一执行解析器选择正确的智能体运行时。",
-        "label": "统一执行解析器"
-      },
       "sessionStore": {
         "description": "将原生 SDK 会话记录镜像到加密且租户隔离的主机存储。",
         "label": "会话存储"

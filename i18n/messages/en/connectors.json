@@ -61,5 +61,12 @@
     "primaryBadge": "Primary",
     "secondary": "Secondary:",
     "title": "Merge platform identities"
+  },
+  "oauth": {
+    "stateMismatch": "This sign-in link doesn't match the one this app started. Start the connection again from Settings.",
+    "unknownPlatform": "No sign-in handler for “{platform}”. It may be a connector this build doesn't ship.",
+    "noHandler": "“{platform}” doesn't use this sign-in flow.",
+    "succeeded": "{platform} connected.",
+    "failed": "{platform} sign-in failed: {reason}"
   }
 }

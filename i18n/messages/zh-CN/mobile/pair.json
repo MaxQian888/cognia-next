@@ -41,6 +41,8 @@
       "trigger": "找不到桌面？"
     },
     "latencyMs": "{ms} 毫秒",
+    "loopbackBlockedBody": "它拒绝了这个浏览器。打开它的 设置 → Companion → 浏览器访问，把 {origin} 加进允许的来源。",
+    "loopbackBlockedTitle": "这台电脑上有一个 Host 在运行",
     "nearbyTitle": "本网络内",
     "precheckOk": "可连接 · v{version} · {ms} 毫秒",
     "precheckUnreachable": "无法连接该服务器，请确认它已在线。",
@@ -55,6 +57,7 @@
     "tlsPinned": "身份已验证",
     "tlsUnverified": "未验证",
     "viaHistory": "历史",
+    "viaLoopback": "本机",
     "viaMdns": "mDNS",
     "viaPaired": "已配对",
     "viaProbe": "局域网探测"

@@ -3,14 +3,36 @@
     "cognia": "Cognia"
   },
   "command": {
-    "chat.addSelection.title": "将选区添加到 Cognia 对话",
-    "chat.addFile.title": "将文件添加到 Cognia 上下文",
-    "chat.explain.title": "解释这段代码",
-    "chat.fix.title": "修复这段代码",
-    "chat.review.title": "审阅这段代码",
-    "chat.customAction.title": "运行 Cognia 模板…",
-    "workspace.focus.title": "显示 Cognia 面板",
-    "diagnostics.send.title": "把问题发送到 Cognia"
+    "chat": {
+      "addSelection": {
+        "title": "将选区添加到 Cognia 对话"
+      },
+      "addFile": {
+        "title": "将文件添加到 Cognia 上下文"
+      },
+      "explain": {
+        "title": "解释这段代码"
+      },
+      "fix": {
+        "title": "修复这段代码"
+      },
+      "review": {
+        "title": "审阅这段代码"
+      },
+      "customAction": {
+        "title": "运行 Cognia 模板…"
+      }
+    },
+    "workspace": {
+      "focus": {
+        "title": "显示 Cognia 面板"
+      }
+    },
+    "diagnostics": {
+      "send": {
+        "title": "把问题发送到 Cognia"
+      }
+    }
   },
   "panel": {
     "disconnected": "Cognia：未连接",

@@ -987,7 +987,6 @@
       "deploymentRef": "部署档案",
       "deploymentRefPlaceholder": "部署 id（如 dep-vendor-a）",
       "description": "该成员的运行时、部署与凭证如何绑定。仅引用——端点与密钥保存在 Provider Profile 中。",
-      "flagOffHint": "在统一执行 resolver 开关（agentExecutionResolverV2）开启前不生效——关闭时派发忽略此绑定。",
       "hostAuto": "任一就绪 Worker",
       "hostLocal": "随协调器运行",
       "hostPinned": "{host}（在线）",

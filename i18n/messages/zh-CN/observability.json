@@ -20,15 +20,19 @@
     "tracesCsv": "导出 Trace 为 CSV"
   },
   "filters": {
+    "back": "返回",
     "clear": "清除",
     "dims": {
       "model": "模型",
       "operation": "操作",
+      "project": "项目",
+      "provider": "供应商",
       "session": "会话",
       "surface": "来源",
       "tool": "工具"
     },
     "empty": "无可选项",
+    "label": "筛选",
     "search": "搜索…"
   },
   "metricToggle": {
@@ -40,18 +44,22 @@
   "noData": "该时间窗口内暂无数据",
   "panels": {
     "byModel": "按模型分布",
+    "byOperation": "按操作分布",
     "byProject": "按项目",
     "byProvider": "按提供商",
     "bySurface": "按来源分布",
+    "byTool": "按工具",
     "cacheHitRate": "缓存命中率",
     "costOverTime": "成本走势",
     "errorRate": "错误率",
     "errorRateOverTime": "错误率",
     "latencyPercentiles": "延迟分位",
     "p95Latency": "延迟 (p95)",
-    "recentTraces": "最近 Trace",
+    "reqPerMin": "请求数 / 分钟",
     "requestRate": "请求速率",
     "tokenThroughput": "Token 吞吐",
+    "toolCalls": "工具调用",
+    "toolFailures": "工具失败",
     "totalCost": "总成本",
     "totalSpans": "Span 总数"
   },
@@ -135,30 +143,15 @@
     "unitMs": "毫秒",
     "unitUsd": "美元"
   },
-  "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
-  "title": "可观测性",
   "toolbar": {
     "edit": "编辑布局",
     "lock": "锁定布局",
     "resetLayout": "重置布局",
     "settings": "仪表盘设置"
   },
-  "traces": {
-    "cost": "成本",
-    "duration": "耗时",
-    "empty": "该时间窗口内暂无 Trace",
-    "root": "Trace",
-    "spans": "Span 数",
-    "started": "开始时间",
-    "surface": "来源"
-  },
   "waterfall": {
     "cost": "成本 {value}",
-    "empty": "该 Trace 暂无 span",
-    "spanCount": "{count} 个 span",
-    "title": "Trace 详情",
     "toggleEvents": "展开/收起 span 详情",
-    "tokens": "{count} tokens",
-    "totalDuration": "耗时 {value}"
+    "tokens": "{count} tokens"
   }
 }

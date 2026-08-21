@@ -1,6 +1,27 @@
 {
+  "activity": {
+    "label": "最近活跃",
+    "options": {
+      "any": "不限时间",
+      "today": "今天",
+      "week": "近 7 天",
+      "month": "近 30 天",
+      "older": "30 天以前"
+    }
+  },
+  "agent": {
+    "label": "Agent",
+    "any": "任意 Agent",
+    "unassigned": "无 Agent"
+  },
+  "cancel": "取消",
   "clearAll": "清除筛选",
   "count": "{shown} / {total}",
+  "drawer": {
+    "title": "筛选与排序",
+    "hint": "缩小列表范围后点击「完成」。",
+    "done": "完成"
+  },
   "filters": {
     "label": "筛选",
     "options": {
@@ -8,6 +29,11 @@
       "pinned": "已置顶",
       "unread": "未读"
     }
+  },
+  "folder": {
+    "label": "文件夹",
+    "any": "任意文件夹",
+    "unassigned": "未归入文件夹"
   },
   "kind": {
     "label": "会话类型",
@@ -19,44 +45,6 @@
   },
   "label": "筛选与排序",
   "labelActive": "筛选与排序（已启用 {count} 项筛选）",
-  "remove": "移除“{name}”筛选",
-  "sort": {
-    "label": "排序方式",
-    "options": {
-      "created": "创建时间",
-      "oldest": "最早活动",
-      "recent": "最近活动",
-      "title": "标题（A–Z）",
-      "unread": "未读优先"
-    }
-  },
-  "cancel": "取消",
-  "selectedSummary": "已选 {count} 项",
-  "sections": {
-    "location": "工作区与文件夹",
-    "agent": "Agent 与团队",
-    "model": "模型与提供商"
-  },
-  "workspace": {
-    "label": "工作区",
-    "any": "任意工作区",
-    "unassigned": "无工作区"
-  },
-  "folder": {
-    "label": "文件夹",
-    "any": "任意文件夹",
-    "unassigned": "未归入文件夹"
-  },
-  "agent": {
-    "label": "Agent",
-    "any": "任意 Agent",
-    "unassigned": "无 Agent"
-  },
-  "team": {
-    "label": "团队",
-    "any": "任意团队",
-    "unassigned": "无团队"
-  },
   "model": {
     "label": "模型",
     "any": "任意模型",
@@ -67,35 +55,81 @@
     "any": "任意提供商",
     "unassigned": "未知提供商"
   },
-  "activity": {
-    "label": "最近活跃",
+  "remove": "移除“{name}”筛选",
+  "searchScope": {
+    "label": "搜索范围",
+    "labelActive": "搜索范围 — 已放宽 {count} 项",
+    "hint": "决定搜索框能找到哪些会话。",
+    "workspace": {
+      "label": "工作区",
+      "current": "当前工作区",
+      "all": "全部工作区"
+    },
+    "includeArchived": "包含已归档会话",
+    "content": "搜索消息内容",
+    "contentHint": "需要 {count} 个字符，读取本机消息索引。"
+  },
+  "sections": {
+    "location": "工作区与文件夹",
+    "agent": "Agent 与团队",
+    "model": "模型与提供商"
+  },
+  "selectedSummary": "已选 {count} 项",
+  "sort": {
+    "label": "排序方式",
     "options": {
-      "any": "不限时间",
-      "today": "今天",
-      "week": "近 7 天",
-      "month": "近 30 天",
-      "older": "30 天以前"
+      "created": "创建时间",
+      "oldest": "最早活动",
+      "recent": "最近活动",
+      "title": "标题（A–Z）",
+      "unread": "未读优先"
     }
   },
-  "presets": {
-    "label": "预设",
-    "empty": "还没有保存的预设。",
-    "save": "保存当前筛选…",
-    "saveShort": "保存",
-    "manage": "管理预设…",
-    "saveTitle": "保存筛选预设",
-    "saveDescription": "为这组筛选条件命名，之后可在任意设备上一键套用。",
-    "namePlaceholder": "预设名称",
-    "saveAction": "保存预设",
-    "saveRejected": "请输入名称，并至少保留一项筛选条件。",
-    "manageTitle": "管理预设",
-    "manageDescription": "重命名或删除已保存的筛选组合，更改立即生效。",
-    "rename": "重命名预设 {name}",
-    "delete": "删除预设 {name}"
+  "team": {
+    "label": "团队",
+    "any": "任意团队",
+    "unassigned": "无团队"
   },
-  "drawer": {
-    "title": "筛选与排序",
-    "hint": "缩小列表范围后点击「完成」。",
-    "done": "完成"
+  "views": {
+    "label": "视图",
+    "empty": "还没有保存的视图。",
+    "save": "保存当前视图…",
+    "saveShort": "保存",
+    "manage": "管理视图…",
+    "saveTitle": "保存视图",
+    "saveDescription": "为当前看到的列表命名。视图只固定你勾选的部分，其余维度仍跟随你之后的设置。",
+    "namePlaceholder": "视图名称",
+    "saveAction": "保存视图",
+    "saveRejected": "请填写名称，并至少固定一个维度。",
+    "manageTitle": "管理视图",
+    "manageDescription": "重命名或删除你保存的视图，也可以恢复被隐藏的内置视图。改动立即生效。",
+    "rename": "重命名视图 {name}",
+    "delete": "删除视图 {name}",
+    "hide": "隐藏视图 {name}",
+    "restore": "恢复视图 {name}",
+    "hidden": "已隐藏的内置视图",
+    "builtInBadge": "内置",
+    "modified": "已修改",
+    "modifiedChip": "{name} · 已修改",
+    "revert": "恢复视图",
+    "update": "更新此视图",
+    "clear": "退出视图",
+    "dimensions": {
+      "legend": "固定",
+      "filters": "筛选",
+      "sortBy": "排序",
+      "groupBy": "分组",
+      "search": "搜索范围"
+    },
+    "builtIn": {
+      "unread": "未读",
+      "recentlyCreated": "最近创建",
+      "globalSearch": "全局检索"
+    }
+  },
+  "workspace": {
+    "label": "工作区",
+    "any": "任意工作区",
+    "unassigned": "无工作区"
   }
 }

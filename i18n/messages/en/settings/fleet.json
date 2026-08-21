@@ -93,6 +93,7 @@
     "copy": "Copy enrollment command",
     "copyFailed": "Could not copy the enrollment command.",
     "description": "Enroll least-privilege CLI workers and inspect their placement readiness.",
+    "dispatchUnavailable": "This host cannot dispatch to workers right now. They stay connected, but no run will be sent to them until the host's execution brain is available.",
     "empty": "No execution workers enrolled.",
     "enroll": "Enroll worker",
     "error": "Worker action failed: {detail}",

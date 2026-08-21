@@ -37,10 +37,33 @@
     "discard": "放弃并切换",
     "title": "放弃未保存的更改?"
   },
+  "coverage": {
+    "title": "生命周期 Hook 未覆盖的范围",
+    "description": "其他所有 Agent 场景（聊天、队友、连接器回复、定时任务、工作流 Agent 节点、计划步骤、Issue 执行）都会经过 Hook 运行时。下面这三处直接在渲染端调用模型服务商，因此不会触发任何 Hook。",
+    "surfaces": {
+      "petProactive": {
+        "label": "桌面宠物主动消息",
+        "reason": "渲染端模型客户端，不经过 Hook 运行时"
+      },
+      "radar": {
+        "label": "注意力雷达报告",
+        "reason": "渲染端模型客户端，不经过 Hook 运行时"
+      },
+      "completionRail": {
+        "label": "纯文本降级通道（Web / 移动端）",
+        "reason": "正是在 Hook 运行时不可用时才启用"
+      }
+    }
+  },
   "description": "在生命周期事件触发时运行 shell 命令或调用 webhook。配置写入 ~/.claude/settings.json (用户作用域) 或项目下的 .claude/settings.json。整份配置原样回写,未识别的字段会被保留。",
   "eventListLabel": "事件",
   "group": {
     "addHandler": "新建处理器",
+    "agentsHint": "按产生该轮次的 agent 收窄，与 Matcher 相互独立。语法相同，匹配 agent 类别或其 id。类别：{kinds}",
+    "agentsInvalid": "正则无效：{detail}",
+    "agentsLabel": "Agents",
+    "agentsPlaceholder": "teammate|subagent 或某个具体 agent（留空匹配所有）",
+    "agentsPortabilityWarning": "仅 Cognia 生效：Claude Code 读取同一份 settings.json 但会忽略此字段，在那里该 Hook 对所有 agent 都会执行。",
     "emptyHandlers": "尚无处理器 — 点击下方按钮添加。",
     "matcherHint": "工具名正则、用 | 分隔的备选项,或留空 / '*' 匹配所有。",
     "matcherInvalid": "正则无效：{detail}",
@@ -59,9 +82,17 @@
     "headersAdd": "新建头部",
     "headersEmpty": "暂无自定义头部。",
     "headersLabel": "请求头",
+    "hookIdLabel": "Hook",
+    "hookIdPlaceholder": "onPreToolUse",
+    "hookIdRequired": "必须填写 Hook 名称",
     "httpCapability": "HTTP 请求需要网络能力。",
+    "inertFields": "所有运行时都会忽略：{fields}。这些键会在 settings.json 中原样保留，但没有任何 Hook 运行器会执行它们。",
     "inputLabel": "输入 JSON",
     "modelLabel": "模型（可选）",
+    "pluginHint": "执行已安装插件自己的 Hook 处理器。仅桌面端与 CLI 生效；插件必须处于启用状态，且若要拦截工具或提示词，还需声明 hooks:chat-intercept。",
+    "pluginIdLabel": "插件",
+    "pluginIdPlaceholder": "my-plugin",
+    "pluginIdRequired": "必须填写插件 id",
     "promptLabel": "提示词",
     "promptRequired": "提示词不能为空。",
     "removeAria": "移除处理器",
@@ -81,7 +112,8 @@
       "command": "命令",
       "http": "HTTP",
       "mcp_tool": "MCP 工具",
-      "prompt": "提示词"
+      "prompt": "提示词",
+      "plugin": "插件"
     },
     "urlInvalid": "请输入有效的 http(s) URL。",
     "urlLabel": "URL",

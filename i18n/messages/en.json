@@ -65,6 +65,7 @@
     "authorInfo": "Author Info",
     "authorName": "Author Name",
     "authorUrl": "URL",
+    "back": "Back",
     "basicInfo": "Basic Info",
     "blankAppName": "Untitled app",
     "blankAppPlaceholder": "Empty app — add components from the tree on the left.",
@@ -80,6 +81,7 @@
     "categorySocial": "Social",
     "categoryUtility": "Utilities",
     "checkPublish": "Check Publish Requirements",
+    "clearAgent": "Use the default agent",
     "clearErrors": "Clear All",
     "clearThumbnail": "Clear Thumbnail",
     "close": "Close",
@@ -112,6 +114,7 @@
     "dataModel": "Data Model",
     "dataModelKeyCount": "{count, plural, one {# key} other {# keys}}",
     "dataObjectType": "Object ({count})",
+    "defaultAgent": "Default agent",
     "delete": "Delete",
     "deleteApp": "Delete App",
     "deleteComponent": "Delete Component",
@@ -179,6 +182,7 @@
     "gallery": "App Gallery",
     "generating": "Generating...",
     "generationFailed": "Failed to generate app",
+    "generationOptions": "Generation options",
     "gridView": "Grid view",
     "heroSubtitle": "Describe your app in one sentence, AI builds it in seconds",
     "heroTitle": "Build Mini Apps Instantly",
@@ -247,6 +251,7 @@
     "manageApps": "Manage your created apps",
     "metadata": "Metadata",
     "missingFields": "Missing required fields",
+    "moreActions": "More actions",
     "move": "Move",
     "moveComponent": "Move Component",
     "moveComponentDescription": "Move the selected component to an exact parent slot and final position.",
@@ -277,6 +282,7 @@
     "paperCardOpenAccess": "Open Access",
     "paperCardPdf": "PDF",
     "papersCount": "{count} papers",
+    "pickAgent": "Pick the agent that builds this app",
     "position": "Position",
     "positionHelp": "Final zero-based position (0–{max}).",
     "previewMode": "Preview",
@@ -332,6 +338,7 @@
     "saveFailed": "Failed to save app changes",
     "savedAsTemplate": "Saved as template",
     "saving": "Saving",
+    "scrollToTop": "Back to top",
     "searchAndManageApps": "Search, sort, and jump back into the apps that already exist.",
     "searchComponents": "Search component types...",
     "searchLoadMore": "Load More Results",
@@ -360,7 +367,9 @@
     "shareToTelegram": "Share to Telegram",
     "shareToTwitter": "Share to Twitter",
     "shortcuts": "Keyboard Shortcuts",
+    "showAll": "Show all",
     "showComponentTree": "Show component tree",
+    "showLess": "Show less",
     "showPropertiesPanel": "Show properties panel",
     "slotAccordionItem": "Accordion item {index}",
     "slotActions": "Actions",
@@ -3020,7 +3029,6 @@
         "deploymentRef": "Deployment profile",
         "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
         "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
-        "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
         "hostAuto": "Any ready worker",
         "hostLocal": "Run with coordinator",
         "hostPinned": "{host} (online)",
@@ -5580,6 +5588,13 @@
       },
       "toggle": "Toggle hook details"
     },
+    "imported": {
+      "diverged": "{source} moved on",
+      "divergedHint": "This conversation has also changed in {source} since Cognia took ownership of it. Cognia does not merge the two — the copy you are reading is Cognia's. Click to dismiss.",
+      "origin": "From {source}",
+      "originHint": "This conversation was imported from {source}. Continuing it here makes Cognia its owner — later changes on the {source} side are no longer mirrored.",
+      "unknownSource": "another agent"
+    },
     "inlineError": {
       "dismiss": "Dismiss",
       "environmentSetupFailed": "Project environment setup failed. Retry, or explicitly bypass setup for this interactive turn.",
@@ -6082,17 +6097,30 @@
     },
     "runPanel": {
       "ariaDiscardQueue": "Discard queued messages",
+      "ariaEditQueued": "Edit this queued message",
       "ariaInterrupt": "Interrupt the current turn",
       "ariaLocateSteer": "Go to the first undelivered message",
+      "ariaManageSteer": "Show the queued messages",
+      "ariaRemoveQueued": "Remove this queued message",
+      "ariaReorderQueued": "Reorder — currently {index} in the send order",
       "ariaSteerQueue": "Queued messages",
       "ariaSubagent": "Sub-agent",
       "collapse": "Hide run details",
       "discardQueue": "Discard",
+      "dndCancelled": "Reordering cancelled.",
+      "dndDropped": "Dropped at position {position} of {total}.",
+      "dndInstructions": "Press Space to pick up a queued message, the arrow keys to move it, and Space again to drop it.",
+      "dndOver": "Now at position {position} of {total}.",
+      "dndPickedUp": "Picked up the message at position {index} of {total}.",
       "expand": "Show run details",
       "lastRun": "Last run",
       "lastRunSummary": "{count, plural, one {# tool} other {# tools}} · {elapsed}",
+      "queueAttachments": "{count, plural, one {# attachment} other {# attachments}}",
+      "queueAttachmentsOnly": "{count, plural, one {# attachment} other {# attachments}}, no text",
+      "queueMergeHint": "Sent as one message, top to bottom, when this turn ends.",
       "runFailedQueued": "Run failed · {count} queued",
       "sectionPlan": "Plan",
+      "sectionQueue": "Queued",
       "sectionSubagents": "Sub-agents",
       "sectionSummary": "Summary",
       "sectionTools": "Tools",
@@ -6259,6 +6287,8 @@
       "discard": "Discard",
       "failed": "Not delivered",
       "failedHint": "The run ended before this could be sent",
+      "position": "{index}/{total}",
+      "positionHint": "Position in the send order — reorder it in the run panel",
       "putBack": "Put back",
       "queued": "Queued",
       "queuedHint": "Will be sent when the current turn finishes"
@@ -6284,7 +6314,8 @@
       "tokens": "{n} tokens",
       "tokensBreakdown": "{prompt} prompt · {completion} completion · {total} total tokens",
       "toolsRunCount": "{n, plural, one {# tool} other {# tools}}",
-      "toolsTailNote": "Showing the last {n} tool calls"
+      "toolsTailNote": "Showing the last {n} tool calls",
+      "transcriptMissing": "This subagent's transcript isn't in this copy of the conversation."
     },
     "terminalTool": {
       "bashLabel": "Bash",
@@ -6534,6 +6565,13 @@
       "primaryBadge": "Primary",
       "secondary": "Secondary:",
       "title": "Merge platform identities"
+    },
+    "oauth": {
+      "failed": "{platform} sign-in failed: {reason}",
+      "noHandler": "“{platform}” doesn't use this sign-in flow.",
+      "stateMismatch": "This sign-in link doesn't match the one this app started. Start the connection again from Settings.",
+      "succeeded": "{platform} connected.",
+      "unknownPlatform": "No sign-in handler for “{platform}”. It may be a connector this build doesn't ship."
     }
   },
   "contextWorkbench": {
@@ -6846,6 +6884,7 @@
         "file": "File",
         "footnote": "Note",
         "memory": "Memory",
+        "projectKnowledge": "Workspace knowledge",
         "tool": "Tool",
         "twinRag": "Twin",
         "twinStyle": "Style",
@@ -6948,28 +6987,25 @@
       "label": "Model",
       "unassigned": "Unknown model"
     },
-    "presets": {
-      "delete": "Delete preset {name}",
-      "empty": "No saved presets yet.",
-      "label": "Presets",
-      "manage": "Manage presets…",
-      "manageDescription": "Rename or remove saved filter combinations. Changes apply immediately.",
-      "manageTitle": "Manage presets",
-      "namePlaceholder": "Preset name",
-      "rename": "Rename preset {name}",
-      "save": "Save current filters…",
-      "saveAction": "Save preset",
-      "saveDescription": "Name this combination to reapply it in one click, on every device.",
-      "saveRejected": "Enter a name — and keep at least one filter active.",
-      "saveShort": "Save",
-      "saveTitle": "Save filter preset"
-    },
     "provider": {
       "any": "Any provider",
       "label": "Provider",
       "unassigned": "Unknown provider"
     },
     "remove": "Remove the {name} filter",
+    "searchScope": {
+      "content": "Search message content",
+      "contentHint": "Needs {count} characters, and reads the local message index.",
+      "hint": "How far the search field looks.",
+      "includeArchived": "Include archived conversations",
+      "label": "Search reach",
+      "labelActive": "Search reach — {count} widened",
+      "workspace": {
+        "all": "All workspaces",
+        "current": "This workspace",
+        "label": "Workspaces"
+      }
+    },
     "sections": {
       "agent": "Agent & team",
       "location": "Workspace & folder",
@@ -6990,6 +7026,43 @@
       "any": "Any team",
       "label": "Team",
       "unassigned": "No team"
+    },
+    "views": {
+      "builtIn": {
+        "globalSearch": "Search everything",
+        "recentlyCreated": "Recently created",
+        "unread": "Unread"
+      },
+      "builtInBadge": "Built in",
+      "clear": "Leave view",
+      "delete": "Delete view {name}",
+      "dimensions": {
+        "filters": "Filters",
+        "groupBy": "Grouping",
+        "legend": "Pin",
+        "search": "Search reach",
+        "sortBy": "Sort order"
+      },
+      "empty": "No saved views yet.",
+      "hidden": "Hidden built-in views",
+      "hide": "Hide view {name}",
+      "label": "Views",
+      "manage": "Manage views…",
+      "manageDescription": "Rename or remove your saved views, and put back any built-in ones you have hidden. Changes apply immediately.",
+      "manageTitle": "Manage views",
+      "modified": "Modified",
+      "modifiedChip": "{name} · modified",
+      "namePlaceholder": "View name",
+      "rename": "Rename view {name}",
+      "restore": "Restore view {name}",
+      "revert": "Reset to view",
+      "save": "Save this view…",
+      "saveAction": "Save view",
+      "saveDescription": "Name what you are looking at. A view pins only the parts you tick — everything else keeps following whatever you set later.",
+      "saveRejected": "Enter a name, and pin at least one part of the view.",
+      "saveShort": "Save",
+      "saveTitle": "Save view",
+      "update": "Update this view"
     },
     "workspace": {
       "any": "Any workspace",
@@ -7389,13 +7462,16 @@
       "newFolder": "New folder",
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
+      "orderPending": "{count, plural, one {# update} other {# updates}}",
       "renameFolder": "Rename folder",
       "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
+      "searchContentMinQuery": "Type {count} characters to search message content",
       "searchMessageContent": "Search message content",
       "searchPlaceholder": "Search chats…",
       "searchShortcutHint": "Press / to search",
       "searchTruncated": "Some results may be hidden — refine your search.",
+      "searchingMessages": "Searching messages…",
       "sectionPinned": "Pinned",
       "sectionRecent": "Recent",
       "sectionResults": "Results",
@@ -7416,6 +7492,7 @@
       "teamFallback": "Team",
       "titleMotion": "Scroll long titles on hover",
       "ungroupedAgent": "No agent",
+      "ungroupedTeam": "Chats",
       "ungroupedWorkspace": "No workspace",
       "viewActive": "Show active conversations",
       "viewArchived": "Show archived conversations"
@@ -7450,6 +7527,9 @@
       "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
       "agentTeams": "Agent teams",
+      "aliases": {
+        "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
+      },
       "auxiliaryGroup": "Profile and logs",
       "browser": "Browser",
       "canvas": "Canvas",
@@ -7490,7 +7570,6 @@
       "memory": "Memory",
       "more": "More",
       "navigation": "Navigation",
-      "observability": "Observability",
       "openSettings": "Open settings",
       "performance": "Performance",
       "pet": "Pet",
@@ -7620,12 +7699,14 @@
       "defaultModel": "Session default model",
       "empty": "No members.",
       "heading": "Members — {count}",
+      "hide": "Hide members",
       "label": "Team members",
       "mentionTitle": "Mention {name}",
       "noTeamSession": "Open a team conversation to see its members.",
       "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
       "openChat": "Open chat with {name}",
       "sharedNotes": "Shared notes",
+      "show": "Show members",
       "status": {
         "errored": "Errored",
         "idle": "Idle",
@@ -7876,6 +7957,7 @@
         "remoteRuntime": "Remote Host",
         "runtimeTarget": "Execution",
         "serverVersion": "Host version",
+        "standaloneScope": "This browser runs chat and its own local data. Source control, the embedded browser and remote sessions need a connected Host.",
         "thisBrowser": "This browser",
         "thisDesktop": "This desktop",
         "tier": {
@@ -8705,6 +8787,9 @@
       "description": "Reference Feishu and Google documents with @ in chat.",
       "desktopOnly": "Desktop app only.",
       "disconnect": "Disconnect",
+      "disconnectNotRevoked": "Disconnected locally, but revoking at Google failed ({reason}). Remove Cognia from your Google account's third-party access to finish.",
+      "disconnectRevoked": "Disconnected. The Google authorization has been revoked.",
+      "disconnecting": "Disconnecting…",
       "googleClientHint": "Create a Desktop app credential in Google Cloud Console.",
       "googleClientId": "OAuth client ID",
       "googleClientSecret": "OAuth client secret",
@@ -10860,9 +10945,14 @@
       "done": "Close",
       "loading": "Reading file…",
       "pickButton": "Choose file…",
-      "pickPrompt": "Pick a JSON export to begin.",
+      "pickPrompt": "Pick an export file to begin.",
       "title": "Import conversations",
       "tryAgain": "Try another file"
+    },
+    "errors": {
+      "cogniaBackup": "This is a Cognia backup, not a conversation export. Restore it from Backup & restore.",
+      "encrypted": "This backup is encrypted. Restore it from Backup & restore, where you can enter its password.",
+      "unrecognized": "This file wasn't recognized as a conversation export from a supported assistant."
     },
     "platform": {
       "chatgpt": {
@@ -13091,6 +13181,11 @@
           "usage": "Usage"
         },
         "spanCount": "{count, plural, =1 {1 span} other {# spans}}",
+        "subViewLabel": "Trace workspace view",
+        "subViews": {
+          "dashboard": "Dashboard",
+          "explore": "Explore"
+        },
         "timeline": {
           "blockAria": "{label} in {lane}, {duration}",
           "blockError": "This span failed",
@@ -14736,6 +14831,7 @@
       "search": "Search chats…",
       "searchAria": "Search chats",
       "searchTruncated": "Some results may be hidden — refine your search.",
+      "searchingMessages": "Searching messages…",
       "sections": {
         "activeRuns": "Active runs",
         "recents": "Recent chats"
@@ -14745,6 +14841,9 @@
       "swipePin": "Pin",
       "swipeUnarchive": "Unarchive",
       "swipeUnpin": "Unpin",
+      "ungroupedAgent": "No agent",
+      "ungroupedTeam": "Chats",
+      "ungroupedWorkspace": "No workspace",
       "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
       "viewActive": "Show active chats",
       "viewArchived": "Show archived chats"
@@ -15305,6 +15404,8 @@
           "trigger": "Can't find your desktop?"
         },
         "latencyMs": "{ms} ms",
+        "loopbackBlockedBody": "It refused this browser. Open its Settings → Companion → browser access and add {origin} to the allowed origins.",
+        "loopbackBlockedTitle": "A Host is running on this computer",
         "nearbyTitle": "On this network",
         "precheckOk": "Reachable · v{version} · {ms} ms",
         "precheckUnreachable": "Couldn't reach this server. Make sure it's online.",
@@ -15319,6 +15420,7 @@
         "tlsPinned": "Identity verified",
         "tlsUnverified": "Unverified",
         "viaHistory": "History",
+        "viaLoopback": "On this computer",
         "viaMdns": "mDNS",
         "viaPaired": "Paired",
         "viaProbe": "LAN probe"
@@ -16217,15 +16319,19 @@
       "tracesCsv": "Traces as CSV"
     },
     "filters": {
+      "back": "Back",
       "clear": "Clear",
       "dims": {
         "model": "Model",
         "operation": "Operation",
+        "project": "Project",
+        "provider": "Provider",
         "session": "Session",
         "surface": "Surface",
         "tool": "Tool"
       },
       "empty": "No options",
+      "label": "Filters",
       "search": "Search…"
     },
     "metricToggle": {
@@ -16237,18 +16343,22 @@
     "noData": "No data in this window",
     "panels": {
       "byModel": "Spans by model",
+      "byOperation": "Spans by operation",
       "byProject": "By project",
       "byProvider": "By provider",
       "bySurface": "Spans by surface",
+      "byTool": "By tool",
       "cacheHitRate": "Cache hit rate",
       "costOverTime": "Cost over time",
       "errorRate": "Error rate",
       "errorRateOverTime": "Error rate",
       "latencyPercentiles": "Latency percentiles",
       "p95Latency": "Latency (p95)",
-      "recentTraces": "Recent traces",
+      "reqPerMin": "Requests / min",
       "requestRate": "Request rate",
       "tokenThroughput": "Token throughput",
+      "toolCalls": "Tool calls",
+      "toolFailures": "Tool failures",
       "totalCost": "Total cost",
       "totalSpans": "Total spans"
     },
@@ -16332,31 +16442,16 @@
       "unitMs": "milliseconds",
       "unitUsd": "USD"
     },
-    "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
-    "title": "Observability",
     "toolbar": {
       "edit": "Edit layout",
       "lock": "Lock layout",
       "resetLayout": "Reset layout",
       "settings": "Dashboard settings"
     },
-    "traces": {
-      "cost": "Cost",
-      "duration": "Duration",
-      "empty": "No traces in this window",
-      "root": "Trace",
-      "spans": "Spans",
-      "started": "Started",
-      "surface": "Surface"
-    },
     "waterfall": {
       "cost": "Cost {value}",
-      "empty": "No spans for this trace",
-      "spanCount": "{count} spans",
-      "title": "Trace detail",
       "toggleEvents": "Toggle span details",
-      "tokens": "{count} tokens",
-      "totalDuration": "Duration {value}"
+      "tokens": "{count} tokens"
     }
   },
   "ocr": {
@@ -16927,9 +17022,9 @@
   "onboarding": {
     "apiKeyHintHost": "console.anthropic.com",
     "apiKeyHintPrefix": "Get one at ",
-    "apiKeyHintSuffix": ". The key never leaves your machine.",
-    "apiKeyLabel": "Anthropic API key",
-    "apiKeyPlaceholder": "sk-ant-…",
+    "apiKeyHintSuffix": "The key never leaves your machine.",
+    "apiKeyLabel": "API key",
+    "apiKeyPlaceholder": "sk-…",
     "back": "Back",
     "cards": {
       "extractText": {
@@ -16959,8 +17054,10 @@
     },
     "firstRun": {
       "changeCharacter": "Change",
+      "connectCta": "Connect a model first",
       "description": "Pick something to try. The agent will do it now, and you can judge the result yourself.",
       "failed": "That didn't work. You can pick another, or skip and try later.",
+      "needsModel": "Cognia can't reach a model yet, so there is nothing to run these with.",
       "runningWith": "Running as {name}",
       "runtimeLine": "Using {runtime}",
       "starting": "Starting…",
@@ -16968,11 +17065,22 @@
     },
     "provider": {
       "apiKey": {
-        "cta": "Use API key",
-        "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
-        "title": "Paste an Anthropic API key"
+        "cta": "Choose a provider",
+        "description": "OpenAI, Google, DeepSeek, a model running on this machine, or any other provider in the catalog.",
+        "save": "Save and continue",
+        "title": "Use an API key"
       },
       "backToChooser": "Choose a different sign-in method",
+      "baseUrlLabel": "Base URL",
+      "byokNote": "This device talks to a provider directly with your own key. Subscription sign-in needs the desktop app, which holds those credentials in the OS keyring.",
+      "byokTitle": "Connect a model",
+      "category": {
+        "aggregator": "Gateways and aggregators",
+        "enterprise": "Enterprise",
+        "flagship": "Major providers",
+        "local": "On this machine",
+        "specialized": "Other providers"
+      },
       "claude": {
         "cta": "Sign in with Anthropic",
         "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
@@ -16983,15 +17091,26 @@
         "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
         "title": "ChatGPT Plus / Pro (Codex)"
       },
+      "connected": {
+        "description": "Cognia will reach a model through this. You can add or switch accounts any time in Settings → Subscription.",
+        "plan": "Plan {plan}",
+        "title": "You're connected"
+      },
       "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+      "localHint": "Runs on this machine, so it needs no key — just make sure the server is running.",
       "loggedInBadge": "Connected",
       "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+      "needsSettings": "This one needs more than a key — a region and credentials of its own. Add it in Settings → Providers once you are set up.",
       "opencode": {
         "cta": "Paste OpenCode key",
         "description": "Paste an OpenCode Zen API key. Optional region override available.",
         "title": "OpenCode Zen"
       },
-      "title": "How do you want to sign in?"
+      "pickerEmpty": "No provider matches that.",
+      "pickerLabel": "Provider",
+      "pickerSearch": "Search providers…",
+      "title": "How do you want to sign in?",
+      "toastIncomplete": "Fill in what this provider needs before continuing."
     },
     "rail": {
       "first-run": {
@@ -17041,7 +17160,7 @@
       "title": "What's already on this machine"
     },
     "skip": "Skip for now",
-    "toastNeedKey": "Paste your Anthropic API key to continue.",
+    "toastNeedKey": "Paste your API key to continue.",
     "tour": {
       "computerUse": {
         "cta": "Open automation settings",
@@ -20025,14 +20144,36 @@
       "cognia": "Cognia"
     },
     "command": {
-      "chat.addFile.title": "Add File to Cognia Context",
-      "chat.addSelection.title": "Add Selection to Cognia Chat",
-      "chat.customAction.title": "Run a Cognia Template…",
-      "chat.explain.title": "Explain This Code",
-      "chat.fix.title": "Fix This Code",
-      "chat.review.title": "Review This Code",
-      "diagnostics.send.title": "Send Problems to Cognia",
-      "workspace.focus.title": "Show the Cognia Panel"
+      "chat": {
+        "addFile": {
+          "title": "Add File to Cognia Context"
+        },
+        "addSelection": {
+          "title": "Add Selection to Cognia Chat"
+        },
+        "customAction": {
+          "title": "Run a Cognia Template…"
+        },
+        "explain": {
+          "title": "Explain This Code"
+        },
+        "fix": {
+          "title": "Fix This Code"
+        },
+        "review": {
+          "title": "Review This Code"
+        }
+      },
+      "diagnostics": {
+        "send": {
+          "title": "Send Problems to Cognia"
+        }
+      },
+      "workspace": {
+        "focus": {
+          "title": "Show the Cognia Panel"
+        }
+      }
     },
     "panel": {
       "chooseAction": "Choose a Cognia template",
@@ -20633,6 +20774,7 @@
     "configDescription": "Configure server host, port, and advanced settings",
     "configTab": {
       "addKey": "Add Key",
+      "apiKeyDescription": "The secret key issued by the provider's dashboard.",
       "apiKeyLabel": "API Key",
       "apiKeyPlaceholder": "Enter your API key",
       "baseURLLabel": "Base URL",
@@ -20660,11 +20802,17 @@
       "connectionFailed": "Connection failed",
       "connectionStatus": "Connection Status",
       "connectionSuccess": "Connected",
+      "credentialsDescription": "What this device needs to reach the provider. Credentials stay local and are never included in diagnostics.",
+      "credentialsTitle": "Credentials & endpoint",
+      "defaultModelDescription": "Preselected whenever a new chat runs on this provider.",
       "defaultModelLabel": "Default Model",
       "docs": "Docs",
+      "executionDescription": "Read-only: where requests for this provider are dispatched, and which paths are certified.",
+      "executionTitle": "Execution path",
       "getApiKey": "Get API Key →",
       "hideKey": "Hide key",
       "keyRotation": "Key Rotation",
+      "keyRotationDescription": "Spread requests across a pool of keys to lift a single key's rate limit.",
       "keyRotationEnabled": "Enable rotation",
       "lastTested": "Last tested",
       "lastVerified": "Last verified",
@@ -20673,15 +20821,22 @@
       "moveDown": "Move down",
       "moveUp": "Move up",
       "newKeyPlaceholder": "sk-...",
+      "notVerifiedHint": "Not verified yet — run a connection test to confirm the key and endpoint work.",
       "random": "Random",
       "removeKey": "Remove",
+      "rotationNeedsTwoKeys": "Add a second key before rotation can be enabled.",
       "rotationStrategy": "Rotation Strategy",
+      "rotationStrategyDescription": "How the next request picks a key from the pool.",
       "roundRobin": "Round Robin",
       "selectModel": "Select model",
       "showKey": "Show key",
       "strategyLeastUsed": "Least Used",
       "strategyRandom": "Random",
-      "strategyRoundRobin": "Round Robin"
+      "strategyRoundRobin": "Round Robin",
+      "testDisabledHint": "Enter credentials before testing the connection.",
+      "transportDescription": "How a request is shaped on the way out. Only needed for gateways, Azure, and self-hosted endpoints.",
+      "transportOverrides": "{count, plural, one {# override} other {# overrides}}",
+      "transportTitle": "Protocol & transport"
     },
     "configuration": "Configuration",
     "configureApiKey": "Configure API Key",
@@ -22345,6 +22500,7 @@
       "executionChart": "Execution History (7 days)",
       "failed": "Failed",
       "noData": "No execution data available",
+      "noRunsYet": "No runs recorded yet",
       "running": "Running",
       "title": "Dashboard"
     },
@@ -22359,6 +22515,7 @@
     "dateTimeRequired": "Date and time are required",
     "days": "days",
     "delete": "Delete",
+    "deleteItemConfirm": "Delete “{name}” ({kind})? This cannot be undone.",
     "deleteTask": "Delete Task",
     "deleteTaskConfirm": "Are you sure you want to delete this task? This action cannot be undone.",
     "dependencies": {
@@ -22466,6 +22623,11 @@
       "loop": "Loop",
       "statusLabel": "Status",
       "typeLabel": "Type"
+    },
+    "filterBar": {
+      "clear": "Clear filters",
+      "kindMenu": "Filter by type",
+      "loopOnly": "Only /loop tasks"
     },
     "finishedAt": "Finished at",
     "footerSuccess": "Success",
@@ -23018,6 +23180,10 @@
     },
     "showLess": "Show less",
     "showMore": "Show more",
+    "sidebarFooter": {
+      "filtered": "{shown} of {total} shown",
+      "total": "{total, plural, one {# item} other {# items}}"
+    },
     "slashCommand": {
       "description": "Create a scheduled task or reminder"
     },
@@ -23752,10 +23918,10 @@
     "back": "Back",
     "cancel": "Cancel",
     "cancelledTitle": "Import stopped",
-    "cardBody": "Import past sessions from Claude Code, Codex, or OpenCode.",
+    "cardBody": "Import past sessions from the coding agents installed on this machine, or from exported session files.",
     "cardTitle": "Coding-agent sessions",
     "close": "Close",
-    "description": "Bring your Claude Code, Codex, and OpenCode command-line histories into Cognia as continuable conversations.",
+    "description": "Bring your command-line coding-agent histories into Cognia as continuable conversations.",
     "deselectAll": "Clear selection",
     "doneBody": "Added {sessions, plural, one {# conversation} other {# conversations}} with {messages, plural, one {# message} other {# messages}}.",
     "doneTitle": "Import complete",
@@ -23786,16 +23952,17 @@
       "noLosses": "Converted without loss.",
       "rebuilt": "Reconstructed",
       "rebuiltHint": "This record was rebuilt from trusted artifacts — it is provenance-marked and does not claim to be the original transcript.",
+      "reverseDormant": "Writing this history back out as a new session in the original agent is defined ({fidelity}) but not yet available in Cognia.",
       "title": "Conversion fidelity"
     },
     "importSelected": "Import {count} selected",
-    "importing": "Importing…",
     "liveSync": "Live sync",
     "liveSyncHint": "Keep watching these agents and import new sessions automatically. A session you continue in Cognia is frozen and never overwritten.",
     "loadMore": "Show {count} more",
     "messagesLabel": "{count, plural, one {# message} other {# messages}}",
     "parsingProgress": "Parsing {done}/{total}…",
     "pickButton": "Choose files…",
+    "pickerOnly": "{sources} keeps its history inside each repository, so a scan can't find it — choose the file yourself.",
     "retry": "Try again",
     "scanButton": "Scan installed agents",
     "scanning": "Looking for sessions…",
@@ -24579,10 +24746,6 @@
           "prewarm": {
             "description": "Keep isolated warm SDK processes ready for the next compatible request.",
             "label": "Prewarm pool"
-          },
-          "resolver": {
-            "description": "Use the unified execution resolver to select the correct agent runtime.",
-            "label": "Unified execution resolver"
           },
           "sessionStore": {
             "description": "Mirror native SDK session records into the encrypted, tenant-isolated host store.",
@@ -26858,6 +27021,8 @@
         "source_assignment": "Assignment",
         "source_conversation-override": "Conversation override",
         "source_dispatch-rule": "Dispatch rule",
+        "source_escalation": "SLA escalation",
+        "source_session": "Chat session",
         "source_system-default": "System default",
         "source_target-managed": "Managed by target",
         "title": "Conversation behavior"
@@ -27106,15 +27271,6 @@
         "welcomeTextHelp": "Optional intro shown at the top of the welcome card. Falls back to a built-in line.",
         "welcomeTextLabel": "Welcome message",
         "welcomeTextPlaceholder": "e.g. Hi! I'm your assistant — here's what I can do."
-      },
-      "inbox": {
-        "archivedLabel": "Archived",
-        "noAdapters": "No adapters configured yet.",
-        "openInbox": "Open Inbox",
-        "pinnedLabel": "Pinned",
-        "summary": "Per-adapter conversation summary. Use the Inbox for the full view.",
-        "totalLabel": "Total",
-        "unreadLabel": "Unread"
       },
       "inboxAssets": {
         "cannedResponses": "Canned responses",
@@ -27778,6 +27934,9 @@
         "botTokenPlaceholder": "xoxb-...",
         "botTokenRequired": "Bot token is required.",
         "cancel": "Cancel",
+        "clientIdLabel": "OAuth client ID",
+        "clientIdPlaceholder": "1234567890.1234567890123",
+        "clientSecretLabel": "OAuth client secret",
         "connectedAs": "{user} @ {team} (id: {userId})",
         "connectedToast": "Connected: {user} @ {team}",
         "connectionFailedLabel": "Connection failed",
@@ -27792,8 +27951,13 @@
         "historyMaxPagesLabel": "History pages per load",
         "oauthButton": "Connect via OAuth",
         "oauthButtonAria": "Connect via OAuth",
-        "oauthClientIdMissing": "NEXT_PUBLIC_SLACK_CLIENT_ID is not set.",
+        "oauthConnecting": "Opening Slack…",
         "oauthHint": "Alternatively, authorize via OAuth to let Slack generate the bot token automatically.",
+        "oauthNeedsClientId": "Add the OAuth client ID and save before authorizing.",
+        "oauthNeedsRelay": "OAuth needs a public address Slack can redirect to. Start the tunnel (desktop) or set a public origin (self-hosted).",
+        "oauthNeedsSavedAdapter": "Save this connection first — the authorization is bound to it.",
+        "oauthOpened": "Slack authorization opened in your browser.",
+        "oauthRedirectHint": "Register this exact redirect URL in your Slack app: {url}",
         "openCompanion": "Open Companion settings",
         "openConsole": "Open Slack app console",
         "quietHoursIncomplete": "Quiet hours requires From, To, and Timezone.",
@@ -27839,7 +28003,6 @@
         "canned": "Canned",
         "capability": "Capabilities",
         "conversations": "Conversations",
-        "inbox": "Inbox",
         "labels": "Labels",
         "outbound": "Outbound",
         "overrides": "Overrides",
@@ -28186,11 +28349,6 @@
         }
       },
       "sidebar": {
-        "contentSearch": {
-          "description": "Also match text inside messages, not just conversation titles (slower).",
-          "heading": "Search message content",
-          "label": "Search inside messages"
-        },
         "customIcons": {
           "description": "Show each conversation's character or team avatar in the list. Off falls back to a neutral glyph.",
           "heading": "Character and team icons",
@@ -28202,18 +28360,6 @@
           "label": "Use compact conversation rows"
         },
         "description": "Tune how the chat sidebar lists and searches conversations.",
-        "groupBy": {
-          "description": "Choose the primary axis the conversation list groups by. Grouping by workspace lists conversations from every workspace; the other modes stay inside the current one.",
-          "heading": "Group conversations by",
-          "label": "Conversation grouping",
-          "options": {
-            "agent": "Agent",
-            "date": "Date",
-            "none": "No grouping",
-            "team": "Chats / Team",
-            "workspace": "Workspace"
-          }
-        },
         "metadata": {
           "agent": {
             "description": "Show the character or team responsible for the conversation.",
@@ -28247,18 +28393,6 @@
           "button": "Reset width",
           "description": "Reset the draggable sidebar back to its default width.",
           "heading": "Sidebar width"
-        },
-        "sortBy": {
-          "description": "Order applied inside each section. Only “Recent activity” keeps a manual drag order.",
-          "heading": "Sort conversations by",
-          "label": "Conversation sort",
-          "options": {
-            "created": "Date created",
-            "oldest": "Oldest activity",
-            "recent": "Recent activity",
-            "title": "Title (A–Z)",
-            "unread": "Unread first"
-          }
         },
         "timestamps": {
           "description": "Show when each conversation was last active at the end of its title.",
@@ -29355,6 +29489,11 @@
         "httpPortHelp": "Port the HTTP transport listens on. Used in the setup snippets below.",
         "noActiveClientError": "No active External Bridge client.",
         "regenerateWarning": "⚠ Regenerating invalidates the old token immediately.",
+        "revokeClientAria": "Revoke client credential",
+        "revokeConfirmAction": "Revoke credential",
+        "revokeConfirmCancel": "Cancel",
+        "revokeConfirmDesc": "The credential is ended immediately and its live sessions are closed. Unlike rotating, no replacement is issued — re-enable the bridge to mint a new one. Use this when a credential has leaked.",
+        "revokeConfirmTitle": "Revoke this client credential?",
         "rotateConfirmAction": "Rotate token",
         "rotateConfirmCancel": "Cancel",
         "rotateConfirmDesc": "Every client already configured with the current token will stop working until you paste the new one. This cannot be undone.",
@@ -29365,6 +29504,7 @@
         "statusOff": "Server is off. No external traffic accepted.",
         "statusStdioActive": "Stdio transport active. Tauri HTTP server is offline — toggle off and on to restart.",
         "title": "MCP server",
+        "toastClientRevoked": "Revoked “{name}”. Its sessions are closed.",
         "toastRestartFailed": "Could not restart the MCP server. Check the host status and try again.",
         "toastServerStarted": "MCP HTTP server listening on 127.0.0.1:{port}",
         "toastServerStopped": "MCP server stopped.",
@@ -29616,6 +29756,7 @@
         "copy": "Copy enrollment command",
         "copyFailed": "Could not copy the enrollment command.",
         "description": "Enroll least-privilege CLI workers and inspect their placement readiness.",
+        "dispatchUnavailable": "This host cannot dispatch to workers right now. They stay connected, but no run will be sent to them until the host's execution brain is available.",
         "empty": "No execution workers enrolled.",
         "enroll": "Enroll worker",
         "error": "Worker action failed: {detail}",
@@ -29922,12 +30063,6 @@
         "ultracode": "ultracode",
         "xhigh": "xhigh"
       },
-      "model": {
-        "claude-haiku-4-5": "Claude Haiku 4.5",
-        "claude-opus-4-5": "Claude Opus 4.5",
-        "claude-opus-4-7": "Claude Opus 4.7",
-        "claude-sonnet-4-5": "Claude Sonnet 4.5"
-      },
       "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
       "orPasteModelId": "Or paste a custom model id",
       "permission": {
@@ -29993,10 +30128,33 @@
         "discard": "Discard & switch",
         "title": "Discard unsaved changes?"
       },
+      "coverage": {
+        "description": "Every other agent surface — chat, teammates, connector replies, scheduled runs, workflow agent nodes, plan steps and issue runs — passes through the hook runtime. These three call the model provider directly from the renderer, so no hook fires for them.",
+        "surfaces": {
+          "completionRail": {
+            "label": "Text-only fallback (web / mobile)",
+            "reason": "used exactly when the hook runtime is unavailable"
+          },
+          "petProactive": {
+            "label": "Desktop pet proactive messages",
+            "reason": "renderer-side model client, never reaches the hook runtime"
+          },
+          "radar": {
+            "label": "Attention Radar reports",
+            "reason": "renderer-side model client, never reaches the hook runtime"
+          }
+        },
+        "title": "Not covered by lifecycle hooks"
+      },
       "description": "Run shell commands or send webhooks at lifecycle events. Stored in ~/.claude/settings.json (User scope) or .claude/settings.json under a project. The full settings document round-trips — unrelated keys are preserved.",
       "eventListLabel": "Events",
       "group": {
         "addHandler": "Add handler",
+        "agentsHint": "Narrows by which agent produced the turn — independent of Matcher. Same syntax, matched against the agent kind or its id. Kinds: {kinds}",
+        "agentsInvalid": "Invalid regex: {detail}",
+        "agentsLabel": "Agents",
+        "agentsPlaceholder": "teammate|subagent or a specific agent (leave empty for all)",
+        "agentsPortabilityWarning": "Cognia-only: Claude Code reads the same settings.json, ignores this field, and will run this hook for every agent.",
         "emptyHandlers": "No handlers — add one below.",
         "matcherHint": "Tool-name regex, pipe alternation, or empty / '*' to match every event.",
         "matcherInvalid": "Invalid regex: {detail}",
@@ -30015,9 +30173,17 @@
         "headersAdd": "Add header",
         "headersEmpty": "No custom headers.",
         "headersLabel": "Headers",
+        "hookIdLabel": "Hook",
+        "hookIdPlaceholder": "onPreToolUse",
+        "hookIdRequired": "Hook name is required",
         "httpCapability": "HTTP requests require the network capability.",
+        "inertFields": "Ignored by every runtime: {fields}. These keys round-trip in settings.json but no hook runner acts on them.",
         "inputLabel": "Input JSON",
         "modelLabel": "Model (optional)",
+        "pluginHint": "Runs the installed plugin's own hook handler. Desktop and CLI only — the plugin must be enabled, and gating a tool or prompt also requires it to declare hooks:chat-intercept.",
+        "pluginIdLabel": "Plugin",
+        "pluginIdPlaceholder": "my-plugin",
+        "pluginIdRequired": "Plugin id is required",
         "promptLabel": "Prompt",
         "promptRequired": "Prompt can't be empty.",
         "removeAria": "Remove handler",
@@ -30037,6 +30203,7 @@
           "command": "Command",
           "http": "HTTP",
           "mcp_tool": "MCP tool",
+          "plugin": "Plugin",
           "prompt": "Prompt"
         },
         "urlInvalid": "Enter a valid http(s) URL.",
@@ -31279,6 +31446,19 @@
         "baseUrlLabel": "Server URL",
         "baseUrlPlaceholder": "https://your-host:27890",
         "connectAfter": "Connect after pairing",
+        "discover": {
+          "empty": "No Cognia hosts are advertising on this network.",
+          "emptyHint": "The host needs its companion server running with mDNS on (its Settings → Companion).",
+          "matchLive": "This host is advertising at {url}.",
+          "matchStale": "This invitation points at {claimed}, but the host is advertising at {live}.",
+          "notAdvertising": "This host isn't advertising here — pairing will use the address in the invitation.",
+          "scan": "Scan LAN",
+          "scanning": "Scanning…",
+          "self": "This computer",
+          "title": "On this network",
+          "useAddress": "Use this address",
+          "version": "cognia {version}"
+        },
         "errBaseUrl": "Enter a URL like https://your-host:27890.",
         "errGeneric": "Pairing failed. Please try again.",
         "errHttp": "Pairing failed (HTTP {status}). Generate a fresh pair token on the host and try again.",

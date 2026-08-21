@@ -987,7 +987,6 @@
       "deploymentRef": "Deployment profile",
       "deploymentRefPlaceholder": "deployment id (e.g. dep-vendor-a)",
       "description": "How this teammate's runtime, deployment and credentials are bound. References only — endpoints and keys live in provider profiles.",
-      "flagOffHint": "Inert until the unified execution resolver flag (agentExecutionResolverV2) is enabled — dispatch ignores this binding while it is off.",
       "hostAuto": "Any ready worker",
       "hostLocal": "Run with coordinator",
       "hostPinned": "{host} (online)",

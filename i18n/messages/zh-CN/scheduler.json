@@ -192,6 +192,7 @@
     "executionChart": "执行历史（7天）",
     "failed": "失败",
     "noData": "暂无执行数据",
+    "noRunsYet": "尚无运行记录",
     "running": "运行中",
     "title": "仪表盘"
   },
@@ -206,6 +207,7 @@
   "dateTimeRequired": "日期和时间为必填项",
   "days": "天",
   "delete": "删除",
+  "deleteItemConfirm": "确定删除「{name}」（{kind}）吗？此操作无法撤销。",
   "deleteTask": "删除任务",
   "deleteTaskConfirm": "确定要删除此任务吗？此操作无法撤销。",
   "dependencies": {
@@ -313,6 +315,11 @@
     "loop": "循环",
     "statusLabel": "状态",
     "typeLabel": "类型"
+  },
+  "filterBar": {
+    "clear": "清除筛选",
+    "kindMenu": "按类型筛选",
+    "loopOnly": "仅 /loop 任务"
   },
   "finishedAt": "结束时间",
   "footerSuccess": "成功率",
@@ -865,6 +872,10 @@
   },
   "showLess": "显示更少",
   "showMore": "显示更多",
+  "sidebarFooter": {
+    "filtered": "已显示 {shown} / {total}",
+    "total": "共 {total} 项"
+  },
   "slashCommand": {
     "description": "创建定时任务或提醒"
   },

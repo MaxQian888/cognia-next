@@ -93,6 +93,7 @@
     "copy": "复制注册命令",
     "copyFailed": "无法复制注册命令。",
     "description": "注册最小权限 CLI worker，并检查其调度就绪状态。",
+    "dispatchUnavailable": "本宿主当前无法向 worker 派发。它们仍保持连接，但在宿主的执行大脑可用之前，不会有任何运行被发送过去。",
     "empty": "尚未注册执行 worker。",
     "enroll": "注册 worker",
     "error": "Worker 操作失败：{detail}",

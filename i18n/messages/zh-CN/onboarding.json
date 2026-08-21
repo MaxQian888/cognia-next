@@ -1,9 +1,9 @@
 {
   "apiKeyHintHost": "console.anthropic.com",
-  "apiKeyHintPrefix": "在 ",
-  "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
-  "apiKeyLabel": "Anthropic API 密钥",
-  "apiKeyPlaceholder": "sk-ant-…",
+  "apiKeyHintPrefix": "在此获取：",
+  "apiKeyHintSuffix": "密钥不会离开你的设备。",
+  "apiKeyLabel": "API 密钥",
+  "apiKeyPlaceholder": "sk-…",
   "back": "返回",
   "cards": {
     "readFolder": {
@@ -32,21 +32,34 @@
     "dismiss": "关闭"
   },
   "firstRun": {
-    "title": "先真做一件事",
-    "description": "挑一个试试。Agent 现在就做，结果你自己判断。",
-    "runningWith": "以 {name} 的身份运行",
     "changeCharacter": "更换",
+    "connectCta": "先去连接模型",
+    "description": "挑一个试试。Agent 现在就做，结果你自己判断。",
+    "failed": "这次没成功。可以换一个，或者先跳过稍后再试。",
+    "needsModel": "Cognia 还连不上模型，这些任务没有可用的执行方。",
+    "runningWith": "以 {name} 的身份运行",
     "runtimeLine": "正在使用 {runtime}",
     "starting": "正在启动…",
-    "failed": "这次没成功。可以换一个，或者先跳过稍后再试。"
+    "title": "先真做一件事"
   },
   "provider": {
     "apiKey": {
-      "cta": "使用 API 密钥",
-      "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
-      "title": "粘贴 Anthropic API 密钥"
+      "cta": "选择 provider",
+      "description": "OpenAI、Google、DeepSeek、跑在本机的模型，或目录里的任意其它 provider。",
+      "save": "保存并继续",
+      "title": "使用 API 密钥"
     },
     "backToChooser": "换一种登录方式",
+    "baseUrlLabel": "Base URL",
+    "byokNote": "本设备用你自己的密钥直连 provider。订阅登录需要桌面端 —— 那些凭据保存在系统钥匙串里。",
+    "byokTitle": "连接模型",
+    "category": {
+      "aggregator": "网关与聚合",
+      "enterprise": "企业",
+      "flagship": "主要 provider",
+      "local": "本机运行",
+      "specialized": "其它 provider"
+    },
     "claude": {
       "cta": "使用 Anthropic 登录",
       "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
@@ -57,15 +70,26 @@
       "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
       "title": "ChatGPT Plus / Pro（Codex）"
     },
+    "connected": {
+      "description": "Cognia 将通过它访问模型。之后可以在 设置 → 订阅 里添加或切换账号。",
+      "plan": "套餐 {plan}",
+      "title": "已连接"
+    },
     "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+    "localHint": "跑在本机，不需要密钥 —— 确认服务已经启动即可。",
     "loggedInBadge": "已连接",
     "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+    "needsSettings": "这个 provider 需要的不止一把密钥 —— 还有区域和它自己的凭据。等装好之后在 设置 → Providers 里添加。",
     "opencode": {
       "cta": "粘贴 OpenCode 密钥",
       "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
       "title": "OpenCode Zen"
     },
-    "title": "选择登录方式"
+    "pickerEmpty": "没有匹配的 provider。",
+    "pickerLabel": "Provider",
+    "pickerSearch": "搜索 provider…",
+    "title": "选择登录方式",
+    "toastIncomplete": "先把这个 provider 需要的内容填完整。"
   },
   "rail": {
     "label": "设置进度",
@@ -115,7 +139,7 @@
     "title": "这台机器上已经有什么"
   },
   "skip": "暂时跳过",
-  "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+  "toastNeedKey": "粘贴 API 密钥后才能继续。",
   "tour": {
     "computerUse": {
       "cta": "打开自动化设置",
