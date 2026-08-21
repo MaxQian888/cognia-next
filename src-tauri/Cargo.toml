@@ -206,9 +206,9 @@ parking_lot = "0.12"
 # ADR-0059 R13 — bollard (docker) and kube moved to
 # `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
 rusqlite = { version = "0.37", features = ["backup", "bundled"] }
-matrix-sdk-crypto = { version = "0.18.0", default-features = false }
-matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
-ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
+# ADR-0067 Tier B — the Matrix E2EE stack (`matrix-sdk-crypto` /
+# `matrix-sdk-sqlite` / `ruma`) moved to `crates/cognia-connectors`; these
+# declarations outlived the move and kept the stack in app_lib's dep graph.
 # ADR-0067 Phase 4 — the native (sqlite-vec) + cloud (qdrant/…) vector store
 # lives in `crates/cognia-vector`, which owns the `sqlite-vec` + `qdrant-client`
 # deps. Re-aliased as `crate::vector` in lib.rs; the app installs a keyring-backed
@@ -217,11 +217,8 @@ cognia-vector = { path = "../crates/cognia-vector" }
 
 gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
-# Cross-platform PTY backend for the integrated terminal (`src-tauri/src/terminal/`).
-# Uses ConPTY on Windows (Win10 1809+), forkpty on macOS/Linux. wezterm's
-# upstream of choice — accept its known ConPTY quirks (resize artifacts,
-# Alt-key duplication) for v1 and patch downstream if hit.
-portable-pty = "0.9"
+# ADR-0067 Tier B — `portable-pty` moved to `crates/cognia-terminal` together
+# with `src-tauri/src/terminal/` (the path this comment named no longer exists).
 # System font enumeration for the appearance / terminal font pickers
 # (`src-tauri/src/fonts.rs`). Pure-Rust — loads the OS font set and reports
 # each face's monospaced flag so the terminal picker can show only
@@ -235,8 +232,8 @@ opentelemetry = { version = "0.32", optional = true, features = ["trace", "metri
 opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
 tracing-opentelemetry = { version = "0.33", optional = true }
-tokio-socks = "0.5"
-tokio-rustls = "0.26"
+# `tokio-socks` / `tokio-rustls` were direct declarations no `src-tauri/src`
+# file ever named; reqwest's `socks` / `rustls` features pull them transitively.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
 rquickjs = "0.12.2"
@@ -258,11 +255,9 @@ keyring = { version = "4", default-features = false }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 base64 = "0.23"
-# Feishu/Lark long-connection wire protocol — the WS transport exchanges
-# protobuf-framed `pbbp2.Frame` messages (not JSON). `prost` decodes/encodes
-# them via `#[derive(Message)]`, so no `.proto`/`protoc`/build.rs is needed.
-# See `src-tauri/src/connectors/lark_ws.rs`.
-prost = "0.14"
+# ADR-0067 Tier B — `prost` (the Feishu/Lark `pbbp2.Frame` codec) moved to
+# `crates/cognia-connectors` with `lark_ws.rs`; the path this comment named no
+# longer exists.
 
 # ADR-0067 Phase 6 — scheduler + workflow + timing (and the `cron` expression
 # parser) live in `crates/cognia-scheduling`; re-aliased as
@@ -343,15 +338,11 @@ tempfile = "3"
 # the `cognia plugin build` CLI emits. Pure-Rust, no system zlib dep.
 zip = { version = "8", default-features = false, features = ["deflate", "bzip2"] }
 
-# WASM plugin runtime (ADR 0013) — Wasmtime 36 LTS with the component-model
-# feature on by default. `wasmtime-wasi` provides the WASI Preview 2
-# interfaces we host (clocks/random/io/cli/filesystem). `wasmparser` is used
-# to scan for the embedded `cognia:api-version` custom section before the
-# component is compiled. Pin the patched 36.x LTS line: older 24/26 releases
-# are affected by sandbox-escape advisories that were fixed in 36.0.12.
-wasmtime = { version = "=47.0.3", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "=47.0.3"
-wasmparser = "0.256"
+# ADR-0067 Tier B — the WASM plugin runtime (ADR-0013) moved to
+# `crates/cognia-plugin-runtime`, which owns `wasmtime`/`wasmtime-wasi`/
+# `wasmparser` and pins its own version. These declarations outlived the move:
+# no `src-tauri/src` file referenced them, and the stale `=47.0.3` pin built a
+# SECOND wasmtime + cranelift-codegen alongside the crate's `=40.0.4`.
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
 # `derive` gives us the `#[derive(Parser)]` macro; `std` keeps default
@@ -442,14 +433,11 @@ block2 = "0.6"
 # [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "4", features = ["apple-native-keyring-store"] }
 oslog = "0.2"
-# ADR-0067 Phase 5 — `enigo` moved to `crates/cognia-automation`.
-# CGEventTap-based global input capture for the skill recorder
-# (`automation/record/hook_mac.rs`) — the macOS counterpart to the Windows
-# low-level hook. `enigo` already pulls both transitively, so naming them as
-# direct deps keeps the event-tap FFI explicit without adding a new version to
-# the lock.
+# ADR-0067 Phase 5 — `enigo` and the skill-recorder CGEventTap hook moved to
+# `crates/cognia-automation`. `core-graphics` / `core-foundation` stay: the pet
+# overlay (`pet_window/surfaces.rs`) and `power_assertion.rs` use them directly.
+# `core-graphics-types` was named only for the moved event-tap FFI.
 core-graphics = "0.25"
-core-graphics-types = "0.2"
 core-foundation = "0.10"
 # Non-activating NSPanel conversion for the desktop-pet overlay + popup windows
 # (pet_window/macos_panel.rs): floats over all Spaces + full-screen apps and
@@ -479,18 +467,9 @@ objc2-web-kit = { version = "0.3.2", features = [
   "WKWebsiteDataStore",
   "block2",
 ] }
-# macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
-# Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
-# The high-level `accessibility` crate covers reading role/title/children; the
-# raw `-sys` crates below back the three things it can't do but a useful tree
-# needs (all verified against Chrome / VS Code): activating lazy web-content
-# a11y on Chromium/WebKit/Electron apps, resolving the focused/main window, and
-# reading element geometry (AXPosition/AXSize). The whole graph shares one
-# `core-foundation-sys` (0.8) and core-foundation (0.10), so the raw `*Ref` C
-# types and `TCFType` wrappers are interchangeable.
-# ADR-0067 Phase 5 — `accessibility` + `accessibility-sys` moved to
-# `crates/cognia-automation`. The lower-level CF crates stay (shared).
-core-foundation-sys = "0.8"
+# ADR-0067 Phase 5 — the macOS Accessibility (AX) element tree (ADR-0020) and
+# the raw `core-foundation-sys` C types it needed moved to
+# `crates/cognia-automation` with `accessibility` + `accessibility-sys`.
 
 [target."cfg(unix)".dependencies]
 # Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the
@@ -519,9 +498,6 @@ cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
 wiremock = "0.6"
-# Percent-encoding helper for the ws_terminal integration test — small
-# (~200 LOC), no transitive deps. Only needed in test builds.
-urlencoding = "2"
 
 # ADR-0024 — standard desktop builds include PaddleOCR; other native OCR
 # bindings remain explicit opt-ins. Placeholder registrations keep the
