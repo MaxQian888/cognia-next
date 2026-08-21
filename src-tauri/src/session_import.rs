@@ -14,3 +14,19 @@ use serde_json::Value;
 pub fn opencode_sessions_read(home: String) -> Result<Vec<Value>, String> {
     cognia_agent_state::session_import::read_opencode_sessions(home)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The command shell is the only thing left in this module, so the thing
+    /// worth pinning is that it still forwards to the extracted reader
+    /// (ADR-0067 Tier C) and preserves its never-error-on-missing-install
+    /// contract.
+    #[test]
+    fn command_forwards_to_the_extracted_reader_and_tolerates_a_missing_install() {
+        let out = opencode_sessions_read("/nonexistent-home-xyz".to_string())
+            .expect("a missing OpenCode install must not be an error");
+        assert!(out.is_empty());
+    }
+}
