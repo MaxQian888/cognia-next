@@ -62,6 +62,8 @@ members = [
   # src-tauri and the headless `cognia-server` binary.
   "crates/cognia-jobs",
   "crates/cognia-observability",
+  # ADR-0067 Tier C — leaves lifted out of the regrown `app_lib`.
+  "crates/cognia-agents",
   "crates/cognia-deployment",
   "crates/cognia-ops-controller",
   "crates/cognia-deploy-agent",

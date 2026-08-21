@@ -138,6 +138,8 @@ cognia-instrument = { path = "../crates/cognia-instrument" }
 # lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
 cognia-git = { path = "../crates/cognia-git" }
 cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
+# ADR-0067 Tier C — multi-agent MCP config IO (owns `toml_edit`).
+cognia-agents = { path = "../crates/cognia-agents" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane

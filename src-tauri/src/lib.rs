@@ -10,7 +10,12 @@ mod agent_session_store;
 pub fn configure_agent_session_store_path(path: std::path::PathBuf) {
     agent_session_store::configure_path(path);
 }
-mod agents;
+// ADR-0067 Tier C — extracted to `crates/cognia-agents` (it had zero
+// `crate::` edges; it owns the `toml_edit` dependency). Re-aliased so both
+// `agents::commands::…` in generate_handler! and the `crate::agents::paths::…`
+// / `crate::agents::io::…` call sites in `cli_bridge`, `tray`, `fleet`,
+// `codeserver` and `files` resolve unchanged.
+pub use cognia_agents as agents;
 // ADR-0067 Tier B prep — extracted to `crates/cognia-secrets`; re-aliased so
 // `crate::api_key::ApiKeyState` (claude, subscription, companion_api, headless)
 // resolves unchanged.

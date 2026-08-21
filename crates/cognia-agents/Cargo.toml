@@ -1,0 +1,36 @@
+# ADR-0067 Tier C — multi-agent MCP config IO, extracted from `app_lib`.
+#
+# Each external coding agent (Claude Code, Cursor, VS Code, Codex, Gemini,
+# Windsurf, Cline, Roo Code) keeps its MCP servers in its own file at a
+# platform-specific path; this crate resolves those paths per-OS, reads/writes
+# them across the JSON / JSONC / TOML format split, and owns the `toml_edit`
+# dependency that only this subsystem uses.
+#
+# It had ZERO `crate::` edges when it moved, and it is depended on by
+# `cognia-files` (which reads the pi-agent vendor root) as well as by the
+# app-side `cli_bridge`, `tray`, `fleet` and `codeserver` modules.
+[package]
+name = "cognia-agents"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Multi-agent MCP configuration discovery and IO for cognia."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_agents"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Format-preserving TOML rewrites for Codex's `config.toml` — the whole reason
+# this dependency exists in the tree; no other subsystem links it.
+toml_edit = { version = "0.25", features = ["serde"] }
+# Per-OS home/config/data roots for the vendor path table.
+dirs = "6"
+# `commands.rs` only; the four `#[tauri::command]` shells stay co-located with
+# their fns (the macro requires it) and are referenced from the app's
+# `generate_handler!` as `agents::commands::…` through the crate alias.
+tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
