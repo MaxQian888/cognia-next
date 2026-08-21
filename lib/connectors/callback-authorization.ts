@@ -87,6 +87,10 @@ const CONSUME_ONCE_KINDS = new Set<ConnectorCallbackBindingKind>([
   "wf_fanout_approve",
   "wf_fanout_cancel",
   "tool_approve",
+  // A plan gate is answered once per revision. A re-plan mints a new binding,
+  // so consuming here is what stops a stale press on the previous revision
+  // from answering the plan that replaced it.
+  "plan_approve",
   "skill_invoke",
 ])
 

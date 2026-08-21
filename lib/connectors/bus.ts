@@ -2373,6 +2373,57 @@ export class ConnectorBus {
       return true
     }
 
+    // ── Step 4-pre-d: plan_approve short-circuit (ADR-0070 gate) ──
+    //
+    // A button on an A2UI plan-approval card. Resolves the run's pending plan
+    // gate through the same registry the tool card uses, so an IM-triggered
+    // team run whose plan tripped the risk gate asks the person in the thread
+    // instead of failing because "there is no human" — a premise that is true
+    // for a 3am scheduler run and false here.
+    //
+    // A rejection carries the free text typed alongside it, which lands in the
+    // lead's existing re-planning loop: the reply IS the revision instruction.
+    if (resolvedBinding?.kind === "plan_approve") {
+      const planRunId = String(resolvedBinding.payload?.["runId"] ?? "")
+      const requestId = String(resolvedBinding.payload?.["requestId"] ?? "")
+      const decision = String(resolvedBinding.payload?.["decision"] ?? "reject") as
+        "approve" | "reject"
+      const feedback = typeof event.payload?.feedback === "string" ? event.payload.feedback : ""
+      try {
+        const [{ applyPlanApprovalCallback }, { resolveApproval }] = await Promise.all([
+          import("@/lib/connectors/hitl/plan-approval"),
+          import("@/lib/connectors/hitl/approval-registry"),
+        ])
+        const { approved, resolved } = applyPlanApprovalCallback({
+          runId: planRunId,
+          requestId,
+          decision,
+          ...(feedback ? { feedback } : {}),
+          resolve: resolveApproval,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: approved ? "plan_approve.granted" : "plan_approve.denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          // `resolved: false` means the press answered a revision that has
+          // already been superseded — worth distinguishing from a real answer.
+          fields: { runId: planRunId, requestId, decision, resolved },
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return true
+    }
+
     // ── Step 4a: skill_invoke short-circuit (ADR-0026) ───────────────
     //
     // When the binding is a deferred built-in-skill invocation, route

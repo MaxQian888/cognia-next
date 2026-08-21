@@ -218,6 +218,13 @@ export type ConnectorCallbackBindingKind =
   // `{ draft, issueProjectId }`. Move/run buttons stay re-clickable; the
   // creation confirmation is consumed once. See `lib/issues/im/`.
   | "issue_action"
+  // A2UI plan-approval card (ADR-0070 gate, reached through the surface that
+  // started the run). A button press resolves the team run's plan gate.
+  // Payload carries `{ runId, teamId, requestId, decision }`. Distinct from
+  // `wf_approve`, which gates a WORKFLOW step: this one answers the lead's
+  // proposed plan, and a rejection's feedback re-enters the lead's existing
+  // re-planning loop. See `lib/connectors/hitl/plan-approval.ts`.
+  | "plan_approve"
 
 /**
  * Persisted association between an outbound A2UI surface and the

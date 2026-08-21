@@ -39,6 +39,18 @@ export interface StartTeamRunFromIMInput {
    * dispatch without it produces an uncarded, uncontrollable run.
    */
   session?: ChatSession
+  /**
+   * remoteUserId of the person whose message started this run. Scopes the plan
+   * card's buttons to them (or a configured operator), the same rule the tool
+   * approval card uses.
+   */
+  initiatorUserId?: string
+  /**
+   * Plan approval owed by the conversation's AUTONOMY level, independent of
+   * risk. ORed into the team's own flag and the risk-derived gate inside the
+   * lifecycle; it can raise a gate, never lower one.
+   */
+  requirePlanApprovalFloor?: boolean
 }
 
 export interface StartTeamRunFromIMResult {
@@ -177,6 +189,32 @@ export async function startTeamRunFromIM(
 
   const partial = buildAgentTeamRuntimeDeps(entryPersona ? { entryPersona } : undefined)
   const runId = `run_team_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`
+
+  // Give the lifecycle a way to ASK. `origin: "im"` alone put this run under
+  // the headless policy, whose plan gate fails fast on the premise that there
+  // is no human — true for a 3am scheduler run, false for a chat thread with a
+  // person in it and a working approval channel. Supplying the delegate is the
+  // proof of that channel; without a delivery target there is genuinely no
+  // surface to ask on, so the old fail-fast behaviour stands.
+  const deliveryTarget = input.session?.platformBinding?.deliveryTarget
+  const conversationRef = deliveryTarget?.conversationRef
+  const planApprovalDelegate =
+    deliveryTarget && conversationRef
+      ? async (request: { planText: string; revision: number; riskReason?: string }) => {
+          const { makeImPlanApprovalDelegate } = await import("@/lib/connectors/hitl/plan-approval")
+          return makeImPlanApprovalDelegate({
+            runId,
+            teamId,
+            objective: input.goal.trim() || teamId,
+            adapterId: input.adapterId,
+            conversationKey: input.conversationKey,
+            conversationRef,
+            deliveryTarget,
+            ...(input.initiatorUserId ? { initiatorUserId: input.initiatorUserId } : {}),
+          })(request)
+        }
+      : undefined
+
   const lifecycleDeps: Record<string, unknown> = {
     ...partial,
     runId,
@@ -184,6 +222,8 @@ export async function startTeamRunFromIM(
     // Belt-and-braces: the lifecycle also derives "im" from triggeredFrom,
     // but stating it keeps the headless gate policy explicit.
     origin: "im",
+    ...(planApprovalDelegate ? { planApprovalDelegate } : {}),
+    ...(input.requirePlanApprovalFloor ? { requirePlanApprovalFloor: true } : {}),
     ...(input.permissionCeiling ? { parentPermissionCeiling: input.permissionCeiling } : {}),
     storeReader: {
       getTeam: (id: string) => store.getTeam(id),

@@ -634,6 +634,110 @@ describe("runTeamLifecycle — risk-raised plan approval (ADR-0070)", () => {
   })
 })
 
+describe("runTeamLifecycle — an attended headless run asks instead of failing", () => {
+  /** Same roster the risk suite uses: computer-use → high risk. */
+  const riskyWorker = () =>
+    ({ ...worker("w1"), config: { tools: ["computer_use"] } }) as AgentTeammate
+
+  it("asks through the run's own surface when the caller supplies a channel", async () => {
+    // `origin: "im"` alone put this under the headless policy, whose plan gate
+    // fails fast on the premise that there is no human. A chat thread with a
+    // person in it and a working approval channel makes that premise false.
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+      planApprovalDelegate,
+    })
+
+    expect(planApprovalDelegate).toHaveBeenCalledWith(
+      expect.objectContaining({ planText: expect.any(String), revision: 0 })
+    )
+    expect(result.status).toBe("completed")
+  })
+
+  it("names the risk to the person being asked, since risk is what raised the gate", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+
+    await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+      planApprovalDelegate,
+    })
+
+    expect(planApprovalDelegate.mock.calls[0]?.[0]).toMatchObject({
+      riskReason: expect.stringContaining("computer-use"),
+    })
+  })
+
+  it("feeds a rejection back into the lead's re-planning loop", async () => {
+    const planApprovalDelegate = jest
+      .fn()
+      .mockResolvedValue({ outcome: "reject", feedback: "split it up" })
+    const deps = buildDeps(
+      { ...baseTeam, config: { ...baseTeam.config, maxPlanRevisions: 2 } },
+      [task("t1")],
+      [lead, riskyWorker()]
+    )
+    const runLeadPlanning = jest.fn(deps.runLeadPlanning!)
+    deps.runLeadPlanning = runLeadPlanning
+
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+      planApprovalDelegate,
+    })
+
+    expect(runLeadPlanning).toHaveBeenCalledTimes(2)
+    expect(runLeadPlanning.mock.calls[1]?.[0]).toMatchObject({ feedback: "split it up" })
+    expect(result.status).toBe("failed")
+  })
+
+  it("still fails fast when the caller has no channel to ask through", async () => {
+    // The default is no channel, so every existing caller keeps today's
+    // behaviour byte for byte — claiming a channel one cannot service would
+    // turn a loud failure into a silent hang.
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "im" })
+    expect(result.status).toBe("failed")
+  })
+
+  it("lets the operator's autonomy raise the gate on a run risk would not have gated", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+
+    await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+      requirePlanApprovalFloor: true,
+      planApprovalDelegate,
+    })
+
+    expect(planApprovalDelegate).toHaveBeenCalled()
+    // Not risk — so the card must not blame the roster for the operator's choice.
+    expect(planApprovalDelegate.mock.calls[0]?.[0]).not.toHaveProperty("riskReason")
+  })
+})
+
 describe("runTeamLifecycle — ultracode orchestration", () => {
   const fence = (json: unknown) => "```json\n" + JSON.stringify(json) + "\n```"
 

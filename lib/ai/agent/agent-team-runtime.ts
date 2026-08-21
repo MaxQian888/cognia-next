@@ -115,6 +115,25 @@ export interface RunTeamLifecycleDeps {
    */
   origin?: TeamRunOrigin
   /**
+   * Ask a human about the lead's plan through the run's OWN surface.
+   *
+   * Supplying it is the caller's proof that a reachable human exists — which
+   * is what flips the gate policy from `fail-fast` to `delegate`. `resolveGatePolicy`
+   * defaults to no channel, so every existing caller keeps today's behaviour.
+   */
+  planApprovalDelegate?: (request: {
+    planText: string
+    revision: number
+    riskReason?: string
+  }) => Promise<import("@/lib/runtime/approval-bus").ApprovalDecision>
+  /**
+   * Ceremony the OPERATOR's autonomy level owes, independent of risk
+   * (ADR-0070 + the autonomy axis). ORed with the risk-derived gate and the
+   * team's own flag, never subtracted from either — a permissive autonomy
+   * level must not be able to cancel a gate risk raised.
+   */
+  requirePlanApprovalFloor?: boolean
+  /**
    * Operator override for ultracode orchestration (ADR-0022 addendum).
    * `"force"` runs the ultracode pattern composition regardless of autoMode;
    * `"off"` forces the flat task DAG. Omitted → the team's `ultracode.autoMode`
@@ -378,7 +397,9 @@ export async function runTeamLifecycle(
     // fail-fast) instead of blocking on a modal nobody is watching.
     const origin: TeamRunOrigin =
       deps.origin ?? (deps.triggeredFrom?.source === "im" ? "im" : "interactive")
-    const gatePolicy = resolveGatePolicy(origin)
+    const gatePolicy = resolveGatePolicy(origin, {
+      approvalChannel: deps.planApprovalDelegate !== undefined,
+    })
 
     // Notifier is created BEFORE the pre-run gates so the capability-audit
     // gate can open its modal (interactive) or emit its warning (headless).
@@ -447,11 +468,15 @@ export async function runTeamLifecycle(
     const riskAssessment = classifyRisk(buildTeamRiskInput({ team, workers, tasks }))
     const riskRaisedGate =
       (team.config.riskGating ?? true) && requiredCeremony(riskAssessment).requirePlanApproval
-    const requirePlanApproval = Boolean(team.config.requirePlanApproval) || riskRaisedGate
+    const requirePlanApproval =
+      Boolean(team.config.requirePlanApproval) ||
+      riskRaisedGate ||
+      deps.requirePlanApprovalFloor === true
     // Only explain the gate by its risk when risk is the SOLE cause. An
     // operator who set `requirePlanApproval` already knows why the gate is
     // there; telling them it's the risk assessment would be a lie.
-    const gateIsRiskOnly = riskRaisedGate && !team.config.requirePlanApproval
+    const gateIsRiskOnly =
+      riskRaisedGate && !team.config.requirePlanApproval && deps.requirePlanApprovalFloor !== true
 
     // ── Plan-approval gate (synthesizer-local; never enters workflow) ──
     if (requirePlanApproval) {
@@ -460,7 +485,7 @@ export async function runTeamLifecycle(
       // that cannot be approved. Whether the gate was an explicit operator
       // choice or risk-raised, honor it by failing loudly instead of
       // auto-approving; a risky unattended run is exactly what this refuses.
-      if (gatePolicy.planApproval !== "block") {
+      if (gatePolicy.planApproval !== "block" && gatePolicy.planApproval !== "delegate") {
         const reason = gateIsRiskOnly
           ? `This run touches ${riskAssessment.reason} and cannot proceed unattended (origin=${origin}); run it interactively, or set riskGating=false to opt out`
           : `requirePlanApproval is enabled but this run is headless (origin=${origin}); approve interactively or disable plan approval`
@@ -535,10 +560,32 @@ export async function runTeamLifecycle(
           openApproval: { scope: "agent-team", id: teamId },
           dedupeKey: `plan-approval:${runId}:${i}`,
         })
-        const decision = await waitForDecision(
-          { scope: "agent-team", id: teamId },
-          ac.signal
-        ).catch(() => ({ outcome: "reject" as const, feedback: "aborted" }))
+        // `block` waits on the pending-gates modal; `delegate` asks through the
+        // surface that started the run. Both land in the same branch below, so
+        // a plan approved from a chat thread and one approved from the desktop
+        // modal are indistinguishable to everything downstream — including the
+        // rejection feedback, which re-enters this loop as the next revision's
+        // instruction either way.
+        const decision = await applyGateBehavior(
+          gatePolicy.planApproval,
+          () =>
+            waitForDecision({ scope: "agent-team", id: teamId }, ac.signal).catch(() => ({
+              outcome: "reject" as const,
+              feedback: "aborted",
+            })),
+          {
+            ...(deps.planApprovalDelegate
+              ? {
+                  delegate: () =>
+                    deps.planApprovalDelegate!({
+                      planText: planResult.planText,
+                      revision: i,
+                      ...(gateIsRiskOnly ? { riskReason: riskAssessment.reason } : {}),
+                    }),
+                }
+              : {}),
+          }
+        )
         // Decision (or abort) received — lift the lead out of awaiting_approval
         // so neither answer surface keeps rendering a live-looking gate.
         deps.storeWriter.updateTeammate(lead.id, { status: "idle" })

@@ -291,3 +291,83 @@ describe("execution run binding", () => {
     expect(result.started).toBe(true)
   })
 })
+
+describe("plan approval channel", () => {
+  const withTarget = {
+    id: "s1",
+    platformBinding: {
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      deliveryTarget: {
+        conversationRef: { platform: "telegram", adapterId: "a1", channelId: "c1" },
+        address: { scopeKind: "private" },
+      },
+    },
+  } as never
+
+  const withoutTarget = {
+    id: "s1",
+    platformBinding: { adapterId: "a1", conversationKey: "telegram:a1:c1" },
+  } as never
+
+  beforeEach(() => runTeamLifecycleMock.mockClear())
+
+  it("hands the lifecycle a way to ask when there is a surface to ask on", async () => {
+    // `origin: "im"` alone put the run under the headless policy, whose plan
+    // gate fails fast on the premise that there is no human. Supplying the
+    // delegate is the proof that premise is false here.
+    await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session: withTarget,
+      initiatorUserId: "ou-user",
+    })
+
+    const deps = runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(typeof deps.planApprovalDelegate).toBe("function")
+    expect(deps.origin).toBe("im")
+  })
+
+  it("omits the delegate when there is genuinely no surface, keeping fail-fast", async () => {
+    // Claiming a channel that cannot be serviced would turn a loud failure
+    // into a silent hang, which is strictly worse.
+    await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session: withoutTarget,
+    })
+
+    const deps = runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(deps.planApprovalDelegate).toBeUndefined()
+  })
+
+  it("passes the autonomy-derived approval floor through, and only when set", async () => {
+    await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session: withTarget,
+      requirePlanApprovalFloor: true,
+    })
+    expect(
+      (runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>).requirePlanApprovalFloor
+    ).toBe(true)
+
+    runTeamLifecycleMock.mockClear()
+    await startTeamRunFromIM({
+      teamId: "team_real",
+      goal: "Ship the thing",
+      adapterId: "a1",
+      conversationKey: "telegram:a1:c1",
+      session: withTarget,
+    })
+    expect(
+      (runTeamLifecycleMock.mock.calls[0]?.[1] as Record<string, unknown>).requirePlanApprovalFloor
+    ).toBeUndefined()
+  })
+})

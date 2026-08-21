@@ -258,6 +258,15 @@ export type AuditKind =
   | "tool_approve.granted"
   | "tool_approve.denied"
   | "tool_approve.expired"
+  // Plan approval over chat (ADR-0070 gate reached through the surface that
+  // started the run). `requested` when the lead's plan projected an
+  // Approve/Reject card; `granted` / `denied` on the press; `expired` when the
+  // TTL elapsed, which resolves as a rejection so the lead re-plans rather
+  // than the run hanging open.
+  | "plan_approve.requested"
+  | "plan_approve.granted"
+  | "plan_approve.denied"
+  | "plan_approve.expired"
   // Proactive notification over IM (control-plane notifications). `pushed` when
   // an agent event was enqueued to a conversation; `skipped` when opt-in was
   // off / no target resolved; `pii_blocked` when the PII gate dropped it.
