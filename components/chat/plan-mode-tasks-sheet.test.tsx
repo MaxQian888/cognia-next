@@ -29,9 +29,13 @@ function record(sessionId: string, todos: TodoEntry[]): RunRecordRow {
   }
 }
 
+// The first `getDb()` call opens the database lazily and runs every schema
+// upgrade in sequence, which costs ~4-5s on its own — right at Jest's 5s
+// default and historically flaky because of it. The budget below is for that
+// one-time open, not for anything this component does.
 beforeEach(async () => {
   await getDb().runRecords.clear()
-})
+}, 30_000)
 
 describe("PlanModeTasksSheet", () => {
   it("renders nothing when the latest run record has no todos", async () => {

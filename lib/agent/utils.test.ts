@@ -2,7 +2,6 @@ import {
   formatBytes,
   formatDuration,
   formatToolName,
-  buildAgentTeamWorkspaceHref,
   formatAgentAsMarkdown,
   parseReplayEvent,
   TOOL_STATE_CONFIG,
@@ -72,19 +71,6 @@ describe("formatToolName", () => {
 
   it("preserves single tokens", () => {
     expect(formatToolName("bash")).toBe("Bash")
-  })
-})
-
-describe("buildAgentTeamWorkspaceHref", () => {
-  it("returns the bare path when teamId is missing", () => {
-    expect(buildAgentTeamWorkspaceHref()).toBe("/agent-teams")
-    expect(buildAgentTeamWorkspaceHref(null)).toBe("/agent-teams")
-    expect(buildAgentTeamWorkspaceHref(undefined)).toBe("/agent-teams")
-  })
-
-  it("appends an encoded teamId when provided", () => {
-    expect(buildAgentTeamWorkspaceHref("abc-123")).toBe("/agent-teams?team=abc-123")
-    expect(buildAgentTeamWorkspaceHref("with space")).toBe("/agent-teams?team=with%20space")
   })
 })
 

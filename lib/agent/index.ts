@@ -25,7 +25,6 @@ export {
   formatBytes,
   formatTokens,
   formatDuration,
-  buildAgentTeamWorkspaceHref,
   downloadFile,
   formatAgentAsMarkdown,
   parseReplayEvent,

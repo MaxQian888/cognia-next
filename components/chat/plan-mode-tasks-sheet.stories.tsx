@@ -4,7 +4,7 @@ import { PlanModeTasksSheet } from "./plan-mode-tasks-sheet"
 import { seedDb } from "@/lib/storybook/seed-db"
 
 const meta = {
-  title: "Agent/Workspace/PlanModeTasksSheet",
+  title: "Chat/PlanModeTasksSheet",
   component: PlanModeTasksSheet,
   args: { sessionId: "session-1" },
 } satisfies Meta<typeof PlanModeTasksSheet>

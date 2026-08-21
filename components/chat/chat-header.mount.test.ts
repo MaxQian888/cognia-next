@@ -13,7 +13,7 @@ const src = readFileSync(join(__dirname, "chat-header.tsx"), "utf8")
 describe("chat header wiring", () => {
   it("imports and renders PlanModeTasksSheet", () => {
     expect(src).toMatch(
-      /import\s*{\s*PlanModeTasksSheet\s*}\s*from\s*"@\/components\/agent\/workspace\/plan-mode-tasks-sheet"/
+      /import\s*{\s*PlanModeTasksSheet\s*}\s*from\s*"@\/components\/chat\/plan-mode-tasks-sheet"/
     )
     expect(src).toMatch(/<PlanModeTasksSheet\s+sessionId=/)
   })

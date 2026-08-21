@@ -81,7 +81,7 @@ jest.mock("@/components/chat/session-cost-badge-live", () => ({
     <div data-testid="cost-badge">{sessionId}</div>
   ),
 }))
-jest.mock("@/components/agent/workspace/plan-mode-tasks-sheet", () => ({
+jest.mock("@/components/chat/plan-mode-tasks-sheet", () => ({
   PlanModeTasksSheet: () => <div data-testid="plan-tasks" />,
 }))
 jest.mock("@/components/plugins/plugin-extension-slot", () => ({

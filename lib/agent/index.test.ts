@@ -14,7 +14,6 @@ describe("agent module barrel", () => {
     expect(typeof agent.formatBytes).toBe("function")
     expect(typeof agent.formatTokens).toBe("function")
     expect(typeof agent.formatDuration).toBe("function")
-    expect(typeof agent.buildAgentTeamWorkspaceHref).toBe("function")
     expect(typeof agent.downloadFile).toBe("function")
     expect(typeof agent.formatAgentAsMarkdown).toBe("function")
     expect(typeof agent.parseReplayEvent).toBe("function")

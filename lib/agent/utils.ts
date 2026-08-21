@@ -274,14 +274,6 @@ export function formatDuration(ms: number): string {
   return `${(ms / 60000).toFixed(1)}m`
 }
 
-/**
- * Build a stable workspace route for Agent Team entrypoints.
- */
-export function buildAgentTeamWorkspaceHref(teamId?: string | null): string {
-  if (!teamId) return "/agent-teams"
-  return `/agent-teams?team=${encodeURIComponent(teamId)}`
-}
-
 // ============================================================================
 // File Export Utilities
 // ============================================================================
