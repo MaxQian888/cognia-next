@@ -136,6 +136,7 @@
     "0136-cross-device-placement",
     "0137-delegation-runtime",
     "0138-reading-area-layout-stability",
-    "0139-visual-output-routing"
+    "0139-visual-output-routing",
+    "0140-squad-as-an-executor"
   ]
 }
