@@ -87,6 +87,110 @@ the MCP `readOnlyHint` annotation, which is advisory metadata supplied by
 third-party servers and is not a security boundary. First release is read-only;
 when a strict sandbox is unavailable Code fails closed with no degraded path.
 
+## Amendment (2026-08-21) — Engagement and Autonomy
+
+Two axes join the five. Both come from the connector side, where a "mode" had
+been decided by a different mechanism entirely, and adding them here is what
+stops there being two mode systems.
+
+The IM stack decided a turn's behaviour from two orthogonal fields that were
+never named as axes: `ConnectorMode` (`auto` / `manual` / `draft`) and
+`ImExecutionTarget` (`direct` / `team` / `workflow`). Their product is what
+people had been calling "assistant mode" and "delegation mode" — neither of
+which exists anywhere in the code. Nine cells, two of them silently broken.
+
+### Engagement — `inline` / `background` / `human`
+
+The decisive case is `direct` × `background`: one agent, no team, hand it a task,
+it runs in the background with progress, steering, and a stop button. It uses the
+**same executor** as `direct` × `inline`, so orchestration cannot express it; and
+`human` has no agent loop at all.
+
+Engagement does not choose an executor — that is orchestration's job. It names an
+attachment switch that already existed implicitly and was already mutually
+exclusive:
+
+| Value | What it attaches to |
+| --- | --- |
+| `inline` | `opts.runAndCapture` — the turn answers in place |
+| `background` | `ExecutionRun` + binding + presentation runner + run control |
+| `human` | `setAssignee` + the SLA ladder |
+
+### Autonomy — `observe` / `suggest` / `confirm` / `act` / `autopilot`
+
+Autonomy is **not a second permission model**. It is a cap on Authority and a
+floor under ceremony, reusing two existing mechanisms once each:
+
+| Autonomy | Authority cap (via `narrowAuthority`) | Ceremony floor (ORed into `requiredCeremony`) |
+| --- | --- | --- |
+| `observe` | does not run | — |
+| `suggest` | `plan` | `{gate, requirePlanApproval, requireAcceptance}` |
+| `confirm` | `default` | `{gate}` |
+| `act` | `acceptEdits` | none — risk alone decides |
+| `autopilot` | uncapped (still bounded by the parent ceiling) | none |
+
+`resolve-composition.ts` already narrows in order — `preset.maxAuthority`, then
+`input.ceiling` — so the autonomy cap is a **third input to the same loop**, not
+new permission code. Composition with risk is field-wise OR, which is the whole
+safety property: a permissive autonomy level can never cancel a gate that risk
+raised. `autopilot` clears only the *operator's* floor; the escape hatch from a
+risk-raised gate remains the separate, visible `riskGating` switch.
+
+The host default is `autopilot`, and that is deliberate: it is the only value
+that contributes nothing, so adding the axis changes no existing behaviour.
+Anything lower would silently narrow a user who had chosen `bypassPermissions`.
+
+### What this fixes
+
+The `draft` × delegation bug is a consequence of the old shape and disappears in
+the new one. `draft` was a **route** — one branch of `routeInbound` — so a
+conversation bound to a team resolved no target at all and silently degraded to a
+single-agent draft. As an axis it is `autonomy: "suggest"`, which produces
+`requireAcceptance`, and the **delivery** stage chooses between a draft and a
+governed send. A team-bound conversation under `suggest` really does dispatch to
+the team, and stores the team's output as a draft.
+
+Engagement follows the **target**, not the mode — which is the axis-level
+statement of the same defect:
+
+| Legacy | Engagement | Autonomy | Authority cap | Orchestration |
+| --- | --- | --- | --- | --- |
+| `auto` + direct | `inline` | `act` | `acceptEdits` | `direct` |
+| `auto` + team/workflow | `background` | `act` | `acceptEdits` | `team` / `workflow` + ref |
+| `draft` (any target) | `inline` | `suggest` | `plan` | whatever routing resolved |
+| `manual` | `human` | `observe` | — | — |
+| `approvalMode: "yolo"` | — | — | `bypassPermissions` | — |
+| `assignee.kind === "human"` | `human` | `observe` | — | — |
+
+Orchestration gains `"team"` plus an `orchestrationRef`, so `ImExecutionTarget`
+folds in. The routing fields stay the **storage authority** for orchestration — a
+composition never carries a `teamId`. That is the hard line against a second
+router: `/team`, `/workflow`, and `/character` writes are unchanged.
+
+### The one seam
+
+`BuildOptionsContext` gains a single field, `compositionSelection`. The connector
+runtime fills it after `effectiveConfig` resolves; `resolveTurnCompositionSafely`
+forwards it. Before this, `build-options.ts` called the resolver without a
+selection, which fell back to reading the desktop zustand store out of
+localStorage — so **every IM turn composed from whatever the desktop user last
+clicked in the composer**, while the entire IM configuration stack sat unused.
+One field is the whole convergence: no new resolver, no new store, no duplicated
+precedence chain.
+
+### Storage
+
+No Dexie version. Every new field is non-indexed and optional, matching the
+precedent already set by `teamId` / `workflowId` / `approvalMode` /
+`reasoningOverride`. `ConversationOverrideRow` gains `autonomy` / `engagement` /
+`authority` (plus assignment snapshots); `AdapterInstanceRow` gains the matching
+`default*` fields. **No backfill**: deriving `{autonomy, engagement}` from `mode`
+at read time is lossless and reversible; writing it into rows is not.
+
+`ConnectorMode` stays as a compatibility mirror — `InboxSendPolicy.forcedMode` is
+still a live path in scheduled outbound, and the plugin SDK mirrors the field.
+Writes set both; reads prefer the axes and derive from `mode` when absent.
+
 ## Reused ownership
 
 This decision adds no second runtime enum, router, event bus, permission

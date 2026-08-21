@@ -93,3 +93,53 @@ Gateway requests now resolve through the Rust `RoutePlanner` from a validated, v
 Deployment rotation and credential rotation are separate reservations. Deployment cursors are scoped to the policy revision, route, and eligible-candidate fingerprint; credential cursors are scoped to the deployment and credential-pool fingerprint. Pool changes reset selection safely, duplicate/blank keys are removed, and an all-cooling pool fails with `503` plus `Retry-After`. Authentication errors do not switch credentials or providers unless a verified route ticket explicitly permits auth failover.
 
 Retries remain pre-response-byte only. The candidate walk is bounded by both Gateway retry configuration and policy fallback limits, and its capped exponential waits share one total wait budget while respecting upstream recovery headers. Snapshot compilation remains outside the request path, and invalid V2 snapshots retain the previous valid snapshot rather than falling through to an unfiltered chain.
+
+### Phase 10 — Difficulty signals and the second-opinion judge (Accepted, implemented)
+
+Auto routing scored difficulty from the prompt text alone. Every other signal it
+needed was already on the request and simply never read: `attachmentKinds` on the
+task hints, `messageCount` on the routing context, tool availability computed one
+line away as a hard capability filter, and the effort level the user had
+explicitly chosen discarded entirely. A screenshot plus a twenty-turn thread was
+scored as if it were the same sentence typed cold.
+
+`deterministicDifficulty` reads all of them and reports each contribution
+separately, so a threshold can be tuned from evidence rather than taste. The
+text-only `scoreDifficulty` is unchanged and exact — four callers depend on it,
+and a test pins the two to the same number. Effort is a **floor**, not a term:
+someone who picked `max` already answered "how hard is this?", and a floor
+respects that answer without capping evidence pointing higher.
+
+On top sits an optional judge, and the interesting part is when it is **not**
+consulted. The deterministic pass always runs and always yields a usable tier;
+the judge is asked only when the score sits within `uncertaintyBand` of a tier
+cut point. An unambiguous prompt never reaches it, so the median request gains
+0 ms — which is why the two published latency figures for LLM routing (~400 ms
+for a judge, tens of milliseconds for an always-on classifier) are not in
+conflict: they describe two different layers.
+
+It is fail-open in the only direction that matters. Timeout, PII refusal,
+malformed answer, a judge that throws — all leave the deterministic tier exactly
+where it was, so the layer can only improve a decision the router was already
+unsure of. It never sends a prompt the redaction gate objects to (a routing hint
+is not worth a disclosure), and it never caches a timeout (that would turn one
+slow moment into five minutes of a disabled judge). A verdict that moves the tier
+moves the score with it, because the alias ladder is chosen from the score —
+recording a verdict and then ignoring it would be worse than not asking.
+
+The package stays free of any LLM dependency: `judgeDifficulty` is injected
+through the same runtime seam as pricing and capabilities, and the gate is read
+from the runtime adapters when a request does not carry its own — so a caller
+that never heard of the feature still honours the user's switch. Off by default
+twice over: `autoRouting.judge.enabled` does nothing unless `autoRouting.enabled`
+is also on, and shadow mode remains the intended rollout path.
+
+`routing.plan` attributes are now built in one place. Both emit sites hand-wrote
+them and had already drifted — the teammate dispatcher omitted the classification
+entirely, so every teammate turn contributed a decision id with no score and
+calibration counted it as absent. Numbers and enums only: the calibration
+pipeline reads decisions and never content, and a trace attribute carrying prompt
+text would break that on a path that runs for every routed turn.
+`analyzeRoutingCalibration` also reports how the judge behaved — consulted,
+agreed, overrode, mean latency — because whether a second-opinion layer earns its
+cost is an empirical question, not an architectural one.

@@ -76,6 +76,98 @@ SDK，SDK 的每次调用都重新进入正常的 tool registry、参数校验�
 的 `readOnlyHint` 注解推导——该注解是第三方服务器提供的建议性元数据，不是安全
 边界。首期严格只读；严格沙箱不可用时 Code 直接 fail closed，不提供降级路径。
 
+## 修订（2026-08-21）—— Engagement 与 Autonomy
+
+五条轴之外再加两条。两条都来自连接器侧 —— 那里的"模式"一直由一套完全不同的机制决
+定 —— 把它们并进来，正是为了不让世上存在两套模式系统。
+
+IM 栈用两个从未被命名为轴的正交字段决定一次轮次的行为：`ConnectorMode`
+（`auto` / `manual` / `draft`）与 `ImExecutionTarget`（`direct` / `team` /
+`workflow`）。它们的乘积就是人们一直称作"助理模式"和"委派模式"的东西 —— 而这两个
+名字在代码里任何地方都不存在。九个格子，其中两个静默损坏。
+
+### Engagement —— `inline` / `background` / `human`
+
+决定性的用例是 `direct` × `background`：单 agent、无团队、交一个任务后台跑，带进
+度、可 steer、有停止按钮。它用的是与 `direct` × `inline` **同一个执行器**，所以
+orchestration 表达不了它；而 `human` 压根没有 agent loop。
+
+Engagement 不选执行器 —— 那是 orchestration 的职责。它命名的是一个早已隐式存在、
+且早已互斥的挂载开关：
+
+| 取值 | 挂到哪里 |
+| --- | --- |
+| `inline` | `opts.runAndCapture` —— 轮次就地作答 |
+| `background` | `ExecutionRun` + binding + 呈现 runner + run control |
+| `human` | `setAssignee` + SLA 阶梯 |
+
+### Autonomy —— `observe` / `suggest` / `confirm` / `act` / `autopilot`
+
+Autonomy **不是第二套权限模型**。它是对 Authority 的上限加对 ceremony 的下限，把两
+套现成机制各复用一次：
+
+| Autonomy | Authority 上限（走 `narrowAuthority`） | Ceremony 下限（OR 进 `requiredCeremony`） |
+| --- | --- | --- |
+| `observe` | 不跑 | — |
+| `suggest` | `plan` | `{gate, requirePlanApproval, requireAcceptance}` |
+| `confirm` | `default` | `{gate}` |
+| `act` | `acceptEdits` | 无 —— 只由风险决定 |
+| `autopilot` | 不封顶（仍受父 ceiling 约束） | 无 |
+
+`resolve-composition.ts` 本来就是按序收窄 —— 先 `preset.maxAuthority`，再
+`input.ceiling` —— 所以 autonomy 上限是**同一个循环的第三个输入**，不是新的权限代
+码。与风险的合成是按位 OR，这就是全部的安全属性：宽松的 autonomy 档位永远无法取消
+风险抬起的门。`autopilot` 只清零**操作者的**下限；从风险抬起的门里逃出去的口子仍
+然是那个独立、可见的 `riskGating` 开关。
+
+宿主默认是 `autopilot`，这是刻意的：它是唯一什么都不贡献的取值，所以加这条轴不改
+变任何既有行为。任何更低的档位都会悄悄收窄一个已经选择了 `bypassPermissions` 的用
+户。
+
+### 它修掉了什么
+
+`draft` × 委派的 bug 是旧形状的必然结果，在新形状里自然消失。`draft` 曾是一条**路
+由** —— `routeInbound` 的一个分支 —— 所以绑了团队的会话根本解析不出目标，静默降级
+成单 agent 草稿。作为一条轴，它是 `autonomy: "suggest"`，由它产生
+`requireAcceptance`，再由**投递阶段**在草稿与受治理发送之间做选择。绑了团队的会话
+在 `suggest` 下会真的派给团队，并把团队的产出存成草稿。
+
+Engagement 跟随的是**目标**，不是模式 —— 这就是同一个缺陷的轴级表述：
+
+| 旧值 | Engagement | Autonomy | Authority 上限 | Orchestration |
+| --- | --- | --- | --- | --- |
+| `auto` + direct | `inline` | `act` | `acceptEdits` | `direct` |
+| `auto` + team/workflow | `background` | `act` | `acceptEdits` | `team`/`workflow` + ref |
+| `draft`（任意目标） | `inline` | `suggest` | `plan` | 由路由决定 |
+| `manual` | `human` | `observe` | — | — |
+| `approvalMode: "yolo"` | — | — | `bypassPermissions` | — |
+| `assignee.kind === "human"` | `human` | `observe` | — | — |
+
+Orchestration 新增 `"team"` 与 `orchestrationRef`，于是 `ImExecutionTarget` 并入。
+路由字段仍是 orchestration 的**存储权威** —— composition 永不自带 `teamId`。这是不
+出现第二个路由器的硬线：`/team`、`/workflow`、`/character` 的写入完全不变。
+
+### 唯一的接缝
+
+`BuildOptionsContext` 增加一个字段 `compositionSelection`。连接器 runtime 在
+`effectiveConfig` 解析完之后填它，`resolveTurnCompositionSafely` 转发它。在此之前
+`build-options.ts` 调解析器时不传 selection，于是回落到从 localStorage 读桌面
+zustand store —— **每一次 IM 轮次的 composition 实际上都是桌面用户最后在 composer
+里点的那个**，而整套 IM 配置栈闲置不用。一个字段就是全部的收敛：没有新解析器、没
+有新 store、没有重复的优先级链。
+
+### 存储
+
+无需 Dexie 版本号。所有新字段非索引、可选，与 `teamId` / `workflowId` /
+`approvalMode` / `reasoningOverride` 已确立的先例一致。`ConversationOverrideRow`
+新增 `autonomy` / `engagement` / `authority`（以及指派快照）；`AdapterInstanceRow`
+新增对应的 `default*` 字段。**不做回填**：读时从 `mode` 推导 `{autonomy,
+engagement}` 是无损可逆的，写进行里就不是。
+
+`ConnectorMode` 保留为兼容镜像 —— `InboxSendPolicy.forcedMode` 在定时出站里仍是活
+路径，插件 SDK 也镜像了该字段。写时同时写两边；读时新轴优先，缺失则由 `mode` 推
+导。
+
 ## 复用边界
 
 本决策不新增第二套 runtime 枚举、路由、事件总线、权限系统、沙箱或 Dexie 表，
