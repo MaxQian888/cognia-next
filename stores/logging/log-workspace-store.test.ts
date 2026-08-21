@@ -3,6 +3,7 @@ import {
   DETAIL_WIDTH_MIN,
   migrateLogWorkspace,
   resolveLogWorkspaceView,
+  resolveTraceSubView,
   useLogWorkspaceStore,
 } from "./log-workspace-store"
 
@@ -16,7 +17,7 @@ describe("log-workspace-store", () => {
     expect(state.activeView).toBe("logs")
     expect(state.density).toBe("comfortable")
     expect(state.receiptsOnly).toBe(false)
-    expect(state.traceWindow).toBe("today")
+    expect(state.traceSubView).toBe("explore")
   })
 
   it("clamps the incident detail pane width", () => {
@@ -33,7 +34,7 @@ describe("log-workspace-store", () => {
     state.setIncidentStateFilter("accepted")
     state.setReceiptsOnly(true)
     state.setDensity("compact")
-    state.setTraceWindow("week")
+    state.setTraceSubView("dashboard")
     state.setTraceErrorsOnly(true)
 
     expect(useLogWorkspaceStore.getState()).toMatchObject({
@@ -42,7 +43,7 @@ describe("log-workspace-store", () => {
       incidentStateFilter: "accepted",
       receiptsOnly: true,
       density: "compact",
-      traceWindow: "week",
+      traceSubView: "dashboard",
       traceErrorsOnly: true,
     })
   })
@@ -61,7 +62,7 @@ describe("log-workspace-store", () => {
       receiptsOnly: false,
       activeSource: "all",
       incidentStateFilter: "all",
-      traceWindow: "today",
+      traceSubView: "explore",
       traceErrorsOnly: false,
     })
   })
@@ -74,6 +75,16 @@ describe("resolveLogWorkspaceView", () => {
     expect(resolveLogWorkspaceView("health")).toBe("logs")
     expect(resolveLogWorkspaceView(null)).toBe("logs")
     expect(resolveLogWorkspaceView("incidents", "traces")).toBe("incidents")
+  })
+})
+
+describe("resolveTraceSubView", () => {
+  it("accepts the two sub-views and rejects anything else", () => {
+    expect(resolveTraceSubView("dashboard")).toBe("dashboard")
+    expect(resolveTraceSubView("explore")).toBe("explore")
+    expect(resolveTraceSubView("nope")).toBe("explore")
+    expect(resolveTraceSubView(null)).toBe("explore")
+    expect(resolveTraceSubView(undefined, "dashboard")).toBe("dashboard")
   })
 })
 
@@ -110,6 +121,17 @@ describe("migrateLogWorkspace", () => {
     })
     expect(migrated).not.toHaveProperty("navigationWidth")
     expect(migrated).not.toHaveProperty("navigationCollapsed")
+  })
+
+  it("drops the v2 trace window — the shared Grafana range replaced it", () => {
+    const migrated = migrateLogWorkspace({ activeView: "traces", traceWindow: "month" })
+    expect(migrated).not.toHaveProperty("traceWindow")
+    expect(migrated.traceSubView).toBe("explore")
+  })
+
+  it("restores a persisted sub-view and rejects a hostile one", () => {
+    expect(migrateLogWorkspace({ traceSubView: "dashboard" }).traceSubView).toBe("dashboard")
+    expect(migrateLogWorkspace({ traceSubView: "charts" }).traceSubView).toBe("explore")
   })
 
   it("clamps and defaults hostile persisted values", () => {

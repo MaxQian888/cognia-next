@@ -23,6 +23,9 @@ export interface TimeRangePickerProps {
   customUntil: number | null
   onPreset: (preset: RangePreset) => void
   onCustom: (since: number, until: number) => void
+  /** Tighten the label's truncation cap — narrow toolbars only. A pinned
+   * absolute range renders as "from → to", which is ~200px unclamped. */
+  compact?: boolean
 }
 
 /** epoch ms → "YYYY-MM-DDTHH:mm" in local time for <input type=datetime-local>. */
@@ -45,6 +48,7 @@ export function TimeRangePicker({
   customUntil,
   onPreset,
   onCustom,
+  compact = false,
 }: TimeRangePickerProps) {
   const t = useTranslations("observability.range")
   const [open, setOpen] = useState(false)
@@ -76,7 +80,9 @@ export function TimeRangePicker({
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5" data-testid="time-range-trigger">
           <ClockIcon className="size-3.5" />
-          <span className="max-w-[220px] truncate">{label}</span>
+          <span className={cn("truncate", compact ? "max-w-[96px]" : "max-w-[220px]")}>
+            {label}
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-3">

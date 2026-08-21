@@ -44,11 +44,6 @@ export function encodeControls(c: UrlControls): URLSearchParams {
   return params
 }
 
-/** Serialize controls to a query string (without the leading `?`). */
-export function encodeControlsString(c: UrlControls): string {
-  return encodeControls(c).toString()
-}
-
 function parseFilters(raw: string | null): TraceFilters {
   if (!raw) return {}
   try {
@@ -56,7 +51,15 @@ function parseFilters(raw: string | null): TraceFilters {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {}
     const src = parsed as Record<string, unknown>
     const out: TraceFilters = {}
-    for (const dim of ["model", "surface", "operation", "tool", "session"] as const) {
+    for (const dim of [
+      "model",
+      "surface",
+      "operation",
+      "tool",
+      "provider",
+      "project",
+      "session",
+    ] as const) {
       const arr = src[dim]
       if (Array.isArray(arr)) {
         const vals = arr.filter((x): x is string => typeof x === "string")

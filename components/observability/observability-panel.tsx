@@ -10,7 +10,6 @@ import { StatPanel } from "./stat-panel"
 import { TimeSeriesPanel } from "./time-series-panel"
 import { DonutPanel } from "./donut-panel"
 import { BreakdownBarPanel } from "./breakdown-bar-panel"
-import { RecentTracesPanel } from "./recent-traces-panel"
 import type { PanelDef } from "./panel-registry"
 import type { ObservabilitySeries } from "@/hooks/observability/use-observability-series"
 import type { BreakdownRow, Dimension } from "@/lib/observability/breakdown"
@@ -30,6 +29,10 @@ function breakdownFor(
       return series.breakdownOperation
     case "tool":
       return series.breakdownTool
+    case "provider":
+      return series.breakdownProvider
+    case "project":
+      return series.breakdownProject
     default:
       return series.breakdownModel
   }
@@ -39,7 +42,6 @@ export interface ObservabilityPanelProps {
   panel: PanelDef
   series: ObservabilitySeries
   editMode: boolean
-  onSelectTrace: (traceId: string) => void
   /** Resolved thresholds (defaults + user overrides). */
   thresholds: Record<ThresholdMetric, ThresholdConfig>
   /** Active variable filters — drives breakdown highlight + toggle. */
@@ -52,7 +54,6 @@ export function ObservabilityPanel({
   panel,
   series,
   editMode,
-  onSelectTrace,
   thresholds,
   filters,
   onFilterValue,
@@ -97,15 +98,6 @@ export function ObservabilityPanel({
           selectedValues={
             panel.dimension ? (filters[panel.dimension] as string[] | undefined) : undefined
           }
-        />
-      )
-    case "traces":
-      return (
-        <RecentTracesPanel
-          panel={panel}
-          traces={series.traces}
-          editMode={editMode}
-          onSelectTrace={onSelectTrace}
         />
       )
   }

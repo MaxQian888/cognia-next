@@ -1,4 +1,9 @@
-import { decodeControls, encodeControls, encodeControlsString, type UrlControls } from "./url-state"
+import { decodeControls, encodeControls, type UrlControls } from "./url-state"
+
+/** The hook writes params one by one; the tests read the whole query string. */
+function encodeControlsString(c: UrlControls): string {
+  return encodeControls(c).toString()
+}
 
 const base: UrlControls = {
   rangePreset: "1h",

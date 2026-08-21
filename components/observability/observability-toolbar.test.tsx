@@ -81,4 +81,31 @@ describe("ObservabilityToolbar", () => {
     fireEvent.click(screen.getByTestId("toggle-edit"))
     expect(props.onToggleEdit).toHaveBeenCalled()
   })
+
+  it("folds only the cadence select at phone width — everything else stays", () => {
+    setup({ dense: true })
+    expect(screen.queryByTestId("refresh-select")).not.toBeInTheDocument()
+    // The gear carries the same control (Settings → Defaults → refresh).
+    expect(screen.getByTestId("open-settings")).toBeInTheDocument()
+    expect(screen.getByTestId("variable-filter-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("time-range-trigger")).toBeInTheDocument()
+    expect(screen.getByTestId("manual-refresh")).toBeInTheDocument()
+    expect(screen.getByTestId("export-menu")).toBeInTheDocument()
+    // `dense` implies `compact`, so the filters are collapsed too.
+    expect(screen.getByTestId("filter-collapsed-trigger")).toBeInTheDocument()
+  })
+
+  it("keeps the cadence select at every width above the phone step", () => {
+    setup({ compact: true })
+    expect(screen.getByTestId("refresh-select")).toBeInTheDocument()
+  })
+
+  it("hides the layout controls when the caller is not on the grid", () => {
+    setup({ showLayoutControls: false })
+    expect(screen.queryByTestId("toggle-edit")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("reset-layout")).not.toBeInTheDocument()
+    // Everything else applies to both sub-views and must survive.
+    expect(screen.getByTestId("variable-filter-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("open-settings")).toBeInTheDocument()
+  })
 })

@@ -58,14 +58,14 @@ describe("PanelGrid", () => {
       <PanelGrid
         layouts={defaultLayouts()}
         editMode={false}
-        hiddenPanels={["ts-tokens", "traces"]}
+        hiddenPanels={["ts-tokens", "bd-tool"]}
         onLayoutChange={jest.fn()}
         renderPanel={(p) => <div data-testid={`cell-${p.id}`}>{p.id}</div>}
       />
     )
     expect(screen.getByTestId("cell-kpi-cost")).toBeInTheDocument()
     expect(screen.queryByTestId("cell-ts-tokens")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("cell-traces")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("cell-bd-tool")).not.toBeInTheDocument()
   })
 
   it("passes editMode through to draggability", () => {

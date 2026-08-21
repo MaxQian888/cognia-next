@@ -30,13 +30,11 @@ function makeSeries() {
 
 describe("ObservabilityPanel dispatch", () => {
   const series = makeSeries()
-  const onSelect = jest.fn()
   const onFilterValue = jest.fn()
 
   const baseProps = {
     series,
     editMode: false,
-    onSelectTrace: onSelect,
     thresholds: DEFAULT_THRESHOLDS,
     filters: {},
     onFilterValue,
@@ -47,7 +45,10 @@ describe("ObservabilityPanel dispatch", () => {
     ["ts-cost", "ts-panel-ts-cost"],
     ["bd-model", "donut-panel-bd-model"],
     ["bd-surface", "bar-panel-bd-surface"],
-    ["traces", "recent-traces-panel"],
+    ["bd-provider", "donut-panel-bd-provider"],
+    ["bd-project", "bar-panel-bd-project"],
+    ["bd-operation", "donut-panel-bd-operation"],
+    ["bd-tool", "bar-panel-bd-tool"],
   ])("renders the right panel for %s", (panelId, testId) => {
     render(<ObservabilityPanel panel={panelById(panelId)!} {...baseProps} />)
     expect(screen.getByTestId(testId)).toBeInTheDocument()
@@ -56,11 +57,21 @@ describe("ObservabilityPanel dispatch", () => {
   it.each([
     ["operation", "donut", "donut-panel-x"],
     ["tool", "bar", "bar-panel-x"],
+    ["provider", "donut", "donut-panel-x"],
+    ["project", "bar", "bar-panel-x"],
     [undefined, "donut", "donut-panel-x"],
   ] as const)("resolves the %s breakdown dimension", (dimension, kind, testId) => {
     const panel = { id: "x", kind, titleKey: "byModel", dimension } as PanelDef
     render(<ObservabilityPanel panel={panel} {...baseProps} />)
     expect(screen.getByTestId(testId)).toBeInTheDocument()
+  })
+
+  // `bd-provider` / `bd-project` shipped wired to a `breakdownFor` switch that
+  // had no case for either dimension, so both plotted the MODEL rollup.
+  it("plots the provider rollup on the provider panel, not the model one", () => {
+    render(<ObservabilityPanel panel={panelById("bd-provider")!} {...baseProps} />)
+    expect(screen.getByTestId("donut-legend-bd-provider-anthropic")).toBeInTheDocument()
+    expect(screen.queryByTestId("donut-legend-bd-provider-opus")).not.toBeInTheDocument()
   })
 
   it("routes a breakdown click to onFilterValue with the panel dimension", () => {

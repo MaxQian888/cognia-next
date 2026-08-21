@@ -1,189 +1,112 @@
 "use client"
 
 /**
- * Grafana-style Agent observability dashboard. Live wrapper that wires the
- * control/data/series hooks to the toolbar, the draggable panel grid, and the
- * trace-waterfall drawer. Reads persisted spans from Dexie over the selected
- * time window; `useLiveQuery` + the refresh tick keep it current.
+ * The aggregate (Grafana-style) view of the agent-trace spans — the panel grid
+ * that used to be the whole `/observability` route.
  *
- * Cross-cutting behavior lives here: click-to-filter from breakdown panels,
- * user-tunable thresholds, panel visibility, export/import, a manual refresh +
- * last-updated readout, deep-linkable range/filters (`useObservabilityUrlSync`),
- * keyboard shortcuts, and a full-dashboard empty state.
+ * It is a *controlled pane* now, not a page. `/logs` → Traces owns the time
+ * range, the variable filters, the refresh tick and the single Dexie window
+ * read; this component receives the derived series and renders the grid. That
+ * is what makes the channel's two sub-views agree by construction: the
+ * Dashboard's KPI numbers and the Explore list are folds of the same array,
+ * over the same window, under the same filters.
+ *
+ * What stayed here: the grid itself, debounced layout persistence (a drag must
+ * not write on every frame), and the whole-window empty state. What moved out:
+ * the toolbar, the URL sync, the hotkeys, the settings sheet and the trace
+ * drill-down — all of them are channel-level concerns shared with Explore.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import { useTranslations } from "next-intl"
-import { GaugeIcon } from "lucide-react"
-import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
-import {
-  useObservabilityControls,
-  useResolvedRange,
-} from "@/hooks/observability/use-observability-controls"
-import { useRefreshTick } from "@/hooks/observability/use-refresh-tick"
-import { useObservabilityData } from "@/hooks/observability/use-observability-data"
-import { useObservabilitySeries } from "@/hooks/observability/use-observability-series"
-import { useObservabilityHotkeys } from "@/hooks/observability/use-observability-hotkeys"
-import { useObservabilityUrlSync } from "@/hooks/observability/use-observability-url-sync"
-import {
-  useObservabilityStore,
-  type PanelLayouts,
-} from "@/stores/observability/observability-store"
-import { ObservabilityToolbar } from "./observability-toolbar"
+import { useCallback, useRef } from "react"
+
 import { ObservabilityPanel } from "./observability-panel"
 import { PanelGrid } from "./panel-grid"
-import { TraceWaterfallDrawer } from "./trace-waterfall-drawer"
 import { ObservabilityEmptyState } from "./observability-empty-state"
-import { ObservabilitySettingsSheet } from "./observability-settings-sheet"
-import { defaultLayouts } from "./panel-registry"
-import { toggleFilterValue } from "@/lib/observability/filters"
-import { mergeThresholds } from "@/lib/observability/thresholds"
-import {
-  DASHBOARD_CONFIG_VERSION,
-  type DashboardConfig,
-} from "@/lib/observability/dashboard-config"
+import type { ObservabilitySeries } from "@/hooks/observability/use-observability-series"
 import type { Dimension } from "@/lib/observability/breakdown"
+import type { TraceFilters } from "@/lib/observability/filters"
+import type { ThresholdConfig, ThresholdMetric } from "@/lib/observability/thresholds"
+import type { PanelLayouts } from "@/stores/observability/observability-store"
+import { cn } from "@/lib/utils"
 
-/** The preset an empty dashboard widens to. */
-const WIDEST_PRESET = "30d" as const
+export interface ObservabilityDashboardProps {
+  /** Derived series over the windowed + filtered spans. */
+  series: ObservabilitySeries
+  layouts: PanelLayouts
+  editMode: boolean
+  hiddenPanels: string[]
+  /** Resolved thresholds (shipped defaults merged with user overrides). */
+  thresholds: Record<ThresholdMetric, ThresholdConfig>
+  /** Active variable filters — drives the breakdown highlight + toggle. */
+  filters: TraceFilters
+  onLayoutChange: (layouts: PanelLayouts) => void
+  /** Click-to-filter from a breakdown slice/bar. */
+  onFilterValue: (dim: Dimension, value: string) => void
+  /**
+   * The window holds no spans at all — as opposed to the filters hiding
+   * everything, which the per-panel "no data" hints already cover.
+   */
+  empty: boolean
+  /** Widen to the longest preset. Absent → the empty state hides the button. */
+  onWidenRange?: () => void
+  className?: string
+}
 
-export function ObservabilityDashboard() {
-  const t = useTranslations("observability")
-  const controls = useObservabilityControls()
-  const { tick, lastUpdated, refresh } = useRefreshTick(controls.refreshMs)
-  const range = useResolvedRange(tick)
-  const { spans, windowSpans, loading } = useObservabilityData(range, controls.filters, tick)
-  const series = useObservabilitySeries(spans, range)
-  useObservabilityUrlSync()
-
-  const storedLayouts = useObservabilityStore((s) => s.layouts)
-  const layouts = useMemo(() => storedLayouts ?? defaultLayouts(), [storedLayouts])
-  const thresholds = useMemo(() => mergeThresholds(controls.thresholds), [controls.thresholds])
-
-  const [selectedTrace, setSelectedTrace] = useState<string | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-
+export function ObservabilityDashboard({
+  series,
+  layouts,
+  editMode,
+  hiddenPanels,
+  thresholds,
+  filters,
+  onLayoutChange,
+  onFilterValue,
+  empty,
+  onWidenRange,
+  className,
+}: ObservabilityDashboardProps) {
   // Debounce layout persistence so a drag doesn't write on every frame.
-  const setLayouts = controls.setLayouts
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleLayoutChange = useCallback(
     (next: PanelLayouts) => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => setLayouts(next), 300)
+      debounceRef.current = setTimeout(() => onLayoutChange(next), 300)
     },
-    [setLayouts]
+    [onLayoutChange]
   )
 
-  // Click-to-filter from breakdown panels: toggle the value in the filters.
-  const setFilters = controls.setFilters
-  const filters = controls.filters
-  const handleFilterValue = useCallback(
-    (dim: Dimension, value: string) => setFilters(toggleFilterValue(filters, dim, value)),
-    [setFilters, filters]
-  )
-
-  // Portable config snapshot for export.
-  const buildConfig = useCallback(
-    (): DashboardConfig => ({
-      version: DASHBOARD_CONFIG_VERSION,
-      layouts: storedLayouts,
-      hiddenPanels: controls.hiddenPanels,
-      thresholds: controls.thresholds,
-      rangePreset: controls.rangePreset,
-      customSince: controls.customSince,
-      customUntil: controls.customUntil,
-      refreshMs: controls.refreshMs,
-      filters: controls.filters,
-    }),
-    [
-      storedLayouts,
-      controls.hiddenPanels,
-      controls.thresholds,
-      controls.rangePreset,
-      controls.customSince,
-      controls.customUntil,
-      controls.refreshMs,
-      controls.filters,
-    ]
-  )
-
-  // Keyboard shortcuts (e / r / f / s).
-  const setEditMode = controls.setEditMode
-  const editMode = controls.editMode
-  useObservabilityHotkeys({
-    onToggleEdit: () => setEditMode(!editMode),
-    onRefresh: refresh,
-    onOpenSettings: () => setSettingsOpen(true),
-    onFocusFilter: () => {
-      document.querySelector<HTMLElement>('[data-testid="variable-filter-bar"] button')?.focus()
-    },
-  })
-
-  const showEmpty = !loading && windowSpans.length === 0
+  if (empty) {
+    return (
+      <div
+        className={cn("flex min-h-0 flex-1 flex-col", className)}
+        data-testid="observability-dashboard"
+      >
+        <ObservabilityEmptyState onWidenRange={onWidenRange} />
+      </div>
+    )
+  }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col" data-testid="observability-dashboard">
-      <FeaturePageHeader
-        icon={<GaugeIcon />}
-        title={t("title")}
-        description={t("subtitle")}
-        controls={
-          <ObservabilityToolbar
-            preset={controls.rangePreset}
-            customSince={controls.customSince}
-            customUntil={controls.customUntil}
-            refreshMs={controls.refreshMs}
-            filters={controls.filters}
-            editMode={controls.editMode}
-            windowSpans={windowSpans}
-            lastUpdated={lastUpdated}
-            traces={series.traces}
-            onPreset={controls.setRangePreset}
-            onCustom={controls.setCustomRange}
-            onRefreshMs={controls.setRefreshMs}
-            onRefresh={refresh}
-            onFilters={controls.setFilters}
-            onToggleEdit={() => controls.setEditMode(!controls.editMode)}
-            onResetLayout={controls.resetLayouts}
-            onOpenSettings={() => setSettingsOpen(true)}
-            buildConfig={buildConfig}
-            onImportConfig={controls.importConfig}
+    <div
+      className={cn("min-h-0 flex-1 overflow-auto p-2", className)}
+      data-testid="observability-dashboard"
+    >
+      <PanelGrid
+        layouts={layouts}
+        editMode={editMode}
+        hiddenPanels={hiddenPanels}
+        onLayoutChange={handleLayoutChange}
+        renderPanel={(panel) => (
+          <ObservabilityPanel
+            panel={panel}
+            series={series}
+            editMode={editMode}
+            thresholds={thresholds}
+            filters={filters}
+            onFilterValue={onFilterValue}
           />
-        }
+        )}
       />
-
-      {showEmpty ? (
-        <ObservabilityEmptyState
-          onWidenRange={
-            controls.rangePreset === WIDEST_PRESET
-              ? undefined
-              : () => controls.setRangePreset(WIDEST_PRESET)
-          }
-        />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto p-2">
-          <PanelGrid
-            layouts={layouts}
-            editMode={controls.editMode}
-            hiddenPanels={controls.hiddenPanels}
-            onLayoutChange={handleLayoutChange}
-            renderPanel={(panel) => (
-              <ObservabilityPanel
-                panel={panel}
-                series={series}
-                editMode={controls.editMode}
-                onSelectTrace={setSelectedTrace}
-                thresholds={thresholds}
-                filters={controls.filters}
-                onFilterValue={handleFilterValue}
-              />
-            )}
-          />
-        </div>
-      )}
-
-      <TraceWaterfallDrawer traceId={selectedTrace} onClose={() => setSelectedTrace(null)} />
-      <ObservabilitySettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }

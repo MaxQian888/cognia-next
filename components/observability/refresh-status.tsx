@@ -27,9 +27,16 @@ export interface RefreshStatusProps {
   /** Epoch ms of the last data refresh; null before the first tick. */
   lastUpdated: number | null
   onRefresh: () => void
+  /**
+   * Drop the "updated Ns ago" label, keeping the button. Narrow toolbars only —
+   * and driven by the caller's measured container, not the `sm:` viewport
+   * breakpoint this used to rely on: a 390px pane inside a 1500px window kept
+   * the label and pushed the row onto a third line.
+   */
+  compact?: boolean
 }
 
-export function RefreshStatus({ lastUpdated, onRefresh }: RefreshStatusProps) {
+export function RefreshStatus({ lastUpdated, onRefresh, compact = false }: RefreshStatusProps) {
   const t = useTranslations("observability.refresh")
   const [now, setNow] = useState<number | null>(null)
 
@@ -64,11 +71,8 @@ export function RefreshStatus({ lastUpdated, onRefresh }: RefreshStatusProps) {
       >
         <RefreshCwIcon className="size-3.5" />
       </Button>
-      {label && (
-        <span
-          className="hidden text-[11px] tabular-nums text-muted-foreground sm:inline"
-          data-testid="last-updated"
-        >
+      {label && !compact && (
+        <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="last-updated">
           {label}
         </span>
       )}

@@ -18,6 +18,8 @@ function kpis(over: Partial<WindowKpis> = {}): WindowKpis {
     cacheHitRate: 0,
     p95LatencyMs: 0,
     reqPerMin: 0,
+    toolCalls: 0,
+    toolFailures: 0,
     ...over,
   }
 }
@@ -27,6 +29,11 @@ describe("resolveStat", () => {
     expect(resolveStat(panelById("kpi-cost")!, kpis({ totalCost: 3.5 })).display).toBe("$3.50")
     expect(resolveStat(panelById("kpi-spans")!, kpis({ totalSpans: 1500 })).display).toBe("1.5k")
     expect(resolveStat(panelById("kpi-errors")!, kpis({ errorRate: 0.123 })).display).toBe("12.3%")
+    expect(resolveStat(panelById("kpi-rate")!, kpis({ reqPerMin: 12 })).display).toBeTruthy()
+    expect(resolveStat(panelById("kpi-tools")!, kpis({ toolCalls: 2100 })).display).toBe("2.1k")
+    expect(resolveStat(panelById("kpi-tool-failures")!, kpis({ toolFailures: 7 })).display).toBe(
+      "7"
+    )
     expect(resolveStat(panelById("kpi-latency")!, kpis({ p95LatencyMs: 1500 })).display).toBe(
       "1.50s"
     )

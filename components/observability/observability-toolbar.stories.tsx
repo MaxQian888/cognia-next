@@ -2,11 +2,13 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { ObservabilityToolbar } from "./observability-toolbar"
-import { makeWindowSpans } from "@/lib/storybook/fixtures/observability"
+import { makeTraceRows, makeWindowSpans } from "@/lib/storybook/fixtures/observability"
 import { DASHBOARD_CONFIG_VERSION } from "@/lib/observability/dashboard-config"
 
 // `ObservabilityToolbar` composes the variable filter bar, time-range picker,
 // refresh + export controls, settings, and the edit/lock + reset-layout controls.
+// It is the `/logs` Traces channel's toolbar; the layout controls only apply to
+// the Dashboard sub-view, hence `showLayoutControls`.
 const meta = {
   title: "Observability/Toolbar",
   component: ObservabilityToolbar,
@@ -19,7 +21,8 @@ const meta = {
     editMode: false,
     windowSpans: makeWindowSpans(),
     lastUpdated: null,
-    traces: [],
+    // What "export recent traces → CSV" would actually write.
+    traces: makeTraceRows(),
     onPreset: fn(),
     onCustom: fn(),
     onRefreshMs: fn(),
@@ -63,4 +66,25 @@ export const WithActiveFilters: Story = {
   args: {
     filters: { surface: ["chat"], model: ["claude-3-opus-20240229"] },
   },
+}
+
+/** Explore sub-view: same controls, minus the grid-only layout editing. */
+export const WithoutLayoutControls: Story = {
+  args: { showLayoutControls: false },
+}
+
+/**
+ * Narrow-channel layout: the seven dimension dropdowns fold behind one
+ * "Filters" trigger and the export / edit labels give way to their icons, so
+ * the row stays one line inside a ~500px pane.
+ */
+export const Compact: Story = {
+  args: { compact: true },
+  decorators: [
+    (Story) => (
+      <div className="w-[560px] border p-2">
+        <Story />
+      </div>
+    ),
+  ],
 }

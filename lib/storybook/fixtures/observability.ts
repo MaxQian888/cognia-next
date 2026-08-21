@@ -174,7 +174,8 @@ export function buildSeries(
     breakdownSurface: breakdownBy(spans, "surface"),
     breakdownOperation: breakdownBy(spans, "operation"),
     breakdownTool: breakdownBy(spans, "tool"),
-    traces: rollupTraces(spans),
+    breakdownProvider: breakdownBy(spans, "provider"),
+    breakdownProject: breakdownBy(spans, "project"),
     kpis: windowKpis(spans, range),
   }
 }

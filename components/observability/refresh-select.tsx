@@ -21,6 +21,8 @@ import { REFRESH_OPTIONS, type RefreshMs } from "@/stores/observability/observab
 export interface RefreshSelectProps {
   value: RefreshMs
   onChange: (ms: RefreshMs) => void
+  /** Drop the trigger to the width of its value — narrow toolbars only. */
+  compact?: boolean
 }
 
 function labelFor(ms: RefreshMs, t: (key: string) => string): string {
@@ -29,13 +31,13 @@ function labelFor(ms: RefreshMs, t: (key: string) => string): string {
   return `${ms / 60_000}m`
 }
 
-export function RefreshSelect({ value, onChange }: RefreshSelectProps) {
+export function RefreshSelect({ value, onChange, compact = false }: RefreshSelectProps) {
   const t = useTranslations("observability.refresh")
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v) as RefreshMs)}>
       <SelectTrigger
         size="sm"
-        className="w-[112px]"
+        className={compact ? "w-[74px]" : "w-[112px]"}
         data-testid="refresh-select"
         aria-label={t("label")}
       >

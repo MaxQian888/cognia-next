@@ -48,6 +48,10 @@ export function resolveStat(panel: PanelDef, kpis: WindowKpis): { display: strin
       return { display: formatMs(kpis.p95LatencyMs), raw: kpis.p95LatencyMs }
     case "reqPerMin":
       return { display: formatRate(kpis.reqPerMin), raw: kpis.reqPerMin }
+    case "toolCalls":
+      return { display: compactCount(kpis.toolCalls), raw: kpis.toolCalls }
+    case "toolFailures":
+      return { display: compactCount(kpis.toolFailures), raw: kpis.toolFailures }
     default:
       return { display: "—", raw: 0 }
   }

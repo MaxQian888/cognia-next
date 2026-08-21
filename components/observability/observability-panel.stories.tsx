@@ -18,7 +18,6 @@ const meta = {
     panel: panelById("kpi-cost")!,
     series,
     editMode: false,
-    onSelectTrace: fn(),
     thresholds: DEFAULT_THRESHOLDS,
     filters: {},
     onFilterValue: fn(),
@@ -49,8 +48,12 @@ export const BarKind: Story = {
   args: { panel: panelById("bd-surface")! },
 }
 
-export const TracesKind: Story = {
-  args: { panel: panelById("traces")! },
+export const ProviderKind: Story = {
+  args: { panel: panelById("bd-provider")! },
+}
+
+export const ToolKind: Story = {
+  args: { panel: panelById("bd-tool")! },
 }
 
 export const EditMode: Story = {

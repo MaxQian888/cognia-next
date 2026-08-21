@@ -3,6 +3,11 @@
 /**
  * Single shared memo that turns the windowed spans into every derived series
  * the panels need — computed in one pass so panels don't each re-bucket.
+ *
+ * The trace rollup is deliberately NOT here: `useTraceList` already folds the
+ * same spans into `TraceRollupRow`s for the Explore list, and computing it
+ * twice per render was the last duplicate fold left after the two surfaces
+ * merged.
  */
 
 import { useMemo } from "react"
@@ -17,7 +22,6 @@ import {
   type WindowKpis,
 } from "@/lib/observability/aggregate-series"
 import { breakdownBy, type BreakdownRow } from "@/lib/observability/breakdown"
-import { rollupTraces, type TraceRollupRow } from "@/lib/observability/trace-rollup"
 import { pickBucketMs, type TimeRange } from "@/lib/observability/time-range"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
@@ -32,7 +36,10 @@ export interface ObservabilitySeries {
   breakdownSurface: BreakdownRow[]
   breakdownOperation: BreakdownRow[]
   breakdownTool: BreakdownRow[]
-  traces: TraceRollupRow[]
+  /** Cost-attribution rollups (ADR-0130) — the `bd-provider` / `bd-project`
+   * panels plotted the model rollup until these existed. */
+  breakdownProvider: BreakdownRow[]
+  breakdownProject: BreakdownRow[]
   kpis: WindowKpis
 }
 
@@ -53,7 +60,8 @@ export function useObservabilitySeries(
       breakdownSurface: breakdownBy(spans, "surface"),
       breakdownOperation: breakdownBy(spans, "operation"),
       breakdownTool: breakdownBy(spans, "tool"),
-      traces: rollupTraces(spans),
+      breakdownProvider: breakdownBy(spans, "provider"),
+      breakdownProject: breakdownBy(spans, "project"),
       kpis: windowKpis(spans, range),
     }
   }, [spans, range])

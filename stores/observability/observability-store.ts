@@ -69,20 +69,113 @@ interface ObservabilityState {
   togglePanelVisibility: (id: string) => void
   /** Apply an imported/portable config, replacing the persisted view state. */
   importConfig: (cfg: DashboardConfig) => void
+  /**
+   * Restore every field to its shipped default.
+   *
+   * The `/logs` workspace's "Reset" action used to cover the whole Traces
+   * channel because its one control (the coarse window) lived in the log
+   * workspace store. The channel's range, filters, refresh cadence, thresholds,
+   * panel layout and panel visibility live here now, so a reset that skipped
+   * this store would leave the user in the view they were trying to escape.
+   */
+  resetView: () => void
+}
+
+/** Shipped defaults — the store body and {@link ObservabilityState.resetView}
+ * read the same object so they cannot drift. */
+const DEFAULTS = {
+  layouts: null,
+  rangePreset: "1h",
+  customSince: null,
+  customUntil: null,
+  refreshMs: 10_000,
+  filters: {},
+  editMode: false,
+  thresholds: {},
+  hiddenPanels: [],
+} satisfies Pick<
+  ObservabilityState,
+  | "layouts"
+  | "rangePreset"
+  | "customSince"
+  | "customUntil"
+  | "refreshMs"
+  | "filters"
+  | "editMode"
+  | "thresholds"
+  | "hiddenPanels"
+>
+
+/**
+ * v0 → v1: drop a panel layout written before the registry changed shape.
+ *
+ * When the dashboard folded into `/logs` → Traces the registry gained five
+ * panels (`kpi-rate`, `kpi-tools`, `kpi-tool-failures`, `bd-operation`,
+ * `bd-tool`) and lost one (`traces`). `PanelGrid` renders one child per
+ * registry entry, and react-grid-layout invents a `{w:1,h:1}` item at the
+ * bottom of the grid for any child the saved layout has no entry for — so
+ * without this every existing install would have opened on five unreadable
+ * tiles beneath a curated grid, a break only upgraders ever see.
+ *
+ * Dropping `layouts` hands them back to `defaultLayouts()` (the call sites read
+ * `stored ?? defaultLayouts()`), which is exactly what a fresh install gets. A
+ * hand-arranged grid is worth less than a legible one, and the grid is
+ * re-arrangeable in place. Everything else the user chose — range, cadence,
+ * filters, thresholds — is preserved.
+ *
+ * Exported for its test, mirroring `migrateLogWorkspace` in
+ * `stores/logging/log-workspace-store.ts`.
+ */
+/**
+ * Query params the Traces channel's deep-link sync owns
+ * (`hooks/observability/use-observability-url-sync.ts`, which re-exports this).
+ *
+ * Defined HERE rather than beside the hook so {@link ObservabilityState.resetView}
+ * can clear them without importing a React module — and without the import
+ * cycle that would create, since the hook already imports this store.
+ */
+export const OBSERVABILITY_URL_PARAMS = ["range", "from", "to", "f"] as const
+
+/**
+ * Drop the owned params from the address bar without navigating.
+ *
+ * A reset that only touched the store would be undone the moment the channel
+ * remounts: `useObservabilityUrlSync` hydrates from the URL on mount and takes
+ * priority over persisted state, so the range and filters the user just cleared
+ * would come straight back out of the query string.
+ */
+function clearObservabilityUrlParams(): void {
+  if (typeof window === "undefined") return
+  const params = new URLSearchParams(window.location.search)
+  for (const key of OBSERVABILITY_URL_PARAMS) params.delete(key)
+  const qs = params.toString()
+  window.history.replaceState(
+    window.history.state,
+    "",
+    qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+  )
+}
+
+export function migrateObservabilityView(
+  persisted: unknown,
+  from: number
+): Partial<ObservabilityState> {
+  const p = (persisted ?? {}) as Partial<ObservabilityState>
+  if (from >= 1) return p
+  const { layouts: _layouts, ...kept } = p
+  return {
+    ...kept,
+    layouts: null,
+    // The removed panel cannot be hidden any more; leaving its id behind would
+    // carry it into every exported `DashboardConfig` forever.
+    hiddenPanels: (kept.hiddenPanels ?? []).filter((id) => id !== "traces"),
+  }
 }
 
 export const useObservabilityStore = create<ObservabilityState>()(
   persist(
     (set) => ({
-      layouts: null,
-      rangePreset: "1h",
-      customSince: null,
-      customUntil: null,
-      refreshMs: 10_000,
-      filters: {},
-      editMode: false,
-      thresholds: {},
-      hiddenPanels: [],
+      ...DEFAULTS,
 
       setLayouts: (layouts) => set({ layouts }),
       resetLayouts: () => set({ layouts: null }),
@@ -113,10 +206,16 @@ export const useObservabilityStore = create<ObservabilityState>()(
           customSince: cfg.rangePreset === "custom" ? (cfg.customSince ?? null) : null,
           customUntil: cfg.rangePreset === "custom" ? (cfg.customUntil ?? null) : null,
         }),
+      resetView: () => {
+        set({ ...DEFAULTS })
+        clearObservabilityUrlParams()
+      },
     }),
     {
       name: "cognia-observability",
       storage: persistLocalStorage(),
+      version: 1,
+      migrate: (persisted, from) => migrateObservabilityView(persisted, from) as ObservabilityState,
       // editMode stays transient — see file header.
       partialize: (s) => ({
         layouts: s.layouts,

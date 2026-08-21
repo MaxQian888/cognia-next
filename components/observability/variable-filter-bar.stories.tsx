@@ -41,3 +41,15 @@ export const WithActiveFilters: Story = {
 export const EmptyWindow: Story = {
   args: { windowSpans: [] },
 }
+
+/**
+ * Collapsed: one trigger, and a two-level drill-down inside a single popover
+ * (nesting seven popovers in an eighth dismisses the parent on first click).
+ */
+export const Collapsed: Story = {
+  args: { collapsed: true },
+}
+
+export const CollapsedWithSelection: Story = {
+  args: { collapsed: true, filters: { model: ["claude-3-opus-20240229"], surface: ["chat"] } },
+}

@@ -1,51 +1,65 @@
 "use client"
 
 /**
- * The `/logs` Traces channel — the agent-trace surface that ADR-0074's
- * successor docs kept promising ("the log panel's agent-trace tab") and that
- * nothing ever mounted: `/logs` passed `includeAgentTrace={false}`, so the
- * span merge, the trace view button and the stats bar were all unreachable.
+ * The `/logs` Traces channel — the whole agent-trace surface.
  *
- * Three resizable columns, list → waterfall → span, with a timeline strip
- * over the middle column:
+ * It started as the per-trace explorer that ADR-0074's successor docs kept
+ * promising and that nothing ever mounted (`/logs` passed
+ * `includeAgentTrace={false}`, so the span merge, the trace view button and
+ * the stats bar were all unreachable). The aggregate half of the same data
+ * lived a route away, at `/observability`: a second time-range control, a
+ * second filter model, a second Dexie window read and a second trace table
+ * with its own waterfall drawer. Two pages, one span table, and no way to
+ * carry a filter from one to the other.
  *
- *   trace list           timeline + waterfall            span detail
- *   ─────────────        ────────────────────            ─────────────
- *   rollupTraces()       buildTraceTimeline()            TraceSpanDetail
- *   useTraceList         buildWaterfall()                (pure)
- *                        useTraceDetail
+ * There is one surface now, with two sub-views over one read:
+ *
+ *   toolbar          range · variable filters · auto-refresh · export · settings
+ *   ───────────────  ────────────────────────────────────────────────────────────
+ *   explore          trace list → timeline + waterfall → span detail
+ *   dashboard        the Grafana-style panel grid (KPIs, series, breakdowns)
+ *
+ * Everything above the switch is shared, and shared literally: `useObservabilityData`
+ * performs the single windowed + filtered read, `useObservabilitySeries` folds
+ * it into the panels' series and `useTraceList` folds the same array into the
+ * list's rows. Narrowing to one model or widening the range moves both views,
+ * and their numbers cannot disagree because there is only one fold behind them.
  *
  * The timeline owns the zoom window; the waterfall below narrows to the same
  * window, so brushing the strip filters the rows rather than just rescaling a
  * picture next to them. Selection is shared in both directions.
  *
- * Everything below the UI already existed. This file is the composition root
- * that finally wires it: `useTraceList` (window read + rollup + paging + the
- * headline summary, all from ONE IndexedDB scan), `useTraceDetail` (one
- * trace's spans → waterfall geometry), the shared `WaterfallRow` from the
- * observability dashboard, and `AgentTraceStatsBarView` fed from the list's
- * own summary — so the headline numbers and the rows below them are literally
- * the same fold and can never disagree.
+ * Layout is driven by the channel's OWN measured width (`useElementWidth`), not
+ * by viewport media queries: the shell rail, the channel list and the settings
+ * drawer between them take several hundred px the viewport knows nothing about,
+ * so a `md:` breakpoint would have rendered three 150px columns in a 500px pane
+ * and called it "wide". Three tiers, all container-relative:
  *
- * Narrow viewports drop to one column: the list, with the waterfall and span
- * detail in a sheet.
+ *   < 768px    list, with the waterfall + span detail in a bottom sheet
+ *   < 1180px   two columns: list │ waterfall over span detail
+ *   ≥ 1180px   three columns: list │ waterfall │ span detail
+ *
+ * The toolbar collapses on the same measurement (see `ObservabilityToolbar`).
  */
 
-import { useCallback, useDeferredValue, useMemo, useState } from "react"
-import Link from "next/link"
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   AlertTriangleIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  GaugeIcon,
+  LayoutDashboardIcon,
+  ListTreeIcon,
   SearchIcon,
 } from "lucide-react"
 
-import { AgentTraceStatsBarView } from "@/components/logging/agent-trace-stats-bar"
 import { TraceSpanDetail } from "@/components/logging/trace-span-detail"
 import { TraceExportMenu } from "@/components/logging/trace-export-menu"
 import { TraceTimeline } from "@/components/logging/trace-timeline"
+import { ObservabilityDashboard } from "@/components/observability/observability-dashboard"
+import { ObservabilitySettingsSheet } from "@/components/observability/observability-settings-sheet"
+import { ObservabilityToolbar } from "@/components/observability/observability-toolbar"
+import { defaultLayouts } from "@/components/observability/panel-registry"
 import { WaterfallRow } from "@/components/observability/waterfall-row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,39 +68,50 @@ import { Input } from "@/components/ui/input"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toggle } from "@/components/ui/toggle"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
 import { useTraceList } from "@/hooks/logging/use-trace-list"
+import {
+  useObservabilityControls,
+  useResolvedRange,
+} from "@/hooks/observability/use-observability-controls"
+import { useObservabilityData } from "@/hooks/observability/use-observability-data"
+import { useObservabilityHotkeys } from "@/hooks/observability/use-observability-hotkeys"
+import { useObservabilitySeries } from "@/hooks/observability/use-observability-series"
+import { useObservabilityUrlSync } from "@/hooks/observability/use-observability-url-sync"
+import { useRefreshTick } from "@/hooks/observability/use-refresh-tick"
 import { useTraceDetail } from "@/hooks/observability/use-trace-detail"
-import { useIsNarrow, useResizableLayout } from "@/hooks/ui"
+import { useElementWidth } from "@/hooks/use-element-width"
+import { useResizableLayout } from "@/hooks/ui"
+import type { Dimension } from "@/lib/observability/breakdown"
 import { paletteColor } from "@/lib/observability/chart-palette"
+import {
+  DASHBOARD_CONFIG_VERSION,
+  type DashboardConfig,
+} from "@/lib/observability/dashboard-config"
+import { toggleFilterValue, type TraceFilters } from "@/lib/observability/filters"
 import { formatMs, formatTimestamp, formatUsd } from "@/lib/observability/format-utils"
+import { mergeThresholds } from "@/lib/observability/thresholds"
 import { flattenWaterfall, type TraceRollupRow } from "@/lib/observability/trace-rollup"
 import type {
   TimelineGrouping,
   TimelineScale,
   TimelineWindow,
 } from "@/lib/observability/trace-timeline"
-import { AGENT_TRACE_WINDOWS, type AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 import { cn } from "@/lib/utils"
+import { useObservabilityStore } from "@/stores/observability/observability-store"
+import { TRACE_SUB_VIEWS, type TraceSubView } from "@/stores/logging/log-workspace-store"
 import type { SpanOperationName } from "@/types/agent-trace/span"
 
 /** Bar color is keyed off operation so the same kind of work reads the same
- * across traces. Mirrors the observability drawer's ordering deliberately. */
+ * across traces. Mirrors the timeline's lane ordering deliberately. */
 const OP_ORDER: readonly SpanOperationName[] = [
   "invoke_agent",
   "execute_tool",
@@ -96,9 +121,48 @@ const OP_ORDER: readonly SpanOperationName[] = [
   "embeddings",
 ]
 
+const SUB_VIEW_ICONS: Record<TraceSubView, typeof ListTreeIcon> = {
+  explore: ListTreeIcon,
+  dashboard: LayoutDashboardIcon,
+}
+
+/** The preset an empty dashboard widens to. */
+const WIDEST_PRESET = "30d" as const
+
+/**
+ * Container-width thresholds (px). Measured on the channel itself — see the
+ * file header for why the viewport is the wrong ruler here.
+ */
+const STACKED_BELOW = 768
+const TWO_COLUMN_BELOW = 1180
+/**
+ * Below this the expanded toolbar needs a second line (measured: 32px tall at
+ * ≥1120, 68px below). This is the width of the toolbar's OWN slot, not the
+ * channel's — the sub-view tabs sit beside it and eat ~200px, so deriving it
+ * from the channel width would be off by exactly that and by however wide the
+ * active locale renders "Explore"/"Dashboard".
+ */
+const COMPACT_TOOLBAR_BELOW = 1120
+/** Phone step: below this the compact toolbar still needs three rows, and the
+ * cadence select is the one control with an identical second home. */
+const DENSE_TOOLBAR_BELOW = 420
+const SUB_VIEW_LABELS_FROM = 560
+
+export type TraceLayoutTier = "stacked" | "split" | "columns"
+
+/** Pure width → layout tier. `0` means "not measured yet"; the widest tier is
+ * the static-export default, matching what the server renders. */
+export function traceLayoutTier(width: number): TraceLayoutTier {
+  if (width <= 0) return "columns"
+  if (width < STACKED_BELOW) return "stacked"
+  if (width < TWO_COLUMN_BELOW) return "split"
+  return "columns"
+}
+
 export interface TraceWorkspaceProps {
-  window: AgentTraceStatsWindow
-  onWindowChange: (window: AgentTraceStatsWindow) => void
+  /** Explore (per-trace) vs Dashboard (aggregate). */
+  subView: TraceSubView
+  onSubViewChange: (subView: TraceSubView) => void
   errorsOnly: boolean
   onErrorsOnlyChange: (errorsOnly: boolean) => void
   /** Deep-linked / restored selection. */
@@ -112,8 +176,8 @@ export interface TraceWorkspaceProps {
 }
 
 export function TraceWorkspace({
-  window,
-  onWindowChange,
+  subView,
+  onSubViewChange,
   errorsOnly,
   onErrorsOnlyChange,
   selectedTraceId,
@@ -123,8 +187,22 @@ export function TraceWorkspace({
   className,
 }: TraceWorkspaceProps) {
   const t = useTranslations("logging.workspace.traces")
-  const narrow = useIsNarrow()
-  const layout = useResizableLayout("cognia-logs-trace-layout")
+  const rootRef = useRef<HTMLDivElement>(null)
+  const toolbarSlotRef = useRef<HTMLDivElement>(null)
+  const width = useElementWidth(rootRef)
+  // The slot is `flex-1` inside a non-wrapping row, so its width is
+  // "row minus tabs" whichever mode the toolbar is in — measuring it cannot
+  // feed back into the decision it drives.
+  const toolbarWidth = useElementWidth(toolbarSlotRef)
+  const tier = traceLayoutTier(width)
+  const compactToolbar = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_BELOW
+  const denseToolbar = toolbarWidth > 0 && toolbarWidth < DENSE_TOOLBAR_BELOW
+  const showSubViewLabels = width === 0 || width >= SUB_VIEW_LABELS_FROM
+  // Distinct storage keys: the two groups do not share a panel-id set, and
+  // `useResizableLayout` persists a flat `{ id: size }` map keyed by panel id.
+  const columnsLayout = useResizableLayout("cognia-logs-trace-layout")
+  const splitLayout = useResizableLayout("cognia-logs-trace-layout-split")
+  const splitDetailLayout = useResizableLayout("cognia-logs-trace-layout-split-detail")
 
   const [query, setQuery] = useState("")
   // Typing re-runs the rollup filter over the whole window; deferring keeps the
@@ -135,29 +213,44 @@ export function TraceWorkspace({
   const [timelineScale, setTimelineScale] = useState<TimelineScale>("duration")
   const [timelineGrouping, setTimelineGrouping] = useState<TimelineGrouping>("operation")
   const [timelineWindow, setTimelineWindow] = useState<TimelineWindow | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // ── The one read both sub-views are folds of ──────────────────────────────
+  const controls = useObservabilityControls()
+  const { tick, lastUpdated, refresh } = useRefreshTick(controls.refreshMs)
+  const range = useResolvedRange(tick)
+  const { spans, windowSpans, loading, spanCount, windowSpanCount, truncated } =
+    useObservabilityData(range, controls.filters, tick)
+  const series = useObservabilitySeries(spans, range)
+  useObservabilityUrlSync()
+
+  const storedLayouts = useObservabilityStore((s) => s.layouts)
+  const layouts = useMemo(() => storedLayouts ?? defaultLayouts(), [storedLayouts])
+  const thresholds = useMemo(() => mergeThresholds(controls.thresholds), [controls.thresholds])
 
   // `page` is the raw intent; `safePage` is it clamped to the filtered set, and
   // every control below steps from `safePage` so a narrower filter can never
   // strand the pager past the last page.
   const {
     traces,
+    matched,
     windowTotal,
     matchedTotal,
     pageCount,
     page: safePage,
-    loading,
-    summary,
-    spanCount,
-    windowSpanCount,
-    truncated,
   } = useTraceList({
-    window,
+    spans,
+    loading,
     errorsOnly,
     query: deferredQuery,
     page,
   })
 
-  const { waterfall, loading: traceLoading } = useTraceDetail(selectedTraceId)
+  // Only Explore renders a waterfall; loading one trace's spans while the
+  // dashboard is on screen would be a read nothing displays.
+  const { waterfall, loading: traceLoading } = useTraceDetail(
+    subView === "explore" ? selectedTraceId : null
+  )
   const allRows = useMemo(() => flattenWaterfall(waterfall), [waterfall])
   const colors = useThemeColors()
 
@@ -211,13 +304,62 @@ export function TraceWorkspace({
     [onErrorsOnlyChange]
   )
 
-  const handleWindow = useCallback(
-    (next: AgentTraceStatsWindow) => {
-      onWindowChange(next)
+  // Click-to-filter from a breakdown panel narrows the trace list too — same
+  // filters, same spans.
+  const setFilters = controls.setFilters
+  const filters = controls.filters
+  const handleFilterValue = useCallback(
+    (dim: Dimension, value: string) => {
+      setFilters(toggleFilterValue(filters, dim, value))
       setPage(0)
     },
-    [onWindowChange]
+    [setFilters, filters]
   )
+
+  const handleFilters = useCallback(
+    (next: TraceFilters) => {
+      setFilters(next)
+      setPage(0)
+    },
+    [setFilters]
+  )
+
+  // Portable config snapshot for export.
+  const buildConfig = useCallback(
+    (): DashboardConfig => ({
+      version: DASHBOARD_CONFIG_VERSION,
+      layouts: storedLayouts,
+      hiddenPanels: controls.hiddenPanels,
+      thresholds: controls.thresholds,
+      rangePreset: controls.rangePreset,
+      customSince: controls.customSince,
+      customUntil: controls.customUntil,
+      refreshMs: controls.refreshMs,
+      filters: controls.filters,
+    }),
+    [
+      storedLayouts,
+      controls.hiddenPanels,
+      controls.thresholds,
+      controls.rangePreset,
+      controls.customSince,
+      controls.customUntil,
+      controls.refreshMs,
+      controls.filters,
+    ]
+  )
+
+  // Keyboard shortcuts (e / r / f / s). `e` only means anything on the grid.
+  const setEditMode = controls.setEditMode
+  const editMode = controls.editMode
+  useObservabilityHotkeys({
+    onToggleEdit: subView === "dashboard" ? () => setEditMode(!editMode) : undefined,
+    onRefresh: refresh,
+    onOpenSettings: () => setSettingsOpen(true),
+    onFocusFilter: () => {
+      document.querySelector<HTMLElement>('[data-testid="variable-filter-bar"] button')?.focus()
+    },
+  })
 
   const renderWaterfall = () => (
     <div className="flex h-full min-h-0 flex-col" data-testid="trace-waterfall-pane">
@@ -327,49 +469,21 @@ export function TraceWorkspace({
               data-testid="trace-search"
             />
           </div>
-          <Select
-            value={window}
-            onValueChange={(value) => handleWindow(value as AgentTraceStatsWindow)}
-          >
-            <SelectTrigger className="h-8 w-[110px] text-xs" aria-label={t("windowLabel")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {AGENT_TRACE_WINDOWS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(`windows.${value}`)}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center justify-between gap-2">
           <Toggle
             size="sm"
             pressed={errorsOnly}
             onPressedChange={handleErrorsOnly}
-            className="h-7 gap-1 px-2 text-xs"
+            className="h-8 shrink-0 gap-1 px-2 text-xs"
             aria-label={t("errorsOnly")}
             data-testid="trace-errors-only"
           >
             <AlertTriangleIcon className="size-3.5" />
-            {t("errorsOnly")}
+            <span className="hidden sm:inline">{t("errorsOnly")}</span>
           </Toggle>
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {t("counts", { matched: matchedTotal, total: windowTotal })}
-          </span>
         </div>
-        {truncated && (
-          <p
-            className="text-[11px] text-warning"
-            role="status"
-            data-testid="trace-truncated-notice"
-          >
-            {t("truncated", { shown: spanCount, total: windowSpanCount })}
-          </p>
-        )}
+        <span className="text-[11px] text-muted-foreground tabular-nums">
+          {t("counts", { matched: matchedTotal, total: windowTotal })}
+        </span>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -435,24 +549,9 @@ export function TraceWorkspace({
     </div>
   )
 
-  return (
-    <div className={cn("flex h-full min-h-0 flex-col", className)} data-testid="trace-workspace">
-      <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
-        {/* Fed from `useTraceList`'s fold rather than its own live query — the
-            live-query variant would re-scan the identical window on every span
-            that lands. */}
-        <AgentTraceStatsBarView summary={summary} window={window} className="min-w-0 flex-1" />
-        {/* The dashboard is the aggregate view of the same spans — charts,
-            percentiles, breakdowns. This channel is the per-trace view. */}
-        <Button asChild variant="ghost" size="sm" className="h-7 shrink-0 px-2 text-xs">
-          <Link href="/observability">
-            <GaugeIcon className="mr-1 size-3.5" />
-            <span className="hidden sm:inline">{t("openDashboard")}</span>
-          </Link>
-        </Button>
-      </div>
-
-      {narrow ? (
+  const renderExplore = () => {
+    if (tier === "stacked") {
+      return (
         <>
           <div className="min-h-0 flex-1">{renderList()}</div>
           <Sheet
@@ -471,27 +570,160 @@ export function TraceWorkspace({
             </SheetContent>
           </Sheet>
         </>
-      ) : (
-        <div className="min-h-0 flex-1">
+      )
+    }
+
+    if (tier === "split") {
+      // Two columns rather than three: below ~1180px a third column leaves the
+      // waterfall too narrow to read a nested span's label, and the span detail
+      // is a form of label/value rows that stacks happily under it.
+      return (
+        <div className="min-h-0 flex-1" data-testid="trace-split-layout">
           <ResizablePanelGroup
             orientation="horizontal"
-            defaultLayout={layout.defaultLayout}
-            onLayoutChanged={layout.onLayoutChanged}
+            defaultLayout={splitLayout.defaultLayout}
+            onLayoutChanged={splitLayout.onLayoutChanged}
           >
-            <ResizablePanel id="trace-list" defaultSize="30%" minSize="20%" maxSize="45%">
+            <ResizablePanel id="trace-list" defaultSize="38%" minSize="25%" maxSize="55%">
               {renderList()}
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel id="trace-waterfall" defaultSize="40%" minSize="25%">
-              {renderWaterfall()}
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel id="trace-span" defaultSize="30%" minSize="20%" maxSize="45%">
-              {renderSpanDetail("h-full")}
+            <ResizablePanel id="trace-detail" defaultSize="62%" minSize="45%">
+              <ResizablePanelGroup
+                orientation="vertical"
+                defaultLayout={splitDetailLayout.defaultLayout}
+                onLayoutChanged={splitDetailLayout.onLayoutChanged}
+              >
+                <ResizablePanel id="trace-waterfall" defaultSize="55%" minSize="25%">
+                  {renderWaterfall()}
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel id="trace-span" defaultSize="45%" minSize="20%">
+                  {renderSpanDetail("h-full")}
+                </ResizablePanel>
+              </ResizablePanelGroup>
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>
+      )
+    }
+
+    return (
+      <div className="min-h-0 flex-1" data-testid="trace-columns-layout">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          defaultLayout={columnsLayout.defaultLayout}
+          onLayoutChanged={columnsLayout.onLayoutChanged}
+        >
+          <ResizablePanel id="trace-list" defaultSize="30%" minSize="20%" maxSize="45%">
+            {renderList()}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel id="trace-waterfall" defaultSize="40%" minSize="25%">
+            {renderWaterfall()}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel id="trace-span" defaultSize="30%" minSize="20%" maxSize="45%">
+            {renderSpanDetail("h-full")}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className={cn("flex h-full min-h-0 flex-col", className)}
+      data-testid="trace-workspace"
+      data-sub-view={subView}
+      data-tier={tier}
+    >
+      <div className="flex items-start gap-2 border-b px-3 py-2">
+        <Tabs
+          value={subView}
+          onValueChange={(value) => onSubViewChange(value as TraceSubView)}
+          className="shrink-0"
+        >
+          <TabsList aria-label={t("subViewLabel")} className="h-8">
+            {TRACE_SUB_VIEWS.map((value) => {
+              const Icon = SUB_VIEW_ICONS[value]
+              return (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  aria-label={t(`subViews.${value}`)}
+                  data-testid={`trace-sub-view-${value}`}
+                  className="gap-1.5"
+                >
+                  <Icon className="size-4" aria-hidden />
+                  {showSubViewLabels && <span>{t(`subViews.${value}`)}</span>}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+        </Tabs>
+
+        <div ref={toolbarSlotRef} className="flex min-w-0 flex-1">
+          <ObservabilityToolbar
+            preset={controls.rangePreset}
+            customSince={controls.customSince}
+            customUntil={controls.customUntil}
+            refreshMs={controls.refreshMs}
+            filters={controls.filters}
+            editMode={controls.editMode}
+            windowSpans={windowSpans}
+            lastUpdated={lastUpdated}
+            traces={matched}
+            onPreset={controls.setRangePreset}
+            onCustom={controls.setCustomRange}
+            onRefreshMs={controls.setRefreshMs}
+            onRefresh={refresh}
+            onFilters={handleFilters}
+            onToggleEdit={() => controls.setEditMode(!controls.editMode)}
+            onResetLayout={controls.resetLayouts}
+            onOpenSettings={() => setSettingsOpen(true)}
+            buildConfig={buildConfig}
+            onImportConfig={controls.importConfig}
+            showLayoutControls={subView === "dashboard"}
+            compact={compactToolbar}
+            dense={denseToolbar}
+          />
+        </div>
+      </div>
+
+      {truncated && (
+        <p
+          className="border-b px-3 py-1 text-[11px] text-warning"
+          role="status"
+          data-testid="trace-truncated-notice"
+        >
+          {t("truncated", { shown: spanCount, total: windowSpanCount })}
+        </p>
       )}
+
+      {subView === "dashboard" ? (
+        <ObservabilityDashboard
+          series={series}
+          layouts={layouts}
+          editMode={controls.editMode}
+          hiddenPanels={controls.hiddenPanels}
+          thresholds={thresholds}
+          filters={controls.filters}
+          onLayoutChange={controls.setLayouts}
+          onFilterValue={handleFilterValue}
+          empty={!loading && windowSpans.length === 0}
+          onWidenRange={
+            controls.rangePreset === WIDEST_PRESET
+              ? undefined
+              : () => controls.setRangePreset(WIDEST_PRESET)
+          }
+        />
+      ) : (
+        renderExplore()
+      )}
+
+      <ObservabilitySettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }

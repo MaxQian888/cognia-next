@@ -43,9 +43,16 @@ export interface ExportMenuProps {
   traces: TraceRollupRow[]
   buildConfig: () => DashboardConfig
   onImportConfig: (cfg: DashboardConfig) => void
+  /** Icon-only trigger — narrow toolbars only. */
+  compact?: boolean
 }
 
-export function ExportMenu({ traces, buildConfig, onImportConfig }: ExportMenuProps) {
+export function ExportMenu({
+  traces,
+  buildConfig,
+  onImportConfig,
+  compact = false,
+}: ExportMenuProps) {
   const t = useTranslations("observability.export")
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -105,9 +112,16 @@ export function ExportMenu({ traces, buildConfig, onImportConfig }: ExportMenuPr
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-1.5" data-testid="export-menu">
+          <Button
+            variant="outline"
+            size="sm"
+            className={compact ? "px-2" : "gap-1.5"}
+            data-testid="export-menu"
+            aria-label={t("label")}
+            title={compact ? t("label") : undefined}
+          >
             <DownloadIcon className="size-3.5" />
-            {t("label")}
+            {!compact && t("label")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

@@ -2,9 +2,10 @@
  * Browser E2E: persisted Agent Trace observability contract.
  *
  * Finished spans are seeded at the real IndexedDB boundary because model/tool
- * execution is owned by separate E2E contracts. The dashboard then has to
- * discover those durable rows, derive rollups, persist a URL-backed filter,
- * and load the selected trace again for its waterfall drill-down.
+ * execution is owned by separate E2E contracts. The `/logs` Traces channel then
+ * has to discover those durable rows, derive rollups, persist a URL-backed
+ * filter, carry that filter across BOTH of its sub-views, and load the selected
+ * trace again for its waterfall drill-down.
  */
 
 import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
@@ -141,7 +142,7 @@ async function seedPersistedSpans(page: Page): Promise<void> {
 }
 
 test.describe("observability — durable trace drill-down", () => {
-  test("filters persisted spans and drills into the selected waterfall", async ({ page }) => {
+  test("carries one filter across the dashboard and the trace explorer", async ({ page }) => {
     await page.goto("/")
     await resetCogniaDb(page)
     await seedPersistedSpans(page)
@@ -152,25 +153,34 @@ test.describe("observability — durable trace drill-down", () => {
       expect.arrayContaining([PRIMARY_TRACE_ID, SECONDARY_TRACE_ID])
     )
 
-    await page.goto("/observability", { waitUntil: "domcontentloaded" })
+    // The dashboard is a sub-view of the /logs Traces channel, not a route.
+    await page.goto("/logs?channel=traces&view=dashboard", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("observability-dashboard")).toBeVisible()
     await expect(page.getByTestId("stat-value-kpi-spans")).toHaveText("3")
 
-    const primaryTrace = page.getByTestId(`trace-row-${PRIMARY_TRACE_ID}`)
-    const secondaryTrace = page.getByTestId(`trace-row-${SECONDARY_TRACE_ID}`)
-    await expect(primaryTrace).toContainText("invoke_agent · Release Auditor")
-    await expect(primaryTrace).toContainText("2")
-    await expect(secondaryTrace).toBeVisible()
-
+    // Click-to-filter on a breakdown slice writes the shareable filter…
     await page.getByTestId(`donut-legend-bd-model-${PRIMARY_MODEL}`).click()
     await expect(page).toHaveURL(/f=/)
-    await expect(primaryTrace).toBeVisible()
-    await expect(secondaryTrace).toHaveCount(0)
+    await expect(page).toHaveURL(/view=dashboard/)
+
+    // …and the Explore sub-view is a fold of the SAME filtered read, so the
+    // secondary trace is gone there too. That cross-view agreement is the whole
+    // point of the merge: the two used to be separate routes with separate
+    // filter state.
+    await page.getByTestId("trace-sub-view-explore").click()
+    await expect(page.getByTestId("trace-list-pane")).toBeVisible()
+    const primaryTrace = page.getByTestId(`trace-row-${PRIMARY_TRACE_ID}`)
+    await expect(primaryTrace).toContainText("invoke_agent · Release Auditor")
+    await expect(page.getByTestId(`trace-row-${SECONDARY_TRACE_ID}`)).toHaveCount(0)
 
     await page.reload({ waitUntil: "domcontentloaded" })
-    const modelFilter = page.getByTestId("filter-model")
-    await expect(modelFilter).toContainText("1")
-    await modelFilter.click()
+    // The filter bar collapses behind one trigger when the channel is narrow,
+    // so assert the count on the bar rather than on a control that only exists
+    // in one of the two layouts.
+    await expect(page.getByTestId("variable-filter-bar")).toContainText("1")
+    const collapsed = page.getByTestId("filter-collapsed-trigger")
+    if ((await collapsed.count()) > 0) await collapsed.click()
+    await page.getByTestId("filter-model").click()
     await expect(page.getByTestId(`filter-model-option-${PRIMARY_MODEL}`)).toHaveAttribute(
       "aria-pressed",
       "true"
@@ -178,22 +188,22 @@ test.describe("observability — durable trace drill-down", () => {
     await page.keyboard.press("Escape")
     await expect(page.getByTestId(`trace-row-${SECONDARY_TRACE_ID}`)).toHaveCount(0)
 
+    // The waterfall is a pane in the channel now, not a drawer over a table.
     await page.getByTestId(`trace-row-${PRIMARY_TRACE_ID}`).click()
-    const drawer = page.getByRole("dialog")
-    await expect(drawer).toContainText(PRIMARY_TRACE_ID)
-    await expect(drawer.getByTestId(`waterfall-row-${ROOT_SPAN_ID}`)).toContainText(
+    const waterfall = page.getByTestId("trace-waterfall-pane")
+    await expect(waterfall.getByTestId(`waterfall-row-${ROOT_SPAN_ID}`)).toContainText(
       "invoke_agent · Release Auditor"
     )
-    await expect(drawer.getByTestId(`waterfall-row-${TOOL_SPAN_ID}`)).toContainText(
+    await expect(waterfall.getByTestId(`waterfall-row-${TOOL_SPAN_ID}`)).toContainText(
       "release_evidence_lookup"
     )
 
-    await drawer.getByTestId(`waterfall-toggle-${ROOT_SPAN_ID}`).click()
-    await expect(drawer.getByTestId(`waterfall-meta-${ROOT_SPAN_ID}`)).toContainText(
+    await waterfall.getByTestId(`waterfall-toggle-${ROOT_SPAN_ID}`).click()
+    await expect(waterfall.getByTestId(`waterfall-meta-${ROOT_SPAN_ID}`)).toContainText(
       "agent.started"
     )
-    await drawer.getByTestId(`waterfall-toggle-${TOOL_SPAN_ID}`).click()
-    const toolMetadata = drawer.getByTestId(`waterfall-meta-${TOOL_SPAN_ID}`)
+    await waterfall.getByTestId(`waterfall-toggle-${TOOL_SPAN_ID}`).click()
+    const toolMetadata = waterfall.getByTestId(`waterfall-meta-${TOOL_SPAN_ID}`)
     await expect(toolMetadata).toContainText("Evidence index unavailable")
     await expect(toolMetadata).toContainText("tool.failed")
   })

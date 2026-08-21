@@ -32,6 +32,7 @@ export function useObservabilityControls() {
   const setHiddenPanels = useObservabilityStore((s) => s.setHiddenPanels)
   const togglePanelVisibility = useObservabilityStore((s) => s.togglePanelVisibility)
   const importConfig = useObservabilityStore((s) => s.importConfig)
+  const resetView = useObservabilityStore((s) => s.resetView)
 
   return {
     rangePreset,
@@ -54,6 +55,7 @@ export function useObservabilityControls() {
     setHiddenPanels,
     togglePanelVisibility,
     importConfig,
+    resetView,
   }
 }
 

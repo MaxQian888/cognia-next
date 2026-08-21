@@ -47,4 +47,14 @@ describe("RefreshStatus", () => {
     render(<RefreshStatus lastUpdated={null} onRefresh={jest.fn()} />)
     expect(screen.queryByTestId("last-updated")).not.toBeInTheDocument()
   })
+
+  it("drops the label but keeps the button when the toolbar is compact", () => {
+    jest.setSystemTime(100_000)
+    render(<RefreshStatus lastUpdated={100_000 - 30_000} onRefresh={jest.fn()} compact />)
+    act(() => {
+      jest.advanceTimersByTime(0)
+    })
+    expect(screen.queryByTestId("last-updated")).not.toBeInTheDocument()
+    expect(screen.getByTestId("manual-refresh")).toBeInTheDocument()
+  })
 })

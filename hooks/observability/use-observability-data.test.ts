@@ -35,4 +35,35 @@ describe("useObservabilityData", () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.spans).toHaveLength(1)
   })
+
+  it("counts the whole window even when the read is capped", async () => {
+    await bulkInsertSpans([
+      makeSpan({ id: "a", startTime: 100 }),
+      makeSpan({ id: "b", startTime: 200 }),
+      makeSpan({ id: "c", startTime: 9999 }),
+    ])
+    const { result } = renderHook(() => useObservabilityData(customRange(0, 1000), {}, 0))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await waitFor(() => expect(result.current.windowSpanCount).toBe(2))
+    expect(result.current.spanCount).toBe(2)
+    // Nothing was dropped, so the channel must not claim a partial answer.
+    expect(result.current.truncated).toBe(false)
+  })
+
+  it("reports truncation when the window is bigger than the read cap", async () => {
+    await bulkInsertSpans([
+      makeSpan({ id: "a", startTime: 100 }),
+      makeSpan({ id: "b", startTime: 200 }),
+      makeSpan({ id: "c", startTime: 300 }),
+    ])
+    // The real cap is 20 000 rows; the hook's contract is "newest N, and say
+    // so", which is what a tiny cap exercises without seeding 20k spans.
+    const { result } = renderHook(() =>
+      useObservabilityData(customRange(0, 1000), {}, 0, { limit: 2 })
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await waitFor(() => expect(result.current.windowSpanCount).toBe(3))
+    expect(result.current.spans.map((s) => s.id)).toEqual(["b", "c"])
+    expect(result.current.truncated).toBe(true)
+  })
 })

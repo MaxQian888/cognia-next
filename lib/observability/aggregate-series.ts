@@ -144,6 +144,10 @@ export interface WindowKpis {
   cacheHitRate: number
   p95LatencyMs: number
   reqPerMin: number
+  /** Spans whose operation is `execute_tool`. */
+  toolCalls: number
+  /** Of those, how many carried an error. */
+  toolFailures: number
 }
 
 export function windowKpis(spans: AgentTraceSpan[], range: TimeRange): WindowKpis {
@@ -151,10 +155,19 @@ export function windowKpis(spans: AgentTraceSpan[], range: TimeRange): WindowKpi
   let errors = 0
   let input = 0
   let cacheRead = 0
+  let toolCalls = 0
+  let toolFailures = 0
   const durations: number[] = []
   for (const s of spans) {
     totalCost += s.costUsdEstimate ?? 0
-    if (isError(s)) errors += 1
+    const failed = isError(s)
+    if (failed) errors += 1
+    // Same rule as `lib/db/agent-traces.ts:aggregate` — a tool call is an
+    // `execute_tool` span, so the two surfaces can never disagree on the count.
+    if (s.operationName === "execute_tool") {
+      toolCalls += 1
+      if (failed) toolFailures += 1
+    }
     if (s.usage) {
       input += s.usage.inputTokens
       cacheRead += s.usage.cacheReadTokens
@@ -171,5 +184,7 @@ export function windowKpis(spans: AgentTraceSpan[], range: TimeRange): WindowKpi
     cacheHitRate: cacheable > 0 ? cacheRead / cacheable : 0,
     p95LatencyMs: percentilesOf(durations, [0.95])[0],
     reqPerMin: total / spanMinutes,
+    toolCalls,
+    toolFailures,
   }
 }

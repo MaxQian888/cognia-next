@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen } from "@testing-library/react"
-import { VariableFilterBar, toggleFilterValue } from "./variable-filter-bar"
+import userEvent from "@testing-library/user-event"
+import { VariableFilterBar, activeFilterCount, toggleFilterValue } from "./variable-filter-bar"
 import { makeSpan } from "@/lib/observability/fixtures"
 
 jest.mock("next-intl", () => ({
@@ -19,6 +20,13 @@ describe("toggleFilterValue", () => {
   it("appends without disturbing other dimensions", () => {
     const out = toggleFilterValue({ surface: ["chat"], model: ["opus"] }, "model", "sonnet")
     expect(out).toEqual({ surface: ["chat"], model: ["opus", "sonnet"] })
+  })
+})
+
+describe("activeFilterCount", () => {
+  it("counts values, not dimensions", () => {
+    expect(activeFilterCount({})).toBe(0)
+    expect(activeFilterCount({ model: ["a", "b"], provider: ["anthropic"] })).toBe(3)
   })
 })
 
@@ -65,5 +73,62 @@ describe("VariableFilterBar", () => {
     )
     fireEvent.click(screen.getByTestId("filter-clear"))
     expect(onChange).toHaveBeenCalledWith({})
+  })
+
+  describe("collapsed", () => {
+    it("folds every dimension behind one trigger carrying the active count", async () => {
+      const user = userEvent.setup()
+      render(
+        <VariableFilterBar
+          windowSpans={spans}
+          filters={{ model: ["opus"], surface: ["chat"] }}
+          onChange={jest.fn()}
+          collapsed
+        />
+      )
+      const trigger = screen.getByTestId("filter-collapsed-trigger")
+      expect(trigger).toHaveTextContent("2")
+      // The seven dropdowns are NOT in the toolbar row — that is the point.
+      expect(screen.queryByTestId("filter-model")).not.toBeInTheDocument()
+
+      await user.click(trigger)
+      expect(screen.getByTestId("filter-dimension-index")).toBeInTheDocument()
+      expect(screen.getByTestId("filter-model")).toBeInTheDocument()
+      expect(screen.getByTestId("filter-session")).toBeInTheDocument()
+    })
+
+    it("drills into one dimension and back without nesting a second popover", async () => {
+      const user = userEvent.setup()
+      const onChange = jest.fn()
+      render(<VariableFilterBar windowSpans={spans} filters={{}} onChange={onChange} collapsed />)
+      await user.click(screen.getByTestId("filter-collapsed-trigger"))
+      await user.click(screen.getByTestId("filter-model"))
+
+      // The index is replaced, not stacked on top of.
+      expect(screen.queryByTestId("filter-dimension-index")).not.toBeInTheDocument()
+      expect(screen.getByTestId("filter-search-model")).toBeInTheDocument()
+
+      await user.click(screen.getByTestId("filter-model-option-opus"))
+      expect(onChange).toHaveBeenCalledWith({ model: ["opus"] })
+
+      await user.click(screen.getByTestId("filter-drill-back"))
+      expect(screen.getByTestId("filter-dimension-index")).toBeInTheDocument()
+    })
+
+    it("clears everything from inside the popover", async () => {
+      const user = userEvent.setup()
+      const onChange = jest.fn()
+      render(
+        <VariableFilterBar
+          windowSpans={spans}
+          filters={{ model: ["opus"] }}
+          onChange={onChange}
+          collapsed
+        />
+      )
+      await user.click(screen.getByTestId("filter-collapsed-trigger"))
+      await user.click(screen.getByTestId("filter-clear"))
+      expect(onChange).toHaveBeenCalledWith({})
+    })
   })
 })
