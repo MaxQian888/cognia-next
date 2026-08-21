@@ -7,15 +7,15 @@
 
 use std::sync::Mutex;
 
-use cognia_observability::event::{
+use crate::event::{
     ObservabilityPayload, ObservabilityRuntime, ObservabilitySeverity,
 };
-use cognia_observability::recovery::{
+use crate::recovery::{
     ChildAction, RecoveryMode, RecoveryStateV1, RecoverySubsystem, RendererAction,
 };
-use cognia_observability::recovery_store::RecoveryStore;
-use cognia_observability::spool::{FileSpool, SpoolLimits};
-use cognia_observability::writer::{EventRequest, ObservabilityWriter, WriterIdentity};
+use crate::recovery_store::RecoveryStore;
+use crate::spool::{FileSpool, SpoolLimits};
+use crate::writer::{EventRequest, ObservabilityWriter, WriterIdentity};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -385,7 +385,7 @@ fn installation_id(dir: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cognia_observability::recovery::CheckpointStatus;
+    use crate::recovery::CheckpointStatus;
     use tempfile::TempDir;
 
     fn controller(dir: &TempDir, build: &str) -> RecoveryController {

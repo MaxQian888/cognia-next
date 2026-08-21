@@ -15,7 +15,7 @@ use cognia_observability::recovery::{RecoveryStateV1, RecoverySubsystem, RECOVER
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use super::controller::RecoveryController;
+use super::RecoveryController;
 
 /// The controller is managed as an `Arc` so the same instance is reachable
 /// both here and from `recovery::controller()`, which supervisors without an

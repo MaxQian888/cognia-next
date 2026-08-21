@@ -4,6 +4,11 @@ pub mod event;
 pub mod log_query;
 pub mod privacy;
 pub mod recovery;
+// ADR-0067 Tier C — the recovery *runtime* (persistence, controller,
+// process-global handle) moved in from `app_lib`. It is tauri-free; the
+// 5 `#[tauri::command]` shells stay app-side in `src-tauri/src/recovery/`
+// so this crate keeps no tauri dep (cognia-cli links it headless).
+pub mod recovery_runtime;
 pub mod recovery_store;
 pub mod spool;
 pub mod writer;

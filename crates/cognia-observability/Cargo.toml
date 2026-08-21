@@ -8,6 +8,10 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+# ADR-0067 Tier C — `recovery_runtime` moved in from `app_lib`: `dirs` for the
+# diagnostics data dir, `log` for the non-fatal persistence warnings.
+dirs = "6"
+log = "0.4"
 ed25519-dalek = "2"
 hex = "0.4"
 regex = "1"
