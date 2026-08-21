@@ -93,6 +93,70 @@ export interface RoutingTaskHints {
   hasCode?: boolean
   attachmentKinds?: Array<"image" | "audio" | "video" | "document">
   category?: TaskCategory
+  /**
+   * How many turns deep the thread is. A long thread is a different task from
+   * the same words typed cold: more context to hold, more prior constraints to
+   * respect. The field existed on `RoutingContext` and was never read.
+   */
+  messageCount?: number
+  /**
+   * Tools the turn can reach. Already computed at the call site as a hard
+   * capability filter; as a SIGNAL it says something else — a turn that can
+   * act on the world is more consequential than one that can only answer.
+   */
+  toolCount?: number
+  /**
+   * Effort the user asked for. Someone who chose `high` or `max` has already
+   * said "this one is hard"; treating that as a floor is respecting an answer
+   * we asked for rather than re-deriving it from their wording.
+   */
+  requestedEffort?: "low" | "medium" | "high" | "xhigh" | "max"
+}
+
+/**
+ * The deterministic signals behind a difficulty score.
+ *
+ * Emitted on the routing trace so a threshold can be tuned from evidence.
+ * Every field is a bounded NUMBER — never prompt text, in line with the
+ * calibration pipeline's rule that it can read decisions but never content.
+ */
+export interface RoutingDifficultySignals {
+  /** Contribution from prompt length. */
+  length: number
+  /** Contribution from fenced or inline code. */
+  code: number
+  /** Contribution from reasoning/complexity keywords. */
+  keywords: number
+  /** Contribution from sentence/question structure. */
+  structure: number
+  /** Contribution from attachments and modality. */
+  attachments: number
+  /** Contribution from thread depth. */
+  threadDepth: number
+  /** Contribution from tool availability. */
+  tools: number
+  /** Floor imposed by an explicitly requested effort level, if any. */
+  effortFloor: number
+}
+
+export type RoutingDifficultyTier = "fast" | "balanced" | "powerful"
+
+/**
+ * What the router concluded about difficulty, and how.
+ *
+ * `deterministicTier` is kept beside `tier` on purpose: when a judge moved the
+ * decision, the pair is the whole record of the disagreement, and shadow-mode
+ * calibration needs both to say whether consulting the judge was worth it.
+ */
+export interface RoutingDifficultyOutcome {
+  score: number
+  tier: RoutingDifficultyTier
+  deterministicTier: RoutingDifficultyTier
+  signals: RoutingDifficultySignals
+  judgeUsed: boolean
+  judgeTier?: RoutingDifficultyTier
+  judgeConfidence?: number
+  judgeLatencyMs?: number
 }
 
 export interface RoutingRequest {
@@ -111,6 +175,19 @@ export interface RoutingRequest {
   strategy?: RoutingStrategy | (string & {})
   /** Compare the awaited decision with the synchronous compatibility path. */
   shadowMode?: boolean
+  /**
+   * Second-opinion layer for the ambiguous middle.
+   *
+   * The deterministic score ALWAYS runs; the judge is consulted only when the
+   * score lands within `uncertaintyBand` of a tier boundary. That is what keeps
+   * the always-on path free: an unambiguous prompt never pays for it, so the
+   * median request gains 0 ms.
+   */
+  judge?: {
+    enabled?: boolean
+    /** Half-width around a threshold inside which the judge is consulted. */
+    uncertaintyBand?: number
+  }
 }
 
 export type RoutingReasonCode =
@@ -134,6 +211,13 @@ export type RoutingReasonCode =
   | "fallback-context"
   | "fallback-content-policy"
   | "committed-no-replay"
+  // Difficulty judge (ADR-0043 Phase 10). `agreed` when it confirmed the
+  // deterministic tier, `overrode` when it moved it, `unavailable` when it was
+  // consulted and returned nothing (timeout, PII gate, malformed output) — in
+  // which case the deterministic tier stands, unchanged.
+  | "judge-agreed"
+  | "judge-overrode"
+  | "judge-unavailable"
   | `plugin:${string}:${string}`
   | `filter:${string}`
 
@@ -158,6 +242,8 @@ export interface RoutingPlan {
   retryPolicy?: ModelMappingRetryPolicy
   overBudgetWarning?: { providerId: string; spend: number; budget: number }
   filterNotes?: FilterNotes
+  /** Present for `auto` selections; absent when the caller pinned a model. */
+  difficulty?: RoutingDifficultyOutcome
   shadowComparison?: {
     differs: boolean
     selected: { providerId: string; modelId: string }
@@ -308,6 +394,20 @@ export interface AutoRouterSettings {
   thresholds: { balanced: number; powerful: number }
   /** Compute and trace decisions without dispatching them. */
   shadowMode: boolean
+  /**
+   * Second-opinion difficulty judge (ADR-0043 Phase 10).
+   *
+   * An opt-in INSIDE an already-opted-in feature: `enabled` here does nothing
+   * unless `autoRouting.enabled` is also on, so turning routing on never
+   * silently starts spending model calls on classification. Default off.
+   */
+  judge?: {
+    enabled: boolean
+    /** Half-width around a tier cut point inside which the judge is consulted. */
+    uncertaintyBand?: number
+    /** Hard ceiling on the judge's round trip; the deterministic tier stands on expiry. */
+    timeoutMs?: number
+  }
 }
 
 /** Settings-store spelling retained as an alias to the canonical type. */
@@ -334,6 +434,10 @@ export const DEFAULT_AUTO_ROUTER_SETTINGS: AutoRouterSettings = {
   candidateAliases: ["fast", "balanced", "powerful"],
   thresholds: { balanced: 0.34, powerful: 0.67 },
   shadowMode: true,
+  // Off by default. Shadow mode is the intended rollout path: publish the
+  // decisions, mine `routing.shadow_diff` with `analyzeRoutingCalibration`,
+  // then turn the layer on with evidence rather than optimism.
+  judge: { enabled: false, uncertaintyBand: 0.08, timeoutMs: 400 },
 }
 
 export const DEFAULT_AUTO_ROUTING = DEFAULT_AUTO_ROUTER_SETTINGS

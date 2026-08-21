@@ -16,6 +16,8 @@
 import type { RoutingStrategySelector } from "@cognia/provider-types/routing-strategy"
 import type {
   RoutingCapabilityRequirements,
+  RoutingDifficultySignals,
+  RoutingDifficultyTier,
   RoutingTaskHints,
   TaskCategory,
   TaskClassification,
@@ -66,6 +68,128 @@ export function scoreDifficulty(text: string): number {
   if (sentences.length > 5) score += 0.1
 
   return Math.min(1, score)
+}
+
+/** Empty contribution set — the shape every signal path starts from. */
+const NO_SIGNALS: RoutingDifficultySignals = {
+  length: 0,
+  code: 0,
+  keywords: 0,
+  structure: 0,
+  attachments: 0,
+  threadDepth: 0,
+  tools: 0,
+  effortFloor: 0,
+}
+
+/**
+ * A user who picked an effort level already answered "how hard is this?".
+ * Treating it as a FLOOR rather than a term respects that answer without
+ * letting it override evidence pointing higher.
+ */
+const EFFORT_FLOOR: Record<string, number> = {
+  low: 0,
+  medium: 0,
+  high: 0.5,
+  xhigh: 0.7,
+  max: 0.8,
+}
+
+export interface DeterministicDifficultyInput {
+  text: string
+  taskHints?: RoutingTaskHints
+  requirements?: RoutingCapabilityRequirements
+}
+
+/**
+ * Score difficulty from every signal the request already carries.
+ *
+ * `scoreDifficulty(text)` stays exactly as it was — four callers depend on the
+ * one-argument form, and the text-only score is still the backbone here. What
+ * this adds is the context the router already had and never read: attachments,
+ * thread depth, tool reach, and the effort the user explicitly asked for.
+ *
+ * Still O(text) with no awaits. The <40ms budget is a property of the code
+ * shape, not of a timer — which is why it is asserted structurally rather than
+ * measured.
+ */
+export function deterministicDifficulty(input: DeterministicDifficultyInput): {
+  score: number
+  signals: RoutingDifficultySignals
+} {
+  const text = input.text ?? ""
+  const signals: RoutingDifficultySignals = { ...NO_SIGNALS }
+
+  signals.length = Math.min(text.length / 2000, 1) * 0.3
+  signals.code = /```/.test(text) ? 0.25 : /`[^`\n]+`/.test(text) ? 0.1 : 0
+  let keywordHits = 0
+  for (const pattern of COMPLEXITY_KEYWORDS) {
+    if (pattern.test(text)) keywordHits++
+  }
+  signals.keywords = text.trim() ? Math.min(keywordHits * 0.15, 0.3) : 0
+  const sentences = text.split(/[.!?。!?]+/).filter((part) => part.trim().length > 0)
+  signals.structure = sentences.length > 5 ? 0.1 : 0
+
+  // A non-text modality is more than a capability requirement: reading a
+  // screenshot or a document is a harder task than answering the same sentence.
+  const attachments = input.taskHints?.attachmentKinds ?? []
+  if (attachments.length > 0) {
+    const heavy = attachments.some((kind) => kind !== "image")
+    signals.attachments = Math.min(0.1 + attachments.length * 0.05, heavy ? 0.25 : 0.2)
+  } else if (input.requirements?.vision) {
+    signals.attachments = 0.1
+  }
+
+  // Thread depth: more prior constraints to hold, and a request that has
+  // already survived several turns is rarely the trivial one.
+  const messageCount = input.taskHints?.messageCount ?? 0
+  signals.threadDepth = messageCount > 4 ? Math.min((messageCount - 4) * 0.02, 0.15) : 0
+
+  // Tool reach: a turn that can act on the world is more consequential than
+  // one that can only answer. Bounded low — reach is not the same as need.
+  const toolCount = input.taskHints?.toolCount ?? (input.requirements?.tools ? 1 : 0)
+  signals.tools = toolCount > 0 ? Math.min(0.05 + toolCount * 0.01, 0.15) : 0
+
+  const summed = Math.min(
+    1,
+    signals.length +
+      signals.code +
+      signals.keywords +
+      signals.structure +
+      signals.attachments +
+      signals.threadDepth +
+      signals.tools
+  )
+  signals.effortFloor = EFFORT_FLOOR[input.taskHints?.requestedEffort ?? "low"] ?? 0
+  return { score: Math.max(summed, signals.effortFloor), signals }
+}
+
+/** Which tier a score falls in, given the configured cut points. */
+export function difficultyTier(
+  score: number,
+  thresholds: { balanced: number; powerful: number }
+): RoutingDifficultyTier {
+  if (score < thresholds.balanced) return "fast"
+  return score < thresholds.powerful ? "balanced" : "powerful"
+}
+
+/**
+ * True when the score sits close enough to a cut point that a second opinion
+ * could change the answer.
+ *
+ * This is the whole cost-control mechanism. The deterministic score always
+ * runs; the judge is consulted only here, so an unambiguous prompt pays
+ * nothing and the median request gains 0 ms.
+ */
+export function isAmbiguousDifficulty(
+  score: number,
+  thresholds: { balanced: number; powerful: number },
+  band: number
+): boolean {
+  if (band <= 0) return false
+  return (
+    Math.abs(score - thresholds.balanced) <= band || Math.abs(score - thresholds.powerful) <= band
+  )
 }
 
 /**

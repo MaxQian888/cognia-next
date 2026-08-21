@@ -7,6 +7,25 @@ export interface RoutingCalibrationResult {
   shadowDiffRate: number
   confidence: number
   recommendedThresholds?: { balanced: number; powerful: number }
+  /**
+   * How the difficulty judge actually behaved on this workload.
+   *
+   * The point of a second-opinion layer is that it is worth its cost, and that
+   * is an empirical question. `consulted` over the sample says how often the
+   * ambiguity band was hit; `overrodeRate` over `consulted` says how often
+   * asking changed the answer. A band that is never hit is dead weight; a judge
+   * that never overrides is paying for agreement.
+   */
+  judge: {
+    consulted: number
+    agreed: number
+    overrode: number
+    unavailable: number
+    /** Share of consulted decisions the judge moved. Zero when never consulted. */
+    overrodeRate: number
+    /** Mean round trip in ms across consulted decisions, when any reported one. */
+    meanLatencyMs?: number
+  }
 }
 
 const MIN_TOTAL_SAMPLES = 50
@@ -34,6 +53,8 @@ export function analyzeRoutingCalibration(
 ): RoutingCalibrationResult {
   const decisions = new Map<string, number>()
   const shadowDiffs = new Set<string>()
+  const judge = { consulted: 0, agreed: 0, overrode: 0, unavailable: 0 }
+  const judgeLatencies: number[] = []
   for (const span of spans) {
     for (const event of span.events ?? []) {
       const decisionId =
@@ -42,6 +63,18 @@ export function analyzeRoutingCalibration(
       if (event.name === "routing.plan") {
         const score = boundedScore(event.attributes?.difficultyScore)
         if (score !== undefined) decisions.set(decisionId, score)
+        if (event.attributes?.judgeUsed === true) {
+          judge.consulted += 1
+          const judgeTier = event.attributes.judgeTier
+          const deterministicTier = event.attributes.deterministicTier
+          if (typeof judgeTier !== "string") judge.unavailable += 1
+          else if (judgeTier === deterministicTier) judge.agreed += 1
+          else judge.overrode += 1
+          const latency = event.attributes.judgeLatencyMs
+          if (typeof latency === "number" && Number.isFinite(latency) && latency >= 0) {
+            judgeLatencies.push(latency)
+          }
+        }
       } else if (event.name === "routing.shadow_diff") {
         shadowDiffs.add(decisionId)
       }
@@ -68,6 +101,16 @@ export function analyzeRoutingCalibration(
     perTier,
     shadowDiffRate,
     confidence: Math.min(0.99, sampleSize / 200) * (1 - shadowDiffRate * 0.25),
+    judge: {
+      ...judge,
+      overrodeRate: judge.consulted > 0 ? judge.overrode / judge.consulted : 0,
+      ...(judgeLatencies.length > 0
+        ? {
+            meanLatencyMs:
+              judgeLatencies.reduce((sum, value) => sum + value, 0) / judgeLatencies.length,
+          }
+        : {}),
+    },
   }
   if (sampleSize < MIN_TOTAL_SAMPLES) {
     return { status: "insufficient-total", ...base }

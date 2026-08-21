@@ -1,4 +1,11 @@
-import { classifyRoutingTask, scoreDifficulty, createDifficultySelector } from "./difficulty-router"
+import {
+  classifyRoutingTask,
+  createDifficultySelector,
+  deterministicDifficulty,
+  difficultyTier,
+  isAmbiguousDifficulty,
+  scoreDifficulty,
+} from "./difficulty-router"
 import { makeTelemetrySnapshot } from "./strategies/built-in"
 import type { DifficultyRoutingSettings } from "./routing-types"
 
@@ -163,5 +170,92 @@ describe("difficulty selector", () => {
   it("returns null on empty chains", () => {
     const selector = createDifficultySelector(() => SETTINGS)
     expect(selector.select([], telemetry, { promptText: "hi" })).toBeNull()
+  })
+})
+
+describe("deterministicDifficulty", () => {
+  it("reads the context the router already had and never looked at", () => {
+    // `attachmentKinds` existed on the hints and `messageCount` on the routing
+    // context; neither reached the score. A screenshot plus a 20-turn thread is
+    // not the same task as the same sentence typed cold.
+    const cold = deterministicDifficulty({ text: "what changed here?" })
+    const warm = deterministicDifficulty({
+      text: "what changed here?",
+      taskHints: {
+        attachmentKinds: ["image"],
+        messageCount: 20,
+        toolCount: 6,
+      },
+    })
+    expect(warm.score).toBeGreaterThan(cold.score)
+    expect(warm.signals.attachments).toBeGreaterThan(0)
+    expect(warm.signals.threadDepth).toBeGreaterThan(0)
+    expect(warm.signals.tools).toBeGreaterThan(0)
+  })
+
+  it("treats a requested effort as a floor, not as a term", () => {
+    // The user already answered "how hard is this?". A floor respects that
+    // answer without letting it cap evidence pointing higher.
+    const trivial = deterministicDifficulty({
+      text: "hi",
+      taskHints: { requestedEffort: "max" },
+    })
+    expect(trivial.score).toBe(0.8)
+
+    const hard = "```\n" + "x".repeat(4000) + "\n```\nprove the theorem step by step and analyze"
+    const withFloor = deterministicDifficulty({
+      text: hard,
+      taskHints: { requestedEffort: "high" },
+    })
+    const withoutFloor = deterministicDifficulty({ text: hard })
+    expect(withFloor.score).toBe(withoutFloor.score)
+  })
+
+  it("keeps the text-only score identical to scoreDifficulty", () => {
+    // The one-argument form has four callers; adding signals must not move the
+    // number they already depend on.
+    for (const text of ["", "hello", "```js\ncode\n```", "analyze and prove this step by step"]) {
+      expect(deterministicDifficulty({ text }).score).toBeCloseTo(scoreDifficulty(text), 10)
+    }
+  })
+
+  it("never exceeds one, however many signals fire", () => {
+    const everything = deterministicDifficulty({
+      text:
+        "```\n" +
+        "y".repeat(5000) +
+        "\n```\nprove analyze refactor optimize math. a. b. c. d. e. f.",
+      taskHints: {
+        attachmentKinds: ["image", "document", "video"],
+        messageCount: 200,
+        toolCount: 50,
+        requestedEffort: "max",
+      },
+    })
+    expect(everything.score).toBeLessThanOrEqual(1)
+  })
+})
+
+describe("difficultyTier / isAmbiguousDifficulty", () => {
+  const thresholds = { balanced: 0.34, powerful: 0.67 }
+
+  it("maps a score onto the configured ladder", () => {
+    expect(difficultyTier(0.1, thresholds)).toBe("fast")
+    expect(difficultyTier(0.5, thresholds)).toBe("balanced")
+    expect(difficultyTier(0.9, thresholds)).toBe("powerful")
+  })
+
+  it("is ambiguous only near a cut point — that IS the cost control", () => {
+    // An unambiguous prompt never consults the judge, so the median request
+    // gains 0 ms from the layer existing.
+    expect(isAmbiguousDifficulty(0.35, thresholds, 0.08)).toBe(true)
+    expect(isAmbiguousDifficulty(0.65, thresholds, 0.08)).toBe(true)
+    expect(isAmbiguousDifficulty(0.05, thresholds, 0.08)).toBe(false)
+    expect(isAmbiguousDifficulty(0.5, thresholds, 0.08)).toBe(false)
+    expect(isAmbiguousDifficulty(0.95, thresholds, 0.08)).toBe(false)
+  })
+
+  it("a zero band disables the judge entirely", () => {
+    expect(isAmbiguousDifficulty(0.34, thresholds, 0)).toBe(false)
   })
 })

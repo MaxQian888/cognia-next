@@ -36,13 +36,26 @@ import type {
   FilterNotes,
   FilterRequest,
 } from "@cognia/provider-types/deployment-filter"
+import type {
+  RoutingDifficultyOutcome,
+  RoutingDifficultySignals,
+  RoutingDifficultyTier,
+} from "@cognia/provider-types/auto-router"
 import { deploymentKeyOfEntry } from "@cognia/provider-types/deployment"
 import type { ProviderName } from "@cognia/provider-types"
 import { resolveModelAlias, type ProviderHealthMetricsLite } from "./alias-resolver"
 import { DEFAULT_FILTER_CHAIN, getDeploymentFilter } from "./filter-registry"
 import { runFilterChain, runFilterChainAsync } from "./run-filter-chain"
+import { getProviderRoutingRuntimeAdapters } from "./runtime-adapters"
 import { getRoutingStrategy } from "./strategy-registry"
-import { classifyRoutingTask, pickAutoAlias, scoreDifficulty } from "./difficulty-router"
+import {
+  classifyRoutingTask,
+  deterministicDifficulty,
+  difficultyTier,
+  isAmbiguousDifficulty,
+  pickAutoAlias,
+  scoreDifficulty,
+} from "./difficulty-router"
 
 /** Provider info needed for routing decisions */
 export interface ProviderRoutingInfo {
@@ -54,6 +67,22 @@ export interface ProviderRoutingInfo {
 
 /** Dependencies injected into the routing engine */
 export interface RoutingEngineDeps {
+  /**
+   * Second-opinion difficulty classifier, consulted ONLY for scores near a
+   * tier boundary.
+   *
+   * Injected rather than imported so this package stays free of any LLM
+   * dependency — the same seam `getPricing` and `getCapabilities` use. A host
+   * that wires nothing keeps a purely deterministic router, and a judge that
+   * throws, times out, or returns nothing leaves the deterministic tier
+   * standing: the layer can only ever improve a decision it was unsure of.
+   */
+  judgeDifficulty?: (input: {
+    promptText: string
+    deterministicScore: number
+    deterministicTier: RoutingDifficultyTier
+    signalsOnly: RoutingDifficultySignals
+  }) => Promise<{ tier: RoutingDifficultyTier; confidence?: number } | null>
   /** Get health metrics for a provider */
   getHealthMetrics: (providerId: string) => ProviderHealthMetrics | undefined
   /** Get circuit breaker state for a provider */
@@ -175,6 +204,16 @@ export interface RoutingResult {
  * // result.providerId, result.modelId, result.fallbackEntries
  * ```
  */
+/** Midpoint of a tier's band — the score a judge's verdict maps back onto. */
+function scoreForTier(
+  tier: RoutingDifficultyTier,
+  thresholds: { balanced: number; powerful: number }
+): number {
+  if (tier === "fast") return Math.max(0, thresholds.balanced / 2)
+  if (tier === "balanced") return (thresholds.balanced + thresholds.powerful) / 2
+  return Math.min(1, (thresholds.powerful + 1) / 2)
+}
+
 export class ProviderRoutingEngine {
   constructor(
     private registry: ModelMappingRegistry,
@@ -203,6 +242,7 @@ export class ProviderRoutingEngine {
     let parameterDefaults: AliasResolutionResult["parameterDefaults"]
     let specialFallbacks: ModelMappingSpecialFallbacks | undefined
     let retryPolicy: ModelMappingRetryPolicy | undefined
+    let difficulty: RoutingDifficultyOutcome | undefined
     const reasonCodes: RoutingReasonCode[] = []
 
     if (request.selection.kind === "manual") {
@@ -231,10 +271,21 @@ export class ProviderRoutingEngine {
           .filter((mapping) => mapping.enabled)
           .map((mapping) => mapping.alias.toLowerCase())
       )
+      const thresholds = request.thresholds ?? { balanced: 0.34, powerful: 0.67 }
+      difficulty = await this.resolveDifficulty(request, thresholds)
+      if (difficulty.judgeUsed) {
+        reasonCodes.push(
+          difficulty.judgeTier === undefined
+            ? "judge-unavailable"
+            : difficulty.judgeTier === difficulty.deterministicTier
+              ? "judge-agreed"
+              : "judge-overrode"
+        )
+      }
       const preferredAlias = pickAutoAlias(
-        scoreDifficulty(request.promptText ?? ""),
+        difficulty.score,
         configuredAliases?.length ? configuredAliases : ["fast", "balanced", "powerful"],
-        request.thresholds ?? { balanced: 0.34, powerful: 0.67 },
+        thresholds,
         availableAliases
       )
       const resolution = resolveModelAlias(
@@ -347,6 +398,7 @@ export class ProviderRoutingEngine {
         (warning) => warning.providerId === selected.providerId
       ),
       filterNotes: filtered.notes,
+      ...(difficulty ? { difficulty } : {}),
       ...(shadowSelected
         ? {
             shadowComparison: {
@@ -362,6 +414,78 @@ export class ProviderRoutingEngine {
         : {}),
       replayPolicy: "pre-commit-only",
       createdAt: this.deps.now?.() ?? Date.now(),
+    }
+  }
+
+  /**
+   * Deterministic score first, judge only in the ambiguous band.
+   *
+   * The ordering is the design. The deterministic pass ALWAYS runs and always
+   * produces a usable tier, so the judge is never load-bearing: it is asked
+   * only when the score sits within `uncertaintyBand` of a cut point, and any
+   * failure — timeout, refusal, malformed answer — leaves the deterministic
+   * tier exactly where it was. An unambiguous prompt pays nothing, which is
+   * why the median request gains 0 ms from this layer existing.
+   */
+  private async resolveDifficulty(
+    request: RoutingRequest,
+    thresholds: { balanced: number; powerful: number }
+  ): Promise<RoutingDifficultyOutcome> {
+    const promptText = request.promptText ?? ""
+    const { score, signals } = deterministicDifficulty({
+      text: promptText,
+      ...(request.taskHints ? { taskHints: request.taskHints } : {}),
+      ...(request.requirements ? { requirements: request.requirements } : {}),
+    })
+    const deterministicTier = difficultyTier(score, thresholds)
+    const base: RoutingDifficultyOutcome = {
+      score,
+      tier: deterministicTier,
+      deterministicTier,
+      signals,
+      judgeUsed: false,
+    }
+
+    const judge = this.deps.judgeDifficulty
+    // Request wins; otherwise the user's own setting, read through the same
+    // runtime seam the difficulty strategy uses. Without the fallback the
+    // feature would be unreachable from every existing call site.
+    const judgeSettings =
+      request.judge ?? getProviderRoutingRuntimeAdapters().getAutoRoutingJudgeSettings()
+    if (!judge || judgeSettings?.enabled !== true) return base
+    const band = judgeSettings.uncertaintyBand ?? 0.08
+    if (!isAmbiguousDifficulty(score, thresholds, band)) return base
+
+    const startedAt = this.deps.now?.() ?? Date.now()
+    let verdict: { tier: RoutingDifficultyTier; confidence?: number } | null = null
+    try {
+      verdict = await judge({
+        promptText,
+        deterministicScore: score,
+        deterministicTier,
+        signalsOnly: signals satisfies RoutingDifficultySignals,
+      })
+    } catch {
+      verdict = null
+    }
+    const judgeLatencyMs = (this.deps.now?.() ?? Date.now()) - startedAt
+
+    return {
+      ...base,
+      judgeUsed: true,
+      judgeLatencyMs,
+      ...(verdict
+        ? {
+            tier: verdict.tier,
+            judgeTier: verdict.tier,
+            ...(verdict.confidence !== undefined ? { judgeConfidence: verdict.confidence } : {}),
+            // The alias ladder is chosen from the SCORE, so a judge that moves
+            // the tier has to move the score with it — otherwise the verdict
+            // would be recorded and then ignored, which is worse than not
+            // asking. Snapped to the midpoint of the chosen band.
+            score: scoreForTier(verdict.tier, thresholds),
+          }
+        : {}),
     }
   }
 

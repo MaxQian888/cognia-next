@@ -139,3 +139,106 @@ describe("analyzeRoutingCalibration", () => {
     expect(result.recommendedThresholds).toEqual({ balanced: 0.99, powerful: 1 })
   })
 })
+
+describe("judge behaviour on the workload", () => {
+  function judgeSpans(
+    rows: Array<{
+      difficultyScore: number
+      judgeUsed?: boolean
+      judgeTier?: string
+      deterministicTier?: string
+      judgeLatencyMs?: number
+    }>
+  ): AgentTraceSpan[] {
+    return rows.map((row, index) => ({
+      id: `span-${index}`,
+      traceId: `trace-${index}`,
+      spanId: `span-${index}`,
+      startTime: index,
+      operationName: "chat",
+      providerName: "openai",
+      sessionId: `session-${index}`,
+      surface: "chat",
+      events: [
+        {
+          name: "routing.plan",
+          at: index,
+          attributes: { decisionId: `decision-${index}`, ...row },
+        },
+      ],
+    })) as AgentTraceSpan[]
+  }
+
+  it("separates agreement, override, and unavailability", () => {
+    // Whether a second-opinion layer earns its cost is empirical. A band that
+    // is never hit is dead weight; a judge that never overrides is paying for
+    // agreement.
+    const result = analyzeRoutingCalibration(
+      judgeSpans([
+        { difficultyScore: 0.3 },
+        {
+          difficultyScore: 0.35,
+          judgeUsed: true,
+          deterministicTier: "fast",
+          judgeTier: "fast",
+          judgeLatencyMs: 100,
+        },
+        {
+          difficultyScore: 0.36,
+          judgeUsed: true,
+          deterministicTier: "fast",
+          judgeTier: "balanced",
+          judgeLatencyMs: 300,
+        },
+        { difficultyScore: 0.37, judgeUsed: true, deterministicTier: "fast" },
+      ]),
+      { balanced: 0.34, powerful: 0.67 }
+    )
+
+    expect(result.judge).toMatchObject({
+      consulted: 3,
+      agreed: 1,
+      overrode: 1,
+      unavailable: 1,
+      meanLatencyMs: 200,
+    })
+    expect(result.judge.overrodeRate).toBeCloseTo(1 / 3, 5)
+  })
+
+  it("reports zeros, not NaN, when the judge was never consulted", () => {
+    const result = analyzeRoutingCalibration(spans([0.1, 0.5, 0.9]), {
+      balanced: 0.34,
+      powerful: 0.67,
+    })
+    expect(result.judge).toEqual({
+      consulted: 0,
+      agreed: 0,
+      overrode: 0,
+      unavailable: 0,
+      overrodeRate: 0,
+    })
+  })
+
+  it("ignores a nonsensical latency instead of skewing the mean", () => {
+    const result = analyzeRoutingCalibration(
+      judgeSpans([
+        {
+          difficultyScore: 0.35,
+          judgeUsed: true,
+          deterministicTier: "fast",
+          judgeTier: "fast",
+          judgeLatencyMs: -5,
+        },
+        {
+          difficultyScore: 0.36,
+          judgeUsed: true,
+          deterministicTier: "fast",
+          judgeTier: "fast",
+          judgeLatencyMs: 120,
+        },
+      ]),
+      { balanced: 0.34, powerful: 0.67 }
+    )
+    expect(result.judge.meanLatencyMs).toBe(120)
+  })
+})

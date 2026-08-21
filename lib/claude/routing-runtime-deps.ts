@@ -88,6 +88,36 @@ export function buildRoutingRuntimeAdapters(): ProviderRoutingRuntimeAdapters {
     // ---- Difficulty router settings (RouteLLM-lite; opt-in, off by default)
     getDifficultyRoutingSettings: () => useSettingsStore.getState().settings?.difficultyRouting,
 
+    getAutoRoutingJudgeSettings: () => useSettingsStore.getState().settings?.autoRouting?.judge,
+
+    // ---- Difficulty judge (opt-in INSIDE opted-in Auto routing) -----------
+    //
+    // Installed unconditionally; the settings gate lives in the engine, which
+    // consults it only when `autoRouting.judge.enabled` is true AND the
+    // deterministic score sits inside the uncertainty band. Building the
+    // utility client lazily per call is deliberate: it is the user's own cheap
+    // model, and resolving it at boot would freeze whatever was configured then.
+    judgeDifficulty: async (input) => {
+      const [{ judgeDifficulty }, { buildUtilityLlmClient }] = await Promise.all([
+        import("@/lib/ai/routing/difficulty-judge"),
+        import("@/lib/ai/generation/utility-client"),
+      ])
+      const settings = useSettingsStore.getState().settings
+      const client = buildUtilityLlmClient({
+        session: null,
+        appSettings: settings,
+        featureId: "routing-difficulty-judge",
+      })
+      if (!client) return null
+      return judgeDifficulty(client, {
+        promptText: input.promptText,
+        deterministicTier: input.deterministicTier,
+        ...(settings?.autoRouting?.judge?.timeoutMs !== undefined
+          ? { timeoutMs: settings.autoRouting.judge.timeoutMs }
+          : {}),
+      })
+    },
+
     // ---- Semantic tool router deps (opt-in, off by default) ----------------
     semanticToolRouterDeps: {
       listRoutes: () => listEnabledToolRoutes(),

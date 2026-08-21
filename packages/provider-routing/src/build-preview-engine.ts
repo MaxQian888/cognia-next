@@ -214,6 +214,9 @@ export function buildRoutingEngineDeps(appSettings: RoutingEngineSettings): Rout
       runtime.releaseSessionDeployment(sessionId)
       releaseSessionDeployment(sessionId)
     },
+    // Only installed when the host wired one. Absent → the engine's judge
+    // branch is unreachable and routing stays purely deterministic.
+    ...(runtime.judgeDifficulty ? { judgeDifficulty: runtime.judgeDifficulty } : {}),
     listCandidates: () => catalogSnapshot.candidates,
     getCapabilities: (id, modelId) => catalogSnapshot.capabilities.get(catalogKey(id, modelId)),
     isLocalProvider: (id) => isLocalProviderName(id as Parameters<typeof isLocalProviderName>[0]),

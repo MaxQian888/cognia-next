@@ -1075,3 +1075,147 @@ describe("ProviderRoutingEngine", () => {
     })
   })
 })
+
+describe("difficulty judge", () => {
+  const ladder = registry([
+    mapping("fast", [entry("p-fast", "m-fast")]),
+    mapping("balanced", [entry("p-balanced", "m-balanced")]),
+    mapping("powerful", [entry("p-powerful", "m-powerful")]),
+  ])
+
+  function engineWithJudge(
+    judgeDifficulty: RoutingEngineDeps["judgeDifficulty"]
+  ): ProviderRoutingEngine {
+    return new ProviderRoutingEngine(ladder, DEFAULT_ROUTING_CONFIG, {
+      ...makeDeps(),
+      ...(judgeDifficulty ? { judgeDifficulty } : {}),
+    })
+  }
+
+  /** A prompt whose deterministic score lands just under the `balanced` cut. */
+  const ambiguous = { promptText: "analyze this", thresholds: { balanced: 0.15, powerful: 0.67 } }
+  /** Nothing at all: score 0, far from every cut point. */
+  const unambiguous = { promptText: "", thresholds: { balanced: 0.34, powerful: 0.67 } }
+
+  it("does not consult the judge for an unambiguous prompt", async () => {
+    // This is the whole cost control: the median request pays 0 ms for the
+    // layer existing.
+    const judge = jest.fn(async () => ({ tier: "powerful" as const }))
+    const plan = await engineWithJudge(judge).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: true, uncertaintyBand: 0.08 },
+      ...unambiguous,
+    })
+    expect(judge).not.toHaveBeenCalled()
+    expect(plan.difficulty?.judgeUsed).toBe(false)
+    expect(plan.difficulty?.tier).toBe("fast")
+  })
+
+  it("consults it inside the band and follows a verdict that moves the tier", async () => {
+    const judge = jest.fn(async () => ({ tier: "powerful" as const, confidence: 0.8 }))
+    const plan = await engineWithJudge(judge).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: true, uncertaintyBand: 0.5 },
+      ...ambiguous,
+    })
+    expect(judge).toHaveBeenCalledTimes(1)
+    expect(plan.difficulty).toMatchObject({
+      judgeUsed: true,
+      judgeTier: "powerful",
+      judgeConfidence: 0.8,
+      tier: "powerful",
+    })
+    // The alias ladder is chosen from the SCORE, so a verdict that does not
+    // move the score would be recorded and then ignored.
+    expect(plan.selected.providerId).toBe("p-powerful")
+    expect(plan.reasonCodes).toContain("judge-overrode")
+  })
+
+  it("records agreement without changing anything", async () => {
+    const baseline = await engineWithJudge(undefined).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      ...ambiguous,
+    })
+    const agreedTier = baseline.difficulty!.deterministicTier
+    const judge = jest.fn(async () => ({ tier: agreedTier }))
+    const plan = await engineWithJudge(judge).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: true, uncertaintyBand: 0.5 },
+      ...ambiguous,
+    })
+    expect(plan.reasonCodes).toContain("judge-agreed")
+    expect(plan.difficulty?.tier).toBe(plan.difficulty?.deterministicTier)
+    expect(plan.selected.providerId).toBe(baseline.selected.providerId)
+  })
+
+  it("keeps the deterministic tier when the judge returns nothing", async () => {
+    const plan = await engineWithJudge(async () => null).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: true, uncertaintyBand: 0.5 },
+      ...ambiguous,
+    })
+    expect(plan.reasonCodes).toContain("judge-unavailable")
+    expect(plan.difficulty?.tier).toBe(plan.difficulty?.deterministicTier)
+    expect(plan.difficulty?.judgeTier).toBeUndefined()
+  })
+
+  it("survives a judge that throws", async () => {
+    // The layer can only ever improve a decision the router was unsure of; it
+    // must never be able to break one.
+    const plan = await engineWithJudge(async () => {
+      throw new Error("judge exploded")
+    }).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: true, uncertaintyBand: 0.5 },
+      ...ambiguous,
+    })
+    expect(plan.difficulty?.tier).toBe(plan.difficulty?.deterministicTier)
+    expect(plan.reasonCodes).toContain("judge-unavailable")
+  })
+
+  it("stays off unless it is switched on, even when a judge is installed", async () => {
+    const judge = jest.fn(async () => ({ tier: "powerful" as const }))
+    const plan = await engineWithJudge(judge).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      judge: { enabled: false },
+      ...ambiguous,
+    })
+    expect(judge).not.toHaveBeenCalled()
+    expect(plan.difficulty?.judgeUsed).toBe(false)
+  })
+
+  it("reports signals as bounded numbers and never the prompt itself", async () => {
+    // The calibration pipeline reads decisions, never content. A trace that
+    // carried prompt text would break that rule at the source.
+    const plan = await engineWithJudge(undefined).planRoute({
+      surface: "chat",
+      selection: { kind: "auto" },
+      promptText: "analyze this and prove the theorem step by step",
+      taskHints: { messageCount: 12, toolCount: 3 },
+    })
+    const signals = plan.difficulty!.signals
+    for (const value of Object.values(signals)) {
+      expect(typeof value).toBe("number")
+      expect(value).toBeGreaterThanOrEqual(0)
+      expect(value).toBeLessThanOrEqual(1)
+    }
+    expect(JSON.stringify(plan.difficulty)).not.toContain("theorem")
+  })
+
+  it("carries no difficulty block when the caller pinned a model", async () => {
+    const plan = await engineWithJudge(undefined).planRoute({
+      surface: "chat",
+      selection: { kind: "manual", providerId: "p-fast", modelId: "m-fast" },
+      promptText: "anything",
+    })
+    expect(plan.difficulty).toBeUndefined()
+    expect(plan.reasonCodes).toContain("manual-override")
+  })
+})

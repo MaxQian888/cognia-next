@@ -1,5 +1,9 @@
 import type { CircuitBreakerStateValue } from "@cognia/provider-types/circuit-breaker"
 import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
+import type {
+  RoutingDifficultySignals,
+  RoutingDifficultyTier,
+} from "@cognia/provider-types/auto-router"
 import type { DifficultyRoutingSettings, ToolRouteRecord } from "./routing-types"
 
 export interface ModelContextLimits {
@@ -33,6 +37,29 @@ export interface ProviderRoutingRuntimeAdapters {
   setCircuitBreakerEnabled?: (enabled: boolean) => void
   setCircuitBreakerSettings?: (settings: Record<string, unknown>) => void
   getDifficultyRoutingSettings?: () => DifficultyRoutingSettings | undefined
+  /**
+   * Second-opinion difficulty classifier (ADR-0043 Phase 10).
+   *
+   * Hung off the runtime seam, not imported, so this package never depends on
+   * an LLM client — the same reason pricing and capabilities are injected. A
+   * host that installs nothing keeps a purely deterministic router, and the
+   * engine only ever calls this for scores inside the uncertainty band.
+   */
+  judgeDifficulty?: (input: {
+    promptText: string
+    deterministicScore: number
+    deterministicTier: RoutingDifficultyTier
+    signalsOnly: RoutingDifficultySignals
+  }) => Promise<{ tier: RoutingDifficultyTier; confidence?: number } | null>
+  /**
+   * Judge gate, read when the request does not carry its own `judge` block.
+   *
+   * Mirrors `getDifficultyRoutingSettings`: the router's own settings reach it
+   * through the runtime seam so a caller that never heard of the feature still
+   * honours the user's switch. A request that DOES specify `judge` wins, which
+   * is what lets one surface (a workflow node, say) opt out on its own.
+   */
+  getAutoRoutingJudgeSettings?: () => { enabled: boolean; uncertaintyBand?: number } | undefined
   semanticToolRouterDeps?: SemanticToolRouterRuntimeDeps
 }
 
@@ -55,9 +82,10 @@ type RequiredRoutingRuntimeAdapters = Required<
     | "setCircuitBreakerEnabled"
     | "setCircuitBreakerSettings"
     | "getDifficultyRoutingSettings"
+    | "getAutoRoutingJudgeSettings"
   >
 > &
-  Pick<ProviderRoutingRuntimeAdapters, "semanticToolRouterDeps">
+  Pick<ProviderRoutingRuntimeAdapters, "semanticToolRouterDeps" | "judgeDifficulty">
 
 const MODEL_CONTEXT_LIMITS: Record<string, ModelContextLimits> = {
   "gpt-4": { maxTokens: 8192, reserveTokens: 2000 },
@@ -125,6 +153,8 @@ function defaultAdapters(): RequiredRoutingRuntimeAdapters {
     setCircuitBreakerEnabled: () => {},
     setCircuitBreakerSettings: () => {},
     getDifficultyRoutingSettings: () => undefined,
+    // Inert default: no host, no judge — routing stays deterministic.
+    getAutoRoutingJudgeSettings: () => undefined,
   }
 }
 
