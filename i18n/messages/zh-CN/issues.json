@@ -118,7 +118,8 @@
     "status": "状态",
     "updated": "更新于",
     "title": "标题",
-    "editLabels": "编辑标签"
+    "editLabels": "编辑标签",
+    "mobileReadOnly": "移动端为只读"
   },
   "activity": {
     "created": "创建了这个议题",

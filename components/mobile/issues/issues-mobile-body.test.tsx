@@ -23,7 +23,7 @@ jest.mock("@/stores/project/project-store", () => ({
     selector({ activeProjectId: "w1" }),
 }))
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { statusCategoryOf } from "@/types/issues"
 import type { Issue } from "@/types/issues"
 import { IssuesMobileBody } from "./issues-mobile-body"
@@ -76,7 +76,9 @@ describe("IssuesMobileBody", () => {
     issuesResult = [issue()]
     const { container } = render(<IssuesMobileBody />)
     expect(container.querySelector("[data-dragging]")).toBeNull()
-    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    // Rows open a read-only sheet, so they ARE buttons; what must not exist is
+    // anything that writes.
+    expect(container.querySelector("input, textarea, select")).toBeNull()
   })
 
   it("highlights the deep-linked issue", () => {
@@ -84,6 +86,33 @@ describe("IssuesMobileBody", () => {
     render(<IssuesMobileBody initialSelectedId="i2" />)
     expect(screen.getByTestId("issues-mobile-row-i2").className).toContain("bg-accent")
     expect(screen.getByTestId("issues-mobile-row-i1").className).not.toContain("bg-accent")
+  })
+
+  describe("detail sheet", () => {
+    it("opens the deep-linked issue instead of only tinting its row", async () => {
+      issuesResult = [issue(), issue()]
+      render(<IssuesMobileBody initialSelectedId="i2" />)
+      expect(await screen.findByTestId("issues-mobile-detail")).toBeInTheDocument()
+    })
+
+    it("stays shut when nothing is deep-linked", () => {
+      issuesResult = [issue()]
+      render(<IssuesMobileBody />)
+      expect(screen.queryByTestId("issues-mobile-detail")).not.toBeInTheDocument()
+    })
+
+    it("opens on tap", async () => {
+      issuesResult = [issue()]
+      render(<IssuesMobileBody />)
+      fireEvent.click(screen.getByTestId("issues-mobile-row-i1"))
+      expect(await screen.findByTestId("issues-mobile-detail")).toBeInTheDocument()
+    })
+
+    it("ignores a deep link to an issue that is not there", () => {
+      issuesResult = [issue()]
+      render(<IssuesMobileBody initialSelectedId="ghost" />)
+      expect(screen.queryByTestId("issues-mobile-detail")).not.toBeInTheDocument()
+    })
   })
 
   it("marks an unassigned row explicitly", () => {

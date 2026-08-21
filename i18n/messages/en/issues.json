@@ -118,7 +118,8 @@
     "status": "Status",
     "updated": "Updated",
     "title": "Title",
-    "editLabels": "Edit labels"
+    "editLabels": "Edit labels",
+    "mobileReadOnly": "Read-only on mobile"
   },
   "activity": {
     "created": "created this issue",

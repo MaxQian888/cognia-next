@@ -11,7 +11,7 @@
  * desktop surface rather than offering controls that would not round-trip.
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 
 import { LabelChip } from "@/components/labels/label-chip"
@@ -24,6 +24,7 @@ import { listLabels } from "@/lib/db/labels"
 import { buildIssueGroups } from "@/lib/issues/board-model"
 import { toUnifiedIssue } from "@/lib/issues/sources/local-source"
 import { useProjectStore } from "@/stores/project/project-store"
+import { IssueDetailSheet } from "./issue-detail-sheet"
 import type { IssueStatus } from "@/types/issues"
 import type { LabelRow } from "@/types/labels"
 import { cn } from "@/lib/utils"
@@ -64,6 +65,16 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
   )
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)
 
+  /**
+   * The deep link used to set a highlight and stop there — `?id=` tinted a row
+   * that nothing could open. It now seeds the detail sheet, so a link from a
+   * notification actually arrives somewhere.
+   */
+  const [openId, setOpenId] = useState<string | undefined>(initialSelectedId)
+  const openItem =
+    groups.flatMap((group) => group.items).find((candidate) => candidate.sourceId === openId) ??
+    null
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-testid="issues-mobile-body">
       <header className="flex items-center gap-2 border-b px-4 py-3">
@@ -95,14 +106,17 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
               </header>
               <ul>
                 {group.items.map((item) => (
-                  <li
-                    key={item.unifiedId}
-                    data-testid={`issues-mobile-row-${item.sourceId}`}
-                    className={cn(
-                      "flex flex-col gap-1.5 border-b px-4 py-3",
-                      initialSelectedId === item.sourceId && "bg-accent"
-                    )}
-                  >
+                  <li key={item.unifiedId}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(item.sourceId)}
+                      data-testid={`issues-mobile-row-${item.sourceId}`}
+                      className={cn(
+                        "flex w-full flex-col gap-1.5 border-b px-4 py-3 text-left",
+                        "focus-visible:ring-ring/50 focus-visible:outline-none focus-visible:ring-[3px]",
+                        openId === item.sourceId && "bg-accent"
+                      )}
+                    >
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[11px] text-muted-foreground">
                         {item.identifier}
@@ -135,7 +149,8 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
                         .map((label) => (
                           <LabelChip key={label.id} label={label} className="h-5 text-[10px]" />
                         ))}
-                    </div>
+                      </div>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -143,6 +158,15 @@ export function IssuesMobileBody({ initialSelectedId }: IssuesMobileBodyProps) {
           ))}
         </div>
       )}
+
+      <IssueDetailSheet
+        item={openItem}
+        onOpenChange={(open) => {
+          if (!open) setOpenId(undefined)
+        }}
+        labelsById={labelsById}
+        projectNamesById={projectNamesById}
+      />
     </div>
   )
 }
