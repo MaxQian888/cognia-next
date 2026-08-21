@@ -10,6 +10,10 @@ describe("built-in skills catalog", () => {
     const ids = BUILT_IN_SKILL_CATALOG.map((e) => e.id).sort()
     expect(ids).toEqual([
       "agent-team-delegation",
+      "chart-design",
+      // `cognia-onboarding` shipped in the catalog without being added here, so
+      // this assertion had been red on `dev`; adding a skill meant fixing it.
+      "cognia-onboarding",
       "computer-use-safety",
       "diagram-design",
       "digital-twin-query",
@@ -21,6 +25,22 @@ describe("built-in skills catalog", () => {
       "web-research",
       "workflow-authoring",
     ])
+  })
+
+  it("teaches the chart artifact contract the renderer actually enforces", () => {
+    const entry = getCatalogSkill("chart-design")!
+    expect(entry.category).toBe("data-analysis")
+    expect(entry.surface).toEqual([])
+    // Each of these is a real constraint in the pipeline, not style advice:
+    // the fence language the artifact detector keys on, the series list read
+    // from `data[0]` only, the line-count floor before a fence is lifted into
+    // the dock, and the palette the renderer owns.
+    expect(entry.content).toContain("fenced `json` block")
+    expect(entry.content).toContain("first row only")
+    expect(entry.content).toContain("at least three lines")
+    expect(entry.content).toContain("Do not specify colours")
+    // Scatter is the one shape with a different row contract.
+    expect(entry.content).toMatch(/`x` and\s+`y`\*\* as numbers/)
   })
 
   it("registers plugin authoring as an opt-in skill with its required tools", () => {
