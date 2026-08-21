@@ -6,7 +6,7 @@
 
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { PolicyEvalResult } from "./policy-eval"
-import { routeInbound, type RouteDecision } from "./mode-router"
+import { routeInbound, routeInboundFromComposition, type RouteDecision } from "./mode-router"
 
 function result(matched: boolean, blocked: boolean): PolicyEvalResult {
   return { matched, blocked, reason: blocked ? "test-blocker" : undefined }
@@ -80,4 +80,104 @@ describe("routeInbound", () => {
       expect(decision).toBe(cell.expected)
     })
   }
+})
+
+describe("routeInboundFromComposition", () => {
+  const matched = { matched: true, blocked: false } as PolicyEvalResult
+  const unmatched = { matched: false, blocked: false } as PolicyEvalResult
+  const blocked = { matched: true, blocked: true } as PolicyEvalResult
+
+  it("runs the turn and holds the product when autonomy is suggest", () => {
+    // The bug this replaces: "draft" was a ROUTE, so a conversation bound to a
+    // team resolved no execution target and silently degraded to a
+    // single-agent draft. As an axis it is one run with acceptance owed.
+    expect(
+      routeInboundFromComposition({
+        engagement: "background",
+        autonomy: "suggest",
+        evalResult: matched,
+        storeUnmatchedInDraftMode: false,
+      })
+    ).toEqual({ kind: "run", requireAcceptance: true })
+  })
+
+  it("does not lose the target that made it background", () => {
+    // The whole defect in one assertion: the decision no longer collapses a
+    // team-bound conversation into a route that cannot express a team.
+    const team = routeInboundFromComposition({
+      engagement: "background",
+      autonomy: "suggest",
+      evalResult: matched,
+      storeUnmatchedInDraftMode: false,
+    })
+    const direct = routeInboundFromComposition({
+      engagement: "inline",
+      autonomy: "suggest",
+      evalResult: matched,
+      storeUnmatchedInDraftMode: false,
+    })
+    expect(team).toEqual(direct)
+    // Same decision, and the caller still holds the engagement/orchestration
+    // that says WHO runs it — which the three-value route erased.
+  })
+
+  it("never runs a turn for observe or a human assignee", () => {
+    for (const input of [
+      { engagement: "human" as const, autonomy: "act" as const },
+      { engagement: "inline" as const, autonomy: "observe" as const },
+    ]) {
+      expect(
+        routeInboundFromComposition({
+          ...input,
+          evalResult: matched,
+          storeUnmatchedInDraftMode: false,
+        })
+      ).toEqual({ kind: "manual-store", requireAcceptance: false })
+    }
+  })
+
+  it("stores a human-owned conversation's traffic even when policy would drop it", () => {
+    expect(
+      routeInboundFromComposition({
+        engagement: "human",
+        autonomy: "observe",
+        evalResult: blocked,
+        storeUnmatchedInDraftMode: false,
+      }).kind
+    ).toBe("manual-store")
+  })
+
+  it("drops or stores unmatched traffic exactly as the legacy router did", () => {
+    for (const evalResult of [unmatched, blocked]) {
+      expect(
+        routeInboundFromComposition({
+          engagement: "inline",
+          autonomy: "act",
+          evalResult,
+          storeUnmatchedInDraftMode: true,
+        })
+      ).toEqual({ kind: "store-only", requireAcceptance: false })
+      expect(
+        routeInboundFromComposition({
+          engagement: "inline",
+          autonomy: "act",
+          evalResult,
+          storeUnmatchedInDraftMode: false,
+        })
+      ).toEqual({ kind: "drop", requireAcceptance: false })
+    }
+  })
+
+  it("owes no acceptance above suggest", () => {
+    for (const autonomy of ["confirm", "act", "autopilot"] as const) {
+      expect(
+        routeInboundFromComposition({
+          engagement: "inline",
+          autonomy,
+          evalResult: matched,
+          storeUnmatchedInDraftMode: false,
+        })
+      ).toEqual({ kind: "run", requireAcceptance: false })
+    }
+  })
 })
