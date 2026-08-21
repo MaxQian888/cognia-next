@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react"
+import { DEFAULT_MESSAGE_DISPLAY_OPTIONS } from "@/lib/chat/message-display"
 import type { UIMessage } from "ai"
 
 import { TranscriptMessageList } from "./transcript-message-list"
@@ -79,10 +80,13 @@ describe("<TranscriptMessageList />", () => {
           } as UIMessage,
         ]}
         status="streaming"
+        // Spread from the shipped defaults: the hand-written literal went stale
+        // when `ResolvedMessageDisplayOptions` gained `markdown` and `bodyFont`
+        // (ADR-0127), and would go stale again on the next field.
         messageDisplay={{
+          ...DEFAULT_MESSAGE_DISPLAY_OPTIONS,
           preset: "inspector",
           layout: "hybrid",
-          metadata: {} as never,
           actions: "all",
           agentFlowMode: "detailed",
           reasoning: "expanded",

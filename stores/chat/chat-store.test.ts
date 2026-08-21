@@ -1387,6 +1387,32 @@ describe("steer queue + run timing", () => {
     expect(result.current).toBe(before) // unknown id → no-op
   })
 
+  it("moveSteerEntry reorders the drain order and clamps at both ends", () => {
+    act(() => {
+      const st = useChatStore.getState()
+      st.enqueueSteer("s1", { id: "a", text: "a" })
+      st.enqueueSteer("s1", { id: "b", text: "b" })
+      st.enqueueSteer("s1", { id: "c", text: "c" })
+    })
+    const { result } = renderHook(() => useSessionSteerQueue("s1"))
+
+    act(() => useChatStore.getState().moveSteerEntry("s1", "c", -1))
+    expect(result.current.map((e) => e.id)).toEqual(["a", "c", "b"])
+
+    act(() => useChatStore.getState().moveSteerEntry("s1", "a", 1))
+    expect(result.current.map((e) => e.id)).toEqual(["c", "a", "b"])
+
+    // Past either end, and for an unknown id, the queue is left identical —
+    // the reference matters: the run panel re-renders off it.
+    const before = result.current
+    act(() => useChatStore.getState().moveSteerEntry("s1", "c", -1))
+    expect(result.current).toBe(before)
+    act(() => useChatStore.getState().moveSteerEntry("s1", "b", 1))
+    expect(result.current).toBe(before)
+    act(() => useChatStore.getState().moveSteerEntry("s1", "ghost", -1))
+    expect(result.current).toBe(before)
+  })
+
   it("clearSteerQueue on an empty queue is a no-op", () => {
     act(() => useChatStore.getState().clearSteerQueue("ghost"))
     const { result } = renderHook(() => useSessionSteerQueue("ghost"))

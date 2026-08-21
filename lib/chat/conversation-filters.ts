@@ -41,6 +41,39 @@ export const CONVERSATION_KIND_FILTER_OPTIONS: readonly ConversationKindFilter[]
   "team",
 ] as const
 
+/**
+ * Which timestamp the list reads a conversation's "when" from.
+ *
+ * The date buckets, the row timestamp and the activity filter must all answer
+ * the same question, and which question that is follows the *sort axis*: asking
+ * for "by date created" and then bucketing by last activity produced a list
+ * whose headers described one axis while the rows inside followed another.
+ *
+ * Lives here rather than in `conversation-list-model.ts` because the matcher
+ * below needs it and the model already imports this module (the reverse would
+ * be a cycle).
+ */
+export type ConversationTimeBasis = "activity" | "created"
+
+/** The basis a sort mode implies — creation order reads creation time. */
+export function resolveConversationTimeBasis(sortBy: ConversationSortBy): ConversationTimeBasis {
+  return sortBy === "created" ? "created" : "activity"
+}
+
+/**
+ * Whether a sort mode has a *date* axis at all, and therefore whether date
+ * buckets can honestly describe it.
+ *
+ * `title` and `unread` order by something that is not time, so bucketing them
+ * by date would put headers on a list the headers do not explain. Alphabetical
+ * headers are not an option either: `localeCompare` can order zh-CN titles, but
+ * no single leading character names the group without a pinyin table. Those two
+ * modes render one flat section instead — see `buildConversationSections`.
+ */
+export function sortSupportsDateBuckets(sortBy: ConversationSortBy): boolean {
+  return sortBy === "recent" || sortBy === "oldest" || sortBy === "created"
+}
+
 /** Render order for the last-activity selector. */
 export const CONVERSATION_ACTIVITY_FILTER_OPTIONS: readonly ConversationActivityFilter[] = [
   "any",
@@ -260,6 +293,12 @@ export function conversationFiltersEqual(
 export interface ConversationFilterContext {
   /** Injected clock for the activity window (never `Date.now()` here). */
   now?: number
+  /**
+   * Which timestamp the activity window measures. Follows the active sort so
+   * "this week" means the same thing as the bucket header above the row —
+   * last activity by default, creation time under the `created` sort.
+   */
+  timeBasis?: ConversationTimeBasis
   /** Effective model id for a session; `undefined` = unknown (never matches a model filter). */
   modelOf?: (session: ChatSession) => string | undefined
   /** Effective provider id for a session; `undefined` = unknown. */
@@ -335,14 +374,13 @@ export function matchesConversationFilters(
   }
   if (filters.activity !== "any") {
     const now = context?.now ?? 0
-    if (
-      !matchesConversationActivity(
-        filters.activity,
-        now,
-        session.lastMessageAt ?? session.updatedAt ?? undefined
-      )
-    )
-      return false
+    // Same basis the bucket headers use: filtering to "today" under the
+    // `created` sort must mean "created today", not "used today".
+    const at =
+      context?.timeBasis === "created"
+        ? (session.createdAt ?? session.lastMessageAt ?? session.updatedAt ?? undefined)
+        : (session.lastMessageAt ?? session.updatedAt ?? undefined)
+    if (!matchesConversationActivity(filters.activity, now, at)) return false
   }
   return true
 }

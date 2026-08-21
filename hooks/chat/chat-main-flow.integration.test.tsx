@@ -58,6 +58,14 @@ jest.mock("@/lib/tauri", () => ({
 jest.mock("@/lib/runtime/standalone-mode", () => ({
   isStandaloneChatMode: jest.fn(() => false),
 }))
+// Task Workspace isolation is GA, so a turn with a `cwd` now always asks the
+// host for a run lease. This suite has no Tauri transport behind that call, and
+// a real host that cannot serve it answers "unknown command" (which
+// `beginTaskWorkspaceTurn` maps to `null`). Model that answer directly.
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  ...jest.requireActual("@/lib/task-workspace/run-lease"),
+  openTaskWorkspaceRunLease: jest.fn(async () => null),
+}))
 
 const onClaudeUnsub = jest.fn()
 let messageCallback: ((evt: unknown) => void) | null = null

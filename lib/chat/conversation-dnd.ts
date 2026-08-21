@@ -3,7 +3,8 @@
  * the @dnd-kit wiring in the component thin and the decision logic testable.
  *
  * Two gestures are supported:
- *  - Drop a conversation onto a folder header → assign it to that folder.
+ *  - Drop a conversation onto a folder header → assign it to that folder
+ *    (rejected when the folder belongs to another workspace).
  *  - Drop a conversation onto another conversation in the same section →
  *    reorder that section (Pinned, a date bucket, a folder, or the flat
  *    "recent" list). Both rows must belong to the same section; dropping across
@@ -20,6 +21,12 @@ export interface DndNode {
     type?: "session" | "folder"
     /** Folder id (for `type: "folder"`) or the session's current folder. */
     folderId?: string | null
+    /**
+     * Owning workspace of the row / of the folder. Both sides predate workspace
+     * isolation and stay optional; when both are known they must agree for an
+     * assignment to be allowed (see {@link resolveConversationDrop}).
+     */
+    projectId?: string | null
   }
 }
 
@@ -73,6 +80,13 @@ export function resolveConversationDrop(
     const folderId = over.data.folderId ?? null
     // No-op if it's already in that folder.
     if (active.data?.folderId === folderId) return null
+    // A folder belongs to one workspace, and under `groupBy: "workspace"` the
+    // list shows conversations from all of them. Filing a foreign row into this
+    // folder would look like it worked and then vanish on the next workspace
+    // switch — the folder simply isn't loaded there.
+    const from = active.data?.projectId
+    const to = over.data.projectId
+    if (folderId && from && to && from !== to) return null
     return { type: "assign", sessionId: active.id, folderId }
   }
 

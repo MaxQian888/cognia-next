@@ -17,6 +17,7 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
 import {
   ConversationFilterChips,
   ConversationFilterMenu,
+  ConversationSearchScopeControl,
   type ConversationFilterViewModel,
 } from "./conversation-filter-controls"
 import { EMPTY_CONVERSATION_FILTER_OPTIONS } from "@/lib/chat/conversation-filter-options"
@@ -34,18 +35,29 @@ function makeModel(overrides: Partial<ConversationFilterViewModel> = {}) {
     setActivity: jest.fn(),
     reset: jest.fn(),
     setSortBy: jest.fn(),
-    applyPreset: jest.fn(),
-    savePreset: jest.fn(() => "new-id"),
-    renamePreset: jest.fn(),
-    deletePreset: jest.fn(),
+    setGroupBy: jest.fn(),
+    setSearchOptions: jest.fn(),
+    applyView: jest.fn(),
+    clearView: jest.fn(),
+    revertView: jest.fn(),
+    saveView: jest.fn((): string | null => "new-id"),
+    updateView: jest.fn(),
+    renameView: jest.fn(),
+    removeView: jest.fn(),
+    restoreView: jest.fn(),
   }
   const model: ConversationFilterViewModel = {
     filters: EMPTY_CONVERSATION_FILTERS,
     activeFilters: 0,
     sortBy: "recent",
+    groupBy: "workspace",
+    search: { workspace: "current", includeArchived: false, content: false },
     options: EMPTY_CONVERSATION_FILTER_OPTIONS,
-    presets: [],
-    activePreset: undefined,
+    views: [],
+    activeView: undefined,
+    activeViewDrift: [],
+    hiddenViewIds: [],
+    suggestedViewDimensions: [],
     actions,
     ...overrides,
   }
@@ -120,7 +132,7 @@ describe("ConversationFilterMenu (desktop)", () => {
     expect(content).toHaveAttribute("data-side", "right")
     const rows = within(content).getAllByRole("menuitem")
     expect(rows.map((r) => r.textContent)).toEqual([
-      "presets.label",
+      "views.label",
       "sort.labelsort.options.recent",
       "filters.label",
       "activity.label",
@@ -243,20 +255,30 @@ describe("ConversationFilterMenu (desktop)", () => {
     expect(actions.reset).not.toHaveBeenCalled()
   })
 
-  it("lists presets, marks the active one, applies on click and gates 'save' on unsaved active filters", async () => {
+  const customView = (id: string, name: string, overlay: Record<string, unknown>) => ({
+    id,
+    name,
+    builtIn: false,
+    createdAt: 1,
+    overlay,
+  })
+
+  it("lists views, marks the active one, applies on click and gates 'save'", async () => {
     const user = userEvent.setup()
-    const presets = [
-      { id: "p1", name: "Unread", filters: { unread: true }, createdAt: 1 },
-      { id: "p2", name: "Teams", filters: { kind: "team" as const }, createdAt: 2 },
-    ]
+    const views = [
+      customView("p1", "Unread", { filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true } }),
+      customView("p2", "Teams", { filters: { ...EMPTY_CONVERSATION_FILTERS, kind: "team" } }),
+    ] as ConversationFilterViewModel["views"]
     const { actions } = menu({
-      presets,
-      activePreset: presets[1],
+      views,
+      activeView: views[1],
+      activeViewDrift: [],
       filters: { ...EMPTY_CONVERSATION_FILTERS, kind: "team" },
       activeFilters: 1,
+      suggestedViewDimensions: ["filters"],
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    const row = await screen.findByRole("menuitem", { name: /presets\.label/ })
+    const row = await screen.findByRole("menuitem", { name: /views\.label/ })
     expect(row).toHaveTextContent("Teams")
     await user.hover(row)
     const teams = await screen.findByRole("menuitemcheckbox", { name: "Teams" })
@@ -265,78 +287,159 @@ describe("ConversationFilterMenu (desktop)", () => {
       "aria-checked",
       "false"
     )
-    // Already saved → nothing new to save.
-    expect(screen.getByRole("menuitem", { name: "presets.save" })).toHaveAttribute(
+    // Sitting inside an unmodified view → it is already saved.
+    expect(screen.getByRole("menuitem", { name: "views.save" })).toHaveAttribute(
       "aria-disabled",
       "true"
     )
-    expect(screen.getByRole("menuitem", { name: "presets.manage" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "views.manage" })).toBeInTheDocument()
     pick(screen.getByRole("menuitemcheckbox", { name: "Unread" }))
-    expect(actions.applyPreset).toHaveBeenCalledWith("p1")
+    expect(actions.applyView).toHaveBeenCalledWith("p1")
   })
 
-  it("saves the active filters as a named preset through the dialog", async () => {
+  it("offers revert and update only once the active view has drifted", async () => {
+    const user = userEvent.setup()
+    const views = [
+      customView("p1", "Unread", { sortBy: "unread" }),
+    ] as ConversationFilterViewModel["views"]
+    const { actions } = menu({
+      views,
+      activeView: views[0],
+      activeViewDrift: ["sortBy"],
+      sortBy: "title",
+      suggestedViewDimensions: ["sortBy"],
+    })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    pick(await screen.findByTestId("conversation-filter-trigger-view-revert"))
+    expect(actions.revertView).toHaveBeenCalled()
+  })
+
+  it("does not offer 'update' for a built-in view — those are code, not data", async () => {
+    const user = userEvent.setup()
+    const views = [
+      {
+        id: "builtin:unread",
+        name: "views.builtIn.unread",
+        builtIn: true,
+        createdAt: 0,
+        overlay: { sortBy: "unread" },
+      },
+    ] as ConversationFilterViewModel["views"]
+    menu({
+      views,
+      activeView: views[0],
+      activeViewDrift: ["sortBy"],
+      sortBy: "title",
+      suggestedViewDimensions: ["sortBy"],
+    })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    expect(await screen.findByTestId("conversation-filter-trigger-view-revert")).toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-filter-trigger-view-update")).toBeNull()
+  })
+
+  it("saves the current state as a named view, pinning the ticked dimensions", async () => {
     const user = userEvent.setup()
     const { actions } = menu({
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true },
       activeFilters: 1,
+      suggestedViewDimensions: ["filters"],
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByRole("menuitem", { name: /presets\.label/ }))
-    expect(await screen.findByText("presets.empty")).toBeInTheDocument()
-    expect(screen.queryByRole("menuitem", { name: "presets.manage" })).toBeNull()
-    pick(screen.getByRole("menuitem", { name: "presets.save" }))
-    const dialog = await screen.findByTestId("conversation-filter-save-dialog")
-    expect(within(dialog).getByRole("button", { name: "presets.saveAction" })).toBeDisabled()
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    expect(await screen.findByText("views.empty")).toBeInTheDocument()
+    pick(screen.getByRole("menuitem", { name: "views.save" }))
+    const dialog = await screen.findByTestId("conversation-view-save-dialog")
+    expect(within(dialog).getByRole("button", { name: "views.saveAction" })).toBeDisabled()
     await user.type(within(dialog).getByRole("textbox"), "Mine")
-    await user.click(within(dialog).getByRole("button", { name: "presets.saveAction" }))
-    expect(actions.savePreset).toHaveBeenCalledWith("Mine")
-    expect(screen.queryByTestId("conversation-filter-save-dialog")).toBeNull()
+    // The suggestion is pre-ticked; add the sort so two dimensions travel.
+    await user.click(
+      within(within(dialog).getByTestId("conversation-view-dimension-sortBy")).getByRole("checkbox")
+    )
+    await user.click(within(dialog).getByRole("button", { name: "views.saveAction" }))
+    expect(actions.saveView).toHaveBeenCalledWith("Mine", ["filters", "sortBy"])
+    expect(screen.queryByTestId("conversation-view-save-dialog")).toBeNull()
   })
 
-  it("keeps the save dialog open with an error when the controller refuses the preset", async () => {
+  it("refuses to save with nothing pinned", async () => {
+    const user = userEvent.setup()
+    const { actions } = menu({ sortBy: "title", suggestedViewDimensions: ["sortBy"] })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    pick(await screen.findByRole("menuitem", { name: "views.save" }))
+    const dialog = await screen.findByTestId("conversation-view-save-dialog")
+    await user.type(within(dialog).getByRole("textbox"), "Mine")
+    // Untick the only suggestion — a view that pins nothing is a no-op button.
+    await user.click(
+      within(within(dialog).getByTestId("conversation-view-dimension-sortBy")).getByRole("checkbox")
+    )
+    expect(within(dialog).getByRole("button", { name: "views.saveAction" })).toBeDisabled()
+    expect(actions.saveView).not.toHaveBeenCalled()
+  })
+
+  it("keeps the save dialog open with an error when the controller refuses the view", async () => {
     const user = userEvent.setup()
     const { actions } = menu({
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true },
       activeFilters: 1,
+      suggestedViewDimensions: ["filters"],
     })
-    actions.savePreset.mockReturnValue(null)
+    actions.saveView.mockReturnValue(null)
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByRole("menuitem", { name: /presets\.label/ }))
-    pick(await screen.findByRole("menuitem", { name: "presets.save" }))
-    const dialog = await screen.findByTestId("conversation-filter-save-dialog")
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    pick(await screen.findByRole("menuitem", { name: "views.save" }))
+    const dialog = await screen.findByTestId("conversation-view-save-dialog")
     await user.type(within(dialog).getByRole("textbox"), "x")
     await user.keyboard("{Enter}")
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("presets.saveRejected")
-    expect(screen.getByTestId("conversation-filter-save-dialog")).toBeInTheDocument()
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("views.saveRejected")
+    expect(screen.getByTestId("conversation-view-save-dialog")).toBeInTheDocument()
   })
 
-  it("renames and deletes presets from the manage dialog, closing when the last one goes", async () => {
+  it("renames and deletes custom views from the manage dialog", async () => {
     const user = userEvent.setup()
-    const presets = [
-      { id: "p1", name: "Unread", filters: { unread: true }, createdAt: 1 },
-      { id: "p2", name: "Teams", filters: { kind: "team" as const }, createdAt: 2 },
-    ]
-    const { actions, rerender, model } = menu({ presets })
+    const views = [
+      customView("p1", "Unread", { filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true } }),
+      customView("p2", "Teams", { filters: { ...EMPTY_CONVERSATION_FILTERS, kind: "team" } }),
+    ] as ConversationFilterViewModel["views"]
+    const { actions } = menu({ views })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
-    await user.hover(await screen.findByRole("menuitem", { name: /presets\.label/ }))
-    pick(await screen.findByRole("menuitem", { name: "presets.manage" }))
-    const dialog = await screen.findByTestId("conversation-filter-manage-dialog")
-    const rename = within(dialog).getByRole("textbox", { name: 'presets.rename:{"name":"Unread"}' })
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    pick(await screen.findByRole("menuitem", { name: "views.manage" }))
+    const dialog = await screen.findByTestId("conversation-view-manage-dialog")
+    const rename = within(dialog).getByRole("textbox", { name: 'views.rename:{"name":"Unread"}' })
     await user.clear(rename)
     await user.type(rename, "Unread only{Enter}")
-    expect(actions.renamePreset).toHaveBeenCalledWith("p1", "Unread only")
+    expect(actions.renameView).toHaveBeenCalledWith("p1", "Unread only")
 
+    await user.click(within(dialog).getByRole("button", { name: 'views.delete:{"name":"Unread"}' }))
+    expect(actions.removeView).toHaveBeenCalledWith("p1")
+  })
+
+  it("hides rather than deletes a built-in view, and offers to restore it", async () => {
+    const user = userEvent.setup()
+    const views = [
+      {
+        id: "builtin:unread",
+        name: "views.builtIn.unread",
+        builtIn: true,
+        createdAt: 0,
+        overlay: { sortBy: "unread" },
+      },
+    ] as ConversationFilterViewModel["views"]
+    const { actions } = menu({ views, hiddenViewIds: ["builtin:globalSearch"] })
+    await user.click(screen.getByTestId("conversation-filter-trigger"))
+    await user.hover(await screen.findByRole("menuitem", { name: /views\.label/ }))
+    pick(await screen.findByRole("menuitem", { name: "views.manage" }))
+    const dialog = await screen.findByTestId("conversation-view-manage-dialog")
+    // A built-in's name is a translation key, so there is no rename field.
+    expect(within(dialog).queryByRole("textbox")).toBeNull()
     await user.click(
-      within(dialog).getByRole("button", { name: 'presets.delete:{"name":"Unread"}' })
+      within(dialog).getByRole("button", { name: 'views.hide:{"name":"views.builtIn.unread"}' })
     )
-    expect(actions.deletePreset).toHaveBeenCalledWith("p1")
-    expect(screen.getByTestId("conversation-filter-manage-dialog")).toBeInTheDocument()
-
-    rerender(<ConversationFilterMenu model={{ ...model, presets: [presets[1]] }} />)
-    await user.click(screen.getByRole("button", { name: 'presets.delete:{"name":"Teams"}' }))
-    expect(actions.deletePreset).toHaveBeenCalledWith("p2")
-    expect(screen.queryByTestId("conversation-filter-manage-dialog")).toBeNull()
+    expect(actions.removeView).toHaveBeenCalledWith("builtin:unread")
+    await user.click(within(dialog).getByTestId("conversation-view-restore-builtin:globalSearch"))
+    expect(actions.restoreView).toHaveBeenCalledWith("builtin:globalSearch")
   })
 
   it("takes a per-surface trigger id so two lists stay distinguishable", () => {
@@ -378,20 +481,29 @@ describe("ConversationFilterMenu (mobile drawer)", () => {
     expect(actions.toggleValue).toHaveBeenCalledWith("workspaceIds", "w1", true)
   })
 
-  it("shows presets as tappable chips and routes save / manage to the dialogs", async () => {
+  it("shows views as tappable chips and routes save / manage to the dialogs", async () => {
     const user = userEvent.setup()
-    const presets = [{ id: "p1", name: "Unread", filters: { unread: true }, createdAt: 1 }]
+    const views = [
+      {
+        id: "p1",
+        name: "Unread",
+        builtIn: false,
+        createdAt: 1,
+        overlay: { filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true } },
+      },
+    ] as ConversationFilterViewModel["views"]
     const { actions } = menu({
-      presets,
+      views,
       filters: { ...EMPTY_CONVERSATION_FILTERS, pinned: true },
       activeFilters: 1,
+      suggestedViewDimensions: ["filters"],
     })
     await user.click(screen.getByTestId("conversation-filter-trigger"))
     const drawer = await screen.findByTestId("conversation-filter-trigger-drawer")
     tap(within(drawer).getByRole("button", { name: "Unread" }))
-    expect(actions.applyPreset).toHaveBeenCalledWith("p1")
-    tap(within(drawer).getByRole("button", { name: "presets.manage" }))
-    expect(await screen.findByTestId("conversation-filter-manage-dialog")).toBeInTheDocument()
+    expect(actions.applyView).toHaveBeenCalledWith("p1")
+    tap(within(drawer).getByRole("button", { name: "views.manage" }))
+    expect(await screen.findByTestId("conversation-view-manage-dialog")).toBeInTheDocument()
   })
 
   it("clears everything from the footer when filters are active", async () => {
@@ -463,25 +575,56 @@ describe("ConversationFilterChips", () => {
     expect(actions.setActivity).toHaveBeenCalledWith("any")
   })
 
-  it("replaces the facet breakdown with one preset chip when the active filters match a preset", async () => {
+  it("replaces the facet breakdown with one chip while a view is exactly in effect", async () => {
     const user = userEvent.setup()
-    const preset = {
+    const view = {
       id: "p1",
       name: "Focus",
-      filters: { unread: true, pinned: true },
+      builtIn: false,
       createdAt: 1,
-    }
+      overlay: { filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, pinned: true } },
+    } as ConversationFilterViewModel["views"][number]
     const { actions } = chips({
-      presets: [preset],
-      activePreset: preset,
+      views: [view],
+      activeView: view,
+      activeViewDrift: [],
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, pinned: true },
       activeFilters: 2,
     })
     const root = screen.getByTestId("conversation-filter-chips")
     expect(root).toHaveTextContent("Focus")
     expect(root).not.toHaveTextContent("filters.options.unread")
-    await user.click(screen.getByRole("button", { name: 'remove:{"name":"Focus"}' }))
-    expect(actions.reset).toHaveBeenCalled()
+    // The × leaves the view; it does not clear the filters the view pinned.
+    await user.click(screen.getByRole("button", { name: "views.clear" }))
+    expect(actions.clearView).toHaveBeenCalled()
+    expect(actions.reset).not.toHaveBeenCalled()
+  })
+
+  it("says 'modified' once the view has drifted, and offers the way back", async () => {
+    const user = userEvent.setup()
+    const view = {
+      id: "p1",
+      name: "Focus",
+      builtIn: false,
+      createdAt: 1,
+      overlay: { filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true } },
+    } as ConversationFilterViewModel["views"][number]
+    const { actions } = chips({
+      views: [view],
+      activeView: view,
+      activeViewDrift: ["filters"],
+      filters: { ...EMPTY_CONVERSATION_FILTERS, pinned: true },
+      activeFilters: 1,
+    })
+    const root = screen.getByTestId("conversation-filter-chips")
+    expect(screen.getByTestId("conversation-filter-chips-view-modified")).toHaveTextContent(
+      'views.modifiedChip:{"name":"Focus"}'
+    )
+    // Drifted → the facets are shown again, because they are no longer the
+    // view's own and the user has to be able to see what moved.
+    expect(root).toHaveTextContent("filters.options.pinned")
+    await user.click(screen.getByRole("button", { name: 'views.modifiedChip:{"name":"Focus"}' }))
+    expect(actions.revertView).toHaveBeenCalled()
   })
 
   it("shows the shown/total count and clears every filter in one click", async () => {
@@ -495,5 +638,56 @@ describe("ConversationFilterChips", () => {
     )
     await user.click(screen.getByRole("button", { name: "clearAll" }))
     expect(actions.reset).toHaveBeenCalled()
+  })
+})
+
+describe("ConversationSearchScopeControl", () => {
+  const scope = (overrides: Partial<ConversationFilterViewModel> = {}) => {
+    const { model, actions } = makeModel(overrides)
+    render(<ConversationSearchScopeControl model={model} />)
+    return { model, actions }
+  }
+
+  it("renders no badge while every axis is at its default", () => {
+    scope()
+    expect(screen.getByTestId("conversation-search-scope")).toBeInTheDocument()
+    expect(screen.queryByTestId("conversation-search-scope-dot")).toBeNull()
+  })
+
+  it("counts each widened axis on the badge, so a reach left on is never invisible", () => {
+    scope({ search: { workspace: "all", includeArchived: true, content: false } })
+    expect(screen.getByTestId("conversation-search-scope-dot")).toHaveTextContent("2")
+  })
+
+  it("writes one axis at a time and leaves the menu open", async () => {
+    const user = userEvent.setup()
+    const { actions } = scope({
+      search: { workspace: "all", includeArchived: false, content: false },
+    })
+    await user.click(screen.getByTestId("conversation-search-scope"))
+    const menuContent = await screen.findByTestId("conversation-search-scope-menu")
+    pick(within(menuContent).getByTestId("conversation-search-scope-archived"))
+    expect(actions.setSearchOptions).toHaveBeenCalledWith({ includeArchived: true })
+    // Composing a reach, not firing a command.
+    expect(screen.getByTestId("conversation-search-scope-menu")).toBeInTheDocument()
+  })
+
+  it("marks the current workspace reach and can widen it", async () => {
+    const user = userEvent.setup()
+    const { actions } = scope()
+    await user.click(screen.getByTestId("conversation-search-scope"))
+    const menuContent = await screen.findByTestId("conversation-search-scope-menu")
+    expect(
+      within(menuContent).getByTestId("conversation-search-scope-workspace-current")
+    ).toHaveAttribute("aria-checked", "true")
+    pick(within(menuContent).getByTestId("conversation-search-scope-workspace-all"))
+    expect(actions.setSearchOptions).toHaveBeenCalledWith({ workspace: "all" })
+  })
+
+  it("only explains the message-index minimum once content search is on", async () => {
+    const user = userEvent.setup()
+    scope({ search: { workspace: "current", includeArchived: false, content: true } })
+    await user.click(screen.getByTestId("conversation-search-scope"))
+    expect(await screen.findByText(/searchScope\.contentHint/)).toBeInTheDocument()
   })
 })

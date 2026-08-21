@@ -14,7 +14,7 @@ import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 function fireConfigChange(scope: "user" | "project" | "local", cwd?: string): void {
   void defaultLifecycleFirer(
     "ConfigChange",
-    { agentId: "settings", sessionId: scope, cwd },
+    { agentId: "settings", agentKind: "system", sessionId: scope, cwd },
     {
       payload: { scope },
     }

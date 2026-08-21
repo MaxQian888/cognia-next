@@ -224,7 +224,10 @@ describe("groupBy: workspace", () => {
       }),
     ]
     const { sections } = buildConversationSections(sessions, [], workspaceOpts())
-    expect(sections[0].sessions.map((s) => s.id)).toEqual(["a-first", "a-none", "a-elsewhere"])
+    // `a-none` is newer than the arranged row so it opens the group;
+    // `a-elsewhere` carries a rank from another section, so it is ordered by
+    // recency and lands below the row it does not outrank.
+    expect(sections[0].sessions.map((s) => s.id)).toEqual(["a-none", "a-first", "a-elsewhere"])
   })
 })
 
@@ -259,13 +262,293 @@ describe("groupBy: agent", () => {
 })
 
 describe("groupBy: team", () => {
-  it("emits the same date buckets as groupBy: date (the rail does the filtering)", () => {
-    const sessions = [session("today1"), session("old", { updatedAt: NOW - 40 * DAY })]
-    const asTeam = buildConversationSections(sessions, [], opts({ groupBy: "team" }))
-    const asDate = buildConversationSections(sessions, [], opts({ groupBy: "date" }))
-    expect(asTeam.sections.map((s) => conversationSectionKey(s))).toEqual(
-      asDate.sections.map((s) => conversationSectionKey(s))
+  const teams = [
+    { id: "t1", name: "Alpha" },
+    { id: "t2", name: "Beta" },
+  ]
+
+  it("emits one section per team, in the caller's order", () => {
+    const sessions = [
+      session("a", { kind: "team", teamId: "t1" }),
+      session("b", { kind: "team", teamId: "t2" }),
+      session("c", { kind: "team", teamId: "t1" }),
+    ]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "team", teams })
     )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["team:t1", "team:t2"])
+    expect(orderedIds).toEqual(["a", "c", "b"])
+  })
+
+  it("puts direct conversations in the ungrouped bucket rather than dropping them", () => {
+    // The mobile list has no guild rail, so team mode used to show it a list
+    // that was not grouped at all. Direct chats carry no teamId — they belong
+    // in a bucket the renderer labels, not in a team's section.
+    const sessions = [session("dm"), session("team", { kind: "team", teamId: "t1" })]
+    const { sections } = buildConversationSections(sessions, [], opts({ groupBy: "team", teams }))
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual([
+      "team:t1",
+      `team:${UNGROUPED_ID}`,
+    ])
+  })
+
+  it("does not collapse anything by default — only the workspace axis does that", () => {
+    const sessions = [session("a", { kind: "team", teamId: "t1" })]
+    const { sections } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "team", teams, activeWorkspaceId: "w1" })
+    )
+    expect(sections.every((s) => s.kind === "group" && !s.collapsed)).toBe(true)
+  })
+
+  it("keys team sections separately from a workspace sharing the id", () => {
+    const group = { id: "x", name: "X" }
+    expect(conversationSectionKey({ kind: "group", axis: "team", group })).toBe("team:x")
+  })
+})
+
+describe("date buckets follow the sort axis", () => {
+  // Created a month ago, used today: the two axes disagree about this row, which
+  // is exactly what the old model got wrong.
+  const stale = session("stale", { createdAt: NOW - 40 * DAY, updatedAt: NOW })
+  // Created today, untouched since: the mirror image.
+  const fresh = session("fresh", { createdAt: NOW, updatedAt: NOW - 40 * DAY })
+
+  it("buckets by last activity under the default recency sort", () => {
+    const { sections } = buildConversationSections([stale, fresh], [], opts({ groupBy: "date" }))
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:today", "date:older"])
+    expect(sections[0]!.sessions.map((s) => s.id)).toEqual(["stale"])
+  })
+
+  it("buckets by creation time under the created sort", () => {
+    const { sections } = buildConversationSections(
+      [stale, fresh],
+      [],
+      opts({ groupBy: "date", sortBy: "created" })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:today", "date:older"])
+    // "Today" now means created today — the opposite row from the recency case.
+    expect(sections[0]!.sessions.map((s) => s.id)).toEqual(["fresh"])
+  })
+
+  it("reverses the bucket order under the oldest sort so headers and rows agree", () => {
+    const sessions = [session("now"), session("old", { updatedAt: NOW - 40 * DAY })]
+    const { sections, orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({ groupBy: "date", sortBy: "oldest" })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:older", "date:today"])
+    expect(orderedIds).toEqual(["old", "now"])
+  })
+
+  it("falls back to creation-less rows' activity time rather than stranding them in older", () => {
+    const legacy = { ...session("legacy"), createdAt: undefined } as unknown as ChatSession
+    const { sections } = buildConversationSections(
+      [legacy],
+      [],
+      opts({ groupBy: "date", sortBy: "created" })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["date:today"])
+  })
+
+  it.each(["title", "unread"] as const)(
+    "renders one flat section under %s, which has no date axis",
+    (sortBy) => {
+      const sessions = [session("b"), session("a", { updatedAt: NOW - 40 * DAY })]
+      const { sections } = buildConversationSections(
+        sessions,
+        [],
+        opts({ groupBy: "date", sortBy })
+      )
+      expect(sections.map((s) => conversationSectionKey(s))).toEqual(["recent"])
+    }
+  )
+
+  it("still groups by workspace under title sort — only the date axis drops out", () => {
+    const sessions = [session("a", { projectId: "w1" })]
+    const { sections } = buildConversationSections(
+      sessions,
+      [],
+      opts({
+        groupBy: "workspace",
+        sortBy: "title",
+        workspaces: [{ id: "w1", name: "W1" }],
+        activeWorkspaceId: "w1",
+      })
+    )
+    expect(sections.map((s) => conversationSectionKey(s))).toEqual(["workspace:w1"])
+  })
+})
+
+describe("searchIncludesArchived", () => {
+  const active = session("active", { title: "deploy notes" })
+  const archived = session("archived", { title: "deploy plan", archivedAt: NOW - DAY })
+
+  it("keeps the archive split closed while browsing, whatever the flag says", () => {
+    // Browsing is the view toggle's job; the flag is about what a QUERY may
+    // find. Without this the two controls would describe the same thing.
+    const { orderedIds } = buildConversationSections(
+      [active, archived],
+      [],
+      opts({ searchIncludesArchived: true })
+    )
+    expect(orderedIds).toEqual(["active"])
+  })
+
+  it("reaches archived rows from the active view while searching", () => {
+    const { orderedIds } = buildConversationSections(
+      [active, archived],
+      [],
+      opts({ query: "deploy", searchIncludesArchived: true })
+    )
+    expect(orderedIds.sort()).toEqual(["active", "archived"])
+  })
+
+  it("reaches active rows from the archived view too — the flag lifts the split, not one side", () => {
+    const { orderedIds } = buildConversationSections(
+      [active, archived],
+      [],
+      opts({ query: "deploy", view: "archived", searchIncludesArchived: true })
+    )
+    expect(orderedIds.sort()).toEqual(["active", "archived"])
+  })
+
+  it("stays inside the view when the flag is off", () => {
+    const { orderedIds } = buildConversationSections(
+      [active, archived],
+      [],
+      opts({ query: "deploy" })
+    )
+    expect(orderedIds).toEqual(["active"])
+  })
+
+  it("leaves `total` describing the view, so an empty view still reads as empty", () => {
+    // A hit from the other side of the split is not evidence that THIS view has
+    // something in it — `total` is what picks the first-run empty state.
+    const model = buildConversationSections(
+      [archived],
+      [],
+      opts({ query: "deploy", searchIncludesArchived: true })
+    )
+    expect(model.total).toBe(0)
+    expect(model.filteredCount).toBe(1)
+  })
+
+  it("still applies the quick filters to rows pulled across the split", () => {
+    const pinnedArchived = session("pinned", {
+      title: "deploy pinned",
+      archivedAt: NOW - DAY,
+      pinned: true,
+    })
+    const { orderedIds } = buildConversationSections(
+      [active, archived, pinnedArchived],
+      [],
+      opts({ query: "deploy", searchIncludesArchived: true, filters: { pinned: true } })
+    )
+    expect(orderedIds).toEqual(["pinned"])
+  })
+})
+
+describe("visibleCount", () => {
+  it("excludes rows inside a collapsed section while filteredCount keeps them", () => {
+    // The chip says "showing N of M"; a folded group must move N. It must NOT
+    // move `filteredCount`, which is what tells an empty result from a folded
+    // one — collapsing everything would otherwise offer to clear filters that
+    // were never the problem.
+    const sessions = [session("a", { folderId: "f1" }), session("b")]
+    const model = buildConversationSections(
+      sessions,
+      [folder("f1")],
+      opts({ collapsedFolderIds: new Set(["f1"]) })
+    )
+    expect(model.filteredCount).toBe(2)
+    expect(model.visibleCount).toBe(1)
+    expect(model.orderedIds).toEqual(["b"])
+  })
+
+  it("equals filteredCount when nothing is folded", () => {
+    const model = buildConversationSections([session("a"), session("b")], [], opts())
+    expect(model.visibleCount).toBe(model.filteredCount)
+  })
+
+  it("counts every search hit", () => {
+    const model = buildConversationSections(
+      [session("alpha"), session("beta")],
+      [],
+      opts({ query: "a" })
+    )
+    expect(model.visibleCount).toBe(model.filteredCount)
+  })
+})
+
+describe("scoreTitle injection", () => {
+  it("ranks by the injected scorer, highest first", () => {
+    const sessions = [session("low"), session("high")]
+    const { orderedIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({
+        query: "x",
+        scoreTitle: (title) => (title === "high" ? 0.9 : 0.1),
+      })
+    )
+    expect(orderedIds).toEqual(["high", "low"])
+  })
+
+  it("lets a scorer admit a title the substring rank would reject", () => {
+    // The point of sharing the ⌘K ranker: "dply" has to find "deploy".
+    const { orderedIds } = buildConversationSections(
+      [session("deploy")],
+      [],
+      opts({ query: "dply", scoreTitle: () => 0.3 })
+    )
+    expect(orderedIds).toEqual(["deploy"])
+  })
+
+  it("keeps every title hit ahead of every content-only hit, whatever the scores", () => {
+    // A weak fuzzy title hit still beats a strong message match: the user typed
+    // a name, not a sentence.
+    const sessions = [session("weak-title"), session("content")]
+    const { orderedIds, contentOnlyIds } = buildConversationSections(
+      sessions,
+      [],
+      opts({
+        query: "q",
+        contentMatchIds: new Set(["content"]),
+        scoreTitle: (title) => (title === "weak-title" ? 0.01 : null),
+      })
+    )
+    expect(orderedIds).toEqual(["weak-title", "content"])
+    expect([...contentOnlyIds]).toEqual(["content"])
+  })
+
+  it("receives the injected clock, never the wall clock", () => {
+    const seen: number[] = []
+    buildConversationSections(
+      [session("a")],
+      [],
+      opts({
+        query: "a",
+        scoreTitle: (_title, _needle, _timestamp, now) => {
+          seen.push(now)
+          return 1
+        },
+      })
+    )
+    expect(seen).toEqual([NOW])
+  })
+
+  it("falls back to the substring rank when no scorer is injected", () => {
+    const sessions = [
+      session("anywhere-x-inside", { title: "reindex" }),
+      session("prefix", { title: "index" }),
+    ]
+    const { orderedIds } = buildConversationSections(sessions, [], opts({ query: "index" }))
+    expect(orderedIds).toEqual(["prefix", "anywhere-x-inside"])
   })
 })
 
@@ -551,7 +834,10 @@ describe("buildConversationSections", () => {
     expect(filteredCount).toBe(2)
   })
 
-  it("orders the pinned section by manualOrder, un-ordered pins fall to the end by recency", () => {
+  it("orders the pinned section by manualOrder, slotting un-ordered pins in by recency", () => {
+    // Both un-ordered pins are more recent than every arranged pin, so they
+    // open the section rather than being appended after the arrangement — a
+    // conversation the user just pinned must not land at the bottom.
     const sessions = [
       session("p-none-new", { pinned: true, updatedAt: NOW }),
       session("p2", { pinned: true, manualOrder: 2, updatedAt: NOW - 10 * DAY }),
@@ -560,12 +846,23 @@ describe("buildConversationSections", () => {
     ]
     const { sections } = buildConversationSections(sessions, [], opts())
     const pinnedSec = sections.find((s) => s.kind === "pinned")
-    expect(pinnedSec?.sessions.map((s) => s.id)).toEqual(["p0", "p2", "p-none-new", "p-none-old"])
+    expect(pinnedSec?.sessions.map((s) => s.id)).toEqual(["p-none-new", "p-none-old", "p0", "p2"])
   })
 
-  it("orders a date bucket by manualOrder, un-ordered rows fall to the end by recency", () => {
+  it("slots an un-ordered pin after the arranged pins it does not outrank", () => {
+    const sessions = [
+      session("p0", { pinned: true, manualOrder: 0, updatedAt: NOW }),
+      session("p1", { pinned: true, manualOrder: 1, updatedAt: NOW - 10 * DAY }),
+      session("p-none", { pinned: true, updatedAt: NOW - 5 * DAY }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], opts())
+    const pinnedSec = sections.find((s) => s.kind === "pinned")
+    expect(pinnedSec?.sessions.map((s) => s.id)).toEqual(["p0", "p-none", "p1"])
+  })
+
+  it("orders a date bucket by manualOrder, slotting un-ordered rows in by recency", () => {
     // All three land in "today"; manual order curates the bucket while the
-    // un-dragged row keeps its recency slot at the end.
+    // un-dragged row takes the recency slot it deserves — here, the top.
     const sessions = [
       session("t-none", { updatedAt: NOW }),
       session("t1", { manualOrder: 1, updatedAt: NOW - 60_000 }),
@@ -573,7 +870,92 @@ describe("buildConversationSections", () => {
     ]
     const { sections } = buildConversationSections(sessions, [], opts())
     const today = sections.find((s) => s.kind === "date" && s.bucket === "today")
-    expect(today?.sessions.map((s) => s.id)).toEqual(["t0", "t1", "t-none"])
+    expect(today?.sessions.map((s) => s.id)).toEqual(["t-none", "t0", "t1"])
+  })
+
+  it("puts a brand-new conversation at the top of a bucket that was drag-ordered", () => {
+    // The regression this rule exists for: `setSessionOrder` renumbers the
+    // whole section, so a chat created afterwards is the only row without a
+    // rank — and used to be appended below every arranged row.
+    const sessions = [
+      session("dragged-a", {
+        manualOrder: 0,
+        manualOrderSection: "date:today",
+        updatedAt: NOW - 60_000,
+      }),
+      session("dragged-b", {
+        manualOrder: 1,
+        manualOrderSection: "date:today",
+        updatedAt: NOW - 120_000,
+      }),
+      session("just-created", { createdAt: NOW, updatedAt: NOW }),
+    ]
+    const { sections, orderedIds } = buildConversationSections(sessions, [], opts())
+    const today = sections.find((s) => s.kind === "date" && s.bucket === "today")
+    expect(today?.sessions.map((s) => s.id)).toEqual(["just-created", "dragged-a", "dragged-b"])
+    expect(orderedIds[0]).toBe("just-created")
+  })
+
+  it("slots rows a filter hid during the drag back in by recency", () => {
+    // A drag under an active quick filter renumbers only the rows that were on
+    // screen. The rest keep no rank for this section, so they must land where
+    // recency says — not behind the arranged pair, which is where the whole
+    // unfiltered remainder used to end up.
+    const sessions = [
+      session("hidden-new", { updatedAt: NOW - 30_000 }),
+      session("dragged-a", {
+        manualOrder: 0,
+        manualOrderSection: "date:today",
+        updatedAt: NOW - 60_000,
+      }),
+      session("hidden-old", { updatedAt: NOW - 90_000 }),
+      session("dragged-b", {
+        manualOrder: 1,
+        manualOrderSection: "date:today",
+        updatedAt: NOW - 120_000,
+      }),
+    ]
+    const { sections } = buildConversationSections(sessions, [], opts())
+    const today = sections.find((s) => s.kind === "date" && s.bucket === "today")
+    expect(today?.sessions.map((s) => s.id)).toEqual([
+      "hidden-new",
+      "dragged-a",
+      "hidden-old",
+      "dragged-b",
+    ])
+  })
+
+  it("keeps the arrangement intact and loses nothing, whatever the mix", () => {
+    // The merge walks two sorted lists with one shared pointer; the invariants
+    // it must never break are "every row appears exactly once" and "the
+    // arranged rows keep their relative order". Deterministic pseudo-random
+    // input (no `Math.random`) so a failure is reproducible.
+    let seed = 20260820
+    const nextInt = (bound: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed % bound
+    }
+    for (let round = 0; round < 40; round++) {
+      const size = 1 + nextInt(9)
+      // Ranks are a 0..k-1 run, the way `setSessionOrder` writes them.
+      let rank = 0
+      const sessions = Array.from({ length: size }, (_, i) =>
+        session(`s${i}`, {
+          updatedAt: NOW - nextInt(size * 1000),
+          ...(nextInt(2) === 0
+            ? { manualOrder: rank++, manualOrderSection: "date:today" }
+            : undefined),
+        })
+      )
+      const { sections } = buildConversationSections(sessions, [], opts())
+      const rendered = sections.flatMap((sec) => sec.sessions.map((s) => s.id))
+      expect([...rendered].sort()).toEqual(sessions.map((s) => s.id).sort())
+      const arranged = sessions
+        .filter((s) => s.manualOrder != null)
+        .sort((a, b) => a.manualOrder! - b.manualOrder!)
+        .map((s) => s.id)
+      expect(rendered.filter((id) => arranged.includes(id))).toEqual(arranged)
+    }
   })
 
   it("ignores a manualOrder tagged with a different section (no cross-bucket leak)", () => {
@@ -603,7 +985,7 @@ describe("buildConversationSections", () => {
     ]
     const { sections } = buildConversationSections(sessions, [], opts())
     const today = sections.find((s) => s.kind === "date" && s.bucket === "today")
-    expect(today?.sessions.map((s) => s.id)).toEqual(["t0", "t-none"])
+    expect(today?.sessions.map((s) => s.id)).toEqual(["t-none", "t0"])
   })
 
   it("orders the flat recent list by manualOrder when date grouping is off", () => {
@@ -614,7 +996,7 @@ describe("buildConversationSections", () => {
     ]
     const { sections } = buildConversationSections(sessions, [], opts({ groupBy: "none" }))
     const recent = sections.find((s) => s.kind === "recent")
-    expect(recent?.sessions.map((s) => s.id)).toEqual(["r0", "r1", "r-none"])
+    expect(recent?.sessions.map((s) => s.id)).toEqual(["r-none", "r0", "r1"])
   })
 
   it("excludes collapsed-folder sessions from orderedIds", () => {
@@ -632,6 +1014,44 @@ describe("buildConversationSections", () => {
     )
     // "foldered" is hidden under the collapsed folder → not navigable.
     expect(collapsed.orderedIds).toEqual(["loose"])
+  })
+})
+
+describe("folder workspace scoping", () => {
+  it("keeps a session in a folder of its own workspace", () => {
+    const f = folder("f1", { projectId: "w1" })
+    const sessions = [session("s1", { projectId: "w1", folderId: "f1" })]
+    const { sections } = buildConversationSections(sessions, [f], opts())
+    const folderSection = sections.find((s) => s.kind === "folder")
+    expect(folderSection?.sessions.map((s) => s.id)).toEqual(["s1"])
+  })
+
+  it("drops a session filed into another workspace's folder back to the primary grouping", () => {
+    // The list may span every workspace (`groupBy: "workspace"`) while the
+    // folders it carries belong to the active one only. A row that ended up
+    // pointing at a foreign folder must not render under it — that membership
+    // disappears the moment the user switches workspaces.
+    const f = folder("f1", { projectId: "w1" })
+    const sessions = [session("foreign", { projectId: "w2", folderId: "f1" })]
+    const { sections } = buildConversationSections(sessions, [f], opts())
+    const folderSection = sections.find((s) => s.kind === "folder")
+    expect(folderSection?.sessions).toEqual([])
+    expect(sections.find((s) => s.kind === "date")?.sessions.map((s) => s.id)).toEqual(["foreign"])
+  })
+
+  it("grandfathers folders and sessions that predate workspace isolation", () => {
+    // Either side missing = unknown, not a mismatch.
+    const legacyFolder = folder("f1")
+    const legacySession = session("s1", { folderId: "f1" })
+    const { sections } = buildConversationSections([legacySession], [legacyFolder], opts())
+    expect(sections.find((s) => s.kind === "folder")?.sessions.map((s) => s.id)).toEqual(["s1"])
+
+    const scopedFolder = folder("f2", { projectId: "w1" })
+    const looseSession = session("s2", { folderId: "f2" })
+    const mixed = buildConversationSections([looseSession], [scopedFolder], opts())
+    expect(mixed.sections.find((s) => s.kind === "folder")?.sessions.map((s) => s.id)).toEqual([
+      "s2",
+    ])
   })
 })
 

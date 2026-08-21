@@ -886,6 +886,51 @@ export async function sendPluginToolResponse(
   })
 }
 
+/** One `{ type: "plugin" }` lifecycle-hook round-trip request from the sidecar. */
+export interface PluginHookExecEvent {
+  type: "plugin_hook_exec"
+  sessionId: string
+  execId: string
+  pluginId: string
+  hookId: string
+  payload: Record<string, unknown>
+}
+
+/**
+ * Subscribe to `plugin_hook_exec` events — the settings.json ⇄ plugin bridge.
+ *
+ * Mirrors {@link subscribePluginToolExec}: the frame falls through Rust's
+ * default branch onto the same sidecar channel, so no Rust routing was needed
+ * for the outbound half. (`host_rpc`, the channel this looks like it should
+ * use, never reaches the renderer at all — see `dispatch/plugin-hook-exec.mjs`.)
+ */
+export async function subscribePluginHookExec(
+  handler: (req: PluginHookExecEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    const e = evt as unknown as PluginHookExecEvent
+    if (e?.type === "plugin_hook_exec" && typeof e.execId === "string") handler(e)
+  })
+}
+
+/**
+ * Write a `plugin_hook_response` back onto the sidecar stdin so the pending
+ * `pendingPluginHookCalls` entry resolves. Mirrors `sendPluginToolResponse`.
+ */
+export async function sendPluginHookResponse(resp: {
+  sessionId: string
+  execId: string
+  result?: unknown
+  error?: string
+}): Promise<void> {
+  await transport.call("claude_plugin_hook_response", {
+    sessionId: resp.sessionId,
+    execId: resp.execId,
+    result: resp.result ?? null,
+    error: resp.error ?? null,
+  })
+}
+
 /**
  * Subscribe to `protocol_adapter_exec` events (P2-E code adapter round-trip)
  * and forward them to `handler`. Reuses the single `onClaudeMessage`

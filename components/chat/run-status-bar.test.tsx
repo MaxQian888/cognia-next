@@ -96,25 +96,42 @@ describe("RunStatusBar", () => {
     expect(screen.queryByText(/fix the failing test/)).not.toBeInTheDocument()
   })
 
-  it("jumps to the first undelivered steer message when the chip is pressed", () => {
-    const jumpToMessage = jest.fn(() => true)
-    useChatViewportStore.setState({ jumpToMessage })
+  function steerBubble(entryId: string, text: string): UIMessage {
+    return {
+      id: `m-${entryId}`,
+      role: "user",
+      parts: [{ type: "text", text }],
+      metadata: { steer: { entryId, state: "queued" } },
+    } as unknown as UIMessage
+  }
+
+  /** Seed a two-entry queue and open the panel on its queue section. */
+  function openQueue(extra?: Partial<SessionChatSlice>) {
     seed({
       status: "streaming",
-      steerQueue: [{ id: "e1", text: "later one" }],
-      messages: [
-        { id: "m0", role: "user", parts: [] } as unknown as UIMessage,
-        {
-          id: "m-e1",
-          role: "user",
-          parts: [{ type: "text", text: "later one" }],
-          metadata: { steer: { entryId: "e1", state: "queued" } },
-        } as unknown as UIMessage,
+      steerQueue: [
+        { id: "e1", text: "first" },
+        { id: "e2", text: "second" },
       ],
+      messages: [steerBubble("e1", "first"), steerBubble("e2", "second")],
+      ...extra,
     })
     render(<RunStatusBar sessionId={SID} />)
     fireEvent.click(screen.getByTestId("run-status-steer-chip"))
-    expect(jumpToMessage).toHaveBeenCalledWith("m-e1")
+  }
+
+  it("opens the queue section from the chip, in send order", () => {
+    openQueue()
+    const rows = screen.getAllByTestId("run-panel-queue-locate")
+    expect(rows.map((r) => r.textContent)).toEqual(["first", "second"])
+  })
+
+  it("jumps to the queued message a row points at", () => {
+    const jumpToMessage = jest.fn(() => true)
+    useChatViewportStore.setState({ jumpToMessage })
+    openQueue()
+    fireEvent.click(screen.getAllByTestId("run-panel-queue-locate")[1])
+    expect(jumpToMessage).toHaveBeenCalledWith("m-e2")
   })
 
   it("stays inert when the queued steer has no reachable message", () => {
@@ -122,9 +139,32 @@ describe("RunStatusBar", () => {
     useChatViewportStore.setState({ jumpToMessage })
     seed({ status: "streaming", steerQueue: [{ id: "gone", text: "orphan" }], messages: [] })
     render(<RunStatusBar sessionId={SID} />)
-    // Rendered as a plain span, not a button — there is nowhere to jump to.
     fireEvent.click(screen.getByTestId("run-status-steer-chip"))
+    fireEvent.click(screen.getByTestId("run-panel-queue-locate"))
     expect(jumpToMessage).not.toHaveBeenCalled()
+  })
+
+  it("rewrites a queued entry and its bubble together", () => {
+    openQueue()
+    fireEvent.click(screen.getAllByTestId("run-panel-queue-edit-open")[0])
+    const box = screen.getByTestId("run-panel-queue-edit")
+    fireEvent.change(box, { target: { value: "first, but rewritten" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+
+    const slice = useChatStore.getState().sessions[SID]
+    expect(slice?.steerQueue[0]?.text).toBe("first, but rewritten")
+    // The transcript must not keep advertising the superseded wording.
+    expect(slice?.messages[0]).toMatchObject({
+      parts: [{ type: "text", text: "first, but rewritten" }],
+    })
+  })
+
+  it("removes a queued entry together with its bubble", () => {
+    openQueue()
+    fireEvent.click(screen.getAllByTestId("run-panel-queue-remove")[0])
+    const slice = useChatStore.getState().sessions[SID]
+    expect(slice?.steerQueue.map((e) => e.id)).toEqual(["e2"])
+    expect(slice?.messages.map((m) => m.id)).toEqual(["m-e2"])
   })
 
   it("surfaces a stuck-queue header after an errored settle with flush + discard", async () => {

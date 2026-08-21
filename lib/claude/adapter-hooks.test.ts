@@ -30,6 +30,11 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => {
 })
 const mockedEmit = emitSystemBusEvent as jest.Mock
 
+import {
+  registerPluginHookContribution,
+  __resetHookRegistryForTesting,
+} from "@/lib/plugin/registries/hook-registry"
+
 // PluginEventHooks reads enabled plugins from this store; default is empty so
 // the no-listener fast path is exercised unless a test opts in.
 const getStateMock = jest.fn(() => ({ plugins: {} as Record<string, unknown> }))
@@ -51,15 +56,28 @@ const ALL_EVENT_HOOKS = {
   onTokenUsage: () => {},
   onPostChatReceive: () => {},
 }
+/**
+ * Seed the plugin runtime.
+ *
+ * Hooks live in ONE registry now (`lib/plugin/registries/hook-registry.ts`);
+ * the store mock supplies only each plugin's `status`, which is where
+ * enablement genuinely lives and what the registry reads.
+ */
+function seedPlugins(plugins: Record<string, { status?: string; hooks?: unknown }>) {
+  getStateMock.mockReturnValue({ plugins })
+  __resetHookRegistryForTesting()
+  for (const [pluginId, row] of Object.entries(plugins)) {
+    if (row?.hooks) registerPluginHookContribution(pluginId, row.hooks as never)
+  }
+}
+
 function enableAllEventHooks() {
-  getStateMock.mockReturnValue({
-    plugins: { p1: { status: "enabled", hooks: ALL_EVENT_HOOKS } },
-  })
+  seedPlugins({ p1: { status: "enabled", hooks: ALL_EVENT_HOOKS } })
 }
 
 beforeEach(() => {
   jest.clearAllMocks()
-  getStateMock.mockReturnValue({ plugins: {} })
+  seedPlugins({})
   // Fresh singletons per test so registered lifecycle hooks don't leak.
   resetPluginEventHooks()
   resetPluginLifecycleHooks()
@@ -149,9 +167,7 @@ describe("adapter-hooks", () => {
     enableAllEventHooks()
     expect(__hasEventListenersForTests("onUserPromptSubmit")).toBe(true)
     // A disabled plugin must not count — locks the enabled-only semantic.
-    getStateMock.mockReturnValue({
-      plugins: { p1: { status: "disabled", hooks: ALL_EVENT_HOOKS } },
-    })
+    seedPlugins({ p1: { status: "disabled", hooks: ALL_EVENT_HOOKS } })
     expect(__hasEventListenersForTests("onUserPromptSubmit")).toBe(false)
   })
 

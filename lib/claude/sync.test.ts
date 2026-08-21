@@ -297,6 +297,7 @@ describe("syncAll", () => {
         "gemini",
         "kiro",
         "opencode",
+        "pi-mcp-adapter",
         "vscode",
         "windsurf",
         "zed",

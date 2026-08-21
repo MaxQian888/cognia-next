@@ -21,9 +21,11 @@ import {
   resolveConversationFilterPresets,
   resolveConversationFilters,
   resolveConversationSortBy,
+  resolveConversationTimeBasis,
   setConversationActivityFilter,
   setConversationFilterList,
   setConversationKindFilter,
+  sortSupportsDateBuckets,
   sortSupportsManualOrder,
   toggleConversationFilter,
   toggleConversationFilterValue,
@@ -285,7 +287,7 @@ describe("list facets", () => {
     ).toBe(true)
     expect(
       matchesConversationFilters(
-        session({ folderId: null }),
+        session({ folderId: undefined }),
         f({ folderIds: [CONVERSATION_FILTER_UNASSIGNED] }),
         undefined
       )
@@ -371,6 +373,52 @@ describe("activity window", () => {
     expect(
       matchesConversationFilters(session({ updatedAt: now - 3 * DAY }), filters, undefined, { now })
     ).toBe(false)
+  })
+
+  it("measures creation time when the sort axis is creation", () => {
+    // "Today" has to mean the same thing as the bucket header above the row.
+    // Under the created sort that header says "created today", so a chat made a
+    // month ago and used this morning must NOT survive the filter.
+    const filters = resolveConversationFilters({ activity: "today" })
+    const usedTodayMadeLastMonth = session({
+      createdAt: now - 40 * DAY,
+      lastMessageAt: now - 1000,
+    })
+    const madeTodayLongIdle = session({ createdAt: now - 1000, lastMessageAt: now - 40 * DAY })
+    expect(matchesConversationFilters(usedTodayMadeLastMonth, filters, undefined, { now })).toBe(
+      true
+    )
+    expect(
+      matchesConversationFilters(usedTodayMadeLastMonth, filters, undefined, {
+        now,
+        timeBasis: "created",
+      })
+    ).toBe(false)
+    expect(
+      matchesConversationFilters(madeTodayLongIdle, filters, undefined, {
+        now,
+        timeBasis: "created",
+      })
+    ).toBe(true)
+  })
+})
+
+describe("sort axis → time basis", () => {
+  it("reads creation time only under the created sort", () => {
+    expect(resolveConversationTimeBasis("created")).toBe("created")
+    for (const sortBy of CONVERSATION_SORT_BY_OPTIONS.filter((s) => s !== "created")) {
+      expect(resolveConversationTimeBasis(sortBy)).toBe("activity")
+    }
+  })
+
+  it("admits date buckets only for the modes that have a date axis", () => {
+    // `title` and `unread` order by something that is not time; bucketing them
+    // by date would put headers on a list the headers do not explain.
+    expect(CONVERSATION_SORT_BY_OPTIONS.filter(sortSupportsDateBuckets)).toEqual([
+      "recent",
+      "oldest",
+      "created",
+    ])
   })
 })
 

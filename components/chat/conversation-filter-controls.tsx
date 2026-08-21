@@ -9,9 +9,13 @@ import {
   CheckIcon,
   CircleDotIcon,
   CpuIcon,
+  EyeOffIcon,
   FilterIcon,
   FolderTreeIcon,
+  RotateCcwIcon,
+  SaveIcon,
   SettingsIcon,
+  TelescopeIcon,
   Trash2Icon,
   XIcon,
   type LucideIcon,
@@ -65,7 +69,6 @@ import type { ConversationFilterOption } from "@/lib/chat/conversation-filter-op
 import {
   CONVERSATION_ACTIVITY_FILTER_OPTIONS,
   CONVERSATION_FILTER_LIST_KEYS,
-  CONVERSATION_FILTER_PRESET_NAME_MAX,
   CONVERSATION_FILTER_TOGGLES,
   CONVERSATION_FILTER_UNASSIGNED,
   CONVERSATION_KIND_FILTER_OPTIONS,
@@ -73,6 +76,18 @@ import {
   DEFAULT_CONVERSATION_SORT_BY,
   type ConversationFilterListKey,
 } from "@/lib/chat/conversation-filters"
+import {
+  CONTENT_SEARCH_MIN_QUERY,
+  CONVERSATION_SEARCH_WORKSPACE_OPTIONS,
+  countWidenedSearchAxes,
+} from "@/lib/chat/conversation-search-scope"
+import {
+  BUILT_IN_CONVERSATION_VIEWS,
+  CONVERSATION_VIEW_DIMENSIONS,
+  CONVERSATION_VIEW_NAME_MAX,
+  type ConversationViewDimension,
+  type ResolvedConversationView,
+} from "@/lib/chat/conversation-views"
 import { cn } from "@/lib/utils"
 import type { ConversationFilterController } from "@/hooks/chat/use-conversation-filter-controller"
 
@@ -104,8 +119,35 @@ import type { ConversationFilterController } from "@/hooks/chat/use-conversation
 /** The slice of the controller the controls read. */
 export type ConversationFilterViewModel = Pick<
   ConversationFilterController,
-  "filters" | "activeFilters" | "sortBy" | "options" | "presets" | "activePreset" | "actions"
+  | "filters"
+  | "activeFilters"
+  | "sortBy"
+  | "groupBy"
+  | "search"
+  | "options"
+  | "views"
+  | "activeView"
+  | "activeViewDrift"
+  | "hiddenViewIds"
+  | "suggestedViewDimensions"
+  | "actions"
 >
+
+/**
+ * A view's display name.
+ *
+ * Built-ins carry a translation key rather than text, so the label follows the
+ * app's locale instead of whichever one the view happened to be created in.
+ * Custom views carry the user's own words and are shown verbatim.
+ */
+function useViewLabel() {
+  const t = useTranslations("conversationFilters")
+  return useCallback(
+    (view: Pick<ResolvedConversationView, "name" | "builtIn">) =>
+      view.builtIn ? t(view.name as never) : view.name,
+    [t]
+  )
+}
 
 export interface ConversationFilterMenuProps {
   model: ConversationFilterViewModel
@@ -366,7 +408,7 @@ function CountPill({ count, className }: { count: number; className?: string }) 
 }
 
 // ---------------------------------------------------------------------------
-// Menu (responsive shell + preset dialogs)
+// Menu (responsive shell + view dialogs)
 // ---------------------------------------------------------------------------
 
 export function ConversationFilterMenu({
@@ -390,8 +432,8 @@ export function ConversationFilterMenu({
           sections={sections}
           triggerClassName={triggerClassName}
           testId={testId}
-          onSavePreset={openSave}
-          onManagePresets={openManage}
+          onSaveView={openSave}
+          onManageViews={openManage}
         />
       ) : (
         <FilterDropdown
@@ -400,21 +442,24 @@ export function ConversationFilterMenu({
           side={side}
           triggerClassName={triggerClassName}
           testId={testId}
-          onSavePreset={openSave}
-          onManagePresets={openManage}
+          onSaveView={openSave}
+          onManageViews={openManage}
         />
       )}
-      <SavePresetDialog
+      <SaveViewDialog
         open={saveOpen}
         onOpenChange={setSaveOpen}
-        onSave={model.actions.savePreset}
+        suggested={model.suggestedViewDimensions}
+        onSave={model.actions.saveView}
       />
-      <ManagePresetsDialog
+      <ManageViewsDialog
         open={manageOpen}
         onOpenChange={setManageOpen}
-        presets={model.presets}
-        onRename={model.actions.renamePreset}
-        onDelete={model.actions.deletePreset}
+        views={model.views}
+        hiddenViewIds={model.hiddenViewIds}
+        onRename={model.actions.renameView}
+        onRemove={model.actions.removeView}
+        onRestore={model.actions.restoreView}
       />
     </>
   )
@@ -425,8 +470,8 @@ interface ShellProps {
   sections: FacetSection[]
   triggerClassName?: string
   testId: string
-  onSavePreset: () => void
-  onManagePresets: () => void
+  onSaveView: () => void
+  onManageViews: () => void
 }
 
 /** Keep the menu open on select — the user is composing a filter, not firing a command. */
@@ -438,12 +483,17 @@ function FilterDropdown({
   side,
   triggerClassName,
   testId,
-  onSavePreset,
-  onManagePresets,
+  onSaveView,
+  onManageViews,
 }: ShellProps & { side: NonNullable<ConversationFilterMenuProps["side"]> }) {
   const t = useTranslations("conversationFilters")
-  const { activeFilters, presets, activePreset, actions } = model
-  const canSave = activeFilters > 0 && !activePreset
+  const labelOf = useViewLabel()
+  const { activeFilters, views, activeView, activeViewDrift, suggestedViewDimensions, actions } =
+    model
+  const modified = activeViewDrift.length > 0
+  // Saving is only meaningful when something is worth pinning; sitting inside
+  // an unmodified view means it is already saved.
+  const canSave = suggestedViewDimensions.length > 0 && !(activeView && !modified)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -460,40 +510,81 @@ function FilterDropdown({
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="gap-2">
             <BookmarkIcon className="size-4 text-muted-foreground" aria-hidden />
-            <span className="flex-1 truncate">{t("presets.label")}</span>
-            {activePreset ? (
+            <span className="flex-1 truncate">{t("views.label")}</span>
+            {activeView ? (
               <span className="max-w-24 truncate text-xs text-muted-foreground">
-                {activePreset.name}
+                {modified
+                  ? t("views.modifiedChip", { name: labelOf(activeView) })
+                  : labelOf(activeView)}
               </span>
             ) : null}
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-56" data-testid={`${testId}-presets`}>
-            {presets.length === 0 ? (
+          <DropdownMenuSubContent className="w-60" data-testid={`${testId}-views`}>
+            {views.length === 0 ? (
               <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                {t("presets.empty")}
+                {t("views.empty")}
               </DropdownMenuLabel>
             ) : (
-              presets.map((preset) => (
+              views.map((view) => (
                 <DropdownMenuCheckboxItem
-                  key={preset.id}
-                  checked={activePreset?.id === preset.id}
-                  onCheckedChange={() => actions.applyPreset(preset.id)}
+                  key={view.id}
+                  checked={activeView?.id === view.id}
+                  // Re-picking the view you are already in is how you get back
+                  // to it after nudging something — never a way to leave it.
+                  onCheckedChange={() => actions.applyView(view.id)}
+                  data-testid={`${testId}-view-${view.id}`}
                 >
-                  <span className="truncate">{preset.name}</span>
+                  <span className="flex-1 truncate">{labelOf(view)}</span>
+                  {view.builtIn ? (
+                    <span className="ml-1 shrink-0 text-[10px] text-muted-foreground">
+                      {t("views.builtInBadge")}
+                    </span>
+                  ) : null}
                 </DropdownMenuCheckboxItem>
               ))
             )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={!canSave} onSelect={onSavePreset}>
-              <BookmarkPlusIcon className="size-4" />
-              {t("presets.save")}
-            </DropdownMenuItem>
-            {presets.length > 0 ? (
-              <DropdownMenuItem onSelect={onManagePresets}>
-                <SettingsIcon className="size-4" />
-                {t("presets.manage")}
-              </DropdownMenuItem>
+            {activeView ? (
+              <>
+                <DropdownMenuSeparator />
+                {modified ? (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={actions.revertView}
+                      data-testid={`${testId}-view-revert`}
+                    >
+                      <RotateCcwIcon className="size-4" />
+                      {t("views.revert")}
+                    </DropdownMenuItem>
+                    {activeView.builtIn ? null : (
+                      <DropdownMenuItem
+                        onSelect={() => actions.updateView(activeView.id)}
+                        data-testid={`${testId}-view-update`}
+                      >
+                        <SaveIcon className="size-4" />
+                        {t("views.update")}
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                ) : null}
+                <DropdownMenuItem onSelect={actions.clearView}>
+                  <XIcon className="size-4" />
+                  {t("views.clear")}
+                </DropdownMenuItem>
+              </>
             ) : null}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!canSave}
+              onSelect={onSaveView}
+              data-testid={`${testId}-view-save`}
+            >
+              <BookmarkPlusIcon className="size-4" />
+              {t("views.save")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onManageViews}>
+              <SettingsIcon className="size-4" />
+              {t("views.manage")}
+            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
@@ -580,13 +671,16 @@ function FilterDrawer({
   sections,
   triggerClassName,
   testId,
-  onSavePreset,
-  onManagePresets,
+  onSaveView,
+  onManageViews,
 }: ShellProps) {
   const t = useTranslations("conversationFilters")
-  const { activeFilters, presets, activePreset, actions } = model
+  const labelOf = useViewLabel()
+  const { activeFilters, views, activeView, activeViewDrift, suggestedViewDimensions, actions } =
+    model
+  const modified = activeViewDrift.length > 0
   const [open, setOpen] = useState(false)
-  const canSave = activeFilters > 0 && !activePreset
+  const canSave = suggestedViewDimensions.length > 0 && !(activeView && !modified)
   return (
     <>
       <FilterTrigger
@@ -613,45 +707,46 @@ function FilterDrawer({
             <div className="flex flex-col gap-2 border-b py-3">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <BookmarkIcon className="size-4 text-muted-foreground" aria-hidden />
-                <span className="flex-1">{t("presets.label")}</span>
+                <span className="flex-1">{t("views.label")}</span>
                 <Button
                   size="xs"
                   variant="ghost"
                   disabled={!canSave}
                   onClick={() => {
                     setOpen(false)
-                    onSavePreset()
+                    onSaveView()
                   }}
                 >
                   <BookmarkPlusIcon className="size-3.5" />
-                  {t("presets.saveShort")}
+                  {t("views.saveShort")}
                 </Button>
-                {presets.length > 0 ? (
+                {views.length > 0 ? (
                   <Button
                     size="icon-xs"
                     variant="ghost"
-                    aria-label={t("presets.manage")}
+                    aria-label={t("views.manage")}
                     onClick={() => {
                       setOpen(false)
-                      onManagePresets()
+                      onManageViews()
                     }}
                   >
                     <SettingsIcon className="size-3.5" />
                   </Button>
                 ) : null}
               </div>
-              {presets.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("presets.empty")}</p>
+              {views.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("views.empty")}</p>
               ) : (
                 <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-                  {presets.map((preset) => {
-                    const active = activePreset?.id === preset.id
+                  {views.map((view) => {
+                    const active = activeView?.id === view.id
                     return (
                       <button
-                        key={preset.id}
+                        key={view.id}
                         type="button"
-                        onClick={() => actions.applyPreset(preset.id)}
+                        onClick={() => actions.applyView(view.id)}
                         aria-pressed={active}
+                        data-testid={`${testId}-view-${view.id}`}
                         className={cn(
                           "inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs transition-colors",
                           active
@@ -659,13 +754,38 @@ function FilterDrawer({
                             : "border-border bg-muted/40 text-foreground"
                         )}
                       >
-                        {active ? <CheckIcon className="size-3" aria-hidden /> : null}
-                        <span className="max-w-40 truncate">{preset.name}</span>
+                        {active && !modified ? <CheckIcon className="size-3" aria-hidden /> : null}
+                        <span className="max-w-40 truncate">{labelOf(view)}</span>
                       </button>
                     )
                   })}
                 </div>
               )}
+              {activeView && modified ? (
+                // Same two exits the desktop menu offers, at touch size.
+                <div className="flex gap-2">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={actions.revertView}
+                    data-testid={`${testId}-view-revert`}
+                  >
+                    <RotateCcwIcon className="size-3.5" />
+                    {t("views.revert")}
+                  </Button>
+                  {activeView.builtIn ? null : (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => actions.updateView(activeView.id)}
+                      data-testid={`${testId}-view-update`}
+                    >
+                      <SaveIcon className="size-3.5" />
+                      {t("views.update")}
+                    </Button>
+                  )}
+                </div>
+              ) : null}
             </div>
             <Accordion type="multiple" defaultValue={["sort", "status"]}>
               {sections.map((section) => (
@@ -756,18 +876,22 @@ function FilterDrawer({
 // Preset dialogs
 // ---------------------------------------------------------------------------
 
-function SavePresetDialog({
+function SaveViewDialog({
   open,
   onOpenChange,
+  suggested,
   onSave,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (name: string) => string | null
+  /** Dimensions the current state has moved off its defaults — pre-ticked. */
+  suggested: readonly ConversationViewDimension[]
+  onSave: (name: string, dimensions: readonly ConversationViewDimension[]) => string | null
 }) {
   const t = useTranslations("conversationFilters")
   const [name, setName] = useState("")
   const [rejected, setRejected] = useState(false)
+  const [picked, setPicked] = useState<readonly ConversationViewDimension[]>(suggested)
   // Reset the draft each time the dialog opens — derived from `open` at the
   // change boundary rather than in an effect.
   const [seenOpen, setSeenOpen] = useState(open)
@@ -775,9 +899,16 @@ function SavePresetDialog({
     setSeenOpen(open)
     setName("")
     setRejected(false)
+    // Whatever the user has moved is presumably why they are saving; starting
+    // from an empty set makes them re-state what is already on screen.
+    setPicked(suggested)
   }
+  const toggle = (dimension: ConversationViewDimension, on: boolean) =>
+    setPicked((current) =>
+      on ? [...current, dimension] : current.filter((entry) => entry !== dimension)
+    )
   const submit = () => {
-    const id = onSave(name)
+    const id = onSave(name, picked)
     if (id) onOpenChange(false)
     else setRejected(true)
   }
@@ -785,42 +916,66 @@ function SavePresetDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[90vw] sm:max-w-sm"
-        data-testid="conversation-filter-save-dialog"
+        data-testid="conversation-view-save-dialog"
       >
         <DialogHeader>
-          <DialogTitle>{t("presets.saveTitle")}</DialogTitle>
-          <DialogDescription>{t("presets.saveDescription")}</DialogDescription>
+          <DialogTitle>{t("views.saveTitle")}</DialogTitle>
+          <DialogDescription>{t("views.saveDescription")}</DialogDescription>
         </DialogHeader>
         <form
           onSubmit={(event) => {
             event.preventDefault()
             submit()
           }}
-          className="flex flex-col gap-2"
+          className="flex flex-col gap-3"
         >
           <Input
             autoFocus
             value={name}
-            maxLength={CONVERSATION_FILTER_PRESET_NAME_MAX}
+            maxLength={CONVERSATION_VIEW_NAME_MAX}
             onChange={(event) => {
               setName(event.target.value)
               setRejected(false)
             }}
-            placeholder={t("presets.namePlaceholder")}
-            aria-label={t("presets.namePlaceholder")}
+            placeholder={t("views.namePlaceholder")}
+            aria-label={t("views.namePlaceholder")}
             aria-invalid={rejected || undefined}
           />
+          {/* Which dimensions this view pins. Everything unticked keeps
+              following whatever the user sets later — that is what makes a view
+              an overlay rather than a photograph. */}
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="pb-1 text-xs text-muted-foreground">
+              {t("views.dimensions.legend")}
+            </legend>
+            {CONVERSATION_VIEW_DIMENSIONS.map((dimension) => (
+              <label
+                key={dimension}
+                className="flex items-center gap-2 text-sm"
+                data-testid={`conversation-view-dimension-${dimension}`}
+              >
+                <Checkbox
+                  checked={picked.includes(dimension)}
+                  onCheckedChange={(checked) => {
+                    toggle(dimension, checked === true)
+                    setRejected(false)
+                  }}
+                />
+                <span>{t(`views.dimensions.${dimension}`)}</span>
+              </label>
+            ))}
+          </fieldset>
           {rejected ? (
             <p className="text-xs text-destructive" role="alert">
-              {t("presets.saveRejected")}
+              {t("views.saveRejected")}
             </p>
           ) : null}
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               {t("cancel")}
             </Button>
-            <Button type="submit" disabled={!name.trim()}>
-              {t("presets.saveAction")}
+            <Button type="submit" disabled={!name.trim() || picked.length === 0}>
+              {t("views.saveAction")}
             </Button>
           </DialogFooter>
         </form>
@@ -829,45 +984,72 @@ function SavePresetDialog({
   )
 }
 
-function ManagePresetsDialog({
+function ManageViewsDialog({
   open,
   onOpenChange,
-  presets,
+  views,
+  hiddenViewIds,
   onRename,
-  onDelete,
+  onRemove,
+  onRestore,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  presets: ConversationFilterViewModel["presets"]
+  views: ConversationFilterViewModel["views"]
+  hiddenViewIds: readonly string[]
   onRename: (id: string, name: string) => void
-  onDelete: (id: string) => void
+  onRemove: (id: string) => void
+  onRestore: (id: string) => void
 }) {
   const t = useTranslations("conversationFilters")
-  // Deleting the last preset closes the dialog — nothing left to manage.
-  const handleDelete = (id: string) => {
-    onDelete(id)
-    if (presets.length <= 1) onOpenChange(false)
-  }
+  const labelOf = useViewLabel()
+  const hidden = useMemo(
+    () => BUILT_IN_CONVERSATION_VIEWS.filter((view) => hiddenViewIds.includes(view.id)),
+    [hiddenViewIds]
+  )
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-w-[90vw] sm:max-w-md"
-        data-testid="conversation-filter-manage-dialog"
+        data-testid="conversation-view-manage-dialog"
       >
         <DialogHeader>
-          <DialogTitle>{t("presets.manageTitle")}</DialogTitle>
-          <DialogDescription>{t("presets.manageDescription")}</DialogDescription>
+          <DialogTitle>{t("views.manageTitle")}</DialogTitle>
+          <DialogDescription>{t("views.manageDescription")}</DialogDescription>
         </DialogHeader>
         <ul className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
-          {presets.map((preset) => (
-            <PresetRow
-              key={preset.id}
-              preset={preset}
+          {views.map((view) => (
+            <ViewRow
+              key={view.id}
+              view={view}
+              label={labelOf(view)}
               onRename={onRename}
-              onDelete={handleDelete}
+              onRemove={onRemove}
             />
           ))}
         </ul>
+        {hidden.length > 0 ? (
+          // Built-ins are code, not data: they are hidden rather than deleted,
+          // so there has to be somewhere to put them back from.
+          <div className="flex flex-col gap-1 border-t pt-3">
+            <p className="text-xs text-muted-foreground">{t("views.hidden")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {hidden.map((view) => (
+                <Button
+                  key={view.id}
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onRestore(view.id)}
+                  aria-label={t("views.restore", { name: labelOf(view) })}
+                  data-testid={`conversation-view-restore-${view.id}`}
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  {labelOf(view)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             {t("drawer.done")}
@@ -878,27 +1060,50 @@ function ManagePresetsDialog({
   )
 }
 
-function PresetRow({
-  preset,
+function ViewRow({
+  view,
+  label,
   onRename,
-  onDelete,
+  onRemove,
 }: {
-  preset: ConversationFilterViewModel["presets"][number]
+  view: ResolvedConversationView
+  label: string
   onRename: (id: string, name: string) => void
-  onDelete: (id: string) => void
+  onRemove: (id: string) => void
 }) {
   const t = useTranslations("conversationFilters")
-  const [draft, setDraft] = useState(preset.name)
+  const [draft, setDraft] = useState(label)
   const commit = () => {
     const next = draft.trim()
-    if (next && next !== preset.name) onRename(preset.id, next)
-    else setDraft(preset.name)
+    if (next && next !== label) onRename(view.id, next)
+    else setDraft(label)
+  }
+  // A built-in's name is a translation key, so it cannot be edited in place —
+  // renaming it would either break the key or strand the row in one locale.
+  if (view.builtIn) {
+    return (
+      <li className="flex items-center gap-2 px-1">
+        <span className="flex-1 truncate text-sm">{label}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          {t("views.builtInBadge")}
+        </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-9 shrink-0 text-muted-foreground hover:text-destructive"
+          aria-label={t("views.hide", { name: label })}
+          onClick={() => onRemove(view.id)}
+        >
+          <EyeOffIcon className="size-4" />
+        </Button>
+      </li>
+    )
   }
   return (
     <li className="flex items-center gap-2">
       <Input
         value={draft}
-        maxLength={CONVERSATION_FILTER_PRESET_NAME_MAX}
+        maxLength={CONVERSATION_VIEW_NAME_MAX}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -908,22 +1113,136 @@ function PresetRow({
             event.currentTarget.blur()
           } else if (event.key === "Escape") {
             event.preventDefault()
-            setDraft(preset.name)
+            setDraft(label)
           }
         }}
-        aria-label={t("presets.rename", { name: preset.name })}
+        aria-label={t("views.rename", { name: label })}
         className="h-9"
       />
       <Button
         size="icon"
         variant="ghost"
         className="size-9 shrink-0 text-muted-foreground hover:text-destructive"
-        aria-label={t("presets.delete", { name: preset.name })}
-        onClick={() => onDelete(preset.id)}
+        aria-label={t("views.delete", { name: label })}
+        onClick={() => onRemove(view.id)}
       >
         <Trash2Icon className="size-4" />
       </Button>
     </li>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Search reach
+// ---------------------------------------------------------------------------
+
+export interface ConversationSearchScopeControlProps {
+  model: Pick<ConversationFilterViewModel, "search" | "actions">
+  /** Where the desktop menu opens relative to the trigger. Defaults to `"right"`. */
+  side?: "right" | "left" | "top" | "bottom"
+  triggerClassName?: string
+  testId?: string
+}
+
+/**
+ * How far the search field looks: workspaces, archived rows, message content.
+ *
+ * One control for three axes that used to be decided in three unrelated places
+ * — the archived *view* toggle, the *grouping* axis, and a settings switch —
+ * which meant whether you could find a conversation depended on how you had
+ * chosen to group the list. It sits beside the field it governs, and the badge
+ * counts the axes widened past their default so a reach left on last week is
+ * never invisible.
+ *
+ * Same dropdown shell as the filter menu rather than a second popover idiom:
+ * the two buttons sit next to each other and would read as different kinds of
+ * thing otherwise.
+ */
+export function ConversationSearchScopeControl({
+  model,
+  side = "right",
+  triggerClassName,
+  testId = "conversation-search-scope",
+}: ConversationSearchScopeControlProps) {
+  const t = useTranslations("conversationFilters")
+  const { search, actions } = model
+  const widened = countWidenedSearchAxes(search)
+  const label =
+    widened > 0 ? t("searchScope.labelActive", { count: widened }) : t("searchScope.label")
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={label}
+          title={label}
+          className={cn("relative", triggerClassName)}
+          data-testid={testId}
+        >
+          <TelescopeIcon className="size-4" />
+          {widened > 0 ? (
+            <span
+              aria-hidden
+              className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums"
+              data-testid={`${testId}-dot`}
+            >
+              {widened}
+            </span>
+          ) : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side={side}
+        align="start"
+        sideOffset={6}
+        collisionPadding={8}
+        className="w-64"
+        data-testid={`${testId}-menu`}
+      >
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          {t("searchScope.hint")}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs">
+          {t("searchScope.workspace.label")}
+        </DropdownMenuLabel>
+        {CONVERSATION_SEARCH_WORKSPACE_OPTIONS.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option}
+            checked={search.workspace === option}
+            onSelect={keepOpen}
+            onCheckedChange={() => actions.setSearchOptions({ workspace: option })}
+            data-testid={`${testId}-workspace-${option}`}
+          >
+            {t(`searchScope.workspace.${option}`)}
+          </DropdownMenuCheckboxItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuCheckboxItem
+          checked={search.includeArchived}
+          onSelect={keepOpen}
+          onCheckedChange={(checked) => actions.setSearchOptions({ includeArchived: checked })}
+          data-testid={`${testId}-archived`}
+        >
+          {t("searchScope.includeArchived")}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={search.content}
+          onSelect={keepOpen}
+          onCheckedChange={(checked) => actions.setSearchOptions({ content: checked })}
+          data-testid={`${testId}-content`}
+        >
+          {t("searchScope.content")}
+        </DropdownMenuCheckboxItem>
+        {search.content ? (
+          <DropdownMenuLabel className="pt-0 text-[11px] font-normal text-muted-foreground">
+            {t("searchScope.contentHint", { count: CONTENT_SEARCH_MIN_QUERY })}
+          </DropdownMenuLabel>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -965,21 +1284,43 @@ export function ConversationFilterChips({
   testId = "conversation-filter-chips",
 }: ConversationFilterChipsProps) {
   const t = useTranslations("conversationFilters")
-  const { filters, activeFilters, sortBy, options, activePreset, actions } = model
+  const labelOf = useViewLabel()
+  const { filters, activeFilters, sortBy, options, activeView, activeViewDrift, actions } = model
   const sortPinned = sortBy !== DEFAULT_CONVERSATION_SORT_BY
-  if (activeFilters === 0 && !sortPinned) return null
+  const modified = activeViewDrift.length > 0
+  if (activeFilters === 0 && !sortPinned && !activeView) return null
 
   const chips: ReactNode[] = []
-  if (activePreset) {
+  // Inside a view, its name replaces the facet-by-facet breakdown — that is
+  // what the user named the combination for. Once they nudge something the
+  // chip says so and offers the way back, rather than silently dropping the
+  // view and leaving them to work out which of ten facets moved.
+  if (activeView && !modified) {
     chips.push(
       <FilterChip
-        key="preset"
+        key="view"
         icon={BookmarkIcon}
-        label={activePreset.name}
-        removeLabel={t("remove", { name: activePreset.name })}
-        onRemove={actions.reset}
+        label={labelOf(activeView)}
+        removeLabel={t("views.clear")}
+        onRemove={actions.clearView}
       />
     )
+  } else if (activeView) {
+    chips.push(
+      <FilterChip
+        key="view"
+        icon={BookmarkIcon}
+        label={t("views.modifiedChip", { name: labelOf(activeView) })}
+        title={t("views.revert")}
+        removeLabel={t("views.clear")}
+        onRemove={actions.clearView}
+        onClick={actions.revertView}
+        testId={`${testId}-view-modified`}
+      />
+    )
+  }
+  if (activeView && !modified) {
+    // Nothing more to say: every facet on screen is the view's own.
   } else {
     for (const key of CONVERSATION_FILTER_TOGGLES) {
       if (!filters[key]) continue
@@ -1078,20 +1419,36 @@ function FilterChip({
   title,
   removeLabel,
   onRemove,
+  onClick,
+  testId,
 }: {
   icon?: LucideIcon
   label: string
   title?: string
   removeLabel: string
   onRemove: () => void
+  /**
+   * Optional action on the chip's body, separate from removing it. Used by the
+   * "modified" view chip, whose body puts the view back while its × leaves the
+   * view — two different exits that must not be one control.
+   */
+  onClick?: () => void
+  testId?: string
 }) {
   return (
     <span
       className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/15 py-0.5 pr-0.5 pl-2 text-[10px] text-primary"
       title={title}
+      data-testid={testId}
     >
       {Icon ? <Icon className="size-2.5 shrink-0" aria-hidden /> : null}
-      <span className="truncate">{label}</span>
+      {onClick ? (
+        <button type="button" onClick={onClick} title={title} className="truncate hover:underline">
+          {label}
+        </button>
+      ) : (
+        <span className="truncate">{label}</span>
+      )}
       <button
         type="button"
         onClick={onRemove}

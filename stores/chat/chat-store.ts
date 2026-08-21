@@ -557,6 +557,13 @@ interface ChatState {
   removeSteerEntry: (id: string, entryId: string) => void
   /** Replace the text of a single queued steer entry (keeps its blocks). */
   updateSteerEntry: (id: string, entryId: string, text: string) => void
+  /**
+   * Move a queued steer entry by `delta` slots (-1 = earlier, +1 = later).
+   * The queue drains in order into one framed turn, so its order is what the
+   * model reads — this is how the user reorders that. Clamped at both ends and
+   * a no-op for an unknown id.
+   */
+  moveSteerEntry: (id: string, entryId: string, delta: number) => void
   /** Drop all queued steer messages for a session. */
   clearSteerQueue: (id: string) => void
   /** Fold a session's latest messages into its per-tool timing map (Run Panel). */
@@ -805,6 +812,18 @@ export const useChatStore = create<ChatState>((set) => ({
       const queue = sliceForId(s, id).steerQueue
       if (!queue.some((e) => e.id === entryId)) return s
       const next = queue.map((e) => (e.id === entryId ? { ...e, text } : e))
+      return patchSliceState(s, id, { steerQueue: next })
+    }),
+  moveSteerEntry: (id, entryId, delta) =>
+    set((s) => {
+      const queue = sliceForId(s, id).steerQueue
+      const from = queue.findIndex((e) => e.id === entryId)
+      if (from < 0) return s
+      const to = from + delta
+      if (to < 0 || to >= queue.length || to === from) return s
+      const next = [...queue]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
       return patchSliceState(s, id, { steerQueue: next })
     }),
   clearSteerQueue: (id) =>

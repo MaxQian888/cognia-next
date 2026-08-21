@@ -4,8 +4,10 @@ import {
   buildConversationSections,
   type ConversationGroup,
   type ConversationListModel,
+  type ConversationTitleScorer,
 } from "@/lib/chat/conversation-list-model"
 import type { ConversationFilterContext } from "@/lib/chat/conversation-filters"
+import { scoreTitleMatch } from "@/lib/global-search/scoring"
 import type {
   ChatSession,
   ConversationFilters,
@@ -26,6 +28,22 @@ function resolveNow(now: number | undefined): number {
   return now ?? Date.now()
 }
 
+/**
+ * Title ranking shared with ⌘K (ADR-0129): substring rank ⊕ fuzzy subsequence
+ * ⊕ recency. Injected here rather than imported by the pure model, because
+ * `lib/global-search/scoring.ts` already imports the model's `titleMatchRank` —
+ * the hook layer is the one side of that edge that can depend on both.
+ *
+ * The consequence users see: typing "dply" finds "deploy" in the sidebar, and
+ * the same query orders its hits the same way in both surfaces.
+ */
+const scoreConversationTitle: ConversationTitleScorer = (title, needle, timestamp, now) => {
+  // `scoreTitleMatch` takes the needle first, and would otherwise read the wall
+  // clock itself — the model's injected `now` is what keeps this deterministic.
+  const match = scoreTitleMatch(needle, title, { timestamp, now })
+  return match ? match.score : null
+}
+
 export interface UseConversationListModelParams {
   sessions: readonly ChatSession[]
   folders?: readonly SessionFolder[]
@@ -39,12 +57,16 @@ export interface UseConversationListModelParams {
   workspaces?: readonly ConversationGroup[]
   /** Agents in display order, for `groupBy: "agent"`. */
   agents?: readonly ConversationGroup[]
+  /** Teams in display order, for `groupBy: "team"`. */
+  teams?: readonly ConversationGroup[]
   /** Workspace that sorts first and starts expanded. */
   activeWorkspaceId?: string | null
   /** Explicit per-group collapse choices, keyed `workspace:<id>` / `agent:<id>`. */
   groupCollapseOverrides?: Readonly<Record<string, boolean>>
   /** Session ids whose message content matched the query (title OR content). */
   contentMatchIds?: ReadonlySet<string>
+  /** Let a query reach past the archive split (search only, never browsing). */
+  searchIncludesArchived?: boolean
   /** Order inside each section. Defaults to `"recent"` (the model's default). */
   sortBy?: ConversationSortBy
   /** Quick filters AND-ed on top of the archive view. Defaults to unfiltered. */
@@ -55,6 +77,11 @@ export interface UseConversationListModelParams {
   filterContext?: Pick<ConversationFilterContext, "modelOf" | "providerOf">
   /** Override the injected clock (tests only); defaults to `Date.now()`. */
   now?: number
+  /**
+   * Override the title ranker (tests only); defaults to the ⌘K-shared scorer.
+   * Pass `null` to fall back to the model's plain substring rank.
+   */
+  scoreTitle?: ConversationTitleScorer | null
 }
 
 /**
@@ -72,14 +99,17 @@ export function useConversationListModel({
   groupBy = "date",
   workspaces = EMPTY_GROUPS,
   agents = EMPTY_GROUPS,
+  teams = EMPTY_GROUPS,
   activeWorkspaceId = null,
   groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
   contentMatchIds,
+  searchIncludesArchived = false,
   sortBy = "recent",
   filters,
   unreadIds,
   filterContext,
   now,
+  scoreTitle = scoreConversationTitle,
 }: UseConversationListModelParams): ConversationListModel {
   return useMemo(
     () =>
@@ -91,13 +121,16 @@ export function useConversationListModel({
         groupBy,
         workspaces,
         agents,
+        teams,
         activeWorkspaceId,
         groupCollapseOverrides,
         contentMatchIds,
+        searchIncludesArchived,
         sortBy,
         filters,
         unreadIds,
         filterContext,
+        scoreTitle: scoreTitle ?? undefined,
       }),
     [
       sessions,
@@ -108,14 +141,17 @@ export function useConversationListModel({
       groupBy,
       workspaces,
       agents,
+      teams,
       activeWorkspaceId,
       groupCollapseOverrides,
       contentMatchIds,
+      searchIncludesArchived,
       sortBy,
       filters,
       unreadIds,
       filterContext,
       now,
+      scoreTitle,
     ]
   )
 }

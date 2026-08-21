@@ -17,7 +17,12 @@ jest.mock("@/lib/ai/agent/external/agent-hooks", () => ({
 
 import { fireAgentHook } from "@/lib/ai/agent/external/agent-hooks"
 
-const ctx: AgentHookContext = { agentId: "goal-judge", sessionId: "s1", cwd: "/repo" }
+const ctx: AgentHookContext = {
+  agentId: "goal-judge",
+  agentKind: "goal-judge",
+  sessionId: "s1",
+  cwd: "/repo",
+}
 
 afterEach(() => jest.clearAllMocks())
 

@@ -55,4 +55,45 @@ describe("useConversationListModel", () => {
     )
     expect(result.current.orderedIds).toEqual(["a"])
   })
+
+  // The default scorer is the whole point of the injection seam — every test
+  // that passes its own would leave the production path unexercised.
+  describe("default title ranker (shared with ⌘K)", () => {
+    it("finds a fuzzy subsequence the substring rank would reject", () => {
+      const { result } = renderHook(() =>
+        useConversationListModel({ sessions: [session("deploy")], query: "dply", now: NOW })
+      )
+      expect(result.current.orderedIds).toEqual(["deploy"])
+    })
+
+    it("still ranks a prefix hit above a mid-word one", () => {
+      const sessions = [
+        session("reindex", { title: "reindex" }),
+        session("index", { title: "index" }),
+      ]
+      const { result } = renderHook(() =>
+        useConversationListModel({ sessions, query: "index", now: NOW })
+      )
+      expect(result.current.orderedIds).toEqual(["index", "reindex"])
+    })
+
+    it("drops a title that shares no subsequence with the query", () => {
+      const { result } = renderHook(() =>
+        useConversationListModel({ sessions: [session("alpha")], query: "zzzz", now: NOW })
+      )
+      expect(result.current.orderedIds).toEqual([])
+    })
+
+    it("can be turned off with scoreTitle: null", () => {
+      const { result } = renderHook(() =>
+        useConversationListModel({
+          sessions: [session("deploy")],
+          query: "dply",
+          now: NOW,
+          scoreTitle: null,
+        })
+      )
+      expect(result.current.orderedIds).toEqual([])
+    })
+  })
 })

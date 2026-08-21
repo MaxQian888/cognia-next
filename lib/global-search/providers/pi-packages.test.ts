@@ -92,10 +92,11 @@ describe("piPackagesProvider", () => {
 describe("piPackagesProvider suggestions", () => {
   async function suggest(limit = 5) {
     const provider = createPiPackagesProvider({ isDesktop: () => true })
+    // `suggest` takes `Omit<GlobalSearchProviderInput, "query">` — the empty-query
+    // surface has no query by definition.
     return provider.suggest!({
       ctx: ctx(),
       limit,
-      query: query(""),
       signal: new AbortController().signal,
     })
   }

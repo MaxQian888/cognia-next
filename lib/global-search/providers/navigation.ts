@@ -46,11 +46,24 @@ export function navigationCandidates(ctx: GlobalSearchContext): NavCandidate[] {
     id: `page:${item.id}`,
     title: ctx.t(`desktop.guildRail.${item.i18nKey}`),
     route: item.route,
-    keywords: [item.id, item.route, item.group],
+    // `aliasKey` carries a localized, comma-separated alias list — the retired
+    // name of a surface this one absorbed. Without it, a page that swallowed
+    // another simply stops answering to the old name.
+    keywords: [item.id, item.route, item.group, ...aliasesFor(ctx, item.aliasKey)],
     icon: { lucide: item.Icon },
     action: { type: "navigate", href: item.route },
   }))
   return [...guilds, ...pages]
+}
+
+/** Split the localized alias string into search terms. */
+function aliasesFor(ctx: GlobalSearchContext, aliasKey: string | undefined): string[] {
+  if (!aliasKey) return []
+  const raw = ctx.t(`desktop.guildRail.aliases.${aliasKey}`)
+  return raw
+    .split(/[,，]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
 }
 
 function toItem(

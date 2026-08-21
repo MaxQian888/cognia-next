@@ -5,8 +5,11 @@ import {
   countActiveConversationFilters,
   matchesConversationFilters,
   resolveConversationFilters,
+  resolveConversationTimeBasis,
+  sortSupportsDateBuckets,
   sortSupportsManualOrder,
   type ConversationFilterContext,
+  type ConversationTimeBasis,
 } from "@/lib/chat/conversation-filters"
 import type {
   ChatSession,
@@ -42,8 +45,8 @@ export const DATE_BUCKET_ORDER: readonly DateBucket[] = [
 
 /**
  * A named bucket the caller resolved for a non-date grouping axis (a workspace,
- * an agent). Kept deliberately thin so the model never has to import the project
- * or character stores and stays pure.
+ * an agent, a team). Kept deliberately thin so the model never has to import the
+ * project, character or team stores and stays pure.
  */
 export interface ConversationGroup {
   id: string
@@ -58,6 +61,18 @@ export interface ConversationGroup {
  */
 export const UNGROUPED_ID = "__ungrouped__"
 
+/**
+ * Grouping axes that resolve their buckets from a caller-supplied entity list.
+ *
+ * `team` joined `workspace` and `agent` when team mode stopped being a *filter*
+ * wearing a grouping's name: it used to emit plain date buckets and rely on the
+ * desktop guild rail having already narrowed the list, which left the mobile
+ * list — no rail — showing "grouped by team" over a list that was not grouped
+ * at all. The rail is now a way to *jump* to a team's section; narrowing to one
+ * team is the `teamIds` facet's job.
+ */
+export type ConversationGroupAxis = "workspace" | "agent" | "team"
+
 export type ConversationSection =
   | { kind: "pinned"; sessions: ChatSession[] }
   | { kind: "folder"; folder: SessionFolder; sessions: ChatSession[]; collapsed: boolean }
@@ -65,10 +80,10 @@ export type ConversationSection =
   // Flat "recent" list emitted instead of buckets when grouping is off.
   | { kind: "recent"; sessions: ChatSession[] }
   | { kind: "search"; sessions: ChatSession[] }
-  // One per workspace / agent, under `groupBy: "workspace" | "agent"`.
+  // One per workspace / agent / team, under `groupBy: "workspace" | "agent" | "team"`.
   | {
       kind: "group"
-      axis: "workspace" | "agent"
+      axis: ConversationGroupAxis
       group: ConversationGroup
       sessions: ChatSession[]
       collapsed: boolean
@@ -89,8 +104,8 @@ export interface BuildSectionsOptions {
    * app's own default is `"workspace"` and lives in
    * `lib/chat/conversation-grouping.ts` (a *preference* default, not a model one).
    *
-   * `"team"` produces the same sections as `"date"` — the guild rail does the
-   * filtering for that mode, which is a caller concern.
+   * `"team"` is a real axis now ({@link ConversationGroupAxis}) and needs
+   * `teams` supplied, the same way `"workspace"` needs `workspaces`.
    */
   groupBy?: ConversationGroupBy
   /**
@@ -102,6 +117,12 @@ export interface BuildSectionsOptions {
   /** Agents/characters in display order, for `groupBy: "agent"`. */
   agents?: readonly ConversationGroup[]
   /**
+   * Teams in display order, for `groupBy: "team"`. Direct conversations carry no
+   * `teamId` and land in the ungrouped bucket, which the renderer labels
+   * "Direct messages" on this axis — the model never invents the copy.
+   */
+  teams?: readonly ConversationGroup[]
+  /**
    * The workspace whose section sorts first and starts expanded. Every other
    * workspace's section starts collapsed — the list would otherwise open as one
    * undifferentiated wall of every conversation the profile has ever held.
@@ -109,7 +130,7 @@ export interface BuildSectionsOptions {
   activeWorkspaceId?: string | null
   /**
    * Explicit per-group collapse choices, keyed like `conversationSectionKey`
-   * (`workspace:<id>` / `agent:<id>`). A map rather than the set folders use
+   * (`workspace:<id>` / `agent:<id>` / `team:<id>`). A map rather than the set folders use
    * because a group's default is not uniform: every workspace except the active
    * one starts collapsed, so "the user expanded this one" has to be
    * representable too.
@@ -121,6 +142,14 @@ export interface BuildSectionsOptions {
    * title matches OR its id is in this set. Undefined = title-only search.
    */
   contentMatchIds?: ReadonlySet<string>
+  /**
+   * Let a query reach past the archive split, in whichever direction `view` is
+   * pointing. Applies **only while `query` is non-empty**: browsing archived
+   * conversations stays the view toggle's job, so the two controls never
+   * describe the same thing. Rows that came from the other side still carry
+   * `archivedAt`, which is how the row marks them.
+   */
+  searchIncludesArchived?: boolean
   /**
    * Order applied inside every section. Defaults to `"recent"` — the historical
    * behavior, and the only mode that honors a drag-reordered `manualOrder`.
@@ -144,7 +173,32 @@ export interface BuildSectionsOptions {
    * option above, not from here.
    */
   filterContext?: Pick<ConversationFilterContext, "modelOf" | "providerOf">
+  /**
+   * How well a title matches the query, higher = better, `null` = no match.
+   *
+   * Injected rather than imported because the shared ranker lives in
+   * `lib/global-search/scoring.ts`, which already imports *this* module for
+   * {@link titleMatchRank} — importing it back would close a cycle. The hook
+   * wrapper supplies it (`hooks/chat/use-conversation-list-model.ts`), so the
+   * sidebar and ⌘K rank the same query the same way; omitting it falls back to
+   * the plain substring rank, which is what the pure model's own tests use.
+   */
+  scoreTitle?: ConversationTitleScorer
 }
+
+/**
+ * Title relevance for one search hit: higher is better, `null` means the title
+ * does not match at all. `timestamp` lets a ranker fold in recency.
+ */
+export type ConversationTitleScorer = (
+  title: string,
+  /** Already trimmed and lower-cased by the model. */
+  needle: string,
+  /** The row's timestamp, for rankers that fold in recency. */
+  timestamp: number | undefined,
+  /** The model's injected clock, so a recency term stays deterministic. */
+  now: number
+) => number | null
 
 export interface ConversationListModel {
   sections: ConversationSection[]
@@ -155,8 +209,22 @@ export interface ConversationListModel {
    * matched nothing".
    */
   total: number
-  /** Sessions actually shown (after quick filters *and* search). */
+  /**
+   * Sessions that survived the quick filters *and* search — whether or not the
+   * section holding them is folded open.
+   *
+   * This, not {@link visibleCount}, is what decides between "your filters
+   * matched nothing" and "there is something here": collapsing every group
+   * would otherwise read as an empty result and offer to clear filters that
+   * were never the problem.
+   */
   filteredCount: number
+  /**
+   * Sessions actually on screen — {@link orderedIds} length, so rows inside a
+   * collapsed folder or group are excluded. This is the number the "showing
+   * N of M" chip reports; `filteredCount` counts rows the user cannot see.
+   */
+  visibleCount: number
   /** Flattened, render-ordered session ids — drives range selection. */
   orderedIds: string[]
   /** How many quick filters are narrowing the list (0 = unfiltered). */
@@ -243,7 +311,7 @@ export function conversationSectionKey(
   section: Pick<ConversationSection, "kind"> & {
     folder?: SessionFolder
     bucket?: DateBucket
-    axis?: "workspace" | "agent"
+    axis?: ConversationGroupAxis
     group?: ConversationGroup
   }
 ): string {
@@ -264,33 +332,95 @@ export function conversationSectionKey(
 }
 
 /**
- * Comparator factory for one section: `manualOrder` (ascending) first —
- * honored only for rows whose `manualOrderSection` matches this section —
- * falling back to the active sort for un-dragged rows and for orders that were
- * set in a different section (legacy rows without a section key keep working
- * inside whichever section they sit in today).
+ * Whether `session` carries a manual rank that applies inside `sectionKey`.
  *
- * A manual order is honored **only under the default recency sort**. Every
- * other mode derives its order from session data, so letting a hand-placed row
- * jump the queue there would silently contradict the axis the user just chose.
+ * A rank tagged with another section is ignored — otherwise an order set in one
+ * date bucket would pin the session to the top of every bucket it later
+ * migrates into. Legacy rows written before the tag existed (`manualOrderSection
+ * == null`) keep working inside whichever section they sit in today.
  */
-function bySectionOrder(
+function manualRankIn(session: ChatSession, sectionKey: string): number | null {
+  if (session.manualOrder == null) return null
+  if (session.manualOrderSection != null && session.manualOrderSection !== sectionKey) return null
+  return session.manualOrder
+}
+
+/**
+ * Order one section's rows: the hand-dragged arrangement first, with everything
+ * that arrived after it slotted in by the active sort.
+ *
+ * A manual order covers exactly the rows that were on screen when the user made
+ * it — `setSessionOrder` renumbers the whole section — so a row *without* a rank
+ * for this section arrived later: a conversation that was just created, just
+ * pinned, just filed into this folder, just un-archived, or one a quick filter
+ * was hiding while the drag happened.
+ *
+ * Such a row is inserted where the active sort puts it **relative to the ranked
+ * rows** (a conversation newer than every ranked row lands first), rather than
+ * appended after them. Appending is what made a brand-new chat show up at the
+ * *bottom* of a bucket that had ever been dragged, and a freshly pinned one at
+ * the bottom of the Pinned block — the opposite of what recency promises.
+ *
+ * Only recency honors a manual order at all ({@link sortSupportsManualOrder});
+ * every other mode derives its order from session data, so a hand-placed row
+ * would silently contradict the axis the user just chose.
+ *
+ * Sorts `sessions` in place and returns it — every caller passes an array it
+ * just built.
+ */
+function orderSectionSessions(
+  sessions: ChatSession[],
   sectionKey: string,
   sortBy: ConversationSortBy,
   unreadIds: ReadonlySet<string> | undefined
-): (a: ChatSession, b: ChatSession) => number {
+): ChatSession[] {
   const base = comparatorFor(sortBy, unreadIds)
-  if (!sortSupportsManualOrder(sortBy)) return base
-  const orderOf = (s: ChatSession): number =>
-    s.manualOrder != null && (s.manualOrderSection == null || s.manualOrderSection === sectionKey)
-      ? s.manualOrder
-      : Number.POSITIVE_INFINITY
-  return (a, b) => {
-    const ao = orderOf(a)
-    const bo = orderOf(b)
-    if (ao !== bo) return ao - bo
-    return base(a, b)
+  if (!sortSupportsManualOrder(sortBy)) return sessions.sort(base)
+
+  const ranked: ChatSession[] = []
+  const loose: ChatSession[] = []
+  for (const session of sessions) {
+    if (manualRankIn(session, sectionKey) != null) ranked.push(session)
+    else loose.push(session)
   }
+  // Nothing to interleave — one comparator decides the whole section.
+  if (ranked.length === 0) return sessions.sort(base)
+  const byRank = (a: ChatSession, b: ChatSession) =>
+    manualRankIn(a, sectionKey)! - manualRankIn(b, sectionKey)! || base(a, b)
+  if (loose.length === 0) return sessions.sort(byRank)
+
+  ranked.sort(byRank)
+  loose.sort(base)
+  // Each un-ranked row goes just before the first arranged row it outranks
+  // under the active sort — so a conversation newer than every arranged row
+  // opens the section, and one older than all of them closes it. `loose` is
+  // sorted, and the slot it resolves to only ever moves forward as the rows get
+  // older, so one shared pointer walks the arranged block exactly once.
+  const slotOf = new Map<string, number>()
+  let slot = 0
+  for (const session of loose) {
+    while (slot < ranked.length && base(ranked[slot]!, session) < 0) slot += 1
+    slotOf.set(session.id, slot)
+  }
+  const merged: ChatSession[] = []
+  let next = 0
+  for (let i = 0; i <= ranked.length; i++) {
+    while (next < loose.length && slotOf.get(loose[next]!.id) === i) merged.push(loose[next++]!)
+    if (i < ranked.length) merged.push(ranked[i]!)
+  }
+  return merged
+}
+
+/**
+ * The timestamp the list reads this session's "when" from, under `basis`.
+ *
+ * Creation time falls back to activity when a legacy row carries no
+ * `createdAt`: a bucket header is better slightly wrong than absent, and the
+ * row would otherwise land in "older" forever.
+ */
+export function conversationTimeOf(session: ChatSession, basis: ConversationTimeBasis): number {
+  if (basis === "created") return session.createdAt ?? activityAt(session)
+  return activityAt(session)
 }
 
 /** Map a session activity timestamp to its relative date bucket (local calendar). */
@@ -320,8 +450,22 @@ export function titleMatchRank(title: string, needle: string): number | null {
   return /[\s\p{P}\p{S}]/u.test(lower[index - 1]!) ? 1 : 2
 }
 
-/** Rank assigned to a hit that matched message content but never its title. */
-const CONTENT_ONLY_RANK = 3
+/**
+ * Result tiers. Every title hit outranks every content-only hit, whatever the
+ * scores inside each tier — a fuzzy title hit scoring 0.2 must still beat a
+ * strong message match, because the user typed a name, not a sentence.
+ */
+const TIER_TITLE = 0
+const TIER_CONTENT_ONLY = 1
+
+/**
+ * Fallback ranker used when no {@link ConversationTitleScorer} is injected:
+ * the plain substring rank, inverted so higher stays better.
+ */
+function substringScore(title: string, needle: string): number | null {
+  const rank = titleMatchRank(title, needle)
+  return rank === null ? null : 2 - rank
+}
 
 const EMPTY_GROUPS: readonly ConversationGroup[] = []
 const EMPTY_COLLAPSE_OVERRIDES: Readonly<Record<string, boolean>> = {}
@@ -356,6 +500,22 @@ export function dedupeSessionsById<T extends Pick<ChatSession, "id" | "updatedAt
     }
   }
   return duplicates ? Array.from(byId.values()) : sessions
+}
+
+/**
+ * Whether `folder` may hold `session`.
+ *
+ * A folder is workspace-scoped (`listFolders` reads one workspace's rows), so
+ * the list only ever carries the active workspace's folders while the session
+ * list may span every workspace (`groupBy: "workspace"`). Without this check a
+ * conversation filed — by drag or menu — into another workspace's folder would
+ * render under that folder here and vanish from it the moment the user switched
+ * workspaces. Both sides are optional (folders and sessions both predate
+ * workspace isolation), so the check only rejects when the two are known and
+ * disagree.
+ */
+function folderAcceptsSession(folder: SessionFolder, session: ChatSession): boolean {
+  return !folder.projectId || !session.projectId || folder.projectId === session.projectId
 }
 
 /**
@@ -414,18 +574,27 @@ function groupSessions(
  * Rules (precedence **pinned > folder > primary grouping**; each session in
  * exactly one section):
  * - `view` filters by archive state first, then `filters` narrows what's left.
- * - A non-empty `query` collapses everything to a single flat `search` section
- *   (title substring, case-insensitive, ranked prefix → word-start → anywhere →
- *   content-only) — no buckets/folders.
+ * - A non-empty `query` collapses everything to a single flat `search` section,
+ *   title hits ranked ahead of content-only hits and ordered inside each tier by
+ *   `scoreTitle` (the shared ⌘K ranker when injected, plain substring rank
+ *   otherwise) — no buckets/folders.
  * - Otherwise: pinned float to the top (incl. pinned-and-foldered); remaining
  *   foldered sessions group under their folder (folders always shown, even
  *   empty, in `order` then name); the rest go through `groupBy`.
  * - Empty date/group/pinned sections are omitted; folder sections are always
  *   emitted so the UI can render headers + empty states.
  *
+ * Date buckets follow the sort axis, never a second one of their own: `created`
+ * buckets by creation time (and the renderer says so in the header), `oldest`
+ * reverses the header order along with the rows, and `title` / `unread` — which
+ * have no date axis at all — fall back to one flat `recent` section.
+ *
  * `groupBy: "workspace"` additionally sorts the active workspace first and
  * starts every other workspace collapsed. Inside every section rows follow
- * `sortBy` (recency by default, the only mode honoring a manual drag order).
+ * `sortBy` (recency by default, the only mode honoring a manual drag order);
+ * a row with no rank for the section it renders in — one that arrived after the
+ * drag — is slotted in by that sort rather than appended (see
+ * {@link orderSectionSessions}).
  */
 export function buildConversationSections(
   sessions: readonly ChatSession[],
@@ -440,65 +609,83 @@ export function buildConversationSections(
     groupBy = "date",
     workspaces = EMPTY_GROUPS,
     agents = EMPTY_GROUPS,
+    teams = EMPTY_GROUPS,
     activeWorkspaceId = null,
     groupCollapseOverrides = EMPTY_COLLAPSE_OVERRIDES,
     contentMatchIds,
+    searchIncludesArchived = false,
     sortBy = "recent",
     filters,
     unreadIds,
     filterContext,
+    scoreTitle,
   } = opts
   const needle = query.trim().toLowerCase()
+  // Which timestamp everything downstream reads: the buckets, their headers,
+  // and the activity filter all follow the sort axis so they cannot disagree.
+  const timeBasis = resolveConversationTimeBasis(sortBy)
   const resolvedFilters = filters ? resolveConversationFilters(filters) : EMPTY_CONVERSATION_FILTERS
   const activeFilterCount = countActiveConversationFilters(resolvedFilters)
 
-  const viewed = dedupeSessionsById(sessions).filter(
-    (s) =>
-      // `subagent` sessions (ADR-0062) are hidden imported-subagent inner
-      // transcripts — never listed, bucketed, or matched by search on any
-      // surface (desktop + mobile both flow through here).
-      s.kind !== "subagent" && (view === "archived" ? s.archivedAt != null : s.archivedAt == null)
+  // `subagent` sessions (ADR-0062) are hidden imported-subagent inner
+  // transcripts — never listed, bucketed, or matched by search on any surface
+  // (desktop + mobile both flow through here).
+  const listable = dedupeSessionsById(sessions).filter((s) => s.kind !== "subagent")
+  const viewed = listable.filter((s) =>
+    view === "archived" ? s.archivedAt != null : s.archivedAt == null
   )
   // `total` counts the *view*, deliberately before quick filters: it is what
   // separates "you have no archived conversations" from "your filters matched
-  // nothing", and those need different empty states.
+  // nothing", and those need different empty states. It stays the view's own
+  // count even when a query reaches past the archive split — a hit from the
+  // other side is not evidence that this view has something in it.
   const total = viewed.length
+
+  // A query may reach past the archive split; browsing never does. Keeping the
+  // two apart is what stops the archived *view* and the search *reach* from
+  // being two controls for one thing: one decides what you are looking at, the
+  // other decides what a query is allowed to find.
+  const pool = needle && searchIncludesArchived ? listable : viewed
 
   // Quick filters narrow everything downstream — search, buckets, and the
   // section counts alike — so a count on screen always describes what is on
   // screen.
   const candidates = activeFilterCount
-    ? viewed.filter((s) =>
+    ? pool.filter((s) =>
         matchesConversationFilters(s, resolvedFilters, unreadIds, {
           now,
+          timeBasis,
           modelOf: filterContext?.modelOf,
           providerOf: filterContext?.providerOf,
         })
       )
-    : viewed
+    : pool
 
   // Search mode: flat result list, no grouping. A session matches when its
   // title matches OR (content search) its id is in `contentMatchIds`, ranked
   // by how directly the title matched so the obvious hit is never buried.
   if (needle) {
     const contentOnly = new Set<string>()
-    const ranked: Array<{ session: ChatSession; rank: number }> = []
+    const ranked: Array<{ session: ChatSession; tier: number; score: number }> = []
     for (const session of candidates) {
-      const titleRank = titleMatchRank(session.title ?? "", needle)
-      if (titleRank !== null) {
-        ranked.push({ session, rank: titleRank })
+      const score = scoreTitle
+        ? scoreTitle(session.title ?? "", needle, activityAt(session), now)
+        : substringScore(session.title ?? "", needle)
+      if (score !== null) {
+        ranked.push({ session, tier: TIER_TITLE, score })
       } else if (contentMatchIds?.has(session.id)) {
         contentOnly.add(session.id)
-        ranked.push({ session, rank: CONTENT_ONLY_RANK })
+        ranked.push({ session, tier: TIER_CONTENT_ONLY, score: 0 })
       }
     }
     const tiebreak = comparatorFor(sortBy, unreadIds)
-    ranked.sort((a, b) => a.rank - b.rank || tiebreak(a.session, b.session))
+    ranked.sort((a, b) => a.tier - b.tier || b.score - a.score || tiebreak(a.session, b.session))
     const matched = ranked.map((entry) => entry.session)
     return {
       sections: matched.length ? [{ kind: "search", sessions: matched }] : [],
       total,
       filteredCount: matched.length,
+      visibleCount: matched.length,
       orderedIds: matched.map((s) => s.id),
       activeFilterCount,
       contentOnlyIds: contentOnly,
@@ -506,25 +693,31 @@ export function buildConversationSections(
   }
 
   const sections: ConversationSection[] = []
-  const sectionOrder = (key: string) => bySectionOrder(key, sortBy, unreadIds)
+  const orderIn = (list: ChatSession[], key: string) =>
+    orderSectionSessions(list, key, sortBy, unreadIds)
 
   // 1. Pinned float to the top (regardless of folder).
-  const pinned = candidates.filter((s) => s.pinned).sort(sectionOrder("pinned"))
+  const pinned = orderIn(
+    candidates.filter((s) => s.pinned),
+    "pinned"
+  )
   if (pinned.length) sections.push({ kind: "pinned", sessions: pinned })
 
   const rest = candidates.filter((s) => !s.pinned)
 
   // 2. Folders (always shown, ordered) for non-pinned foldered sessions.
-  const folderIds = new Set(folders.map((f) => f.id))
+  const folderById = new Map(folders.map((f) => [f.id, f]))
   const byFolder = new Map<string, ChatSession[]>()
   const loose: ChatSession[] = []
   for (const s of rest) {
-    if (s.folderId && folderIds.has(s.folderId)) {
-      const bucket = byFolder.get(s.folderId)
+    const folder = s.folderId ? folderById.get(s.folderId) : undefined
+    if (folder && folderAcceptsSession(folder, s)) {
+      const bucket = byFolder.get(folder.id)
       if (bucket) bucket.push(s)
-      else byFolder.set(s.folderId, [s])
+      else byFolder.set(folder.id, [s])
     } else {
-      // Loose, or pointing at a deleted folder → falls back to date buckets.
+      // Loose, pointing at a deleted folder, or filed into a folder that
+      // belongs to another workspace → falls back to the primary grouping.
       loose.push(s)
     }
   }
@@ -535,21 +728,27 @@ export function buildConversationSections(
     sections.push({
       kind: "folder",
       folder,
-      sessions: (byFolder.get(folder.id) ?? []).sort(sectionOrder(`folder:${folder.id}`)),
+      sessions: orderIn(byFolder.get(folder.id) ?? [], `folder:${folder.id}`),
       collapsed: collapsedFolderIds.has(folder.id),
     })
   }
 
   // 3. Remaining loose sessions, along the chosen primary axis.
-  if (groupBy === "none") {
-    if (loose.length)
-      sections.push({ kind: "recent", sessions: loose.sort(sectionOrder("recent")) })
-  } else if (groupBy === "workspace" || groupBy === "agent") {
-    const axis = groupBy
+  // `title` and `unread` have no date axis, so date buckets would put headers on
+  // a list they do not explain — those modes render one flat section instead.
+  const dateAxisApplies = sortSupportsDateBuckets(sortBy)
+  if (groupBy === "none" || (groupBy === "date" && !dateAxisApplies)) {
+    if (loose.length) sections.push({ kind: "recent", sessions: orderIn(loose, "recent") })
+  } else if (groupBy === "workspace" || groupBy === "agent" || groupBy === "team") {
+    const axis: ConversationGroupAxis = groupBy
     const order =
-      axis === "workspace" ? orderWorkspaces(workspaces, activeWorkspaceId) : [...agents]
+      axis === "workspace"
+        ? orderWorkspaces(workspaces, activeWorkspaceId)
+        : axis === "agent"
+          ? [...agents]
+          : [...teams]
     const grouped = groupSessions(loose, order, (s) =>
-      axis === "workspace" ? s.projectId : s.characterId
+      axis === "workspace" ? s.projectId : axis === "agent" ? s.characterId : s.teamId
     )
     for (const { group, sessions: members } of grouped) {
       const key = `${axis}:${group.id}`
@@ -570,27 +769,29 @@ export function buildConversationSections(
         kind: "group",
         axis,
         group,
-        sessions: members.sort(sectionOrder(key)),
+        sessions: orderIn(members, key),
         collapsed: groupCollapseOverrides[key] ?? collapsedByDefault,
       })
     }
   } else {
-    // `date` and `team` share the bucket layout — `team` differs only in which
-    // sessions the caller hands us (the guild rail filters them).
     const buckets = new Map<DateBucket, ChatSession[]>()
     for (const s of loose) {
-      const bucket = dateBucketFor(now, activityAt(s))
+      const bucket = dateBucketFor(now, conversationTimeOf(s, timeBasis))
       const list = buckets.get(bucket)
       if (list) list.push(s)
       else buckets.set(bucket, [s])
     }
-    for (const bucket of DATE_BUCKET_ORDER) {
+    // Oldest-first orders the rows *and* the headers: leaving "Today" on top
+    // while the rows under it ran oldest-first was the same disagreement the
+    // basis fixes one level down.
+    const bucketOrder = sortBy === "oldest" ? [...DATE_BUCKET_ORDER].reverse() : DATE_BUCKET_ORDER
+    for (const bucket of bucketOrder) {
       const list = buckets.get(bucket)
       if (list?.length)
         sections.push({
           kind: "date",
           bucket,
-          sessions: list.sort(sectionOrder(`date:${bucket}`)),
+          sessions: orderIn(list, `date:${bucket}`),
         })
     }
   }
@@ -608,6 +809,7 @@ export function buildConversationSections(
     sections,
     total,
     filteredCount: candidates.length,
+    visibleCount: orderedIds.length,
     orderedIds,
     activeFilterCount,
     contentOnlyIds: EMPTY_ID_SET,

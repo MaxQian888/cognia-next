@@ -1430,7 +1430,11 @@ export async function handleEvent(
                     signal: ac.signal,
                     capturedGenerationId,
                     firer: defaultLifecycleFirer,
-                    hookContext: { agentId: "goal-judge", sessionId: goal.id },
+                    hookContext: {
+                      agentId: "goal-judge",
+                      agentKind: "goal-judge",
+                      sessionId: goal.id,
+                    },
                   })
                 } finally {
                   unregister()
@@ -1499,11 +1503,22 @@ export async function handleEvent(
                   const unregister = getPlanRuntime().registerAbortController(activePlan.id, ac)
                   let outcome: Awaited<ReturnType<typeof handlePlanTurnComplete>>
                   try {
+                    const { defaultLifecycleFirer } =
+                      await import("@/lib/claude/hooks/lifecycle-firer")
                     outcome = await handlePlanTurnComplete({
                       planId: activePlan.id,
                       lastResponse: extractAssistantText(lastAssistant),
                       capturedGenerationId: activePlan.generationId,
                       signal: ac.signal,
+                      // Bracket each plan step with settings.json lifecycle
+                      // hooks, the same way the goal driver above does.
+                      firer: defaultLifecycleFirer,
+                      hookContext: {
+                        agentId: "plan-step",
+                        agentKind: "plan-step",
+                        agentRef: activePlan.id,
+                        sessionId,
+                      },
                     })
                   } finally {
                     unregister()

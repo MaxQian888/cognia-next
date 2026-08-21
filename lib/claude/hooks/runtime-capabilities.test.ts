@@ -11,7 +11,17 @@ describe("hook runtime capabilities", () => {
 
     expect(capabilities.contractVersion).toBe(HOOK_CAPABILITY_CONTRACT_VERSION)
     expect(capabilities.events).toHaveLength(31)
-    expect(capabilities.handlerTypes).toEqual(["command", "http", "mcp_tool", "prompt", "agent"])
+    // `plugin` runs an installed plugin's own hook handler through the
+    // renderer round-trip. Sidecar-only, which is why the codex/opencode
+    // manifests below do not carry it.
+    expect(capabilities.handlerTypes).toEqual([
+      "command",
+      "http",
+      "mcp_tool",
+      "prompt",
+      "agent",
+      "plugin",
+    ])
     expect(capabilities.executionOwner).toBe("sdk")
   })
 

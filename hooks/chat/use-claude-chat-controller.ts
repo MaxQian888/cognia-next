@@ -1023,7 +1023,13 @@ export function useClaudeChat() {
           sessionId,
           toDiagnostic(new Error("cost_budget_exceeded"), {
             source: "chat",
-            meta: { sessionId, blockedBy: budgetDecision.blockedBy.map((v) => v.scopeKey) },
+            // `extra` is `DiagnosticMeta`'s documented escape hatch for
+            // subsystem-specific ids, and it takes scalars — hence the join
+            // rather than the raw array.
+            meta: {
+              sessionId,
+              extra: { blockedBy: budgetDecision.blockedBy.map((v) => v.scopeKey).join(",") },
+            },
           })
         )
         chatTurnPerformance.finish(sessionId, "failed")
@@ -1115,10 +1121,7 @@ export function useClaudeChat() {
         stopAssemblyHeartbeat()
         return
       }
-      const legacyWorkspaceEnabled =
-        !executionContext &&
-        useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
-        Boolean(sendOptions.cwd)
+      const legacyWorkspaceEnabled = !executionContext && Boolean(sendOptions.cwd)
       if (
         !hasNoToolSurface &&
         (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)

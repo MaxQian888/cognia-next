@@ -61,7 +61,9 @@ const meta = {
   component: ChatHeader,
   parameters: { layout: "padded" },
   decorators: [withCharacter],
-  args: { session: session(), onOpenSettings: fn() },
+  // No `onOpenSettings`: the header's settings entry moved into the sheet that
+  // already owned it, so `Props` no longer carries the callback.
+  args: { session: session() },
   beforeEach: () => resetStore(useChatStore),
 } satisfies Meta<typeof ChatHeader>
 

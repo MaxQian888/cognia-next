@@ -44,6 +44,10 @@ const CLAUDE_HANDLER_TYPES: readonly HookHandlerType[] = [
   "mcp_tool",
   "prompt",
   "agent",
+  // Runs an installed plugin's in-process hook handler. Sidecar-only: it needs
+  // the renderer round-trip (`sidecar/dispatch/plugin-hook-exec.mjs`), which is
+  // why the codex/opencode manifests below do not list it.
+  "plugin",
 ]
 
 const MANIFESTS: Record<HookProvider, Omit<HookRuntimeCapabilities, "runtimeVersion">> = {

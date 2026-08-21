@@ -3,6 +3,7 @@ import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { getSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useUIStore } from "@/stores/ui"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 
 jest.mock("@/lib/plugin/messaging/message-bus", () => ({
@@ -39,6 +40,15 @@ describe("startNewSession", () => {
     expect(emitMock).toHaveBeenCalledWith(SystemEvents.SESSION_CREATED, {
       sessionId: session.id,
     })
+  })
+
+  it("asks the conversation list to reveal the new row", async () => {
+    // The list's narrowing state is persisted (archived view, a search, a quick
+    // filter), so a new conversation can be created, selected and invisible.
+    useUIStore.setState({ pendingConversationReveal: null })
+    const session = await startNewSession()
+
+    expect(useUIStore.getState().pendingConversationReveal).toBe(session.id)
   })
 
   it("seeds the session from the caller's input", async () => {

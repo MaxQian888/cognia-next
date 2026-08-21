@@ -25,6 +25,7 @@ import { PlanModeTasksSheet } from "@/components/agent/workspace/plan-mode-tasks
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
+import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { inboxConversationHref } from "@/lib/inbox/conversation-href"
@@ -130,6 +131,11 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         {/* The reverse direction: self-hides unless this session HAS branches.
             Both can show at once on a branch that was itself branched. */}
         <BranchChildrenChip sessionId={session.id} />
+        {/* Self-hides unless this conversation came from an external agent's
+            on-disk history (ADR-0062). Also carries the "the source moved on"
+            warning for a frozen import — the badge `lib/data/import-merge.ts`
+            promised while nothing in the app read `importFrozen` at all. */}
+        <ImportedOriginChip session={session} />
       </div>
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the

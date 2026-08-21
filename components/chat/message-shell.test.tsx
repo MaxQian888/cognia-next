@@ -55,7 +55,12 @@ describe("MessageShell", () => {
   it("applies layout, motion, user identity, and error status semantics", () => {
     const failedMessage: UIMessage = {
       ...message,
-      metadata: { ...message.metadata, run: { finishReason: "error" } },
+      // `UIMessage["metadata"]` is `unknown` on the AI SDK type, so the spread
+      // needs an object view of it.
+      metadata: {
+        ...(message.metadata as Record<string, unknown>),
+        run: { finishReason: "error" },
+      },
     }
     const { rerender } = render(
       <MessageShell

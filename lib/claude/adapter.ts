@@ -38,6 +38,7 @@ import {
   mergeSources,
   type TwinRetrievedChunk,
 } from "./citations"
+import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
 
 /**
  * Map a `tool_use` block's name + input to an ArtifactPart when the call
@@ -614,6 +615,65 @@ interface SystemEventFields {
   block?: string
   additional_context?: string
   warnings?: string[]
+  // `hook_audit` fields (`sidecar/dispatch/agent-hooks.mjs:buildHookAuditPayload`).
+  hookId?: string
+  hookEvent?: string
+  provider?: string
+  handlerType?: string
+  policyClass?: string
+  latencyMs?: number
+  redacted?: boolean
+  blockReason?: string
+  error?: string
+}
+
+/**
+ * Land one `hook_audit` envelope as an agent-trace span.
+ *
+ * The sidecar has emitted these for every matched handler for a long time and
+ * this adapter dropped them on the floor — so "why didn't my hook fire?" had no
+ * answer anywhere in the product. That question gets much more common now that
+ * a group can also be narrowed by `agents`, because there are two ways to miss.
+ *
+ * Rides the existing trace surface (`/logs` → Traces) rather than a new panel,
+ * and reuses the same `plugin-hook` span surface the plugin-hook dispatcher
+ * already emits on. Best-effort: a telemetry failure must never affect a turn.
+ */
+function emitHookAuditSpan(evt: SystemEventFields, sessionId: string): void {
+  try {
+    const startTime = Date.now() - Math.max(0, evt.latencyMs ?? 0)
+    emitFinishedSpan({
+      operationName: "execute_tool",
+      providerName: "cognia.hook",
+      sessionId: sessionId || "hook-runtime",
+      surface: "plugin-hook",
+      toolName: evt.hookEvent ?? evt.hook_event ?? "hook",
+      startTime,
+      durationMs: Math.max(0, evt.latencyMs ?? 0),
+      status: evt.blockReason ? "error" : evt.error ? "error" : "ok",
+      ...(evt.error || evt.blockReason
+        ? {
+            errorType: evt.blockReason ? "hook_blocked" : "hook_error",
+            errorMessage: evt.blockReason ?? evt.error,
+          }
+        : {}),
+      events: [
+        {
+          name: "hook.audit",
+          at: startTime,
+          attributes: {
+            ...(evt.hookId ? { hookId: evt.hookId } : {}),
+            ...(evt.handlerType ? { handlerType: evt.handlerType } : {}),
+            ...(evt.policyClass ? { policyClass: evt.policyClass } : {}),
+            ...(evt.provider ? { provider: evt.provider } : {}),
+            ...(evt.redacted !== undefined ? { redacted: evt.redacted } : {}),
+          },
+        },
+      ],
+    })
+  } catch {
+    // Telemetry is never allowed to break the turn it describes.
+  }
 }
 
 function applySystemEvent(
@@ -638,6 +698,7 @@ function applySystemEvent(
       }
 
     case "hook_audit":
+      emitHookAuditSpan(evt, (raw as { session_id?: string }).session_id ?? "")
       return { messages, turnComplete: false }
 
     case "compact_boundary":

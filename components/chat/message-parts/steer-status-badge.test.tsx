@@ -90,6 +90,28 @@ describe("SteerStatusBadge", () => {
     expect(screen.getByTestId("steer-status-badge")).toHaveAttribute("data-state", "failed")
   })
 
+  it("shows the send position only once a second follow-up is queued", () => {
+    seed({ status: "streaming", steerQueue: [{ id: "e1", text: "one" }] })
+    const single = render(
+      <SteerStatusBadge message={steerMessage("e1", "queued")} sessionId={SID} />
+    )
+    expect(screen.queryByTestId("steer-queue-position")).not.toBeInTheDocument()
+    single.unmount()
+
+    // Two entries drain as one framed turn, so which one goes first is now a
+    // real choice the run panel lets the user make — the bubble has to say
+    // where this one currently sits, since the transcript keeps arrival order.
+    seed({
+      status: "streaming",
+      steerQueue: [
+        { id: "e2", text: "two" },
+        { id: "e1", text: "one" },
+      ],
+    })
+    render(<SteerStatusBadge message={steerMessage("e1", "queued")} sessionId={SID} />)
+    expect(screen.getByTestId("steer-queue-position")).toBeInTheDocument()
+  })
+
   it("removes both the queue entry and the bubble on discard", () => {
     const msg = steerMessage("e1", "queued")
     seed({

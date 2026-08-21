@@ -1,3 +1,4 @@
+import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
 import type { UIMessage } from "ai"
 
 import {
@@ -527,6 +528,85 @@ describe("applySdkEvent — hook fire", () => {
 
     expect(result.messages).toBe(existing)
     expect(result.turnComplete).toBe(false)
+  })
+
+  it("lands a hook audit as a trace span instead of dropping it", () => {
+    // The sidecar has emitted these for every matched handler all along and the
+    // adapter discarded them, so "why didn't my hook fire?" had no answer
+    // anywhere in the product.
+    const written: unknown[] = []
+    setAgentTraceWriter((span) => {
+      written.push(span)
+    })
+    try {
+      applySdkEvent([], {
+        type: "system",
+        subtype: "hook_audit",
+        session_id: "session-1",
+        hookId: "session-1:PreToolUse:1:0",
+        hookEvent: "PreToolUse",
+        handlerType: "command",
+        policyClass: "managed",
+        provider: "claude",
+        outcome: "block",
+        latencyMs: 42,
+        blockReason: "budget exhausted",
+      } as unknown as SDKResultMessage)
+    } finally {
+      setAgentTraceWriter(null)
+    }
+
+    expect(written).toHaveLength(1)
+    expect(written[0]).toMatchObject({
+      sessionId: "session-1",
+      surface: "plugin-hook",
+      providerName: "cognia.hook",
+      toolName: "PreToolUse",
+      durationMs: 42,
+      // A block is the outcome a user is most often hunting for.
+      errorType: "hook_blocked",
+      errorMessage: "budget exhausted",
+    })
+  })
+
+  it("records an allowed hook audit as a healthy span", () => {
+    const written: unknown[] = []
+    setAgentTraceWriter((span) => {
+      written.push(span)
+    })
+    try {
+      applySdkEvent([], {
+        type: "system",
+        subtype: "hook_audit",
+        session_id: "session-1",
+        hookEvent: "PostToolUse",
+        handlerType: "command",
+        outcome: "allow",
+        latencyMs: 3,
+      } as unknown as SDKResultMessage)
+    } finally {
+      setAgentTraceWriter(null)
+    }
+    expect(written[0]).toMatchObject({ status: "ok", toolName: "PostToolUse" })
+    expect(written[0]).not.toHaveProperty("errorType")
+  })
+
+  it("never lets a telemetry failure break the turn", () => {
+    setAgentTraceWriter(() => {
+      throw new Error("writer exploded")
+    })
+    try {
+      const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+      const result = applySdkEvent(existing, {
+        type: "system",
+        subtype: "hook_audit",
+        session_id: "session-1",
+        hookEvent: "Stop",
+      } as unknown as SDKResultMessage)
+      expect(result.messages).toBe(existing)
+    } finally {
+      setAgentTraceWriter(null)
+    }
   })
 })
 
@@ -1414,7 +1494,13 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
 describe("mergeProjectKnowledgeSourcesIntoLastAssistant", () => {
   it("persists workspace knowledge as a distinct source domain", () => {
     const messages = [
-      { id: "assistant", role: "assistant" as const, parts: [{ type: "text", text: "Answer" }] },
+      {
+        id: "assistant",
+        role: "assistant" as const,
+        // `as const` on the part type too — it widens to `string` otherwise, and
+        // `UIMessage`'s part union is keyed on the literal.
+        parts: [{ type: "text" as const, text: "Answer" }],
+      },
     ]
 
     const next = mergeProjectKnowledgeSourcesIntoLastAssistant(messages, {

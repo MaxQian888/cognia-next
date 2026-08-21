@@ -4,8 +4,11 @@
  * Delivery state of a follow-up the user typed while a turn was still running
  * ("steer"), rendered under its own bubble.
  *
- * The bubble is the single home for a steer: the run panel only reports how
- * many are still pending, so reading, editing, and removing all happen here.
+ * The bubble is where a single follow-up is read, rewritten, or dropped. What
+ * it cannot show is the queue as a whole: bubbles sit in ARRIVAL order in the
+ * transcript, while the queue drains top-to-bottom into one framed turn and is
+ * reorderable in the run panel — hence the position marker while more than one
+ * is pending. The panel's queue section is the list view of the same entries.
  *
  * Nothing renders once the message is `applied` — at that point it is an
  * ordinary part of the conversation and a permanent badge would just be noise
@@ -24,7 +27,7 @@ import { AnimatePresence, motion } from "motion/react"
 import type { UIMessage } from "ai"
 import { CheckIcon, ClockIcon, PencilIcon, TriangleAlertIcon, Undo2Icon, XIcon } from "lucide-react"
 
-import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { resolveSteerDisplayState, steerMetaOf, stripSteerPrefix } from "@/lib/claude/steer"
@@ -49,9 +52,13 @@ export function SteerStatusBadge({
   const meta = steerMetaOf(message.metadata)
   if (!meta || !sessionId) return null
 
+  // Position in the SEND order, which the run panel lets the user rearrange —
+  // so it is not necessarily this bubble's position in the transcript. Shown
+  // only once there is a second entry to be ahead of or behind.
+  const queueIndex = steerQueue.findIndex((entry) => entry.id === meta.entryId)
   const state = resolveSteerDisplayState(meta, {
     sessionBusy: status === "streaming" || status === "awaiting_approval",
-    stillQueued: steerQueue.some((entry) => entry.id === meta.entryId),
+    stillQueued: queueIndex >= 0,
   })
   // Delivered and folded into the conversation — nothing left to say.
   if (state === "applied") return null
@@ -68,13 +75,18 @@ export function SteerStatusBadge({
   if (draft !== null) {
     return (
       <div className="mt-1 flex w-full justify-end">
-        <Input
+        {/* Textarea, not Input: a follow-up is often several lines (a pasted
+            path list, a snippet), and collapsing it into one line on edit
+            silently rewrote what the model was about to receive. Enter still
+            commits — Shift+Enter is the newline. */}
+        <Textarea
           autoFocus
+          rows={1}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commitEdit}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault()
               commitEdit()
             } else if (e.key === "Escape") {
@@ -83,7 +95,7 @@ export function SteerStatusBadge({
             }
           }}
           aria-label={t("ariaEdit")}
-          className="h-7 max-w-[min(82%,42rem)] text-[12px]"
+          className="max-w-[min(82%,42rem)] min-h-8 resize-none py-1 text-[12px]"
           data-testid="steer-edit-input"
         />
       </div>
@@ -114,6 +126,15 @@ export function SteerStatusBadge({
         <span title={state === "failed" ? (meta.reason ?? t("failedHint")) : t(`${state}Hint`)}>
           {t(state)}
         </span>
+        {pending && steerQueue.length > 1 && queueIndex >= 0 && (
+          <span
+            className="tabular-nums text-muted-foreground/80"
+            title={t("positionHint")}
+            data-testid="steer-queue-position"
+          >
+            {t("position", { index: queueIndex + 1, total: steerQueue.length })}
+          </span>
+        )}
 
         {pending && (
           <>

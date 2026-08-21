@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SubagentPart } from "./subagent-part"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import type { SubagentPart as SubagentPartType } from "@/lib/claude/parts-extensions"
@@ -41,6 +41,12 @@ const setActiveSession = jest.fn()
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: { getState: () => ({ setActiveSession }) },
 }))
+
+const getSession = jest.fn(async (_id: string) => ({ id: _id }) as unknown)
+jest.mock("@/lib/db/sessions", () => ({ getSession: (id: string) => getSession(id) }))
+
+const toastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (m: string) => toastError(m) } }))
 
 const basePart: SubagentPartType = {
   type: "subagent",
@@ -145,16 +151,32 @@ describe("SubagentPart", () => {
     expect(link.getAttribute("href")).toContain("subagent:sa-1")
   })
 
-  it("imported subagent: drills into the nested transcript session instead of the workspace link", () => {
+  it("imported subagent: drills into the nested transcript session instead of the workspace link", async () => {
     setActiveSession.mockClear()
+    getSession.mockResolvedValue({ id: "import:claude-code:s:sub:sa-1" })
     render(
       <SubagentPart part={{ ...basePart, nestedSessionId: "import:claude-code:s:sub:sa-1" }} />
     )
     // The workspace link is replaced by the transcript drill-in.
     expect(screen.queryByTestId("subagent-open")).toBeNull()
-    const btn = screen.getByTestId("subagent-open-transcript")
-    fireEvent.click(btn)
-    expect(setActiveSession).toHaveBeenCalledWith("import:claude-code:s:sub:sa-1")
+    fireEvent.click(screen.getByTestId("subagent-open-transcript"))
+    await waitFor(() =>
+      expect(setActiveSession).toHaveBeenCalledWith("import:claude-code:s:sub:sa-1")
+    )
+  })
+
+  it("says so when the nested transcript is not in this copy of the conversation", async () => {
+    // `kind: "subagent"` rows are hidden from every listing surface, so
+    // navigating to a missing one used to swap the pane to a silent blank
+    // conversation. Reachable after any round trip that did not carry the
+    // inner transcript along.
+    setActiveSession.mockClear()
+    toastError.mockClear()
+    getSession.mockResolvedValue(undefined)
+    render(<SubagentPart part={{ ...basePart, nestedSessionId: "import:codex:gone" }} />)
+    fireEvent.click(screen.getByTestId("subagent-open-transcript"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("transcriptMissing"))
+    expect(setActiveSession).not.toHaveBeenCalled()
   })
 
   it("computes duration from startedAt → completedAt when both present", () => {

@@ -10,6 +10,7 @@ import {
 } from "@/lib/chat/search/engine"
 import { projectSearchText } from "@/lib/chat/search/project-text"
 import { drainSearchIndex, scheduleSearchIndexDrain } from "@/lib/chat/search/indexer"
+import { CONTENT_SEARCH_MIN_QUERY } from "@/lib/chat/conversation-search-scope"
 import type { ChatSearchTextRow } from "@/lib/db/chat-search-text"
 import { useChatStore } from "@/stores/chat"
 
@@ -85,7 +86,7 @@ export function useChatHistorySearch(
   query: string,
   {
     enabled = true,
-    minQueryLength = 2,
+    minQueryLength = CONTENT_SEARCH_MIN_QUERY,
     limit,
     projectId,
     includeArchived,

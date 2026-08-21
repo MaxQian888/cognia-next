@@ -4,6 +4,7 @@ import { fn } from "storybook/test"
 import {
   ConversationFilterChips,
   ConversationFilterMenu,
+  ConversationSearchScopeControl,
   type ConversationFilterViewModel,
 } from "./conversation-filter-controls"
 import { EMPTY_CONVERSATION_FILTER_OPTIONS } from "@/lib/chat/conversation-filter-options"
@@ -25,20 +26,36 @@ const actions: ConversationFilterViewModel["actions"] = {
   setActivity: fn(),
   reset: fn(),
   setSortBy: fn(),
-  applyPreset: fn(),
-  savePreset: fn(() => "id"),
-  renamePreset: fn(),
-  deletePreset: fn(),
+  setGroupBy: fn(),
+  setSearchOptions: fn(),
+  applyView: fn(),
+  clearView: fn(),
+  revertView: fn(),
+  saveView: fn(() => "id"),
+  updateView: fn(),
+  renameView: fn(),
+  removeView: fn(),
+  restoreView: fn(),
 }
 
-const presets = [
+const views: ConversationFilterViewModel["views"] = [
   {
     id: "p1",
     name: "Unread team chats",
-    filters: { unread: true, kind: "team" as const },
+    builtIn: false,
     createdAt: 1,
+    overlay: {
+      filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, kind: "team" },
+      sortBy: "unread",
+    },
   },
-  { id: "p2", name: "This week", filters: { activity: "week" as const }, createdAt: 2 },
+  {
+    id: "p2",
+    name: "This week",
+    builtIn: false,
+    createdAt: 2,
+    overlay: { filters: { ...EMPTY_CONVERSATION_FILTERS, activity: "week" } },
+  },
 ]
 
 const options = {
@@ -68,9 +85,14 @@ const base: ConversationFilterViewModel = {
   filters: EMPTY_CONVERSATION_FILTERS,
   activeFilters: 0,
   sortBy: "recent",
+  groupBy: "workspace",
+  search: { workspace: "current", includeArchived: false, content: false },
   options,
-  presets: [],
-  activePreset: undefined,
+  views: [],
+  activeView: undefined,
+  activeViewDrift: [],
+  hiddenViewIds: [],
+  suggestedViewDimensions: [],
   actions,
 }
 
@@ -92,19 +114,37 @@ export const MenuWithActiveFilters: Story = {
       ...base,
       activeFilters: 3,
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, kind: "team", workspaceIds: ["w1"] },
-      presets,
+      views,
+      suggestedViewDimensions: ["filters"],
     },
   },
 }
 
-export const MenuWithActivePreset: Story = {
+export const MenuWithActiveView: Story = {
   args: {
     model: {
       ...base,
       activeFilters: 2,
+      sortBy: "unread",
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, kind: "team" },
-      presets,
-      activePreset: presets[0],
+      views,
+      activeView: views[0],
+    },
+  },
+}
+
+/** The view is on, but the user has nudged its sort — the way back is offered. */
+export const MenuWithModifiedView: Story = {
+  args: {
+    model: {
+      ...base,
+      activeFilters: 2,
+      sortBy: "title",
+      filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, kind: "team" },
+      views,
+      activeView: views[0],
+      activeViewDrift: ["sortBy"],
+      suggestedViewDimensions: ["filters", "sortBy"],
     },
   },
 }
@@ -143,7 +183,7 @@ export const ChipsSortOnly: Story = {
   ),
 }
 
-/** List facets collapse to one chip each; a matching preset replaces the breakdown. */
+/** List facets collapse to one chip each. */
 export const ChipsEverything: Story = {
   args: {
     model: {
@@ -166,19 +206,51 @@ export const ChipsEverything: Story = {
   ),
 }
 
-export const ChipsPreset: Story = {
+/** Inside a view, its name replaces the facet-by-facet breakdown. */
+export const ChipsView: Story = {
   args: {
     model: {
       ...base,
       activeFilters: 2,
+      sortBy: "unread",
       filters: { ...EMPTY_CONVERSATION_FILTERS, unread: true, kind: "team" },
-      presets,
-      activePreset: presets[0],
+      views,
+      activeView: views[0],
     },
   },
   render: (args) => (
     <div className="w-72 rounded-md border p-2">
       <ConversationFilterChips {...args} shown={6} total={118} />
+    </div>
+  ),
+}
+
+/** Nudged out of the view: the chip says so, and its body puts the view back. */
+export const ChipsViewModified: Story = {
+  args: {
+    model: {
+      ...base,
+      activeFilters: 1,
+      sortBy: "title",
+      filters: { ...EMPTY_CONVERSATION_FILTERS, pinned: true },
+      views,
+      activeView: views[0],
+      activeViewDrift: ["filters", "sortBy"],
+    },
+  },
+  render: (args) => (
+    <div className="w-72 rounded-md border p-2">
+      <ConversationFilterChips {...args} shown={9} total={118} />
+    </div>
+  ),
+}
+
+/** The search-reach control: three axes that used to live in three places. */
+export const SearchScope: Story = {
+  args: { model: { ...base, search: { workspace: "all", includeArchived: true, content: true } } },
+  render: (args) => (
+    <div className="w-72 rounded-md border p-2">
+      <ConversationSearchScopeControl model={args.model} />
     </div>
   ),
 }

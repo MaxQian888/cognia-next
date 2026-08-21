@@ -13,10 +13,13 @@
  * that expands to the same sections). The elapsed timer ticks once a second and
  * only while busy, reading the active-work clock so it freezes during approval.
  *
- * The panel reports on queued follow-ups but does not host them: a steer is a
- * real message in the transcript from the moment it is typed, and that bubble
- * is where it is read, edited, and removed. All that lives here is the pending
- * count (a way back to the first one) and the interrupt-and-send escalation.
+ * Queued follow-ups ("steers") get a section of their own in the expanded body.
+ * Each one is also a real message in the transcript from the moment it is typed,
+ * and that bubble is where it is read — but the bubbles render in ARRIVAL order
+ * and scatter through a long turn, so the SEND order (which is what the model
+ * reads: the whole queue is joined into one framed turn) is only legible here.
+ * Reordering, rewriting, removing, and the interrupt-and-send escalation all
+ * live in this panel; the bubble keeps the light-weight edit/remove shortcuts.
  *
  * Exported as `RunStatusBar` from `./run-status-bar` for an unchanged mount
  * contract in `chat-view.tsx`.
@@ -31,12 +34,34 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CornerDownRightIcon,
+  GripVerticalIcon,
   Loader2,
   MessageSquareIcon,
+  PaperclipIcon,
+  PencilIcon,
+  XIcon,
   ZapIcon,
 } from "lucide-react"
 
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
+
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,7 +74,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { MOBILE_SPRING, mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { steerMetaOf } from "@/lib/claude/steer"
-import { discardPendingSteer } from "@/hooks/chat/steer-runtime"
+import { discardPendingSteer, editPendingSteer } from "@/hooks/chat/steer-runtime"
+import { resolveDragEnd } from "@/lib/chat/attachments/reorder"
 import { cn } from "@/lib/utils"
 import {
   useChatStore,
@@ -59,6 +85,7 @@ import {
   useSessionStatus,
   useSessionSteerQueue,
   useSessionToolTimestamps,
+  type SteerEntry,
 } from "@/stores/chat"
 import { useChatViewportStore } from "@/stores/chat/chat-viewport-store"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -112,20 +139,25 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Pending-steer counter. Each queued follow-up is already a bubble in the
- * transcript (that is where it is edited and removed), so the panel only
- * reports how many are still undelivered and offers a way back to the first
- * one — a long turn easily scrolls them out of view.
+ * Pending-steer counter, and the way into the queue section below it.
+ *
+ * The bubbles in the transcript stay the place a single follow-up is read, but
+ * they are scattered through a long turn and they render in ARRIVAL order —
+ * neither of which lets the user see, let alone rearrange, the order the queue
+ * will actually be sent in. The chip opens that list; a session with no queue
+ * never renders it.
  *
  * Springs on each change so a follow-up landing in the queue registers even
  * while the tool lines above it are churning.
  */
 function SteerQueueChip({
   count,
-  onLocate,
+  onToggle,
+  expanded,
 }: {
   count: number
-  onLocate: (() => void) | undefined
+  onToggle: (() => void) | undefined
+  expanded: boolean
 }) {
   const t = useTranslations("chat.runStatus")
   const tp = useTranslations("chat.runPanel")
@@ -147,7 +179,7 @@ function SteerQueueChip({
     </>
   )
 
-  if (!onLocate) {
+  if (!onToggle) {
     return (
       <span
         className="flex items-center gap-1 text-muted-foreground"
@@ -161,13 +193,266 @@ function SteerQueueChip({
   return (
     <button
       type="button"
-      onClick={onLocate}
-      aria-label={tp("ariaLocateSteer")}
+      onClick={onToggle}
+      aria-expanded={expanded}
+      aria-controls={PANEL_BODY_ID}
+      aria-label={tp("ariaManageSteer")}
       className="flex items-center gap-1 rounded text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
       data-testid="run-status-steer-chip"
     >
       {body}
     </button>
+  )
+}
+
+/**
+ * The queue itself — every still-undelivered follow-up, in the order it will be
+ * sent, with the three things the bubbles cannot offer: reordering, a multi-line
+ * rewrite, and a jump back to the message in the transcript.
+ *
+ * Order is the point. `buildSteerPayload` joins the whole queue into ONE framed
+ * turn, so this list reads top-to-bottom as the paragraphs the model will get —
+ * which is why the row index is shown even for a single entry, and why the
+ * bubbles carry the same index (see `SteerStatusBadge`).
+ *
+ * Reordering is a @dnd-kit vertical sortable, set up the way the composer's
+ * attachment chips are (`attachment-preview.tsx`): a `PointerSensor` with a
+ * small activation distance so a press that never moves still reaches the row's
+ * own buttons, a `KeyboardSensor` so the same move is possible without a mouse,
+ * and the commit decision delegated to the pure `resolveDragEnd` — jsdom gives
+ * every element a 0x0 box, so the library can never resolve a drop target in a
+ * test and only OUR half of the branch is worth exercising.
+ */
+function SteerQueueSection({
+  sessionId,
+  queue,
+  onLocate,
+}: {
+  sessionId: string
+  queue: readonly SteerEntry[]
+  onLocate: ((entryId: string) => void) | undefined
+}) {
+  const tp = useTranslations("chat.runPanel")
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const move = useChatStore((s) => s.moveSteerEntry)
+
+  // `distance: 4` is what keeps every row control clickable: a press with no
+  // movement never starts a drag, so the jump / edit / remove buttons — and the
+  // caret placement inside an open editor — still get their event.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const commitEdit = () => {
+    if (!editing) return
+    const next = editing.text.trim()
+    setEditing(null)
+    if (!next) discardPendingSteer(sessionId, editing.id)
+    else editPendingSteer(sessionId, editing.id, next)
+  }
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const activeId = String(event.active.id)
+    const overId = resolveDragEnd(activeId, event.over ? String(event.over.id) : null)
+    if (!overId) return
+    // The store's move is expressed as a signed step, so translate "landed on
+    // that row" into one.
+    const from = queue.findIndex((entry) => entry.id === activeId)
+    const to = queue.findIndex((entry) => entry.id === overId)
+    if (from < 0 || to < 0) return
+    move(sessionId, activeId, to - from)
+  }
+
+  // dnd-kit ships English-only default announcements and instructions, and they
+  // are read aloud — so they are user-facing strings like any other and have to
+  // come from the message catalog.
+  const total = queue.length
+  const positionOf = (id: unknown) => queue.findIndex((entry) => entry.id === String(id)) + 1
+  const announcements = {
+    onDragStart: ({ active }: { active: { id: unknown } }) =>
+      tp("dndPickedUp", { index: positionOf(active.id), total }),
+    onDragOver: ({ over }: { over: { id: unknown } | null }) =>
+      over ? tp("dndOver", { position: positionOf(over.id), total }) : undefined,
+    onDragEnd: ({ over }: { over: { id: unknown } | null }) =>
+      over ? tp("dndDropped", { position: positionOf(over.id), total }) : tp("dndCancelled"),
+    onDragCancel: () => tp("dndCancelled"),
+  }
+
+  return (
+    <section data-testid="run-panel-queue-section">
+      <SectionHeading>{tp("sectionQueue")}</SectionHeading>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onDragEnd}
+        accessibility={{
+          announcements,
+          screenReaderInstructions: { draggable: tp("dndInstructions") },
+        }}
+      >
+        <SortableContext
+          items={queue.map((entry) => entry.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <ul className="flex flex-col gap-0.5">
+            {queue.map((entry, index) => (
+              <SteerQueueRow
+                key={entry.id}
+                entry={entry}
+                index={index}
+                editing={editing?.id === entry.id ? editing.text : null}
+                onEditChange={(text) => setEditing({ id: entry.id, text })}
+                onEditOpen={() => setEditing({ id: entry.id, text: entry.text })}
+                onEditCancel={() => setEditing(null)}
+                onEditCommit={commitEdit}
+                onLocate={onLocate ? () => onLocate(entry.id) : undefined}
+                onRemove={() => discardPendingSteer(sessionId, entry.id)}
+                tp={tp}
+              />
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
+      <p className="px-1 pt-1 text-[10px] text-muted-foreground/70">{tp("queueMergeHint")}</p>
+    </section>
+  )
+}
+
+/**
+ * One queued follow-up. The drag listeners sit on the grip alone, never on the
+ * row: the row body is a jump-to-message button and holds three more controls,
+ * and `touch-none` (which the listeners require) would otherwise eat the
+ * panel's own scroll on the mobile shell.
+ */
+function SteerQueueRow({
+  entry,
+  index,
+  editing,
+  onEditChange,
+  onEditOpen,
+  onEditCancel,
+  onEditCommit,
+  onLocate,
+  onRemove,
+  tp,
+}: {
+  entry: SteerEntry
+  index: number
+  editing: string | null
+  onEditChange: (text: string) => void
+  onEditOpen: () => void
+  onEditCancel: () => void
+  onEditCommit: () => void
+  onLocate: (() => void) | undefined
+  onRemove: () => void
+  tp: ReturnType<typeof useTranslations<"chat.runPanel">>
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: entry.id,
+    // A row being rewritten must not also be draggable: the editor owns the
+    // pointer (selection, caret) and the arrow keys for as long as it is open.
+    disabled: editing !== null,
+  })
+
+  const attachments = entry.blocks?.length ?? 0
+  const label = entry.text.trim() || tp("queueAttachmentsOnly", { count: attachments })
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      data-testid="run-panel-queue-row"
+      className={cn(
+        "group/queue flex items-start gap-1 rounded px-1 py-0.5 hover:bg-muted/50",
+        isDragging && "z-10 bg-muted/70 opacity-80"
+      )}
+    >
+      <button
+        type="button"
+        aria-label={tp("ariaReorderQueued", { index: index + 1 })}
+        className={cn(
+          "mt-0.5 shrink-0 touch-none rounded text-muted-foreground/50 hover:text-foreground",
+          editing !== null ? "cursor-default opacity-30" : "cursor-grab active:cursor-grabbing"
+        )}
+        data-testid="run-panel-queue-grip"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVerticalIcon className="size-3" aria-hidden />
+      </button>
+
+      <span className="mt-1 w-3 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground/70">
+        {index + 1}
+      </span>
+
+      {editing !== null ? (
+        <Textarea
+          autoFocus
+          value={editing}
+          onChange={(e) => onEditChange(e.target.value)}
+          onBlur={onEditCommit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault()
+              onEditCommit()
+            } else if (e.key === "Escape") {
+              e.preventDefault()
+              onEditCancel()
+            }
+          }}
+          aria-label={tp("ariaEditQueued")}
+          className="min-h-14 flex-1 resize-none py-1 text-[12px]"
+          data-testid="run-panel-queue-edit"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onLocate}
+          disabled={!onLocate}
+          title={entry.text}
+          aria-label={tp("ariaLocateSteer")}
+          className="min-w-0 flex-1 truncate text-left text-[12px] leading-5 text-foreground/80 enabled:hover:text-foreground disabled:cursor-default"
+          data-testid="run-panel-queue-locate"
+        >
+          {label}
+        </button>
+      )}
+
+      {attachments > 0 && (
+        <span
+          className="mt-0.5 flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+          title={tp("queueAttachments", { count: attachments })}
+        >
+          <PaperclipIcon className="size-3" aria-hidden />
+          {attachments}
+        </span>
+      )}
+
+      {/* Always visible, only dimmed: this list IS the queue editor, and a
+          hover-revealed row of controls is unreachable on the mobile shell,
+          which mounts the same panel. */}
+      <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground/70 focus-within:text-muted-foreground group-hover/queue:text-muted-foreground">
+        <button
+          type="button"
+          onClick={onEditOpen}
+          aria-label={tp("ariaEditQueued")}
+          className="rounded p-0.5 hover:text-foreground"
+          data-testid="run-panel-queue-edit-open"
+        >
+          <PencilIcon className="size-3" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={tp("ariaRemoveQueued")}
+          className="rounded p-0.5 hover:text-destructive"
+          data-testid="run-panel-queue-remove"
+        >
+          <XIcon className="size-3" aria-hidden />
+        </button>
+      </div>
+    </li>
   )
 }
 
@@ -298,22 +583,17 @@ function RunPanelImpl({
     [usageMsgCount, latestUsage, resolvedBar]
   )
 
-  // Scroll back to the oldest still-undelivered follow-up. Queued entries live
-  // in the transcript now, and a long turn scrolls them away; the chip is the
-  // way back. It resolves the message from the queue rather than trusting an
-  // id, so the chip stays inert when no matching bubble is mounted.
+  // Scroll back to a still-undelivered follow-up. Queued entries live in the
+  // transcript now, and a long turn scrolls them away; the queue section is the
+  // way back. It resolves the message from the entry id rather than trusting
+  // one, so a row stays inert when no matching bubble is mounted.
   const queueDepth = steerQueue.length
-  const firstPendingSteerId = (() => {
-    if (queueDepth === 0) return null
-    const pending = new Set(steerQueue.map((entry) => entry.id))
-    const hit = messages.find((message) => {
-      const meta = steerMetaOf(message.metadata)
-      return meta ? pending.has(meta.entryId) : false
-    })
-    return hit?.id ?? null
-  })()
-  const locatePendingSteer =
-    jumpToMessage && firstPendingSteerId ? () => jumpToMessage(firstPendingSteerId) : undefined
+  const locateSteerEntry = jumpToMessage
+    ? (entryId: string) => {
+        const hit = messages.find((message) => steerMetaOf(message.metadata)?.entryId === entryId)
+        if (hit) jumpToMessage(hit.id)
+      }
+    : undefined
 
   // "Interrupt and send" aborts the running turn's in-flight tool calls to
   // deliver the queue early — not obvious from a button, so the first use asks
@@ -326,6 +606,9 @@ function RunPanelImpl({
 
   const hasWork =
     record.tools.length > 0 || record.todos.length > 0 || record.subagentParts.length > 0
+  // The queue is a section of the expanded body, so a queue alone is enough to
+  // make the panel expandable — a turn can have follow-ups before its first tool.
+  const expandable = hasWork || queueDepth > 0
   const replay = !busy && steerQueue.length === 0 && hasWork
 
   // Nothing live, nothing queued, and no replayable record → render nothing.
@@ -357,7 +640,7 @@ function RunPanelImpl({
       )}
     >
       <div className="flex items-center gap-2">
-        {hasWork && (
+        {expandable && (
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
@@ -473,7 +756,13 @@ function RunPanelImpl({
 
       {(queueDepth > 0 || subagentChip) && (
         <div className="flex flex-wrap items-center gap-2 pl-5 text-[11px]">
-          {queueDepth > 0 && <SteerQueueChip count={queueDepth} onLocate={locatePendingSteer} />}
+          {queueDepth > 0 && (
+            <SteerQueueChip
+              count={queueDepth}
+              expanded={expanded}
+              onToggle={() => setExpanded((v) => !v)}
+            />
+          )}
           {subagentChip && (
             <span className="flex items-center gap-1 text-muted-foreground">
               <BotIcon className="size-3" aria-hidden />
@@ -500,12 +789,20 @@ function RunPanelImpl({
         </div>
       )}
 
-      {expanded && hasWork && (
+      {expanded && expandable && (
         <div
           id={PANEL_BODY_ID}
           data-testid="run-panel-body"
           className="mt-1 flex max-h-[40vh] flex-col gap-2 overflow-y-auto border-t border-border/40 pt-2"
         >
+          {sessionId && queueDepth > 0 && (
+            <SteerQueueSection
+              sessionId={sessionId}
+              queue={steerQueue}
+              onLocate={locateSteerEntry}
+            />
+          )}
+
           {record.todos.length > 0 && (
             <section>
               <SectionHeading>{tp("sectionPlan")}</SectionHeading>
@@ -546,22 +843,24 @@ function RunPanelImpl({
             </section>
           )}
 
-          <section className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px] text-muted-foreground @sm/runpanel:gap-x-4">
-            <SectionHeading>{tp("sectionSummary")}</SectionHeading>
-            {elapsed && <span className="tabular-nums">{elapsed}</span>}
-            <span>{tp("summaryTools", { count: record.counts.tools })}</span>
-            {record.counts.subagents > 0 && (
-              <span>{tp("summarySubagents", { count: record.counts.subagents })}</span>
-            )}
-            {record.todoCounts.total > 0 && (
-              <span>
-                {tp("summaryTodos", {
-                  done: record.todoCounts.done,
-                  total: record.todoCounts.total,
-                })}
-              </span>
-            )}
-          </section>
+          {hasWork && (
+            <section className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px] text-muted-foreground @sm/runpanel:gap-x-4">
+              <SectionHeading>{tp("sectionSummary")}</SectionHeading>
+              {elapsed && <span className="tabular-nums">{elapsed}</span>}
+              <span>{tp("summaryTools", { count: record.counts.tools })}</span>
+              {record.counts.subagents > 0 && (
+                <span>{tp("summarySubagents", { count: record.counts.subagents })}</span>
+              )}
+              {record.todoCounts.total > 0 && (
+                <span>
+                  {tp("summaryTodos", {
+                    done: record.todoCounts.done,
+                    total: record.todoCounts.total,
+                  })}
+                </span>
+              )}
+            </section>
+          )}
         </div>
       )}
 

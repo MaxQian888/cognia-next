@@ -45,6 +45,48 @@ describe("resolveConversationDrop", () => {
     })
   })
 
+  it("rejects a drop onto a folder that belongs to another workspace", () => {
+    // The list can span every workspace (`groupBy: "workspace"`) while the
+    // folders it carries belong to the active one. Filing a foreign row would
+    // stick a folderId on it that is not loaded where the conversation lives.
+    const foreign: DndNode = { id: "a", data: { type: "session", folderId: null, projectId: "w2" } }
+    const target: DndNode = {
+      id: "folder:f1",
+      data: { type: "folder", folderId: "f1", projectId: "w1" },
+    }
+    expect(resolveConversationDrop(foreign, target, [])).toBeNull()
+  })
+
+  it("allows the drop when the workspaces match, or when either side is unknown", () => {
+    const own: DndNode = { id: "a", data: { type: "session", folderId: null, projectId: "w1" } }
+    const scoped: DndNode = {
+      id: "folder:f1",
+      data: { type: "folder", folderId: "f1", projectId: "w1" },
+    }
+    const legacyFolder: DndNode = { id: "folder:f1", data: { type: "folder", folderId: "f1" } }
+    expect(resolveConversationDrop(own, scoped, [])).toEqual({
+      type: "assign",
+      sessionId: "a",
+      folderId: "f1",
+    })
+    expect(resolveConversationDrop(own, legacyFolder, [])).toEqual({
+      type: "assign",
+      sessionId: "a",
+      folderId: "f1",
+    })
+  })
+
+  it("still unfiles a foreign conversation dropped outside every folder", () => {
+    // Unfiling touches no folder, so the workspace check must not block it.
+    const foreign: DndNode = { id: "a", data: { type: "session", folderId: "f1", projectId: "w2" } }
+    const loose: DndNode = { id: "folder:null", data: { type: "folder", folderId: null } }
+    expect(resolveConversationDrop(foreign, loose, [])).toEqual({
+      type: "assign",
+      sessionId: "a",
+      folderId: null,
+    })
+  })
+
   it("reorders within a section when dropped on another row in it", () => {
     // Move "c" before "a": [a,b,c] with active c over a → [c,a,b]
     expect(resolveConversationDrop(sess("c"), sess("a"), ["a", "b", "c"])).toEqual({

@@ -23,6 +23,7 @@ type SessionSourceLabel =
   | "twinStyle"
   | "agentKnowledge"
   | "memory"
+  | "projectKnowledge"
   | "footnote"
 
 interface SessionSource {
@@ -41,6 +42,9 @@ function sourceLabel(origin: SourcesPartItem["origin"]): SessionSourceLabel {
   if (origin === "twin-rag") return "twinRag"
   if (origin === "twin-style") return "twinStyle"
   if (origin === "agent-knowledge-base") return "agentKnowledge"
+  // The workspace-knowledge origin had no label at all, so the panel asked for
+  // `labels.project-knowledge` and rendered the raw key.
+  if (origin === "project-knowledge") return "projectKnowledge"
   return origin
 }
 

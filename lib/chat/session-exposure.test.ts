@@ -36,6 +36,31 @@ describe("session exposure policy", () => {
     expect(isEmbeddedSession(embedded)).toBe(true)
     expect(isEmbeddedSession(ordinary)).toBe(false)
     expect(filterExposedSessions([ordinary, embedded], "main-list")).toEqual([ordinary])
-    expect(isSessionExposed(session({ kind: "subagent" }), "resource-export")).toBe(false)
+  })
+})
+
+describe("imported subagent transcripts (ADR-0062)", () => {
+  const subagent = session({ kind: "subagent" })
+
+  it.each(["main-list", "global-search", "plugin-enumeration", "external-connector"] as const)(
+    "stays hidden from %s — drill-in from a parent turn is still the only way in",
+    (channel) => {
+      expect(isSessionExposed(subagent, channel)).toBe(false)
+    }
+  )
+
+  it.each(["standard-export", "authenticated-project-sync", "resource-export"] as const)(
+    "rides along on %s so the parent's drill-in link is not orphaned",
+    (channel) => {
+      // The parent turn IS exported/synced and its
+      // `SubagentPart.nestedSessionId` points here. Excluding the target while
+      // keeping the link is what turned a restore into a dead button.
+      expect(isSessionExposed(subagent, channel)).toBe(true)
+    }
+  )
+
+  it("does not widen the other embedded kinds", () => {
+    const workbench = session({ kind: "resource-workbench", visibility: "embedded" })
+    expect(isSessionExposed(workbench, "standard-export")).toBe(false)
   })
 })

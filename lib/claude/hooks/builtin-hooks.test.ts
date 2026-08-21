@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -210,5 +210,41 @@ describe("pii-safety-guard.mjs", () => {
     })
     expect(res.code).toBe(2)
     expect(res.stderr).toContain("SSN")
+  })
+})
+
+describe("TS ↔ Rust lockstep", () => {
+  it("matches the shared registry table", () => {
+    // The registry is declared twice (here and `src-tauri/src/hooks/builtin.rs`)
+    // and was hand-maintained with nothing enforcing agreement. Because
+    // `builtinHookOverrides` is keyed by id, a drifted id also orphans the
+    // user's enable/disable choice on one shell. Both sides assert this table.
+    const table = JSON.parse(
+      readFileSync(path.join(SCRIPTS_DIR, "..", "builtin-hooks.lockstep.json"), "utf8")
+    ) as {
+      hooks: {
+        id: string
+        event: string
+        matcher: string | null
+        script: string
+        defaultEnabled: boolean
+      }[]
+    }
+
+    expect(
+      BUILTIN_HOOKS.map((h) => ({
+        id: h.id,
+        event: h.event,
+        matcher: h.matcher ?? null,
+        script: h.script,
+        defaultEnabled: h.defaultEnabled,
+      }))
+    ).toEqual(table.hooks)
+  })
+
+  it("keeps every entry pointed at a script that ships", () => {
+    for (const hook of BUILTIN_HOOKS) {
+      expect(existsSync(path.join(SCRIPTS_DIR, hook.script))).toBe(true)
+    }
   })
 })

@@ -132,6 +132,7 @@ import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
 import { resolveProviderAttemptOptions } from "./provider-attempt-options"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import { resolveTurnCompositionSafely } from "./resolve-turn-composition-safely"
 import {
   applySupportAgentSafety,
@@ -358,6 +359,12 @@ function buildWorkflowSnapshotBlock(
 
 export interface BuildOptionsContext {
   session?: ChatSession | null
+  /**
+   * Which agent this turn belongs to, for lifecycle-hook scoping
+   * (`HookGroup.agents`). Defaults to `"chat"` — override from the surfaces
+   * that resolve options for a non-chat turn (team chat per-member sends).
+   */
+  agentKind?: import("@/lib/claude/hooks").HookAgentKind
   /** Receives the already-resolved execution spec stamped onto this send. */
   onResolvedExecutionSpec?: (
     spec: import("@cognia/agent-config-types/agent-execution").ResolvedAgentExecutionSpec
@@ -581,6 +588,17 @@ export interface BuildOptionsContext {
    */
   imOverrideRow?: ConversationOverrideRow | null
   imAdapterRow?: AdapterInstanceRow | null
+  /**
+   * Pre-resolved composition selection (ADR-0117 axes).
+   *
+   * Set by the connector runtime so an IM turn composes from its own Dexie
+   * config stack. Without it `resolveTurnComposition` falls through to
+   * `compositionForSession()`, which reads the localStorage-backed zustand
+   * store — meaning every IM turn silently inherited whatever the desktop user
+   * last picked in the composer chip. Direct chat leaves this undefined and
+   * keeps that store read, which is correct there.
+   */
+  compositionSelection?: AgentCompositionSelectionV1
   /**
    * Pre-resolved MCP server list, injected by desktop-independent callers
    * (the standalone agent CLI) that cannot reach Dexie. When provided —
@@ -976,7 +994,12 @@ async function proIdeWriteToolsAvailable(ctx: BuildOptionsContext): Promise<bool
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
-  const opts: SendOptions = {}
+  // Name the turn for lifecycle-hook scoping. Everything resolved here is a
+  // chat-session turn; the surfaces that are NOT (teammate dispatch, plan
+  // steps, dispatched subagents) overwrite `agentKind` on the options they
+  // hand to `runAndCaptureAssistantReply`. Without a default, `agents: "chat"`
+  // would match nothing — an unidentified turn never matches a narrowed hook.
+  const opts: SendOptions = { agentKind: ctx.agentKind ?? "chat" }
 
   // --- Resolve the active character -----------------------------------------
   let character = ctx.character ?? null
@@ -1826,7 +1849,13 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // path and never blocks a send. No-ops on web / when no hook is configured.
   void defaultLifecycleFirer(
     "InstructionsLoaded",
-    { agentId: "build-options", sessionId: ctx.session?.id ?? "session" },
+    {
+      agentId: "build-options",
+      // Carries the same identity this send was just resolved with, so an
+      // `agents`-narrowed InstructionsLoaded hook scopes like the rest.
+      agentKind: opts.agentKind as import("@/lib/claude/hooks").HookAgentKind,
+      sessionId: ctx.session?.id ?? "session",
+    },
     { payload: { hasSystemPrompt: Boolean(systemPrompt) } }
   )
 
@@ -3689,103 +3718,92 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
-  // ADR-0090 Phase 6: behind the resolver flag, stamp the frozen execution
-  // spec onto the outgoing SendOptions. `execution` is the secret-free wire
-  // shape the sidecar's dispatch routes on (runtime adapter instead of the
-  // provider-id branch); the legacy `provider`/proxy fields stay untouched so
-  // rollback is turning the flag off. A stamping failure must not break the
-  // send — dispatch falls back to the provider branch and counts it as
-  // `legacy_dispatch` telemetry.
+  // ADR-0090: stamp the frozen execution spec onto the outgoing SendOptions.
+  // `execution` is the secret-free wire shape the sidecar's dispatch routes on
+  // (runtime adapter instead of the provider-id branch); the legacy
+  // `provider`/proxy fields stay untouched so an older sidecar still routes. A
+  // stamping failure must not break the send — dispatch falls back to the
+  // provider branch and counts it as `legacy_dispatch` telemetry.
   //
-  // `gatewayAgentRouteTickets` opens the same door on its own. It is the flag
-  // the Settings → Gateway → Route tickets switch writes, and the only thing
-  // that makes `resolveAgentExecutionSpec` return a `gateway` route at all
-  // (`gatewayEligible`). Requiring `agentExecutionResolverV2` as well meant the
-  // switch changed nothing on a default install — no turn ever minted, so the
-  // panel that lists and revokes tickets stayed permanently empty while its own
-  // copy said "Turn it on above to start issuing them". Stamping here does not
-  // move execution to the unified authority; that is still
-  // `executeAgentTurnFromRenderer`, which keeps its own resolver-flag check.
+  // Whether a `gateway` route is actually reachable is still a flag decision:
+  // `gatewayAgentRouteTickets` is what makes `resolveAgentExecutionSpec` return
+  // `gatewayEligible` at all, and it is the flag the Settings → Gateway → Route
+  // tickets switch writes. Stamping unconditionally is what lets that switch
+  // mean something on a default install.
   try {
-    const { isAgentExecutionFlagEnabled, getAgentExecutionFlags } =
-      await import("@/lib/ai/agent/execution/feature-flags")
-    if (
-      isAgentExecutionFlagEnabled("agentExecutionResolverV2") ||
-      isAgentExecutionFlagEnabled("gatewayAgentRouteTickets") ||
-      isAgentExecutionFlagEnabled("claudeSdkParityV1")
-    ) {
-      const { resolveAgentExecutionSpec, sendSpecFromResolved } =
-        await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
-      const { isTauri } = await import("@/lib/tauri")
-      const { spec } = resolveAgentExecutionSpec({
-        surface: "chat",
-        environment: { isTauri: isTauri(), isHeadlessHost: false },
-        flags: getAgentExecutionFlags(),
-        // Chat sessions are agent sessions by definition; the legacy
-        // provider id still drives the runtime mapping.
-        policy: { executionKind: "agent" },
-        legacy: { providerId: opts.provider, modelId: opts.model },
-        identity:
-          session?.id || ctx.executionIdentity
-            ? { ...(session?.id ? { sessionId: session.id } : {}), ...ctx.executionIdentity }
-            : undefined,
-      })
-      // A gateway route is only real once a ticket exists: without one
-      // `sendSpecFromResolved` degrades to `direct`, which is why the route
-      // ticket panel could never list anything. Minting is best-effort — a
-      // refusal falls back to the direct shape rather than failing the send.
-      const minted =
-        spec.route.kind === "gateway" && session?.id
-          ? await (
-              await import("@/lib/gateway/mint-session-ticket")
-            ).mintSessionRouteTicket({
-              sessionId: session.id,
-              executionFingerprint: spec.executionFingerprint,
-              model: opts.model ?? spec.modelBindings.primary,
-              routePolicy: spec.route.routePolicy,
-            })
-          : undefined
-      // ADR-0117: resolve the turn's composition and ride it on the same wire
-      // spec. The sidecar reads `composition.toolPresentation` to decide which
-      // tool surface to register, so this is what makes Code mode reachable at
-      // all — and what makes an unsandboxed host resolve down to `native`
-      // before the sidecar ever sees the request. Best-effort like the rest of
-      // this block: a failure leaves `composition` absent, which the sidecar
-      // treats as `native`.
-      const composition = await resolveTurnCompositionSafely({
-        sessionId: session?.id,
-        systemPrompt: opts.systemPrompt ?? opts.appendSystemPrompt,
-        toolNames: opts.allowedTools,
-        executionFingerprint: spec.executionFingerprint,
-      })
+    const { getAgentExecutionFlags } = await import("@/lib/ai/agent/execution/feature-flags")
+    const { resolveAgentExecutionSpec, sendSpecFromResolved } =
+      await import("@/lib/ai/agent/execution/resolve-agent-execution-spec")
+    const { isTauri } = await import("@/lib/tauri")
+    const { spec } = resolveAgentExecutionSpec({
+      surface: "chat",
+      environment: { isTauri: isTauri(), isHeadlessHost: false },
+      flags: getAgentExecutionFlags(),
+      // Chat sessions are agent sessions by definition; the legacy
+      // provider id still drives the runtime mapping.
+      policy: { executionKind: "agent" },
+      legacy: { providerId: opts.provider, modelId: opts.model },
+      identity:
+        session?.id || ctx.executionIdentity
+          ? { ...(session?.id ? { sessionId: session.id } : {}), ...ctx.executionIdentity }
+          : undefined,
+    })
+    // A gateway route is only real once a ticket exists: without one
+    // `sendSpecFromResolved` degrades to `direct`, which is why the route
+    // ticket panel could never list anything. Minting is best-effort — a
+    // refusal falls back to the direct shape rather than failing the send.
+    const minted =
+      spec.route.kind === "gateway" && session?.id
+        ? await (
+            await import("@/lib/gateway/mint-session-ticket")
+          ).mintSessionRouteTicket({
+            sessionId: session.id,
+            executionFingerprint: spec.executionFingerprint,
+            model: opts.model ?? spec.modelBindings.primary,
+            routePolicy: spec.route.routePolicy,
+          })
+        : undefined
+    // ADR-0117: resolve the turn's composition and ride it on the same wire
+    // spec. The sidecar reads `composition.toolPresentation` to decide which
+    // tool surface to register, so this is what makes Code mode reachable at
+    // all — and what makes an unsandboxed host resolve down to `native`
+    // before the sidecar ever sees the request. Best-effort like the rest of
+    // this block: a failure leaves `composition` absent, which the sidecar
+    // treats as `native`.
+    const composition = await resolveTurnCompositionSafely({
+      sessionId: session?.id,
+      systemPrompt: opts.systemPrompt ?? opts.appendSystemPrompt,
+      toolNames: opts.allowedTools,
+      executionFingerprint: spec.executionFingerprint,
+      selection: ctx.compositionSelection,
+    })
 
-      if (minted) {
-        opts.execution = sendSpecFromResolved(
-          spec,
-          {
-            endpoint: minted.endpoint,
-            ticketId: minted.ticketId,
-          },
-          composition
-        )
-        // The shape `sidecar/dispatch/subprocess-env.mjs:validateRouteEnv`
-        // enforces: the base URL must be the ticket endpoint, and the secret
-        // rides the env overlay rather than the (secret-free) wire spec.
-        opts.env = {
-          ...opts.env,
-          ANTHROPIC_BASE_URL: minted.endpoint,
-          ANTHROPIC_API_KEY: minted.secret,
-        }
-      } else {
-        opts.execution = sendSpecFromResolved(spec, undefined, composition)
+    if (minted) {
+      opts.execution = sendSpecFromResolved(
+        spec,
+        {
+          endpoint: minted.endpoint,
+          ticketId: minted.ticketId,
+        },
+        composition
+      )
+      // The shape `sidecar/dispatch/subprocess-env.mjs:validateRouteEnv`
+      // enforces: the base URL must be the ticket endpoint, and the secret
+      // rides the env overlay rather than the (secret-free) wire spec.
+      opts.env = {
+        ...opts.env,
+        ANTHROPIC_BASE_URL: minted.endpoint,
+        ANTHROPIC_API_KEY: minted.secret,
       }
-      if (spec.runtimeAdapter === "claude-agent-sdk") {
-        const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")
-        const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
-        if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
-      }
-      ctx.onResolvedExecutionSpec?.(spec)
+    } else {
+      opts.execution = sendSpecFromResolved(spec, undefined, composition)
     }
+    if (spec.runtimeAdapter === "claude-agent-sdk") {
+      const { claudeSdkRolloutOptions } = await import("./claude-sdk-rollout")
+      const rollout = claudeSdkRolloutOptions(getAgentExecutionFlags())
+      if (rollout) opts.claudeAgentSdk = { ...opts.claudeAgentSdk, ...rollout }
+    }
+    ctx.onResolvedExecutionSpec?.(spec)
   } catch {
     // Never fail the send over spec stamping.
   }
