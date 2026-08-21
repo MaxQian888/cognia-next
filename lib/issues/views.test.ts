@@ -1,5 +1,5 @@
 import { statusCategoryOf } from "@/types/issues"
-import type { IssueActor, IssueStatus } from "@/types/issues"
+import type { IssueActor } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
 import { FULL_ISSUE_CAPABILITIES, makeUnifiedIssueId } from "@/types/issues/unified"
 import {
@@ -7,6 +7,7 @@ import {
   applyViewScope,
   BUILTIN_ISSUE_VIEWS,
   DEFAULT_ISSUE_VIEW_ID,
+  countIssuesPerView,
   DEFAULT_ISSUE_LIST_DENSITY,
   findIssueView,
   matchesViewScope,
@@ -261,5 +262,46 @@ describe("toggleColumnCollapse", () => {
     const input = { backlog: true }
     toggleColumnCollapse(input, "done", false)
     expect(input).toEqual({ backlog: true })
+  })
+})
+
+describe("countIssuesPerView", () => {
+  const viewer: IssueViewerContext = { selfKey: "human:self", agentKeys: ["agent:a1"] }
+  const mine: IssueActor = { kind: "human" }
+  const bot: IssueActor = { kind: "agent", id: "a1" }
+
+  it("returns a count for every built-in view, including zeroes", () => {
+    const counts = countIssuesPerView([], viewer)
+    expect(Object.keys(counts).sort()).toEqual(BUILTIN_ISSUE_VIEWS.map((view) => view.id).sort())
+    expect(Object.values(counts).every((count) => count === 0)).toBe(true)
+  })
+
+  it("counts every item under the all view", () => {
+    const counts = countIssuesPerView([item(), item(), item()], viewer)
+    expect(counts.all).toBe(3)
+  })
+
+  it("scopes assigned, created and my-agents independently", () => {
+    const counts = countIssuesPerView(
+      [
+        item({ assignee: mine }),
+        item({ createdBy: mine }),
+        item({ assignee: bot }),
+        item({ assignee: { kind: "agent", id: "stranger" } }),
+      ],
+      viewer
+    )
+    expect(counts.all).toBe(4)
+    expect(counts.assigned).toBe(1)
+    expect(counts.created).toBe(1)
+    expect(counts["my-agents"]).toBe(1)
+  })
+
+  it("counts federated rows too, so the rail cannot contradict the board", () => {
+    const counts = countIssuesPerView(
+      [item({ kind: "github", sourceId: "o/r#1", assignee: mine })],
+      viewer
+    )
+    expect(counts.assigned).toBe(1)
   })
 })

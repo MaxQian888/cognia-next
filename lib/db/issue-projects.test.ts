@@ -252,6 +252,7 @@ describe("computeIssueProjectProgress", () => {
       completed: 0,
       canceled: 0,
       started: 0,
+      denominator: 0,
       ratio: 0,
     })
   })
@@ -264,6 +265,7 @@ describe("computeIssueProjectProgress", () => {
       canceled: 1,
       started: 1,
       // 1 done out of 3 non-cancelled.
+      denominator: 3,
       ratio: 1 / 3,
     })
   })

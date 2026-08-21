@@ -22,8 +22,8 @@ import type {
   IssuePriority,
   IssueActor,
 } from "@/types/issues"
-import { statusCategoryOf } from "@/types/issues"
 import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
+import { computeProgress, type IssueProjectProgress } from "@/lib/issues/project-progress"
 import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
@@ -237,40 +237,23 @@ export async function deleteIssueProject(id: string): Promise<void> {
   )
 }
 
-export interface IssueProjectProgress {
-  total: number
-  completed: number
-  canceled: number
-  started: number
-  /** 0–1, excluding cancelled issues from the denominator. */
-  ratio: number
-}
+/**
+ * Re-exported from the pure module so existing importers keep working. The
+ * shape and every field's meaning live in `lib/issues/project-progress.ts`.
+ */
+export type { IssueProjectProgress }
 
 /**
- * Progress for the project header bar. Derived on read rather than stored,
- * so it can never drift from the issues it summarises.
+ * Progress for the project header bar. Derived on read rather than stored, so
+ * it can never drift from the issues it summarises.
+ *
+ * One container, one query. The projects console does NOT use this — it
+ * already holds the workspace's issues and calls `computeProgressFromIssues`
+ * directly, which is one pass instead of one query per container.
  */
 export async function computeIssueProjectProgress(
   issueProjectId: string
 ): Promise<IssueProjectProgress> {
   const issues = await getDb().issues.where("issueProjectId").equals(issueProjectId).toArray()
-
-  let completed = 0
-  let canceled = 0
-  let started = 0
-  for (const issue of issues) {
-    const category = statusCategoryOf(issue.status)
-    if (category === "completed") completed += 1
-    else if (category === "canceled") canceled += 1
-    else if (category === "started") started += 1
-  }
-
-  const denominator = issues.length - canceled
-  return {
-    total: issues.length,
-    completed,
-    canceled,
-    started,
-    ratio: denominator > 0 ? completed / denominator : 0,
-  }
+  return computeProgress(issues)
 }

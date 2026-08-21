@@ -253,3 +253,25 @@ export function toggleColumnCollapse(
 ): Partial<Record<IssueStatus, boolean>> {
   return { ...overrides, [status]: !currentlyCollapsed }
 }
+
+/**
+ * How many items each built-in view would show, for the rail's counts.
+ *
+ * Computed from the item set already in memory rather than from
+ * `countIssuesByStatus`, which only ever saw the local Dexie table — the rail
+ * has to count federated rows too or its numbers would contradict the board
+ * standing next to it.
+ */
+export function countIssuesPerView(
+  items: readonly UnifiedIssueItem[],
+  viewer: IssueViewerContext
+): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const view of BUILTIN_ISSUE_VIEWS) {
+    counts[view.id] = items.reduce(
+      (total, item) => total + (matchesViewScope(item, view.scope, viewer) ? 1 : 0),
+      0
+    )
+  }
+  return counts
+}
