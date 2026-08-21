@@ -109,7 +109,7 @@ describe("isRecord", () => {
     ["x", "string"],
     [1, "number"],
     [undefined, "undefined"],
-  ])("rejects %p (%s)", (value) => {
+  ])("rejects %p (%s)", (value, _label) => {
     expect(isRecord(value)).toBe(false)
   })
 })
@@ -151,7 +151,7 @@ describe("isNonNegativeInteger", () => {
     [Number.MAX_SAFE_INTEGER + 1, "beyond safe integer range"],
     ["1", "numeric string"],
     [null, "null"],
-  ])("rejects %p (%s)", (value) => {
+  ])("rejects %p (%s)", (value, _label) => {
     expect(isNonNegativeInteger(value)).toBe(false)
   })
 })

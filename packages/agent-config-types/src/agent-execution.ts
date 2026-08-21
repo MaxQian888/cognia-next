@@ -1,9 +1,8 @@
 import type { ResolvedAgentExecutionSpec as AgentSdkResolvedExecutionSpec } from "@cognia/agent"
-import type {
-  AgentOrchestrationPolicy,
-  AgentPermissionMode,
-  ToolPresentationMode,
-} from "./agent-composition"
+import type { AgentOrchestrationPolicy, ToolPresentationMode } from "./agent-composition"
+// `AgentPermissionMode` lives in `./index` — `agent-composition` imports it from
+// there too, and never re-exported it.
+import type { AgentPermissionMode } from "./index"
 
 // Unified Agent execution contract (ADR-0090).
 //

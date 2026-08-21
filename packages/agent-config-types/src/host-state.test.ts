@@ -4,7 +4,6 @@ import {
   canonicalHostStateJson,
   createEmptyHostStateSession,
   hostStateDigest,
-  hostStateMigrationStageAllowsWrites,
   isHostStateActionV1,
   isHostStateAppliedActionV1,
   isHostStateSnapshotV1,
@@ -165,7 +164,6 @@ describe("HostStateProtocolV1", () => {
         hostId: "host-a",
         hostGeneration: 3,
         hostSeq: 1,
-        migrationStage: "shadow",
         leaseExpiresAt: 10,
         pendingDispatch: 0,
         pendingBroadcast: 0,
@@ -926,7 +924,6 @@ describe("HostState snapshot and response wire guards", () => {
       hostId: "host-a",
       hostGeneration: 3,
       hostSeq: 1,
-      migrationStage: "hoststate-authoritative",
       leaseExpiresAt: 10,
       pendingDispatch: 0,
       pendingBroadcast: 0,
@@ -936,14 +933,20 @@ describe("HostState snapshot and response wire guards", () => {
       { hostId: "" },
       { hostGeneration: -1 },
       { hostSeq: -1 },
-      { migrationStage: "unknown" },
       { leaseExpiresAt: -1 },
       { pendingDispatch: 1.5 },
       { pendingBroadcast: "0" },
+      { migrationStage: "unknown" },
       { extra: 1 },
     ]
 
     expect(isHostStateStatusV1(status)).toBe(true)
+    expect(
+      isHostStateStatusV1({
+        ...status,
+        migrationStage: "hoststate-authoritative",
+      })
+    ).toBe(true)
     expect(isHostStateStatusV1(null)).toBe(false)
     for (const overrides of malformed) {
       expect(isHostStateStatusV1({ ...status, ...overrides })).toBe(false)
@@ -951,7 +954,7 @@ describe("HostState snapshot and response wire guards", () => {
   })
 })
 
-describe("HostState channels, canonical JSON, and migration stages", () => {
+describe("HostState channels and canonical JSON", () => {
   it("percent-encodes ids so a slash cannot forge a channel segment", () => {
     expect(sessionIndexChannel("target/evil")).toBe(
       `${HOST_STATE_SESSION_CHANNEL_PREFIX}target%2Fevil/sessions`
@@ -972,14 +975,5 @@ describe("HostState channels, canonical JSON, and migration stages", () => {
     expect(() => canonicalHostStateJson({ fn: () => null })).toThrow(
       "HostState canonical JSON accepts JSON values only"
     )
-  })
-
-  it("only allows writes once the host owns the state", () => {
-    expect(hostStateMigrationStageAllowsWrites("hoststate-authoritative")).toBe(true)
-    expect(hostStateMigrationStageAllowsWrites("legacy-projection-only")).toBe(true)
-    expect(hostStateMigrationStageAllowsWrites("retired")).toBe(true)
-    expect(hostStateMigrationStageAllowsWrites("legacy-authoritative")).toBe(false)
-    expect(hostStateMigrationStageAllowsWrites("shadow")).toBe(false)
-    expect(hostStateMigrationStageAllowsWrites("hoststate-read")).toBe(false)
   })
 })

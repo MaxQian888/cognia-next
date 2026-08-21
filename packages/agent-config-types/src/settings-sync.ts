@@ -68,6 +68,10 @@ export const SETTINGS_SYNC = {
   // fires a scheduled task, so it has nothing to do with this value.
   schedulerNotifications: { category: "desktop-only" },
   gitSettings: { category: "desktop-only" },
+  // The watcher reads the desktop's own filesystem (`~/.claude/projects`,
+  // `~/.codex/sessions`, the OpenCode SQLite store). A phone has none of those
+  // trees, so the toggle is meaningless there and must not cross the wire.
+  sessionImportWatch: { category: "desktop-only" },
   subagentNesting: { category: "desktop-only" },
   backgroundTasks: { category: "desktop-only" },
   webTools: { category: "desktop-only" },
@@ -273,6 +277,10 @@ export const SETTINGS_SYNC = {
   backupReminderDismissedAt: { category: "desktop-only" },
   backupAutoSchedule: { category: "desktop-only" },
   backupDestinations: { category: "desktop-only" },
+  // Same shape as `backupDestinations`: non-secret config here, the OAuth
+  // client secret and tokens in the host keyring, and a loopback callback
+  // (`/oauth/docs/{provider}/callback`) only the desktop can serve.
+  docsProviders: { category: "desktop-only" },
   a2uiDefaultEnabled: { category: "desktop-only" },
   a2uiDefaultCatalogId: { category: "desktop-only" },
   a2uiDefaultHostStrategy: { category: "desktop-only" },

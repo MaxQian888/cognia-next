@@ -281,6 +281,43 @@ export interface SendOptions {
    */
   turnId?: string
   /**
+   * Which agent this turn belongs to, for lifecycle-hook scoping. Like
+   * {@link turnId} these are sidecar-protocol envelope fields, not SDK options:
+   * they ride through Rust's `SendOptions.extra` flatten and the sidecar merges
+   * them into every hook payload as `agent_kind` / `agent_ref`.
+   *
+   * The SDK cannot supply this — cognia never launches with `--agent`, so the
+   * SDK only fills `agent_id` / `agent_type` inside a Task subagent. Without
+   * these two fields a teammate turn is indistinguishable from a chat turn.
+   *
+   * `agentKind` is a `HookAgentKind` (`lib/claude/hooks.ts`); typed as a string
+   * here because this package must stay free of app imports.
+   */
+  agentKind?: string
+  agentRef?: string
+  /**
+   * The user's merged settings.json lifecycle-hook block, which the sidecar
+   * registers as SDK-native hooks (`sidecar/dispatch/agent-hooks.mjs`).
+   *
+   * On the desktop this is injected HOST-side after the trust gate
+   * (`src-tauri/src/claude/commands.rs`) so a compromised renderer cannot
+   * smuggle project hooks in; the CLI resolves and injects its own
+   * (`cli/src/hooks/resolve-hooks-config.ts`). It was previously untyped and
+   * rode through Rust's `extra` flatten — declared here so the CLI injection
+   * is type-checked.
+   *
+   * Structurally typed rather than importing `HooksConfig`: this package must
+   * stay free of app (`@/`) imports.
+   */
+  hooks?: Record<
+    string,
+    Array<{
+      matcher?: string
+      agents?: string
+      hooks: Array<Record<string, unknown> & { type: string }>
+    }>
+  >
+  /**
    * Frozen execution-spec projection (ADR-0090). Like `turnId`, this is a
    * sidecar-protocol envelope field, not an SDK option: it rides through
    * Rust's `SendOptions.extra` flatten and the sidecar dispatch reads
@@ -2171,6 +2208,46 @@ export interface ChatSession {
    */
   importFrozen?: boolean
   /**
+   * The `AgentSessionSourceAdapter.id` this conversation was imported from
+   * (`claude-code`, `codex`, a plugin's `${pluginId}:${id}`, …), stamped by
+   * `importSessions`. The session id already encodes it, but a plugin source id
+   * may itself contain a colon, so parsing it back out of
+   * `import:<source>:<originalId>` is ambiguous. Stored, it is unambiguous —
+   * and it is what lets the UI say WHICH agent a conversation came from.
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  importSource?: string
+  /**
+   * The source adapter's own `displayName` as of the import ("Claude Code",
+   * "Codex CLI", a plugin's "Cursor (Acme)").
+   *
+   * Denormalized on purpose: provenance has to survive the plugin that
+   * contributed the source being uninstalled, and it keeps the chat header from
+   * having to import the adapter registry — and with it all seven parsers —
+   * just to render one chip. Built-in ids still render from the message
+   * catalogue so the label is localized; this is the fallback.
+   */
+  importSourceLabel?: string
+  /**
+   * Digest of the source transcript as of the last mirrored import (message
+   * count + last message identity). Compared on a re-import to tell "the source
+   * has not moved" from "the source moved but we are frozen and did not mirror
+   * it". Non-indexed optional column — no Dexie schema bump.
+   */
+  importSourceDigest?: string
+  /**
+   * Set when a re-import found the on-disk source CHANGED after this row was
+   * frozen — i.e. the user continued this conversation both in Cognia and in
+   * the original agent, and the two have drifted apart. Cognia deliberately
+   * does not merge; it says so, which is the "diverged" badge
+   * `lib/data/import-merge.ts` documents. Cleared by
+   * `acknowledgeImportDivergence` once the user has seen it.
+   * Non-indexed optional column — no Dexie schema bump.
+   */
+  importDiverged?: boolean
+  /** Epoch ms of the divergence {@link importDiverged} records. */
+  importDivergedAt?: number
+  /**
    * Set to `"cli"` on a session materialised from a standalone-CLI handoff
    * (`lib/chat/import-handoff-session.ts`). Lets a repeat handoff of the *same*
    * CLI session overwrite its row in place (idempotent re-handoff), while an
@@ -2399,7 +2476,40 @@ export interface ConversationTimelineSettings {
 /** Row density for the conversation sidebar (ChannelList). */
 export type ConversationSidebarDensity = "comfortable" | "compact"
 /** How far the conversation-sidebar search reaches. */
+/**
+ * @deprecated Superseded by {@link ConversationSearchOptions}, which also
+ * carries the workspace reach and the archive reach. Kept so a settings blob
+ * written before the scope control landed still means something: `"title"` /
+ * `"titleAndContent"` fold into `content: false | true`. Resolve both through
+ * `lib/chat/conversation-search-scope.ts:resolveConversationSearchOptions`
+ * rather than reading the field.
+ */
 export type ConversationSearchScope = "title" | "titleAndContent"
+
+/** How far the conversation list's search reaches across workspaces. */
+export type ConversationSearchWorkspaceReach = "current" | "all"
+
+/**
+ * What the conversation-list search field is allowed to reach.
+ *
+ * Before this existed the three axes were each decided somewhere unrelated:
+ * archived conversations were reachable only by switching the whole list to the
+ * archived view, another workspace's conversations only when the *grouping*
+ * happened to be `"workspace"`, and message content only from a settings
+ * toggle. One control now owns all three, and a saved view can carry them.
+ */
+export interface ConversationSearchOptions {
+  /** Which workspaces search reaches. Defaults to the active one. */
+  workspace?: ConversationSearchWorkspaceReach
+  /**
+   * Whether search also reaches archived conversations. Applies **only while a
+   * query is present** — browsing is still the archived view's job, so the two
+   * controls never describe the same thing.
+   */
+  includeArchived?: boolean
+  /** Whether search also matches message content (async, indexed). */
+  content?: boolean
+}
 /** Optional context fields rendered beneath a conversation title. */
 export type ConversationSidebarMetadata = "agent" | "model" | "provider" | "workspace"
 /** Motion policy for overflowing conversation titles. */
@@ -2504,6 +2614,34 @@ export interface ConversationFilterPreset {
  * object (legacy settings) keeps today's behavior. Layout state (width, view,
  * collapsed folders, active quick filters) lives in `useUIStore`, not here.
  */
+/**
+ * A saved conversation-list view.
+ *
+ * Deliberately a **partial overlay**, not a snapshot: every dimension is
+ * optional and `undefined` means "leave the current value alone". Two
+ * consequences that paid for the choice — the older `filterPresets` rows are
+ * already valid views (a view that only pins `filters`), so there is no
+ * migration to run and no risk of one silently resetting a user's sort; and a
+ * future dimension can join without re-migrating every stored view.
+ *
+ * Built-in views are code-owned and never stored here; see
+ * `lib/chat/conversation-views.ts`.
+ */
+export interface ConversationView {
+  id: string
+  /** User-supplied text. Built-in views carry a translation key instead. */
+  name: string
+  createdAt: number
+  /** Quick filters this view pins. */
+  filters?: ConversationFilters
+  /** Order inside each section. */
+  sortBy?: ConversationSortBy
+  /** Primary grouping axis. */
+  groupBy?: ConversationGroupBy
+  /** How far the search field reaches. */
+  search?: ConversationSearchOptions
+}
+
 export interface ConversationSidebarSettings {
   /** Row density. Defaults to `"comfortable"`. */
   density?: ConversationSidebarDensity
@@ -2528,12 +2666,29 @@ export interface ConversationSidebarSettings {
   groupBy?: ConversationGroupBy
   /** Order applied inside each section. Defaults to `"recent"`. */
   sortBy?: ConversationSortBy
-  /** Saved filter combinations, in creation order. Defaults to none. */
+  /**
+   * @deprecated Superseded by {@link ConversationSidebarSettings.views}. A
+   * preset is exactly a view that pins only its filters, so these are read as
+   * views rather than migrated — see
+   * `lib/chat/conversation-views.ts:resolveConversationViews`.
+   */
   filterPresets?: ConversationFilterPreset[]
+  /** Saved views, in creation order. Defaults to none. */
+  views?: ConversationView[]
+  /**
+   * Built-in view ids the user has hidden. Built-ins cannot be deleted (they
+   * are code, not data) but they can be taken out of the menu.
+   */
+  hiddenViewIds?: string[]
   /** Show per-conversation unread badges. Defaults to on. */
   showUnreadBadges?: boolean
-  /** Whether search also matches message content (async). Defaults to title-only. */
+  /**
+   * @deprecated Superseded by {@link ConversationSidebarSettings.search}.
+   * Read both through `resolveConversationSearchOptions`.
+   */
   searchScope?: ConversationSearchScope
+  /** What the search field reaches: workspaces, archived rows, message content. */
+  search?: ConversationSearchOptions
   /** Ordered context fields rendered beneath each title. Defaults to agent + model. */
   metadata?: ConversationSidebarMetadata[]
   /** How overflowing titles reveal their full text. Defaults to hover. */
@@ -2867,6 +3022,19 @@ export interface AppSettings {
    * defaults without a schema migration.
    */
   gitSettings?: import("@/types/git").GitUiSettings
+  /**
+   * External-agent session-history live sync (ADR-0062). When `enabled`, the
+   * `SessionImportWatchInitializer` keeps the Rust fs-watcher running over
+   * every registered source's scan roots for the whole app session and
+   * re-imports on change — which is what the switch's copy ("Keep watching
+   * these agents and import new sessions automatically") actually promises.
+   *
+   * It lives in settings rather than in the import dialog's local state
+   * because the watcher is an app-lifetime background job: local state died
+   * with the dialog, leaving the native watcher running with no listener and
+   * the switch reading "off" on the next open.
+   */
+  sessionImportWatch?: { enabled: boolean }
   /**
    * Nested-subagent dispatch settings (depth-N). Opt-in: when `enabled`, the
    * built-in chat agent is offered the `dispatch_agent` tool and dispatched
@@ -4810,12 +4978,6 @@ export const DEFAULT_AUTOMATION_POLICY: AutomationPolicy = {
  * UIs.
  */
 export interface DeveloperSettings {
-  /**
-   * Experimental task-scoped isolated workspace and reversible resource
-   * ledger. Default off until the full runtime matrix reaches GA.
-   */
-  taskWorkspace?: boolean
-
   /**
    * Experimental: when `true`, registered plugin chat-middlewares actually run
    * on the send hot path (ADR-0026 §4 §A). Default off — the runner skips

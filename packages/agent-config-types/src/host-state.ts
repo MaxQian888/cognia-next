@@ -213,22 +213,9 @@ export interface HostStateStatusV1 {
   hostId: string
   hostGeneration: number
   hostSeq: number
-  migrationStage:
-    | "legacy-authoritative"
-    | "shadow"
-    | "hoststate-read"
-    | "hoststate-authoritative"
-    | "legacy-projection-only"
-    | "retired"
   leaseExpiresAt: number
   pendingDispatch: number
   pendingBroadcast: number
-}
-
-export function hostStateMigrationStageAllowsWrites(
-  stage: HostStateStatusV1["migrationStage"]
-): boolean {
-  return ["hoststate-authoritative", "legacy-projection-only", "retired"].includes(stage)
 }
 
 export interface HostStateReplicaV1<TState extends HostStateChannelStateV1> {
@@ -623,14 +610,15 @@ export function isHostStateStatusV1(value: unknown): value is HostStateStatusV1 
     nonEmptyString(value.hostId) &&
     nonNegativeInteger(value.hostGeneration) &&
     nonNegativeInteger(value.hostSeq) &&
-    [
-      "legacy-authoritative",
-      "shadow",
-      "hoststate-read",
-      "hoststate-authoritative",
-      "legacy-projection-only",
-      "retired",
-    ].includes(String(value.migrationStage)) &&
+    (value.migrationStage === undefined ||
+      [
+        "legacy-authoritative",
+        "shadow",
+        "hoststate-read",
+        "hoststate-authoritative",
+        "legacy-projection-only",
+        "retired",
+      ].includes(String(value.migrationStage))) &&
     nonNegativeInteger(value.leaseExpiresAt) &&
     nonNegativeInteger(value.pendingDispatch) &&
     nonNegativeInteger(value.pendingBroadcast)

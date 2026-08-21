@@ -50,6 +50,8 @@ export type SpanProviderName =
   | "x_ai"
   // Cognia vendor extensions — non-model surfaces that still emit spans.
   | "cognia.plugin"
+  /** The settings.json lifecycle-hook runtime (`hook_audit` envelopes). */
+  | "cognia.hook"
   | "cognia.team"
   | "cognia.connector"
   | "cognia.workflow"
