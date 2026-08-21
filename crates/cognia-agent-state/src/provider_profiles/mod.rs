@@ -909,7 +909,7 @@ pub fn gateway_snapshot_json(
             let api_key = deployment
                 .credential_profile_ref
                 .as_ref()
-                .and_then(|reference| resolve(reference));
+                .and_then(resolve);
             let (auth_scheme, auth_header_name) =
                 match transport.auth.get("scheme").and_then(Value::as_str) {
                     Some("custom-header") => (
