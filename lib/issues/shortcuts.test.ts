@@ -35,7 +35,6 @@ describe("resolveIssueShortcut", () => {
     expect(resolveIssueShortcut({ key: "j", target: div })).toBe("next")
     expect(resolveIssueShortcut({ key: "k", target: div })).toBe("previous")
     expect(resolveIssueShortcut({ key: "x", target: div })).toBe("toggleSelect")
-    expect(resolveIssueShortcut({ key: "e", target: div })).toBe("edit")
     expect(resolveIssueShortcut({ key: "Enter", target: div })).toBe("open")
   })
 
@@ -48,10 +47,14 @@ describe("resolveIssueShortcut", () => {
     expect(resolveIssueShortcut({ key: "q", target: div })).toBeNull()
   })
 
+  it("does not claim `e`: Enter already opens the inspector, where editing lives", () => {
+    expect(resolveIssueShortcut({ key: "e", target: div })).toBeNull()
+  })
+
   it("never claims a modified keystroke, so Cmd+K stays the command palette", () => {
     expect(resolveIssueShortcut({ key: "k", metaKey: true, target: div })).toBeNull()
     expect(resolveIssueShortcut({ key: "c", ctrlKey: true, target: div })).toBeNull()
-    expect(resolveIssueShortcut({ key: "e", altKey: true, target: div })).toBeNull()
+    expect(resolveIssueShortcut({ key: "j", altKey: true, target: div })).toBeNull()
   })
 
   it("ignores a keystroke another handler already claimed", () => {

@@ -214,4 +214,32 @@ describe("BoardColumn", () => {
       expect(onToggleCollapsed).toHaveBeenCalledWith("todo")
     })
   })
+
+  describe("item menu", () => {
+    it("renders cards directly when no wrapper is supplied", () => {
+      renderColumn({ items: [item()] })
+      expect(screen.getByTestId("issue-card-local:s1")).toBeInTheDocument()
+    })
+
+    it("wraps each card when one is", () => {
+      renderColumn({
+        items: [item(), item()],
+        renderItemMenu: (menuItem, children) => (
+          <div key={menuItem.unifiedId} data-testid={`menu-${menuItem.unifiedId}`}>
+            {children}
+          </div>
+        ),
+      })
+      const wrapper = screen.getByTestId("menu-local:s1")
+      expect(wrapper.contains(screen.getByTestId("issue-card-local:s1"))).toBe(true)
+      expect(screen.getByTestId("menu-local:s2")).toBeInTheDocument()
+    })
+
+    it("keys the cards itself, so the unwrapped path is not a React key warning", () => {
+      const warn = jest.spyOn(console, "error").mockImplementation(() => undefined)
+      renderColumn({ items: [item(), item()] })
+      expect(warn.mock.calls.flat().join(" ")).not.toContain('unique "key"')
+      warn.mockRestore()
+    })
+  })
 })

@@ -41,6 +41,10 @@ export interface IssueBulkToolbarProps {
   assigneeOptions: readonly AssigneeOption[]
   onAction: (action: IssueBulkAction) => void
   onRequestDelete: () => void
+  /** Ticks every row currently on screen; a second call clears. */
+  onToggleAll?: () => void
+  /** How many rows are on screen, for the select-all label. */
+  visibleCount?: number
   onClear: () => void
 }
 
@@ -52,6 +56,8 @@ export function IssueBulkToolbar({
   assigneeOptions,
   onAction,
   onRequestDelete,
+  onToggleAll,
+  visibleCount,
   onClear,
 }: IssueBulkToolbarProps) {
   const t = useTranslations("issues")
@@ -77,6 +83,23 @@ export function IssueBulkToolbar({
       <span className="text-sm font-medium tabular-nums" data-testid="issue-bulk-count">
         {t("bulk.selected", { count: items.length })}
       </span>
+
+      {/*
+        Select-all lives here rather than in a list header: the toolbar is
+        already on screen the moment one row is ticked, which is exactly when
+        "and the rest" gets reached for.
+      */}
+      {onToggleAll && visibleCount !== undefined && visibleCount > items.length ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={onToggleAll}
+          data-testid="issue-bulk-select-all"
+        >
+          {t("bulk.selectAll", { count: visibleCount })}
+        </Button>
+      ) : null}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

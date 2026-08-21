@@ -717,7 +717,17 @@
     "rowColorAria": "{name} 的颜色",
     "rowNameAria": "{name} 的名称",
     "title": "会话标签",
-    "reorderAria": "调整 {name} 的顺序"
+    "reorderAria": "调整 {name} 的顺序",
+    "colors": {
+      "0": "红色",
+      "1": "琥珀色",
+      "2": "绿色",
+      "3": "青色",
+      "4": "蓝色",
+      "5": "紫色",
+      "6": "粉色",
+      "7": "石板灰"
+    }
   },
   "lark": {
     "adapterCreated": "适配器已创建。",

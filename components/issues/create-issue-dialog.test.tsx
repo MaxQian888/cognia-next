@@ -172,4 +172,48 @@ describe("CreateIssueDialog", () => {
     await user.click(screen.getByTestId("create-issue-submit"))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("iss_1"))
   })
+
+  /*
+   * The branch that fixes "one project per workspace, forever". It used to be
+   * `projects.length === 0` and nothing else, so once a workspace had a
+   * container this path was permanently unreachable.
+   */
+  describe("creating a container inline", () => {
+    it("offers a new-container row even when containers already exist", async () => {
+      const user = userEvent.setup()
+      renderDialog({ projects: [PROJECT] })
+      await user.click(screen.getByTestId("create-issue-project"))
+      expect(await screen.findByTestId("create-issue-project-new")).toBeInTheDocument()
+    })
+
+    it("switches to the name+key fields when it is picked", async () => {
+      const user = userEvent.setup()
+      renderDialog({ projects: [PROJECT] })
+      await user.click(screen.getByTestId("create-issue-project"))
+      await user.click(await screen.findByTestId("create-issue-project-new"))
+      expect(await screen.findByTestId("create-issue-project-name")).toBeInTheDocument()
+      expect(screen.queryByTestId("create-issue-project")).not.toBeInTheDocument()
+    })
+
+    it("can back out to the existing containers", async () => {
+      const user = userEvent.setup()
+      renderDialog({ projects: [PROJECT] })
+      await user.click(screen.getByTestId("create-issue-project"))
+      await user.click(await screen.findByTestId("create-issue-project-new"))
+      await user.click(await screen.findByTestId("create-issue-project-cancel-new"))
+      expect(await screen.findByTestId("create-issue-project")).toBeInTheDocument()
+    })
+
+    it("offers no back-out when there is nothing to go back to", async () => {
+      renderDialog({ projects: [] })
+      await screen.findByTestId("create-issue-project-name")
+      expect(screen.queryByTestId("create-issue-project-cancel-new")).not.toBeInTheDocument()
+    })
+
+    it("does not read the taken keys until the branch that needs them is showing", async () => {
+      renderDialog({ projects: [PROJECT] })
+      await screen.findByTestId("create-issue-project")
+      expect(mockListTakenProjectKeys).not.toHaveBeenCalled()
+    })
+  })
 })

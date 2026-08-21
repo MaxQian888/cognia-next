@@ -64,6 +64,8 @@ export interface LabelCatalogueStrings {
   builtinBadge: string
   rowNameAria: (name: string) => string
   rowColorAria: (name: string) => string
+  /** One swatch, by palette index — the raw oklch token is not a label. */
+  swatchAria: (index: number) => string
   deleteAria: (name: string) => string
   reorderAria: (name: string) => string
 }
@@ -273,6 +275,7 @@ function LabelRowEditor({
         <PaletteSwatches
           value={label.color ?? defaultLabelColor(label.name)}
           ariaLabel={strings.rowColorAria(label.name)}
+          swatchAria={strings.swatchAria}
           testId={`${testId}-color-${label.id}`}
           onChange={(next) => void updateLabel(label.id, { color: next })}
         />
@@ -314,25 +317,27 @@ function LabelRowEditor({
 function PaletteSwatches({
   value,
   ariaLabel,
+  swatchAria,
   testId,
   onChange,
 }: {
   value: string
   ariaLabel: string
+  swatchAria: (index: number) => string
   testId: string
   onChange: (color: string) => void
 }) {
   return (
     <div role="radiogroup" aria-label={ariaLabel} className="flex shrink-0 gap-0.5">
-      {LABEL_COLORS.map((color) => (
+      {LABEL_COLORS.map((color, index) => (
         <button
           key={color}
           type="button"
           role="radio"
           aria-checked={color === value}
-          aria-label={color}
+          aria-label={swatchAria(index)}
           onClick={() => onChange(color)}
-          data-testid={`${testId}-${LABEL_COLORS.indexOf(color)}`}
+          data-testid={`${testId}-${index}`}
           className={cn(
             "focus-visible:ring-ring/50 size-4 rounded-full focus-visible:outline-none focus-visible:ring-[3px]",
             color === value && "ring-2 ring-foreground/60 ring-offset-1 ring-offset-background"

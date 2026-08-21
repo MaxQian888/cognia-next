@@ -115,7 +115,9 @@ export function ProjectIdentityFields({
             ? t("projects.keyInvalid")
             : verdict.taken
               ? t("projects.keyTaken")
-              : t("projects.keyHint")}
+              : // `keyHint` takes an {example}; without it next-intl falls back
+                // to printing the key path, which is what this field did.
+                t("projects.keyHint", { example: `${verdict.key || "KEY"}-1` })}
         </p>
       </div>
     </>

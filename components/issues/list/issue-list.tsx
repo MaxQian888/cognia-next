@@ -33,6 +33,11 @@ export interface IssueListProps {
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
   runningIds?: ReadonlySet<string>
+  /**
+   * `actorKey` → display name, for the assignee grouping's headings. Without
+   * it a group headed by an agent or a squad shows the raw Character id.
+   */
+  assigneeLabels?: ReadonlyMap<string, string>
   /** The row whose detail is open. */
   selectedId?: string
   onSelect?: (unifiedId: string) => void
@@ -55,6 +60,7 @@ export function IssueList({
   labelsById,
   projectNamesById,
   runningIds,
+  assigneeLabels,
   selectedId,
   onSelect,
   checkedIds,
@@ -88,7 +94,10 @@ export function IssueList({
       case "project":
         return projectNamesById?.get(key) ?? key
       case "assignee":
-        return key.startsWith("human:") ? t("actor.human") : key.split(":")[1]
+        if (key.startsWith("human:")) return t("actor.human")
+        // The cached display name, then the actor kind — never the raw id,
+        // which is what a bare `key.split(":")[1]` used to render.
+        return assigneeLabels?.get(key) ?? t(`actor.${key.split(":")[0] as "agent" | "team"}`)
       default:
         return key
     }

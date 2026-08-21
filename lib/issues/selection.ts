@@ -31,12 +31,6 @@ export function toggleSelection(state: IssueSelectionState, id: string): IssueSe
   return { selected, anchor: id }
 }
 
-/** Replace the whole selection with one row. */
-export function selectOnly(state: IssueSelectionState, id: string): IssueSelectionState {
-  void state
-  return { selected: new Set([id]), anchor: id }
-}
-
 /**
  * Select every row between the anchor and `id`, inclusive, ADDING to whatever
  * was already selected.

@@ -43,6 +43,7 @@ import { listIssues, moveIssue, reorderIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
 import { listLabels } from "@/lib/db/labels"
 import {
+  actorKey,
   applyIssueFilter,
   buildIssueColumns,
   buildIssueGroups,
@@ -122,6 +123,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
   const setSort = useIssueViewStore((s) => s.setSort)
   const setDensity = useIssueViewStore((s) => s.setDensity)
   const toggleColumnCollapsed = useIssueViewStore((s) => s.toggleColumnCollapsed)
+  const resetView = useIssueViewStore((s) => s.resetView)
 
   const view = findIssueView(viewId) ?? BUILTIN_ISSUE_VIEWS[0]
   const prefs = useMemo(() => resolveIssueViewPreferences(view, overrides), [view, overrides])
@@ -279,6 +281,20 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
     () => countIssuesPerView(visibleFederated, viewer),
     [visibleFederated, viewer]
   )
+  /**
+   * `actorKey` → cached display name, for the list's assignee group headings
+   * and anywhere else a bare key would otherwise surface.
+   */
+  const assigneeLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const item of scoped) {
+      const key = actorKey(item.assignee)
+      if (key && item.assignee && !labels.has(key)) {
+        labels.set(key, item.assignee.label ?? t(`actor.${item.assignee.kind}`))
+      }
+    }
+    return labels
+  }, [scoped, t])
   const labelCounts = useMemo(() => {
     const counts = new Map<string, number>()
     for (const item of scoped) {
@@ -296,6 +312,18 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
   )
 
   const selected = sorted.find((item) => item.unifiedId === selectedId)
+  /**
+   * Repos bound to the selected issue's own container. Scoped rather than
+   * workspace-wide because the GitHub loop runs against the container's repo,
+   * so offering another container's would produce a ref the adapter refuses.
+   */
+  const selectedGithubRepos = useMemo(() => {
+    if (!selected?.issueProjectId) return []
+    const container = (projects ?? []).find((project) => project.id === selected.issueProjectId)
+    return (container?.resources ?? [])
+      .filter((resource) => resource.kind === "github-repo")
+      .map((resource) => resource.repoFullName)
+  }, [selected, projects])
 
   /**
    * The rows a bulk action would reach, in display order. Built from the same
@@ -541,6 +569,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
                   projects={projects ?? []}
                   assigneeOptions={assigneeOptions}
                   running={runningUnifiedIds.has(selected.unifiedId)}
+                  githubRepos={selectedGithubRepos}
                   onAction={(action) => void runBulk([selected], action)}
                   onRequestDelete={() => setDeleteTargets([selected])}
                   onClose={() => setSelectedId(undefined)}
@@ -564,6 +593,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         onSortChange={(sort) => setSort(viewId, sort)}
         density={prefs.density}
         onDensityChange={(density) => setDensity(viewId, density)}
+        onResetView={() => resetView(viewId)}
         labelsById={labelsById}
         projectNamesById={projectNamesById}
         searchRef={searchRef}
@@ -577,6 +607,8 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
         assigneeOptions={assigneeOptions}
         onAction={(action) => void runBulk(checkedItems, action)}
         onRequestDelete={() => setDeleteTargets(checkedItems)}
+        onToggleAll={selection.toggleAll}
+        visibleCount={orderedIds.length}
         onClear={selection.clear}
       />
 
@@ -602,8 +634,14 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           labelsById={labelsById}
           projectNamesById={projectNamesById}
           runningIds={runningUnifiedIds}
+          assigneeLabels={assigneeLabels}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            // Clicking a row also moves the keyboard cursor, so `j`/`k`
+            // continue from where the eye already is rather than from the top.
+            selection.setCursorId(id)
+            setSelectedId(id)
+          }}
           checkedIds={selection.selectedIds}
           onToggleCheck={(id, modifiers) =>
             modifiers.shiftKey ? selection.extendTo(id) : selection.toggle(id)

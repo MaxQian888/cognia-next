@@ -41,6 +41,7 @@ export function LabelsTab() {
         rowColorAria: (name) => t("rowColorAria", { name }),
         deleteAria: (name) => t("deleteAria", { name }),
         reorderAria: (name) => t("reorderAria", { name }),
+        swatchAria: (index) => t(`colors.${index}`),
       }}
     />
   )

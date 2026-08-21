@@ -77,6 +77,8 @@ export interface IssueFilterBarProps {
   onSortChange: (sort: IssueSortMode) => void
   density: IssueListDensity
   onDensityChange: (density: IssueListDensity) => void
+  /** Drop every override and go back to what the view declares. */
+  onResetView?: () => void
   labelsById?: ReadonlyMap<string, LabelRow>
   projectNamesById?: ReadonlyMap<string, string>
   /** Focus target for the `/` shortcut. */
@@ -95,6 +97,7 @@ export function IssueFilterBar({
   onSortChange,
   density,
   onDensityChange,
+  onResetView,
   labelsById,
   projectNamesById,
   searchRef,
@@ -293,6 +296,20 @@ export function IssueFilterBar({
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+
+            {/*
+              Preferences persist per view, so there has to be a way back to
+              what the view itself declares — otherwise a layout picked once is
+              permanent.
+            */}
+            {onResetView ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onResetView} data-testid="issue-reset-view">
+                  {t("resetView")}
+                </DropdownMenuItem>
+              </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
 

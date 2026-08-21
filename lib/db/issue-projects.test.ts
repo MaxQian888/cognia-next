@@ -9,7 +9,6 @@ import { createIssue } from "./issues"
 import { listIssueEvents } from "./issue-events"
 import {
   addIssueProjectResource,
-  computeIssueProjectProgress,
   createIssueProject,
   deleteIssueProject,
   getIssueProject,
@@ -227,56 +226,5 @@ describe("deleteIssueProject", () => {
     })
     await deleteIssueProject(drop.id)
     expect(await getDb().issues.get(kept.id)).toBeDefined()
-  })
-})
-
-describe("computeIssueProjectProgress", () => {
-  async function seed(statuses: readonly string[]) {
-    const project = await createIssueProject({ projectId: "w1", name: "X" })
-    for (const status of statuses) {
-      await createIssue({
-        projectId: "w1",
-        issueProjectId: project.id,
-        title: status,
-        status: status as never,
-        createdBy: HUMAN,
-      })
-    }
-    return project
-  }
-
-  it("is all zeroes for an empty project", async () => {
-    const project = await createIssueProject({ projectId: "w1", name: "X" })
-    expect(await computeIssueProjectProgress(project.id)).toEqual({
-      total: 0,
-      completed: 0,
-      canceled: 0,
-      started: 0,
-      denominator: 0,
-      ratio: 0,
-    })
-  })
-
-  it("counts by category and excludes cancelled work from the denominator", async () => {
-    const project = await seed(["done", "todo", "canceled", "in_progress"])
-    expect(await computeIssueProjectProgress(project.id)).toEqual({
-      total: 4,
-      completed: 1,
-      canceled: 1,
-      started: 1,
-      // 1 done out of 3 non-cancelled.
-      denominator: 3,
-      ratio: 1 / 3,
-    })
-  })
-
-  it("reports 0 rather than dividing by zero when everything is cancelled", async () => {
-    const project = await seed(["canceled", "canceled"])
-    expect((await computeIssueProjectProgress(project.id)).ratio).toBe(0)
-  })
-
-  it("reports a complete project as 1", async () => {
-    const project = await seed(["done", "done", "canceled"])
-    expect((await computeIssueProjectProgress(project.id)).ratio).toBe(1)
   })
 })

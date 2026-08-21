@@ -93,15 +93,6 @@ export function toggleFilterValue(
   return { ...filter, [facet]: next } as IssueBoardFilter
 }
 
-/** Is this exact value engaged? Drives the rail's pressed state. */
-export function isFilterValueActive(
-  filter: IssueBoardFilter,
-  facet: "labelIds" | "priorities" | "assignees" | "sources" | "issueProjectIds",
-  value: string
-): boolean {
-  return (filter[facet] as readonly string[]).includes(value)
-}
-
 /**
  * Replace one facet outright, clearing everything else in it. The rail's
  * project rows use this: clicking a project means "show me this project",

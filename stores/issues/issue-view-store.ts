@@ -65,7 +65,13 @@ export interface IssueViewState {
 
   /** Drop every override for a view, returning it to its declared defaults. */
   resetView: (viewId: string) => void
-  /** Wipe everything — used by tests and the "reset layout" affordance. */
+  /**
+   * Wipe every view's overrides at once.
+   *
+   * Test-support only, deliberately: the UI resets ONE view at a time
+   * (`resetView`, from the Display menu), because a control that silently
+   * clears preferences you set on three other views is not one anybody wants.
+   */
   reset: () => void
 }
 
@@ -138,5 +144,3 @@ export const useIssueViewStore = create<IssueViewState>()(
     }
   )
 )
-
-export default useIssueViewStore

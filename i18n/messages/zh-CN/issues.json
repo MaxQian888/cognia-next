@@ -48,15 +48,15 @@
       "runtime-owned": "有 Agent 正在处理这个议题 —— 请等待运行结束。",
       "illegal-transition": "不允许这样移动。"
     },
-    "runningCard": "有 Agent 正在处理这个 issue",
+    "runningCard": "有 Agent 正在处理这个议题",
     "collapseColumn": "折叠{status}",
     "expandColumn": "展开{status}",
     "dnd": {
-      "instructions": "按空格键拾起 issue，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开 issue。",
+      "instructions": "按空格键拾起议题，用方向键在列之间移动，空格键放下，Esc 取消。按回车键则是打开议题。",
       "pickedUp": "已从{column}拾起 {identifier}。",
-      "over": "{identifier} 将放入{column}，第 {position} / {total} 位。",
+      "over": "{identifier} 将放入{column}，第 {position} 位，共 {total} 位。",
       "denied": "{column}不接受 {identifier}。",
-      "dropped": "{identifier} 已放入{column}，第 {position} / {total} 位。",
+      "dropped": "{identifier} 已放入{column}，第 {position} 位，共 {total} 位。",
       "cancelled": "已取消拖动，{identifier} 仍在{column}。"
     }
   },
@@ -97,7 +97,8 @@
       "label": "密度",
       "comfortable": "宽松",
       "compact": "紧凑"
-    }
+    },
+    "resetView": "重置此视图"
   },
   "detail": {
     "activity": "活动",
@@ -151,8 +152,8 @@
     "submit": "创建议题",
     "cancel": "取消",
     "noProject": "请先创建一个项目 —— 议题需要有归属。",
-    "newProject": "新建容器…",
-    "pickExistingProject": "← 选择已有容器"
+    "newProject": "新建项目…",
+    "pickExistingProject": "← 选择已有项目"
   },
   "projects": {
     "title": "项目",
@@ -198,13 +199,13 @@
     "repoTaken": "该仓库已绑定到某个项目。",
     "noRootsAvailable": "本工作区没有尚未绑定的已挂载目录。",
     "noResources": "尚未绑定任何资源。",
-    "issueCount": "Issue 数",
-    "createHint": "容器用来归组 issue，并决定它们标识符的前缀。",
+    "issueCount": "议题数",
+    "createHint": "项目用来归组议题，并决定它们标识符的前缀。",
     "keyImmutable": "不可更改",
     "deleteTitle": "删除 {name}？",
-    "deleteBody": "{count, plural, =0 {该容器下没有 issue。} other {其下 # 个 issue 会一并删除，连同它们的活动记录与运行历史。}} 以 {key}- 开头的标识符不会被重新使用。此操作无法撤销。",
+    "deleteBody": "{count, plural, =0 {该项目下没有议题。} other {其下 # 个议题会一并删除，连同它们的活动记录与运行历史。}} 以 {key}- 开头的标识符不会被重新使用。此操作无法撤销。",
     "deleted": "已删除 {name}",
-    "openIssues": "查看这些 issue",
+    "openIssues": "查看这些议题",
     "icon": "图标"
   },
   "workspace": {
@@ -230,8 +231,8 @@
     "none": "暂无标签",
     "manage": "管理标签",
     "remove": "移除 {name}",
-    "manageTitle": "Issue 标签",
-    "manageDescription": "标签作用于当前工作区的 issue。可拖动排序；5 个内置标签不可删除。",
+    "manageTitle": "议题标签",
+    "manageDescription": "标签作用于当前工作区的议题。可拖动排序；5 个内置标签不可删除。",
     "nameLabel": "名称",
     "namePlaceholder": "例如：regression",
     "colorLabel": "颜色",
@@ -241,7 +242,17 @@
     "rowNameAria": "重命名 {name}",
     "rowColorAria": "{name} 的颜色",
     "deleteAria": "删除 {name}",
-    "reorderAria": "调整 {name} 的顺序"
+    "reorderAria": "调整 {name} 的顺序",
+    "colors": {
+      "0": "红色",
+      "1": "琥珀色",
+      "2": "绿色",
+      "3": "青色",
+      "4": "蓝色",
+      "5": "紫色",
+      "6": "粉色",
+      "7": "石板灰"
+    }
   },
   "sync": {
     "now": "立即同步",
@@ -280,7 +291,13 @@
     "error": {
       "no-account": "没有已启用的 GitHub 账号。请在「设置 → 连接」中连接一个。",
       "plugin-unavailable": "GitHub delivery 插件不可用。请先启用它再试。"
-    }
+    },
+    "linkTitle": "关联 GitHub issue",
+    "linkHint": "把这个议题绑定到一个已存在的 GitHub issue —— GitHub loop 必须先有它才能运行。",
+    "linkRepo": "仓库",
+    "linkNumber": "Issue 编号",
+    "linkSubmit": "关联",
+    "linkTrigger": "关联到 GitHub…"
   },
   "assignee": {
     "agents": "Agent",
@@ -376,7 +393,7 @@
     }
   },
   "rail": {
-    "label": "Issue 导航",
+    "label": "议题导航",
     "views": "视图",
     "projects": "项目",
     "labels": "标签",
@@ -393,7 +410,7 @@
     "moreLabels": "+{count}"
   },
   "context": {
-    "open": "打开 issue",
+    "open": "打开议题",
     "delete": "删除"
   },
   "bulk": {
@@ -402,14 +419,15 @@
     "clear": "取消选择",
     "addLabel": "添加标签",
     "removeLabel": "移除标签",
-    "applied": "已更新 {count} 个 issue",
-    "skipped": "已更新 {count} 个 issue，跳过 {skipped} 个",
-    "failed": "{count} 个 issue 更新失败",
-    "nothing": "没有可更改的项"
+    "applied": "已更新 {count} 个议题",
+    "skipped": "已更新 {count} 个议题，跳过 {skipped} 个",
+    "failed": "{count} 个议题更新失败",
+    "nothing": "没有可更改的项",
+    "selectAll": "全选 {count} 项"
   },
   "delete": {
     "titleOne": "删除 {identifier}？",
-    "titleMany": "删除 {count} 个 issue？",
+    "titleMany": "删除 {count} 个议题？",
     "bodyOne": "「{title}」及其全部活动记录与运行历史都会一并删除，且无法恢复。",
     "bodyMany": "它们的活动记录与运行历史都会一并删除，且无法恢复。",
     "cancel": "保留",

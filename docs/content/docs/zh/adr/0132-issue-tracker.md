@@ -75,7 +75,7 @@ IM 卡片（`lib/issues/im/card.ts`）是纯 A2UI 构建器：恰好是**合法�
 - **`/projects` 改为 master-detail 控制台**——表格（名称、KEY、状态、负责人、目标日期、进度、issue 数）、可写入全部八个可编辑字段的检视面板、创建，以及一个会说明 issue 数量的删除，因为级联会带走其下每一个 issue、事件与运行记录。`key` 保持不可变；每一个已打印的标识符都嵌着它。
 - **拖拽图层。** 被拖卡片乘 `<DragOverlay>` 传送到 `document.body`，`zIndex 60`。原地位移时它会被列的 `overflow-y-auto` 与看板的 `overflow-x-auto` 裁剪，并因为 `opacity < 1` 在 `z-auto` 开出堆叠上下文而被后面的列**盖住**。`components/agent/workspace/board/task-board.tsx` 有逐行相同的缺陷，同法修复。
 - **键盘。** 看板的 `KeyboardSensor` 只占用空格键，让回车键留给「打开卡片」；水平移动按生命周期顺序在列之间解析——dnd-kit 的 `sortableKeyboardCoordinates` 假设只有一个可排序列表，在六个并排的列表上会判错目标。
-- **`countIssuesByStatus` 被删除而非接线**：它唯一可能的消费者是导航栏计数，而它只读本地表，永远给不出与旁边联邦看板一致的数字。
+- **十二个里有两个是删除而非接线。** `countIssuesByStatus` 唯一可能的消费者是导航栏计数，而它只读本地表，永远给不出与旁边联邦看板一致的数字。`computeIssueProjectProgress` 为一份两个真实消费者都能在已加载数据上一趟算完的统计，每个容器跑一次查询；`lib/issues/project-progress.ts` 是唯一实现。其余十个都有了 UI 路径，包括 `linkIssueToGithub`——没有它，`github-loop` 适配器会拒绝每一个不是由 GitHub 同步创建的议题，因为应用里没有任何地方能写入 `githubRef`。
 - **标签目录管理**由「设置 → 连接 → 标签」泛化而来，不是复制。`colorMode` 区分两个 scope：会话标签存自由 hex，Issue 标签存 oklch 主题令牌，原生颜色输入框会把后者无声改写成前者。
 - 移动端保持只读，并且现在会明说：行可点开只读详情，不再只是给一个打不开的行加底色；`/projects` 也补上了它从未有过的移动端页面。
 

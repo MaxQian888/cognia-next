@@ -28,7 +28,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
-import type { IssueProjectProgress } from "@/lib/issues/project-progress"
+import {
+  EMPTY_ISSUE_PROJECT_PROGRESS,
+  type IssueProjectProgress,
+} from "@/lib/issues/project-progress"
 import type { IssueProjectUpdatePatch } from "@/lib/db/issue-projects"
 import { ISSUE_PRIORITIES, ISSUE_PROJECT_STATUSES, type IssueProject } from "@/types/issues"
 import { IssueTextEditor } from "../editors/issue-text-editor"
@@ -57,6 +60,9 @@ export function ProjectInspector({
   onOpenIssues,
 }: ProjectInspectorProps) {
   const t = useTranslations("issues")
+  // One fallback, so the four read sites below cannot drift apart on what
+  // "no progress yet" means.
+  const tally = progress ?? EMPTY_ISSUE_PROJECT_PROGRESS
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="project-inspector">
@@ -165,14 +171,14 @@ export function ProjectInspector({
           </h3>
           <div className="flex items-center gap-2">
             <Progress
-              value={(progress?.ratio ?? 0) * 100}
+              value={tally.ratio * 100}
               className="h-2 flex-1"
               aria-label={t("projects.progress")}
             />
             <span className="text-xs tabular-nums text-muted-foreground">
               {t("projects.progressCount", {
-                completed: progress?.completed ?? 0,
-                total: progress?.denominator ?? 0,
+                completed: tally.completed,
+                total: tally.denominator,
               })}
             </span>
           </div>

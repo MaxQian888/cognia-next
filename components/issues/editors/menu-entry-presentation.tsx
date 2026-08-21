@@ -21,7 +21,7 @@ import type { AssigneeOption } from "../assignee-picker"
 import { IssuePriorityIcon, IssueStatusIcon } from "../issue-glyphs"
 
 /** Section id → its `issues.detail.*` heading key. */
-export const ISSUE_MENU_SECTION_LABEL_KEY: Record<IssueMenuSectionId, string> = {
+const ISSUE_MENU_SECTION_LABEL_KEY: Record<IssueMenuSectionId, string> = {
   status: "detail.status",
   priority: "detail.priority",
   assignee: "detail.assignee",

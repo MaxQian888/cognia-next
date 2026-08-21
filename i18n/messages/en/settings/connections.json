@@ -717,7 +717,17 @@
     "rowColorAria": "Color for {name}",
     "rowNameAria": "Name for {name}",
     "title": "Conversation labels",
-    "reorderAria": "Reorder {name}"
+    "reorderAria": "Reorder {name}",
+    "colors": {
+      "0": "Red",
+      "1": "Amber",
+      "2": "Green",
+      "3": "Teal",
+      "4": "Blue",
+      "5": "Purple",
+      "6": "Pink",
+      "7": "Slate"
+    }
   },
   "lark": {
     "adapterCreated": "Adapter created.",

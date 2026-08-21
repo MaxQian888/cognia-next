@@ -193,4 +193,29 @@ describe("IssueBulkToolbar", () => {
     renderToolbar({ projects: [] })
     expect(screen.queryByTestId("issue-bulk-project")).not.toBeInTheDocument()
   })
+
+  describe("select all", () => {
+    it("offers it when more rows are on screen than are ticked", () => {
+      renderToolbar({ items: [item()], visibleCount: 5, onToggleAll: jest.fn() })
+      expect(screen.getByTestId("issue-bulk-select-all")).toHaveTextContent("bulk.selectAll:5")
+    })
+
+    it("hides it once everything on screen is already ticked", () => {
+      renderToolbar({ items: [item()], visibleCount: 1, onToggleAll: jest.fn() })
+      expect(screen.queryByTestId("issue-bulk-select-all")).not.toBeInTheDocument()
+    })
+
+    it("hides it without a handler", () => {
+      renderToolbar({ items: [item()], visibleCount: 5 })
+      expect(screen.queryByTestId("issue-bulk-select-all")).not.toBeInTheDocument()
+    })
+
+    it("fires", async () => {
+      const user = userEvent.setup()
+      const onToggleAll = jest.fn()
+      renderToolbar({ items: [item()], visibleCount: 5, onToggleAll })
+      await user.click(screen.getByTestId("issue-bulk-select-all"))
+      expect(onToggleAll).toHaveBeenCalled()
+    })
+  })
 })

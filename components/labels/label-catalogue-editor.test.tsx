@@ -55,6 +55,7 @@ const STRINGS = {
   empty: "No labels yet",
   builtinBadge: "Built-in",
   rowNameAria: (name: string) => `Rename ${name}`,
+  swatchAria: (index: number) => `Colour ${index}`,
   rowColorAria: (name: string) => `Colour for ${name}`,
   deleteAria: (name: string) => `Delete ${name}`,
   reorderAria: (name: string) => `Reorder ${name}`,
@@ -150,6 +151,12 @@ describe("LabelCatalogueEditor", () => {
       expect(screen.queryByLabelText("Colour for bug")).toHaveAttribute("role", "radiogroup")
       fireEvent.click(screen.getByTestId("cat-color-l1-2"))
       expect(mockUpdateLabel).toHaveBeenCalledWith("l1", { color: LABEL_COLORS[2] })
+    })
+
+    it("names each swatch instead of announcing its raw oklch token", () => {
+      renderEditor({ labels: [label()], colorMode: "palette" })
+      // `aria-label={color}` used to read "oklch(0.65 0.19 25)" aloud.
+      expect(screen.getByTestId("cat-color-l1-0")).toHaveAttribute("aria-label", "Colour 0")
     })
 
     it("hides the create-form colour field in palette mode", () => {

@@ -88,16 +88,11 @@ jest.mock("./list/issue-bulk-toolbar", () => ({
     return items.length > 0 ? <div data-testid="bulk-stub">{items.length}</div> : null
   },
 }))
-let contextMenuItems: string[] = []
+let contextMenuProps: Record<string, unknown> = {}
 jest.mock("./issue-context-menu", () => ({
-  IssueContextMenu: ({
-    item,
-    children,
-  }: {
-    item: { unifiedId: string }
-    children: React.ReactNode
-  }) => {
-    contextMenuItems.push(item.unifiedId)
+  IssueContextMenu: (props: Record<string, unknown>) => {
+    contextMenuProps = props
+    const { item, children } = props as { item: { unifiedId: string }; children: React.ReactNode }
     return <div data-testid={`context-${item.unifiedId}`}>{children}</div>
   },
 }))
@@ -239,7 +234,7 @@ beforeEach(() => {
   bulkProps = {}
   deleteDialogProps = {}
   detailProps = {}
-  contextMenuItems = []
+  contextMenuProps = {}
   toastCalls.length = 0
   activeProjectId = "w1"
   projectsForTest = EMPTY_ROWS
@@ -347,6 +342,21 @@ describe("IssueConsole", () => {
   })
 
   describe("rail wiring", () => {
+    it("scopes the my-agents view to the viewer's own Characters and squads", async () => {
+      viewerForTest = { selfKey: "human:self", agentKeys: ["agent:a1"] }
+      mockListAll.mockResolvedValue({
+        items: [
+          item({ assignee: { kind: "agent", id: "a1", label: "Scout" } }),
+          item({ sourceId: "i2", assignee: { kind: "agent", id: "stranger" } }),
+        ],
+        errors: [],
+      })
+      render(<IssueConsole />)
+      await waitFor(() =>
+        expect((railProps.viewCounts as Record<string, number>)["my-agents"]).toBe(1)
+      )
+    })
+
     it("counts every view from the unfiltered scope", async () => {
       mockListAll.mockResolvedValue({
         items: [item(), item({ sourceId: "i2" })],
@@ -354,6 +364,33 @@ describe("IssueConsole", () => {
       })
       render(<IssueConsole />)
       await waitFor(() => expect((railProps.viewCounts as Record<string, number>).all).toBe(2))
+    })
+
+    it("applies the ?project= deep link once, and only once", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole initialProjectId="p1" />)
+      await waitFor(() =>
+        expect((filterBarProps.filter as { issueProjectIds: string[] }).issueProjectIds).toEqual([
+          "p1",
+        ])
+      )
+      // Taking it off must stick: re-applying on every render would make the
+      // container filter impossible to remove.
+      callProp(
+        filterBarProps,
+        "onToggleProject" in railProps ? "onFilterChange" : "onFilterChange",
+        {
+          query: "",
+          labelIds: [],
+          priorities: [],
+          assignees: [],
+          sources: [],
+          issueProjectIds: [],
+        }
+      )
+      await waitFor(() =>
+        expect((filterBarProps.filter as { issueProjectIds: string[] }).issueProjectIds).toEqual([])
+      )
     })
 
     it("turns a project click into a filter, not a navigation", async () => {
@@ -409,6 +446,13 @@ describe("IssueConsole", () => {
       expect(await screen.findByTestId("issue-agents-working")).toBeInTheDocument()
     })
 
+    it("hides the degraded badge when every source is healthy", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      expect(screen.queryByTestId("issue-source-errors")).not.toBeInTheDocument()
+    })
+
     it("surfaces a degraded source instead of silently under-reporting", async () => {
       mockListAll.mockResolvedValue({ items: [], errors: [new Error("boom")] })
       render(<IssueConsole />)
@@ -417,6 +461,42 @@ describe("IssueConsole", () => {
   })
 
   describe("drops", () => {
+    it("persists a same-column reorder", async () => {
+      mockListAll.mockResolvedValue({
+        items: [item(), item({ sourceId: "i2" })],
+        errors: [],
+      })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", {
+        type: "reorder",
+        unifiedId: "local:i1",
+        targetIndex: 1,
+      })
+      await waitFor(() => expect(mockReorderIssues).toHaveBeenCalled())
+    })
+
+    it("reports a denial returned by the write boundary itself, not just by the reducer", async () => {
+      mockMoveIssue.mockResolvedValueOnce("runtime-owned")
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", { type: "move", unifiedId: "local:i1", to: "done" })
+      await waitFor(() =>
+        expect(toastCalls).toContainEqual(["error", "board.denied.runtime-owned:source.local"])
+      )
+    })
+
+    it("stays quiet when the row simply vanished under the drop", async () => {
+      mockMoveIssue.mockResolvedValueOnce("issue-not-found")
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onDrop", { type: "move", unifiedId: "local:i1", to: "done" })
+      await waitFor(() => expect(mockMoveIssue).toHaveBeenCalled())
+      expect(toastCalls).toEqual([])
+    })
+
     it("writes a move through the guarded store call", async () => {
       mockListAll.mockResolvedValue({ items: [item()], errors: [] })
       render(<IssueConsole />)
@@ -551,6 +631,24 @@ describe("IssueConsole", () => {
       expect(screen.queryByTestId("delete-dialog-stub")).not.toBeInTheDocument()
     })
 
+    it("clears the inspector and the selection once the cascade lands", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onSelect", "local:i1")
+      await screen.findByTestId("detail-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      callProp(listProps, "onToggleCheck", "local:i1", { shiftKey: false })
+      callProp(bulkProps, "onRequestDelete")
+      await screen.findByTestId("delete-dialog-stub")
+      await act(async () => {
+        await (deleteDialogProps.onConfirm as () => Promise<void>)()
+      })
+      await waitFor(() => expect(screen.queryByTestId("detail-stub")).not.toBeInTheDocument())
+      expect(screen.queryByTestId("bulk-stub")).not.toBeInTheDocument()
+    })
+
     it("opens with the issues it would delete", async () => {
       mockListAll.mockResolvedValue({ items: [item()], errors: [] })
       render(<IssueConsole />)
@@ -565,20 +663,80 @@ describe("IssueConsole", () => {
   })
 
   describe("context menu", () => {
+    /**
+     * The wrapper's props, read off the element it returns.
+     *
+     * Calling `renderItemMenu` builds an element; it does not render one, so
+     * the mock component's own capture stays empty. Reading `.props` is what
+     * actually proves what the console handed the menu.
+     */
+    function invokeMenu(props: Record<string, unknown>, target: UnifiedIssueItem) {
+      const build = props.renderItemMenu as (
+        item: UnifiedIssueItem,
+        children: React.ReactNode
+      ) => React.ReactElement<Record<string, unknown>>
+      return build(target, null).props
+    }
+
     it("wraps every card so the shared menu is reachable from the board", async () => {
-      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      const card = item()
+      mockListAll.mockResolvedValue({ items: [card], errors: [] })
       render(<IssueConsole />)
       await screen.findByTestId("board-stub")
-      expect(typeof boardProps.renderItemMenu).toBe("function")
+      expect(invokeMenu(boardProps, card).item).toBe(card)
     })
 
     it("wraps every row in the list too", async () => {
-      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      const card = item()
+      mockListAll.mockResolvedValue({ items: [card], errors: [] })
       render(<IssueConsole />)
       await screen.findByTestId("board-stub")
       callProp(filterBarProps, "onLayoutChange", "list")
       await screen.findByTestId("list-stub")
-      expect(typeof listProps.renderItemMenu).toBe("function")
+      expect(invokeMenu(listProps, card).item).toBe(card)
+    })
+
+    it("hands write menus LOCAL labels only, never GitHub's projections", async () => {
+      // Applying a `github:` id to a local issue would store a reference that
+      // resolves only while that GitHub row happens to be on the board.
+      const card = item()
+      labelsForTest = [
+        { id: "lbl_local", scope: "issue", name: "bug", sortOrder: 0, createdAt: 0, updatedAt: 0 },
+      ]
+      mockListAll.mockResolvedValue({
+        items: [card, item({ kind: "github", sourceId: "o/r#1", labelIds: ["github:remote"] })],
+        errors: [],
+      })
+      render(<IssueConsole />)
+      await screen.findByTestId("rail-stub")
+
+      const menuLabels = (invokeMenu(boardProps, card).labels as Array<{ id: string }>).map(
+        (label) => label.id
+      )
+      expect(menuLabels).toEqual(["lbl_local"])
+
+      // The rail keeps the merged catalogue, because filtering by a GitHub
+      // label is legitimate.
+      const railLabels = (railProps.labels as Array<{ id: string }>).map((label) => label.id)
+      expect(railLabels).toEqual(expect.arrayContaining(["lbl_local", "github:remote"]))
+    })
+
+    it("routes a single-issue action through the same reporting path as a bulk one", async () => {
+      const card = item()
+      mockListAll.mockResolvedValue({ items: [card], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      const menu = invokeMenu(boardProps, card)
+      await act(async () => {
+        ;(menu.onAction as (a: unknown) => void)({ kind: "priority", to: "low" })
+      })
+      expect(mockApplyBulk).toHaveBeenCalledWith(
+        [card],
+        { kind: "priority", to: "low" },
+        { kind: "human" },
+        expect.any(Set)
+      )
+      expect(toastCalls).toContainEqual(["success", "bulk.applied:1"])
     })
   })
 
@@ -596,6 +754,20 @@ describe("IssueConsole", () => {
       callProp(boardProps, "onSelect", "local:i1")
       expect(await screen.findByTestId("detail-stub")).toBeInTheDocument()
       expect(detailProps.labelsById).toBeInstanceOf(Map)
+    })
+
+    it("still re-reads the sources when the refetch itself fails", async () => {
+      mockRunSync.mockRejectedValueOnce(new Error("offline"))
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(boardProps, "onSelect", "local:i1")
+      await screen.findByTestId("detail-stub")
+      const before = mockListAll.mock.calls.length
+      await act(async () => {
+        await (detailProps.onWritebackCompleted as () => Promise<void>)()
+      })
+      await waitFor(() => expect(mockListAll.mock.calls.length).toBeGreaterThan(before))
     })
 
     it("round-trips a GitHub write-back through a full sync", async () => {
@@ -626,6 +798,17 @@ describe("IssueConsole", () => {
     })
   })
 
+  describe("view preferences", () => {
+    it("resets one view back to what it declares", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("board-stub")
+      callProp(filterBarProps, "onLayoutChange", "list")
+      await screen.findByTestId("list-stub")
+      callProp(filterBarProps, "onResetView")
+      expect(await screen.findByTestId("board-stub")).toBeInTheDocument()
+    })
+  })
+
   describe("keyboard", () => {
     it("opens the create dialog on `c`", async () => {
       render(<IssueConsole />)
@@ -634,6 +817,38 @@ describe("IssueConsole", () => {
         document.dispatchEvent(new KeyboardEvent("keydown", { key: "c", bubbles: true }))
       })
       expect(await screen.findByTestId("create-dialog-stub")).toBeInTheDocument()
+    })
+
+    it("opens the cursor row on Enter", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      // The cursor walks the rows, so wait for the fan-out to deliver them —
+      // the board stub renders with zero items too.
+      await waitFor(() => expect((boardProps.items as unknown[]).length).toBe(1))
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true }))
+      })
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+      })
+      expect(await screen.findByTestId("detail-stub")).toBeInTheDocument()
+    })
+
+    it("ticks the cursor row on x, and Escape clears the selection", async () => {
+      mockListAll.mockResolvedValue({ items: [item()], errors: [] })
+      render(<IssueConsole />)
+      await waitFor(() => expect((boardProps.items as unknown[]).length).toBe(1))
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "j", bubbles: true }))
+      })
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }))
+      })
+      expect(await screen.findByTestId("bulk-stub")).toBeInTheDocument()
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+      })
+      await waitFor(() => expect(screen.queryByTestId("bulk-stub")).not.toBeInTheDocument())
     })
 
     it("does not open it while typing", async () => {

@@ -36,9 +36,14 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { createIssue } from "@/lib/db/issues"
 import { createIssueProject, listTakenProjectKeys } from "@/lib/db/issue-projects"
-import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
 import type { IssueActor, IssueProject, IssueStatus } from "@/types/issues"
 import { AssigneePicker } from "./assignee-picker"
+import {
+  EMPTY_PROJECT_IDENTITY,
+  ProjectIdentityFields,
+  resolveProjectIdentity,
+  type ProjectIdentityState,
+} from "./projects/project-identity-fields"
 
 /** Sentinel for the picker's "new container" row; `Select` needs a value. */
 const NEW_PROJECT_VALUE = "__new__"
@@ -79,9 +84,7 @@ export function CreateIssueDialog({
   const [description, setDescription] = useState("")
   const [assignee, setAssignee] = useState<IssueActor | null>(null)
   const [issueProjectId, setIssueProjectId] = useState<string>("")
-  const [projectName, setProjectName] = useState("")
-  const [projectKeyInput, setProjectKeyInput] = useState("")
-  const [keyTouched, setKeyTouched] = useState(false)
+  const [identity, setIdentity] = useState<ProjectIdentityState>(EMPTY_PROJECT_IDENTITY)
   const [takenKeys, setTakenKeys] = useState<ReadonlySet<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -100,33 +103,32 @@ export function CreateIssueDialog({
   const selectedProjectId = issueProjectId || (projects[0]?.id ?? "")
 
   /**
-   * The key is DERIVED from the project name until the user edits it, rather
-   * than mirrored into state by an effect. Suggesting it in an effect meant a
-   * `setState` in the effect body — a cascading render on every keystroke, and
-   * the source of truth living in two places at once.
+   * Name + key validation is shared with the projects console's own create
+   * dialog. It used to be duplicated here, and the copies had already drifted:
+   * this one passed `{example}` into `projects.keyHint` and the other did not,
+   * so the other rendered the raw key path.
    */
-  const derivedKey = useMemo(
-    () => (projectName.trim() ? deriveProjectKey(projectName, takenKeys) : ""),
-    [projectName, takenKeys]
+  const identityVerdict = useMemo(
+    () => resolveProjectIdentity(identity, takenKeys),
+    [identity, takenKeys]
   )
-  const projectKey = keyTouched ? projectKeyInput : derivedKey
-
-  const keyInvalid = needsProject && projectKey.length > 0 && !isValidProjectKey(projectKey)
-  const keyTaken = needsProject && takenKeys.has(projectKey)
   const canSubmit =
     title.trim().length > 0 &&
     !busy &&
-    (needsProject
-      ? projectName.trim().length > 0 && !keyInvalid && !keyTaken
-      : Boolean(selectedProjectId))
+    (needsProject ? identityVerdict.valid : Boolean(selectedProjectId))
 
   async function submit() {
     setBusy(true)
     setError(null)
     try {
       const containerId = needsProject
-        ? (await createIssueProject({ projectId, name: projectName, key: projectKey || undefined }))
-            .id
+        ? (
+            await createIssueProject({
+              projectId,
+              name: identity.name.trim(),
+              key: identityVerdict.key || undefined,
+            })
+          ).id
         : selectedProjectId
 
       const issue = await createIssue({
@@ -142,9 +144,7 @@ export function CreateIssueDialog({
       setTitle("")
       setDescription("")
       setAssignee(null)
-      setProjectName("")
-      setProjectKeyInput("")
-      setKeyTouched(false)
+      setIdentity(EMPTY_PROJECT_IDENTITY)
       onCreated?.(issue.id)
       onOpenChange(false)
     } catch (cause) {
@@ -176,37 +176,13 @@ export function CreateIssueDialog({
                   {t("create.pickExistingProject")}
                 </Button>
               ) : null}
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="issue-project-name">{t("projects.nameLabel")}</Label>
-                <Input
-                  id="issue-project-name"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                  placeholder={t("projects.namePlaceholder")}
-                  data-testid="create-issue-project-name"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="issue-project-key">{t("projects.keyLabel")}</Label>
-                <Input
-                  id="issue-project-key"
-                  value={projectKey}
-                  onChange={(event) => {
-                    setKeyTouched(true)
-                    setProjectKeyInput(event.target.value.toUpperCase())
-                  }}
-                  maxLength={5}
-                  className="w-28 font-mono"
-                  data-testid="create-issue-project-key"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {keyInvalid
-                    ? t("projects.keyInvalid")
-                    : keyTaken
-                      ? t("projects.keyTaken")
-                      : t("projects.keyHint", { example: `${projectKey || "KEY"}-1` })}
-                </p>
-              </div>
+              <ProjectIdentityFields
+                value={identity}
+                onChange={setIdentity}
+                takenKeys={takenKeys}
+                idPrefix="create-issue-project"
+                disabled={busy}
+              />
             </>
           ) : (
             <div className="flex flex-col gap-1.5">

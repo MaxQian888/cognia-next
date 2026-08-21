@@ -636,3 +636,37 @@ describe("editing", () => {
     expect(screen.getByTestId("issue-detail-title")).toBeDisabled()
   })
 })
+
+/*
+ * `linkIssueToGithub` had no caller anywhere in the app, which left the
+ * `github-loop` adapter permanently refusing with `no-github-ref` for any
+ * issue not created by the GitHub sync.
+ */
+describe("linking to GitHub", () => {
+  it("offers the control for a local issue in a container with a bound repo", () => {
+    render(<IssueDetailPanel item={item()} githubRepos={["acme/mercury"]} />)
+    expect(screen.getByTestId("issue-detail-link-github")).toBeInTheDocument()
+  })
+
+  it("hides it when the container has no repo bound", () => {
+    render(<IssueDetailPanel item={item()} />)
+    expect(screen.queryByTestId("issue-detail-link-github")).not.toBeInTheDocument()
+  })
+
+  it("hides it on a federated row, which already has its own identity", () => {
+    render(
+      <IssueDetailPanel
+        item={item({ kind: "github", origin: { deepLinkHref: "x", sourceLabel: "GitHub" } })}
+        githubRepos={["acme/mercury"]}
+      />
+    )
+    expect(screen.queryByTestId("issue-detail-link-github")).not.toBeInTheDocument()
+  })
+
+  it("opens the dialog", async () => {
+    const user = userEvent.setup()
+    render(<IssueDetailPanel item={item()} githubRepos={["acme/mercury"]} />)
+    await user.click(screen.getByTestId("issue-detail-link-github"))
+    expect(await screen.findByTestId("link-github-issue-dialog")).toBeInTheDocument()
+  })
+})

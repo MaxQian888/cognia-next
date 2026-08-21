@@ -58,6 +58,7 @@ import { useMenuEntryPresentation } from "./editors/menu-entry-presentation"
 import { IssuePropertyMenu } from "./editors/issue-property-menu"
 import { IssueTextEditor } from "./editors/issue-text-editor"
 import { GithubWritebackDialog, type GithubWritebackKind } from "./github-writeback-dialog"
+import { LinkGithubIssueDialog } from "./link-github-issue-dialog"
 import { IssuePriorityIcon, IssueStatusIcon } from "./issue-glyphs"
 import { RunIssueDialog } from "./run-issue-dialog"
 
@@ -71,6 +72,12 @@ export interface IssueDetailPanelProps {
   assigneeOptions?: readonly AssigneeOption[]
   /** A run is in flight, which locks the status menu. */
   running?: boolean
+  /**
+   * GitHub repos bound to this issue's container. Offering the link control
+   * only when one exists keeps it from producing a ref the run adapter would
+   * immediately refuse.
+   */
+  githubRepos?: readonly string[]
   /**
    * Applies one edit. Routed through the caller so the outcome is reported
    * once, in one place, rather than by every control that can write.
@@ -90,6 +97,7 @@ export function IssueDetailPanel({
   projects = [],
   assigneeOptions = [],
   running = false,
+  githubRepos = [],
   onAction,
   onRequestDelete,
   onClose,
@@ -98,6 +106,7 @@ export function IssueDetailPanel({
   const t = useTranslations("issues")
   const [writeback, setWriteback] = useState<GithubWritebackKind | null>(null)
   const [runOpen, setRunOpen] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
 
   // Only local rows have an activity trail in our own table.
   const parsed = parseUnifiedIssueId(item.unifiedId)
@@ -357,6 +366,24 @@ export function IssueDetailPanel({
           </>
         ) : null}
 
+        {/*
+          A local issue with no `githubRef` cannot be run by the GitHub loop —
+          the adapter refuses with `no-github-ref` — and nothing else in the app
+          could ever set one.
+        */}
+        {localId && !item.origin.sourceLabel && githubRepos.length > 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 w-fit gap-1.5 text-xs"
+            onClick={() => setLinkOpen(true)}
+            data-testid="issue-detail-link-github"
+          >
+            <ExternalLinkIcon className="size-3.5" />
+            {t("writeback.linkTrigger")}
+          </Button>
+        ) : null}
+
         <OpenInProIde item={item} references={fileReferences} />
 
         {item.kind !== "local" ? (
@@ -526,6 +553,17 @@ export function IssueDetailPanel({
                 }}
                 issueId={localId}
                 identifier={item.identifier}
+              />
+            ) : null}
+            {linkOpen ? (
+              <LinkGithubIssueDialog
+                open
+                onOpenChange={(next) => {
+                  if (!next) setLinkOpen(false)
+                }}
+                issueId={localId}
+                repos={githubRepos}
+                onLinked={onWritebackCompleted}
               />
             ) : null}
           </>

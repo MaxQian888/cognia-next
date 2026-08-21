@@ -17,8 +17,16 @@
 import enMessages from "./messages/en.json"
 import zhMessages from "./messages/zh-CN.json"
 
+import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
 import { ISSUE_GROUP_BY_OPTIONS } from "@/lib/issues/board-model"
+import type { IssueFilterFacet } from "@/lib/issues/filter-chips"
+import { AGENT_TASK_RUN_ADAPTER_ID } from "@/lib/issues/run/agent-task-adapter"
+import { AGENT_TEAM_RUN_ADAPTER_ID } from "@/lib/issues/run/agent-team-adapter"
+import { GITHUB_LOOP_RUN_ADAPTER_ID } from "@/lib/issues/run/github-loop-adapter"
+import type { IssueRunRefusalReason } from "@/lib/issues/run/types"
+import type { IssueMoveDenial } from "@/lib/issues/state-machine"
 import { ISSUE_LIST_DENSITIES, ISSUE_SORT_MODES, BUILTIN_ISSUE_VIEWS } from "@/lib/issues/views"
+import type { IssueActorKind, IssueEventKind } from "@/types/issues"
 import {
   ISSUE_PRIORITIES,
   ISSUE_PROJECT_STATUSES,
@@ -28,50 +36,101 @@ import {
 } from "@/types/issues"
 import { ISSUE_SOURCE_KINDS } from "@/types/issues/unified"
 
-/** The three reasons `canMoveIssue` can return. */
-const MOVE_DENIALS = ["federated-read-only", "runtime-owned", "illegal-transition"] as const
+/**
+ * Unions that have no runtime constant, written as an exhaustive map.
+ *
+ * `Record<Union, true>` is the point: a missing member is a TYPE error at
+ * build time, and a typo is one too. A hand-typed `as const` array would
+ * compile happily while quietly dropping the member whose message is missing —
+ * which is exactly the failure this file exists to catch.
+ */
+function exhaustive<K extends string>(map: Record<K, true>): K[] {
+  return Object.keys(map) as K[]
+}
 
-/** Every `IssueRunRefusalReason`. */
-const RUN_REFUSALS = [
-  "assignee-kind-mismatch",
-  "assignee-not-found",
-  "team-busy",
-  "no-github-ref",
-  "no-github-repo",
-  "desktop-only",
-  "no-github-account",
-  "run-active",
-  "issue-finished",
-  "adapter-missing",
-] as const
+/** Every reason `canMoveIssue` can return. */
+const MOVE_DENIALS = exhaustive<IssueMoveDenial>({
+  "federated-read-only": true,
+  "runtime-owned": true,
+  "illegal-transition": true,
+})
+
+/** Every reason an `IssueRunAdapter` can refuse with. */
+const RUN_REFUSALS = exhaustive<IssueRunRefusalReason>({
+  "assignee-kind-mismatch": true,
+  "assignee-not-found": true,
+  "team-busy": true,
+  "no-github-ref": true,
+  "no-github-repo": true,
+  "desktop-only": true,
+  "no-github-account": true,
+  "run-active": true,
+  "issue-finished": true,
+  "adapter-missing": true,
+})
 
 /** Every `IssueEvent["kind"]`, which the activity trail renders one line for. */
-const EVENT_KINDS = [
-  "created",
-  "status_changed",
-  "assigned",
+const EVENT_KINDS = exhaustive<IssueEventKind>({
+  created: true,
+  status_changed: true,
+  assigned: true,
+  unassigned: true,
+  reassigned: true,
+  priority_changed: true,
+  label_added: true,
+  label_removed: true,
+  title_changed: true,
+  description_changed: true,
+  project_changed: true,
+  commented: true,
+  run_started: true,
+  run_succeeded: true,
+  run_failed: true,
+  artifact_linked: true,
+  github_linked: true,
+  github_write_back: true,
+})
+
+/** Every `TaskMoveError` the Agent Team board localizes on a refused drop. */
+const TASK_MOVE_DENIALS = exhaustive<TaskMoveError>({
+  "blocked-column": true,
+  "runtime-owned": true,
+  "illegal-transition": true,
+  "task-not-found": true,
+})
+
+/** Every actor kind, plus the two sentinels the pickers render. */
+const ACTOR_KEYS = [
+  ...exhaustive<IssueActorKind>({ human: true, agent: true, team: true }),
   "unassigned",
-  "reassigned",
-  "priority_changed",
-  "label_added",
-  "label_removed",
-  "title_changed",
-  "description_changed",
-  "project_changed",
-  "commented",
-  "run_started",
-  "run_succeeded",
-  "run_failed",
-  "artifact_linked",
-  "github_linked",
-  "github_write_back",
-] as const
+  "noLead",
+]
 
 /** The screen-reader announcements the board builds at drag time. */
 const DND_KEYS = ["instructions", "pickedUp", "over", "denied", "dropped", "cancelled"] as const
 
-/** The facet names the filter chips localize. */
-const FILTER_FACETS = ["query", "priority", "labels", "assignee", "source", "project"] as const
+/**
+ * The facet names the filter chips localize.
+ *
+ * Keyed by `IssueFilterFacet` so a new facet on `IssueBoardFilter` fails to
+ * compile here; the VALUES differ from the keys because the message catalogue
+ * names them in the singular.
+ */
+const FILTER_FACET_KEYS = Object.values({
+  query: "query",
+  priorities: "priority",
+  labelIds: "labels",
+  assignees: "assignee",
+  sources: "source",
+  issueProjectIds: "project",
+} satisfies Record<IssueFilterFacet, string>)
+
+/** The three registered adapters, by the id `IssueRun.adapterId` carries. */
+const ADAPTER_IDS = [
+  AGENT_TASK_RUN_ADAPTER_ID,
+  AGENT_TEAM_RUN_ADAPTER_ID,
+  GITHUB_LOOP_RUN_ADAPTER_ID,
+]
 
 const LOCALES = { en: enMessages, "zh-CN": zhMessages } as Record<string, unknown>
 
@@ -95,8 +154,10 @@ const DYNAMIC_KEYS: string[] = [
   ...ISSUE_PRIORITIES.map((v) => `issues.priority.${v}`),
   ...ISSUE_SOURCE_KINDS.map((v) => `issues.source.${v}`),
   ...ISSUE_PROJECT_STATUSES.map((v) => `issues.projects.status.${v}`),
-  // Each adapter carries a name AND a description; the run dialog renders both.
-  ...ISSUE_RUN_KINDS.flatMap((v) => [
+  // Keyed by `IssueRun.adapterId`, NOT by `kind` — the detail panel builds the
+  // key from the adapter id, and the two are separate fields that only happen
+  // to agree today.
+  ...ADAPTER_IDS.flatMap((v) => [
     `issues.run.adapter.${v}.name`,
     `issues.run.adapter.${v}.description`,
   ]),
@@ -108,10 +169,11 @@ const DYNAMIC_KEYS: string[] = [
   ...ISSUE_GROUP_BY_OPTIONS.map((v) => `issues.toolbar.groupBy.${v}`),
   ...ISSUE_SORT_MODES.map((v) => `issues.toolbar.sort.${v}`),
   ...ISSUE_LIST_DENSITIES.map((v) => `issues.toolbar.density.${v}`),
-  ...FILTER_FACETS.map((v) => `issues.toolbar.facet.${v}`),
+  ...FILTER_FACET_KEYS.map((v) => `issues.toolbar.facet.${v}`),
   ...BUILTIN_ISSUE_VIEWS.map((view) => `issues.views.${view.labelKey}`),
-  // Actor kinds, plus the two sentinels the pickers render.
-  ...["human", "agent", "team", "unassigned", "noLead"].map((v) => `issues.actor.${v}`),
+  ...ACTOR_KEYS.map((v) => `issues.actor.${v}`),
+  // The Agent Team board refuses drops with its own denial vocabulary.
+  ...TASK_MOVE_DENIALS.map((v) => `agentTeamsWorkspace.tasks.board.denied.${v}`),
   // Section headings the property menus reuse for their own labels.
   ...["status", "priority", "assignee", "labels", "project"].map((v) => `issues.detail.${v}`),
 ]
@@ -127,12 +189,21 @@ describe("issue tracker dynamic message keys", () => {
     })
   }
 
-  it("covers every status the board can render", () => {
-    // A guard on the guard: if `ISSUE_STATUSES` grows, this list grows with it
-    // because it is derived, and the per-key assertions above then fail loudly
-    // instead of the UI printing the raw enum value.
-    expect(DYNAMIC_KEYS.filter((key) => key.startsWith("issues.status."))).toHaveLength(
-      ISSUE_STATUSES.length
-    )
+  describe("the list itself stays derived", () => {
+    it("covers every status the board can render", () => {
+      expect(DYNAMIC_KEYS.filter((key) => key.startsWith("issues.status."))).toHaveLength(
+        ISSUE_STATUSES.length
+      )
+    })
+
+    it("keys the run adapters by adapterId, which is what the panel builds from", () => {
+      // They agree today only because every adapter picked `id === kind`. If
+      // one ever diverges, the messages must follow the id, not the kind.
+      expect([...ADAPTER_IDS].sort()).toEqual([...ISSUE_RUN_KINDS].sort())
+    })
+
+    it("covers every event kind the activity trail can be handed", () => {
+      expect(EVENT_KINDS).toHaveLength(18)
+    })
   })
 })

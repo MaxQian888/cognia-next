@@ -2,7 +2,6 @@ import {
   clearSelection,
   EMPTY_ISSUE_SELECTION,
   pruneSelection,
-  selectOnly,
   selectRange,
   stepCursor,
   toggleSelectAll,
@@ -35,12 +34,6 @@ describe("toggleSelection", () => {
     const input = state(["a"])
     toggleSelection(input, "b")
     expect([...input.selected]).toEqual(["a"])
-  })
-})
-
-describe("selectOnly", () => {
-  it("replaces the whole selection", () => {
-    expect([...selectOnly(state(["a", "b"]), "c").selected]).toEqual(["c"])
   })
 })
 

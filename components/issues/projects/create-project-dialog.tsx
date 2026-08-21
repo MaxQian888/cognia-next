@@ -128,7 +128,7 @@ export function CreateProjectDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            {t("delete.cancel")}
+            {t("create.cancel")}
           </Button>
           <Button
             disabled={!verdict.valid || busy}

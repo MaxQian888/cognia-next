@@ -135,6 +135,7 @@ export function BoardColumn({
   const cards = items.map((item) => {
     const card = (
       <IssueCard
+        key={item.unifiedId}
         item={item}
         labels={item.labelIds
           .map((id) => labelsById?.get(id))
@@ -145,6 +146,8 @@ export function BoardColumn({
         onSelect={onSelect}
       />
     )
+    // The key lives on the card AND on whatever the menu wraps it in, because
+    // only one of the two is the element this array actually yields.
     return renderItemMenu ? renderItemMenu(item, card) : card
   })
 

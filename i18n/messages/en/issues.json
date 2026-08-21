@@ -97,7 +97,8 @@
       "label": "Density",
       "comfortable": "Comfortable",
       "compact": "Compact"
-    }
+    },
+    "resetView": "Reset this view"
   },
   "detail": {
     "activity": "Activity",
@@ -151,8 +152,8 @@
     "submit": "Create issue",
     "cancel": "Cancel",
     "noProject": "Create a project first — issues need somewhere to live.",
-    "newProject": "New container…",
-    "pickExistingProject": "← Pick an existing container"
+    "newProject": "New project…",
+    "pickExistingProject": "← Pick an existing project"
   },
   "projects": {
     "title": "Projects",
@@ -199,10 +200,10 @@
     "noRootsAvailable": "No unbound directories are mounted on this workspace.",
     "noResources": "No resources bound yet.",
     "issueCount": "Issues",
-    "createHint": "A container groups issues and gives them their identifier prefix.",
+    "createHint": "A project groups issues and gives them their identifier prefix.",
     "keyImmutable": "Cannot be changed",
     "deleteTitle": "Delete {name}?",
-    "deleteBody": "{count, plural, =0 {The container has no issues.} one {Its # issue goes too, with its activity trail and run history.} other {Its # issues go too, with their activity trails and run histories.}} Identifiers starting {key}- will not be reused. This cannot be undone.",
+    "deleteBody": "{count, plural, =0 {The project has no issues.} one {Its # issue goes too, with its activity trail and run history.} other {Its # issues go too, with their activity trails and run histories.}} Identifiers starting {key}- will not be reused. This cannot be undone.",
     "deleted": "Deleted {name}",
     "openIssues": "View these issues",
     "icon": "Icon"
@@ -241,7 +242,17 @@
     "rowNameAria": "Rename {name}",
     "rowColorAria": "Colour for {name}",
     "deleteAria": "Delete {name}",
-    "reorderAria": "Reorder {name}"
+    "reorderAria": "Reorder {name}",
+    "colors": {
+      "0": "Red",
+      "1": "Amber",
+      "2": "Green",
+      "3": "Teal",
+      "4": "Blue",
+      "5": "Purple",
+      "6": "Pink",
+      "7": "Slate"
+    }
   },
   "sync": {
     "now": "Sync now",
@@ -280,7 +291,13 @@
     "error": {
       "no-account": "No enabled GitHub account is connected. Connect one in Settings → Connections.",
       "plugin-unavailable": "The GitHub delivery plugin is unavailable. Enable it, then try again."
-    }
+    },
+    "linkTitle": "Link to a GitHub issue",
+    "linkHint": "Binds this issue to an existing GitHub issue, which is what the GitHub loop needs before it can run.",
+    "linkRepo": "Repository",
+    "linkNumber": "Issue number",
+    "linkSubmit": "Link",
+    "linkTrigger": "Link to GitHub…"
   },
   "assignee": {
     "agents": "Agents",
@@ -405,7 +422,8 @@
     "applied": "{count, plural, one {# issue updated} other {# issues updated}}",
     "skipped": "{count, plural, one {# issue updated} other {# issues updated}}, {skipped} skipped",
     "failed": "{count, plural, one {# issue failed} other {# issues failed}}",
-    "nothing": "Nothing to change"
+    "nothing": "Nothing to change",
+    "selectAll": "Select all {count}"
   },
   "delete": {
     "titleOne": "Delete {identifier}?",

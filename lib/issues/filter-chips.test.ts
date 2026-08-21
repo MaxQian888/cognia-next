@@ -1,7 +1,6 @@
 import { EMPTY_ISSUE_FILTER } from "./board-model"
 import {
   collectActiveFilterChips,
-  isFilterValueActive,
   removeFilterChip,
   setSoleFilterValue,
   toggleFilterValue,
@@ -121,14 +120,6 @@ describe("toggleFilterValue", () => {
   it("does not touch sibling facets", () => {
     const filter = { ...EMPTY_ISSUE_FILTER, priorities: ["urgent" as const] }
     expect(toggleFilterValue(filter, "labelIds", "l1").priorities).toEqual(["urgent"])
-  })
-})
-
-describe("isFilterValueActive", () => {
-  it("reports engaged and unengaged values", () => {
-    const filter = { ...EMPTY_ISSUE_FILTER, issueProjectIds: ["p1"] }
-    expect(isFilterValueActive(filter, "issueProjectIds", "p1")).toBe(true)
-    expect(isFilterValueActive(filter, "issueProjectIds", "p2")).toBe(false)
   })
 })
 

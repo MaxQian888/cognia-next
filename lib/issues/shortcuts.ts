@@ -10,17 +10,14 @@
  * Pure so the "is the user typing?" rule — the part that actually breaks, and
  * breaks silently, by swallowing a keystroke inside a search box — is testable
  * without a DOM event loop.
+ *
+ * There is deliberately no `e`-for-edit: Enter already opens the inspector,
+ * where every property is editable, so a second key to the same destination is
+ * a binding that looks like it does something and does not.
  */
 
 export type IssueShortcutAction =
-  | "create"
-  | "focusSearch"
-  | "next"
-  | "previous"
-  | "open"
-  | "toggleSelect"
-  | "edit"
-  | "clearSelection"
+  "create" | "focusSearch" | "next" | "previous" | "open" | "toggleSelect" | "clearSelection"
 
 /** The bare-key bindings, in the order the help text lists them. */
 const KEY_MAP: Record<string, IssueShortcutAction> = {
@@ -32,7 +29,6 @@ const KEY_MAP: Record<string, IssueShortcutAction> = {
   ArrowUp: "previous",
   Enter: "open",
   x: "toggleSelect",
-  e: "edit",
   Escape: "clearSelection",
 }
 

@@ -23,7 +23,6 @@ import type {
   IssueActor,
 } from "@/types/issues"
 import { deriveProjectKey, isValidProjectKey } from "@/lib/issues/identifier"
-import { computeProgress, type IssueProjectProgress } from "@/lib/issues/project-progress"
 import { getDb } from "./schema"
 import { deleteIssueCounter } from "./issue-counters"
 import { deleteIssueEventsForIssues } from "./issue-events"
@@ -235,25 +234,4 @@ export async function deleteIssueProject(id: string): Promise<void> {
       await db.issueProjects.delete(id)
     }
   )
-}
-
-/**
- * Re-exported from the pure module so existing importers keep working. The
- * shape and every field's meaning live in `lib/issues/project-progress.ts`.
- */
-export type { IssueProjectProgress }
-
-/**
- * Progress for the project header bar. Derived on read rather than stored, so
- * it can never drift from the issues it summarises.
- *
- * One container, one query. The projects console does NOT use this — it
- * already holds the workspace's issues and calls `computeProgressFromIssues`
- * directly, which is one pass instead of one query per container.
- */
-export async function computeIssueProjectProgress(
-  issueProjectId: string
-): Promise<IssueProjectProgress> {
-  const issues = await getDb().issues.where("issueProjectId").equals(issueProjectId).toArray()
-  return computeProgress(issues)
 }
