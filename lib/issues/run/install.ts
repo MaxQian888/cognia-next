@@ -14,7 +14,7 @@
  * `bootIssueTracker` (`components/providers/initializers/issue-tracker-initializer.tsx`).
  */
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { listIssueRuns } from "@/lib/db/issue-runs"
 import { createAgentTaskRunAdapter } from "./agent-task-adapter"
@@ -102,7 +102,10 @@ export function installIssueRunBridge(options: InstallIssueRunBridgeOptions = {}
   // Engine tables (Dexie).
   let unsubscribeLive: (() => void) | null = null
   try {
-    const subscription = liveQuery(engineChangeSignature).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const subscription = Dexie.liveQuery(engineChangeSignature).subscribe({
       next: () => scheduleReconcile(),
       error: onError,
     })

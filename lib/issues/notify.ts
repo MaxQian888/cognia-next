@@ -21,7 +21,7 @@
  * stays mechanical.
  */
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import type { Issue, IssueActor, IssueEvent, IssueEventPayload } from "@/types/issues"
 import type { NotificationInput, NotificationLevel } from "@/types/notifications"
 import { getDb } from "@/lib/db/schema"
@@ -237,7 +237,10 @@ export function installIssueNotifications(
   const onError = options.onError ?? (() => {})
   let disposed = false
 
-  const subscription = liveQuery(() =>
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const subscription = Dexie.liveQuery(() =>
     getDb().issueEvents.where("ts").above(watermark).toArray()
   ).subscribe({
     next: (events: IssueEvent[]) => {

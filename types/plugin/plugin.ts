@@ -2257,6 +2257,14 @@ export interface PluginHostContextAPI {
   capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
   git: import("@/lib/plugin/api/git-api").PluginGitAPI
   goals: import("@/lib/plugin/api/goal-api").PluginGoalAPI
+  /**
+   * Read-only view of this plugin's lifecycle-hook contribution: whether it is
+   * live, which hooks it registered, and the exact settings.json entry that
+   * binds one to a lifecycle event. Registration itself stays the return value
+   * of `activate()` — a second registration path would reintroduce the
+   * two-sources-of-truth problem the hook registry removed.
+   */
+  hooks: import("@/lib/plugin/api/hooks-api").PluginHooksAPI
   /** ADR-0045 plan hub — read/author/approve/run `AgentPlan`s. */
   plans: import("@/lib/plugin/api/plan-api").PluginPlanAPI
   memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
