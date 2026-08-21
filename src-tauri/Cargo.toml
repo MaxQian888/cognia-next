@@ -246,7 +246,8 @@ tracing-opentelemetry = { version = "0.33", optional = true }
 # file ever named; reqwest's `socks` / `rustls` features pull them transitively.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
-rquickjs = "0.12.2"
+# ADR-0067 Tier C — `rquickjs` moved to `crates/cognia-net` with
+# `provider_diagnostics`, its only user; no `src-tauri/src` file references it.
 bytes = "1"
 
 # Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved

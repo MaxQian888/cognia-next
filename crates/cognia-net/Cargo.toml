@@ -45,6 +45,11 @@ futures-util = { version = "0.3", default-features = false }
 sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 dirs = "6"
 regex = "1"
+# ADR-0067 Tier C — `provider_diagnostics` sandboxes user-authored balance
+# scripts in QuickJS. Nothing else in the tree links it.
+rquickjs = "0.12.2"
+# Balance-token storage for the diagnostics scripts.
+cognia-secrets = { path = "../cognia-secrets" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -15,6 +15,10 @@
 //!   as it arrives. Backs the Ops Controller live-event command (ADR-0059): an
 //!   SSE body never completes, so the buffered `proxy_http_request` escape
 //!   hatch delivers nothing at all rather than merely delivering it late.
+//! - [`provider_diagnostics`] — connectivity + balance-script diagnostics
+//!   for a configured provider, running user-authored scripts in a QuickJS
+//!   sandbox with a hard wall-time limit. `app_lib` keeps the three
+//!   `provider_diagnostics_*` command shells so this crate stays tauri-free.
 //! - [`outbound_pii`] — fail-closed PII detection for text crossing native
 //!   network boundaries.
 
@@ -22,6 +26,7 @@ pub mod http_download;
 pub mod inbound_policy;
 pub mod ndjson_stream;
 pub mod outbound_pii;
+pub mod provider_diagnostics;
 pub mod proxy_config;
 pub mod request_cancellation;
 pub mod sse_stream;
