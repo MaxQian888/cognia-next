@@ -19,6 +19,13 @@
     "typeLabel": "Type"
   },
   "bulk": {
+    "archive": "Archive",
+    "archiveConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Archive",
+      "description": "This removes {count} memories from recall. They stay in the archive and can be restored.",
+      "title": "Archive selected memories?"
+    },
     "clear": "Clear selection",
     "delete": "Delete",
     "deleteConfirm": {
@@ -49,6 +56,33 @@
     "title": "Resolve conflicting memories"
   },
   "detail": {
+    "activity": {
+      "actions": {
+        "conflict": "Marked conflicting",
+        "created": "Created",
+        "deleted": "Deleted",
+        "invalidated": "Archived",
+        "learn-allowed": "Learning allowed",
+        "learn-denied": "Learning denied",
+        "pinned": "Pinned",
+        "promoted": "Marked verified",
+        "recall-allowed": "Recall allowed",
+        "recall-denied": "Recall denied",
+        "revised": "Revised",
+        "unpinned": "Unpinned"
+      },
+      "audit": "Audit",
+      "empty": "Nothing recorded yet.",
+      "evidence": "Evidence",
+      "kinds": {
+        "agent-finding": "Agent finding",
+        "checkpoint": "Checkpoint",
+        "external": "External source",
+        "file": "File",
+        "manual": "Entered by hand",
+        "message": "Chat message"
+      }
+    },
     "auditTitle": "Audit history",
     "cancel": "Cancel",
     "close": "Close",
@@ -84,6 +118,14 @@
     "replacedBy": "Replaced by",
     "replacedByGone": "The replacement was deleted.",
     "save": "Save",
+    "sections": {
+      "activity": "Activity",
+      "content": "Memory",
+      "metrics": "Metrics",
+      "origin": "Origin",
+      "status": "Status",
+      "tags": "Tags"
+    },
     "source": "Source",
     "tagsLabel": "Tags",
     "tagsPlaceholder": "comma, separated, tags",
@@ -95,7 +137,57 @@
     "mutation_failed": "The memory operation failed — please try again",
     "not_found": "This memory no longer exists",
     "pii_blocked": "Blocked: the text contains personal information",
+    "policy_denied": "A memory policy blocked this change",
+    "scope_denied": "That scope isn't allowed for this memory",
     "temporary": "Memory is in temporary mode"
+  },
+  "external": {
+    "agents": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode",
+      "pi": "Pi"
+    },
+    "cancel": "Cancel",
+    "confirm": {
+      "action": "Overwrite",
+      "description": "This rewrites {path} on disk. The previous version is kept alongside it as a .bak file.",
+      "title": "Overwrite this file?"
+    },
+    "desktopOnly": {
+      "description": "External agent memory lives on disk, so it can only be read from the desktop app.",
+      "title": "Desktop only"
+    },
+    "edit": "Edit",
+    "editorLabel": "File contents",
+    "empty": {
+      "description": "Nothing was discovered for Claude Code, Codex, OpenCode, or Pi on this machine.",
+      "title": "No external agent memory found"
+    },
+    "loadError": "Could not read this file.",
+    "loading": "Loading…",
+    "notCreated": "Not created yet",
+    "readOnly": "Read-only",
+    "refresh": "Rescan",
+    "save": "Save",
+    "scopes": {
+      "auto": "Auto memory",
+      "global": "Global",
+      "managed": "Managed policy",
+      "memories": "Agent-managed",
+      "project": "Project",
+      "user": "User"
+    },
+    "stats": {
+      "editable": "Editable",
+      "total": "Files found"
+    },
+    "subtitle": "Memory and instruction files that external coding agents keep on this machine. Editing these changes what those agents remember.",
+    "toast": {
+      "saveFailed": "Could not save this file",
+      "saved": "Saved",
+      "savedWithBackup": "Saved — previous version kept as {backup}"
+    }
   },
   "governance": {
     "clean": "Clean",
@@ -104,6 +196,7 @@
     "legacy": "Legacy / no evidence",
     "markConflict": "Mark conflict",
     "markVerified": "Mark verified",
+    "pending_instruction": "Awaiting review",
     "supported": "Evidence-backed",
     "unknown": "Unknown",
     "unreviewed": "Unreviewed",
@@ -113,24 +206,72 @@
     "accessedRelative": "used {time}",
     "add": "Add",
     "addFirst": "Add your first memory",
+    "archive": "Archive",
+    "archiveConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Archive",
+      "description": "It stops being recalled but stays in the archive, and you can restore it later.",
+      "title": "Archive this memory?"
+    },
     "cancelEdit": "Cancel",
+    "clearFiltered": "Delete everything in this view…",
+    "clearFilteredConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "description": "This permanently removes every memory currently listed. This can't be undone.",
+      "title": "Delete {count, plural, one {# memory} other {# memories}}?"
+    },
     "clearFilters": "Clear filters",
     "clearTags": "Clear tags",
+    "clearedToast": "{count, plural, one {# memory deleted} other {# memories deleted}}",
+    "copied": "Copied",
+    "copyText": "Copy text",
     "delete": "Delete",
+    "deleteForever": "Delete permanently",
     "detailTitle": "Memory details",
+    "display": {
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "density": "Density",
+      "label": "Display",
+      "sort": "Sort by"
+    },
     "edit": "Edit",
     "editLabel": "Edit memory text",
     "empty": {
       "description": "As you chat, durable facts about you are saved here. You can also use /remember.",
       "title": "No memories yet"
     },
+    "filter": {
+      "clear": "Clear filters",
+      "label": "Filter",
+      "none": "Nothing to filter in this view",
+      "provenances": "Source",
+      "scopes": "Scope",
+      "tags": "Tags",
+      "types": "Type"
+    },
+    "importanceValue": "Importance {value}",
     "invalidated": "archived",
+    "moreActions": "More actions",
+    "moreTags": "+{count}",
     "noResults": {
       "description": "No memory matches the current filters.",
       "title": "No matching memories"
     },
+    "openSettings": "Memory settings",
+    "piiRedacted": "Saved — personal details were redacted first.",
     "pin": "Pin",
     "provenanceLabel": "Source type",
+    "retrieval": {
+      "activeJobs": "{count, plural, =0 {no jobs} one {# job} other {# jobs}}",
+      "disabled": "Recall paused",
+      "hybrid": "Hybrid recall",
+      "keyword": "Keyword recall",
+      "label": "Retrieval",
+      "openPanel": "Retrieval controls",
+      "probing": "Checking recall…"
+    },
     "saveEdit": "Save",
     "scopeLabel": "Scope",
     "searchLabel": "Search memories",
@@ -148,6 +289,7 @@
       "active": "Active"
     },
     "subtitle": "What the assistant remembers about you.",
+    "summary": "{active} active · {pinned} pinned · {conflicts} in conflict · {coverage}% indexed",
     "tabs": {
       "app": "App memory",
       "external": "External agent memory"
@@ -155,7 +297,14 @@
     "tagFilterLabel": "Tags:",
     "title": "Memory",
     "unpin": "Unpin",
-    "viewSource": "View source"
+    "viewSource": "View source",
+    "views": {
+      "all": "All",
+      "archived": "Archived",
+      "conflicts": "Conflicts",
+      "needsReview": "Needs review",
+      "pinned": "Pinned"
+    }
   },
   "provenance": {
     "all": "All sources",

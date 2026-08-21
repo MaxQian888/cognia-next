@@ -19,6 +19,13 @@
     "typeLabel": "类型"
   },
   "bulk": {
+    "archive": "归档",
+    "archiveConfirm": {
+      "cancel": "取消",
+      "confirm": "归档",
+      "description": "这会让 {count} 条记忆不再被召回。它们仍保留在归档中，可以恢复。",
+      "title": "归档所选记忆？"
+    },
     "clear": "清除选择",
     "delete": "删除",
     "deleteConfirm": {
@@ -49,6 +56,33 @@
     "title": "处置冲突记忆"
   },
   "detail": {
+    "activity": {
+      "actions": {
+        "conflict": "标记为冲突",
+        "created": "创建",
+        "deleted": "删除",
+        "invalidated": "归档",
+        "learn-allowed": "允许学习",
+        "learn-denied": "拒绝学习",
+        "pinned": "置顶",
+        "promoted": "标记为已核实",
+        "recall-allowed": "允许召回",
+        "recall-denied": "拒绝召回",
+        "revised": "修改",
+        "unpinned": "取消置顶"
+      },
+      "audit": "审计",
+      "empty": "暂无记录。",
+      "evidence": "证据",
+      "kinds": {
+        "agent-finding": "Agent 发现",
+        "checkpoint": "检查点",
+        "external": "外部来源",
+        "file": "文件",
+        "manual": "手动录入",
+        "message": "会话消息"
+      }
+    },
     "auditTitle": "审计历史",
     "cancel": "取消",
     "close": "关闭",
@@ -84,6 +118,14 @@
     "replacedBy": "已被替换为",
     "replacedByGone": "替换它的记忆已被删除。",
     "save": "保存",
+    "sections": {
+      "activity": "活动",
+      "content": "内容",
+      "metrics": "指标",
+      "origin": "归属",
+      "status": "状态",
+      "tags": "标签"
+    },
     "source": "来源",
     "tagsLabel": "标签",
     "tagsPlaceholder": "用逗号分隔的标签",
@@ -95,7 +137,57 @@
     "mutation_failed": "记忆操作失败，请重试",
     "not_found": "这条记忆已不存在",
     "pii_blocked": "已拦截：文本包含个人隐私信息",
+    "policy_denied": "记忆策略拦截了本次改动",
+    "scope_denied": "该记忆不允许使用这个作用域",
     "temporary": "记忆当前处于临时模式"
+  },
+  "external": {
+    "agents": {
+      "claude-code": "Claude Code",
+      "codex": "Codex",
+      "opencode": "OpenCode",
+      "pi": "Pi"
+    },
+    "cancel": "取消",
+    "confirm": {
+      "action": "覆盖",
+      "description": "这会重写磁盘上的 {path}，原版本会以 .bak 文件保留在同目录。",
+      "title": "覆盖该文件？"
+    },
+    "desktopOnly": {
+      "description": "外部 Agent 记忆存放在磁盘上，只能在桌面应用中读取。",
+      "title": "仅桌面端可用"
+    },
+    "edit": "编辑",
+    "editorLabel": "文件内容",
+    "empty": {
+      "description": "本机没有找到 Claude Code、Codex、OpenCode 或 Pi 的记忆文件。",
+      "title": "未发现外部 Agent 记忆"
+    },
+    "loadError": "无法读取该文件。",
+    "loading": "加载中…",
+    "notCreated": "尚未创建",
+    "readOnly": "只读",
+    "refresh": "重新扫描",
+    "save": "保存",
+    "scopes": {
+      "auto": "自动记忆",
+      "global": "全局",
+      "managed": "企业托管",
+      "memories": "Agent 托管",
+      "project": "项目级",
+      "user": "用户级"
+    },
+    "stats": {
+      "editable": "可编辑",
+      "total": "发现文件"
+    },
+    "subtitle": "外部编码 Agent 存放在本机的记忆与指令文件。在这里编辑会直接改变那些 Agent 记住的内容。",
+    "toast": {
+      "saveFailed": "保存失败",
+      "saved": "已保存",
+      "savedWithBackup": "已保存——原版本备份为 {backup}"
+    }
   },
   "governance": {
     "clean": "干净",
@@ -104,6 +196,7 @@
     "legacy": "旧记忆 / 无证据",
     "markConflict": "标记冲突",
     "markVerified": "标记已验证",
+    "pending_instruction": "待审阅",
     "supported": "有证据",
     "unknown": "未知",
     "unreviewed": "未审核",
@@ -113,24 +206,72 @@
     "accessedRelative": "{time}使用",
     "add": "新增",
     "addFirst": "添加第一条记忆",
+    "archive": "归档",
+    "archiveConfirm": {
+      "cancel": "取消",
+      "confirm": "归档",
+      "description": "它将不再被召回，但会保留在归档中，之后可以恢复。",
+      "title": "归档这条记忆？"
+    },
     "cancelEdit": "取消",
+    "clearFiltered": "删除当前视图的全部记忆…",
+    "clearFilteredConfirm": {
+      "cancel": "取消",
+      "confirm": "永久删除",
+      "description": "这会永久删除当前列出的所有记忆，且无法撤销。",
+      "title": "删除 {count} 条记忆？"
+    },
     "clearFilters": "清除筛选",
     "clearTags": "清除标签",
+    "clearedToast": "已删除 {count} 条记忆",
+    "copied": "已复制",
+    "copyText": "复制内容",
     "delete": "删除",
+    "deleteForever": "永久删除",
     "detailTitle": "记忆详情",
+    "display": {
+      "comfortable": "宽松",
+      "compact": "紧凑",
+      "density": "密度",
+      "label": "显示",
+      "sort": "排序方式"
+    },
     "edit": "编辑",
     "editLabel": "编辑记忆内容",
     "empty": {
       "description": "随着对话进行，关于你的耐久事实会保存在这里。也可以用 /remember。",
       "title": "暂无记忆"
     },
+    "filter": {
+      "clear": "清除筛选",
+      "label": "筛选",
+      "none": "当前视图没有可筛选的项",
+      "provenances": "来源",
+      "scopes": "作用域",
+      "tags": "标签",
+      "types": "类型"
+    },
+    "importanceValue": "重要度 {value}",
     "invalidated": "已归档",
+    "moreActions": "更多操作",
+    "moreTags": "+{count}",
     "noResults": {
       "description": "没有记忆符合当前筛选条件。",
       "title": "没有匹配的记忆"
     },
+    "openSettings": "记忆设置",
+    "piiRedacted": "已保存——其中的个人信息已先行脱敏。",
     "pin": "置顶",
     "provenanceLabel": "来源类型",
+    "retrieval": {
+      "activeJobs": "{count, plural, =0 {无任务} other {# 个任务}}",
+      "disabled": "召回已暂停",
+      "hybrid": "混合召回",
+      "keyword": "关键词召回",
+      "label": "检索",
+      "openPanel": "检索控制",
+      "probing": "正在检测召回方式…"
+    },
     "saveEdit": "保存",
     "scopeLabel": "作用域",
     "searchLabel": "搜索记忆",
@@ -148,6 +289,7 @@
       "active": "活跃"
     },
     "subtitle": "助手记住的关于你的内容。",
+    "summary": "{active} 条活跃 · {pinned} 条置顶 · {conflicts} 条冲突 · 已建索引 {coverage}%",
     "tabs": {
       "app": "应用记忆",
       "external": "外部 Agent 记忆"
@@ -155,7 +297,14 @@
     "tagFilterLabel": "标签：",
     "title": "记忆",
     "unpin": "取消置顶",
-    "viewSource": "查看来源"
+    "viewSource": "查看来源",
+    "views": {
+      "all": "全部",
+      "archived": "已归档",
+      "conflicts": "冲突",
+      "needsReview": "待审阅",
+      "pinned": "置顶"
+    }
   },
   "provenance": {
     "all": "所有来源",
