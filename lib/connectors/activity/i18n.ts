@@ -109,6 +109,10 @@ const EN: ActivityI18n = {
       goal: "Goal",
       team: "Team",
       scheduled: "Scheduled run",
+      // Named for the commitment, not the engine: what a person handed over is
+      // a task, and the run carrying it out at any moment may be any of the
+      // kinds above.
+      delegation: "Delegated task",
     })[kind],
   activityLabel: (activity) =>
     ({
@@ -184,6 +188,7 @@ const ZH: ActivityI18n = {
       goal: "目标",
       team: "团队",
       scheduled: "定时任务",
+      delegation: "委派任务",
     })[kind],
   activityLabel: (activity) =>
     ({

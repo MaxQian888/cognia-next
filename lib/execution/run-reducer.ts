@@ -40,13 +40,27 @@ function allowedActions(
   // that lands, offering the button would render a control that always fails.
   // See the note in `run-control.ts`.
   if (TERMINAL.has(status)) return ["open_details"]
+  // Kinds with a real steering track: the agent SDK's live input lane
+  // (`agent-turn`), the team coordinator's durable receipts (`team`), and a
+  // delegation, which fans out to whichever of those is carrying it. Every
+  // other kind would render a button whose handler throws.
+  const steerable = kind === "agent-turn" || kind === "team" || kind === "delegation"
+  // `steer` sits LAST before `open_details` deliberately. Follow-up
+  // registrations take the first two verbs, and losing `stop` to make room for
+  // a verb that also has a text-prefix route would be a bad trade.
+  const withSteer = (actions: RunControlAction[]): RunControlAction[] =>
+    steerable ? [...actions.slice(0, -1), "steer", "open_details"] : actions
   switch (status) {
     case "paused":
       // `team` joined this list once a durable AgentTeam run got a control
       // handler that can actually pause and resume it. Before that the kind
       // was routed to the workflow handler, which only knows how to cancel —
       // so offering resume would have been a button that always failed.
-      return kind === "plan" || kind === "goal" || kind === "agent-turn" || kind === "team"
+      return kind === "plan" ||
+        kind === "goal" ||
+        kind === "agent-turn" ||
+        kind === "team" ||
+        kind === "delegation"
         ? ["resume", "stop", "open_details"]
         : ["stop", "open_details"]
     case "recovery_required":
@@ -54,11 +68,13 @@ function allowedActions(
     case "waiting":
       return hasPendingInterrupt
         ? ["approve", "deny", "stop", "open_details"]
-        : ["stop", "open_details"]
+        : withSteer(["stop", "open_details"])
     default:
-      return kind === "plan" || kind === "goal" || kind === "team"
-        ? ["pause", "stop", "open_details"]
-        : ["stop", "open_details"]
+      return withSteer(
+        kind === "plan" || kind === "goal" || kind === "team" || kind === "delegation"
+          ? ["pause", "stop", "open_details"]
+          : ["stop", "open_details"]
+      )
   }
 }
 

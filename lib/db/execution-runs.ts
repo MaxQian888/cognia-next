@@ -1,4 +1,4 @@
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { reduceRunEvents } from "@/lib/execution/run-reducer"
 import type {
   ExecutionRun,
@@ -79,6 +79,41 @@ export async function listExecutionRuns(query: ExecutionRunQuery = {}): Promise<
     )
     .limit(limit)
     .toArray()
+}
+
+/**
+ * Every run that belongs to `parentRunId`, newest first.
+ *
+ * Indexed since v176. Before that the column existed but the question cost a
+ * full scan, so nothing asked it — which is why a delegation could not roll its
+ * children onto one card and `retry` could not link a replacement run.
+ */
+export async function listChildExecutionRuns(
+  parentRunId: string,
+  options: { statuses?: readonly ExecutionRunStatus[] } = {}
+): Promise<ExecutionRun[]> {
+  const statuses = options.statuses ? new Set(options.statuses) : undefined
+  const rows = await getDb().executionRuns.where("parentRunId").equals(parentRunId).toArray()
+  return rows
+    .filter((run) => !statuses || statuses.has(run.status))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+}
+
+/**
+ * Adopt an already-created run into a parent.
+ *
+ * The delegation path cannot always create the child itself: an agent turn is
+ * minted by the runtime before anyone knows the turn will be promoted to
+ * background work. Adoption is how a run that started inline joins the
+ * delegation that later took it over, instead of the delegation having to
+ * pre-empt a decision it does not yet have the evidence for.
+ */
+export async function adoptExecutionRun(runId: string, parentRunId: string): Promise<boolean> {
+  if (runId === parentRunId) return false
+  const run = await getExecutionRun(runId)
+  if (!run || run.parentRunId === parentRunId) return false
+  await getDb().executionRuns.update(runId, { parentRunId })
+  return true
 }
 
 export async function createExecutionRunBinding(
@@ -255,7 +290,10 @@ export const runEventJournal: RunEventJournal = {
   getSnapshot: getExecutionRunSnapshot,
 
   subscribe(runId, listener) {
-    const subscription = liveQuery(() => getExecutionRunSnapshot(runId)).subscribe({
+    // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+    // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+    // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+    const subscription = Dexie.liveQuery(() => getExecutionRunSnapshot(runId)).subscribe({
       next: listener,
       error: () => listener(undefined),
     })

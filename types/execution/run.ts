@@ -2,7 +2,24 @@
 
 import type { ConversationDeliveryTarget } from "@/types/connectors/event"
 
-export type ExecutionRunKind = "agent-turn" | "workflow" | "plan" | "goal" | "team" | "scheduled"
+export type ExecutionRunKind =
+  | "agent-turn"
+  | "workflow"
+  | "plan"
+  | "goal"
+  | "team"
+  | "scheduled"
+  /**
+   * A unit of asynchronous work a person handed over: it reports back, can be
+   * steered, stopped, and handed to a human, and it OWNS the runs that carry
+   * it out (they point at it through `parentRunId`).
+   *
+   * Deliberately not a synonym for any of the kinds above. Those name the
+   * ENGINE that executes; this one names the COMMITMENT, which outlives any
+   * single engine attempt — a delegation whose agent turn fails is still an
+   * open delegation, and the retry is a new child, not a resurrected run.
+   */
+  | "delegation"
 
 export type ExecutionRunStatus =
   | "queued"
@@ -69,7 +86,22 @@ export interface RunProgressSnapshot {
 }
 
 export type RunControlAction =
-  "stop" | "pause" | "resume" | "approve" | "deny" | "retry" | "open_details"
+  | "stop"
+  | "pause"
+  | "resume"
+  | "approve"
+  | "deny"
+  | "retry"
+  | "open_details"
+  /**
+   * Redirect work that is already running, without stopping it.
+   *
+   * The message itself travels in `RunControlCommand.steerMessage` and is
+   * NEVER journalled: `control.accepted` carries only a receipt id. The run
+   * journal is a projection surface read by IM cards, so free user text in it
+   * would be a redaction hole in every platform at once.
+   */
+  | "steer"
 
 export interface RunArtifactSnapshot {
   id: string
@@ -201,6 +233,14 @@ export interface RunControlCommand {
   expectedRevision: number
   actor: ExecutionRunInitiator
   interruptId?: string
+  /**
+   * Free text for `steer` (and the optional note on a handoff `resume`).
+   *
+   * Held on the command rather than in the journal on purpose — see
+   * `RunControlAction["steer"]`. Handlers pass it to the engine's own steering
+   * seam, which owns the PII gate for it.
+   */
+  steerMessage?: string
 }
 
 export interface RunPresentationCapabilities {
@@ -289,7 +329,15 @@ export interface ExecutionRunInterrupt {
   id: string
   runId: string
   projectId?: string
-  type: "tool_approval" | "workflow_approval"
+  type:
+    | "tool_approval"
+    | "workflow_approval"
+    /** A team run's plan gate, asked through the surface that started the run. */
+    | "plan_approval"
+    /** The run is parked on a person; resolving it hands the work back. */
+    | "human_handoff"
+    /** A delegation held back from starting (quiet hours, operator sign-off). */
+    | "delegation_approval"
   status: ExecutionRunInterruptStatus
   title: string
   toolName?: string

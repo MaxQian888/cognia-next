@@ -12,7 +12,31 @@ import type {
   RunControlCommand,
 } from "@/types/execution/run"
 
-export type RunControlHandler = (command: RunControlCommand) => Promise<void>
+/**
+ * What a handler can tell the control gate about what it did.
+ *
+ * `void` keeps every existing handler valid. The one thing a handler needs to
+ * report is a steering RECEIPT id — never the steering text, which must not
+ * enter the journal (see {@link RunControlCommand.steerMessage}).
+ */
+export interface RunControlHandlerOutcome {
+  steerReceiptIds?: readonly string[]
+}
+
+export type RunControlHandler = (
+  command: RunControlCommand
+) => Promise<void | RunControlHandlerOutcome>
+
+/**
+ * Why a steer could not be applied as asked.
+ *
+ * Named rather than collapsed into a generic refusal because each one implies a
+ * different recovery: a caller that knows the run has no live lane can queue
+ * the text as an ordinary turn, whereas a caller told only "rejected" has to
+ * choose between dropping the user's message and double-sending it.
+ */
+export type SteerDegradedReason =
+  "provider_unsupported" | "not_admitted" | "pii_blocked" | "store_failed" | "no_active_run"
 
 export interface RunControlResult {
   accepted: boolean
@@ -33,8 +57,20 @@ export interface RunControlResult {
      * refusal the user cannot act on.
      */
     | "unsupported_for_kind"
+    /**
+     * The run kind CAN steer, but this run could not right now. The message is
+     * intact and the caller still owns it — that is the whole point of
+     * distinguishing this from a refusal.
+     */
+    | "steer_degraded"
+    /** The command itself is malformed (a `steer` with no message, say). */
+    | "invalid_command"
   duplicate?: boolean
   currentRevision?: number
+  /** Set with `steer_degraded`. */
+  degradedReason?: SteerDegradedReason
+  /** Durable receipts a successful steer produced, for correlation. */
+  steerReceiptIds?: readonly string[]
 }
 
 const handlers = new Map<ExecutionRunKind, RunControlHandler>()
@@ -219,6 +255,9 @@ async function executeRunControlCommandUnlocked(
   if (command.expectedRevision !== run.currentRevision) {
     return reject(command, "revision_conflict", run.currentRevision)
   }
+  if (command.action === "steer" && !command.steerMessage?.trim()) {
+    return reject(command, "invalid_command", run.currentRevision)
+  }
 
   let interrupt: ExecutionRunInterrupt | undefined
   if (command.action === "approve" || command.action === "deny") {
@@ -254,12 +293,30 @@ async function executeRunControlCommandUnlocked(
 
   const handler = handlers.get(run.kind)
   if (!handler) return reject(command, "unsupported", run.currentRevision)
+  let outcome: void | RunControlHandlerOutcome
   try {
-    await handler(command)
+    outcome = await handler(command)
   } catch (error) {
     // A handler that refuses because the KIND cannot do this action says so,
     // instead of every throw collapsing into a generic engine refusal the user
     // has no way to act on.
+    if (error instanceof Error && error.name === "SteerDegradedError") {
+      const degradedReason = (error as { reason?: SteerDegradedReason }).reason ?? "no_active_run"
+      // `run.degraded` — not `control.rejected` alone — because the card's own
+      // lifecycle vocabulary already knows how to say "this happened, in a
+      // reduced form"; a silent downgrade is what this replaces.
+      await runEventJournal
+        .append(
+          command.runId,
+          semanticRunEvent(
+            "run.degraded",
+            { action: command.action, reason: degradedReason },
+            { sourceEventId: `control:${command.idempotencyKey}:degraded` }
+          )
+        )
+        .catch(() => undefined)
+      return { ...(await reject(command, "steer_degraded", run.currentRevision)), degradedReason }
+    }
     const reason =
       error instanceof Error && error.name === "UnsupportedForKindError"
         ? "unsupported_for_kind"
@@ -283,15 +340,27 @@ async function executeRunControlCommandUnlocked(
       )
     )
   }
+  const steerReceiptIds = outcome?.steerReceiptIds ?? []
   const accepted = await runEventJournal.append(
     run.id,
     semanticRunEvent(
       "control.accepted",
-      { action: command.action, actorId: actorId(command.actor) },
+      {
+        action: command.action,
+        actorId: actorId(command.actor),
+        // Receipt ids only. `command.steerMessage` is free user text and the
+        // journal is projected onto twelve platforms' cards — putting it here
+        // would be one redaction hole in all of them at once.
+        ...(steerReceiptIds.length > 0 ? { steerReceiptIds: [...steerReceiptIds] } : {}),
+      },
       { ts: now, sourceEventId }
     )
   )
-  return { accepted: true, currentRevision: accepted.seq }
+  return {
+    accepted: true,
+    currentRevision: accepted.seq,
+    ...(steerReceiptIds.length > 0 ? { steerReceiptIds } : {}),
+  }
 }
 
 export async function executeRunControlCommand(

@@ -423,3 +423,105 @@ describe("retry is declared but never offered", () => {
     }
   })
 })
+
+describe("steer is offered only where a steering track exists", () => {
+  function snapshotFor(
+    kind: "agent-turn" | "team" | "delegation" | "workflow" | "plan" | "goal",
+    status: "running" | "paused" | "waiting" = "running"
+  ) {
+    return reduceRunEvents(
+      {
+        id: `execution:${kind}:r1`,
+        kind,
+        sourceId: "r1",
+        title: "t",
+        status,
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+  }
+
+  it.each(["agent-turn", "team", "delegation"] as const)("offers steer for %s", (kind) => {
+    expect(snapshotFor(kind).allowedActions).toContain("steer")
+  })
+
+  it.each(["workflow", "plan", "goal"] as const)(
+    "does not offer steer for %s, whose handler would throw",
+    (kind) => {
+      expect(snapshotFor(kind).allowedActions).not.toContain("steer")
+    }
+  )
+
+  it("keeps steer behind stop so a follow-up registration never loses stop", () => {
+    // `buildFollowUpItems` takes the first two verbs. Putting steer earlier
+    // would spend a slot on the one verb that also has a text-prefix route,
+    // and drop the one that does not.
+    const actions = snapshotFor("team").allowedActions
+    expect(actions.indexOf("steer")).toBeGreaterThan(actions.indexOf("stop"))
+    expect(actions[actions.length - 1]).toBe("open_details")
+  })
+
+  it("drops steer while a pending approval owns the card", () => {
+    const snapshot = reduceRunEvents(
+      {
+        id: "execution:team:r2",
+        kind: "team",
+        sourceId: "r2",
+        title: "t",
+        status: "running",
+        currentRevision: 0,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      [
+        {
+          id: "e1",
+          runId: "execution:team:r2",
+          seq: 1,
+          ts: 2,
+          type: "interrupt.requested",
+          visibility: "summary",
+          payload: { interruptId: "i-1" },
+        },
+      ]
+    )
+    expect(snapshot.allowedActions).toEqual(["approve", "deny", "stop", "open_details"])
+  })
+})
+
+describe("delegation allowed actions", () => {
+  it("offers pause and resume, because the handler forwards both to the children", () => {
+    const running = reduceRunEvents(
+      {
+        id: "execution:delegation:d1",
+        kind: "delegation",
+        sourceId: "d1",
+        title: "t",
+        status: "running",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(running.allowedActions).toEqual(["pause", "stop", "steer", "open_details"])
+
+    const paused = reduceRunEvents(
+      {
+        id: "execution:delegation:d1",
+        kind: "delegation",
+        sourceId: "d1",
+        title: "t",
+        status: "paused",
+        currentRevision: 1,
+        startedAt: 1,
+        updatedAt: 1,
+      },
+      []
+    )
+    expect(paused.allowedActions).toEqual(["resume", "stop", "open_details"])
+  })
+})

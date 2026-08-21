@@ -84,6 +84,56 @@ export async function controlDurableRun(
   })
 }
 
+/**
+ * Redirect a durable team run without stopping it.
+ *
+ * Fans out to every child that can still act, because a team's work is spread
+ * across children — steering only the lead would leave the workers running on
+ * the instruction the person just corrected.
+ *
+ * The coordinator's own `steer` owns the PII gate and the durable receipt, and
+ * it is the receipt that makes this safe to call when nothing is live: an
+ * undelivered steer stays `queued` and the next provider turn consumes it at
+ * its next safe boundary. So "no live control attached" is not a failure here —
+ * it is the durable path working. Only "no child can act at all" is.
+ */
+export async function steerDurableRun(
+  runId: string,
+  message: string,
+  options: DurableRunControlOptions = {}
+): Promise<{ receiptIds: string[]; childCount: number }> {
+  const coordinator = options.coordinator ?? getDurableTeamCoordinator()
+  const now = options.now ?? Date.now
+  const run = await getAgentTeamRun(runId)
+  if (!run) throw new Error(`Unknown durable AgentTeam run: ${runId}`)
+  const children = (await listAgentTeamChildRuns(runId)).filter(
+    (child) => !TERMINAL_CHILDREN.has(child.status)
+  )
+  if (children.length === 0) return { receiptIds: [], childCount: 0 }
+
+  const receipts = await Promise.all(
+    children.map(async (child) => {
+      try {
+        return (await coordinator.steer(child.id, message)).id
+      } catch {
+        // One refusing child must not swallow the correction for the others.
+        return undefined
+      }
+    })
+  )
+  const receiptIds = receipts.filter((id): id is string => typeof id === "string")
+  await appendAgentTeamTrajectory({
+    runId,
+    kind: "run_controlled",
+    correlationId: `run-steer:${runId}:${now()}`,
+    // Receipt ids only. The message text lives in the receipt rows, which are
+    // redaction-gated; the trajectory is a projection surface.
+    payload: { action: "steer", childCount: children.length, receiptIds },
+    createdAt: now(),
+  })
+  return { receiptIds, childCount: children.length }
+}
+
 export async function controlDurableRuns(
   runIds: string[],
   action: DurableRunControlAction,
