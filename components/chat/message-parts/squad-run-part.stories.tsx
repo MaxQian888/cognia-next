@@ -19,7 +19,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "The conversation's record of a turn handed to a Squad. Members are folded away by default — a Squad is an executor, not a room full of speakers. Status and activity are live-queried from the execution run, so these stories show the empty-journal shape; the populated states need a run in Dexie.",
+          "The conversation's record of a turn handed to a Squad. Steps are folded away by default — a Squad is an executor, not a room full of speakers. Status and steps are live-queried from the execution run, so these stories show the no-run shape; the populated states are covered by the co-located tests, which seed Dexie.",
       },
     },
   },

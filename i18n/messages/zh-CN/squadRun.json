@@ -1,12 +1,4 @@
 {
-  "activityStatus": {
-    "blocked": "被阻塞",
-    "completed": "已完成",
-    "failed": "失败",
-    "pending": "待开始",
-    "running": "进行中",
-    "skipped": "已跳过"
-  },
   "gate": {
     "decision": {
       "approved": "已批准",
@@ -15,9 +7,23 @@
     },
     "openRun": "运行"
   },
-  "journalUnavailable": "本机没有该运行的活动记录。",
   "memberActivity": "{count, plural, other {# 个步骤}}",
-  "omittedActivity": "{count, plural, other {另有 # 个更早的步骤未显示}}",
   "openRun": "查看运行",
-  "runUnavailable": "本机没有该运行记录"
+  "runStatus": {
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "failed": "失败",
+    "paused": "已暂停",
+    "queued": "排队中",
+    "recovery_required": "需要恢复",
+    "running": "进行中",
+    "waiting": "等待中"
+  },
+  "runUnavailable": "本机没有该运行记录",
+  "stepStatus": {
+    "completed": "已完成",
+    "failed": "失败",
+    "running": "进行中",
+    "skipped": "已跳过"
+  }
 }
