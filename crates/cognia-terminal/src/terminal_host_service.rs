@@ -15,10 +15,10 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use crate::host::{ClientIdentity, TerminalHost, TerminalHostConfig};
 use crate::host_wire::serve_host_stream;
 use crate::session::{PathInjection, SessionOrigin, SpawnRequest};
+use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
