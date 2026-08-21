@@ -540,7 +540,7 @@ describe("▶ Run with more than one capable engine", () => {
     getIssueRunRegistry().register({
       id: "refuses",
       kind: "agent-team",
-      canRun: async () => ({ ok: false, reason: "no-team" }),
+      canRun: async () => ({ ok: false, reason: "assignee-kind-mismatch" }) as never,
       start: (async () => {
         throw new Error("must not run")
       }) as never,
