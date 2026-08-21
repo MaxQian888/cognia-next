@@ -8,6 +8,7 @@ describe("control command registry", () => {
         "agent",
         "character",
         "commands",
+        "delegate",
         "dir",
         "goal",
         "handoff",

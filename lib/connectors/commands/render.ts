@@ -24,6 +24,11 @@ const COMMAND_HELP: Array<{ name: ControlCommandName; usage: string; desc: strin
   { name: "character", usage: "/character <id|名称>", desc: "切换角色 / switch character" },
   { name: "team", usage: "/team <名称|off>", desc: "绑定/解绑 Agent 团队 / bind a team" },
   {
+    name: "delegate",
+    usage: "/delegate [标题]",
+    desc: "把进行中的任务转为委派 / promote a running task to a delegation",
+  },
+  {
     name: "handoff",
     usage: "/handoff [姓名] | back [备注]",
     desc: "把委派任务交给人 / hand a delegated task to a person",

@@ -34,6 +34,7 @@ export type ControlCommandName =
   | "tasks"
   | "schedule"
   | "handoff"
+  | "delegate"
 
 export interface ControlCommandSpec {
   name: ControlCommandName
@@ -77,6 +78,9 @@ export const CONTROL_COMMAND_SPECS: readonly ControlCommandSpec[] = [
     nativeExposed: false,
     usage: "/handoff [name] | back [note]",
   },
+  // Same reasoning: a menu item for a verb that only means something while
+  // work is in flight would be a menu item that usually fails.
+  { name: "delegate", readonly: false, nativeExposed: false, usage: "/delegate [title]" },
 ]
 
 /** Specs published to platform-native slash manifests. */

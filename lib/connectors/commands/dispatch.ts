@@ -54,6 +54,7 @@ import {
 } from "@/lib/connectors/conversation-admission"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
+import { handleDelegateCommand } from "./delegate"
 import { handleHandoffCommand } from "./handoff"
 import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
@@ -84,6 +85,8 @@ export interface ControlCommandDeps {
   handleGoal?: typeof handleGoalCommand
   /** Injectable `/handoff` handler (defaults to the real delegation handoff). */
   handleHandoff?: typeof handleHandoffCommand
+  /** Injectable `/delegate` handler (defaults to the real promotion path). */
+  handleDelegate?: typeof handleDelegateCommand
   scheduler?: ScheduleCommandScheduler
   getAgentTopicStatus?: (conversationKey: string) => Promise<
     R.AgentTopicStatusView & {
@@ -665,6 +668,12 @@ export async function maybeHandleControlCommand(
       // audit) and `ensureSession` (the IM-bound session the guard checks).
       const handleGoal = deps.handleGoal ?? handleGoalCommand
       await handleGoal({ event, arg, ensureSession, reply })
+      return true
+    }
+
+    case "delegate": {
+      const handleDelegate = deps.handleDelegate ?? handleDelegateCommand
+      await handleDelegate({ event, arg, reply })
       return true
     }
 
