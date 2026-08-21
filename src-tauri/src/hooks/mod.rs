@@ -13,7 +13,10 @@ pub mod webhook;
 use regex::Regex;
 use serde_json::Value;
 
-pub use types::{HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler, HookOutcome};
+pub use types::{
+    HookAgentIdentity, HookDecision, HookEvent, HookEventPayload, HookGroup, HookHandler,
+    HookOutcome,
+};
 
 use crate::settings::{ClaudeSettings, EffectiveSettings};
 
@@ -35,12 +38,23 @@ fn groups_for_event(settings: &ClaudeSettings, event: HookEvent) -> Vec<HookGrou
         .collect()
 }
 
-/// Test whether a hook group's matcher applies to the given target name. The
-/// matcher follows Claude Code's rules:
-///   - omitted / `"*"` → match everything
-///   - alphanumeric + `_` + `|` → exact-string-or-pipe-set match
-///   - anything else → JS-style regex
-fn matcher_matches(matcher: Option<&str>, target: &str) -> bool {
+/// Test whether a hook group's matcher applies to the given target name.
+///
+/// The canonical rule lives in `sidecar/dispatch/agent-hooks.mjs` — that is the
+/// rail the built-in agent runs on and the one users' existing Claude Code
+/// settings were written against. This is a port of it, and the shared table in
+/// `hooks/matcher-conformance.json` is asserted by all three runners' tests so
+/// the ports cannot drift again.
+///
+///   - omitted / `""` / `"*"` → match everything
+///   - `[A-Za-z0-9_-, |]` only → exact set, split on `[|,]`, alternatives trimmed
+///   - anything else → unanchored regex; an invalid regex matches nothing
+///
+/// `narrow` tightens the exact-set alphabet to `[A-Za-z0-9_|]` (split on `|`
+/// only). Used for `FileChanged` / `StopFailure`, whose targets are file paths
+/// and error strings: their punctuation must stay regex-significant instead of
+/// being read as list separators.
+fn matcher_matches_with(matcher: Option<&str>, target: &str, narrow: bool) -> bool {
     let Some(m) = matcher else {
         return true;
     };
@@ -48,22 +62,59 @@ fn matcher_matches(matcher: Option<&str>, target: &str) -> bool {
     if m.is_empty() || m == "*" {
         return true;
     }
-    // Pipe-separated alternatives where each alternative is alphanumeric/_:
-    if m.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '|')
-    {
-        for alt in m.split('|') {
-            if alt == target {
-                return true;
-            }
-        }
-        return false;
+    let in_exact_alphabet = m.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || c == '_'
+            || c == '|'
+            || (!narrow && (c == '-' || c == ',' || c == ' '))
+    });
+    if in_exact_alphabet {
+        let alts: Vec<&str> = if narrow {
+            m.split('|').collect()
+        } else {
+            m.split(['|', ',']).collect()
+        };
+        return alts.iter().any(|alt| alt.trim() == target);
     }
-    // Treat as regex.
+    // Treat as regex. Unanchored, matching the JS `RegExp.test` the other two
+    // rails use — anchoring here would silently narrow existing configs.
     match Regex::new(m) {
         Ok(re) => re.is_match(target),
         Err(_) => false,
     }
+}
+
+/// The common case: {@link matcher_matches_with} with the wide exact-set alphabet.
+fn matcher_matches(matcher: Option<&str>, target: &str) -> bool {
+    matcher_matches_with(matcher, target, false)
+}
+
+/// True for the events whose matcher target is a path / free text rather than a
+/// tool name, so the exact-set alphabet must be tightened.
+fn uses_narrow_exact_set(event: HookEvent) -> bool {
+    matches!(event, HookEvent::FileChanged | HookEvent::StopFailure)
+}
+
+/// Test a group's `agents` selector against the event's agent identity. An
+/// absent selector matches everything, so every pre-existing config keeps its
+/// behaviour. A present selector matches when it applies to EITHER the
+/// `agent_kind` or the `agent_ref` — so `"teammate"` catches a whole class and
+/// `"reviewer"` catches one named agent, without two separate fields.
+///
+/// An event with no identity at all never matches a present selector: a hook
+/// that asked to be narrowed must not fire on an unidentified turn.
+fn agents_match(selector: Option<&str>, identity: &HookAgentIdentity) -> bool {
+    let Some(sel) = selector else {
+        return true;
+    };
+    let sel = sel.trim();
+    if sel.is_empty() || sel == "*" {
+        return true;
+    }
+    identity
+        .match_targets()
+        .into_iter()
+        .any(|t| matcher_matches(Some(sel), t))
 }
 
 /// Run all hooks for `event` whose matcher applies to `target_name`. `target_name`
@@ -73,6 +124,7 @@ async fn run_event(
     settings: &ClaudeSettings,
     event: HookEvent,
     target_name: &str,
+    identity: &HookAgentIdentity,
     payload: &HookEventPayload,
 ) -> HookDecision {
     let groups = groups_for_event(settings, event);
@@ -89,8 +141,12 @@ async fn run_event(
             return decision;
         }
     };
+    let narrow = uses_narrow_exact_set(event);
     for group in groups {
-        if !matcher_matches(group.matcher.as_deref(), target_name) {
+        if !matcher_matches_with(group.matcher.as_deref(), target_name, narrow) {
+            continue;
+        }
+        if !agents_match(group.agents.as_deref(), identity) {
             continue;
         }
         for handler in group.hooks {
@@ -120,6 +176,15 @@ async fn run_handler(handler: HookHandler, payload_json: &str) -> HookOutcome {
             headers,
             timeout,
         } => webhook::run_webhook_handler(&url, &headers, timeout, payload_json).await,
+        // Needs the sidecar's renderer round-trip; this rail (external agents,
+        // worktree lifecycle) has no renderer to reach. Soft-allow with a
+        // warning naming the plugin, so the user can see WHY nothing ran
+        // instead of watching a configured hook do nothing.
+        HookHandler::Plugin { plugin_id, hook_id } => HookOutcome::InternalError {
+            reason: format!(
+                "plugin hook {plugin_id}:{hook_id} is not executable on this rail (sidecar only)"
+            ),
+        },
         HookHandler::Unsupported => HookOutcome::InternalError {
             reason: "unsupported handler type".to_string(),
         },
@@ -153,15 +218,18 @@ pub async fn run_session_scoped(
     event: HookEvent,
     session_id: &str,
     cwd: Option<&str>,
+    identity: HookAgentIdentity,
     fields: Value,
 ) -> HookDecision {
     let payload = HookEventPayload {
         hook_event_name: hook_event_name(event),
         session_id: session_id.to_string(),
         cwd: cwd.map(String::from),
+        agent_kind: identity.kind.clone(),
+        agent_ref: identity.agent_ref.clone(),
         fields,
     };
-    run_event(&settings.merged, event, "", &payload).await
+    run_event(&settings.merged, event, "", &identity, &payload).await
 }
 
 /// Run a tool-scoped hook whose matcher is tested against `tool_name`. Used for
@@ -172,15 +240,18 @@ pub async fn run_tool_scoped(
     session_id: &str,
     cwd: Option<&str>,
     tool_name: &str,
+    identity: HookAgentIdentity,
     fields: Value,
 ) -> HookDecision {
     let payload = HookEventPayload {
         hook_event_name: hook_event_name(event),
         session_id: session_id.to_string(),
         cwd: cwd.map(String::from),
+        agent_kind: identity.kind.clone(),
+        agent_ref: identity.agent_ref.clone(),
         fields,
     };
-    run_event(&settings.merged, event, tool_name, &payload).await
+    run_event(&settings.merged, event, tool_name, &identity, &payload).await
 }
 
 /// Load merged settings for the given cwd. Returns an empty `EffectiveSettings`
@@ -204,6 +275,118 @@ pub fn load_effective_settings(cwd: Option<&str>) -> EffectiveSettings {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The cross-rail matcher table. Compiled in so the Rust suite fails when
+    /// this rail drifts from the canonical sidecar rule — the exact defect this
+    /// file was added for (three runners, three different semantics).
+    const CONFORMANCE: &str = include_str!("../../../hooks/matcher-conformance.json");
+
+    #[test]
+    fn matcher_conformance_table_matches_the_canonical_rule() {
+        let table: serde_json::Value = serde_json::from_str(CONFORMANCE).unwrap();
+        for (key, narrow) in [("cases", false), ("narrowCases", true)] {
+            let cases = table[key].as_array().unwrap_or_else(|| {
+                panic!("conformance table is missing the `{key}` array");
+            });
+            assert!(!cases.is_empty(), "`{key}` must not be empty");
+            for case in cases {
+                let matcher = case["matcher"].as_str();
+                let target = case["target"].as_str().expect("case.target");
+                let expected = case["expected"].as_bool().expect("case.expected");
+                let why = case["why"].as_str().unwrap_or("");
+                assert_eq!(
+                    matcher_matches_with(matcher, target, narrow),
+                    expected,
+                    "{key}: matcher={matcher:?} target={target:?} — {why}"
+                );
+            }
+        }
+    }
+
+    fn identity(kind: Option<&str>, agent_ref: Option<&str>) -> HookAgentIdentity {
+        HookAgentIdentity {
+            kind: kind.map(String::from),
+            agent_ref: agent_ref.map(String::from),
+        }
+    }
+
+    #[test]
+    fn agents_omitted_matches_every_agent() {
+        let id = identity(Some("teammate"), Some("reviewer"));
+        assert!(agents_match(None, &id));
+        assert!(agents_match(Some(""), &id));
+        assert!(agents_match(Some("*"), &id));
+        // An absent selector still matches when there is no identity, so every
+        // pre-existing config keeps its behaviour after this field was added.
+        assert!(agents_match(None, &identity(None, None)));
+    }
+
+    #[test]
+    fn agents_matches_either_kind_or_ref() {
+        let id = identity(Some("teammate"), Some("reviewer"));
+        assert!(agents_match(Some("teammate"), &id));
+        assert!(agents_match(Some("reviewer"), &id));
+        assert!(agents_match(Some("chat|teammate"), &id));
+        assert!(agents_match(Some("^review"), &id));
+        assert!(!agents_match(Some("chat"), &id));
+        assert!(!agents_match(Some("planner"), &id));
+    }
+
+    #[test]
+    fn agents_present_never_matches_an_unidentified_event() {
+        // A hook that asked to be narrowed must not fire on a turn whose agent
+        // we cannot name — the fail-safe direction for a guard.
+        assert!(!agents_match(Some("teammate"), &identity(None, None)));
+        assert!(!agents_match(Some("teammate"), &identity(Some(""), None)));
+    }
+
+    #[test]
+    fn agent_identity_serializes_onto_the_payload() {
+        let payload = HookEventPayload {
+            hook_event_name: "PostToolUse".to_string(),
+            session_id: "s1".to_string(),
+            cwd: None,
+            agent_kind: Some("teammate".to_string()),
+            agent_ref: Some("reviewer".to_string()),
+            fields: json!({ "tool_name": "Bash" }),
+        };
+        let v = serde_json::to_value(&payload).unwrap();
+        assert_eq!(v["agent_kind"], "teammate");
+        assert_eq!(v["agent_ref"], "reviewer");
+        assert_eq!(v["tool_name"], "Bash");
+
+        // Absent identity is omitted entirely so a hook script can tell
+        // "no identity" apart from "identity is empty".
+        let anon = HookEventPayload {
+            hook_event_name: "PostToolUse".to_string(),
+            session_id: "s1".to_string(),
+            cwd: None,
+            agent_kind: None,
+            agent_ref: None,
+            fields: json!({}),
+        };
+        let v = serde_json::to_value(&anon).unwrap();
+        assert!(v.get("agent_kind").is_none());
+        assert!(v.get("agent_ref").is_none());
+    }
+
+    #[test]
+    fn hook_group_deserializes_the_agents_selector() {
+        let g: HookGroup = serde_json::from_value(json!({
+            "matcher": "Bash",
+            "agents": "teammate",
+            "hooks": [{ "type": "command", "command": "guard.mjs" }],
+        }))
+        .unwrap();
+        assert_eq!(g.agents.as_deref(), Some("teammate"));
+        // Omitted stays None — existing settings.json round-trips untouched.
+        let legacy: HookGroup = serde_json::from_value(json!({
+            "matcher": "Bash",
+            "hooks": [{ "type": "command", "command": "guard.mjs" }],
+        }))
+        .unwrap();
+        assert!(legacy.agents.is_none());
+    }
 
     #[test]
     fn matcher_omitted_matches_all() {

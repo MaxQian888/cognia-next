@@ -80,6 +80,10 @@ pub fn build_unresolved_router() -> Router<ConnectorsState> {
     let base = Router::new()
         .route("/health", get(health_handler))
         .route("/oauth/lark/callback", get(oauth_lark_callback))
+        .route(
+            "/oauth/connector/{kind}/callback",
+            get(oauth_connector_callback),
+        )
         .route("/oauth/docs/{provider}/callback", get(oauth_docs_callback))
         .route("/webhook/{adapter_type}/{adapter_id}", any(webhook_handler));
     ws_server::register_routes(base).layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -127,6 +131,55 @@ async fn oauth_lark_callback(
     );
     let deep_link = build_lark_oauth_deep_link(&params);
     oauth_callback_page(&deep_link)
+}
+
+/// Generic platform-connector OAuth relay.
+///
+/// The Lark route above is the same idea nailed to one platform. Every IM
+/// platform that speaks OAuth has the same constraint — Slack, like Feishu,
+/// only accepts http/https redirect URLs and will not register a custom scheme
+/// — so the relay belongs to the subsystem, not to one adapter. A connector's
+/// authorize step registers `{ingressBase}/oauth/connector/{kind}/callback` and
+/// this route fans the result out to both hosts:
+///
+///   - headless: `connectors://connector-oauth/callback`, carrying `kind` so
+///     the brain can pick the handler out of `oauthRegistry` without a route
+///     per platform;
+///   - desktop: a bounce page into `cognia://connector/oauth/{kind}`, which is
+///     the scheme `ConnectorDeepLinkRouter` already claims.
+///
+/// `/oauth/lark/callback` stays as it is: that exact path is registered
+/// byte-for-byte in every existing install's Feishu console, and moving it
+/// would break them for no gain.
+///
+/// `kind` is validated against the same strict slug charset as the docs
+/// provider before it reaches the rendered page — it arrives from the URL path
+/// and the bounce page embeds the deep link in an HTML attribute and a JS
+/// string literal.
+async fn oauth_connector_callback(
+    Path(kind): Path<String>,
+    RawQuery(raw_query): RawQuery,
+    Extension(EmitterExt(emitter)): Extension<EmitterExt>,
+) -> Response {
+    if !is_docs_provider_slug(&kind) {
+        return error_response(StatusCode::NOT_FOUND, "unknown connector kind");
+    }
+    let params = parse_query(raw_query.as_deref().unwrap_or(""));
+    let mut payload: serde_json::Map<String, serde_json::Value> = OAUTH_FIELDS
+        .iter()
+        .filter_map(|&key| {
+            params
+                .get(key)
+                .map(|value| (key.to_string(), serde_json::Value::String(value.clone())))
+        })
+        .collect();
+    payload.insert("kind".to_string(), serde_json::Value::String(kind.clone()));
+    emitter.emit_ephemeral_to_brain(
+        "connectors://connector-oauth/callback",
+        serde_json::Value::Object(payload),
+    );
+    let base = format!("cognia://connector/oauth/{kind}");
+    oauth_callback_page(&build_oauth_deep_link(&base, &params))
 }
 
 /// Remote document provider OAuth relay (ADR-0134).
@@ -1017,6 +1070,99 @@ mod tests {
         let body = to_bytes(resp.into_body(), 65536).await.unwrap();
         let text = std::str::from_utf8(&body).unwrap();
         assert!(text.contains("error=access_denied"));
+    }
+
+    #[tokio::test]
+    async fn oauth_connector_callback_names_the_kind_for_the_brain_and_bounces_to_the_scheme() {
+        let state = ConnectorsState::new();
+        let (app, emitter) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/connector/slack/callback?code=abc123&state=slack:sl1:nonce")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        // Same scheme the desktop deep-link router already claims.
+        assert!(text.contains("cognia://connector/oauth/slack?"));
+        assert!(text.contains("code=abc123"));
+        // `kind` is what lets the brain pick a handler without a route per platform.
+        assert_eq!(
+            emitter.events.lock().as_slice(),
+            &[(
+                "connectors://connector-oauth/callback".to_string(),
+                serde_json::json!({
+                    "code": "abc123",
+                    "state": "slack:sl1:nonce",
+                    "kind": "slack",
+                }),
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_connector_callback_forwards_platform_errors() {
+        let state = ConnectorsState::new();
+        let (app, _) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/connector/slack/callback?error=access_denied&error_description=nope")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 65536).await.unwrap();
+        assert!(std::str::from_utf8(&body).unwrap().contains("error=access_denied"));
+    }
+
+    #[tokio::test]
+    async fn oauth_connector_callback_rejects_a_kind_outside_the_slug_charset() {
+        let state = ConnectorsState::new();
+        let (app, emitter) = test_router_with(state);
+        // The kind is interpolated into an HTML attribute and a JS string on
+        // the bounce page, so anything outside the slug charset is a 404 before
+        // it can reach either.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/connector/sl%22ack/callback?code=abc")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert!(emitter.events.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn oauth_lark_callback_keeps_its_own_path_and_topic() {
+        // The generic route did not replace it: the Feishu console of every
+        // existing install has `/oauth/lark/callback` registered byte-for-byte.
+        let state = ConnectorsState::new();
+        let (app, emitter) = test_router_with(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/oauth/lark/callback?code=abc123&state=lark:lk1:nonce")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            emitter.events.lock()[0].0,
+            "connectors://lark-oauth/callback".to_string()
+        );
     }
 
     #[tokio::test]

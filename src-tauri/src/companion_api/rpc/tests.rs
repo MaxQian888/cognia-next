@@ -2393,8 +2393,25 @@ async fn integration_ingress_uses_the_headless_workflow_state() {
     .expect("unregister integration route");
 }
 
+/// A headless host must never answer approval RPCs from its own Rust
+/// `workflow_waitpoint` mirror.
+///
+/// Nothing in a headless deployment writes that table: its only writer is the
+/// `workflow_waitpoint_create` Tauri command, and the brain reaches it through
+/// `lib/workflow/runtime/tauri-bridge.ts`, which short-circuits every native
+/// call to `null` off-Tauri. Answering locally therefore reported "no pending
+/// approvals" no matter how many gates were actually waiting in the brain's
+/// Dexie, so the phone's pending-approvals card stayed blank and every gate ran
+/// out its timeout onto the `rejected` branch.
+///
+/// The row planted below is the trap: it exists ONLY in the local mirror, which
+/// is exactly the state a real headless host can never reach. Both commands must
+/// ignore it and divert to the brain's TS arms
+/// (`lib/companion/desktop-write-source.ts`). With no brain connected that
+/// divert surfaces a retryable `service_unavailable` — failing loudly beats
+/// answering with a confident, empty lie.
 #[tokio::test]
-async fn workflow_approval_rpc_uses_durable_headless_waitpoints() {
+async fn headless_approval_rpc_never_answers_from_the_local_mirror() {
     let state = test_state();
     let services = crate::headless::HeadlessServices::stub_for_tests();
     let host = super::super::dispatch_host::DispatchHost::Headless(Arc::clone(&services));
@@ -2422,58 +2439,38 @@ async fn workflow_approval_rpc_uses_durable_headless_waitpoints() {
         })
         .expect("persist approval");
 
-    let listed = dispatch(
-        "workflow_approval_list",
-        json!({}),
-        &state,
-        &host,
-        "device-1",
-        Some(ACCOUNT_ID),
-        Some("service"),
-    )
-    .await
-    .expect("list approvals");
-    assert_eq!(listed["approvals"][0]["approvalId"], "approval-1");
+    for (command, args) in [
+        ("workflow_approval_list", json!({})),
+        (
+            "workflow_approval_respond",
+            json!({ "approvalId": "approval-1", "decision": "approved" }),
+        ),
+    ] {
+        let err = dispatch(
+            command,
+            args,
+            &state,
+            &host,
+            "device-1",
+            Some(ACCOUNT_ID),
+            Some("service"),
+        )
+        .await
+        .expect_err("headless must divert to the brain, not read the local mirror");
+        assert_eq!(err.0, StatusCode::SERVICE_UNAVAILABLE, "{command}");
+        assert_eq!(err.1 .0.code, "service_unavailable", "{command}");
+        assert!(err.1 .0.retryable, "{command} must be retryable");
+    }
 
-    let decided = dispatch(
-        "workflow_approval_respond",
-        json!({ "approvalId": "approval-1", "decision": "approved" }),
-        &state,
-        &host,
-        "device-1",
-        Some(ACCOUNT_ID),
-        Some("service"),
-    )
-    .await
-    .expect("decide approval");
-    assert_eq!(decided, json!({ "ok": true }));
-
-    let duplicate = dispatch(
-        "workflow_approval_respond",
-        json!({ "approvalId": "approval-1", "decision": "rejected" }),
-        &state,
-        &host,
-        "device-2",
-        Some(ACCOUNT_ID),
-        Some("service"),
-    )
-    .await
-    .expect("duplicate decision");
-    assert_eq!(
-        duplicate,
-        json!({ "ok": false, "reason": "already-decided" })
-    );
+    // The planted row is untouched: nothing decided it behind the brain's back.
     let row = services
         .workflow
         .mirror
         .get_waitpoint("approval-1")
         .expect("read approval")
         .expect("approval exists");
-    assert_eq!(row.status, "resolved");
-    assert_eq!(
-        row.resolution.expect("resolution")["respondedBy"],
-        "device:device-1"
-    );
+    assert_eq!(row.status, "pending");
+    assert!(row.resolution.is_none());
 }
 
 /// Malformed args map to 400 malformed_request, not a panic or 500.

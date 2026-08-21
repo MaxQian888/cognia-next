@@ -976,6 +976,45 @@ pub async fn claude_plugin_tool_response_impl(
     state.write_command(&payload).await
 }
 
+/// Build the `plugin_hook_response` JSON line written to the sidecar stdin.
+/// Pure so it is unit-testable without a running sidecar.
+fn build_plugin_hook_response_payload(
+    session_id: String,
+    exec_id: String,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Value {
+    json!({
+      "type": "plugin_hook_response",
+      "sessionId": session_id,
+      "execId": exec_id,
+      "result": result,
+      "error": error,
+    })
+}
+
+/// Renderer → sidecar: resolve a pending `{ type: "plugin" }` lifecycle-hook
+/// round-trip so the sidecar's `pendingPluginHookCalls` promise settles.
+///
+/// The outbound half needs no command: `plugin_hook_exec` falls through the
+/// sidecar reader's default branch onto `SIDECAR_EVENT` like any other frame.
+/// Only the answer needs a way back into stdin, and that mirrors
+/// `claude_plugin_tool_response` exactly.
+///
+/// Renderer-only — plugin hooks execute in the desktop renderer, never on the
+/// phone, so this is deliberately NOT exposed over companion RPC.
+#[tauri::command]
+pub async fn claude_plugin_hook_response(
+    state: State<'_, SidecarState>,
+    session_id: String,
+    exec_id: String,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Result<(), String> {
+    let payload = build_plugin_hook_response_payload(session_id, exec_id, result, error);
+    state.write_command(&payload).await
+}
+
 /// Build the `tool_result_decision` JSON line written to the sidecar stdin.
 /// Pure so it is unit-testable without a running sidecar.
 fn build_tool_result_decision_payload(

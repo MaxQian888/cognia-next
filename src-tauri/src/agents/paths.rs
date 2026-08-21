@@ -106,6 +106,22 @@ pub struct VendorRoots {
     pub pi_agent_dir: String,
     /// `$PI_CODING_AGENT_SESSION_DIR` or `<pi_agent_dir>/sessions`.
     pub pi_session_dir: String,
+    /// `<home>/.gemini` — Gemini CLI's user-scope directory (its session
+    /// transcripts live under `tmp/`).
+    ///
+    /// Home-relative with no environment override: unlike `$CLAUDE_CONFIG_DIR`
+    /// / `$CODEX_HOME` / `$XDG_*` / `$PI_CODING_AGENT_DIR`, no relocation
+    /// variable for Gemini CLI is confirmed against upstream, and inventing one
+    /// here would be a path this resolver claims to honour and does not. The
+    /// point of carrying it anyway is that the renderer stops deriving the path
+    /// itself — `lib/session-import/adapters/gemini-cli.ts` was one of only two
+    /// sources still joining onto a bare `home`, which is exactly the drift
+    /// this module exists to end. Adding an override later is one line here.
+    pub gemini_dir: String,
+    /// `<home>/.continue` — Continue's global directory (its session JSON lives
+    /// under `sessions/`). Home-relative, no confirmed override; see
+    /// [`VendorRoots::gemini_dir`].
+    pub continue_dir: String,
 }
 
 /// A non-blank env override as a path.
@@ -169,6 +185,9 @@ pub fn vendor_roots_from(
     let pi_session = env_path(env.pi_coding_agent_session_dir)
         .or_else(|| pi_agent.as_ref().map(|d| d.join("sessions")));
 
+    let gemini = home_dir.as_ref().map(|h| h.join(".gemini"));
+    let continue_dir = home_dir.as_ref().map(|h| h.join(".continue"));
+
     VendorRoots {
         claude_config_dir: to_string(claude),
         codex_home: to_string(codex),
@@ -177,6 +196,8 @@ pub fn vendor_roots_from(
         opencode_platform_data_dir: to_string(opencode_platform_data),
         pi_agent_dir: to_string(pi_agent),
         pi_session_dir: to_string(pi_session),
+        gemini_dir: to_string(gemini),
+        continue_dir: to_string(continue_dir),
     }
 }
 
@@ -493,6 +514,11 @@ mod tests {
         assert_eq!(got.codex_home, "/h/.codex");
         assert_eq!(got.opencode_config_dir, "/h/.config/opencode");
         assert_eq!(got.opencode_data_dir, "/h/.local/share/opencode");
+        // Gemini CLI and Continue are resolved HERE now. They were the only two
+        // session sources still deriving their own path from a bare home in the
+        // renderer, which is the drift this module exists to prevent.
+        assert_eq!(got.gemini_dir, "/h/.gemini");
+        assert_eq!(got.continue_dir, "/h/.continue");
     }
 
     #[test]
@@ -584,6 +610,8 @@ mod tests {
         assert_eq!(got.opencode_data_dir, "");
         assert_eq!(got.pi_agent_dir, "");
         assert_eq!(got.pi_session_dir, "");
+        assert_eq!(got.gemini_dir, "");
+        assert_eq!(got.continue_dir, "");
     }
 
     #[test]

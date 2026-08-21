@@ -16,6 +16,7 @@ use super::{
     browser_access, desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     mdns::AutoStartConfig,
+    reachability_config::{self, ReachabilityConfig},
     secret, security_store,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
@@ -1162,6 +1163,159 @@ pub fn companion_mdns_stop(state: State<'_, CompanionServerState>) {
 #[tauri::command]
 pub fn companion_mdns_status(state: State<'_, CompanionServerState>) -> bool {
     state.mdns.is_running()
+}
+
+/// One `_cognia._tcp` host this desktop can see on the LAN, plus whether it is
+/// this desktop's own advertisement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowsedHost {
+    #[serde(flatten)]
+    pub host: super::mdns::DiscoveredHost,
+    /// `https://<addr>:<port>` — precomputed so the renderer does not
+    /// re-derive URL assembly (and get IPv6 bracketing wrong).
+    pub base_url: Option<String>,
+    /// This machine's own broadcast. Kept in the list rather than filtered out
+    /// so the Add-host form can say "that's this computer" instead of showing
+    /// a host that silently fails to pair with itself.
+    pub is_self: bool,
+}
+
+/// Sweep the LAN for other Cognia hosts advertising over mDNS.
+///
+/// The desktop has advertised `_cognia._tcp` since Wave 1.5 but never listened
+/// for it, so pairing this desktop *to another host* (ADR-0082) meant typing an
+/// address for a machine that was broadcasting its own the whole time.
+///
+/// `timeout_ms` is clamped to a sane sweep window: below ~500 ms a host that is
+/// awake but slow to answer is missed, and above ~10 s the form appears hung.
+/// Runs on the blocking pool — [`super::mdns::browse_once`] parks on the mDNS
+/// event channel and would otherwise stall the UI thread for its whole window.
+#[tauri::command]
+pub async fn companion_mdns_browse(
+    state: State<'_, CompanionServerState>,
+    timeout_ms: Option<u64>,
+) -> Result<Vec<BrowsedHost>, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(2_000).clamp(500, 10_000));
+    let own_fullname = state.mdns.current_fullname();
+
+    let hosts = tauri::async_runtime::spawn_blocking(move || super::mdns::browse_once(timeout))
+        .await
+        .map_err(|error| format!("mdns browse task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+
+    Ok(hosts
+        .into_iter()
+        .map(|host| BrowsedHost {
+            base_url: host.base_url(),
+            is_self: own_fullname.as_deref() == Some(host.fullname.as_str()),
+            host,
+        })
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// Reachability preference — persisted "how should this desktop be reachable"
+// ---------------------------------------------------------------------------
+
+/// Read the saved reachability preference. Returns the all-off default when
+/// nothing has been saved, so the caller never has to special-case "first run".
+#[tauri::command]
+pub fn companion_reachability_get(
+    app_handle: tauri::AppHandle,
+) -> Result<ReachabilityConfig, String> {
+    let dir = data_dir(&app_handle)?;
+    Ok(reachability_config::load_config(Some(&dir)))
+}
+
+/// Persist the reachability preference.
+///
+/// Called by Settings → Companion when the user changes the server switch, the
+/// bind mode, or the mDNS switch. Deliberately **not** called by
+/// `companion_server_start`: see the module docs on why only user intent — and
+/// not every internal start — is allowed to write this file.
+#[tauri::command]
+pub fn companion_reachability_set(
+    app_handle: tauri::AppHandle,
+    config: ReachabilityConfig,
+) -> Result<(), String> {
+    let dir = data_dir(&app_handle)?;
+    reachability_config::save_config(Some(&dir), &config)
+}
+
+/// What [`restore_reachability`] actually did, for logs and for the test that
+/// pins the "advertise only behind a live listener" rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReachabilityRestoreOutcome {
+    /// Whether the companion listener was started by this call.
+    pub restored: bool,
+    /// The port it actually bound, when it started.
+    pub port: Option<u16>,
+    /// Whether mDNS advertising was (re-)established.
+    pub advertising: bool,
+}
+
+impl ReachabilityRestoreOutcome {
+    fn skipped() -> Self {
+        Self {
+            restored: false,
+            port: None,
+            advertising: false,
+        }
+    }
+}
+
+/// Boot-time restore of the saved reachability preference.
+///
+/// Invoked from the Tauri `setup` hook rather than from the renderer, so a
+/// launch that never opens a window (tray-only start, autostart at login) still
+/// becomes reachable. A phone that paired over the LAN can therefore find this
+/// desktop again after a restart without the user opening Settings.
+///
+/// Both legs delegate to the same commands the Settings switches call, so the
+/// restored path and the manual path cannot drift apart.
+pub async fn restore_reachability(
+    app_handle: tauri::AppHandle,
+) -> Result<ReachabilityRestoreOutcome, String> {
+    let dir = data_dir(&app_handle)?;
+    let config = reachability_config::load_config(Some(&dir));
+    if !config.restores_anything() {
+        return Ok(ReachabilityRestoreOutcome::skipped());
+    }
+
+    let state = app_handle.state::<CompanionServerState>();
+    let port = companion_server_start(
+        state.clone(),
+        app_handle.clone(),
+        config.port,
+        config.bind_loopback_only,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    // `advertises()` — not `mdns_enabled` — because advertising without a live
+    // listener publishes an address that refuses every connection.
+    let advertising = if config.advertises() {
+        let fingerprint = ensure_tls_fingerprint(&app_handle)?;
+        companion_mdns_start(
+            state.clone(),
+            app_handle.clone(),
+            port,
+            env!("CARGO_PKG_VERSION").to_string(),
+            fingerprint,
+            None,
+        )?;
+        true
+    } else {
+        false
+    };
+
+    Ok(ReachabilityRestoreOutcome {
+        restored: true,
+        port: Some(port),
+        advertising,
+    })
 }
 
 /// Start a Cloudflared tunnel. The mode is read from persisted config:

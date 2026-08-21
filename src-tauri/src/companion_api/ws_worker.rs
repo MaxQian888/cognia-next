@@ -5,7 +5,14 @@
 //! opaque, newline-free Agent RPC frames through the existing brain bridge.
 //! Task, run, lease, review, and lineage ownership remain in the brain.
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use axum::{
     extract::{
@@ -16,11 +23,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tauri::Emitter;
+use tauri::{ipc::Channel, Emitter};
 use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{interval, Instant};
 
@@ -31,6 +38,23 @@ const MAX_WORKER_QUEUE_BYTES: usize = 32 * 1024 * 1024;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const HEARTBEAT_SECS: u64 = 25;
 const IDLE_TIMEOUT_SECS: u64 = 90;
+/// Inbound (worker -> brain) budget for the in-process desktop brain.
+///
+/// The socket brain gets backpressure for free: frames leave through a TCP
+/// connection, so a brain that stops reading stalls the worker's socket too.
+/// A Tauri IPC channel has no such signal — `Channel::send` returns as soon as
+/// the message is queued for the WebView — so the budget has to be explicit,
+/// and the renderer releases it by acking the sequence numbers it has consumed.
+const MAX_BRAIN_QUEUE_BYTES: usize = 32 * 1024 * 1024;
+/// Cost charged for a lifecycle event, which carries no Agent RPC payload.
+const BRAIN_EVENT_OVERHEAD_BYTES: usize = 1024;
+/// How long a worker waits for the desktop brain to drain before it is detached.
+///
+/// Dropping an Agent RPC frame is not an option — the session's request/response
+/// correlation would never recover — so a brain that stays blocked this long
+/// costs the connection instead. The worker reconnects and ADR-0113 checkpoint
+/// recovery resumes the run.
+const BRAIN_BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(30);
 const CLOSE_PROTOCOL_ERROR: u16 = 1002;
 const CLOSE_POLICY_VIOLATION: u16 = 1008;
 
@@ -162,8 +186,229 @@ fn reserve_queue_bytes(
         .map_err(|_| "worker connection byte budget exhausted".to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Brain sinks
+//
+// A worker's frames are useless until some brain owns dispatch for them. There
+// are exactly two brains, and they are mutually exclusive: the headless `cognia
+// serve` process, which attaches over the bridge socket, and the desktop
+// WebView, which is in-process and reachable only through a Tauri IPC channel.
+// Before this sink existed the ingress spoke only the first, so a desktop host
+// accepted workers, showed them online in Fleet, and could never send them a
+// single frame — every attach and frame was dropped by a `let _ =`.
+
+/// One worker-lifecycle event on its way to whichever brain owns dispatch.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WorkerBrainEvent {
+    #[serde(rename_all = "camelCase")]
+    WorkerAttach {
+        connection_id: String,
+        host_ref: String,
+        manifest: Value,
+    },
+    #[serde(rename_all = "camelCase")]
+    WorkerFrame {
+        connection_id: String,
+        frame: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    WorkerDetach {
+        connection_id: String,
+        host_ref: String,
+        reason: String,
+    },
+}
+
+impl WorkerBrainEvent {
+    fn queue_cost(&self) -> usize {
+        match self {
+            WorkerBrainEvent::WorkerFrame { frame, .. } => frame.len(),
+            _ => BRAIN_EVENT_OVERHEAD_BYTES,
+        }
+    }
+}
+
+/// Channel payload. `seq` is what the renderer acks to release its byte budget.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerBrainEnvelope {
+    seq: u64,
+    #[serde(flatten)]
+    event: WorkerBrainEvent,
+}
+
+/// How a delivery attempt ended, because the two failures are not the same.
+///
+/// `NoBrain` is the ordinary state of a host nobody has attached a brain to
+/// yet; the worker stays connected and waits. `Failed` means a brain *is*
+/// attached and could not take the event, which for an Agent RPC frame is
+/// unrecoverable — the connection has to go.
+enum BrainDelivery {
+    Delivered,
+    NoBrain,
+    Failed(String),
+}
+
+struct DesktopWorkerSink {
+    tenant_id: String,
+    channel: Channel<WorkerBrainEnvelope>,
+    seq: AtomicU64,
+    budget: Arc<Semaphore>,
+    outstanding: Mutex<VecDeque<(u64, OwnedSemaphorePermit)>>,
+}
+
+impl DesktopWorkerSink {
+    fn new(tenant_id: String, channel: Channel<WorkerBrainEnvelope>) -> Self {
+        Self {
+            tenant_id,
+            channel,
+            seq: AtomicU64::new(0),
+            budget: Arc::new(Semaphore::new(MAX_BRAIN_QUEUE_BYTES)),
+            outstanding: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    fn emit(&self, event: WorkerBrainEvent, permit: OwnedSemaphorePermit) -> Result<(), String> {
+        // Sequence allocation, the send and the push happen under ONE lock.
+        // This sink is shared by every worker connection of the tenant, and
+        // `deliver_to_brain` runs concurrently from each connection's task —
+        // two emits interleaving between `fetch_add` and `push_back` would
+        // leave `outstanding` out of order, and `ack`'s front-pop drain stops
+        // at the first entry above the watermark. The permits behind it stay
+        // held even though the renderer has consumed their bytes.
+        let mut outstanding = self.outstanding.lock();
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
+        // The permit is only retained once the send succeeded; a failed send
+        // drops it here and returns the bytes rather than leaking the budget.
+        self.channel
+            .send(WorkerBrainEnvelope { seq, event })
+            .map_err(|error| format!("desktop brain channel is unavailable: {error}"))?;
+        outstanding.push_back((seq, permit));
+        Ok(())
+    }
+
+    fn try_send(&self, event: WorkerBrainEvent) -> Result<(), String> {
+        let cost = u32::try_from(event.queue_cost()).map_err(|_| "brain event is too large")?;
+        let permit = Arc::clone(&self.budget)
+            .try_acquire_many_owned(cost)
+            .map_err(|_| "desktop brain queue byte budget exhausted".to_string())?;
+        self.emit(event, permit)
+    }
+
+    async fn send(&self, event: WorkerBrainEvent) -> Result<(), String> {
+        let cost = u32::try_from(event.queue_cost()).map_err(|_| "brain event is too large")?;
+        let permit = match tokio::time::timeout(
+            BRAIN_BACKPRESSURE_TIMEOUT,
+            Arc::clone(&self.budget).acquire_many_owned(cost),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err("desktop brain queue is closed".to_string()),
+            Err(_) => {
+                return Err("desktop brain did not drain within the backpressure window".to_string())
+            }
+        };
+        self.emit(event, permit)
+    }
+
+    /// Release every permit up to and including `through_seq`.
+    fn ack(&self, through_seq: u64) {
+        let mut outstanding = self.outstanding.lock();
+        while outstanding
+            .front()
+            .is_some_and(|(seq, _)| *seq <= through_seq)
+        {
+            outstanding.pop_front();
+        }
+    }
+}
+
+static DESKTOP_SINK: Lazy<RwLock<Option<Arc<DesktopWorkerSink>>>> = Lazy::new(|| RwLock::new(None));
+
+fn desktop_sink_for(tenant_id: &str) -> Option<Arc<DesktopWorkerSink>> {
+    DESKTOP_SINK
+        .read()
+        .as_ref()
+        .filter(|sink| sink.tenant_id == tenant_id)
+        .map(Arc::clone)
+}
+
+/// The tenant whose workers the currently attached brain owns, if any.
+fn attached_brain_tenant() -> Option<String> {
+    DESKTOP_SINK
+        .read()
+        .as_ref()
+        .map(|sink| sink.tenant_id.clone())
+        .or_else(super::ws_bridge::current_brain_account_id)
+}
+
+fn deliver_to_socket_brain(tenant_id: &str, event: WorkerBrainEvent) -> BrainDelivery {
+    let sent = match event {
+        WorkerBrainEvent::WorkerAttach {
+            connection_id,
+            host_ref,
+            manifest,
+        } => super::ws_bridge::send_worker_attach(
+            tenant_id.to_string(),
+            connection_id,
+            host_ref,
+            manifest,
+        ),
+        WorkerBrainEvent::WorkerFrame {
+            connection_id,
+            frame,
+        } => super::ws_bridge::send_worker_frame(tenant_id.to_string(), connection_id, frame),
+        WorkerBrainEvent::WorkerDetach {
+            connection_id,
+            host_ref,
+            reason,
+        } => super::ws_bridge::send_worker_detach(
+            tenant_id.to_string(),
+            connection_id,
+            host_ref,
+            reason,
+        ),
+    };
+    // A socket brain that is mid-reconnect is the `NoBrain` case, not a
+    // failure: the worker stays attached and is re-announced on hello.
+    match sent {
+        Ok(()) => BrainDelivery::Delivered,
+        Err(_) => BrainDelivery::NoBrain,
+    }
+}
+
+/// Deliver one event to the attached brain, waiting for queue space if needed.
+async fn deliver_to_brain(tenant_id: &str, event: WorkerBrainEvent) -> BrainDelivery {
+    if let Some(sink) = desktop_sink_for(tenant_id) {
+        return match sink.send(event).await {
+            Ok(()) => BrainDelivery::Delivered,
+            Err(reason) => BrainDelivery::Failed(reason),
+        };
+    }
+    deliver_to_socket_brain(tenant_id, event)
+}
+
+/// Non-blocking delivery, used where the caller cannot await.
+fn try_deliver_to_brain(tenant_id: &str, event: WorkerBrainEvent) -> BrainDelivery {
+    if let Some(sink) = desktop_sink_for(tenant_id) {
+        return match sink.try_send(event) {
+            Ok(()) => BrainDelivery::Delivered,
+            Err(reason) => BrainDelivery::Failed(reason),
+        };
+    }
+    deliver_to_socket_brain(tenant_id, event)
+}
+
+/// Re-announce every live worker to whichever brain just attached.
+///
+/// This is a deliberate reset point: a brain that has just connected holds no
+/// Agent RPC session state, so the pool tears down and rebuilds each worker's
+/// client on re-attach. It is no longer gated on a *socket* brain existing —
+/// that gate is what made the desktop host silently inert.
 pub(crate) fn announce_all_workers() {
-    let Some(tenant_id) = super::ws_bridge::current_brain_account_id() else {
+    let Some(tenant_id) = attached_brain_tenant() else {
         return;
     };
     let workers = WORKERS
@@ -173,12 +418,16 @@ pub(crate) fn announce_all_workers() {
         .cloned()
         .collect::<Vec<_>>();
     for worker in workers {
-        let _ = super::ws_bridge::send_worker_attach(
-            worker.tenant_id,
-            worker.connection_id,
-            worker.host_ref,
-            worker.manifest,
-        );
+        if let BrainDelivery::Failed(reason) = try_deliver_to_brain(
+            &tenant_id,
+            WorkerBrainEvent::WorkerAttach {
+                connection_id: worker.connection_id,
+                host_ref: worker.host_ref,
+                manifest: worker.manifest,
+            },
+        ) {
+            log::warn!("companion-api ws-worker: worker announce failed: {reason}");
+        }
     }
 }
 
@@ -344,12 +593,36 @@ async fn handle_worker_socket(
     };
     install_worker(connection);
     publish_fleet_update(&state, &tenant_id);
-    let _ = super::ws_bridge::send_worker_attach(
-        tenant_id.clone(),
-        connection_id.clone(),
-        host_ref.clone(),
-        manifest,
-    );
+    if let BrainDelivery::Failed(reason) = deliver_to_brain(
+        &tenant_id,
+        WorkerBrainEvent::WorkerAttach {
+            connection_id: connection_id.clone(),
+            host_ref: host_ref.clone(),
+            manifest,
+        },
+    )
+    .await
+    {
+        // Same verdict as a refused frame, for a stronger reason: a brain that
+        // never received the ATTACH does not know this connection exists, so it
+        // can never dispatch to it. Serving on would leave the worker connected
+        // and shown online in Fleet while being unreachable — exactly the state
+        // this sink was written to remove — until the 90s idle timeout or the
+        // next `announce_all_workers`. Drop it and let the worker reconnect.
+        log::warn!("companion-api ws-worker: worker attach was refused by the brain: {reason}");
+        close_with(
+            &mut socket,
+            CLOSE_POLICY_VIOLATION,
+            "brain could not accept the worker attach",
+        )
+        .await;
+        // No `worker_detach` follow-up: the brain has no record of a connection
+        // it never saw attach, and the same sink would refuse it anyway.
+        if remove_worker(&connection_id) {
+            publish_fleet_update(&state, &tenant_id);
+        }
+        return;
+    }
 
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await;
@@ -381,10 +654,30 @@ async fn handle_worker_socket(
                             close_with(&mut socket, CLOSE_PROTOCOL_ERROR, "invalid Agent RPC frame").await;
                             break;
                         }
-                        if super::ws_bridge::send_worker_frame(tenant_id.clone(), connection_id.clone(), frame.to_string()).is_err() {
-                            // The worker stays attached while the brain reconnects. Agent RPC frames
-                            // only begin after the brain has observed `worker_attach`.
-                            log::debug!("companion-api ws-worker: brain unavailable for worker frame");
+                        match deliver_to_brain(
+                            &tenant_id,
+                            WorkerBrainEvent::WorkerFrame {
+                                connection_id: connection_id.clone(),
+                                frame: frame.to_string(),
+                            },
+                        )
+                        .await
+                        {
+                            BrainDelivery::Delivered => {}
+                            BrainDelivery::NoBrain => {
+                                // The worker stays attached while the brain reconnects. Agent RPC frames
+                                // only begin after the brain has observed `worker_attach`.
+                                log::debug!("companion-api ws-worker: brain unavailable for worker frame");
+                            }
+                            BrainDelivery::Failed(reason) => {
+                                // An attached brain that cannot take a frame has broken the session's
+                                // request/response correlation; dropping the frame would strand every
+                                // in-flight call, so the connection is closed and recovered instead.
+                                log::warn!("companion-api ws-worker: brain refused a worker frame: {reason}");
+                                detach_reason = "brain_backpressure";
+                                close_with(&mut socket, CLOSE_POLICY_VIOLATION, "brain could not accept Agent RPC frames").await;
+                                break;
+                            }
                         }
                     }
                     Some(Ok(Message::Ping(bytes))) => {
@@ -430,12 +723,18 @@ async fn handle_worker_socket(
 
     if remove_worker(&connection_id) {
         publish_fleet_update(&state, &tenant_id);
-        let _ = super::ws_bridge::send_worker_detach(
-            tenant_id,
-            connection_id,
-            host_ref,
-            detach_reason.to_string(),
-        );
+        if let BrainDelivery::Failed(reason) = deliver_to_brain(
+            &tenant_id,
+            WorkerBrainEvent::WorkerDetach {
+                connection_id,
+                host_ref,
+                reason: detach_reason.to_string(),
+            },
+        )
+        .await
+        {
+            log::warn!("companion-api ws-worker: worker detach was not delivered: {reason}");
+        }
     }
 }
 
@@ -462,6 +761,21 @@ fn publish_fleet_update(state: &super::SharedState, tenant_id: &str) {
     }
 }
 
+/// An attached worker can be dispatched to at any moment, so the host that
+/// accepted it must stay awake. Sleeping here drops the socket, expires the
+/// run lease, and shows the team a host that was online seconds ago.
+fn hold_host_awake(host_ref: &str) {
+    crate::power_assertion::acquire(crate::power_assertion::WakeReason::AttachedWorker(
+        host_ref.to_string(),
+    ));
+}
+
+fn release_host_awake(host_ref: &str) {
+    crate::power_assertion::release(&crate::power_assertion::WakeReason::AttachedWorker(
+        host_ref.to_string(),
+    ));
+}
+
 fn install_worker(connection: WorkerConnection) {
     WORKER_HISTORY.write().insert(
         connection.host_ref.clone(),
@@ -476,6 +790,7 @@ fn install_worker(connection: WorkerConnection) {
             online: true,
         },
     );
+    hold_host_awake(&connection.host_ref);
     let replaced = {
         let mut workers = WORKERS.write();
         let previous_id = workers
@@ -487,6 +802,7 @@ fn install_worker(connection: WorkerConnection) {
         previous
     };
     if let Some(previous) = replaced {
+        release_host_awake(&previous.host_ref);
         let _ = previous.shutdown.send(true);
     }
 }
@@ -499,8 +815,115 @@ fn remove_worker(connection_id: &str) -> bool {
             presence.last_seen_at = worker.last_seen_at;
             presence.used_slots = 0;
         }
+        release_host_awake(&worker.host_ref);
     }
     removed.is_some()
+}
+
+// ---------------------------------------------------------------------------
+// Desktop brain commands
+//
+// The desktop brain lives in the WebView, so its half of the worker bridge is a
+// pair of Tauri commands rather than a socket. `attach` installs the IPC channel
+// and immediately replays the live roster; `send_frame` reuses the same
+// per-connection byte budget the socket brain writes through, so outbound
+// backpressure is identical on both hosts.
+
+/// Attach the in-process brain and replay the live worker roster onto it.
+///
+/// `tenant_id` is the renderer's active account. The WebView is inside the
+/// trust boundary — it can already invoke every command in the app — so this is
+/// an addressing parameter, not an authorization one; worker authorization is
+/// still enforced per connection against the security store.
+#[tauri::command]
+pub async fn companion_worker_attach_channel(
+    tenant_id: String,
+    on_event: Channel<WorkerBrainEnvelope>,
+) -> Result<(), String> {
+    if tenant_id.is_empty() {
+        return Err("tenant id is required".to_string());
+    }
+    let previous = DESKTOP_SINK
+        .write()
+        .replace(Arc::new(DesktopWorkerSink::new(tenant_id, on_event)));
+    if previous.is_some() {
+        log::info!("companion-api ws-worker: replacing the attached desktop brain channel");
+    }
+    announce_all_workers();
+    Ok(())
+}
+
+/// Detach the in-process brain. Workers stay connected and wait for a new one.
+#[tauri::command]
+pub async fn companion_worker_detach_channel() -> Result<(), String> {
+    DESKTOP_SINK.write().take();
+    Ok(())
+}
+
+/// Send one Agent RPC frame from the desktop brain to a worker.
+#[tauri::command]
+pub async fn companion_worker_send_frame(
+    tenant_id: String,
+    connection_id: String,
+    frame: String,
+) -> Result<(), String> {
+    send_to_worker(&tenant_id, &connection_id, frame)
+}
+
+/// Release the inbound byte budget for everything up to `through_seq`.
+///
+/// Without this the desktop brain's queue would be a pure fire-and-forget push
+/// and a fast worker could grow the WebView's message backlog without bound.
+#[tauri::command]
+pub async fn companion_worker_ack_events(through_seq: u64) -> Result<(), String> {
+    let sink = DESKTOP_SINK.read().as_ref().map(Arc::clone);
+    match sink {
+        Some(sink) => {
+            sink.ack(through_seq);
+            Ok(())
+        }
+        None => Err("no desktop brain is attached".to_string()),
+    }
+}
+
+/// Wake a worker host that is offline but has told us how to reach its NIC.
+///
+/// Placement rejects an offline worker and the run waits. For a machine that is
+/// merely asleep that is a self-fulfilling verdict — nothing wakes it, so it
+/// stays offline. The retained presence record still holds the manifest from
+/// its last connection, which is where the MAC came from.
+///
+/// Best-effort by contract: `Ok(true)` means a magic packet left this host, not
+/// that anything woke up. Wake-on-LAN also has to be enabled in the worker's
+/// firmware, which nothing here can verify.
+#[tauri::command]
+pub async fn companion_wake_worker(tenant_id: String, host_ref: String) -> Result<bool, String> {
+    let manifest = WORKER_HISTORY
+        .read()
+        .values()
+        .find(|worker| worker.tenant_id == tenant_id && worker.host_ref == host_ref)
+        .map(|worker| worker.manifest.clone())
+        .ok_or_else(|| format!("no worker presence for {host_ref}"))?;
+    let Some(wake) = manifest.get("wake") else {
+        return Ok(false);
+    };
+    let broadcast = wake.get("broadcastAddress").and_then(Value::as_str);
+    let macs = wake
+        .get("macAddresses")
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if macs.is_empty() {
+        return Ok(false);
+    }
+    let mut woke = false;
+    for mac in macs {
+        match crate::wake_on_lan::wake(mac, broadcast) {
+            Ok(()) => woke = true,
+            Err(error) => log::debug!("companion-api ws-worker: wake failed for {mac}: {error}"),
+        }
+    }
+    Ok(woke)
 }
 
 pub(crate) fn derive_host_ref(tenant_id: &str, device_id: &str) -> String {
@@ -654,6 +1077,10 @@ mod tests {
 
     #[test]
     fn worker_load_projects_readiness_to_live_and_retained_hosts() {
+        // `install_worker` / `remove_worker` take and drop a power-assertion
+        // hold as a side effect, and that state is process-global. Without this
+        // lock the assertion suite intermittently observes this test's holder.
+        let _guard = crate::power_assertion::ASSERTION_TEST_LOCK.lock();
         let tenant_id = "tenant-placement-projection";
         let connection_id = "connection-placement-projection";
         let host_ref = "device:placement-projection";
@@ -733,6 +1160,139 @@ mod tests {
         let value = serde_json::to_value(&summaries[0]).unwrap();
         assert_eq!(value["hostRef"], derive_host_ref("tenant-a", "worker-a"));
         assert_eq!(value["deviceId"], "worker-a");
+    }
+
+    fn test_sink(
+        tenant_id: &str,
+    ) -> (
+        Arc<DesktopWorkerSink>,
+        tauri::ipc::Channel<WorkerBrainEnvelope>,
+    ) {
+        let channel = Channel::new(|_| Ok(()));
+        let sink = Arc::new(DesktopWorkerSink::new(
+            tenant_id.to_string(),
+            channel.clone(),
+        ));
+        (sink, channel)
+    }
+
+    #[test]
+    fn brain_events_serialize_as_a_tagged_envelope_the_renderer_can_switch_on() {
+        // The TS side matches on `type` and acks `seq`. A shape change here is a
+        // silent protocol break: the renderer would drop every envelope and the
+        // host would stall on an unreleased byte budget.
+        let envelope = WorkerBrainEnvelope {
+            seq: 4,
+            event: WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: "{}".to_string(),
+            },
+        };
+        let value = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(value["seq"], 4);
+        assert_eq!(value["type"], "worker_frame");
+        assert_eq!(value["connectionId"], "connection-1");
+
+        let attach = serde_json::to_value(WorkerBrainEnvelope {
+            seq: 1,
+            event: WorkerBrainEvent::WorkerAttach {
+                connection_id: "connection-1".to_string(),
+                host_ref: "device:a".to_string(),
+                manifest: serde_json::json!({ "manifestVersion": 1 }),
+            },
+        })
+        .unwrap();
+        assert_eq!(attach["type"], "worker_attach");
+        assert_eq!(attach["hostRef"], "device:a");
+
+        let detach = serde_json::to_value(WorkerBrainEnvelope {
+            seq: 2,
+            event: WorkerBrainEvent::WorkerDetach {
+                connection_id: "connection-1".to_string(),
+                host_ref: "device:a".to_string(),
+                reason: "idle_timeout".to_string(),
+            },
+        })
+        .unwrap();
+        assert_eq!(detach["type"], "worker_detach");
+        assert_eq!(detach["reason"], "idle_timeout");
+    }
+
+    #[test]
+    fn desktop_brain_queue_is_bounded_and_released_by_renderer_acks() {
+        // `Channel::send` is fire-and-forget, so without this budget a fast
+        // worker would grow the WebView's backlog without bound.
+        let (sink, _channel) = test_sink("tenant-budget");
+        let frame = "x".repeat(MAX_BRAIN_QUEUE_BYTES / 2);
+
+        assert!(sink
+            .try_send(WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: frame.clone(),
+            })
+            .is_ok());
+        assert!(sink
+            .try_send(WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: frame.clone(),
+            })
+            .is_ok());
+        assert!(sink
+            .try_send(WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: "one more".to_string(),
+            })
+            .is_err());
+
+        // Acks are cumulative: releasing through seq 2 frees both frames.
+        sink.ack(2);
+        assert!(sink
+            .try_send(WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: "one more".to_string(),
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn an_ack_below_the_watermark_releases_nothing() {
+        let (sink, _channel) = test_sink("tenant-partial-ack");
+        let frame = "x".repeat(MAX_BRAIN_QUEUE_BYTES / 2);
+        sink.try_send(WorkerBrainEvent::WorkerFrame {
+            connection_id: "connection-1".to_string(),
+            frame: frame.clone(),
+        })
+        .unwrap();
+        sink.try_send(WorkerBrainEvent::WorkerFrame {
+            connection_id: "connection-1".to_string(),
+            frame,
+        })
+        .unwrap();
+
+        sink.ack(0);
+
+        assert!(sink
+            .try_send(WorkerBrainEvent::WorkerFrame {
+                connection_id: "connection-1".to_string(),
+                frame: "still blocked".to_string(),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn a_desktop_brain_takes_priority_over_the_socket_brain_for_its_own_tenant() {
+        // The two brains are mutually exclusive by design — delivering to both
+        // would give one worker connection two Agent RPC clients.
+        let tenant_id = "tenant-routing";
+        let (sink, _channel) = test_sink(tenant_id);
+        DESKTOP_SINK.write().replace(Arc::clone(&sink));
+
+        assert!(desktop_sink_for(tenant_id).is_some());
+        assert!(desktop_sink_for("tenant-other").is_none());
+        assert_eq!(attached_brain_tenant().as_deref(), Some(tenant_id));
+
+        DESKTOP_SINK.write().take();
+        assert!(desktop_sink_for(tenant_id).is_none());
     }
 
     #[test]

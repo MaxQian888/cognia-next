@@ -1402,12 +1402,21 @@ pub async fn plugin_set_state(
 /// Set the lifecycle status on a plugin's runtime snapshot. This is the
 /// status-ledger counterpart to `plugin_set_state` (which persists opaque
 /// runtime data, NOT status). The frontend `PluginManager.syncBackendStatus`
-/// drives this on every load/enable/disable/suspend/unload transition so a
-/// cold-start `syncRuntimeState` restores the exact status. Uses
+/// drives this on every load/enable/disable/suspend/unload transition. Uses
 /// `upsert_status` so any status string (installed/loaded/enabled/disabled/
 /// error) is preserved verbatim — and a plugin the backend hasn't explicitly
 /// loaded (browser built-ins, disk-scanned plugins, anything after a cold
 /// restart) is seeded rather than rejected with `NotFound`.
+///
+/// This ledger is IN-MEMORY ONLY. `PluginRuntimeState::new` starts with an
+/// empty map and nothing rehydrates it from disk (pinned by the
+/// `state_starts_empty` test), so it does NOT survive a host restart and a
+/// cold-start `syncRuntimeState` reads an empty list. It is meaningful only
+/// within a live host process — most notably across a renderer reload, where
+/// the ledger still describes the PREVIOUS JS context. The renderer therefore
+/// treats it as a downstream mirror, never as a source of truth for liveness:
+/// see `syncRuntimeState` in lib/plugin/core/manager.ts for which statuses it
+/// may safely adopt and why.
 #[tauri::command]
 pub async fn plugin_set_status(
     state: State<'_, PluginRuntimeState>,

@@ -141,6 +141,18 @@ fn validate_content_protocol(
     Ok(())
 }
 
+/// Whether a durable-waitpoint command must be answered by the host's TS layer
+/// rather than the local Rust `workflow_waitpoint` mirror.
+///
+/// True only on headless hosts: the mirror's sole writer is the
+/// `workflow_waitpoint_create` Tauri command, which a Node brain cannot reach,
+/// so its Dexie holds the only copy of a pending approval. On a Tauri host the
+/// renderer mirrors every waitpoint into SQLite, and answering natively is what
+/// lets a paired device decide while the WebView is asleep.
+fn waitpoint_command_needs_ts_authority(name: &str, headless: bool) -> bool {
+    headless && matches!(name, "workflow_approval_list" | "workflow_approval_respond")
+}
+
 pub(super) async fn dispatch(
     name: &str,
     args: Value,
@@ -462,9 +474,46 @@ pub(super) async fn dispatch(
         }
 
         // ── Durable workflow waitpoints ─────────────────────────────────────
-        // Host-owned SQLite is the authority here: a paired device can decide
-        // while the WebView is asleep, and the renderer observes the terminal
-        // row when it resumes polling.
+        // Which store is authoritative depends on the host, so these two
+        // commands take one of two paths.
+        //
+        // Headless: the brain's Dexie is the only copy. The sole writer of the
+        // Rust `workflow_waitpoint` table is the `workflow_waitpoint_create`
+        // Tauri command, and a Node brain cannot reach it —
+        // `lib/workflow/runtime/tauri-bridge.ts` short-circuits every native
+        // call to `null` off-Tauri. So route to the brain's TS arms in
+        // `lib/companion/desktop-write-source.ts`. Answering from the
+        // always-empty local mirror instead left the phone's pending-approvals
+        // card permanently blank on a cloud host and let every approval gate
+        // run out its timeout onto the `rejected` branch.
+        "workflow_approval_list" | "workflow_approval_respond"
+            if waitpoint_command_needs_ts_authority(
+                name,
+                matches!(
+                    host,
+                    super::super::dispatch_host::DispatchHost::Headless(_)
+                ),
+            ) =>
+        {
+            let args = inject_caller_device_id(name, args, device_id);
+            let bridge = std::sync::Arc::clone(&state.desktop_writes_bridge);
+            let transport = super::super::ws_bridge::resolve_bridge_transport(state)
+                .map_err(RpcError::service_unavailable)?;
+            bridge
+                .dispatch(
+                    transport.as_ref(),
+                    name,
+                    args,
+                    crate::companion_api::desktop_writes_bridge::DEFAULT_TIMEOUT,
+                )
+                .await
+                .map_err(|error| map_desktop_write_bridge_error(name, error))
+        }
+
+        // Tauri: host-owned SQLite is the authority — the renderer mirrors every
+        // waitpoint into it, so a paired device can decide while the WebView is
+        // asleep and the renderer observes the terminal row when it resumes
+        // polling (`getWorkflowWaitpoint` reads native-first).
         "workflow_approval_list" => {
             let rows = match host {
                 super::super::dispatch_host::DispatchHost::Tauri(app) => app
@@ -723,6 +772,53 @@ pub(super) async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headless_hosts_route_approval_commands_to_the_ts_authority() {
+        for name in ["workflow_approval_list", "workflow_approval_respond"] {
+            assert!(
+                waitpoint_command_needs_ts_authority(name, true),
+                "{name} must reach the brain's Dexie on a headless host; the Rust waitpoint mirror is never written there"
+            );
+            assert!(
+                !waitpoint_command_needs_ts_authority(name, false),
+                "{name} must stay native on Tauri so a device can decide while the WebView is asleep"
+            );
+        }
+    }
+
+    #[test]
+    fn no_other_command_is_diverted_to_the_ts_authority() {
+        for name in COMMANDS {
+            if matches!(
+                *name,
+                "workflow_approval_list" | "workflow_approval_respond"
+            ) {
+                continue;
+            }
+            assert!(
+                !waitpoint_command_needs_ts_authority(name, true),
+                "{name} was diverted off its own dispatch arm"
+            );
+        }
+    }
+
+    #[test]
+    fn approval_respond_carries_the_verified_caller_device_id() {
+        // The native arm stamps `device:{device_id}` itself; the headless arm
+        // hands the decision to TS, which reads `callerDeviceId`. That field is
+        // only injected for commands on the allowlist, so dropping it there
+        // would silently strip the responder identity from every cloud-host
+        // approval.
+        assert_eq!(
+            inject_caller_device_id(
+                "workflow_approval_respond",
+                serde_json::json!({ "approvalId": "apr_1", "callerDeviceId": "spoofed" }),
+                "dev-real",
+            )["callerDeviceId"],
+            serde_json::json!("dev-real")
+        );
+    }
 
     #[test]
     fn command_family_is_non_empty_and_unique() {

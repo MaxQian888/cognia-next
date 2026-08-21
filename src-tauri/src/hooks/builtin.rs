@@ -207,6 +207,31 @@ pub fn apply_builtin_hooks(settings: &mut ClaudeSettings) {
 mod tests {
     use super::*;
 
+    /// The shared registry table. Compiled in so this side fails when the Rust
+    /// registry drifts from `lib/claude/hooks/builtin-hooks.ts` — they are two
+    /// hand-maintained copies of the same list, and because
+    /// `builtinHookOverrides` is keyed by id a drifted id also orphans the
+    /// user's enable/disable choice on one shell.
+    const LOCKSTEP: &str = include_str!("../../../hooks/builtin-hooks.lockstep.json");
+
+    #[test]
+    fn builtin_registry_matches_the_shared_lockstep_table() {
+        let table: Value = serde_json::from_str(LOCKSTEP).unwrap();
+        let expected = table["hooks"].as_array().expect("hooks array");
+        assert_eq!(
+            BUILTIN_HOOKS.len(),
+            expected.len(),
+            "built-in hook count drifted from the lockstep table"
+        );
+        for (def, want) in BUILTIN_HOOKS.iter().zip(expected) {
+            assert_eq!(def.id, want["id"].as_str().unwrap());
+            assert_eq!(def.event, want["event"].as_str().unwrap());
+            assert_eq!(def.script, want["script"].as_str().unwrap());
+            assert_eq!(def.default_enabled, want["defaultEnabled"].as_bool().unwrap());
+            assert_eq!(def.matcher, want["matcher"].as_str());
+        }
+    }
+
     fn overrides(pairs: &[(&str, bool)]) -> Map<String, Value> {
         pairs
             .iter()

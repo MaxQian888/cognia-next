@@ -64,6 +64,23 @@ pub struct AutomationState {
     pub recorder: super::record::session::RecorderState,
     /// One passive OS input hook shared by the recorder and selection toolbar.
     pub input_monitor: InputMonitor,
+    /// Live plugin registry seam — answers "is plugin X installed, enabled, and
+    /// what did the user grant it?" for any plugin id.
+    ///
+    /// It lives on `AutomationState` rather than on `RecorderState` because two
+    /// unrelated surfaces need it: the skill recorder (`native:input` /
+    /// `native:screen` / `media:image:write`) and `sandbox_exec`
+    /// (`native:filesystem` / `native:process`). The trait itself still lives
+    /// under `record::plugin_facts` — where it was first introduced — but it was
+    /// never recorder-specific.
+    ///
+    /// `cognia-automation` deliberately does not depend on
+    /// `cognia-plugin-runtime`, so `src-tauri` registers the real source at
+    /// boot. The default fails closed: `NoPluginFacts` reports "not installed",
+    /// which denies rather than waving grants through unchecked.
+    plugin_facts: std::sync::Arc<
+        parking_lot::Mutex<std::sync::Arc<dyn super::record::plugin_facts::PluginFactsSource>>,
+    >,
 }
 
 impl AutomationState {
@@ -86,7 +103,23 @@ impl AutomationState {
             cua,
             recorder: super::record::session::RecorderState::default(),
             input_monitor: InputMonitor::default(),
+            plugin_facts: std::sync::Arc::new(parking_lot::Mutex::new(std::sync::Arc::new(
+                super::record::plugin_facts::NoPluginFacts,
+            ))),
         }
+    }
+
+    pub fn set_plugin_facts(
+        &self,
+        source: std::sync::Arc<dyn super::record::plugin_facts::PluginFactsSource>,
+    ) {
+        *self.plugin_facts.lock() = source;
+    }
+
+    pub fn plugin_facts(
+        &self,
+    ) -> std::sync::Arc<dyn super::record::plugin_facts::PluginFactsSource> {
+        self.plugin_facts.lock().clone()
     }
 }
 

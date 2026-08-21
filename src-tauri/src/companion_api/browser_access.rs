@@ -164,7 +164,10 @@ pub fn load(data_dir: Option<&Path>) -> BrowserAccessConfig {
 }
 
 /// Persist the config after validating it.
-pub fn save(data_dir: Option<&Path>, config: BrowserAccessConfig) -> Result<BrowserAccessConfig, String> {
+pub fn save(
+    data_dir: Option<&Path>,
+    config: BrowserAccessConfig,
+) -> Result<BrowserAccessConfig, String> {
     let sanitized = config.sanitized()?;
     let path = config_path(data_dir);
     if let Some(parent) = path.parent() {

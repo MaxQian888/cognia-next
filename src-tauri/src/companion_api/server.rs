@@ -612,7 +612,10 @@ fn build_router_for_mode(
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(from_fn(reject_mutations_while_draining));
     if crate::headless::headless_services().is_none() {
-        return router.layer(from_fn_with_state(origin_policy, super::web_origin::enforce));
+        return router.layer(from_fn_with_state(
+            origin_policy,
+            super::web_origin::enforce,
+        ));
     }
     // Raw broker content deliberately sits outside the default JSON/webhook
     // body limit. It has its own 64 MiB cap and requires the same loopback-only
@@ -633,9 +636,10 @@ fn build_router_for_mode(
         ))
         .layer(from_fn(reject_mutations_while_draining))
         .with_state(state);
-    router
-        .merge(content_router)
-        .layer(from_fn_with_state(origin_policy, super::web_origin::enforce))
+    router.merge(content_router).layer(from_fn_with_state(
+        origin_policy,
+        super::web_origin::enforce,
+    ))
 }
 
 async fn reject_mutations_while_draining(request: Request, next: Next) -> Response {

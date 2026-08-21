@@ -85,6 +85,12 @@ impl WorktreeLifecycleSink for HookWorktreeLifecycleSink {
                 hook_event,
                 &session_id,
                 Some(&cwd),
+                // Worktree lifecycle is host bookkeeping, not an agent turn —
+                // same classification the TS producer uses in lib/git/commands.ts.
+                crate::hooks::HookAgentIdentity {
+                    kind: Some("system".to_string()),
+                    agent_ref: None,
+                },
                 fields,
             )
             .await;

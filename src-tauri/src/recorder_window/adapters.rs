@@ -161,6 +161,36 @@ impl<R: tauri::Runtime> cognia_automation::automation::record::session::Recorder
     }
 }
 
+/// Point the automation layer's plugin-facts seam at the live plugin registry.
+///
+/// Split out of [`register`] and called eagerly at boot, because two surfaces
+/// read it and only one of them can afford to wait. The skill recorder's
+/// preflight is user-driven, but `sandbox_exec`'s permission gate runs on the
+/// first sandboxed tool call of a turn — and the default `NoPluginFacts` fails
+/// closed as "not installed". Leaving this behind the OCR-backend probe that
+/// [`register`] awaits would deny every `sandbox_bash` / `sandbox_edit` /
+/// `sandbox_write` until that probe lands, and permanently if it never does.
+///
+/// Idempotent: [`register`] calls it again once the recorder's other seams are
+/// ready, which is a no-op re-store of the same source.
+pub fn register_plugin_facts<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
+where
+    R: 'static,
+{
+    use cognia_automation::automation::commands::AutomationState;
+    use tauri::Manager;
+
+    let automation = app.state::<AutomationState>();
+    if let Some(plugins) = app.try_state::<PluginRuntimeState>() {
+        automation.set_plugin_facts(Arc::new(RuntimePluginFacts::new(plugins.inner())));
+    } else {
+        log::warn!(
+            "plugin runtime state unavailable; the skill recorder's preflight will report its \
+             plugin as not installed, and every sandboxed tool call will be denied"
+        );
+    }
+}
+
 /// Convenience for boot: build every seam and hand them to the recorder.
 pub async fn register<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
 where
@@ -174,16 +204,7 @@ where
     automation
         .recorder
         .set_surface(Arc::new(ControllerSurface { app: app.clone() }));
-    if let Some(plugins) = app.try_state::<PluginRuntimeState>() {
-        automation
-            .recorder
-            .set_plugin_facts(Arc::new(RuntimePluginFacts::new(plugins.inner())));
-    } else {
-        log::warn!(
-            "skill recorder: plugin runtime state unavailable; preflight will report the \
-             recorder plugin as not installed"
-        );
-    }
+    register_plugin_facts(app);
     if let Some(ocr) = app.try_state::<NativeOcrRegistry>() {
         automation
             .recorder

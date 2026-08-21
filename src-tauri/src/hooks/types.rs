@@ -51,6 +51,13 @@ pub struct HookGroup {
     /// Tool-name regex (or comma-separated literal) to match. None = match all.
     #[serde(default)]
     pub matcher: Option<String>,
+    /// Agent selector, orthogonal to `matcher`: same syntax, tested against the
+    /// event's `agent_kind` and `agent_ref`. None = match every agent.
+    ///
+    /// A cognia extension. Real Claude Code ignores the unknown key and will run
+    /// the group unconditionally — the settings UI says so explicitly.
+    #[serde(default)]
+    pub agents: Option<String>,
     /// Handlers run sequentially; first blocking handler wins.
     pub hooks: Vec<HookHandler>,
 }
@@ -83,6 +90,17 @@ pub enum HookHandler {
         headers: std::collections::HashMap<String, String>,
         #[serde(default)]
         timeout: Option<u64>,
+    },
+    /// Plugin handler (`{ type: "plugin", pluginId, hookId }`). Recognised so
+    /// settings.json round-trips, but NOT executable on this rail: it needs the
+    /// renderer round-trip only the sidecar can perform
+    /// (`sidecar/dispatch/plugin-hook-exec.mjs`). Treated as unsupported here,
+    /// which soft-allows with a warning.
+    Plugin {
+        #[serde(default)]
+        plugin_id: String,
+        #[serde(default)]
+        hook_id: String,
     },
     /// MCP-tool / prompt / agent handlers — recognised so settings.json
     /// round-trips, but execution is unimplemented in Phase 1.
@@ -154,6 +172,30 @@ impl HookDecision {
     }
 }
 
+/// Which agent a lifecycle event came from. Mirrors the TS `HookAgentKind`
+/// union plus its free-form companion; both reach a hook script as top-level
+/// payload fields (`agent_kind` / `agent_ref`) and are what the `agents`
+/// selector on a `HookGroup` is tested against.
+///
+/// Kept as `Option<String>` rather than an enum: an unknown kind from a future
+/// TS release must round-trip and simply fail to match, never abort the event.
+#[derive(Debug, Clone, Default)]
+pub struct HookAgentIdentity {
+    pub kind: Option<String>,
+    pub agent_ref: Option<String>,
+}
+
+impl HookAgentIdentity {
+    /// The strings an `agents` selector may match: the kind and the ref.
+    pub fn match_targets(&self) -> Vec<&str> {
+        [self.kind.as_deref(), self.agent_ref.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+}
+
 /// Event payload pumped to a `command` handler on stdin. Mirrors the shape
 /// Claude Code uses, minus session/transcript fields we don't have here.
 #[derive(Debug, Serialize)]
@@ -162,6 +204,13 @@ pub struct HookEventPayload {
     pub hook_event_name: String,
     pub session_id: String,
     pub cwd: Option<String>,
+    /// Which agent produced the event. Omitted from the JSON when unknown so a
+    /// hook script can distinguish "no identity" from "identity is empty".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_kind: Option<String>,
+    /// Free-form identity within `agent_kind` (teammate id, subagent def id...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_ref: Option<String>,
     /// Free-form bag of event-specific fields (prompt text, tool name + input, etc.).
     #[serde(flatten)]
     pub fields: Value,

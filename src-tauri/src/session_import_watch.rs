@@ -48,12 +48,30 @@ impl SessionImportWatcherState {
 }
 
 /// Whether a changed path is an importable session file (by extension). Matches
-/// the union of the adapters' `acceptedExtensions`.
+/// the union of the adapters' `acceptedExtensions`, plus SQLite's own sidecar
+/// files.
+///
+/// The sidecars matter: OpenCode keeps its history in `opencode.db`, and SQLite
+/// in WAL mode writes new pages to `opencode.db-wal` and touches
+/// `opencode.db-shm`, leaving the main database file untouched until a
+/// checkpoint. Matching only `.db` therefore meant live sync could sit silent
+/// through an entire OpenCode session and fire only when SQLite happened to
+/// checkpoint. The frontend re-scans the whole source on any event from it, so
+/// treating a `-wal` touch as "OpenCode changed" is exactly right — and the
+/// 300ms debounce collapses a write burst either way.
 fn is_session_file(p: &Path) -> bool {
     match p.extension().and_then(|s| s.to_str()) {
         Some(ext) => matches!(
             ext.to_ascii_lowercase().as_str(),
-            "jsonl" | "json" | "md" | "db"
+            "jsonl"
+                | "json"
+                | "md"
+                | "db"
+                | "db-wal"
+                | "db-shm"
+                | "sqlite"
+                | "sqlite-wal"
+                | "sqlite-shm"
         ),
         None => false,
     }
@@ -167,6 +185,20 @@ mod tests {
         assert!(is_session_file(&PathBuf::from("/x/.aider.chat.history.md")));
         assert!(is_session_file(&PathBuf::from("/x/opencode.db")));
         assert!(is_session_file(&PathBuf::from("/x/a.JSONL"))); // case-insensitive
+    }
+
+    #[test]
+    fn sqlite_sidecar_writes_count_as_changes() {
+        // WAL-mode SQLite writes land in `-wal` and leave the `.db` mtime alone
+        // until a checkpoint, so matching only `.db` made live sync miss an
+        // entire OpenCode session.
+        assert!(is_session_file(&PathBuf::from("/x/opencode.db-wal")));
+        assert!(is_session_file(&PathBuf::from("/x/opencode.db-shm")));
+        assert!(is_session_file(&PathBuf::from("/x/store.sqlite")));
+        assert!(is_session_file(&PathBuf::from("/x/store.SQLITE-WAL")));
+        // Both spellings carry both sidecars: `.sqlite-shm` was missing while
+        // `.db-shm` was accepted, so the two conventions behaved differently.
+        assert!(is_session_file(&PathBuf::from("/x/store.sqlite-shm")));
     }
 
     #[test]

@@ -22,7 +22,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use cognia_net::request_cancellation::RequestCancellationRegistry;
-use cognia_net::sse_stream::{stream_sse_get, SseEvent, SseError};
+use cognia_net::sse_stream::{stream_sse_get, SseError, SseEvent};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;
 use tauri::Emitter;
@@ -69,7 +69,8 @@ fn stream_channel(stream_id: &str) -> String {
 /// than trusting its caller. Loopback stays reachable on purpose: a controller
 /// on `http://127.0.0.1:8080` is the documented local development target.
 fn validate_controller_url(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url).map_err(|error| format!("invalid controller URL: {error}"))?;
+    let parsed =
+        url::Url::parse(url).map_err(|error| format!("invalid controller URL: {error}"))?;
     let host = parsed.host_str().unwrap_or_default();
     // Never a valid controller, always a cloud-credential exfiltration target.
     if host == "169.254.169.254" {
@@ -239,8 +240,14 @@ mod tests {
         // A blank cursor must be omitted rather than sent empty: the controller
         // parses `Last-Event-ID` as an integer and an empty value would replay
         // the whole backlog on every reconnect.
-        assert!(build_headers("token-1", Some("  ")).unwrap().get("last-event-id").is_none());
-        assert!(build_headers("token-1", None).unwrap().get("last-event-id").is_none());
+        assert!(build_headers("token-1", Some("  "))
+            .unwrap()
+            .get("last-event-id")
+            .is_none());
+        assert!(build_headers("token-1", None)
+            .unwrap()
+            .get("last-event-id")
+            .is_none());
         assert!(build_headers("   ", None).is_err());
     }
 
@@ -268,6 +275,8 @@ mod tests {
 
     #[tokio::test]
     async fn closing_an_unknown_stream_is_not_an_error() {
-        assert!(!server_ops_events_close("never-opened".into()).await.unwrap());
+        assert!(!server_ops_events_close("never-opened".into())
+            .await
+            .unwrap());
     }
 }

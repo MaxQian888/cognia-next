@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use super::trust;
 use super::{
-    hook_event_name, load_effective_settings, run_session_scoped, run_tool_scoped, HookDecision,
-    HookEvent,
+    hook_event_name, load_effective_settings, run_session_scoped, run_tool_scoped,
+    HookAgentIdentity, HookDecision, HookEvent,
 };
 
 /// Wire shape returned to TS. `block` set ⇒ the caller should treat the action
@@ -50,6 +50,10 @@ fn parse_event(event: &str) -> Option<HookEvent> {
 /// - `tool_name`: when present, the hook is tool-scoped (matcher tested against it);
 ///   when absent it is session-scoped.
 /// - `cwd`: project dir; project/local hooks load only if it is a trusted workspace.
+/// - `agent_kind` / `agent_ref`: which agent produced the event. Reaches the hook
+///   script as top-level payload fields and is what a group's `agents` selector
+///   is tested against. Optional so a caller that genuinely has no identity
+///   (and accepts never matching a narrowed hook) can omit it.
 /// - `payload`: event-specific fields merged into the hook payload `fields`.
 #[tauri::command]
 pub async fn run_agent_hook(
@@ -57,6 +61,8 @@ pub async fn run_agent_hook(
     session_id: String,
     cwd: Option<String>,
     tool_name: Option<String>,
+    agent_kind: Option<String>,
+    agent_ref: Option<String>,
     payload: Option<Value>,
 ) -> Result<HookDecisionDto, String> {
     let Some(hook_event) = parse_event(&event) else {
@@ -65,6 +71,10 @@ pub async fn run_agent_hook(
     let resolved_cwd = trust::resolve_trusted_cwd(cwd.as_deref());
     let settings = load_effective_settings(resolved_cwd.as_deref());
     let fields = payload.unwrap_or(Value::Null);
+    let identity = HookAgentIdentity {
+        kind: agent_kind,
+        agent_ref,
+    };
 
     let decision = match &tool_name {
         Some(tool) => {
@@ -74,6 +84,7 @@ pub async fn run_agent_hook(
                 &session_id,
                 resolved_cwd.as_deref(),
                 tool,
+                identity,
                 fields,
             )
             .await
@@ -84,6 +95,7 @@ pub async fn run_agent_hook(
                 hook_event,
                 &session_id,
                 resolved_cwd.as_deref(),
+                identity,
                 fields,
             )
             .await

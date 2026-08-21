@@ -472,9 +472,11 @@ fn submit_blocking(
         processing_state: receipt.processing_state,
         service_url: connection.base_url.clone(),
         submitted_at: chrono::Utc::now().to_rfc3339(),
-        deletion_credential: receipt
-            .deletion_credential
-            .or_else(|| previous.as_ref().and_then(|old| old.deletion_credential.clone())),
+        deletion_credential: receipt.deletion_credential.or_else(|| {
+            previous
+                .as_ref()
+                .and_then(|old| old.deletion_credential.clone())
+        }),
         withdrawn_at: None,
         included_minidump: built.included_minidump,
         included_screenshot: built.included_screenshot,
@@ -654,7 +656,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         // `stackFrames` is one of the four keys `find_frame_value` searches;
         // the raw `backtrace` string is not, which is why it is reshaped.
-        assert_eq!(events[0]["stackFrames"], serde_json::json!(["alpha", "beta"]));
+        assert_eq!(
+            events[0]["stackFrames"],
+            serde_json::json!(["alpha", "beta"])
+        );
         assert_eq!(events[0]["kind"], serde_json::json!("crash"));
         // The untouched report rides along for a human reading the package.
         assert_eq!(events[0]["report"]["message"], serde_json::json!("boom"));
@@ -669,13 +674,18 @@ mod tests {
 
     #[test]
     fn build_identity_separates_architectures_of_the_same_release() {
-        let intel = serde_json::json!({"system": {"arch": "x86_64"}, "extra": {"appVersion": "1.2.3"}});
-        let arm = serde_json::json!({"system": {"arch": "aarch64"}, "extra": {"appVersion": "1.2.3"}});
+        let intel =
+            serde_json::json!({"system": {"arch": "x86_64"}, "extra": {"appVersion": "1.2.3"}});
+        let arm =
+            serde_json::json!({"system": {"arch": "aarch64"}, "extra": {"appVersion": "1.2.3"}});
         assert_eq!(build_id(&intel), "1.2.3-x86_64");
         assert_ne!(build_id(&intel), build_id(&arm));
         // A report missing the fields still yields something groupable.
         assert!(!build_id(&serde_json::Value::Null).is_empty());
-        assert_eq!(exception_for(&serde_json::json!({"kind": "panic"})), "panic");
+        assert_eq!(
+            exception_for(&serde_json::json!({"kind": "panic"})),
+            "panic"
+        );
         assert_eq!(exception_for(&serde_json::Value::Null), "unknown");
     }
 
@@ -685,7 +695,10 @@ mod tests {
             platform_label(&serde_json::json!({"system": {"family": "windows"}})),
             "windows"
         );
-        assert_eq!(platform_label(&serde_json::Value::Null), std::env::consts::OS);
+        assert_eq!(
+            platform_label(&serde_json::Value::Null),
+            std::env::consts::OS
+        );
     }
 
     #[test]

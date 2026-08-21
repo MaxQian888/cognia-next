@@ -38,7 +38,6 @@ use super::journal::{
 };
 use super::limits::{LimitTracker, LimitUsage, RecordLimits, ESTIMATED_FRAME_BYTES};
 use super::ocr_fallback::{needs_ocr, ocr_region, RegionOcr};
-use super::plugin_facts::PluginFactsSource;
 use super::scope::{CaptureScope, ScopeBinding, ScopeVerdict};
 use super::secure_input::{classify_run, SecureFieldProbe};
 use crate::automation::input_monitor::{InputButton, InputEvent, InputMonitor, InputSubscription};
@@ -226,7 +225,6 @@ pub struct RecorderState {
     inner: Arc<Mutex<Option<ActiveSession>>>,
     secure_probe: Arc<Mutex<Arc<dyn SecureFieldProbe>>>,
     ocr: Arc<Mutex<Option<Arc<dyn RegionOcr>>>>,
-    plugin_facts: Arc<Mutex<Arc<dyn PluginFactsSource>>>,
     surface: Arc<Mutex<Arc<dyn RecorderSurface>>>,
 }
 
@@ -240,10 +238,6 @@ impl Default for RecorderState {
                 super::secure_input::PlatformSecureProbe,
             ))),
             ocr: Arc::new(Mutex::new(None)),
-            // Fails closed: "not installed" until `src-tauri` registers the real
-            // source at boot, so a wiring mistake blocks recording rather than
-            // waving grants through unchecked.
-            plugin_facts: Arc::new(Mutex::new(Arc::new(super::plugin_facts::NoPluginFacts))),
             surface: Arc::new(Mutex::new(Arc::new(NoRecorderSurface))),
         }
     }
@@ -264,14 +258,6 @@ impl RecorderState {
 
     pub fn region_ocr(&self) -> Option<Arc<dyn RegionOcr>> {
         self.ocr.lock().clone()
-    }
-
-    pub fn set_plugin_facts(&self, source: Arc<dyn PluginFactsSource>) {
-        *self.plugin_facts.lock() = source;
-    }
-
-    pub fn plugin_facts(&self) -> Arc<dyn PluginFactsSource> {
-        self.plugin_facts.lock().clone()
     }
 
     pub fn set_surface(&self, surface: Arc<dyn RecorderSurface>) {

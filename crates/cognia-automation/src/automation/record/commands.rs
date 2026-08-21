@@ -87,7 +87,7 @@ pub async fn record_preflight(
         .map(|r| journal::scan_recoverable(r).len() as u32)
         .unwrap_or(0);
 
-    let facts = state.recorder.plugin_facts().facts(RECORDER_PLUGIN_ID);
+    let facts = state.plugin_facts().facts(RECORDER_PLUGIN_ID);
     let missing = missing_grants(&facts);
     let ocr_backends = state
         .recorder
@@ -220,7 +220,7 @@ pub async fn record_start(
     // itself; this adds the recorder-specific blockers (plugin disabled, a
     // missing manifest grant, no disk headroom) to the same "never prompt for
     // something that cannot proceed" rule.
-    let facts = state.recorder.plugin_facts().facts(RECORDER_PLUGIN_ID);
+    let facts = state.plugin_facts().facts(RECORDER_PLUGIN_ID);
     let admission = preflight::AdmissionFacts {
         kill_switch: state.gate.kill_switch_engaged(),
         automation_enabled: state.gate.settings().enabled,

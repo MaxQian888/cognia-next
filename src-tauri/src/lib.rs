@@ -100,6 +100,7 @@ mod plugins;
 // Unified managed-process registry — aggregates cognia-spawned child processes
 // (external agents, chat sidecar, ACP + PTY terminals, MCP server) for the
 // performance panel's "Managed Processes" tab and the graceful teardown arm.
+mod power_assertion;
 mod process_registry;
 mod project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
@@ -113,6 +114,7 @@ mod recorder_window;
 /// ADR-0102 §4 — diagnostics-first safe mode. Owns `RecoveryStateV1`, its
 /// atomic persistence and the typed IPC the renderer's boot gate reads.
 pub mod recovery;
+mod wake_on_lan;
 pub use cognia_automation::sandbox;
 // ADR-0067 Phase 6 — scheduler/workflow/timing extracted to the
 // cognia-scheduling cluster; re-aliased so all three module paths resolve.
@@ -629,6 +631,7 @@ pub fn run() {
             claude::commands::claude_set_mode,
             claude::commands::claude_approve,
             claude::commands::claude_plugin_tool_response,
+            claude::commands::claude_plugin_hook_response,
             claude::commands::claude_tool_result_decision,
             claude::commands::claude_protocol_adapter_message,
             claude::commands::claude_close_session,
@@ -1116,11 +1119,20 @@ pub fn run() {
             companion_api::commands::companion_media_response,
             companion_api::commands::companion_desktop_write_response,
             companion_api::commands::companion_host_state_publish,
+            companion_api::ws_worker::companion_worker_attach_channel,
+            companion_api::ws_worker::companion_worker_detach_channel,
+            companion_api::ws_worker::companion_worker_send_frame,
+            companion_api::ws_worker::companion_worker_ack_events,
+            companion_api::ws_worker::companion_wake_worker,
+            wake_on_lan::wake_paired_host,
             companion_api::commands::companion_get_tls_fingerprint,
             companion_api::commands::companion_tls_paths,
             companion_api::commands::companion_mdns_start,
             companion_api::commands::companion_mdns_stop,
             companion_api::commands::companion_mdns_status,
+            companion_api::commands::companion_mdns_browse,
+            companion_api::commands::companion_reachability_get,
+            companion_api::commands::companion_reachability_set,
             companion_api::commands::companion_tunnel_start,
             companion_api::commands::companion_tunnel_stop,
             companion_api::commands::companion_tunnel_current,
@@ -1599,6 +1611,17 @@ pub fn run() {
             // before/after can be compared from the app logs.
             let setup_start = std::time::Instant::now();
 
+            // Reachability is a host concern, not a renderer concern. Restore
+            // it even for tray-only/autostart launches where no webview mounts.
+            let reachability_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) =
+                    companion_api::commands::restore_reachability(reachability_handle).await
+                {
+                    log::warn!("companion reachability restore failed: {error}");
+                }
+            });
+
             // Resolve one Node.js executable for every app-owned JavaScript
             // child. A missing system runtime is retained as an actionable
             // error so the lightweight shell can still open and guide repair.
@@ -1739,6 +1762,13 @@ pub fn run() {
                     );
                 }
             });
+
+            // The automation layer's plugin-facts seam, wired synchronously:
+            // `sandbox_exec`'s permission gate reads it on the first sandboxed
+            // tool call of a turn, and its default fails closed as "plugin not
+            // installed". The recorder's own registration below sits behind an
+            // awaited OCR probe, which is far too late for that caller.
+            recorder_window::adapters::register_plugin_facts(app.handle());
 
             // ADR-0024 — install the OCR native backends. Each enabled
             // Cargo feature (`ocr-tesseract`, `ocr-windows`, `ocr-apple`)
@@ -2231,6 +2261,29 @@ mod tests {
                 "{command} must remain in tauri::generate_handler!"
             );
         }
+    }
+
+    #[test]
+    fn companion_reachability_commands_are_registered_and_restored_at_boot() {
+        let source = include_str!("lib.rs");
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production lib.rs source");
+        for command in [
+            "companion_api::commands::companion_mdns_browse,",
+            "companion_api::commands::companion_reachability_get,",
+            "companion_api::commands::companion_reachability_set,",
+        ] {
+            assert!(
+                production_source.contains(command),
+                "{command} must remain in tauri::generate_handler!"
+            );
+        }
+        assert!(
+            production_source.contains("companion_api::commands::restore_reachability("),
+            "saved companion reachability must be restored from the Tauri setup hook"
+        );
     }
 
     /// The app declares an ACL manifest (build.rs → AppManifest), which turns on

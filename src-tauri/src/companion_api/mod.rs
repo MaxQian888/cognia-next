@@ -54,6 +54,7 @@ pub mod oidc;
 pub mod push;
 pub mod push_creds;
 pub mod rate_limit;
+pub mod reachability_config;
 pub mod remote_execution;
 pub mod replay_cache;
 pub mod rpc;
