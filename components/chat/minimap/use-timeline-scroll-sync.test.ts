@@ -169,6 +169,76 @@ describe("useTimelineScrollSync — virtualized scroll updates", () => {
   })
 })
 
+describe("useTimelineScrollSync — the live tail counts toward the extent", () => {
+  let rafQueue: FrameRequestCallback[]
+
+  beforeEach(() => {
+    rafQueue = []
+    jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback: FrameRequestCallback) => {
+        rafQueue.push(callback)
+        return rafQueue.length
+      })
+    jest.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {})
+  })
+
+  afterEach(() => jest.restoreAllMocks())
+
+  function renderWithTail(getTailSize?: () => number) {
+    const container = document.createElement("div")
+    Object.defineProperties(container, {
+      clientHeight: { value: 100, configurable: true },
+      scrollTop: { value: 0, writable: true, configurable: true },
+    })
+    const virtualizer = {
+      getTotalSize: () => 1_000,
+      measurementsCache: [{ start: 0 }, { start: 500 }],
+      getOffsetForIndex: () => undefined,
+      options: { count: 2 },
+    } as unknown as Virtualizer<HTMLDivElement, Element>
+    // Hoisted, like every other case here: `turns` is an effect dependency, so
+    // a literal inside the render callback re-runs the remeasure every commit
+    // and spins the rAF loop until the worker dies.
+    const turns = [turn("a", 0), turn("b", 1)]
+    const scrollRef = { current: container }
+    const rendered = renderHook(() =>
+      useTimelineScrollSync({
+        scrollRef,
+        virtualizer,
+        virtualize: true,
+        turns,
+        getTailSize,
+      })
+    )
+    act(() => {
+      const queued = rafQueue
+      rafQueue = []
+      queued.forEach((callback) => callback(0))
+    })
+    return rendered
+  }
+
+  it("normalises markers against the windowed rows plus the tail region", () => {
+    // ADR-0138 — the streamed row and the thinking indicator render in document
+    // flow BELOW the virtual container, so `getTotalSize()` alone under-reports
+    // the scrollable extent for the whole of every turn and pushes every marker
+    // toward the foot.
+    const withoutTail = renderWithTail()
+    const withTail = renderWithTail(() => 1_000)
+
+    // Turn "b" starts at 500: half way through 1000, a quarter through 2000.
+    expect(withoutTail.result.current.positions[1]).toBeCloseTo(0.5)
+    expect(withTail.result.current.positions[1]).toBeCloseTo(0.25)
+  })
+
+  it("treats an absent getter as no tail", () => {
+    const absent = renderWithTail()
+    const zero = renderWithTail(() => 0)
+    expect(absent.result.current.positions).toEqual(zero.result.current.positions)
+  })
+})
+
 describe("useTimelineScrollSync — document-flow measurement caching", () => {
   let rafQueue: FrameRequestCallback[]
   beforeEach(() => {

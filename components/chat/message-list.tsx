@@ -270,32 +270,48 @@ export function MessageList({
   const textLength = useMemo(() => transcriptTextLength(messages), [messages])
   const virtualize = shouldVirtualize({ rowCount: totalCount, textLength })
 
-  // The currently-streaming row, if any: the last message must be the
-  // assistant message we're appending tokens to and the status must be
-  // active streaming (not awaiting_approval — that's paused, so the row's
-  // height is stable and the normal measure path is fine).
-  const streamingRowIndex = useMemo(() => {
-    if (status !== "streaming") return -1
-    const idx = messages.length - 1
-    if (idx < 0) return -1
-    if (messages[idx]?.role !== "assistant") return -1
-    return idx
-  }, [messages, status])
+  // ── The live tail (ADR-0138) ────────────────────────────────────────────
+  // The row currently being streamed into. It is the one row whose height
+  // changes many times per second, and windowing has nothing to offer it: it is
+  // always on screen, and it is always last, so no row below it can shift.
+  //
+  // It used to sit inside the virtual list with `measureElement` deliberately
+  // withheld (measuring per token pumps the observer), which meant its slot was
+  // sized by a `220 + chars × 0.55` projection while the real text grew in
+  // ~22px line steps. Everything downstream of `getTotalSize()` — including the
+  // `scrollHeight` the auto-scroll pins against — therefore tracked a number
+  // that was never the rendered height, and the gap under the caret breathed.
+  //
+  // So it leaves the virtual list entirely and renders in normal document flow
+  // beneath it, together with the thinking indicator. Real height, real
+  // `scrollHeight`, no projection. When the turn seals it rejoins the virtual
+  // list: the row mounts carrying `measureElement`, which measures during the
+  // same commit, and since it is the last row nothing below it can be pushed —
+  // so the handoff needs no seeded measurement, only the re-pin below.
+  const liveTailIndex =
+    (status === "streaming" || status === "awaiting_approval") &&
+    lastIndex >= 0 &&
+    messages[lastIndex]?.role === "assistant"
+      ? lastIndex
+      : -1
+  const hasLiveTail = liveTailIndex >= 0
+  const liveTailMessage = hasLiveTail ? messages[liveTailIndex] : null
+  /** Rows the virtualizer owns — everything except the live tail. */
+  const virtualCount = messages.length - (hasLiveTail ? 1 : 0)
+  // The tail region's rendered height. Read on demand (never on the render
+  // path) by the minimap, whose geometry is normalised against the scroller's
+  // full extent and would otherwise under-report by exactly this box.
+  const liveTailRef = useRef<HTMLDivElement | null>(null)
+  const getTailSize = useCallback(() => liveTailRef.current?.offsetHeight ?? 0, [])
 
   // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
   // React Compiler correctly skips it. Nothing to fix on our side.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
-    count: totalCount,
+    count: virtualCount,
     getScrollElement: () => scrollParentRef.current,
-    estimateSize: (index) => estimateRowSize(index, streamingRowIndex, messages),
+    estimateSize: (index) => estimateRowSize(index, messages),
     overscan: 5,
-    // For every row except the actively-streaming one, we attach
-    // measureElement (via the ref below). The streaming row gets no ref so
-    // its height is driven by estimateSize, which grows monotonically with
-    // text length. Without this skip, every token would trigger a
-    // getBoundingClientRect on the streaming row → ResizeObserver pump →
-    // virtualizer re-publish → jitter.
     // Round to whole pixels. Feeding fractional getBoundingClientRect heights
     // back into the virtualizer (which positions rows via transform) lets
     // sub-pixel deltas retrigger the ResizeObserver → re-measure → re-publish
@@ -303,20 +319,17 @@ export function MessageList({
     measureElement: (el) => Math.round(el?.getBoundingClientRect().height ?? 0),
   })
 
-  // Re-measure every row when the turn finalises. The streaming→idle setStatus
-  // is wrapped in startTransition by the chat hook (see use-claude-chat's turn
-  // seal), so this re-measure lands at transition priority.
+  // Hand the live tail back to the virtual list when the turn seals.
   //
-  // A layout effect, not `useEffect` + rAF: the re-measure changes the total
-  // size, and a reader pinned at the foot must not see that shift painted
-  // before it is corrected. `pinNow` no-ops when the reader scrolled away or
-  // auto-scroll is off; the content observer inside the hook catches whatever
-  // height the re-measure settles on a frame later.
+  // No blanket `rowVirtualizer.measure()` here any more: that threw away every
+  // row's measurement to fix one row's projection, and the live tail no longer
+  // HAS a projection — it rejoins carrying `measureElement`, which measures it
+  // during this very commit. All that is left to do is re-pin, in the layout
+  // phase, so a reader parked at the foot never sees the total size settle.
   useIsomorphicLayoutEffect(() => {
-    if (status !== "idle") return
-    rowVirtualizer.measure()
+    if (hasLiveTail) return
     pinNow()
-  }, [status, rowVirtualizer, pinNow])
+  }, [hasLiveTail, pinNow])
 
   // Switching sessions invalidates every cached row height — left over
   // measurements from the prior session leave gaps / overlaps in the
@@ -424,20 +437,26 @@ export function MessageList({
         flash(messageId)
       }
 
-      if (virtualize && resolvedIndex >= 0) {
+      // `resolvedIndex < virtualCount` matters: the live tail is a real DOM row
+      // BELOW the virtual container, not row `virtualCount` inside it, so
+      // asking the virtualizer to scroll to it would land on empty space. It
+      // carries `data-msg-id` like every other row, so the anchor path below
+      // handles it — and a search hit on the streaming reply is exactly the
+      // case that reaches here.
+      if (virtualize && resolvedIndex >= 0 && resolvedIndex < virtualCount) {
         arriveFrom()
         rowVirtualizer.scrollToIndex(resolvedIndex, { align })
         return true
       }
-      // Document-flow lists, and the virtualized case where the id resolved to
-      // no row at all (compacted away / another session's message).
+      // Document-flow lists, the live tail, and the virtualized case where the
+      // id resolved to no row at all (compacted away / another session's).
       const node = findMessageAnchor(scrollParentRef.current, messageId)
       if (!node) return false
       arriveFrom()
       node.scrollIntoView({ behavior: "smooth", block: align })
       return true
     },
-    [messages, virtualize, rowVirtualizer, flash, rememberReturn]
+    [messages, virtualize, virtualCount, rowVirtualizer, flash, rememberReturn]
   )
 
   // Only the primary list publishes: the dock hosts its own per-resource chat
@@ -584,38 +603,7 @@ export function MessageList({
                 {virtualize ? (
                   <div style={{ height: totalSize, position: "relative" }}>
                     {virtualItems.map((virtualItem) => {
-                      const isThinkingRow = virtualItem.index === messages.length
-                      if (isThinkingRow) {
-                        return (
-                          <div
-                            key="thinking"
-                            data-index={virtualItem.index}
-                            ref={rowVirtualizer.measureElement}
-                            className="px-3 sm:px-5"
-                            style={{
-                              position: "absolute",
-                              top: 0,
-                              left: 0,
-                              width: "100%",
-                              transform: `translateY(${virtualItem.start}px)`,
-                            }}
-                          >
-                            <ChatThinkingIndicator
-                              directCharacter={directCharacter}
-                              onPhaseChange={pinNow}
-                              compact={thinking === "compact"}
-                            />
-                          </div>
-                        )
-                      }
-
                       const m = messages[virtualItem.index]!
-                      const isStreaming =
-                        virtualItem.index === lastIndex &&
-                        m.role === "assistant" &&
-                        (status === "streaming" || status === "awaiting_approval")
-                      const isStreamingMeasureSkip = virtualItem.index === streamingRowIndex
-
                       return (
                         <div
                           key={m.id}
@@ -626,7 +614,7 @@ export function MessageList({
                           // the list crossed VIRTUALIZE_THRESHOLD.
                           data-msg-id={m.id}
                           data-search-hit={m.id === activeHitId ? "" : undefined}
-                          ref={isStreamingMeasureSkip ? undefined : rowVirtualizer.measureElement}
+                          ref={rowVirtualizer.measureElement}
                           className={cn(
                             "px-3 sm:px-5",
                             m.id === activeHitId &&
@@ -643,7 +631,7 @@ export function MessageList({
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
-                          {renderRow(m, isStreaming)}
+                          {renderRow(m, false)}
                         </div>
                       )
                     })}
@@ -654,10 +642,9 @@ export function MessageList({
                   // no remount-on-scroll.
                   <div>
                     {messages.map((m, index) => {
-                      const isStreaming =
-                        index === lastIndex &&
-                        m.role === "assistant" &&
-                        (status === "streaming" || status === "awaiting_approval")
+                      // The live tail is already in document flow here, so this
+                      // branch renders it in place; only the virtualized branch
+                      // lifts it into the tail region below.
                       return (
                         <div
                           key={m.id}
@@ -675,21 +662,46 @@ export function MessageList({
                           {m.id === flashId && (
                             <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
                           )}
-                          {renderRow(m, isStreaming)}
+                          {renderRow(m, index === liveTailIndex)}
                         </div>
                       )
                     })}
-                    {showThinking && (
-                      <div key="thinking" className="px-3 sm:px-5">
-                        <ChatThinkingIndicator
-                          directCharacter={directCharacter}
-                          onPhaseChange={pinNow}
-                          compact={thinking === "compact"}
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
+                {/* ── The live tail (ADR-0138) ──────────────────────────────
+                    Real document flow, always: the row being streamed into
+                    (virtualized lists only — in flow mode it is already above)
+                    plus the thinking indicator. One place owns the foot of the
+                    transcript in both modes, and neither element is ever sized
+                    by a projection. */}
+                <div ref={liveTailRef} data-slot="conversation-live-tail">
+                  {virtualize && liveTailMessage ? (
+                    <div
+                      key={liveTailMessage.id}
+                      data-msg-id={liveTailMessage.id}
+                      data-search-hit={liveTailMessage.id === activeHitId ? "" : undefined}
+                      className={cn(
+                        "relative px-3 sm:px-5",
+                        liveTailMessage.id === activeHitId &&
+                          "rounded-md ring-2 ring-primary/60 ring-offset-2 ring-offset-background"
+                      )}
+                    >
+                      {liveTailMessage.id === flashId && (
+                        <JumpFlash nonce={flashNonce} holdMs={flashHoldMs} />
+                      )}
+                      {renderRow(liveTailMessage, true)}
+                    </div>
+                  ) : null}
+                  {showThinking ? (
+                    <div className="px-3 sm:px-5">
+                      <ChatThinkingIndicator
+                        directCharacter={directCharacter}
+                        onPhaseChange={pinNow}
+                        compact={thinking === "compact"}
+                      />
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
             {/* Selecting text in the transcript and asking about THAT. Scoped
@@ -721,6 +733,7 @@ export function MessageList({
               scrollRef={scrollParentRef}
               virtualizer={rowVirtualizer}
               virtualize={virtualize}
+              getTailSize={getTailSize}
             />
           )}
           {shouldMountTimeline({
@@ -735,6 +748,7 @@ export function MessageList({
               scrollRef={scrollParentRef}
               virtualizer={rowVirtualizer}
               virtualize={virtualize}
+              getTailSize={getTailSize}
               shortcutsEnabled={ownsShortcuts}
             />
           )}
@@ -785,34 +799,21 @@ export function MessageList({
 /**
  * Estimate a row's height for the TanStack virtualizer.
  *
- * Non-streaming rows are estimated from their content (`estimateMessageHeight`,
- * memoized per parts array) until their ref-attached measureElement runs. They
- * used to take a flat 200px, which is roughly right for prose and badly wrong
- * for anything carrying images, diagrams or a long fence — the shortfall shows
- * up as the scroll position lurching as each row scrolls in and corrects
- * itself.
+ * Rows are estimated from their content (`estimateMessageHeight`, memoized per
+ * parts array) until their ref-attached measureElement runs. They used to take
+ * a flat 200px, which is roughly right for prose and badly wrong for anything
+ * carrying images, diagrams or a long fence — the shortfall shows up as the
+ * scroll position lurching as each row scrolls in and corrects itself.
  *
- * The streaming row keeps its own monotonically-growing projection rather than
- * the content estimate: it is the one row with no measureElement ref (measuring
- * per token causes a jitter loop), so its estimate must never decrease, and a
- * content-derived number carries no such guarantee.
- *
- * Coefficient: 0.55px per character ≈ one line per 80 characters at the chat
- * column's typical mono+text mix.
+ * Every virtual row is now a SETTLED message: the row being streamed into left
+ * the virtual list for the live-tail region (ADR-0138), which is what let the
+ * old `220 + chars × 0.55` monotonic projection — and the measure skip it
+ * existed to compensate for — be deleted outright.
  */
-function estimateRowSize(index: number, streamingRowIndex: number, messages: UIMessage[]): number {
+function estimateRowSize(index: number, messages: UIMessage[]): number {
   const m = messages[index]
-  // Also the thinking row, whose index is one past the end.
   if (!m) return FALLBACK_ROW_PX
-  if (index !== streamingRowIndex) return estimateMessageHeight(m)
-  let textLen = 0
-  for (const part of m.parts) {
-    const p = part as { type?: string; text?: string }
-    if (p.type === "text" && typeof p.text === "string") textLen += p.text.length
-    else if (p.type === "reasoning" && typeof p.text === "string") textLen += p.text.length
-  }
-  // Monotonically non-decreasing: 220px floor + ~0.55px per char.
-  return Math.max(220, 220 + textLen * 0.55)
+  return estimateMessageHeight(m)
 }
 
 /**

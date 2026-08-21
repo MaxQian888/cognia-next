@@ -218,6 +218,7 @@ import type { ReactNode } from "react"
 import type { UIMessage } from "ai"
 import { MessageList, TIMELINE_THRESHOLD, VIRTUALIZE_THRESHOLD } from "./message-list"
 import { TIMELINE_MIN_PANE_PX } from "./minimap/timeline-visibility"
+import { FALLBACK_ROW_PX } from "@/lib/chat/row-height-estimate"
 import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { getAppShortcutDescriptor } from "@/lib/shortcuts/app-catalog"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
@@ -611,14 +612,14 @@ describe("MessageList", () => {
     expect(screen.queryByTestId("long-press-hint")).not.toBeInTheDocument()
   })
 
-  describe("streaming-row measure-skip (Stage 2)", () => {
+  describe("the live tail (ADR-0138)", () => {
     const assistantStreaming = (id: string, text: string): UIMessage => ({
       id,
       role: "assistant",
       parts: [{ type: "text", text }],
     })
 
-    it("the actively-streaming row sits directly above the thinking row (virtualized path)", () => {
+    it("keeps the streaming row and the thinking row out of the virtual list", () => {
       const Wrapper = withAdapter(makeAdapter())
       // Force the virtualized path: fillers + a final streaming assistant row.
       const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
@@ -630,66 +631,47 @@ describe("MessageList", () => {
           />
         </Wrapper>
       )
-      const rows = container.querySelectorAll("[data-index]")
-      // fillers + streaming row + the compact thinking row, which trails the
-      // turn's content for its whole duration (see `thinkingMode`).
-      expect(rows).toHaveLength(fillers.length + 2)
-      expect(rows[rows.length - 1].textContent).toContain("Claude is working…")
-      // The streaming row skips the measureElement ref; we verify it is
-      // rendered and carries the streaming text — the ref-skip is exercised by
-      // the snapshot rendering correctly.
-      expect(rows[rows.length - 2].textContent).toContain("partial")
+      // Only settled messages are windowed — the live tail is a real DOM row
+      // below the virtual container, not row `count` inside it.
+      expect(container.querySelectorAll("[data-index]")).toHaveLength(fillers.length)
+      expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
+
+      const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
+      expect(tail).toBeInTheDocument()
+      expect(tail.textContent).toContain("partial")
+      expect(tail.textContent).toContain("Claude is working…")
+      // The tail row is still anchorable, so a search hit on the streaming
+      // reply resolves through the DOM path.
+      expect(tail.querySelector('[data-msg-id="a1"]')).toBeInTheDocument()
     })
 
-    it("renders the streaming row in document flow for short lists", () => {
+    it("hands the row back to the virtual list when the turn seals", () => {
       const Wrapper = withAdapter(makeAdapter())
-      const { container } = render(
+      const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
+      const { container, rerender } = render(
         <Wrapper>
           <MessageList
-            messages={[userMsg("u1", "hi"), assistantStreaming("a1", "partial…")]}
+            messages={[...fillers, assistantStreaming("a1", "partial…")]}
             status="streaming"
           />
         </Wrapper>
       )
-      // Flow path → no [data-index]; the streaming text still renders.
-      expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
-      expect(document.querySelector(`[data-test="msg-a1"]`)?.textContent).toContain("partial")
-    })
+      expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
 
-    it("estimateSize returns a growing projection for the streaming row", () => {
-      const Wrapper = withAdapter(makeAdapter())
-      const text = "X".repeat(1000)
-      render(
+      rerender(
         <Wrapper>
-          <MessageList
-            messages={[userMsg("u1", "hi"), assistantStreaming("a1", text)]}
-            status="streaming"
-          />
+          <MessageList messages={[...fillers, assistantStreaming("a1", "done")]} status="idle" />
         </Wrapper>
       )
-      const lastCall = useVirtualizerCalls.at(-1)
-      expect(lastCall).toBeDefined()
-      // Non-streaming rows fall back to 200.
-      expect(lastCall!.estimateSize(0)).toBe(200)
-      // Streaming row projects from text length — 1000 chars * 0.55 + 220 = 770.
-      const projected = lastCall!.estimateSize(1)
-      expect(projected).toBeGreaterThan(700)
-      expect(projected).toBeLessThan(900)
+      expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length + 1)
+      const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
+      expect(tail.textContent).toBe("")
     })
 
-    it("estimateSize returns the default 200 for non-streaming rows even on the last index", () => {
-      const Wrapper = withAdapter(makeAdapter())
-      render(
-        <Wrapper>
-          <MessageList messages={[userMsg("u1", "hi")]} status="idle" />
-        </Wrapper>
-      )
-      const lastCall = useVirtualizerCalls.at(-1)
-      expect(lastCall).toBeDefined()
-      expect(lastCall!.estimateSize(0)).toBe(200)
-    })
-
-    it("calls rowVirtualizer.measure() when status flips from streaming to idle", () => {
+    it("does not blanket-remeasure every row when the turn seals", () => {
+      // The old finalise path threw away every row's measurement to reconcile
+      // ONE row's projection. The live tail has no projection: it rejoins
+      // carrying measureElement and is measured in that same commit.
       const Wrapper = withAdapter(makeAdapter())
       const { rerender } = render(
         <Wrapper>
@@ -708,7 +690,59 @@ describe("MessageList", () => {
           />
         </Wrapper>
       )
-      expect(measureSpy).toHaveBeenCalled()
+      expect(measureSpy).not.toHaveBeenCalled()
+    })
+
+    it("renders the streaming row in document flow for short lists", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      const { container } = render(
+        <Wrapper>
+          <MessageList
+            messages={[userMsg("u1", "hi"), assistantStreaming("a1", "partial…")]}
+            status="streaming"
+          />
+        </Wrapper>
+      )
+      // Flow path → no [data-index]; the streaming text still renders in place
+      // (only the virtualized branch lifts it into the tail region).
+      expect(container.querySelectorAll("[data-index]")).toHaveLength(0)
+      expect(document.querySelector(`[data-test="msg-a1"]`)?.textContent).toContain("partial")
+      const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
+      expect(tail.textContent).toContain("Claude is working…")
+      expect(tail.querySelector('[data-msg-id="a1"]')).not.toBeInTheDocument()
+    })
+
+    it("estimates a row the same way whether or not it is the one streaming", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      const text = "X".repeat(1000)
+      const messages = [userMsg("u1", "hi"), assistantStreaming("a1", text)]
+      const { rerender } = render(
+        <Wrapper>
+          <MessageList messages={messages} status="streaming" />
+        </Wrapper>
+      )
+      const whileStreaming = useVirtualizerCalls.at(-1)!.estimateSize(1)
+      rerender(
+        <Wrapper>
+          <MessageList messages={messages} status="idle" />
+        </Wrapper>
+      )
+      expect(useVirtualizerCalls.at(-1)!.estimateSize(1)).toBe(whileStreaming)
+      // Nowhere near the deleted `220 + chars × 0.55` projection (= 770 here):
+      // there is no streaming special case left to diverge.
+      expect(whileStreaming).toBeLessThan(700)
+    })
+
+    it("estimateSize returns the default 200 for non-streaming rows even on the last index", () => {
+      const Wrapper = withAdapter(makeAdapter())
+      render(
+        <Wrapper>
+          <MessageList messages={[userMsg("u1", "hi")]} status="idle" />
+        </Wrapper>
+      )
+      const lastCall = useVirtualizerCalls.at(-1)
+      expect(lastCall).toBeDefined()
+      expect(lastCall!.estimateSize(0)).toBe(200)
     })
 
     it("calls rowVirtualizer.measure() on session change", () => {
@@ -1941,44 +1975,83 @@ describe("MessageList — system rows render as markers, not as messages", () =>
   })
 })
 
-describe("MessageList — the streaming row's height projection", () => {
-  it("counts reasoning text, not just visible text", () => {
-    // A long reasoning block is real height on screen. Ignoring it would let the
-    // projection undershoot badly and jerk the scroll position on every token.
+describe("MessageList — the live tail carries real height, not a projection", () => {
+  const streamingWith = (parts: unknown[]): UIMessage =>
+    ({ id: "a-stream", role: "assistant", parts }) as unknown as UIMessage
+
+  it("keeps a reasoning-heavy streaming row out of the virtualizer entirely", () => {
+    // A long reasoning block is real height on screen. It used to be fed into a
+    // `220 + chars × 0.55` projection because the row carried no measureElement
+    // ref; now the row renders in document flow and the browser owns its height,
+    // so the virtualizer is never asked about it at all.
     const Wrapper = withAdapter(makeAdapter())
     const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
-    const streaming = {
-      id: "a-stream",
-      role: "assistant",
-      parts: [{ type: "reasoning", text: "r".repeat(1000) }],
-    } as unknown as UIMessage
-    render(
+    const { container } = render(
       <Wrapper>
-        <MessageList messages={[...fillers, streaming]} status="streaming" />
+        <MessageList
+          messages={[...fillers, streamingWith([{ type: "reasoning", text: "r".repeat(1000) }])]}
+          status="streaming"
+        />
       </Wrapper>
     )
 
-    const estimate = useVirtualizerCalls.at(-1)!.estimateSize(fillers.length)
-    // 1000 chars * 0.55 + 220 = 770.
-    expect(estimate).toBeGreaterThan(700)
-    expect(estimate).toBeLessThan(900)
+    expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
+    const tail = container.querySelector('[data-slot="conversation-live-tail"]')!
+    expect(tail.querySelector('[data-msg-id="a-stream"]')).toBeInTheDocument()
   })
 
-  it("ignores parts that carry no text", () => {
+  it("changes no estimate the virtualizer is given as the streamed text grows", () => {
+    // This is the property the whole live-tail split exists to guarantee: the
+    // windowed geometry — and therefore `getTotalSize()`, and therefore the
+    // `scrollHeight` the auto-scroll pins against — is a function of settled
+    // messages only, so it cannot breathe with every token.
     const Wrapper = withAdapter(makeAdapter())
     const fillers = manyMsgs(VIRTUALIZE_THRESHOLD)
-    const streaming = {
-      id: "a-stream",
-      role: "assistant",
-      parts: [{ type: "tool-bash" }, { type: "reasoning" }],
-    } as unknown as UIMessage
-    render(
+    const { rerender } = render(
       <Wrapper>
-        <MessageList messages={[...fillers, streaming]} status="streaming" />
+        <MessageList
+          messages={[...fillers, streamingWith([{ type: "text", text: "x".repeat(100) }])]}
+          status="streaming"
+        />
       </Wrapper>
     )
-    // Floor only — the projection must never drop below it, or rows overlap.
-    expect(useVirtualizerCalls.at(-1)!.estimateSize(fillers.length)).toBe(220)
+    const before = useVirtualizerCalls.at(-1)!
+    const beforeSizes = fillers.map((_, index) => before.estimateSize(index))
+
+    rerender(
+      <Wrapper>
+        <MessageList
+          messages={[...fillers, streamingWith([{ type: "text", text: "x".repeat(5000) }])]}
+          status="streaming"
+        />
+      </Wrapper>
+    )
+    const after = useVirtualizerCalls.at(-1)!
+    expect(after.count).toBe(fillers.length)
+    expect(fillers.map((_, index) => after.estimateSize(index))).toEqual(beforeSizes)
+  })
+
+  it("falls back rather than throwing for an index with no message behind it", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const fillers = manyMsgs(VIRTUALIZE_THRESHOLD + 1)
+    render(
+      <Wrapper>
+        <MessageList messages={fillers} status="idle" />
+      </Wrapper>
+    )
+    expect(useVirtualizerCalls.at(-1)!.estimateSize(fillers.length + 5)).toBe(FALLBACK_ROW_PX)
+  })
+
+  it("still estimates settled rows from their content", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    const fillers = manyMsgs(VIRTUALIZE_THRESHOLD + 1)
+    render(
+      <Wrapper>
+        <MessageList messages={fillers} status="idle" />
+      </Wrapper>
+    )
+    expect(useVirtualizerCalls.at(-1)!.count).toBe(fillers.length)
+    expect(useVirtualizerCalls.at(-1)!.estimateSize(0)).toBe(200)
   })
 })
 

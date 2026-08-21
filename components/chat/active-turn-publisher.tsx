@@ -28,6 +28,8 @@ interface ActiveTurnPublisherProps {
   scrollRef: React.RefObject<HTMLDivElement | null>
   virtualizer: Virtualizer<HTMLDivElement, Element> | null
   virtualize: boolean
+  /** Height of the live-tail region — see `useTimelineScrollSync`. */
+  getTailSize?: () => number
 }
 
 export const ActiveTurnPublisher = memo(function ActiveTurnPublisher({
@@ -35,9 +37,10 @@ export const ActiveTurnPublisher = memo(function ActiveTurnPublisher({
   scrollRef,
   virtualizer,
   virtualize,
+  getTailSize,
 }: ActiveTurnPublisherProps) {
   const turns = useTimelineTurns(messages)
-  const geometry = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns })
+  const geometry = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns, getTailSize })
   const setActiveTurnMessageIds = useChatViewportStore((state) => state.setActiveTurnMessageIds)
 
   const activeTurn = geometry.activeIndex >= 0 ? turns[geometry.activeIndex] : undefined

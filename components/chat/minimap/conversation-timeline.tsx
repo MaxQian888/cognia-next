@@ -28,6 +28,8 @@ interface Props {
   scrollRef: React.RefObject<HTMLDivElement | null>
   virtualizer: Virtualizer<HTMLDivElement, Element>
   virtualize: boolean
+  /** Height of the live-tail region — see `useTimelineScrollSync`. */
+  getTailSize?: () => number
   /**
    * Whether this instance owns the anchor chords. False for a split view's
    * unfocused pane — shortcut ids are global and the runtime keeps only the
@@ -115,6 +117,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   scrollRef,
   virtualizer,
   virtualize,
+  getTailSize,
   shortcutsEnabled = true,
 }: Props) {
   const t = useTranslations("chat.timeline")
@@ -150,7 +153,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [onlyBookmarked, allTurns, isTurnBookmarked]
   )
 
-  const geom = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns })
+  const geom = useTimelineScrollSync({ scrollRef, virtualizer, virtualize, turns, getTailSize })
   const bookmarkedIndices = useMemo(() => {
     const indices = new Set<number>()
     for (let index = 0; index < turns.length; index++) {
@@ -374,7 +377,10 @@ export const ConversationTimeline = memo(function ConversationTimeline({
       const el = scrollRef.current
       if (!rail || !el) return
       const rect = rail.getBoundingClientRect()
-      const totalSize = virtualize && virtualizer ? virtualizer.getTotalSize() : el.scrollHeight
+      const totalSize =
+        virtualize && virtualizer
+          ? virtualizer.getTotalSize() + (getTailSize?.() ?? 0)
+          : el.scrollHeight
       el.scrollTop = scrollTopForThumb({
         thumbTop: clientY - rect.top - grabOffsetRef.current,
         railHeight: rect.height,
@@ -382,7 +388,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
         maxScrollTop: el.scrollHeight - el.clientHeight,
       })
     },
-    [scrollRef, virtualize, virtualizer]
+    [scrollRef, virtualize, virtualizer, getTailSize]
   )
 
   const onThumbPointerDown = useCallback((e: React.PointerEvent<HTMLElement>) => {

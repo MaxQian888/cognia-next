@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { Virtualizer } from "@tanstack/react-virtual"
 import { findMessageAnchor } from "@/lib/chat/message-anchor"
+import { useIsomorphicLayoutEffect } from "@/hooks/use-isomorphic-layout-effect"
 import type { TimelineTurn } from "./use-timeline-turns"
 
 /** Geometry the minimap renders from — all positions are fractions in [0,1]. */
@@ -90,6 +91,18 @@ export interface UseScrollSyncArgs {
   virtualizer: Virtualizer<HTMLDivElement, Element> | null
   virtualize: boolean
   turns: TimelineTurn[]
+  /**
+   * Rendered height of the live-tail region — the streamed row plus the
+   * thinking indicator, which render in document flow BELOW the virtual
+   * container (ADR-0138). `getTotalSize()` cannot see them, so without this the
+   * scrollable extent is under-reported for the whole of every turn and every
+   * marker drifts toward the foot. A getter, not a number: the tail's height
+   * changes many times per second and this must never re-render the list.
+   *
+   * Held in a ref internally, so an unstable identity from the caller cannot
+   * churn `compute` and spin the rAF loop.
+   */
+  getTailSize?: () => number
 }
 
 /**
@@ -105,8 +118,13 @@ export function useTimelineScrollSync({
   virtualizer,
   virtualize,
   turns,
+  getTailSize,
 }: UseScrollSyncArgs): TimelineGeometry {
   const [geom, setGeom] = useState<TimelineGeometry>(EMPTY_GEOMETRY)
+  const tailSizeRef = useRef(getTailSize)
+  useIsomorphicLayoutEffect(() => {
+    tailSizeRef.current = getTailSize
+  })
   const rafRef = useRef<number | null>(null)
   // Cached absolute starts and normalized marker positions. Both document-flow
   // DOM reads and virtualizer-cache walks are O(turns), so neither belongs on
@@ -145,7 +163,10 @@ export function useTimelineScrollSync({
     (remeasure: boolean): TimelineGeometry => {
       const el = scrollRef.current
       if (!el) return EMPTY_GEOMETRY
-      const total = virtualize && virtualizer ? virtualizer.getTotalSize() : el.scrollHeight
+      const total =
+        virtualize && virtualizer
+          ? virtualizer.getTotalSize() + (tailSizeRef.current?.() ?? 0)
+          : el.scrollHeight
       if (remeasure || startsRef.current == null || positionsRef.current == null) {
         startsRef.current = measureStarts(el, total)
         positionsRef.current = computeTurnPositions(startsRef.current, total)
