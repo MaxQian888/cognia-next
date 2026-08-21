@@ -10,11 +10,20 @@ import { getDb } from "@/lib/db/schema"
 import { getExecutionRun } from "@/lib/db/execution-runs"
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
+import { matchFollowUpItem } from "@/lib/connectors/run-presentation/follow-up-items"
 
 export interface FollowUpControlItem {
   action: RunControlAction | "status"
   content: string
   localizedContent: string
+  /**
+   * `"prefix"` items carry a payload: everything after the prefix is the
+   * message. Absent means the original exact-label rule, which is what keeps a
+   * bare "stop" from firing on an ordinary sentence.
+   */
+  match?: "exact" | "prefix"
+  /** Set by the presentation layer when a pending interrupt owns the verbs. */
+  interruptId?: string
 }
 
 export interface FollowUpControlRegistration {
@@ -161,16 +170,20 @@ export async function maybeHandleRunControlFollowUp(
     const followUp = registration(binding)
     if (!followUp || followUp.expiresAt < now) continue
     if (binding.platformMessageId !== followUp.platformMessageId) continue
-    const item = followUp.items.find(
-      (candidate) => candidate.content === text || candidate.localizedContent === text
-    )
-    if (!item) continue
+    const matched = matchFollowUpItem(followUp.items, text)
+    if (!matched) continue
+    const { item, steerMessage } = matched
 
     try {
-      await deps.consume(binding, now)
+      // A prefix verb keeps its registration: buttons are one-shot, but a
+      // person redirecting work in flight says several things over one run.
+      if (matched.consumes) await deps.consume(binding, now)
       const run = await deps.getRun(followUp.runId)
       if (!run) return true
-      const zh = text === item.localizedContent || binding.locale?.toLowerCase().startsWith("zh")
+      const zh =
+        text === item.localizedContent ||
+        text.startsWith(item.localizedContent) ||
+        binding.locale?.toLowerCase().startsWith("zh")
       if (item.action === "status") {
         await reply(deps, event, statusText(run, Boolean(zh)), "status")
         return true
@@ -204,10 +217,17 @@ export async function maybeHandleRunControlFollowUp(
             displayName: event.sender.displayName,
           },
           ...(snapshot.pendingInterrupt ? { interruptId: snapshot.pendingInterrupt.id } : {}),
+          ...(steerMessage ? { steerMessage } : {}),
         },
         { operatorIds }
       )
       if (!result.accepted) {
+        // A degraded steer is not a refusal: the run kind CAN steer, it just
+        // could not right now, and the user's text is intact. Returning false
+        // hands the message back to the ordinary inbound pipeline, which
+        // queues it as a turn — so a correction is never silently dropped and
+        // never sent twice.
+        if (result.reason === "steer_degraded") return false
         await reply(
           deps,
           event,

@@ -2081,6 +2081,10 @@ export class ConnectorBus {
       "deny",
       "retry",
       "open_details",
+      // Card-native steering (a CardKit input submitting alongside the action).
+      // The text rides on the payload and never enters the run journal; the
+      // engine's own steering seam owns its PII gate.
+      "steer",
     ])
     const isRunControl =
       Boolean(runId) && Number.isInteger(runRevision) && RUN_CONTROL_ACTIONS.has(runAction)
@@ -2156,6 +2160,10 @@ export class ConnectorBus {
               },
               ...(typeof event.payload?.interruptId === "string"
                 ? { interruptId: event.payload.interruptId }
+                : {}),
+              ...(typeof event.payload?.steerMessage === "string" &&
+              event.payload.steerMessage.trim()
+                ? { steerMessage: event.payload.steerMessage.trim() }
                 : {}),
             },
             { operatorIds }

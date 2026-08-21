@@ -235,3 +235,88 @@ describe("run control is not a one-platform feature", () => {
     expect(maybeHandleLarkFollowUpControl).toBe(maybeHandleRunControlFollowUp)
   })
 })
+
+describe("steering through the follow-up lane", () => {
+  const steerBinding = {
+    ...binding,
+    presentationState: {
+      followUpControl: {
+        platformMessageId: "om-progress",
+        runId: "run-1",
+        revision: 1,
+        createdAt: 100,
+        expiresAt: 700,
+        items: [
+          { action: "stop", content: "Stop", localizedContent: "停止" },
+          { action: "status", content: "View status", localizedContent: "查看状态" },
+          { action: "steer", content: "steer:", localizedContent: "调整：", match: "prefix" },
+        ],
+      },
+    },
+  } as ExecutionRunBinding
+
+  const steerableRun = {
+    ...run,
+    latestSnapshot: { ...run.latestSnapshot!, allowedActions: ["stop", "steer"] },
+  } as ExecutionRun
+
+  it("carries the correction on the command and leaves the registration alive", async () => {
+    const execute = jest.fn(async () => ({ accepted: true }))
+    const consume = jest.fn(async () => undefined)
+
+    const handled = await maybeHandleRunControlFollowUp(
+      event("steer: prefer the smaller diff"),
+      adapter,
+      {
+        now: () => 500,
+        listBindings: async () => [steerBinding],
+        getRun: async () => steerableRun,
+        execute,
+        consume,
+        enqueue: jest.fn(),
+      }
+    )
+
+    expect(handled).toBe(true)
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "steer", steerMessage: "prefer the smaller diff" }),
+      { operatorIds: ["ou-operator"] }
+    )
+    // A button is one-shot; steering is not. Consuming the registration would
+    // silently make the second correction of a long run do nothing.
+    expect(consume).not.toHaveBeenCalled()
+  })
+
+  it("hands a degraded steer back to the inbound pipeline instead of answering it", async () => {
+    // The run kind CAN steer, it just could not right now — the user's text is
+    // intact. Returning false lets the ordinary pipeline queue it as a turn, so
+    // a correction is never dropped and never sent twice.
+    const enqueue = jest.fn(async () => undefined as unknown as OutboundJobRow)
+    const handled = await maybeHandleRunControlFollowUp(event("steer: change course"), adapter, {
+      now: () => 500,
+      listBindings: async () => [steerBinding],
+      getRun: async () => steerableRun,
+      execute: jest.fn(async () => ({ accepted: false, reason: "steer_degraded" })),
+      consume: jest.fn(async () => undefined),
+      enqueue,
+    })
+
+    expect(handled).toBe(false)
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it("still answers a genuine refusal rather than replaying it as a turn", async () => {
+    const enqueue = jest.fn(async () => undefined as unknown as OutboundJobRow)
+    const handled = await maybeHandleRunControlFollowUp(event("steer: change course"), adapter, {
+      now: () => 500,
+      listBindings: async () => [steerBinding],
+      getRun: async () => steerableRun,
+      execute: jest.fn(async () => ({ accepted: false, reason: "forbidden" })),
+      consume: jest.fn(async () => undefined),
+      enqueue,
+    })
+
+    expect(handled).toBe(true)
+    expect(enqueue).toHaveBeenCalled()
+  })
+})
