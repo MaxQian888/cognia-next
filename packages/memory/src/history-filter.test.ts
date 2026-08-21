@@ -1,5 +1,14 @@
 import type { Memory } from "./types/memory"
-import { computeMemoryStats, filterAndSortMemories } from "./history-filter"
+import {
+  clearMemoryFacets,
+  collectMemoryFacets,
+  computeMemoryStats,
+  countActiveMemoryFilters,
+  countMemoryQuickViews,
+  filterAndSortMemories,
+  findMemoryQuickView,
+  MEMORY_QUICK_VIEWS,
+} from "./history-filter"
 
 let seq = 0
 function mem(over: Partial<Memory> = {}): Memory {
@@ -176,5 +185,102 @@ describe("filterAndSortMemories — reviewStatus preset", () => {
         .map((m) => m.id)
         .sort()
     ).toEqual(["c1", "u1", "v1"])
+  })
+})
+
+describe("status / pin / review gates", () => {
+  it("status=invalidated returns only the archive", () => {
+    const rows = [mem({ id: "a" }), mem({ id: "b", status: "invalidated" })]
+    expect(filterAndSortMemories(rows, { status: "invalidated" }).map((m) => m.id)).toEqual(["b"])
+  })
+
+  it("pinnedOnly keeps just the pinned rows", () => {
+    const rows = [mem({ id: "a", pinned: true }), mem({ id: "b" })]
+    expect(filterAndSortMemories(rows, { pinnedOnly: true }).map((m) => m.id)).toEqual(["a"])
+  })
+
+  it("treats an unset reviewStatus as unreviewed", () => {
+    const rows = [mem({ id: "a" }), mem({ id: "b", reviewStatus: "verified" })]
+    expect(filterAndSortMemories(rows, { reviewStatus: "unreviewed" }).map((m) => m.id)).toEqual([
+      "a",
+    ])
+  })
+
+  it("accepts an array of review states as an OR", () => {
+    const rows = [
+      mem({ id: "a", reviewStatus: "unreviewed" }),
+      mem({ id: "b", reviewStatus: "pending_instruction" }),
+      mem({ id: "c", reviewStatus: "verified" }),
+    ]
+    const ids = filterAndSortMemories(rows, {
+      reviewStatus: ["unreviewed", "pending_instruction"],
+    }).map((m) => m.id)
+    expect(ids.sort()).toEqual(["a", "b"])
+  })
+})
+
+describe("quick views", () => {
+  it("every view id resolves, and an unknown id degrades to `all`", () => {
+    for (const view of MEMORY_QUICK_VIEWS) {
+      expect(findMemoryQuickView(view.id).id).toBe(view.id)
+    }
+    // @ts-expect-error deliberately passing an id that is no longer defined
+    expect(findMemoryQuickView("retired-view").id).toBe("all")
+  })
+
+  it("counts each view, folding pending_instruction into needsReview", () => {
+    const counts = countMemoryQuickViews([
+      mem({ pinned: true }),
+      mem({ reviewStatus: "pending_instruction" }),
+      mem({ reviewStatus: "conflict" }),
+      mem({ reviewStatus: "verified" }),
+      mem({ status: "invalidated" }),
+    ])
+    expect(counts).toEqual({ all: 4, pinned: 1, needsReview: 2, conflicts: 1, archived: 1 })
+  })
+
+  it("each view's filter actually selects the rows its count promised", () => {
+    const rows = [
+      mem({ id: "pin", pinned: true }),
+      mem({ id: "pend", reviewStatus: "pending_instruction" }),
+      mem({ id: "conf", reviewStatus: "conflict" }),
+      mem({ id: "arch", status: "invalidated" }),
+    ]
+    const counts = countMemoryQuickViews(rows)
+    for (const view of MEMORY_QUICK_VIEWS) {
+      expect(filterAndSortMemories(rows, view.filter)).toHaveLength(counts[view.id])
+    }
+  })
+})
+
+describe("facets", () => {
+  it("derives only the options present, ordered by count", () => {
+    const facets = collectMemoryFacets([
+      mem({ type: "semantic", scope: "global", provenance: "user", tags: ["a"] }),
+      mem({ type: "semantic", scope: "workspace", provenance: "user", tags: ["a", "b"] }),
+    ])
+    expect(facets.types).toEqual([{ value: "semantic", count: 2 }])
+    expect(facets.provenances).toEqual([{ value: "user", count: 2 }])
+    expect(facets.scopes.map((s) => s.value).sort()).toEqual(["global", "workspace"])
+    expect(facets.tags).toEqual([
+      { value: "a", count: 2 },
+      { value: "b", count: 1 },
+    ])
+  })
+
+  it("counts a repeated tag on one row once", () => {
+    const facets = collectMemoryFacets([mem({ tags: ["dup", "dup"] })])
+    expect(facets.tags).toEqual([{ value: "dup", count: 1 }])
+  })
+
+  it("counts active facet axes but not the query, sort, or view", () => {
+    expect(countActiveMemoryFilters({ query: "x", sort: "created", status: "all" })).toBe(0)
+    expect(countActiveMemoryFilters({ types: ["semantic"], tags: ["a", "b"] })).toBe(3)
+  })
+
+  it("clearMemoryFacets keeps the query and sort axes", () => {
+    expect(
+      clearMemoryFacets({ query: "x", sort: "created", types: ["semantic"], tags: ["a"] })
+    ).toEqual({ query: "x", sort: "created" })
   })
 })
