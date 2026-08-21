@@ -228,7 +228,19 @@
     "add": "Add label",
     "none": "No labels",
     "manage": "Manage labels",
-    "remove": "Remove {name}"
+    "remove": "Remove {name}",
+    "manageTitle": "Issue labels",
+    "manageDescription": "Labels apply to issues in this workspace. Drag to reorder; the five starter labels cannot be deleted.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. regression",
+    "colorLabel": "Colour",
+    "addButton": "Add label",
+    "nameRequired": "Give the label a name",
+    "builtinBadge": "Built-in",
+    "rowNameAria": "Rename {name}",
+    "rowColorAria": "Colour for {name}",
+    "deleteAria": "Delete {name}",
+    "reorderAria": "Reorder {name}"
   },
   "sync": {
     "now": "Sync now",

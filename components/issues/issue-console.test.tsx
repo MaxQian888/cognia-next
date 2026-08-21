@@ -63,6 +63,10 @@ jest.mock("./list/issue-list", () => ({
   },
 }))
 let railProps: Record<string, unknown> = {}
+jest.mock("./rail/manage-labels-dialog", () => ({
+  ManageLabelsDialog: (props: Record<string, unknown>) =>
+    props.open ? <div data-testid="manage-labels-stub" /> : null,
+}))
 jest.mock("./rail/issue-rail", () => ({
   IssueRail: (props: Record<string, unknown>) => {
     railProps = props
@@ -361,6 +365,14 @@ describe("IssueConsole", () => {
           "p1",
         ])
       )
+    })
+
+    it("opens label management from the rail — the control was never wired before", async () => {
+      render(<IssueConsole />)
+      await screen.findByTestId("rail-stub")
+      expect(typeof railProps.onManageLabels).toBe("function")
+      callProp(railProps, "onManageLabels")
+      expect(await screen.findByTestId("manage-labels-stub")).toBeInTheDocument()
     })
 
     it("turns a label click into a filter", async () => {

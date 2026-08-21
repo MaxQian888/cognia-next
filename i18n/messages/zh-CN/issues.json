@@ -228,7 +228,19 @@
     "add": "添加标签",
     "none": "暂无标签",
     "manage": "管理标签",
-    "remove": "移除 {name}"
+    "remove": "移除 {name}",
+    "manageTitle": "Issue 标签",
+    "manageDescription": "标签作用于当前工作区的 issue。可拖动排序；5 个内置标签不可删除。",
+    "nameLabel": "名称",
+    "namePlaceholder": "例如：regression",
+    "colorLabel": "颜色",
+    "addButton": "添加标签",
+    "nameRequired": "请填写标签名称",
+    "builtinBadge": "内置",
+    "rowNameAria": "重命名 {name}",
+    "rowColorAria": "{name} 的颜色",
+    "deleteAria": "删除 {name}",
+    "reorderAria": "调整 {name} 的顺序"
   },
   "sync": {
     "now": "立即同步",

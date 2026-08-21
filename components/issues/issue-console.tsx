@@ -82,6 +82,7 @@ import { IssueBoard } from "./board/issue-board"
 import { IssueFilterBar } from "./filter-bar/issue-filter-bar"
 import { IssueBulkToolbar } from "./list/issue-bulk-toolbar"
 import { IssueList } from "./list/issue-list"
+import { ManageLabelsDialog } from "./rail/manage-labels-dialog"
 import { IssueRail } from "./rail/issue-rail"
 import { IssueDetailPanel } from "./issue-detail-panel"
 import { CreateIssueDialog } from "./create-issue-dialog"
@@ -316,6 +317,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
     [selection.selectedIds, itemsById]
   )
   const [deleteTargets, setDeleteTargets] = useState<readonly UnifiedIssueItem[]>([])
+  const [manageLabelsOpen, setManageLabelsOpen] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createStatus, setCreateStatus] = useState<IssueStatus>("backlog")
@@ -521,6 +523,7 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
                   onToggleLabel={(id) =>
                     updateFilter(toggleFilterValue(prefs.filter, "labelIds", id))
                   }
+                  onManageLabels={() => setManageLabelsOpen(true)}
                 />
               ),
             }
@@ -609,6 +612,12 @@ export function IssueConsole({ initialSelectedId, initialProjectId }: IssueConso
           renderItemMenu={renderItemMenu}
         />
       )}
+
+      <ManageLabelsDialog
+        open={manageLabelsOpen}
+        onOpenChange={setManageLabelsOpen}
+        labels={writableLabels}
+      />
 
       <DeleteIssueDialog
         open={deleteTargets.length > 0}

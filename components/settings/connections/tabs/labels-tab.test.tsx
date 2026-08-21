@@ -13,10 +13,14 @@ let mockLabels: ConversationLabelRow[] = []
 jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
   useConversationLabels: () => mockLabels,
 }))
-jest.mock("@/lib/db/conversation-labels", () => ({
+// The tab renders the shared `LabelCatalogueEditor`, which reaches the
+// catalogue directly rather than through the conversation-scoped facade.
+const mockReorderLabels = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/db/labels", () => ({
   createLabel: (...a: unknown[]) => mockCreateLabel(...a),
   updateLabel: (...a: unknown[]) => mockUpdateLabel(...a),
   deleteLabel: (...a: unknown[]) => mockDeleteLabel(...a),
+  reorderLabels: (...a: unknown[]) => mockReorderLabels(...a),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
@@ -55,7 +59,11 @@ describe("LabelsTab", () => {
     fireEvent.change(screen.getByLabelText("Color"), { target: { value: "#123456" } })
     fireEvent.click(screen.getByRole("button", { name: /add label/i }))
     await waitFor(() => {
-      expect(mockCreateLabel).toHaveBeenCalledWith({ name: "Urgent", color: "#123456" })
+      expect(mockCreateLabel).toHaveBeenCalledWith({
+        scope: "conversation",
+        name: "Urgent",
+        color: "#123456",
+      })
     })
   })
 

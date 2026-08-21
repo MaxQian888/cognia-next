@@ -716,7 +716,8 @@
     "nameRequired": "Label name is required.",
     "rowColorAria": "Color for {name}",
     "rowNameAria": "Name for {name}",
-    "title": "Conversation labels"
+    "title": "Conversation labels",
+    "reorderAria": "Reorder {name}"
   },
   "lark": {
     "adapterCreated": "Adapter created.",

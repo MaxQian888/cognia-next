@@ -716,7 +716,8 @@
     "nameRequired": "标签名称不能为空。",
     "rowColorAria": "{name} 的颜色",
     "rowNameAria": "{name} 的名称",
-    "title": "会话标签"
+    "title": "会话标签",
+    "reorderAria": "调整 {name} 的顺序"
   },
   "lark": {
     "adapterCreated": "适配器已创建。",
