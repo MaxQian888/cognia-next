@@ -2,7 +2,10 @@ mod a2ui_bridge;
 mod account_auth;
 #[cfg(all(feature = "agent-debug", desktop))]
 mod agent_debug;
-mod agent_session_store;
+// ADR-0067 Tier C — extracted to `crates/cognia-agent-state` (zero `crate::`
+// edges, no tauri). Re-aliased so `crate::agent_session_store::…` in
+// `companion_api` and the `configure_path` calls below resolve unchanged.
+pub use cognia_agent_state::agent_session_store;
 
 /// Configure the shared Claude Agent SDK session mirror before a host starts
 /// its sidecar. Desktop setup and `cognia-server` deliberately call the same
@@ -118,7 +121,10 @@ mod process_registry;
 mod project_environment;
 /// ADR-0090 Phase 1 — headless Provider Profile Store (SQLite mirror of the
 /// renderer's Dexie v121 tables).
-pub mod provider_profiles;
+// ADR-0067 Tier C — extracted to `crates/cognia-agent-state`; re-aliased so
+// `crate::provider_profiles::…` and the `app_lib::provider_profiles::…`
+// paths that `bin/cognia-server.rs` uses resolve unchanged.
+pub use cognia_agent_state::provider_profiles;
 mod proxy_config;
 pub use cognia_net::proxy_config::{
     apply_current as apply_current_proxy_config, clear_inherited_proxy_environment,
@@ -142,6 +148,8 @@ mod selection_toolbar;
 // Live Ops Controller event stream (ADR-0059) — an SSE body never ends, so the
 // buffered `proxy_http_request` bridge cannot serve it.
 mod server_ops;
+// ADR-0067 Tier C — the reader moved to `cognia-agent-state`; this module is
+// now just the `#[tauri::command]` shell (see its doc comment).
 mod session_import;
 mod session_import_watch;
 mod settings;

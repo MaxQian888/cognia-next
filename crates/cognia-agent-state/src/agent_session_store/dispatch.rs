@@ -48,7 +48,9 @@ fn store() -> Result<Arc<SessionStore>, String> {
     Ok(opened)
 }
 
-pub(crate) fn configured_store() -> Result<Arc<SessionStore>, String> {
+/// `pub` across the crate boundary (ADR-0067): its only caller is the
+/// app-side `companion_api` host-RPC path, which stayed in `app_lib`.
+pub fn configured_store() -> Result<Arc<SessionStore>, String> {
     store()
 }
 

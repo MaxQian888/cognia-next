@@ -65,6 +65,7 @@ members = [
   # ADR-0067 Tier C — leaves lifted out of the regrown `app_lib`.
   "crates/cognia-agents",
   "crates/cognia-files",
+  "crates/cognia-agent-state",
   "crates/cognia-deployment",
   "crates/cognia-ops-controller",
   "crates/cognia-deploy-agent",

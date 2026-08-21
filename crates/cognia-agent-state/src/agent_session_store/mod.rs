@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 mod dispatch;
-pub(crate) use dispatch::configured_store;
+pub use dispatch::configured_store;
 pub use dispatch::{configure_path, dispatch_host_rpc, is_session_store_method};
 
 /// Default retention for mirrored sessions. Deliberately generous: this is a

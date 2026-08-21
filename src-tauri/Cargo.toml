@@ -142,6 +142,9 @@ cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 cognia-agents = { path = "../crates/cognia-agents" }
 # ADR-0067 Tier C — confined filesystem surface (owns `gray_matter`, `ignore`).
 cognia-files = { path = "../crates/cognia-files" }
+# ADR-0067 Tier C — SQLite mirrors of renderer-side agent state. Tauri-free
+# on purpose: the headless `cognia-server` bin links it directly.
+cognia-agent-state = { path = "../crates/cognia-agent-state" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane
