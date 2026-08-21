@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import type { PerformanceCaptureAttachmentRow } from "@/lib/perf/capture-types"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import {
@@ -80,6 +81,9 @@ function validCpuIntervals(frames: PerfFrame[]) {
   }))
 }
 
+/** Typed empty default — a bare `[]` infers `never[]` and poisons every row read. */
+const EMPTY_ATTACHMENTS: PerformanceCaptureAttachmentRow[] = []
+
 export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
   const t = useTranslations("performance.captures")
   const state = useSyncExternalStore(
@@ -105,13 +109,16 @@ export function PerfCapturesTab({ hostAvailable }: { hostAvailable: boolean }) {
     []
   )
   const scope = getActiveRuntimeTargetContext()
+  // The empty branch and the default both need the row type spelled out —
+  // otherwise they infer `never[]`, the union collapses, and every field read
+  // off a row below fails with "does not exist on type 'never'".
   const rawAttachments = useLiveQuery(
     () =>
       rawCaptureId
         ? db.performanceCaptureAttachments.where("captureId").equals(rawCaptureId).sortBy("ordinal")
-        : Promise.resolve([]),
+        : Promise.resolve<PerformanceCaptureAttachmentRow[]>([]),
     [db.name, rawCaptureId],
-    []
+    EMPTY_ATTACHMENTS
   )
 
   useEffect(() => {

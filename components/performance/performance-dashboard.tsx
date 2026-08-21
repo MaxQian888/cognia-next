@@ -117,7 +117,9 @@ export function PerformanceDashboard() {
             <TabsContent value="diagnose" className="mt-0 space-y-4">
               <div className="flex flex-wrap gap-2">
                 <Button asChild variant="outline">
-                  <Link href="/observability">{t("diagnose.observability")}</Link>
+                  <Link href="/logs?channel=traces&view=dashboard">
+                    {t("diagnose.observability")}
+                  </Link>
                 </Button>
                 <Button asChild variant="outline">
                   <Link href="/logs">{t("diagnose.logs")}</Link>

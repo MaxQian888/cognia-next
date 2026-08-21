@@ -8,6 +8,30 @@ import { PERF_NAMESPACE } from "./perf-marker"
 
 const MAX_ENTRIES_PER_NAME = 60
 
+/**
+ * The fields {@link RendererPerformanceCollector.ingestPerformanceEntries}
+ * actually reads. Narrower than the DOM's `PerformanceEntry` on purpose: a real
+ * entry satisfies it, and a caller (or a test) with a plain object no longer has
+ * to fabricate `toJSON` and the rest of an interface nothing here touches.
+ */
+export interface PerformanceEntryLike {
+  name: string
+  entryType: string
+  duration: number
+  startTime: number
+}
+
+/**
+ * The timer seams, declared as the single call shape this class uses rather
+ * than as the full overloaded `typeof globalThis.setInterval`. The globals
+ * remain assignable; a test stub finally is too.
+ */
+export type IntervalScheduler = (
+  handler: () => void,
+  timeoutMs: number
+) => ReturnType<typeof setInterval>
+export type IntervalCanceller = (handle: ReturnType<typeof setInterval>) => void
+
 export interface RendererMeasurementEntry {
   name: string
   duration: number
@@ -25,8 +49,8 @@ interface RendererCollectorDependencies {
   timeOrigin?: number
   now?: () => number
   wallNow?: () => number
-  setInterval?: typeof globalThis.setInterval
-  clearInterval?: typeof globalThis.clearInterval
+  setInterval?: IntervalScheduler
+  clearInterval?: IntervalCanceller
 }
 
 function randomId(): string {
@@ -51,8 +75,8 @@ export class RendererPerformanceCollector {
   private readonly listeners = new Set<(frame: PerfFrame) => void>()
   private readonly now: () => number
   private readonly wallNow: () => number
-  private readonly schedule: typeof globalThis.setInterval
-  private readonly cancel: typeof globalThis.clearInterval
+  private readonly schedule: IntervalScheduler
+  private readonly cancel: IntervalCanceller
   private timer: ReturnType<typeof setInterval> | null = null
   private timerCadenceMs = 0
   private targetId = "web-standalone"
@@ -132,7 +156,19 @@ export class RendererPerformanceCollector {
     return this.measurements
   }
 
-  ingestPerformanceEntries(entries: ArrayLike<PerformanceEntry>): boolean {
+  /**
+   * Drop every retained measurement.
+   *
+   * Exists so the HUD's "clear" button has something to call. It used to cast
+   * the `ReadonlyMap` from `getMeasurements()` to a mutable `Map` and clear it
+   * through that handle, which worked only because the two share one object —
+   * a lie the type system stopped accepting.
+   */
+  clearMeasurements(): void {
+    this.measurements.clear()
+  }
+
+  ingestPerformanceEntries(entries: ArrayLike<PerformanceEntryLike>): boolean {
     let changed = false
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index]

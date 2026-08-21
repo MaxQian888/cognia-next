@@ -31,7 +31,10 @@ export function PerfCaptureShellStatus({ className }: { className?: string }) {
     return () => clearInterval(timer)
   }, [state.active])
 
-  if (!state.active || !state.captureId || !state.startedAt) return null
+  // `targetId` joins the guard rather than being defaulted at the call site: the
+  // controller always stamps one when a capture starts (`scope?.targetId ??
+  // "web-standalone"`), so a null here means there is no capture to describe.
+  if (!state.active || !state.captureId || !state.startedAt || !state.targetId) return null
 
   const elapsedSeconds = Math.floor(Math.max(0, now - state.startedAt) / 1_000)
 

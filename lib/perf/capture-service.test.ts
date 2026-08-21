@@ -90,7 +90,10 @@ describe("PerformanceCaptureSession", () => {
     await registryDb?.delete()
   })
 
-  async function start(onDemandEnd = jest.fn(), onStopped = jest.fn()) {
+  // Typed parameters, not just defaults: a `jest.fn()` default makes the
+  // parameter type `jest.Mock`, which then rejects the plain callbacks some
+  // cases pass.
+  async function start(onDemandEnd: () => void = jest.fn(), onStopped: () => void = jest.fn()) {
     return PerformanceCaptureSession.start({
       accountId: "account-a",
       targetDatabase: db.name,
@@ -101,7 +104,9 @@ describe("PerformanceCaptureSession", () => {
       key: crypto.getRandomValues(new Uint8Array(32)),
       db,
       quota,
-      setTimeout: (() => 1) as typeof setTimeout,
+      // The seam is a single call shape now, so the stub only has to return a
+      // handle-shaped value rather than impersonate the overloaded global.
+      setTimeout: () => 1 as unknown as ReturnType<typeof setTimeout>,
       clearTimeout: jest.fn(),
       onDemandEnd,
       onStopped,

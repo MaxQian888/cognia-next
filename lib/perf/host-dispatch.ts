@@ -93,7 +93,14 @@ export async function dispatchPerformanceHostCommand(
   }
 
   const { invoke } = await import("@tauri-apps/api/core")
-  const args = { ...payload, callerDeviceId, deviceId: callerDeviceId, remote: true }
+  // A widened record: the `perf_open_lease` branch below adds `input`, which the
+  // inferred object literal type has no room for.
+  const args: Record<string, unknown> = {
+    ...payload,
+    callerDeviceId,
+    deviceId: callerDeviceId,
+    remote: true,
+  }
   if (command === "perf_open_lease") {
     args.input = {
       ...(payload.input as PerfOpenLeaseRequest),

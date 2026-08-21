@@ -35,7 +35,7 @@ interface Entry {
 }
 
 interface StoreShape {
-  byName: Map<string, Entry[]>
+  byName: ReadonlyMap<string, Entry[]>
   subscribers: Set<() => void>
 }
 
@@ -43,7 +43,10 @@ const rendererCollector = getRendererPerformanceCollector()
 
 // The HUD is a subscriber of the shared per-document collector.
 const perfStore: StoreShape = {
-  byName: rendererCollector.getMeasurements() as Map<string, Entry[]>,
+  // No cast: `Entry` is a structural subset of the collector's entry type, and
+  // the map is genuinely read-only from here — clearing goes through
+  // `rendererCollector.clearMeasurements()`.
+  byName: rendererCollector.getMeasurements(),
   subscribers: new Set(),
 }
 
@@ -130,7 +133,7 @@ function percentile(sortedAsc: number[], p: number): number {
   return sortedAsc[idx]
 }
 
-function aggregate(byName: Map<string, Entry[]>): AggregateStat[] {
+function aggregate(byName: ReadonlyMap<string, Entry[]>): AggregateStat[] {
   const stats: AggregateStat[] = []
   for (const [name, entries] of byName) {
     if (entries.length === 0) continue
@@ -221,7 +224,7 @@ function PerfHudInner() {
   }
 
   const clearEntries = () => {
-    perfStore.byName.clear()
+    rendererCollector.clearMeasurements()
     snapshotVersion++
     for (const sub of perfStore.subscribers) sub()
   }
@@ -302,7 +305,7 @@ export const __test__ = {
   MAX_ENTRIES_PER_NAME,
   peek: (name: string): Entry[] => (perfStore.byName.get(name) ?? []).slice(),
   reset: () => {
-    perfStore.byName.clear()
+    rendererCollector.clearMeasurements()
     perfStore.subscribers.clear()
     snapshotVersion = 0
     dismissed = false

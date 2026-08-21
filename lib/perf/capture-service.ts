@@ -4,7 +4,7 @@ import { encryptPerformanceArtifact } from "./capture-crypto"
 import type {
   PerformanceCaptureAttachmentRow,
   PerformanceCaptureRow,
-  PerformanceCaptureStopReason,
+  PerfCaptureStopReason,
 } from "./capture-types"
 import { PerformanceQuotaExceededError, PerformanceQuotaManager } from "./quota"
 import {
@@ -38,18 +38,28 @@ export interface PerformanceCaptureSessionOptions {
   quota: PerformanceQuotaManager
   durationMs?: number
   now?: () => number
-  setTimeout?: typeof globalThis.setTimeout
+  setTimeout?: TimeoutScheduler
   clearTimeout?: typeof globalThis.clearTimeout
   onDemandEnd?: () => void
   onStopped?: () => void
 }
 
+/**
+ * The timer seam, declared as the single call shape this module uses rather
+ * than as the full overloaded `typeof globalThis.setTimeout`. `globalThis`
+ * stays assignable to it; a plain test stub finally is too.
+ */
+type TimeoutScheduler = (handler: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>
+
 function digestHex(bytes: Uint8Array): Promise<string> {
-  return crypto.subtle
-    .digest("SHA-256", bytes)
-    .then((digest) =>
-      Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
-    )
+  return (
+    crypto.subtle
+      // See the note in `capture-portability.ts:sha256`.
+      .digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)
+      .then((digest) =>
+        Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+      )
+  )
 }
 
 function randomId(prefix: string): string {
@@ -65,7 +75,7 @@ export class PerformanceCaptureSession {
   readonly startedAt: number
   private readonly securityGeneration = getPerformanceSecurityGeneration()
   private readonly now: () => number
-  private readonly schedule: typeof globalThis.setTimeout
+  private readonly schedule: TimeoutScheduler
   private readonly cancel: typeof globalThis.clearTimeout
   private readonly durationMs: number
   private tail: PerfFrame[] = []
@@ -320,7 +330,7 @@ export class PerformanceCaptureSession {
     )
   }
 
-  async stop(reason: PerformanceCaptureStopReason = "manual"): Promise<void> {
+  async stop(reason: PerfCaptureStopReason = "manual"): Promise<void> {
     if (this.stopped) return this.flushing
     this.stopped = true
     this.clearTimer()
@@ -430,7 +440,7 @@ export class PerformanceCaptureSession {
     }
   }
 
-  private async finalizeAfterWriteFailure(reason: PerformanceCaptureStopReason): Promise<void> {
+  private async finalizeAfterWriteFailure(reason: PerfCaptureStopReason): Promise<void> {
     this.stopped = true
     this.tail = []
     this.tailBytes = 0
@@ -553,7 +563,7 @@ export class ActivePerformanceCaptureCoordinator {
     return this.active
   }
 
-  async stop(reason: PerformanceCaptureStopReason = "manual"): Promise<void> {
+  async stop(reason: PerfCaptureStopReason = "manual"): Promise<void> {
     await this.active?.stop(reason)
     this.active = null
   }

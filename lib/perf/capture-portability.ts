@@ -68,7 +68,11 @@ export async function readPerformanceCaptureFrames(input: {
 }
 
 async function sha256(value: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", value)
+  // `BufferSource` excludes `SharedArrayBuffer`-backed views, so a bare
+  // `Uint8Array` (i.e. `Uint8Array<ArrayBufferLike>`) stopped satisfying it when
+  // TS made the buffer a type parameter. Every caller here passes an
+  // ArrayBuffer-backed array.
+  const digest = await crypto.subtle.digest("SHA-256", value as Uint8Array<ArrayBuffer>)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 

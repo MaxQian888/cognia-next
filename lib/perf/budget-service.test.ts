@@ -3,8 +3,9 @@
 import "fake-indexeddb/auto"
 import { CogniaAccountRegistryDB } from "@/lib/accounts/account-db"
 import { PerformanceBudgetService } from "./budget-service"
+import type { CreatePerformanceBudgetProfileInput } from "./budget-service"
 
-function input() {
+function input(): CreatePerformanceBudgetProfileInput {
   return {
     id: "budget-a",
     name: "Main CPU",
@@ -12,18 +13,18 @@ function input() {
     metricId: "process.main.cpuPct",
     metricDefinitionVersion: 1,
     unit: "%",
-    sourceKind: "host" as const,
+    sourceKind: "host",
     metricSchemaVersion: 1,
     requestedCadenceMs: 1000,
-    aggregation: "p95" as const,
-    direction: "lower" as const,
+    aggregation: "p95",
+    direction: "lower",
     warningThreshold: 60,
     failureThreshold: 80,
     applicability: {
-      runtimeKinds: ["tauri-rust"] as const,
-      buildProfiles: ["production"] as const,
+      runtimeKinds: ["tauri-rust"],
+      buildProfiles: ["production"],
     },
-    comparisonWindow: "interval" as const,
+    comparisonWindow: "interval",
     createdAt: 100,
   }
 }

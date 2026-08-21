@@ -73,7 +73,8 @@ function fromBase64(value: string): Uint8Array {
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  // See the note in `capture-portability.ts:sha256`.
+  const digest = await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
@@ -220,7 +221,7 @@ export async function buildCogniaPerfPackage(input: {
     const signature = await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
       privateKey,
-      signingPayload(manifest)
+      signingPayload(manifest) as Uint8Array<ArrayBuffer>
     )
     manifest.signature = {
       algorithm: "P-256-SHA-256",
@@ -368,8 +369,8 @@ export async function validateCogniaPerfPackage(
     const verified = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },
       publicKey,
-      fromBase64(manifest.signature.value),
-      signingPayload({ ...manifest, signature: undefined })
+      fromBase64(manifest.signature.value) as Uint8Array<ArrayBuffer>,
+      signingPayload({ ...manifest, signature: undefined }) as Uint8Array<ArrayBuffer>
     )
     if (!verified) throw new Error("cognia-perf-signature-invalid")
     trustState = trustedProducerFingerprints.has(manifest.producerFingerprint)

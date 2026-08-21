@@ -28,7 +28,9 @@ export function buildProcessTree(
   sort: ProcessSort = defaultSort
 ): ProcessTreeNode[] {
   const byPid = new Map(processes.map((process) => [process.pid, process]))
-  const nodes = new Map(
+  // Annotated: an inline `children: []` infers as `never[]`, which then rejects
+  // the very nodes this loop pushes into it.
+  const nodes = new Map<ProcessSample["pid"], ProcessTreeNode>(
     processes.map((process) => [
       process.pid,
       {

@@ -11,7 +11,7 @@ import {
   subscribePerfFrame,
 } from "./backend/commands"
 import type { PerfFrame, PerfGap, PerfSourceKind } from "./backend/types"
-import type { PerformanceCaptureStopReason } from "./capture-types"
+import type { PerfCaptureStopReason } from "./capture-types"
 import {
   getActivePerformanceCaptureCoordinator,
   type PerformanceCaptureSession,
@@ -213,7 +213,7 @@ export class PerformanceCaptureController {
     return this.session.id
   }
 
-  async stop(reason: PerformanceCaptureStopReason = "manual") {
+  async stop(reason: PerfCaptureStopReason = "manual") {
     await this.dependencies.coordinator().stop(reason)
     await this.writeQueue
     this.completeSession()
