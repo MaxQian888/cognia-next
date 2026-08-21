@@ -9,7 +9,7 @@
  * "pending review" tile was literally a toggle button) and a `flex-wrap` row of
  * eight controls that folded into two or three ragged lines at medium widths.
  *
- * The split mirrors `components/issues/board/board-toolbar.tsx`: quick views
+ * The split mirrors `components/issues/filter-bar/issue-filter-bar.tsx`: quick views
  * and Filter change *which rows exist*, Display changes how they are ordered
  * and how dense they are. Every facet option comes from
  * `collectMemoryFacets` over the rows the current view already narrowed to, so
