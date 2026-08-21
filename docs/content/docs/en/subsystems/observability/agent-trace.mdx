@@ -102,7 +102,7 @@ flowchart TB
   AT -->|"bulkInsertSpans"| Dexie[("Dexie agentTraces")]
   OTLP -->|"spansToOtlp"| Wire["/v1/traces<br/>Grafana/Tempo/Honeycomb"]
   Dexie --> Panel["/logs Traces channel"]
-  Dexie --> Dash["/observability dashboard"]
+  Dexie --> Dash["/logs → Traces<br/>explorer + dashboard"]
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
   class Prod,Em,Disp,Entry,AT,OTLP,Dexie,Wire,Panel,Dash box

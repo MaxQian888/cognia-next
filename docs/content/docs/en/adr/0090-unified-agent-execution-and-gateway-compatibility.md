@@ -542,3 +542,35 @@ Fleet sessions and subagents carry `lifecycleConfidence`:
 - `inferred` for Task-tool heuristics.
 
 Consumers may display both but must not silently present inferred lifecycle as provider-confirmed fact.
+
+## 2026-08-20 amendment — Phase 9 retirement is done
+
+`agentExecutionResolverV2` is deleted. `AgentExecutionService` is the only
+execution path: `executeAgent` is a thin delegate to `executeAgentTurn`, the
+`toolsEnabled → runAgentRail / runCompletionRail` branch it used to own is gone,
+`recordAgentExecutionShadow` has no reason to exist, and spec stamping in
+`resolveSendOptions` is unconditional (it previously required the flag, so a
+default install never carried an `execution` spec and the sidecar always took
+the legacy provider branch).
+
+The `action.agent.turn` node no longer runs its own `isTauri()` precheck for
+`requireTools` — that was a second implementation of a policy the service
+already enforces fail-closed.
+
+Behaviour is preserved where the migration table says it should be: legacy
+`toolsEnabled: true` without `requireTools` still maps to
+`fallbackPolicy: "completion"`, so the web fallback is unchanged and merely
+labelled `degradedReason: "legacy-completion-fallback"`. It changes exactly where
+the ADR intended: explicit policy, headless hosts, `requireTools`, and
+unsatisfied hard capabilities now fail before spending a turn.
+
+`resolveAgentExecutionShadowSpec` is renamed `resolveAgentExecutionSpecForConfig`
+— the connector runtime depends on it to remint a gateway ticket on a recovery
+turn, which was never shadow work.
+
+`developer.taskWorkspace` is also gone: Task Workspace isolation is GA, so
+`isAgentTeamRemoteDispatchEnabled()` takes no arguments and reads one flag.
+Whether a *remote* host can isolate is still checked per worker against its
+advertised manifest (`evaluateRemoteWorkerPlacement` →
+`task_workspace_unavailable`).
+

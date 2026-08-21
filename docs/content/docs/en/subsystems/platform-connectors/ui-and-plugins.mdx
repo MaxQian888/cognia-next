@@ -257,13 +257,20 @@ tabs** (`TAB_IDS`, `connections-section.tsx:41-49`):
 
 | Tab | id | Trigger | Content |
 | --- | --- | --- | --- |
-| Overview | `overview` | `connections-section.tsx:90` | `OverviewTab` (`:98-99`) |
-| Adapters | `adapters` | `connections-section.tsx:91` | `AdaptersTab` (`:101-102`) |
-| Conversations | `conversations` | `connections-section.tsx:92` | `ConversationsTab` (`:104-105`) |
-| Inbox | `inbox` | `connections-section.tsx:93` | `InboxTab` (`:107-108`) |
-| Outbound | `outbound` | `connections-section.tsx:94` | `OutboundTab` (`:110-111`) |
-| Audit | `audit` | `connections-section.tsx:95` | `AuditTab` (`:113-114`) |
-| Capability | `capability` | `connections-section.tsx:96` | `CapabilityMatrixTab` (`:116-117`) |
+| Overview | `overview` | `connections-section.tsx:84` | `OverviewTab` (`:107`) |
+| Adapters | `adapters` | `connections-section.tsx:87` | `AdaptersTab` (`:110`) |
+| Conversations | `overrides` | `connections-section.tsx:90` | `ConversationsTab` (`:113`) |
+| Outbound | `outbound` | `connections-section.tsx:93` | `OutboundTab` (`:116`) |
+| Audit | `audit` | `connections-section.tsx:96` | `AuditTab` (`:119`) |
+| Capability | `capability` | `connections-section.tsx:99` | `CapabilityMatrixTab` (`:122`) |
+| Inbox assets | `assets` | `connections-section.tsx:102` | `InboxAssetsTab` (`:125`) |
+
+Seven tabs, and the id of the Conversations tab is `overrides`, not
+`conversations` — the deep link (`?connectionsTab=`) predates the rename.
+There is no standalone Inbox tab: the per-adapter conversation summary that
+used to live here was dropped in favour of the `/inbox` route, and the legacy
+`?connectionsTab=tunnel` link now resolves to Overview, which hosts the tunnel
+card. `connections-section.test.tsx` pins both absences.
 
 ## Live Data Bindings
 

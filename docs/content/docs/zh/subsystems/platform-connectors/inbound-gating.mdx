@@ -64,7 +64,7 @@ flowchart TD
   E -->|yes| F["deny (chat_allowlist)"]
   E -->|no| G{"atResponseStrategy?"}
   G -->|always| ALLOW
-  G -->|"mention_only"| H{"isDm OR<br/>selfMentioned?"}
+  G -->|"mention_only"| H{"isDm OR selfMentioned<br/>OR replies to us?"}
   H -->|yes| ALLOW
   H -->|no| I["deny (at_mention_required)"]
   G -->|"direct_only"| J{"isDm?"}
@@ -76,12 +76,13 @@ flowchart TD
 - **chatId 解析** —— `event.channel.platformChannelId ?? event.channel.id`（`at-gate.ts:53`），因为操作者把平台原生 id 逐字粘贴进名单。
 - **先黑名单后白名单** —— 命中黑名单即拒绝（`at-gate.ts:72`）；非空白名单中缺该会话也拒绝（`at-gate.ts:76`）。空 / 未定义的白名单意味着"任何会话都行"。
 - **at-策略** —— `AtResponseStrategy = "always" | "mention_only" | "direct_only"`（`at-gate.ts:32`）。新适配器的默认值是 `DEFAULT_AT_RESPONSE_STRATEGY = "mention_only"`（`at-gate.ts:35`）——比 `always` 更安全。私聊总是绕过提及要求，因为它没有提及面。
+- **回复机器人等同于称呼它** —— `isReplyToSelf(event)`（`types/connectors/event.ts`）在本门控与会话准入里都与 `selfMentioned` 等价地满足提及要求。没有它，下文的 `reply-to-bot` 触发规则在群里永远不可能命中：准入会在规则被评估之前就丢弃未 @ 的群消息。匹配是严格的——父消息作者必须等于 `event.selfId`，父作者未知时绝不过度匹配。
 
 ```ts
 // lib/connectors/at-gate.ts:90 — mention_only branch
     case "mention_only":
       if (isDm) return { allowed: true }
-      if (event.mentions.selfMentioned) return { allowed: true }
+      if (event.mentions.selfMentioned || isReplyToSelf(event)) return { allowed: true }
       return { allowed: false, reason: "at_mention_required" }
     case "direct_only":
       if (isDm) return { allowed: true }
@@ -106,7 +107,7 @@ flowchart TD
 | ------------------- | ------------------------------------------------------------------ | ----------------- |
 | `private-default`   | `event.channel.kind === "private"`                                 | `policy-eval.ts:37` |
 | `self-mention`      | `event.mentions.selfMentioned`                                     | `policy-eval.ts:40` |
-| `reply-to-bot`      | `event.replyTo?.messageId` 存在                                    | `policy-eval.ts:43` |
+| `reply-to-bot`      | `event.replyTo.parentSenderId === event.selfId`（精确匹配）        | `policy-eval.ts:43` |
 | `slash-command`     | `plainText`（trim 后）以任一 `prefixes` 开头                       | `policy-eval.ts:49` |
 | `keyword`           | `plainText` 包含任一 `words`（可选大小写不敏感）                   | `policy-eval.ts:54` |
 | `user-allowlist`    | `userIds` 包含 `event.sender.id`                                   | `policy-eval.ts:62` |

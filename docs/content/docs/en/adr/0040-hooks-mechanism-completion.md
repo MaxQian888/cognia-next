@@ -126,6 +126,89 @@ sanitized inputs, decisions, timing, and errors.
 - External adapters keep their protocol-specific ingestion but converge on the same semantic decisions and trust rules.
 - `webhook` remains compatible for existing settings, while all new configuration writes use `http`.
 
+## Amendment — agent scoping, plugin contribution, and rail parity (2026-08-21)
+
+This amendment extends ADR-0040 rather than superseding it. Five defects and one
+missing capability drove it; the decisions below are the ones that stand.
+
+### What was wrong
+
+1. **No agent identity reached any hook.** `AgentHookContext.agentId` was declared but never sent:
+   `fireAgentHook` omitted it, `run_agent_hook` had no parameter for it, and the CLI firer named the
+   context `_ctx`. A teammate turn, a plan step, a connector auto-reply and a plain chat turn all
+   produced indistinguishable payloads. The SDK's own `agent_type` / `agent_id` populate only inside
+   SDK-Task subagents, so they could not carry a cognia identity.
+2. **Plugins could not contribute a lifecycle hook.** No hooks plugin API, no hook registry, and
+   `BUILTIN_HOOKS` was a hardcoded array.
+3. **Three matcher implementations disagreed.** Sidecar and Rust used an unanchored regex; the CLI
+   split on commas only and then anchored its fallback, so an author's `"^Notebook"` matched on the
+   desktop and silently matched nothing on the CLI.
+4. **The CLI never had SDK-native hooks at all.** `cli/src/runtime/protocol.ts` maps `claude_send`
+   straight to sidecar stdin, bypassing the host-side injection in `src-tauri/src/claude/commands.rs`,
+   and the CLI never injected `sendOptions.hooks` itself. Its only engine was the reduced
+   `cli/src/tui/runtime/hook-runner.ts`, wired into the TUI alone and never parsing hook stdout — so
+   the default-ON `auto-context-loader` silently did nothing there, and CLI subagents and headless
+   runs were hook-blind.
+5. **Eight handler fields were typed but unimplemented in every runner** — `args`, `if`,
+   `statusMessage`, `once`, `async`, `asyncRewake`, `shell`, `allowedEnvVars`.
+
+### Decisions
+
+- **Agent identity is a closed enum plus a free reference.** `HookAgentKind`
+  (`chat` / `teammate` / `subagent` / `goal-judge` / `plan-step` / `connector` / `scheduler` /
+  `external` / `system`) reaches hooks as `agent_kind`, with `agent_ref` carrying the specific id.
+  Closed so the `agents` selector has a domain the settings UI can enumerate and validate.
+- **`HookGroup.agents` is a second, orthogonal selector.** `matcher` narrows by tool, `agents` by
+  producer, and they are ANDed. It applies to every event, including the matcher-less ones. An
+  absent selector matches everything, so every pre-existing config is untouched; a **present**
+  selector never matches an unidentified turn, which is the fail-safe direction for a guard.
+  This is a cognia extension to a file real Claude Code also reads, where the unknown key is ignored
+  and the group therefore runs unconditionally. The settings UI states that inline.
+- **Matcher semantics canonicalize on the sidecar**, because that is the rail the built-in agent
+  runs on and what users' existing Claude Code settings were written against. `hooks/matcher-conformance.json`
+  is asserted by all three runners' suites, so a future divergence fails on the rail that drifted.
+- **The CLI injects rather than reimplements.** It resolves its merged config once
+  (`cli/src/hooks/resolve-hooks-config.ts`) and injects it into `sendOptions.hooks`, so a CLI turn
+  runs the real SDK-native engine — including subagents and headless runs. `hook-runner.ts` stands
+  down whenever there is a group to inject, derived from the same read so the two cannot disagree.
+- **Plugins contribute through a `{ type: "plugin", pluginId, hookId }` handler.**
+  `host_rpc` is NOT the transport: `answer_host_rpc` is deliberately terminal, answered in Rust and
+  never forwarded to the renderer, dispatching only `jobs.*` and the agent-session-store methods.
+  That is also why the plugin `onPreCompact` hook had been dead since it was written — it called a
+  `preCompact` method that was never registered. The bridge instead mirrors the `plugin_tool_exec`
+  round-trip: the sidecar emits `plugin_hook_exec`, Rust's default branch forwards it on
+  `SIDECAR_EVENT`, the renderer answers, and `claude_plugin_hook_response` writes back to stdin.
+  `onPreCompact` now rides the same channel and works.
+- **Two independent gates on that handler.** Writing it into `settings.json` is the user's
+  authorization; the plugin's declared `hooks:chat-intercept` capability is the plugin's — required
+  only when bound to an event whose decision can deny a turn (`PreToolUse`, `UserPromptSubmit`).
+  Everything else fails OPEN: absent plugin, disabled plugin, missing hook, refused permission,
+  timeout and throw all resolve to a warning, never a block.
+- **One plugin hook registry.** `lib/plugin/registries/hook-registry.ts` replaces the class-private
+  Map plus Zustand pair, which were written together but read apart with two different liveness
+  rules — so a disabled plugin kept receiving half its hooks. Enablement is read from the plugin
+  store rather than mirrored, because a cached copy is how the two drifted.
+- **Fire-point coverage is finished where it was a genuine omission, and labelled where it is not.**
+  `lib/agent/plan/turn-driver.ts` gained the firer seam its sibling goal driver already had (a
+  blocking hook PAUSES the plan rather than failing it); teammate dispatch and cognia-dispatched
+  subagents now carry identity, and the latter synthesize `SubagentStart`/`SubagentStop` the SDK
+  only emits for its own Task subagents. Desktop-pet proactive messages, Attention Radar and the
+  text-only `runCompletionRail` fallback are NOT covered — they use a renderer-side `LlmClient` and
+  would need a fourth rail — and the Hooks settings panel says so.
+- **The capability tables tell the truth.** `prompt` / `agent` / `mcp_tool` ARE executable on the
+  sidecar (`hook-native-executor.mjs`, cost-governed, recursion depth 1) and were reported as
+  unsupported long after that shipped; the CLI's own runner really is command-only.
+- **The eight unimplemented handler fields are labelled, not implemented** — typed as dormant,
+  surfaced in the handler form when a config actually carries one, and pinned by a test that greps
+  the runners so a future implementation forces the list to change.
+- **`hook_audit` lands in traces.** The sidecar had emitted an audit per matched handler all along
+  and the adapter dropped it, so "why didn't my hook fire?" had no answer anywhere. It now emits a
+  span on the existing `/logs` → Traces surface. This matters more now that a group can miss for two
+  different reasons.
+- **The two `BUILTIN_HOOKS` registries are pinned together.** `hooks/builtin-hooks.lockstep.json` is
+  asserted by both the TS and Rust suites; because `builtinHookOverrides` is keyed by id, a drifted
+  id also orphaned a user's enable/disable choice on one shell.
+
 ## Primary sources
 
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)

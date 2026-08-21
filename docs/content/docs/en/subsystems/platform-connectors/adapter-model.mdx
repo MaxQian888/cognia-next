@@ -244,9 +244,46 @@ native factory remain `planned`. The Discover page consumes this registry; it ne
 stores credentials in the keyring. `OAuthHandler` (`lib/connectors/oauth-registry.ts:22`) is
 `(code, state) => Promise<void>`, and `oauthRegistry` (`:27`) is a `Map`. Only two platforms register —
 **Slack** (`:36`) and **Lark** (`:55`), each behind a dynamic import of its handler module. Telegram,
-Discord, and OneBot use no OAuth. The `ConnectorDeepLinkRouter` calls the registered handler after
-validating the OAuth `state` parameter, shaped `<platform>:<adapterId>:<nonce>`, from which the handler
-decodes the `adapterId`.
+Discord, and OneBot use no OAuth.
+
+### The flow runs in the brain, on both hosts
+
+Each OAuth platform ships the same three-part shape, and the split is what makes a self-hosted install
+work at all:
+
+| Part | Slack | Lark |
+| --- | --- | --- |
+| Authorize (mint + persist state) | `adapters/slack/oauth-begin.ts` | `adapters/lark/oauth-begin.ts` |
+| Durable pending record | `adapters/slack/oauth-pending.ts` | `adapters/lark/oauth-pending.ts` |
+| Complete (validate + exchange) | `adapters/slack/oauth-handler.ts` | `adapters/lark/oauth-handler.ts` |
+
+The pending record lives in the connectors secret store, **not** in `sessionStorage`. A headless brain's
+Web Storage is an in-memory shim and the browser that opened the settings dialog is a different process,
+so a state written there was never visible to the process that had to spend it. The renderer's
+`CONNECTOR_OAUTH_STATE_KEY` copy is a desktop-only pre-check; the durable record is the authoritative
+CSRF check and is spent on use, before the exchange, so a replayed redirect cannot ride it.
+
+`beginXOAuth` returns a URL rather than opening one — only the caller knows whether a browser is reachable
+from where it runs. The settings dialog opens it in-process on the desktop; a headless deployment drives
+the same function through the `oauth-begin` operator intent
+(`lib/connectors/principal/admin-intent.ts`), which dispatches on the adapter row's own `type`.
+
+### The relay
+
+Neither Slack's nor Feishu's console will register a custom scheme, so the redirect target is an https
+route on the connectors ingress, which then fans out to both hosts:
+
+| Route | Path | Brain topic | Desktop bounce |
+| --- | --- | --- | --- |
+| `oauth_lark_callback` | `/oauth/lark/callback` | `connectors://lark-oauth/callback` | `cognia://connector/oauth/lark` |
+| `oauth_connector_callback` | `/oauth/connector/{kind}/callback` | `connectors://connector-oauth/callback` (carries `kind`) | `cognia://connector/oauth/{kind}` |
+
+Both live in `crates/cognia-connectors/src/axum_app.rs`. The generic route is the one every new platform
+uses — `connectorOAuthRelayPath(kind)` (`lib/connectors/server-transport.ts`) derives the path, and Lark
+keeps its own only because that exact URL is already registered byte-for-byte in existing Feishu consoles.
+On the brain side one subscription serves every platform: the payload names the `kind` and the handler
+comes out of `oauthRegistry`, so registering a handler is all a new platform needs to be authorizable
+headless.
 
 ## Shared: MentionAccumulator
 

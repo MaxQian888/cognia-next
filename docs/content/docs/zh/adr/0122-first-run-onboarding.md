@@ -41,6 +41,38 @@ welcome  →  scan  →  [provider]  →  first-run
 
 四种语境被 `lib/onboarding/shell.ts` 归结为一个 `OnboardingShell` 值。真正重要的区分不是「桌面还是手机」，而是**算力在哪**：配对的手机没有本地 runtime 可扫，所以它是独立的一种语境，而不是笼统的「移动端」。
 
+### 外框与版式
+
+引导流程独占整个窗口。`isOnboardingRoute`（`lib/onboarding/route.ts`）让
+`DesktopAppShell` 在 `/onboarding` 上直接透传 children，于是标题栏、GuildRail、
+状态栏、终端坞、扩展宿主栏以及残留的 finish-setup 提示条在整个安装期间都不出现；
+移动端 wrapper 本来就隐藏了标签栏，并给这条路由一个确定高度的 `h-[100dvh]` 列。
+把安装流程画在工作区外框里，等于在推销一个用户还没装完的应用——而 finish-setup
+条的职责恰恰是把人送回这里，它却挂在自己指向的那一页上。
+
+它**没有**放进 `lib/shell/bypass-routes`。那份名单的含义更窄：任务途中的深链
+（`/pair`、`/oauth`、`/share-target`）和 Tauri 的小型无边框窗口，它们独占视口并
+保留文档滚动。接管是一根整高的 flex 列，压制同样的 chrome 但理由不同，归属方也
+不同。
+
+压制标题栏会一并拿掉无边框窗口的拖拽区，以及 Windows/Linux 上唯一的关闭按钮——
+所以 `OnboardingWindowBar` 自己画一条：返回、字标、铺满空隙的
+`data-tauri-drag-region`，尾端是 `WindowControls`
+（`components/desktop/window-controls.tsx`）。`useWindowChromeMode()` 是这类整窗
+表面读取的三值规则——Web 壳里是 `none`，macOS 上是 `traffic-lights`（不画按钮，
+但必须在前缘留出 80px，否则内容会压在原生红绿灯下面），Tauri 其余平台是
+`buttons`。
+
+内部只有一套几何：齐边整高、尾边一条发丝线并带连接线的步骤栏，可滚动的正文，
+以及齐边的操作行。圆角属于内容而不属于窗口——每一块带框区域统一
+`rounded-xl`（与 `components/ui/card.tsx` 同值），按钮沿用自身的 `rounded-md`。
+第一版在带内边距的槽里浮着一张 `rounded-2xl` 的侧栏卡片，旁边却是齐边直角的内容，
+还给它硬写了 `dark`，于是同一屏在"页面"和"对话框"之间自相矛盾，浅色主题用户拿到
+的是一块黑板。
+
+返回按钮只有一个，放在窗口条里，因为只有那一行在所有宽度下都存在；侧栏在 `md`
+以下会隐藏，把返回放在那里就得在窄屏进度条里再放一份。
+
 ### 扫描步
 
 原样复用 `probeVendors()`，而不是另造一个探测器——「这台机器上装没装 claude-code」在本仓库里已经有一个诚实的答案，有两个就一定会漂移。配置文件存在的 vendor 被报告为已登录，因为这些 CLI 把写配置作为登录的一部分。这是证据而非证明（吊销的 token 会留下文件），所以它所抑制掉的 provider 步，仍然可以从残留提示条回到。
@@ -48,6 +80,65 @@ welcome  →  scan  →  [provider]  →  first-run
 迁移**内嵌执行**，直接调用 `buildMigrationPreview` → `applyMigration`。把用户中途弹去设置页，会让返回路径变得不确定。
 
 阶段判定用两个计时器，不是一个。Multica 最初只用了一个并且不得不修（代码里标了 MUL-5119）：daemon 还在探测时页面已经翻到「没找到 runtime」，用户就跳过了一个再等一秒就会成功的步骤。Cognia 的探测链路**更长**——文件系统探测、可执行文件解析、版本查询——所以同样的假阴性只会更容易发生。软超时给出 5 秒的常规预算，但在确实有工作在飞行中时被抑制；硬超时 20 秒为这种抑制封顶，让卡死的探测仍能收敛。
+
+### 如何算「能连上模型」
+
+有三处地方可以证明设备具备模型访问能力，且互不覆盖，所以 `hasModelAccess` 接收三
+个输入而不是自己去读 settings：聊天链路自己的探测（`useCredentialStatus` —— 钥匙串
+密钥、OAuth bearer，或 standalone 下解析成功的 BYOK provider）、由 settings 解析出
+的 AI-SDK provider（`resolveStandaloneProvider`，这条是只认 Anthropic 的 Tauri 探测
+看不见的），以及旧的 `settings.apiKey` 槽位。扫描发现的、已完成认证的
+`claude-code` 算第四种。
+
+它此前把 `Boolean(settings.defaultProvider)` 当作「有订阅」。那个字段是**当前默认
+provider id**（`"openai"`、`"anthropic"` …），既不代表有凭据，登录链路上也没有任何
+代码写它 —— 于是刚连上 Claude Pro 的用户被判定为没有模型，而只是在设置里选过
+provider 的用户被判定为有。
+
+这个结论会被**锁存**在第一次探测落定时，理由和门控判定被锁存的理由一致：
+`resolveStepSequence` 在它为真时丢掉登录步，而 `nextStep` 在当前所处步骤已不在序列
+中时返回**第一步**。实时结论恰好会在用户完成登录的那一刻翻转 —— 于是序列在用户脚
+下改变，下一次 Continue 把人送回流程开头。
+
+### 登录步给什么，连接又写了什么
+
+**给什么取决于当前壳用得上什么。** 订阅账号存在系统钥匙串里、经由
+`resolveAccountEnv` 解析，而它在 standalone 模式（没有 Companion 目标的浏览器，或
+处于 BYOK 模式的手机）下直接返回空。那里的聊天走 `resolveStandaloneProvider`，只读
+`providerSettings`。在这些壳上摆三个订阅登录入口，意味着整个浏览器引导（welcome →
+provider → first run）可以全程走完却产不出一条可用凭据 —— 因此 standalone 壳只给
+BYOK 卡片，并配自己的标题。
+
+**连接会写三个指针**，因为有三个消费方各读一处：vault 的 active 指针
+（`setActiveAccount`）、ADR-0028 的作用域默认账号（`setProviderDefaultAccount`），
+以及 `defaultProvider`。缺了最后一个，`build-options` 会回退到字面量
+`"anthropic"` —— 连了 ChatGPT 的用户，第一次运行被打到 Anthropic。
+`setDefaultProvider` 同时重新对齐 `defaultModel`，保持二者成对一致。
+
+**密钥面板给的是整个内置目录**，而不是一个 Anthropic 输入框。三张订阅卡覆盖
+Anthropic、ChatGPT 和 OpenCode；其余所有人 —— OpenAI、Google、自建的 Ollama、
+DeepSeek，以及 Kimi、GLM 这类 Anthropic 兼容端点 —— 此前在首次运行里根本没有入
+口，只能自己去找 设置 → Providers。面板改用一个可搜索的 combobox 覆盖 `PROVIDERS`
+（77 项，按 flagship → 本机 → 长尾分组），搜索是让这个长度可用的关键；表单本身按
+`getProviderRequirements` 自适应：只有需要凭据时才出现密钥字段，只有需要时才出现
+base URL，本机服务则预填其众所周知的端口。草稿由 `getBuiltInProviderReadiness` 校
+验 —— 与设置页同一套规则，因此这一步不会对「什么算配置完整」产生第二种意见。
+
+既不需要密钥、也不需要 base URL 的 provider，恰恰是这个面板没有字段可填的那种
+（Amazon Bedrock 要的是区域和一对访问密钥）。它们会明说并禁用保存，而不是在一张空
+表单上「保存成功」。这个判断由 requirements 推导得出，不是硬编码 id 名单，所以之后
+新增的 provider 会自行归类。
+
+**粘贴的密钥写入 `providerSettings.anthropic`**（并置 `enabled`），同时照写旧的
+`settings.apiKey`，让启动时推入 Rust `ApiKeyState` 的那条路径保持同步。只写旧槽位
+会让浏览器用户手里那把密钥在自己的壳里无人读取。
+
+**Anthropic 对话框保留它自己的默认模式。** 此前这一步强行传
+`initialMode="subscription"`，覆盖了 `discovered ? "reuse"` —— 把一台已经有 Claude
+Code 登录的机器（正是扫描步刚刚庆祝过的那台）推去走完整的浏览器 PKCE。
+
+连接成功后原地展示连上的是什么（账号、套餐），由用户从操作行继续，而不是在用户还
+没看清时就把页面翻过去。
 
 ### 终点步
 

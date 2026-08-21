@@ -99,12 +99,14 @@ flowchart TB
 span 的 `events[]` 会投影到同一坐标轴上成为刻点，嵌套深度决定色块明度，零耗时 span 也保有可点击的
 最小宽度。
 
-同一个时间窗口控件（`今天 / 7 天 / 30 天 / 全部`，`lib/observability/trace-window.ts`）同时驱动
-列表和 `AgentTraceStatsBar`，因此头部数字与下方行永远描述同一批数据。筛选作用于整个窗口而非当前
-页，这也是列表读取窗口而不是用 `queryRecentTraces` 分页的原因。
+同一个 Grafana 式时间范围控件（`5m…30d` 加上可固定的自定义区间，`lib/observability/time-range.ts`）
+同时驱动列表、瀑布图，以及该频道另一个子视图里的[追踪仪表盘](./tracing-dashboard)，因此头部数字与
+下方行永远描述同一批数据——它们都是同一次 `useObservabilityData` 读取的折叠结果。筛选作用于整个窗口
+而非当前页，这也是列表读取窗口而不是用 `queryRecentTraces` 分页的原因。
 
 span 详情的**在日志中查看这条追踪**会切到日志通道并写入 `?trace=<id>`，同时重挂面板，让它的挂载期
-URL 水合读到这个焦点。`/observability` 依旧是同一批 span 的聚合视图；两者互相跳转。
+URL 水合读到这个焦点。同一批 span 的聚合视图就在同一频道里一键之遥：「仪表盘」子视图
+（`?channel=traces&view=dashboard`），也就是过去那个独立的 `/observability` 路由。
 
 ## 多源归并
 

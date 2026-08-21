@@ -71,3 +71,133 @@ The workflow editor's palette keeps ⌘K, but no longer on a raw listener. It re
 - Every entity family is one provider file away from the palette; the mobile palette gains 14 groups it never had, the desktop one gains workflows, skills, memories, templates, scheduled tasks, plugins, MCP servers, inbox conversations and settings controls.
 - Removed: `components/inbox/inbox-command-palette.tsx`, `components/settings/finder/settings-finder.tsx`, the desktop palette's 500-line body, the mobile palette's copy of it, and the `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` message trees plus the finder's own chrome strings (replaced by `globalSearch.*`; `settings.finder.controls.*` stays as the control labels).
 - Follow-ups: a `*grams` session prefilter if the resident corpus cap is reached (ADR-0099 phase B); persist "recently opened" server-side for the companion profile.
+
+## Amendment (2026-08-21) — the conversation list is a search surface too
+
+The sidebar conversation list was audited against this ADR's own premise — that
+finding a conversation should not depend on where you happen to be standing —
+and eight ways it broke that premise were fixed. The list is now the second
+search surface governed here; the ranker is literally the same function.
+
+### 6. Views replace filter presets
+
+`ConversationSidebarSettings.filterPresets` could only save the quick filters,
+so the views people wanted — "unread first", "everything I made this week",
+"search my whole account" — were unrepresentable: each needs a sort, a grouping
+or a search reach as well. A **view** (`lib/chat/conversation-views.ts`,
+`ConversationView`) pins any of four dimensions: `filters`, `sortBy`, `groupBy`,
+`search`.
+
+It is a **partial overlay, not a snapshot**: an absent dimension means "leave the
+current value alone". That is what makes every stored preset a valid view with
+no migration (a preset is a view that pins only its filters), and what stops
+"unread first" from silently discarding the grouping the user had chosen.
+
+Storage is split along the axis it already was: definitions live in the settings
+blob so they follow the profile, while **which view is active**
+(`activeConversationViewId`) is UI-store layout state, so a phone and a desktop
+can sit in different views. Applying a view therefore writes to both, which is
+why that write lives in `useConversationFilterController` rather than in each
+surface.
+
+The chip says `name · modified` once any pinned dimension drifts
+(`conversationViewDrift`), and offers *reset to view* / *update this view*.
+Inferring the active view by comparing filters — the old behaviour — lost the
+view the instant anything was nudged, which is also why "update this view" could
+not be offered: nothing knew which view was meant.
+
+Three built-ins ship as code, not data (**Unread**, **Recently created**,
+**Search everything**): they are the discovery path for vocabulary nobody goes
+looking for in a menu. They are hidden rather than deleted, and a stored row
+claiming a built-in id is ignored so the built-in stays reachable.
+
+### 7. Search reach: one control, three axes
+
+Whether the sidebar could find a conversation used to depend on three unrelated
+things — archived rows only by switching the whole list to the archived view,
+another workspace's rows only when the *grouping* happened to be `"workspace"`,
+and message content from a settings toggle. `ConversationSearchOptions`
+(`lib/chat/conversation-search-scope.ts`) owns all three, a view can carry them,
+and `ConversationSearchScopeControl` sits beside the field it governs.
+
+- `needsCrossWorkspaceSessions(groupBy, search)` decides the `useSessions`
+  subscription, so "can I find this chat?" no longer depends on how the list is
+  grouped.
+- `includeArchived` applies **only while a query is present**. Browsing archived
+  conversations stays the view toggle's job, so the two controls never describe
+  the same thing.
+- The legacy `searchScope` enum folds into `content` through the resolver; the
+  object wins in both directions so a downgrade round-trip cannot resurrect a
+  setting the user has since changed.
+
+### 8. The same ranker, and the same honesty about async
+
+`buildConversationSections` takes an injected `scoreTitle`
+(`ConversationTitleScorer`) and `hooks/chat/use-conversation-list-model.ts`
+supplies `scoreTitleMatch` — so "dply" finds "deploy" in the sidebar, and the
+same query orders its hits the same way in both surfaces. Injection rather than
+import: `lib/global-search/scoring.ts` already imports the model's
+`titleMatchRank`, and the reverse edge would close a cycle.
+
+Content hits resolve a beat after title hits. Neither surface may claim "no
+results for X" while `contentSearch.loading` — it reads as a miss and then
+contradicts itself — and a one-character query now says so rather than silently
+degrading to title-only (the message index needs `CONTENT_SEARCH_MIN_QUERY`).
+
+### 9. Dates follow the sort axis
+
+Buckets used to come from `lastMessageAt` whatever the sort was, so "by date
+created" produced a list bucketed by last activity, and `oldest` ran the rows
+backwards under forward headers. `resolveConversationTimeBasis(sortBy)` now
+decides the timestamp for the buckets, the headers and the activity filter
+alike; `oldest` reverses the bucket order; and `title` / `unread` — which have
+no date axis at all — render one flat section rather than headers that do not
+explain the list. (Alphabetical headers are not an option: `localeCompare`
+orders zh-CN titles, but no single leading character names the group without a
+pinyin table.)
+
+### 10. Team is a real grouping axis
+
+`groupBy: "team"` used to emit plain date buckets and rely on the desktop guild
+rail having filtered the list — which left the mobile list, with no rail, showing
+"grouped by team" over a list that was not. `ConversationGroupAxis` gains
+`"team"`; the rail becomes a way to *jump* to a team's section, and narrowing to
+one team is the existing `teamIds` facet's job.
+
+### 11. Holding the list still while it is read
+
+The list is a live query ordered by activity, so a background conversation slides
+rows under the cursor — and under date bucketing, out of the section entirely.
+`lib/chat/conversation-order-freeze.ts` + `hooks/chat/use-conversation-order-freeze.ts`
+hold the *order* (and section membership) while the pointer is over the list or
+it is scrolled, releasing on the conjunction. Additions and removals are never
+held: freezing insertions would fight the new-conversation reveal, and holding a
+deleted row would leave one that opens nothing. A pill reports how many rows are
+waiting and applies them at once.
+
+`@tanstack/react-virtual` windows only long **flat, un-draggable** sections
+(search results, `title` / `unread` sorts, past 200 rows) — the only place with
+no sticky group header to pin and no sortable context whose items must stay in
+the DOM.
+
+### 12. Smaller corrections
+
+- `modelFolders` was doing two jobs: hiding folder *grouping* in the archived
+  view and starving the folder *facet* of its options, so an archived-view chip
+  rendered a raw folder id. Split.
+- `visibleCount` (rows on screen) now feeds the "showing N of M" chip, while
+  `filteredCount` keeps its meaning for the empty state — collapsing every group
+  is not "your filters matched nothing".
+- Settings → Conversation loses `sortBy` / `groupBy` / `searchScope`. That card
+  decides how a row *looks*; a settings page is the wrong place to answer "where
+  did my conversation go", and a view can carry these where a settings page
+  cannot.
+- `mobile.home.ungroupedWorkspace` / `ungroupedAgent` never existed in either
+  locale, so the mobile ungrouped header rendered its own key. Added, along with
+  `ungroupedTeam`.
+
+**Scope added:** `lib/chat/{conversation-views,conversation-search-scope,conversation-order-freeze,conversation-group-axis}.ts`,
+`lib/chat/conversation-{list-model,filters}.ts`, `hooks/chat/{use-conversation-list-model,use-conversation-filter-controller,use-conversation-order-freeze}.ts`,
+`components/chat/conversation-filter-controls.tsx`, `components/desktop/{channel-list,session-row}.tsx`,
+`components/mobile/shell/mobile-channel-list.tsx`, `components/settings/conversation/conversation-sidebar-card.tsx`,
+`stores/ui/ui-store.ts`, `packages/agent-config-types/src/index.ts`.

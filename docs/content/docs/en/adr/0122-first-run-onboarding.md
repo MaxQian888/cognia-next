@@ -71,6 +71,45 @@ The four contexts are one `OnboardingShell` value resolved by
 but **where the compute lives**: a paired phone has no local runtime to scan
 for, which is why it is a separate shell rather than one "mobile".
 
+### Chrome and layout
+
+The flow owns the whole window. `isOnboardingRoute` (`lib/onboarding/route.ts`)
+makes `DesktopAppShell` render bare children on `/onboarding`, so the title bar,
+guild rail, status bar, terminal dock, extension host bar and the residual
+finish-setup notice are all absent for the length of setup; the mobile wrapper
+already hid its tab bar and hands the route a definite `h-[100dvh]` column.
+Setup rendered inside the workspace frame was advertising an app the user has
+not finished setting up — and the finish-setup bar, whose whole job is to send
+someone back here, was mounting on the page it points at.
+
+It is deliberately **not** in `lib/shell/bypass-routes`. That list means
+something narrower: mid-task deep links (`/pair`, `/oauth`, `/share-target`) and
+the small frameless Tauri windows, which own the viewport and keep the document
+scroll. The takeover is a full-height flex column that suppresses the same
+chrome for a different reason, and it answers to the flow rather than to the
+shell.
+
+Suppressing the title bar removes the frameless window's drag region and, on
+Windows and Linux, its only close button — so `OnboardingWindowBar` draws its
+own: Back, the wordmark, `data-tauri-drag-region` across the slack, and
+`WindowControls` (`components/desktop/window-controls.tsx`) at the trailing
+edge. `useWindowChromeMode()` is the three-valued rule that surface reads —
+`none` in the web shell, `traffic-lights` on macOS (draw nothing, reserve 80px
+on the leading edge or the content lands under the native buttons),
+`buttons` everywhere else under Tauri.
+
+Inside, one geometry: a flush full-height rail with a hairline trailing edge and
+a connected stepper, a scrolling body, and a flush action row. Radii belong to
+the content, not the window — `rounded-xl` for every framed block (the same
+value `components/ui/card.tsx` uses) and the buttons' own `rounded-md`. The
+first version floated a `rounded-2xl` rail card in a padded gutter beside flush,
+square content and hard-coded `dark` on it, so the same screen was arguing about
+whether it was a page or a dialog, and a light-theme user got a black slab.
+
+Back exists once, in the window bar, because that row exists at every width; the
+rail is hidden below `md`, so hosting it there had required a second copy in the
+narrow progress bar.
+
 ### The scan step
 
 Reuses `probeVendors()` verbatim rather than adding a second detector — that
@@ -91,6 +130,78 @@ succeeded a second later. Cognia's probe chain is *longer* — filesystem probe,
 executable resolution, version queries — so the same false negative is more
 likely, not less. A soft 5s budget is suppressed while work is genuinely in
 flight; a hard 20s ceiling bounds that suppression so a hung probe still resolves.
+
+### Reaching a model
+
+Three things can give a device model access, and no two of them live in the
+same place, so `hasModelAccess` takes all three rather than reading settings
+itself: the chat path's own probe (`useCredentialStatus` — a keyring key, an
+OAuth bearer, or a resolved BYOK provider), a settings-resolved AI-SDK provider
+(`resolveStandaloneProvider`, which the Anthropic-only Tauri probe cannot see),
+and the legacy `settings.apiKey` slot. An already-authenticated `claude-code`
+the scan found counts as a fourth.
+
+It previously read `Boolean(settings.defaultProvider)` as "has a subscription".
+That field is the *active default provider id* (`"openai"`, `"anthropic"`, …),
+not evidence of a credential, and nothing in the sign-in path writes it — so
+the flow believed a user who had just connected Claude Pro had no model, and
+believed a user who had merely picked a provider in Settings did.
+
+The verdict is **latched** at the first settled probe, for the reason the gate
+verdict is: `resolveStepSequence` drops the sign-in step when it is true, and
+`nextStep` returns the *first* step when the step you are standing on is no
+longer in the sequence. A live verdict flips exactly when the user signs in —
+so it would re-sequence underneath them and send the next Continue back to the
+start of the flow.
+
+### What the sign-in step offers, and what connecting writes
+
+**The offer depends on what the shell can use.** Subscription accounts live in
+the OS keyring and resolve through `resolveAccountEnv`, which returns nothing
+in standalone mode — a browser with no Companion target, or a phone in BYOK
+mode. Chat there goes through `resolveStandaloneProvider`, which reads
+`providerSettings` only. Offering three subscription sign-ins on those shells
+meant the entire browser onboarding (welcome → provider → first run) could
+complete without producing one usable credential, so standalone shells get the
+BYOK card alone, under their own heading.
+
+**Connecting writes three pointers**, because three consumers read three
+places: the vault's active pointer (`setActiveAccount`), the ADR-0028 scoped
+default (`setProviderDefaultAccount`), and `defaultProvider`. Without that last
+one `build-options` falls through to its literal `"anthropic"`, so a user who
+connected ChatGPT had their first run dispatched to Anthropic.
+`setDefaultProvider` also re-syncs `defaultModel`, keeping the pair coherent.
+
+**The key panel offers the whole built-in catalog**, not an Anthropic field.
+Three subscription cards cover Anthropic, ChatGPT and OpenCode; everyone else —
+OpenAI, Google, a self-hosted Ollama, DeepSeek, an Anthropic-compatible
+endpoint like Kimi or GLM — previously had no first-run path and had to find
+Settings → Providers unaided. A searchable combobox over `PROVIDERS` (77
+entries, grouped flagship → local → the long tails) is what makes that length
+usable, and the form adapts to `getProviderRequirements`: a key field only
+where a credential is required, a base URL only where one is needed, prefilled
+with the well-known port for a local server. Drafts are validated with
+`getBuiltInProviderReadiness` — the same rules Settings validates against, so
+this step cannot form a second opinion about what "configured" means.
+
+A provider that needs *neither* a key nor a base URL is one this panel has no
+fields for (Amazon Bedrock wants a region and an access key pair). Those say so
+and disable Save rather than "succeeding" on an empty form. The test is derived
+from the requirements, not a hard-coded id list, so a provider added later
+classifies itself.
+
+**A pasted key goes to `providerSettings.anthropic`** (plus `enabled`), with
+the legacy `settings.apiKey` written alongside so the boot-time push into the
+Rust `ApiKeyState` stays in step. Writing only the legacy slot left a browser
+user holding a key that nothing in their shell reads.
+
+**The Anthropic dialog keeps its own default.** The step used to force
+`initialMode="subscription"`, overriding `discovered ? "reuse"` — pushing a
+machine that already has a Claude Code login, the exact machine the scan step
+celebrates, through a full browser PKCE round-trip.
+
+Connecting shows what it connected (account, tier) and lets the user continue
+from the action row, rather than advancing out from under them.
 
 ### The terminal step
 

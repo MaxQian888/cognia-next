@@ -1,6 +1,6 @@
 ---
 title: Tracing Dashboard
-description: The Grafana/Langfuse-style /observability dashboard — a draggable react-grid-layout panel grid over the Dexie agentTraces table. lib/observability is a real analytics engine — exact percentiles, fixed-boundary time bucketing, span→trace rollup + waterfall, group-by breakdowns, and thresholds — surfaced through a 13-panel registry and a trace waterfall drawer.
+description: The Grafana/Langfuse-style Dashboard sub-view of /logs → Traces — a draggable react-grid-layout panel grid over the Dexie agentTraces table. lib/observability is a real analytics engine — exact percentiles, fixed-boundary time bucketing, span→trace rollup + waterfall, group-by breakdowns, and thresholds — surfaced through a 16-panel registry sharing one window read with the trace explorer beside it.
 ---
 
 # Tracing Dashboard
@@ -8,23 +8,25 @@ description: The Grafana/Langfuse-style /observability dashboard — a draggable
 <Status variant="beta" />
 
 <TLDR>
-  `/observability` (`app/observability/page.tsx`) is a Grafana/Langfuse-style telemetry dashboard: a
-  draggable, resizable `react-grid-layout` panel grid reading the **Dexie `agentTraces` table** (the
-  same spans the [agent-trace](./agent-trace) pipeline persists) — so it works in the browser and on
-  mobile, unlike `/performance`. `lib/observability/` is a genuine analytics engine: exact percentiles
-  (`percentiles.ts`), fixed-boundary time bucketing with null-gapping (`aggregate-series.ts`),
-  spans→trace rollup + parent/child waterfall (`trace-rollup.ts`), group-by breakdowns
-  (`breakdown.ts`), and threshold classification (`thresholds.ts`). A single
-  `useObservabilitySeries` memo computes everything once; 13 panels (5 kinds) render from it; clicking
-  a trace opens a waterfall drawer.
+  The **Dashboard sub-view of `/logs` → Traces** (`components/observability/observability-dashboard.tsx`)
+  is a Grafana/Langfuse-style telemetry dashboard: a draggable, resizable `react-grid-layout` panel
+  grid reading the **Dexie `agentTraces` table** (the same spans the [agent-trace](./agent-trace)
+  pipeline persists) — so it works in the browser and on mobile, unlike `/performance`. It used to be
+  its own `/observability` route with its own range control, its own filters and its own window read;
+  it is now a pane the channel feeds, sharing one read with the Explore sub-view beside it, so the
+  KPI numbers and the trace list cannot disagree. `lib/observability/` is a genuine analytics engine:
+  exact percentiles (`percentiles.ts`), fixed-boundary time bucketing with null-gapping
+  (`aggregate-series.ts`), spans→trace rollup + parent/child waterfall (`trace-rollup.ts`), group-by
+  breakdowns (`breakdown.ts`), and threshold classification (`thresholds.ts`). A single
+  `useObservabilitySeries` memo computes everything once; 16 panels (4 kinds) render from it.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Data source" value="Dexie agentTraces" hint="NOT fixtures — queryByWindow (use-observability-data.ts:35)" />
-  <Stat label="Panels" value="13" hint="panel-registry.ts:39" />
-  <Stat label="Panel kinds" value="5" hint="stat · timeseries · donut · bar · traces" />
+  <Stat label="Data source" value="Dexie agentTraces" hint="NOT fixtures — queryByWindow (use-observability-data.ts)" />
+  <Stat label="Panels" value="16" hint="panel-registry.ts" />
+  <Stat label="Panel kinds" value="4" hint="stat · timeseries · donut · bar" />
   <Stat label="Time presets" value="7" hint="5m · 15m · 1h · 6h · 24h · 7d · 30d" />
-  <Stat label="Breakdown dims" value="5" hint="model · surface · operation · tool · session" />
+  <Stat label="Breakdown dims" value="7" hint="model · surface · operation · tool · provider · project · session" />
   <Stat label="Grid engine" value="react-grid-layout v2" hint="hooks-based, React-19 safe" />
 </StatGrid>
 
@@ -33,13 +35,14 @@ description: The Grafana/Langfuse-style /observability dashboard — a draggable
 The dashboard reads the Dexie `agentTraces` table — **not** fixtures (those exist only for tests). The
 proof chain:
 
-```ts title="hooks/observability/use-observability-data.ts:35"
-const spans = useClientLiveQuery(
-  () => queryByWindow({ since: range.since, until: range.until }),
-  [range.since, range.until, tick],
+```ts title="hooks/observability/use-observability-data.ts"
+const windowSpans = useClientLiveQuery(
+  () => queryByWindow({ since: range.since, until: range.until, limit: SPAN_READ_CAP }),
+  [range.since, range.until, tick, limit],
   EMPTY,
 )
-// queryByWindow → getDb().agentTraces.toArray() filtered to the window (lib/db/agent-traces.ts:53)
+// queryByWindow → the v150 global startTime index, newest-N capped; countByWindow supplies the
+// denominator so a capped read can say so instead of showing a partial answer silently.
 ```
 
 So the flow is: spans emitted by the [logging pipeline](./logging-pipeline) → persisted by the
@@ -55,14 +58,14 @@ flowchart TB
   Series --> Grid["PanelGrid (react-grid-layout)"]
   Grid --> P1["stat panels (KPIs)"]
   Grid --> P2["timeseries (cost/rate/errors/latency/tokens)"]
-  Grid --> P3["donut (by model)"]
-  Grid --> P4["bar (by surface)"]
-  Grid --> P5["recent traces table"]
-  P5 -->|"onSelectTrace"| Drawer["TraceWaterfallDrawer<br/>useTraceDetail → buildWaterfall"]
-  Dexie -.->|"queryByTrace"| Drawer
+  Grid --> P3["donut (model · provider · operation)"]
+  Grid --> P4["bar (surface · project · tool)"]
+  Data --> List["useTraceList<br/>same spans → trace rows"]
+  List --> Explore["Explore sub-view<br/>list → timeline + waterfall → span"]
+  Dexie -.->|"queryByTrace"| Explore
 
   classDef box fill:#1e293b,stroke:#475569,color:#e2e8f0
-  class Dexie,Data,Series,Grid,P1,P2,P3,P4,P5,Drawer box
+  class Dexie,Data,Series,Grid,P1,P2,P3,P4,List,Explore box
 ```
 
 ## The Analytics Engine
@@ -103,13 +106,13 @@ const [p50, p95, p99] = percentilesOf(durations, [0.5, 0.95, 0.99])
 ```
 
 `windowKpis(spans, range)` rolls the whole window into `{ totalCost, totalSpans, errorRate,
-cacheHitRate, p95LatencyMs, reqPerMin }`.
+cacheHitRate, p95LatencyMs, reqPerMin, toolCalls, toolFailures }`.
 
 ### Trace Rollup & Waterfall
 
 `trace-rollup.ts` has two outputs. `rollupTraces` produces one `TraceRollupRow` per `traceId` for the
-recent-traces table (root = earliest-start span, duration = `maxEnd - minStart`). `buildWaterfall`
-builds the parent/child tree with offset/width geometry for the drawer, guarding against
+Explore list (root = earliest-start span, duration = `maxEnd - minStart`). `buildWaterfall`
+builds the parent/child tree with offset/width geometry for the waterfall pane, guarding against
 missing/self/cyclic parents (orphans become roots, a `visited` set breaks cycles):
 
 ```ts title="lib/observability/trace-rollup.ts:142"
@@ -121,9 +124,9 @@ widthMs: Math.max(0, span.durationMs ?? (span.endTime ?? span.startTime) - span.
 
 ### Breakdowns & Thresholds
 
-`breakdown.ts` groups spans by one of five dimensions (`model | surface | operation | tool | session`)
-into `BreakdownRow`s (span count, cost, tokens, errors, avg latency). `distinctValues` powers the
-filter-bar options.
+`breakdown.ts` groups spans by one of seven dimensions (`model | surface | operation | tool |
+provider | project | session`) into `BreakdownRow`s (span count, cost, tokens, errors, avg latency).
+`distinctValues` powers the filter-bar options.
 
 `thresholds.ts` classifies a metric value into `ok | warn | crit` and maps it to a theme colour. The
 defaults:
@@ -144,10 +147,12 @@ over the already-windowed spans.
 
 ## Data Hooks
 
-- `useObservabilityData(range, filters, tick)` — the windowed `useLiveQuery` + client-side filter;
-  returns `{ spans (filtered), windowSpans (pre-filter, for option lists), loading }`.
-- `useObservabilitySeries(spans, range)` — **one** `useMemo` computing `bucketMs`, all 5 series, 4
-  breakdowns, `rollupTraces`, and `windowKpis`, so no panel re-buckets.
+- `useObservabilityData(range, filters, tick)` — the windowed (and capped) `useLiveQuery` +
+  client-side filter; returns `{ spans (filtered), windowSpans (pre-filter, for option lists),
+  loading, spanCount, windowSpanCount, truncated }`. It is the channel's only read.
+- `useObservabilitySeries(spans, range)` — **one** `useMemo` computing `bucketMs`, all 5 series, 6
+  breakdowns and `windowKpis`, so no panel re-buckets. The trace rollup is deliberately not here:
+  `useTraceList` already folds the same spans for the Explore list.
 - `useObservabilityControls()` / `useResolvedRange(tick)` — selector layer over the persisted
   `useObservabilityStore` (zustand `persist`, key `cognia-observability`; `editMode` is transient so
   the grid always reopens locked).
@@ -157,41 +162,50 @@ over the already-windowed spans.
 ## The Panel Registry
 
 `panel-registry.ts` is pure config (no JSX). A `PanelDef` carries `id`, `kind`, `titleKey`, and
-optional `statMetric` / `seriesKind` / `dimension` / `threshold`. There are **13 registered panels**
-across **5 kinds**:
+optional `statMetric` / `seriesKind` / `dimension` / `threshold`. There are **16 registered panels**
+across **4 kinds**:
 
 | Kind | Panels |
 | --- | --- |
-| `stat` | `kpi-cost` · `kpi-spans` · `kpi-errors` · `kpi-cache` · `kpi-latency` |
+| `stat` | `kpi-cost` · `kpi-spans` · `kpi-errors` · `kpi-cache` · `kpi-latency` · `kpi-rate` · `kpi-tools` · `kpi-tool-failures` |
 | `timeseries` | `ts-cost` · `ts-rate` · `ts-errors` · `ts-latency` · `ts-tokens` |
-| `donut` | `bd-model` (by model) |
-| `bar` | `bd-surface` (by surface) |
-| `traces` | `traces` (recent traces table) |
+| `donut` | `bd-model` · `bd-provider` · `bd-operation` |
+| `bar` | `bd-surface` · `bd-project` · `bd-tool` |
+
+There is deliberately no `traces` kind: the Explore sub-view beside the grid IS the trace list, over
+the same window and the same filters, and its waterfall is the drill-down the deleted
+`RecentTracesPanel` + `TraceWaterfallDrawer` pair used to provide.
 
 `defaultLayouts()` provides curated 12-column (`lg`), 8-column (`md`), and derived 2-column (`sm`)
-layouts. Note: `breakdownOperation`/`breakdownTool` are computed but no default panel uses them.
+layouts. Every breakdown `useObservabilitySeries` computes now has a panel plotting it, and every
+`StatMetric` `resolveStat` can format has a KPI tile — `panel-registry.test.ts` pins both, because
+the pairs drifted twice (`bd-provider`/`bd-project` silently plotted the model rollup, and
+`reqPerMin` was computed for nobody).
 
 ## Components
 
-`ObservabilityDashboard` wires the hooks (`controls → tick → range → data → series`) and renders the
-header (Gauge icon + title) + `ObservabilityToolbar` + `PanelGrid` + `TraceWaterfallDrawer`.
-`ObservabilityPanel` switches on `panel.kind` to dispatch to `StatPanel` / `TimeSeriesPanel` /
-`DonutPanel` / `BreakdownBarPanel` / `RecentTracesPanel`. `PanelGrid` uses **react-grid-layout v2**
+`TraceWorkspace` (`components/logging/trace-workspace.tsx`) is the composition root: it wires the
+hooks (`controls → tick → range → data → series`), renders the sub-view switch + `ObservabilityToolbar`
++ `ObservabilitySettingsSheet`, and hands the derived series to `ObservabilityDashboard`, which is now
+just the grid + the empty state. `ObservabilityPanel` switches on `panel.kind` to dispatch to
+`StatPanel` / `TimeSeriesPanel` / `DonutPanel` / `BreakdownBarPanel`. `PanelGrid` uses **react-grid-layout v2**
 (hooks-based + `ResizeObserver`, React-19 safe — no `findDOMNode`) with `COLS {lg:12, md:8, sm:2}`,
 drag gated on `editMode` via a `.panel-drag-handle`. `PanelFrame` adds the card chrome and a
 threshold status dot.
 
 The chart panels (`TimeSeriesPanel`) build a recharts config per `seriesKind` — cost as a chart-1
 area, error rate as a destructive line, latency as three p50/p95/p99 lines, tokens as four stacked
-areas — with threshold `ReferenceLine`s and colours from `useThemeColors`. `TraceWaterfallDrawer` is a
-shadcn `Sheet` rendering `flattenWaterfall` rows, each a proportional timing bar
-(`offsetPct`/`widthPct`) coloured by operation, expandable to show events/model/tokens/cost.
+areas — with threshold `ReferenceLine`s and colours from `useThemeColors`. The waterfall itself lives
+in the Explore sub-view (see [log panel UI](./log-panel)), rendering `flattenWaterfall` rows via the
+shared `WaterfallRow` — each a proportional timing bar (`offsetPct`/`widthPct`) coloured by operation,
+expandable to show events/model/tokens/cost.
 
 ## i18n
 
 The dashboard uses the `observability` namespace (`observability.panels.*`, `observability.series.*`,
 `observability.toolbar.*`, `observability.range.*`, `observability.filters.*`,
-`observability.waterfall.*`). The guild-rail nav label is `observability`.
+`observability.waterfall.*`), plus `logging.workspace.traces.subViews.*` for the switch. There is no
+guild-rail entry any more — `/logs` is the single destination.
 
 ## Interactions & Settings
 
@@ -210,9 +224,29 @@ Beyond the read-only panels, the dashboard is interactive:
   → JSON (`serializeDashboardConfig`/`parseDashboardConfig`), via the cross-platform `saveExport`.
 - **Manual refresh + last-updated** (`RefreshStatus` over `useRefreshTick`'s `{ tick, lastUpdated, refresh }`).
 - **Deep links** — the active range + filters mirror to the URL (`useObservabilityUrlSync` over
-  `lib/observability/url-state.ts`), so a `/observability?range=6h&f=…` link reproduces the view.
+  `lib/observability/url-state.ts`), so a `/logs?channel=traces&view=dashboard&range=6h&f=…` link
+  reproduces the view. The sync only rewrites the four params it owns, so the channel's own
+  `channel`/`view`/`traceId` survive it.
 - **Keyboard shortcuts** (`useObservabilityHotkeys`) — `e` edit · `r` refresh · `f` focus filters · `s` settings.
 - **Empty state** (`ObservabilityEmptyState`) when the window holds no spans.
+
+## Responsive Layout
+
+The channel measures **itself** (`useElementWidth` on the workspace root and on the toolbar's
+`flex-1` slot) rather than reading a viewport media query, because the shell rail and the channel
+list routinely make the viewport 300px wider than the pane the panels actually get — a `lg:`
+breakpoint reported "wide" while rendering three 150px columns. Three tiers, all container-relative:
+under 768px Explore is the list with the waterfall + span detail in a bottom sheet; under 1180px it
+is two columns (list │ waterfall over span detail); above that, three. The toolbar collapses under
+1120px of its own slot: the seven dimension dropdowns fold into one "Filters" trigger with a
+two-level drill-down, and the export / edit labels and the "updated Ns ago" readout give way to
+their icons — measured, that is 68px of wrapped toolbar down to a single 32px row, which holds down
+to ~600px of channel. Below 420px of slot one further step (`dense`) folds the auto-refresh cadence
+select away: it is the only control here with an identical second home (Settings → Defaults →
+refresh, the gear two buttons along), and it is what takes a 390px phone from three toolbar rows to
+two. Nothing else is ever hidden at any width. The panel grid keeps its own `react-grid-layout`
+breakpoints (`lg` 1200 / `md` 768 / `sm` 0), also container-measured; the `sm` layout pairs the KPI
+tiles two-up and gives anything with an axis the full width.
 
 ## Where to Start
 
@@ -220,7 +254,7 @@ Beyond the read-only panels, the dashboard is interactive:
 | --- | --- |
 | Add a panel | add a `PanelDef` to `PANELS` in `components/observability/panel-registry.ts` + a `defaultLayouts` slot |
 | Add a metric/series | `lib/observability/aggregate-series.ts` + `TimeSeriesPanel` config |
-| Add a breakdown dimension | `Dimension` union + `dimValue` in `lib/observability/breakdown.ts` + the filter bar |
+| Add a breakdown dimension | `Dimension` union + `dimValue` in `lib/observability/breakdown.ts` + `useObservabilitySeries` + `breakdownFor` + the filter bar + `url-state.ts` |
 | Tune default thresholds | `DEFAULT_THRESHOLDS` in `lib/observability/thresholds.ts` (users override them in the settings drawer) |
 | Change the settings drawer | `components/observability/observability-settings-sheet.tsx` + the store slices in `stores/observability/observability-store.ts` |
 | Change what deep-links carry | `lib/observability/url-state.ts` |

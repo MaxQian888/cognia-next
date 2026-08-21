@@ -64,7 +64,7 @@ flowchart TD
   E -->|yes| F["deny (chat_allowlist)"]
   E -->|no| G{"atResponseStrategy?"}
   G -->|always| ALLOW
-  G -->|"mention_only"| H{"isDm OR<br/>selfMentioned?"}
+  G -->|"mention_only"| H{"isDm OR selfMentioned<br/>OR replies to us?"}
   H -->|yes| ALLOW
   H -->|no| I["deny (at_mention_required)"]
   G -->|"direct_only"| J{"isDm?"}
@@ -76,12 +76,13 @@ flowchart TD
 - **chatId resolution** — `event.channel.platformChannelId ?? event.channel.id` (`at-gate.ts:53`), because operators paste platform-native ids verbatim into the lists.
 - **Blocklist then allowlist** — blocklist hit denies (`at-gate.ts:72`); a non-empty allowlist that omits the chat denies (`at-gate.ts:76`). An empty / undefined allowlist means "any chat is fine".
 - **at-strategy** — `AtResponseStrategy = "always" | "mention_only" | "direct_only"` (`at-gate.ts:32`). The default for fresh adapters is `DEFAULT_AT_RESPONSE_STRATEGY = "mention_only"` (`at-gate.ts:35`) — safer than `always`. DMs always bypass the mention requirement since they have no mention surface.
+- **A reply to the bot counts as addressing it** — `isReplyToSelf(event)` (`types/connectors/event.ts`) satisfies the mention requirement wherever `selfMentioned` does, in this gate and in conversation admission alike. Without it the `reply-to-bot` trigger rule below could never fire in a group: admission drops an unmentioned group message before the rule is ever evaluated. The match is strict — the parent author must equal `event.selfId`, so an unknown parent never over-matches.
 
 ```ts
 // lib/connectors/at-gate.ts:90 — mention_only branch
     case "mention_only":
       if (isDm) return { allowed: true }
-      if (event.mentions.selfMentioned) return { allowed: true }
+      if (event.mentions.selfMentioned || isReplyToSelf(event)) return { allowed: true }
       return { allowed: false, reason: "at_mention_required" }
     case "direct_only":
       if (isDm) return { allowed: true }
@@ -106,7 +107,7 @@ Rules and blockers are independent: **any rule matching** sets `matched = true` 
 | ------------------- | ------------------------------------------------------------------ | ----------------- |
 | `private-default`   | `event.channel.kind === "private"`                                 | `policy-eval.ts:37` |
 | `self-mention`      | `event.mentions.selfMentioned`                                     | `policy-eval.ts:40` |
-| `reply-to-bot`      | `event.replyTo?.messageId` is present                              | `policy-eval.ts:43` |
+| `reply-to-bot`      | `event.replyTo.parentSenderId === event.selfId` (exact)            | `policy-eval.ts:43` |
 | `slash-command`     | `plainText` (trimmed) starts with any of `prefixes`                | `policy-eval.ts:49` |
 | `keyword`           | `plainText` includes any of `words` (optional case-insensitive)    | `policy-eval.ts:54` |
 | `user-allowlist`    | `userIds` includes `event.sender.id`                               | `policy-eval.ts:62` |

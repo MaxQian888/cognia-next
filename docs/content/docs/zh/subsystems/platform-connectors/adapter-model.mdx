@@ -230,8 +230,41 @@ emit: async (event: NormalizedInboundEvent) => {
 `oauth-registry.ts` 把 `PlatformKind` 映射到那个完成 OAuth 授权码交换并将凭据写入 keyring 的异步处理器。
 `OAuthHandler`（`lib/connectors/oauth-registry.ts:22`）是 `(code, state) => Promise<void>`，`oauthRegistry`
 （`:27`）是一个 `Map`。只有两个平台注册 —— **Slack**（`:36`）与 **Lark**（`:55`），各自隐藏在其处理器模块的
-动态 import 之后。Telegram、Discord 与 OneBot 不使用 OAuth。`ConnectorDeepLinkRouter` 在校验 OAuth `state`
-参数（形如 `<platform>:<adapterId>:<nonce>`）后调用已注册的处理器，处理器从中解码出 `adapterId`。
+动态 import 之后。Telegram、Discord 与 OneBot 不使用 OAuth。
+
+### 整个流程都在 brain 里跑，两种宿主一致
+
+每个 OAuth 平台都是同样的三件套，而这个拆分正是自托管安装能跑通的原因：
+
+| 部分 | Slack | Lark |
+| --- | --- | --- |
+| 发起（铸造并持久化 state） | `adapters/slack/oauth-begin.ts` | `adapters/lark/oauth-begin.ts` |
+| 持久 pending 记录 | `adapters/slack/oauth-pending.ts` | `adapters/lark/oauth-pending.ts` |
+| 完成（校验 + 兑换） | `adapters/slack/oauth-handler.ts` | `adapters/lark/oauth-handler.ts` |
+
+pending 记录存在连接器 secret store 里，**而不是** `sessionStorage`。headless brain 的 Web Storage 是内存
+垫片，且打开设置对话框的浏览器是另一个进程 —— 写在那里的 state，需要花掉它的那个进程根本看不见。渲染端
+`CONNECTOR_OAUTH_STATE_KEY` 那份副本只是桌面端的预检；持久记录才是权威的 CSRF 校验，并且在兑换之前就被
+花掉（clear-on-use），所以重放的回跳无法搭上它。
+
+`beginXOAuth` 返回 URL 而不是直接打开 —— 只有调用方知道它所处的位置有没有可用浏览器。桌面端由设置对话框
+在同进程打开；headless 部署通过 `oauth-begin` 运维意图（`lib/connectors/principal/admin-intent.ts`）驱动
+同一个函数，该意图按适配器行自身的 `type` 分派。
+
+### 中继
+
+Slack 与飞书的开发者后台都不接受自定义 scheme，所以回调目标是连接器 ingress 上的一个 https 路由，再由它
+向两种宿主扇出：
+
+| 路由 | 路径 | brain 主题 | 桌面端跳板 |
+| --- | --- | --- | --- |
+| `oauth_lark_callback` | `/oauth/lark/callback` | `connectors://lark-oauth/callback` | `cognia://connector/oauth/lark` |
+| `oauth_connector_callback` | `/oauth/connector/{kind}/callback` | `connectors://connector-oauth/callback`（携带 `kind`） | `cognia://connector/oauth/{kind}` |
+
+两者都在 `crates/cognia-connectors/src/axum_app.rs`。新平台一律走通用路由 ——
+`connectorOAuthRelayPath(kind)`（`lib/connectors/server-transport.ts`）推导路径；Lark 保留自己那条，只是
+因为那个 URL 已经逐字节注册在既有安装的飞书后台里。brain 侧一个订阅服务所有平台：负载里写明 `kind`，
+处理器从 `oauthRegistry` 取，所以一个新平台只要注册处理器就能在 headless 下完成授权。
 
 ## 共享：MentionAccumulator
 

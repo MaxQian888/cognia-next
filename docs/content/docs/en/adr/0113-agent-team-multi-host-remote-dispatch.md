@@ -65,3 +65,17 @@ The deployment and rollback procedure is maintained in `docs/runbooks/agent-team
 - ADR-0086: `docs/content/docs/en/adr/0086-task-scoped-resource-workspaces.md`
 - ADR-0090: `docs/content/docs/en/adr/0090-unified-agent-execution-and-gateway-compatibility.md`
 - ADR-0111: `docs/content/docs/en/adr/0111-managed-workspace-registry-and-bundle.md`
+
+## 2026-08-20 amendment — one prerequisite, not three
+
+Decision 12 gated remote dispatch behind `agentTeamRemoteDispatch` **plus**
+`agentExecutionResolverV2` **plus** `developer.taskWorkspace`, all three off by
+default. Two of those are no longer toggles: the unified resolver is the only
+execution path (ADR-0090 Phase 9) and Task Workspace isolation is GA. Remote
+dispatch is therefore one flag, still off by default, and
+`isAgentTeamRemoteDispatchEnabled()` takes no arguments.
+
+The per-worker check is unchanged and remains the real fail-closed boundary:
+a worker that does not advertise `taskWorkspace.enabled` is refused placement
+with `task_workspace_unavailable`.
+

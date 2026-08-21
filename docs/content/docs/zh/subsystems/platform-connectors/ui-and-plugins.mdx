@@ -238,13 +238,19 @@ beforeApprove: async ({ segments: edited }) => {
 
 | 标签 | id | Trigger | Content |
 | --- | --- | --- | --- |
-| Overview | `overview` | `connections-section.tsx:90` | `OverviewTab` (`:98-99`) |
-| Adapters | `adapters` | `connections-section.tsx:91` | `AdaptersTab` (`:101-102`) |
-| Conversations | `conversations` | `connections-section.tsx:92` | `ConversationsTab` (`:104-105`) |
-| Inbox | `inbox` | `connections-section.tsx:93` | `InboxTab` (`:107-108`) |
-| Outbound | `outbound` | `connections-section.tsx:94` | `OutboundTab` (`:110-111`) |
-| Audit | `audit` | `connections-section.tsx:95` | `AuditTab` (`:113-114`) |
-| Capability | `capability` | `connections-section.tsx:96` | `CapabilityMatrixTab` (`:116-117`) |
+| Overview | `overview` | `connections-section.tsx:84` | `OverviewTab` (`:107`) |
+| Adapters | `adapters` | `connections-section.tsx:87` | `AdaptersTab` (`:110`) |
+| Conversations | `overrides` | `connections-section.tsx:90` | `ConversationsTab` (`:113`) |
+| Outbound | `outbound` | `connections-section.tsx:93` | `OutboundTab` (`:116`) |
+| Audit | `audit` | `connections-section.tsx:96` | `AuditTab` (`:119`) |
+| Capability | `capability` | `connections-section.tsx:99` | `CapabilityMatrixTab` (`:122`) |
+| Inbox assets | `assets` | `connections-section.tsx:102` | `InboxAssetsTab` (`:125`) |
+
+共七个标签页。Conversations 的 id 是 `overrides` 而非 `conversations` ——
+深链参数（`?connectionsTab=`）早于那次改名。这里没有独立的 Inbox 标签页：
+原先的按适配器会话汇总已被 `/inbox` 路由取代；旧的 `?connectionsTab=tunnel`
+链接现在落到 Overview，隧道卡片就在那里。两处缺席都由
+`connections-section.test.tsx` 钉住。
 
 ## 实时数据绑定
 

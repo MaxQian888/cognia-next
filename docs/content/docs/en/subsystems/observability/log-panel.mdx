@@ -104,14 +104,17 @@ chat turn with twenty tool calls is twenty rows to scroll in one and a single gl
 Mid-span `events[]` are projected onto the same axis as ticks, nesting depth shades each block, and
 a zero-duration span still gets a hittable minimum width.
 
-One window control (`today / 7d / 30d / all`, `lib/observability/trace-window.ts`) drives both the
-list and `AgentTraceStatsBar`, so the headline numbers and the rows below them always describe the
-same set. Filtering happens over the whole window rather than the visible page, which is why the
-list reads a window instead of paging with `queryRecentTraces`.
+One Grafana-style range control (`5m…30d` + a pinned custom window,
+`lib/observability/time-range.ts`) drives the list, the waterfall AND the
+[tracing dashboard](./tracing-dashboard) in the channel's other sub-view, so the headline numbers and
+the rows below them always describe the same set — they are folds of one `useObservabilityData` read.
+Filtering happens over the whole window rather than the visible page, which is why the list reads a
+window instead of paging with `queryRecentTraces`.
 
 A span's **Show this trace in logs** action switches to the Logs channel with `?trace=<id>` and
-remounts the panel so its mount-time URL hydration picks the focus up. `/observability` stays the
-aggregate view of the same spans; the two link across to each other.
+remounts the panel so its mount-time URL hydration picks the focus up. The aggregate view of the same
+spans is one click away on the same channel: the Dashboard sub-view (`?channel=traces&view=dashboard`),
+which used to be the standalone `/observability` route.
 
 ## The Multi-Source Merge
 

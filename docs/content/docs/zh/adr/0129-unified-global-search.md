@@ -71,3 +71,56 @@ description: 一个搜索面（⌘K）、一个打开入口、一个可重绑的
 - 每个实体族距离调色板只差一个 provider 文件；移动端调色板获得它从未有过的 14 个分组，桌面端获得工作流、技能、记忆、模板、计划任务、插件、MCP 服务器、收件箱会话与设置控件。
 - 移除：`components/inbox/inbox-command-palette.tsx`、`components/settings/finder/settings-finder.tsx`、桌面调色板 500 行主体、移动端的复制品，以及 `desktop.commandPalette` / `mobile.search` / `inbox.commandPalette` 文案树与查找器自身的界面文案（由 `globalSearch.*` 取代；`settings.finder.controls.*` 作为控件标签保留）。
 - 后续：触及常驻语料上限时加 `*grams` 会话预过滤（ADR-0099 B 阶段）；为伴侣画像在服务端持久化"最近打开"。
+
+## 修订（2026-08-21）—— 会话列表同样是一个检索面
+
+按本 ADR 自身的前提审计了侧边栏会话列表——找到一个会话不应取决于你恰好站在哪里——并修复了违背该前提的八处问题。列表现在是本 ADR 治下的第二个检索面，排序器就是同一个函数。
+
+### 6. 视图取代筛选预设
+
+`ConversationSidebarSettings.filterPresets` 只能保存快捷筛选，因此人们真正想要的视图——「未读优先」「本周创建的一切」「检索整个账号」——无法表达：它们各自还需要一个排序、一个分组或一个搜索范围。**视图**（`lib/chat/conversation-views.ts`，`ConversationView`）可固定四个维度中的任意几个：`filters`、`sortBy`、`groupBy`、`search`。
+
+它是**部分覆盖而非快照**：缺席的维度意味着「保持当前值不动」。这正是让每个已存预设天然成为合法视图、无需迁移的原因（预设就是只固定 filters 的视图），也避免了「未读优先」静默丢弃用户已选的分组。
+
+存储沿既有的轴切分：定义存在 settings blob 里以跟随 profile，而**当前处于哪个视图**（`activeConversationViewId`）是 UI store 的布局态，因此手机与桌面可以各自停在不同视图。应用视图因此要写两处——这也是该写入放在 `useConversationFilterController` 而非各端的原因。
+
+任一被固定的维度漂移后（`conversationViewDrift`），chip 显示 `名称 · 已修改`，并提供「恢复视图」/「更新此视图」。旧行为靠比较筛选来推断当前视图，用户一动就丢失视图；这也是「更新此视图」无法提供的原因——那时已经没人知道指的是哪个视图。
+
+三个内置视图作为代码而非数据随包发布（**未读**、**最近创建**、**全局检索**）：它们是那些没人会去菜单里翻找的新语汇的发现入口。它们只能隐藏不能删除，且声称占用内置 id 的存储行会被忽略，以保证内置视图始终可达。
+
+### 7. 搜索范围：一个控件，三条轴
+
+侧边栏能否找到一个会话，过去取决于三件不相干的事——已归档的行只能靠把整个列表切到归档视图、其他工作区的行只有在*分组*恰好是 `"workspace"` 时才可见、消息内容则来自一个设置开关。`ConversationSearchOptions`（`lib/chat/conversation-search-scope.ts`）统一拥有这三条轴，视图可以携带它们，`ConversationSearchScopeControl` 就放在它所治理的输入框旁边。
+
+- `needsCrossWorkspaceSessions(groupBy, search)` 决定 `useSessions` 的订阅，因此「我能不能找到这个会话」不再取决于列表如何分组。
+- `includeArchived` **仅在存在查询时生效**。浏览归档会话仍是视图切换器的职责，两个控件因此永不描述同一件事。
+- 旧的 `searchScope` 枚举经由解析器折叠进 `content`；对象在两个方向上都优先，因此降级再升级不会复活用户此后已经改掉的设置。
+
+### 8. 同一个排序器，以及对异步同样的诚实
+
+`buildConversationSections` 接受注入的 `scoreTitle`（`ConversationTitleScorer`），由 `hooks/chat/use-conversation-list-model.ts` 提供 `scoreTitleMatch`——于是「dply」在侧边栏也能找到「deploy」，且同一查询在两处的排序一致。用注入而非 import：`lib/global-search/scoring.ts` 已经引用了模型的 `titleMatchRank`，反向边会成环。
+
+内容命中比标题命中晚一拍。两端都不得在 `contentSearch.loading` 期间声称「找不到 X」——那读起来像未命中，随后又自相矛盾——一字符查询现在会明说，而不是静默降级为仅标题（消息索引需要 `CONTENT_SEARCH_MIN_QUERY`）。
+
+### 9. 日期跟随排序轴
+
+无论排序如何，分桶过去都取自 `lastMessageAt`，于是「按创建时间」产出的是按最后活动分桶的列表，而 `oldest` 让行在正序表头下倒着走。`resolveConversationTimeBasis(sortBy)` 现在同时决定分桶、表头与活动筛选所读的时间戳；`oldest` 连同桶序一起倒转；而 `title` / `unread`——它们根本没有日期轴——渲染为单个扁平段，而不是一组解释不了列表的表头。（按首字母分组不成立：`localeCompare` 能排序中文标题，但没有拼音表就没有单个首字符能命名该组。）
+
+### 10. team 是真正的分组轴
+
+`groupBy: "team"` 过去只是发出普通日期桶，并依赖桌面 guild rail 已经过滤了列表——这让没有 rail 的移动端呈现出「按 team 分组」却其实并未分组的列表。`ConversationGroupAxis` 新增 `"team"`；rail 降级为*跳转*到某个 team 分区的方式，而收窄到单个 team 是既有 `teamIds` 筛选面的职责。
+
+### 11. 阅读时把列表按住
+
+列表是按活动排序的实时查询，因此后台会话会把行从光标下挪走——在日期分桶下甚至整个离开该分区。`lib/chat/conversation-order-freeze.ts` + `hooks/chat/use-conversation-order-freeze.ts` 在指针位于列表上或列表已滚动时按住*顺序*（以及分区归属），并在两者同时解除时释放。新增与删除从不被按住：冻结插入会与新会话的 reveal 打架，而按住已删除的行会留下一个点开什么也没有的行。一个 pill 报告有多少行在等待，并可一次性应用。
+
+`@tanstack/react-virtual` 只对长的**扁平、不可拖拽**分区做窗口化（搜索结果、`title` / `unread` 排序、超过 200 行）——那是唯一既没有 sticky 分组头要钉住、也没有 sortable 上下文要求条目留在 DOM 里的场景。
+
+### 12. 其余修正
+
+- `modelFolders` 同时在做两件事：在归档视图隐藏 folder *分组*，以及饿死 folder *筛选面*的选项，于是归档视图下的 chip 显示原始 folder id。已拆开。
+- 「显示 N / 共 M」的 chip 改用 `visibleCount`（屏上的行），而 `filteredCount` 保留原义用于空态判定——把所有分组折叠起来并不等于「筛选无结果」。
+- 设置 → 会话卡片移除 `sortBy` / `groupBy` / `searchScope`。该卡片决定行*长什么样*；设置页不是回答「我的会话去哪了」的地方，而视图能携带这些，设置页不能。
+- `mobile.home.ungroupedWorkspace` / `ungroupedAgent` 在两种语言里都不存在，移动端的未分组表头一直在渲染自己的 key。已补齐，并新增 `ungroupedTeam`。
+
+**新增范围：** `lib/chat/{conversation-views,conversation-search-scope,conversation-order-freeze,conversation-group-axis}.ts`、`lib/chat/conversation-{list-model,filters}.ts`、`hooks/chat/{use-conversation-list-model,use-conversation-filter-controller,use-conversation-order-freeze}.ts`、`components/chat/conversation-filter-controls.tsx`、`components/desktop/{channel-list,session-row}.tsx`、`components/mobile/shell/mobile-channel-list.tsx`、`components/settings/conversation/conversation-sidebar-card.tsx`、`stores/ui/ui-store.ts`、`packages/agent-config-types/src/index.ts`。

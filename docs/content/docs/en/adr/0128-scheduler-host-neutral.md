@@ -70,6 +70,20 @@ A promoted task no longer re-executes out of process. The native entry runs a ne
 
 Every host keeps its own `CogniaSchedulerDB`; nothing hands tasks between hosts. A client chooses which reachable schedule it **manages** — `local` (this device) or `paired` (the host it drives / is paired with, through the `scheduled_task_*` RPCs) — in `lib/scheduler/scheduler-host-target.ts`. Defaults: companions and a desktop driving a remote host prefer `paired`; a remembered `paired` degrades to `local` while unreachable. The scheduler pages show a host bar ("Managing: this device / cloud host <name>", suspended badge, only-while-open note, switch button); the type picker resolves the **target** host's capabilities via the `host_capabilities` RPC.
 
+> **Amended by ADR-0136 (2026-08-21).** "Nothing hands tasks between hosts"
+> stands — a host still owns its own `CogniaSchedulerDB` and no task row ever
+> travels. What changed is *arming*: `isTimingAuthority()` used to return `true`
+> unconditionally whenever the timing driver had no leader election, which is
+> every driver in production, so two desktops signed into one account each armed
+> the same cron and each fired it. It now consults the configured execution
+> authority (`lib/placement/authority.ts`). **Unconfigured still means
+> self-authority**, so a single-machine install is unchanged; a configured host
+> owns timing and the others stand down; and an authority that stays unreachable
+> past its grace window is taken over locally with a visible `placement.degraded`
+> record rather than silently stopping the schedule. Handoff is by standing
+> down, never by transferring state, and duplicate fires are absorbed by the
+> deterministic idempotency key rather than prevented by an election.
+
 ### 7. Remote backup destinations
 
 `lib/data/destinations/` gains **GitHub** (contents API into a private repo — public repos are refused) and **Google Drive** (user-supplied OAuth client, **device flow**, `drive.file` scope, tokens in the `backup-destinations` keyring namespace) legs, plus a manual "Sync now" that runs the same pipeline as the scheduled `backup` executor. `convex` is deprecated in place. The executor fans out per leg and records `destination` in backup history. Host filesystem access goes through `lib/data/backup-host-filesystem.ts` so the headless runtime injects its own seam. Settings → Data hosts the two cards; the schedule dialog only offers destinations that are configured.

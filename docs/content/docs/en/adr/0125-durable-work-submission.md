@@ -5,7 +5,7 @@ description: "Commits a chat turn's message, frozen input and execution run in o
 
 # ADR 0125 — Durable Work Submission and Immutable Input Ownership
 
-**Status:** Accepted, behind `durableWorkSubmission` (off by default)
+**Status:** Accepted. The `durableWorkSubmission` flag was removed on 2026-08-20 — this is the only chat submission path.
 **Date:** 2026-08-15
 
 ## Context

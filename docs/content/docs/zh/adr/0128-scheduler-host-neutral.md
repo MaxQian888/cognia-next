@@ -70,6 +70,8 @@ description: 桌面、无头大脑与 web / 伴侣壳共用一份调度器契约
 
 每台主机维护自己的 `CogniaSchedulerDB`；任务不在主机间交接。客户端选择它**管理**哪一份可达日程——`local`（本机）或 `paired`（它驱动 / 配对的主机，经 `scheduled_task_*` RPC）——见 `lib/scheduler/scheduler-host-target.ts`。默认：伴侣与驱动远端主机的桌面偏好 `paired`；记住的 `paired` 在不可达时退化为 `local`。调度器页面显示主机栏（"管理中：本机 / 云端主机 <名称>"、已暂停徽章、仅打开时运行提示、切换按钮）；类型选择器通过 `host_capabilities` RPC 解析**目标**主机的能力。
 
+> **由 ADR-0136 修订（2026-08-21）。**"任务不在主机间交接"依然成立 —— 每台主机仍拥有自己的 `CogniaSchedulerDB`，任务行永不迁移。变化的是**武装**这一步：`isTimingAuthority()` 过去在驱动没有 leader election 时无条件返回 `true`，而生产里每个驱动都没有，于是两台登录同一账号的桌面各自武装同一个 cron、各自触发一次。现在它会询问已配置的执行权威（`lib/placement/authority.ts`）。**未配置仍然是自任权威**，单机安装行为不变；已配置时该宿主拥有计时权、其余让位；权威超过宽限期仍不可达时由本地接管，并留下可见的 `placement.degraded` 记录，而不是让调度悄悄停摆。交接靠**让位**而非转移状态，重复触发由确定性幂等键吸收，而不是靠选举避免。
+
 ### 7. 远端备份目的地
 
 `lib/data/destinations/` 新增 **GitHub**（contents API 写入私有仓库——公开仓库被拒绝）与 **Google Drive**（用户自备 OAuth 客户端、**设备流**、`drive.file` 范围、令牌存于 `backup-destinations` keyring 命名空间）两条腿，以及与调度 `backup` executor 同一管线的手动"立即同步"。`convex` 原地弃用。executor 按腿扇出并在备份历史中记录 `destination`。主机文件系统访问经 `lib/data/backup-host-filesystem.ts`，无头运行时注入自己的接缝。设置 → 数据承载两张卡片；调度对话框只提供已配置的目的地。

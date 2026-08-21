@@ -5,7 +5,7 @@ description: "AHP-inspired ordered state channels above Agent RPC v2"
 
 # ADR-0116: Host-authoritative cross-surface session state
 
-- Status: Accepted, incremental rollout
+- Status: Accepted. The `migrationStage` rollout ladder was removed on 2026-08-20 — HostState is unconditional (see the amendment at the end).
 - Date: 2026-08-14
 
 ## Context
@@ -77,3 +77,25 @@ remain visible instead of disappearing on refresh. The cost is a durable
 ledger, snapshot projection, lease recovery, and explicit compatibility period.
 Snapshots are capped at 512 KiB and exclude device-local UI state, secrets,
 local paths, attachment bytes, and full transcript history.
+
+## 2026-08-20 amendment — the migration ladder is removed
+
+`HostStateMigrationStage` had six values and `hostStateMigrationStageAllowsWrites`
+admitted only three of them. Nothing in production ever passed
+`start({ migrationStage })`, so every host stayed on the default
+`legacy-authoritative` and `commitHostStateAction` refused every write with
+`host_state_not_authoritative`. All four client shells checked the stage before
+routing and therefore took the legacy table-sync path permanently — while
+`host_feature_manifest` advertised `session.state-sync@1` unconditionally.
+
+The ladder, the write gate, the `migrationStage` wire field and the four client
+guards are gone. Authority is what it always actually was: the lease plus
+`hostGeneration`. Compatibility is preserved by omission — an older client
+reading an absent `migrationStage` gets `undefined`, its own
+`hostStateMigrationStageAllowsWrites(undefined)` returns false, and it falls back
+to legacy table sync exactly as before.
+
+`HOST_STATE_PROTOCOL_VERSION` stays 1; the historical Dexie `version(168)` index
+still names `migrationStage` because migration history is immutable, and rows
+written from now on simply do not carry the property.
+
