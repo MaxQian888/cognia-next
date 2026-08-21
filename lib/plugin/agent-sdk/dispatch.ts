@@ -25,6 +25,7 @@ import type {
   PluginSubagentDispatchRejection,
 } from "@/types/plugin/plugin-agent-sdk"
 import { assertNoLeakingPiiDeep } from "@/lib/plugin/api/plugin-pii-gate"
+import { fireAgentHook, type AgentHookContext } from "@/lib/ai/agent/external/agent-hooks"
 import { getDispatchBudget, isDispatchBudgetExhausted } from "@/lib/claude/agents/dispatch-budget"
 import {
   envelopeForBudgetExhausted,
@@ -160,6 +161,28 @@ export async function dispatchSubagent(
   const timeoutMs =
     typeof deadlineMs === "number" ? Math.max(0, deadlineMs - Date.now()) : undefined
 
+  // Lifecycle hooks: a cognia-dispatched subagent runs as its OWN top-level
+  // session, so the SDK never emits `SubagentStart` / `SubagentStop` for it —
+  // only SDK-Task-dispatched agents get those. Without synthesizing them here a
+  // user's `SubagentStart` hook fires for some subagents and silently not for
+  // the ones cognia itself dispatches. Observational and best-effort: a broken
+  // hook bridge must never fail a dispatch.
+  const hookCtx: AgentHookContext = {
+    agentId: thisId,
+    agentKind: "subagent",
+    agentRef: thisId,
+    // The parent chat session when the host's dispatch_agent routed approvals
+    // there; otherwise the child's own run id, so the event is still correlated.
+    sessionId: options._approvalRoute?.parentSessionId ?? runId,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+  }
+  const subagentHookPayload = {
+    agent_type: thisId,
+    agent_id: runId,
+    ...(def.name ? { agent_name: def.name } : {}),
+  }
+  void fireAgentHook("SubagentStart", hookCtx, { payload: subagentHookPayload })
+
   // ADR-0090 Phase 6: the unified authority resolves the child's frozen spec
   // (surface "plugin") behind the resolver flag; legacy executeAgent otherwise.
   const { executeAgentTurnFromRenderer } =
@@ -217,6 +240,10 @@ export async function dispatchSubagent(
     },
     { surface: "plugin" }
   )
+
+  void fireAgentHook("SubagentStop", hookCtx, {
+    payload: { ...subagentHookPayload, success: true },
+  })
 
   // Draw the run's usage down the shared subtree budget (best-effort — the
   // root dispatch creates the guard with the real limit).

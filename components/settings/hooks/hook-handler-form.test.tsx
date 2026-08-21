@@ -389,3 +389,36 @@ describe("emptyHandlerForType", () => {
     expect(emptyHandlerForType("agent")).toEqual({ type: "agent", prompt: "" })
   })
 })
+
+describe("plugin handler", () => {
+  it("edits both halves of the binding", () => {
+    const onChange = jest.fn()
+    render(
+      <HookHandlerForm
+        value={{ type: "plugin", pluginId: "", hookId: "" }}
+        onChange={onChange}
+        onRemove={() => {}}
+      />
+    )
+    fireEvent.change(screen.getByTestId("handler-plugin-id"), { target: { value: "my-plugin" } })
+    expect(onChange).toHaveBeenCalledWith({ type: "plugin", pluginId: "my-plugin", hookId: "" })
+
+    onChange.mockClear()
+    fireEvent.change(screen.getByTestId("handler-hook-id"), { target: { value: "onPreToolUse" } })
+    expect(onChange).toHaveBeenCalledWith({ type: "plugin", pluginId: "", hookId: "onPreToolUse" })
+  })
+
+  it("requires both ids at the save gate", () => {
+    // A wrong id fails OPEN and silently at run time, so this gate is the only
+    // place a typo can still be caught.
+    expect(validateHandler({ type: "plugin", pluginId: "", hookId: "onPreToolUse" })).toBe(
+      "pluginIdRequired"
+    )
+    expect(validateHandler({ type: "plugin", pluginId: "p1", hookId: "  " })).toBe("hookIdRequired")
+    expect(validateHandler({ type: "plugin", pluginId: "p1", hookId: "onPreToolUse" })).toBeNull()
+  })
+
+  it("starts empty when the type is selected", () => {
+    expect(emptyHandlerForType("plugin")).toEqual({ type: "plugin", pluginId: "", hookId: "" })
+  })
+})

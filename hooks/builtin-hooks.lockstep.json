@@ -1,0 +1,57 @@
+{
+  "$comment": [
+    "Lockstep table for the product-bundled built-in hook registry.",
+    "",
+    "The registry is declared TWICE — `lib/claude/hooks/builtin-hooks.ts` (used by",
+    "the settings UI, the mobile read-only list and the CLI) and",
+    "`src-tauri/src/hooks/builtin.rs` (used by the desktop's host-side merge). They",
+    "are hand-maintained and nothing enforced that they agreed, so a hook added or",
+    "an id renamed on one side silently changed behaviour on only one shell — and",
+    "`builtinHookOverrides` is keyed by id, so a drifted id also orphans a user's",
+    "enable/disable choice.",
+    "",
+    "Both sides assert against this table in their own test suite, so a drift fails",
+    "on whichever side changed without updating it.",
+    "",
+    "`description` is deliberately absent: it is a UI string that lives in the TS",
+    "registry only (the Rust side never renders it), so requiring parity on it",
+    "would be noise."
+  ],
+  "hooks": [
+    {
+      "id": "auto-context-loader",
+      "event": "SessionStart",
+      "matcher": null,
+      "script": "auto-context-loader.mjs",
+      "defaultEnabled": true
+    },
+    {
+      "id": "auto-context-loader-prompt",
+      "event": "UserPromptSubmit",
+      "matcher": null,
+      "script": "auto-context-loader.mjs",
+      "defaultEnabled": true
+    },
+    {
+      "id": "cost-quota-guard",
+      "event": "UserPromptSubmit",
+      "matcher": null,
+      "script": "cost-quota-guard.mjs",
+      "defaultEnabled": false
+    },
+    {
+      "id": "pii-safety-guard",
+      "event": "UserPromptSubmit",
+      "matcher": null,
+      "script": "pii-safety-guard.mjs",
+      "defaultEnabled": false
+    },
+    {
+      "id": "pii-safety-guard-tool",
+      "event": "PreToolUse",
+      "matcher": null,
+      "script": "pii-safety-guard.mjs",
+      "defaultEnabled": false
+    }
+  ]
+}

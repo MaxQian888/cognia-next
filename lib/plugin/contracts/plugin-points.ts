@@ -914,21 +914,68 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
     })
   ) as Record<CanonicalExtensionPoint, PluginPointContract>
 
+/**
+ * Hook points that are declared for plugin authors but have no fire site in
+ * the host yet. A plugin may register a handler for one — the SDK types and
+ * `validateHookPoint` accept it — but the host never calls it, so the handler
+ * is a silent no-op.
+ *
+ * These are `status: "virtual"` for the same reason `VIRTUAL_EXTENSION_POINTS`
+ * are: the contract is published, the host implementation is not. Declaring
+ * them here is what makes the dormancy visible on all three axes required by
+ * the repo's working rules — the contract says virtual, `validateHookPoint`
+ * emits a `plugin.point.virtual` diagnostic, and `pnpm audit:hooks` fails if
+ * either the label or the missing fire site stops being true.
+ *
+ * Moving a hook OUT of this set is the last step of wiring it: add the
+ * `executeHook`/`hooks.<name>` call in the binding file first, then delete the
+ * entry here — `audit:hooks` fails while the two disagree in either direction.
+ */
+const VIRTUAL_HOOK_POINTS = new Set<CanonicalHookPoint>([
+  // Scheduler CRUD + pre-run hooks. `lib/scheduler/` mutates tasks without
+  // going through the plugin hooks system; only onScheduledTaskStart /
+  // Complete / Error are fired today.
+  "onScheduledTaskCreate",
+  "onScheduledTaskUpdate",
+  "onScheduledTaskDelete",
+  "onScheduledTaskPause",
+  "onScheduledTaskResume",
+  "onScheduledTaskBeforeRun",
+  // Workflow node/trigger registry churn. The registries in
+  // `lib/workflow/{nodes,triggers}/registry.ts` do not notify the hooks
+  // system when an entry is added or removed; only the *execution* hooks
+  // (onWorkflowNodeStart / Complete / Error, onWorkflowTriggerFired) fire.
+  "onWorkflowNodeRegister",
+  "onWorkflowNodeUnregister",
+  "onWorkflowTriggerRegister",
+  "onWorkflowTriggerUnregister",
+])
+
+/** The file whose fire sites `audit:hooks` checks for non-virtual hooks. */
+export const HOOK_POINT_BINDING = "lib/plugin/messaging/hooks-system.ts"
+
+export function isVirtualHookPoint(hookName: CanonicalHookPoint): boolean {
+  return VIRTUAL_HOOK_POINTS.has(hookName)
+}
+
 const hookPointContracts: Record<CanonicalHookPoint, PluginPointContract> = Object.fromEntries(
-  CANONICAL_HOOK_POINTS.map((id) => [
-    id,
-    {
+  CANONICAL_HOOK_POINTS.map((id) => {
+    const virtual = VIRTUAL_HOOK_POINTS.has(id)
+    return [
       id,
-      kind: "hook",
-      stability: "stable",
-      status: "implemented",
-      owner: "plugin-platform",
-      binding: "lib/plugin/messaging/hooks-system.ts",
-      docs: HOOK_POINT_DOCS,
-      requiredTests: HOOK_POINT_TESTS,
-      introducedIn: "0.1.0",
-    } as PluginPointContract,
-  ])
+      {
+        id,
+        kind: "hook",
+        stability: virtual ? "experimental" : "stable",
+        status: virtual ? "virtual" : "implemented",
+        owner: "plugin-platform",
+        binding: virtual ? "declared only (no fire site)" : HOOK_POINT_BINDING,
+        docs: HOOK_POINT_DOCS,
+        requiredTests: HOOK_POINT_TESTS,
+        introducedIn: "0.1.0",
+      } as PluginPointContract,
+    ]
+  })
 ) as Record<CanonicalHookPoint, PluginPointContract>
 
 /**
@@ -1575,11 +1622,24 @@ export function validateHookPoint(
   }
 
   const canonical = hookName as CanonicalHookPoint
+  const contract = getHookPointContract(canonical)
+
+  if (contract.status === "virtual") {
+    diagnostics.push({
+      code: "plugin.point.virtual",
+      severity: "warning",
+      message: `Hook "${canonical}" is declared virtual — the host has no fire site for it, so a handler registered here never runs.`,
+      hint: "Pick a hook the host fires, or track the wiring before depending on this one.",
+      pointKind: "hook",
+      pointId: hookName,
+      canonicalId: canonical,
+    })
+  }
 
   return {
     allowed: true,
     canonicalId: canonical,
-    contract: getHookPointContract(canonical),
+    contract,
     diagnostics,
   }
 }

@@ -60,9 +60,60 @@ describe("plugin point contracts", () => {
     }
   })
 
-  it("has no registry entries left in virtual status", () => {
-    const virtualEntries = PLUGIN_POINT_CONTRACTS.filter((entry) => entry.status === "virtual")
-    expect(virtualEntries).toEqual([])
+  // This assertion used to be `expect(virtualEntries).toEqual([])`, which
+  // passed for the wrong reason: `VIRTUAL_EXTENSION_POINTS` was empty and the
+  // hook + runtime contracts were synthesized with a hardcoded
+  // `status: "implemented"`, so NO contract in the registry could ever be
+  // virtual. The filter was unfalsifiable — the one test meant to catch a
+  // declared-but-dormant plugin point could not fail. Ten hook points were
+  // dormant the whole time it was green.
+  //
+  // The ratchet is kept, but against a named list rather than emptiness: new
+  // dormancy cannot enter silently, and wiring a point up means deleting its
+  // row here. The list may only shrink.
+  it("keeps every virtual registry entry on the known-dormant list", () => {
+    const EXPECTED_VIRTUAL: readonly string[] = [
+      // Scheduler CRUD + pre-run hooks — lib/scheduler/ mutates tasks without
+      // notifying the hooks system.
+      "onScheduledTaskCreate",
+      "onScheduledTaskUpdate",
+      "onScheduledTaskDelete",
+      "onScheduledTaskPause",
+      "onScheduledTaskResume",
+      "onScheduledTaskBeforeRun",
+      // Workflow node/trigger registry churn — the registries never notify the
+      // hooks system when an entry is added or removed.
+      "onWorkflowNodeRegister",
+      "onWorkflowNodeUnregister",
+      "onWorkflowTriggerRegister",
+      "onWorkflowTriggerUnregister",
+    ]
+    const virtualIds = PLUGIN_POINT_CONTRACTS.filter((e) => e.status === "virtual")
+      .map((e) => e.id)
+      .sort()
+    expect(virtualIds).toEqual([...EXPECTED_VIRTUAL].sort())
+  })
+
+  it("labels every virtual entry as experimental, never stable", () => {
+    for (const entry of PLUGIN_POINT_CONTRACTS.filter((e) => e.status === "virtual")) {
+      // A dormant point advertising itself as `stable` is the exact lie this
+      // registry exists to prevent.
+      expect(entry.stability).not.toBe("stable")
+    }
+  })
+
+  it("warns a plugin author who registers a virtual hook", () => {
+    const outcome = validateHookPoint("onScheduledTaskBeforeRun")
+    expect(outcome.allowed).toBe(true)
+    expect(outcome.contract?.status).toBe("virtual")
+    expect(outcome.diagnostics.map((d) => d.code)).toContain("plugin.point.virtual")
+  })
+
+  it("does not warn for a hook the host actually fires", () => {
+    const outcome = validateHookPoint("onScheduledTaskStart")
+    expect(outcome.contract?.status).toBe("implemented")
+    expect(outcome.contract?.stability).toBe("stable")
+    expect(outcome.diagnostics).toEqual([])
   })
 
   it("Python SDK PluginHook enum matches canonical hook registry", () => {

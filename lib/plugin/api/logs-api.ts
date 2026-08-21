@@ -25,7 +25,7 @@
  * so its output is attributable.
  */
 
-import { liveQuery, type Subscription } from "dexie"
+import Dexie, { type Subscription } from "dexie"
 
 import {
   IndexedDBTransport,
@@ -197,7 +197,10 @@ function createTraceAPI(pluginId: string): PluginTraceAPI {
       let primed = false
       let subscription: Subscription | null = null
       try {
-        subscription = liveQuery(() => queryRecent(TRACE_SUBSCRIPTION_WINDOW)).subscribe({
+        // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+        // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+        // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+        subscription = Dexie.liveQuery(() => queryRecent(TRACE_SUBSCRIPTION_WINDOW)).subscribe({
           next: (spans: AgentTraceSpan[]) => {
             // The first emission is the existing tail, not news. Record it and
             // stay quiet, so `subscribe` means "from now on".

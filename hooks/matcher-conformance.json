@@ -1,0 +1,135 @@
+{
+  "$comment": [
+    "Cross-rail conformance table for hook-group matcher semantics.",
+    "",
+    "Three runners evaluate the SAME settings.json `matcher` string: the sidecar",
+    "(sidecar/dispatch/agent-hooks.mjs), the Rust host (src-tauri/src/hooks/mod.rs)",
+    "and the CLI (cli/src/hooks/run-hooks.ts). They drifted into three different",
+    "rules, so the same config behaved differently depending on which shell ran the",
+    "turn. The sidecar's rule is canonical because it is the rail that carries the",
+    "built-in agent and is what users' existing Claude Code settings were written",
+    "against; the other two were aligned to it.",
+    "",
+    "Every runner's test suite reads THIS file, so a future divergence fails a test",
+    "on the rail that drifted instead of silently changing behaviour.",
+    "",
+    "Canonical rule:",
+    "  1. absent / \"\" / \"*\"                     -> match everything",
+    "  2. /^[A-Za-z0-9_\\-, |]+$/                 -> exact set, split on [|,], trimmed",
+    "  3. otherwise                              -> unanchored regex; invalid regex -> no match",
+    "",
+    "`narrow` cases use the tightened exact-set pattern /^[A-Za-z0-9_|]+$/ (split on",
+    "| only) that the sidecar applies to FileChanged and StopFailure, whose targets",
+    "are file paths and error strings whose punctuation must stay regex-significant."
+  ],
+  "cases": [
+    { "matcher": null, "target": "Bash", "expected": true, "why": "absent matches all" },
+    { "matcher": "", "target": "Bash", "expected": true, "why": "empty matches all" },
+    { "matcher": "   ", "target": "Bash", "expected": true, "why": "blank matches all" },
+    { "matcher": "*", "target": "Bash", "expected": true, "why": "star matches all" },
+
+    { "matcher": "Bash", "target": "Bash", "expected": true, "why": "single literal" },
+    {
+      "matcher": "Edit",
+      "target": "MultiEdit",
+      "expected": false,
+      "why": "a bare alphanumeric matcher is an EXACT match, not a substring regex"
+    },
+    {
+      "matcher": "Bash|Edit",
+      "target": "Edit",
+      "expected": true,
+      "why": "pipe set, exact alternatives"
+    },
+    { "matcher": "Bash|Edit", "target": "Read", "expected": false, "why": "pipe set miss" },
+    {
+      "matcher": "Bash,Edit",
+      "target": "Edit",
+      "expected": true,
+      "why": "comma is an alternative separator too"
+    },
+    {
+      "matcher": "Bash, Edit",
+      "target": "Edit",
+      "expected": true,
+      "why": "alternatives are trimmed, so a spaced list works"
+    },
+    {
+      "matcher": "mcp__server__tool",
+      "target": "mcp__server__tool",
+      "expected": true,
+      "why": "underscores stay in the exact-set alphabet"
+    },
+    {
+      "matcher": "write-file",
+      "target": "write-file",
+      "expected": true,
+      "why": "hyphens stay in the exact-set alphabet"
+    },
+
+    {
+      "matcher": "^Notebook",
+      "target": "NotebookEdit",
+      "expected": true,
+      "why": "punctuation escapes the exact-set path; regex is UNANCHORED at the tail"
+    },
+    {
+      "matcher": "Edit$",
+      "target": "MultiEdit",
+      "expected": true,
+      "why": "unanchored head, so a tail anchor matches a suffix"
+    },
+    {
+      "matcher": ".*Edit",
+      "target": "MultiEdit",
+      "expected": true,
+      "why": "explicit wildcard regex"
+    },
+    {
+      "matcher": "^(Bash|Read)$",
+      "target": "Bash",
+      "expected": true,
+      "why": "fully anchored regex still works"
+    },
+    {
+      "matcher": "^(Bash|Read)$",
+      "target": "BashTool",
+      "expected": false,
+      "why": "author-anchored regex is respected"
+    },
+    {
+      "matcher": "[",
+      "target": "Bash",
+      "expected": false,
+      "why": "an invalid regex matches nothing rather than throwing"
+    }
+  ],
+  "narrowCases": [
+    { "matcher": null, "target": "/a/b.ts", "expected": true, "why": "absent matches all" },
+    { "matcher": "*", "target": "/a/b.ts", "expected": true, "why": "star matches all" },
+    {
+      "matcher": "src|lib",
+      "target": "lib",
+      "expected": true,
+      "why": "pipe set still exact under the narrow alphabet"
+    },
+    {
+      "matcher": "\\.ts$",
+      "target": "/a/b.ts",
+      "expected": true,
+      "why": "a path matcher must stay a regex"
+    },
+    {
+      "matcher": "/a/b.ts",
+      "target": "/a/b.ts",
+      "expected": true,
+      "why": "slashes and dots leave the exact-set path and regex-match themselves"
+    },
+    {
+      "matcher": "a,b",
+      "target": "a",
+      "expected": false,
+      "why": "comma is NOT an alternative separator here — it is regex-literal, so the whole string must appear"
+    }
+  ]
+}

@@ -84,7 +84,7 @@ describe("clipboard-history (built-in)", () => {
 
   it("registers the clipboard_history_list result card when the host offers the API (ADR-0127)", async () => {
     const { ctx } = makeCtx()
-    const registerToolResultRenderer = jest.fn(() => () => {})
+    const registerToolResultRenderer = jest.fn((_tool: string, _render: unknown) => () => {})
     ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
     await clipboardHistory.activate?.(ctx)
     expect(registerToolResultRenderer).toHaveBeenCalledTimes(1)

@@ -2281,10 +2281,35 @@ describe("PluginManager", () => {
   })
 
   describe("syncRuntimeState", () => {
+    // The ledger's wire shape is the Rust `PluginRuntimeSnapshot`
+    // (crates/cognia-plugin-runtime/src/lib.rs). It carries NO
+    // `serde(rename_all)`, so every field name below is snake_case on purpose.
+    const snapshot = (overrides: Record<string, unknown> = {}) => ({
+      plugin_id: "ledger.plugin",
+      version: "1.0.0",
+      status: "installed",
+      last_error: null,
+      loaded_at: null,
+      install_path: "/plugins/ledger.plugin",
+      ...overrides,
+    })
+
+    const storeWith = (plugins: Record<string, unknown>) => ({
+      plugins,
+      setPluginError: jest.fn(),
+      setPluginStatus: jest.fn(),
+    })
+
+    const installedPlugin = (id: string) => ({
+      manifest: createManifest(id),
+      status: "installed",
+      source: "local",
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
     it("skips backend sync when the native invoke bridge is unavailable", async () => {
-      const store = {
-        plugins: {} as Record<string, Plugin>,
-      }
+      const store = storeWith({})
 
       mockGetState.mockReturnValue(store)
       mockCanUseTauriInvoke.mockReturnValue(false)
@@ -2293,8 +2318,239 @@ describe("PluginManager", () => {
 
       await manager.syncRuntimeState()
 
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+
+    it("skips backend sync on a non-tauri runtime profile", async () => {
+      mockGetState.mockReturnValue(storeWith({}))
+      mockCanUseTauriInvoke.mockReturnValue(true)
+
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      })
+
+      await manager.syncRuntimeState()
+
+      expect(mockInvoke).not.toHaveBeenCalled()
+    })
+
+    // ARGUMENT LIST. `plugin_get_all` is the only registered list-shaped
+    // command and it takes no arguments. Its per-plugin sibling
+    // `plugin_runtime_snapshot` REQUIRES a `pluginId` and returns a single
+    // record, so invoking it here could only ever reject.
+    it("invokes plugin_get_all with no arguments and never plugin_runtime_snapshot", async () => {
+      mockGetState.mockReturnValue(storeWith({}))
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_get_all")
+      expect(mockInvoke).toHaveBeenCalledTimes(1)
+      // No second positional argument: a payload object would mean the call
+      // was written against some other command's signature.
+      expect(mockInvoke.mock.calls[0]).toHaveLength(1)
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_runtime_snapshot", expect.anything())
       expect(mockInvoke).not.toHaveBeenCalledWith("plugin_runtime_snapshot")
-      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_get_all")
+    })
+
+    // RESPONSE SHAPE. A flat, snake_case snapshot list — not a wrapper object
+    // with a nested `plugin` and not camelCase keys.
+    it("reads the snake_case snapshot fields and surfaces a native error status", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([
+        snapshot({ status: "error", last_error: "wasm trap in activate()" }),
+      ])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).toHaveBeenCalledWith("ledger.plugin", "wasm trap in activate()")
+    })
+
+    it("falls back to a generic message when last_error is null", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      // `last_error` has no skip_serializing_if on the Rust side, so it is
+      // always present on the wire — as null whenever nothing recorded it.
+      mockInvoke.mockResolvedValue([snapshot({ status: "error", last_error: null })])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).toHaveBeenCalledWith(
+        "ledger.plugin",
+        "Plugin runtime reported an error"
+      )
+    })
+
+    it("ignores a camelCase payload rather than reading a mis-keyed id", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([
+        { pluginId: "ledger.plugin", status: "error", lastError: "boom" },
+      ])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).not.toHaveBeenCalled()
+    })
+
+    it("ignores the legacy wrapper shape with a nested plugin manifest", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      // The shape this call used to declare. Rust has never returned it.
+      mockInvoke.mockResolvedValue([
+        { plugin: { manifest: createManifest("ledger.plugin"), status: "error" } },
+      ])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).not.toHaveBeenCalled()
+    })
+
+    // The ledger has no manifest, so an id the store never scanned cannot be
+    // discovered here — and `setPluginStatus`/`setPluginError` would spread an
+    // undefined record into a manifest-less ghost entry.
+    it("skips ledger ids the store does not know", async () => {
+      const store = storeWith({})
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([snapshot({ status: "error", last_error: "boom" })])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).not.toHaveBeenCalled()
+      expect(store.setPluginStatus).not.toHaveBeenCalled()
+    })
+
+    // REGRESSION GUARD. The ledger survives a renderer reload while the Rust
+    // host process stays alive, so it can still say "enabled" for a plugin
+    // that has no instance in the fresh JS context. Adopting that would strand
+    // the plugin in BOTH restore paths: `restorePluginStates()` only enables
+    // plugins still marked `installed`, and `handleActivationEvent()` skips
+    // anything already marked `enabled`.
+    it.each(["enabled", "loaded", "suspended", "enabling", "loading", "updating"])(
+      "never adopts the live-claiming status %s",
+      async (status) => {
+        const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+        mockGetState.mockReturnValue(store)
+        mockCanUseTauriInvoke.mockReturnValue(true)
+        mockInvoke.mockResolvedValue([snapshot({ status })])
+
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+        await manager.syncRuntimeState()
+
+        expect(store.setPluginStatus).not.toHaveBeenCalled()
+        expect(store.setPluginError).not.toHaveBeenCalled()
+      }
+    )
+
+    // `disabled` restates the persisted lifecycle intent that
+    // `restorePluginStates()` already reads directly; a stale ledger value
+    // could only wrongly suppress a legitimate restore.
+    it("does not adopt a disabled status over the persisted lifecycle intent", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([snapshot({ status: "disabled" })])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginStatus).not.toHaveBeenCalled()
+    })
+
+    // `status` is a free-form String in Rust (`upsert_status` preserves any
+    // value verbatim), so it must never reach a typed store setter unchecked.
+    it("ignores an unrecognized free-form status string", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([snapshot({ status: "not-a-real-status" })])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginStatus).not.toHaveBeenCalled()
+      expect(store.setPluginError).not.toHaveBeenCalled()
+    })
+
+    it("does not re-report an error the store already reflects", async () => {
+      const errored = { ...installedPlugin("ledger.plugin"), status: "error" }
+      const store = storeWith({ "ledger.plugin": errored })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([snapshot({ status: "error", last_error: "boom" })])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).not.toHaveBeenCalled()
+    })
+
+    it("tolerates a non-array payload without throwing", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue({ plugins: [] })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.syncRuntimeState()).resolves.toBeUndefined()
+      expect(store.setPluginError).not.toHaveBeenCalled()
+    })
+
+    it("swallows a rejected invoke so cold start is never blocked", async () => {
+      const store = storeWith({ "ledger.plugin": installedPlugin("ledger.plugin") })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockRejectedValue(new Error("command not found"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await expect(manager.syncRuntimeState()).resolves.toBeUndefined()
+    })
+
+    it("applies every error entry across a multi-plugin ledger", async () => {
+      const store = storeWith({
+        "ledger.a": installedPlugin("ledger.a"),
+        "ledger.b": installedPlugin("ledger.b"),
+      })
+      mockGetState.mockReturnValue(store)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      mockInvoke.mockResolvedValue([
+        snapshot({ plugin_id: "ledger.a", status: "error", last_error: "a failed" }),
+        snapshot({ plugin_id: "ledger.b", status: "enabled" }),
+        snapshot({ plugin_id: "ledger.unknown", status: "error", last_error: "ghost" }),
+      ])
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      await manager.syncRuntimeState()
+
+      expect(store.setPluginError).toHaveBeenCalledTimes(1)
+      expect(store.setPluginError).toHaveBeenCalledWith("ledger.a", "a failed")
     })
   })
 

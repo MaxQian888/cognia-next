@@ -110,7 +110,7 @@ describe("web-tools (built-in)", () => {
   it("registers web_search + web_fetch result cards on activate and disposes them on deactivate", async () => {
     const { ctx } = makeCtx()
     const dispose = jest.fn()
-    const registerToolResultRenderer = jest.fn(() => dispose)
+    const registerToolResultRenderer = jest.fn((_tool: string, _render: unknown) => dispose)
     ;(ctx as { toolResult?: unknown }).toolResult = { registerToolResultRenderer }
     await webTools.activate?.(ctx)
     expect(registerToolResultRenderer.mock.calls.map((c) => c[0]).sort()).toEqual([

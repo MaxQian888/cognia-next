@@ -77,6 +77,7 @@ import { cn } from "@/lib/utils"
 import { HookGroupEditor, validateMatcher } from "./hook-group-editor"
 import { validateHandler } from "./hook-handler-form"
 import { BuiltinHooksCard } from "./builtin-hooks-card"
+import { HookCoverageNote } from "./hook-coverage-note"
 import { hookRuntimeCapability } from "@/lib/claude/hooks/capabilities"
 import { createLogger } from "@cognia/logging"
 import {
@@ -359,6 +360,8 @@ export function HooksSection({ cwd, runtimeCapabilities = DEFAULT_RUNTIME_CAPABI
           <RelatedSectionsStrip current="hooks" targets={CLAUDE_CODE_RELATED} />
 
           <BuiltinHooksCard />
+
+          <HookCoverageNote />
 
           <Tabs value={scope} onValueChange={(v) => requestScope(v as Scope)}>
             <TabsList>

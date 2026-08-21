@@ -161,3 +161,74 @@ describe("HookGroupEditor", () => {
     expect(onRemove).toHaveBeenCalled()
   })
 })
+
+describe("agents selector field", () => {
+  const base: HookGroup = { matcher: "Bash", hooks: [] }
+
+  it("writes the selector onto the group", () => {
+    const onChange = jest.fn()
+    render(<HookGroupEditor value={base} onChange={onChange} onRemove={() => {}} />)
+
+    fireEvent.change(screen.getByTestId("group-agents"), { target: { value: "teammate" } })
+    expect(onChange).toHaveBeenCalledWith({ ...base, agents: "teammate" })
+  })
+
+  it("clears back to undefined rather than an empty string", () => {
+    // An empty string would be persisted into settings.json as a no-op key.
+    const onChange = jest.fn()
+    render(
+      <HookGroupEditor
+        value={{ ...base, agents: "teammate" }}
+        onChange={onChange}
+        onRemove={() => {}}
+      />
+    )
+    fireEvent.change(screen.getByTestId("group-agents"), { target: { value: "" } })
+    expect(onChange).toHaveBeenCalledWith({ ...base, agents: undefined })
+  })
+
+  it("leaves the matcher untouched — the two selectors are independent", () => {
+    const onChange = jest.fn()
+    render(
+      <HookGroupEditor
+        value={{ matcher: "Bash", agents: "teammate", hooks: [] }}
+        onChange={onChange}
+        onRemove={() => {}}
+      />
+    )
+    fireEvent.change(screen.getByTestId("group-matcher"), { target: { value: "Read" } })
+    expect(onChange).toHaveBeenCalledWith({ matcher: "Read", agents: "teammate", hooks: [] })
+  })
+
+  it("warns about Claude Code portability only while a selector is set", () => {
+    const { rerender } = render(
+      <HookGroupEditor value={base} onChange={() => {}} onRemove={() => {}} />
+    )
+    // No selector ⇒ nothing to warn about; the group is portable as-is.
+    expect(screen.queryByTestId("group-agents-portability")).toBeNull()
+
+    rerender(
+      <HookGroupEditor
+        value={{ ...base, agents: "teammate" }}
+        onChange={() => {}}
+        onRemove={() => {}}
+      />
+    )
+    expect(screen.getByTestId("group-agents-portability")).toBeInTheDocument()
+  })
+
+  it("surfaces an invalid selector the same way an invalid matcher is surfaced", () => {
+    render(
+      <HookGroupEditor value={{ ...base, agents: "[" }} onChange={() => {}} onRemove={() => {}} />
+    )
+    expect(screen.getByTestId("group-agents-error")).toBeInTheDocument()
+    expect(screen.getByTestId("group-agents")).toHaveAttribute("aria-invalid", "true")
+  })
+
+  it("lists every agent kind in the hint so the domain is discoverable", () => {
+    render(<HookGroupEditor value={base} onChange={() => {}} onRemove={() => {}} />)
+    // The mocked translator echoes the interpolation vars.
+    expect(screen.getByText(/agentsHint/)).toHaveTextContent("teammate")
+    expect(screen.getByText(/agentsHint/)).toHaveTextContent("subagent")
+  })
+})

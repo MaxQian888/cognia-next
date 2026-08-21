@@ -64,7 +64,10 @@ describe("VS Code host-neutral runtime handlers", () => {
     configureVscodeRuntimeHandlersForTesting(invokeSidecar)
     configureRpcDispatcher({
       listen: async () => () => {},
-      sendResponse: async (pluginId, raw) => {
+      // Three parameters, not two: the real `SendResponseFn` is
+      // `(pluginId, generation, responseJson)`, so the two-parameter form was
+      // JSON-parsing the generation string as if it were the frame.
+      sendResponse: async (pluginId, _generation, raw) => {
         responses.push({ pluginId, frame: JSON.parse(raw) as Record<string, unknown> })
       },
     })

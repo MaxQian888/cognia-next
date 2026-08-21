@@ -1,18 +1,23 @@
 import { dispatchSubagent, runTeam } from "./dispatch"
-import { executeAgent } from "@/lib/ai/agent/agent-executor"
+import { runCompletionRail } from "@/lib/ai/agent/agent-executor"
 import { getSubagent } from "@/lib/plugin/registries/subagent-registry"
 import { agentTeamManager } from "@/lib/ai/agent/agent-team"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { PluginPiiError } from "@/lib/plugin/api/plugin-pii-gate"
 
+// ADR-0090: the dispatch path routes through the unified authority, which
+// consumes these rails directly — there is no `executeAgent` hop left to mock.
+// Jest runs with no Tauri and no headless host, so a legacy `toolsEnabled`
+// mapping resolves to the completion rail; that rail IS what a dispatched
+// subagent runs here, and asserting on it asserts on the real dispatch.
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
   __esModule: true,
-  executeAgent: jest.fn(),
+  runAgentRail: jest.fn(),
+  runCompletionRail: jest.fn(),
 }))
-// ADR-0090 Phase 6: the dispatch path routes through the unified authority.
-// Default delegates to the REAL wrapper (flag off ⇒ the executeAgent mock
-// above), so legacy assertions still hold; individual tests override it to
-// pin the surface and the execution-meta pass-through.
+// Default delegates to the REAL wrapper so the assertions below observe the
+// genuine resolution; individual tests override it to pin the surface and the
+// execution-meta pass-through.
 const mockRendererTurn = jest.fn()
 jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
   __esModule: true,
@@ -22,6 +27,14 @@ jest.mock("@/lib/ai/agent/execution/agent-execution-service", () => ({
 jest.mock("@/lib/plugin/registries/subagent-registry", () => ({
   __esModule: true,
   getSubagent: jest.fn(),
+}))
+// The System-B hook bridge. cognia-dispatched subagents run as their own
+// top-level session, so the SDK never emits SubagentStart/Stop for them —
+// dispatch synthesizes both, and these tests pin that.
+const mockFireAgentHook = jest.fn(async () => null)
+jest.mock("@/lib/ai/agent/external/agent-hooks", () => ({
+  __esModule: true,
+  fireAgentHook: (...a: unknown[]) => mockFireAgentHook(...(a as [])),
 }))
 jest.mock("@/lib/ai/agent/agent-team", () => ({
   __esModule: true,
@@ -61,7 +74,7 @@ jest.mock("@/lib/ai/agent/external/resolve-acp-mcp-servers", () => ({
   resolveAcpMcpServers: (...a: unknown[]) => externalResolveMcp(...a),
 }))
 
-const mockExecute = executeAgent as jest.MockedFunction<typeof executeAgent>
+const mockExecute = runCompletionRail as jest.MockedFunction<typeof runCompletionRail>
 const mockGetSubagent = getSubagent as jest.MockedFunction<typeof getSubagent>
 const mockTeam = agentTeamManager as unknown as {
   get: jest.Mock
@@ -142,17 +155,19 @@ describe("dispatchSubagent", () => {
     })
   })
 
-  it("omits execution meta from the result when the turn ran without it (flag off)", async () => {
+  it("always carries the resolved execution meta on the result", async () => {
+    // This used to assert the opposite: with the resolver behind a default-off
+    // flag, a dispatched subagent came back with no runtime/route at all, so a
+    // plugin could not tell what had executed its subagent. The unified service
+    // is now the only path, and it stamps every result.
     const res = await dispatchSubagent(subagent, "go")
-    expect(res).not.toHaveProperty("runtime")
-    expect(res).not.toHaveProperty("routeKind")
-    expect(res).not.toHaveProperty("degradedReason")
-    expect(res).not.toHaveProperty("delegationMode")
+    expect(res.runtime).toBe("claude-agent-sdk")
+    expect(res.routeKind).toBe("direct")
+    expect(res.delegationMode).toBe("native")
   })
 
-  it("classifies the delegation mode at runtime under the resolver flag (ADR-0090 P7)", async () => {
-    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
-    try {
+  it("classifies the delegation mode at runtime (ADR-0090 P7)", async () => {
+    {
       mockRendererTurn.mockResolvedValue({
         text: "ok",
         channel: "sidecar",
@@ -169,8 +184,6 @@ describe("dispatchSubagent", () => {
       const orchestrated = await dispatchSubagent({ ...subagent, provider: "openai" }, "go")
       expect(orchestrated.delegationMode).toBe("orchestrated")
       expect(orchestrated.delegationReasons).toContain("runtime-differs")
-    } finally {
-      delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     }
   })
 
@@ -527,5 +540,43 @@ describe("runTeam", () => {
     mockTeam.get.mockReturnValueOnce({ id: "t1" }).mockReturnValueOnce(undefined)
     const res = await runTeam("t1")
     expect(res.status).toBe("unknown")
+  })
+})
+
+describe("dispatchSubagent — synthesized SubagentStart / SubagentStop", () => {
+  beforeEach(() => mockFireAgentHook.mockClear())
+
+  it("brackets the run with both events, carrying a subagent identity", async () => {
+    await dispatchSubagent(subagent, "review this PR")
+
+    const events = mockFireAgentHook.mock.calls.map((c) => (c as unknown[])[0])
+    expect(events).toEqual(["SubagentStart", "SubagentStop"])
+
+    const [, startCtx, startOpts] = mockFireAgentHook.mock.calls[0] as unknown as [
+      string,
+      { agentKind?: string; agentRef?: string },
+      { payload?: Record<string, unknown> },
+    ]
+    // `agents: "subagent"` must scope to exactly these turns.
+    expect(startCtx.agentKind).toBe("subagent")
+    expect(startCtx.agentRef).toBe(subagent.id)
+    // `agent_type` mirrors what the SDK puts on its OWN subagent hook inputs,
+    // so a matcher written for SDK-Task subagents also matches these.
+    expect(startOpts.payload).toMatchObject({ agent_type: subagent.id })
+  })
+
+  it("correlates both events to the same run id", async () => {
+    const res = await dispatchSubagent(subagent, "go")
+    const payloads = mockFireAgentHook.mock.calls.map(
+      (c) => (c as unknown[])[2] as { payload?: { agent_id?: string } }
+    )
+    expect(payloads[0]!.payload!.agent_id).toBe(res.runId)
+    expect(payloads[1]!.payload!.agent_id).toBe(res.runId)
+  })
+
+  it("does not fire either event when the dispatch is refused", async () => {
+    // A refused dispatch never ran, so an observer must not see a bracket.
+    await dispatchSubagent({ ...subagent, disabled: true }, "go").catch(() => {})
+    expect(mockFireAgentHook).not.toHaveBeenCalled()
   })
 })

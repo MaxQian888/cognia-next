@@ -1,4 +1,12 @@
-import { createImportAPI, clearCustomImporters, getCustomImporterOwnersForFile } from "./import-api"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
+import {
+  createImportAPI,
+  clearCustomImporters,
+  clearCustomImportersByPlugin,
+  getCustomImporterOwnersForFile,
+} from "./import-api"
 import { getSessionSource } from "@/lib/session-import/registry"
 import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
 import {
@@ -6,6 +14,7 @@ import {
   detectFormat,
   getImporterLabel,
   importChatExport,
+  unregisterImportersByPlugin,
 } from "@/lib/data/import-registry"
 
 jest.mock("../core/logger", () => ({
@@ -226,5 +235,81 @@ describe("createImportAPI", () => {
         .map((i) => i.id)
         .sort()
     ).toEqual(["a:same"])
+  })
+})
+
+describe("plugin disable teardown", () => {
+  beforeEach(() => {
+    clearCustomImporters()
+    __resetDynamicImportersForTesting()
+  })
+
+  it("clearCustomImportersByPlugin drops only that plugin's importers", () => {
+    const a = createImportAPI("a")
+    const b = createImportAPI("b")
+    for (const [api, id] of [
+      [a, "one"],
+      [a, "two"],
+      [b, "one"],
+    ] as const) {
+      api.registerImporter({
+        id,
+        name: id,
+        description: id,
+        format: id,
+        extensions: ["zip"],
+        import: () => ({ success: true }),
+      })
+    }
+
+    expect(clearCustomImportersByPlugin("a")).toBe(2)
+    expect(a.getCustomImporters()).toEqual([])
+    expect(b.getCustomImporters().map((i) => i.id)).toEqual(["b:one"])
+    // Idempotent — a second disable pass must not throw or double-count.
+    expect(clearCustomImportersByPlugin("a")).toBe(0)
+  })
+
+  it("a swept plugin no longer claims attachment bytes", () => {
+    const api = createImportAPI("leaky")
+    api.registerImporter({
+      id: "slack",
+      name: "Slack export",
+      description: "slack",
+      format: "slack",
+      extensions: ["zip"],
+      mimeType: "application/zip",
+      import: () => ({ success: true }),
+    })
+    expect(getCustomImporterOwnersForFile("export.zip", "application/zip")).toEqual(["leaky"])
+
+    clearCustomImportersByPlugin("leaky")
+    // The real consequence of the missing sweep: `lib/chat/attachments/dispatch.ts`
+    // authorizes the raw bytes of a matching attachment to every owner this
+    // returns, so a disabled plugin must disappear from it.
+    expect(getCustomImporterOwnersForFile("export.zip", "application/zip")).toEqual([])
+  })
+
+  it("a swept plugin's chat importer stops being detected", async () => {
+    const api = createImportAPI("acme")
+    api.registerChatImporter<{ widget: true }>({
+      format: "widget",
+      label: "Widget export",
+      detect: (data: unknown): data is { widget: true } =>
+        (data as { widget?: boolean })?.widget === true,
+      parse: async () => [],
+    })
+    expect(detectFormat({ widget: true })).toBe("acme:widget")
+
+    unregisterImportersByPlugin("acme")
+    expect(detectFormat({ widget: true })).toBe("unknown")
+    await expect(importChatExport({ widget: true })).rejects.toThrow(/recognize/i)
+  })
+
+  it("the plugin manager's disable path calls both sweeps", () => {
+    // The functions were always correct; what was missing for both was the CALL
+    // SITE. Pin it, because nothing else fails when a disable sweep is dropped.
+    const manager = readFileSync(path.join(process.cwd(), "lib/plugin/core/manager.ts"), "utf8")
+    expect(manager).toContain("unregisterImportersByPlugin(pluginId)")
+    expect(manager).toContain("clearCustomImportersByPlugin(pluginId)")
   })
 })

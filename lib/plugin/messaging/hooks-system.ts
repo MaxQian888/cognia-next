@@ -32,6 +32,15 @@ import type {
 } from "@/types/plugin"
 import type { A2UISurfaceType } from "@/types/artifact/a2ui"
 import { usePluginStore } from "@/stores/plugin-runtime"
+import {
+  getPluginHookContribution,
+  listEnabledHookPlugins,
+  listHookContributors,
+  listRegisteredHookPlugins,
+  __resetHookRegistryForTesting,
+  registerPluginHookContribution,
+  unregisterPluginHookContribution,
+} from "@/lib/plugin/registries/hook-registry"
 import { loggers } from "../core/logger"
 import type {
   PluginHooksAll,
@@ -244,35 +253,40 @@ type HookName = keyof PluginHooks
  * session events, and command handling.
  */
 export class PluginLifecycleHooks {
-  private registeredHooks: Map<string, RegisteredHooks> = new Map()
-  private hookExecutionOrder: string[] = []
-
   // ===========================================================================
   // Registration
+  //
+  // Storage lives in `lib/plugin/registries/hook-registry.ts`. It used to be a
+  // class-private Map here while `PluginEventHooks` read the Zustand store —
+  // two stores, written together but read apart, with two different liveness
+  // rules. One registry now backs both dispatchers.
   // ===========================================================================
 
   registerHooks(pluginId: string, hooks: PluginHooks, priority: number = 0): void {
-    this.registeredHooks.set(pluginId, {
-      pluginId,
-      hooks,
-      priority,
-    })
-    this.updateExecutionOrder()
+    registerPluginHookContribution(pluginId, hooks as PluginHooksAll, priority)
   }
 
   unregisterHooks(pluginId: string): void {
-    this.registeredHooks.delete(pluginId)
-    this.updateExecutionOrder()
+    unregisterPluginHookContribution(pluginId)
   }
 
-  private updateExecutionOrder(): void {
-    this.hookExecutionOrder = Array.from(this.registeredHooks.entries())
-      .sort((a, b) => {
-        const priorityDiff = b[1].priority - a[1].priority
-        if (priorityDiff !== 0) return priorityDiff
-        return a[0].localeCompare(b[0])
-      })
-      .map(([id]) => id)
+  /** One plugin's registered hooks, ignoring enablement. */
+  private registered(pluginId: string): RegisteredHooks | undefined {
+    const entry = getPluginHookContribution(pluginId)
+    if (!entry) return undefined
+    return { pluginId, hooks: entry.hooks as PluginHooks, priority: entry.priority }
+  }
+
+  /**
+   * Enabled plugins in priority order. Previously an eagerly-maintained array
+   * with NO enabled filter, so a disabled plugin kept receiving every fan-out
+   * hook until it was fully unloaded. The explicit per-plugin dispatchers
+   * (`dispatchOnDisable` and friends) deliberately go through `registered()`
+   * instead, which ignores enablement — a plugin must still receive its own
+   * disable hook.
+   */
+  private get hookExecutionOrder(): string[] {
+    return listEnabledHookPlugins()
   }
 
   // ===========================================================================
@@ -280,70 +294,70 @@ export class PluginLifecycleHooks {
   // ===========================================================================
 
   async dispatchOnLoad(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onLoad) {
       await registered.hooks.onLoad()
     }
   }
 
   async dispatchOnEnable(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onEnable) {
       await registered.hooks.onEnable()
     }
   }
 
   async dispatchOnDisable(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onDisable) {
       await registered.hooks.onDisable()
     }
   }
 
   async dispatchOnUnload(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onUnload) {
       await registered.hooks.onUnload()
     }
   }
 
   async dispatchOnInstall(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onInstall) {
       await registered.hooks.onInstall()
     }
   }
 
   async dispatchOnUninstall(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onUninstall) {
       await registered.hooks.onUninstall()
     }
   }
 
   async dispatchOnUpdate(pluginId: string, info: PluginUpdateInfo): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onUpdate) {
       await registered.hooks.onUpdate(info)
     }
   }
 
   async dispatchOnSuspend(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onSuspend) {
       await registered.hooks.onSuspend()
     }
   }
 
   async dispatchOnResume(pluginId: string): Promise<void> {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onResume) {
       await registered.hooks.onResume()
     }
   }
 
   dispatchOnConfigChange(pluginId: string, config: Record<string, unknown>): void {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (registered?.hooks.onConfigChange) {
       registered.hooks.onConfigChange(config)
     }
@@ -355,7 +369,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnA2UISurfaceCreate(surfaceId: string, type: A2UISurfaceType): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onA2UISurfaceCreate) {
         try {
           registered.hooks.onA2UISurfaceCreate(surfaceId, type)
@@ -368,7 +382,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnA2UISurfaceDestroy(surfaceId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onA2UISurfaceDestroy) {
         try {
           registered.hooks.onA2UISurfaceDestroy(surfaceId)
@@ -381,7 +395,7 @@ export class PluginLifecycleHooks {
 
   async dispatchOnA2UIAction(action: PluginA2UIAction): Promise<void> {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onA2UIAction) {
         try {
           await registered.hooks.onA2UIAction(action)
@@ -394,7 +408,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnA2UIDataChange(change: PluginA2UIDataChange): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onA2UIDataChange) {
         try {
           registered.hooks.onA2UIDataChange(change)
@@ -411,7 +425,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnAgentStart(agentId: string, config: Record<string, unknown>): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentStart) {
         try {
           registered.hooks.onAgentStart(agentId, config)
@@ -424,7 +438,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnAgentStep(agentId: string, step: PluginAgentStep): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentStep) {
         try {
           registered.hooks.onAgentStep(agentId, step)
@@ -437,7 +451,7 @@ export class PluginLifecycleHooks {
 
   async dispatchOnAgentToolCall(agentId: string, tool: string, args: unknown): Promise<unknown> {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentToolCall) {
         try {
           const result = await registered.hooks.onAgentToolCall(agentId, tool, args)
@@ -454,7 +468,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnAgentComplete(agentId: string, result: unknown): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentComplete) {
         try {
           registered.hooks.onAgentComplete(agentId, result)
@@ -467,7 +481,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnAgentError(agentId: string, error: Error): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentError) {
         try {
           registered.hooks.onAgentError(agentId, error)
@@ -500,7 +514,7 @@ export class PluginLifecycleHooks {
   ): void {
     const sessionId = extractSessionIdFromPayload(payload)
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       const handler = registered?.hooks[name] as ((p: typeof payload) => void) | undefined
       if (!handler) continue
       queueMicrotask(() => {
@@ -584,7 +598,7 @@ export class PluginLifecycleHooks {
     let currentMessage = message
 
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onMessageSend) {
         try {
           currentMessage = await registered.hooks.onMessageSend(currentMessage)
@@ -601,7 +615,7 @@ export class PluginLifecycleHooks {
     let currentMessage = message
 
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onMessageReceive) {
         try {
           currentMessage = await registered.hooks.onMessageReceive(currentMessage)
@@ -616,7 +630,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnMessageRender(message: PluginMessage): React.ReactNode | null {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onMessageRender) {
         try {
           const result = registered.hooks.onMessageRender(message)
@@ -637,7 +651,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnSessionCreate(sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSessionCreate) {
         try {
           registered.hooks.onSessionCreate(sessionId)
@@ -650,7 +664,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnSessionSwitch(sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSessionSwitch) {
         try {
           registered.hooks.onSessionSwitch(sessionId)
@@ -663,7 +677,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnSessionDelete(sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSessionDelete) {
         try {
           registered.hooks.onSessionDelete(sessionId)
@@ -680,7 +694,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnMessageDelete(messageId: string, sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onMessageDelete) {
         try {
           registered.hooks.onMessageDelete(messageId, sessionId)
@@ -698,7 +712,7 @@ export class PluginLifecycleHooks {
     sessionId: string
   ): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onMessageEdit) {
         try {
           registered.hooks.onMessageEdit(messageId, oldContent, newContent, sessionId)
@@ -715,7 +729,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnSessionRename(sessionId: string, oldTitle: string, newTitle: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSessionRename) {
         try {
           registered.hooks.onSessionRename(sessionId, oldTitle, newTitle)
@@ -728,7 +742,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnSessionClear(sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSessionClear) {
         try {
           registered.hooks.onSessionClear(sessionId)
@@ -745,7 +759,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnChatRegenerate(messageId: string, sessionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onChatRegenerate) {
         try {
           registered.hooks.onChatRegenerate(messageId, sessionId)
@@ -763,7 +777,7 @@ export class PluginLifecycleHooks {
     previousModel?: string
   ): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onModelSwitch) {
         try {
           registered.hooks.onModelSwitch(provider, model, previousProvider, previousModel)
@@ -776,7 +790,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnChatModeSwitch(sessionId: string, newMode: string, previousMode: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onChatModeSwitch) {
         try {
           registered.hooks.onChatModeSwitch(sessionId, newMode, previousMode)
@@ -793,7 +807,7 @@ export class PluginLifecycleHooks {
     previousPrompt?: string
   ): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onSystemPromptChange) {
         try {
           registered.hooks.onSystemPromptChange(sessionId, newPrompt, previousPrompt)
@@ -810,7 +824,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnAgentPlanCreate(agentId: string, tasks: { id: string; description: string }[]): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentPlanCreate) {
         try {
           registered.hooks.onAgentPlanCreate(agentId, tasks)
@@ -828,7 +842,7 @@ export class PluginLifecycleHooks {
     success: boolean
   ): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onAgentPlanStepComplete) {
         try {
           registered.hooks.onAgentPlanStepComplete(agentId, taskId, result, success)
@@ -845,7 +859,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnScheduledTaskStart(taskId: string, executionId: string): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onScheduledTaskStart) {
         try {
           registered.hooks.onScheduledTaskStart(taskId, executionId)
@@ -862,7 +876,7 @@ export class PluginLifecycleHooks {
     result: { success: boolean; output?: Record<string, unknown>; error?: string }
   ): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onScheduledTaskComplete) {
         try {
           registered.hooks.onScheduledTaskComplete(taskId, executionId, result)
@@ -875,7 +889,7 @@ export class PluginLifecycleHooks {
 
   dispatchOnScheduledTaskError(taskId: string, executionId: string, error: Error): void {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onScheduledTaskError) {
         try {
           registered.hooks.onScheduledTaskError(taskId, executionId, error)
@@ -892,7 +906,7 @@ export class PluginLifecycleHooks {
 
   async dispatchOnCommand(command: string, args: string[]): Promise<boolean> {
     for (const pluginId of this.hookExecutionOrder) {
-      const registered = this.registeredHooks.get(pluginId)
+      const registered = this.registered(pluginId)
       if (registered?.hooks.onCommand) {
         try {
           const handled = await registered.hooks.onCommand(command, args)
@@ -912,7 +926,7 @@ export class PluginLifecycleHooks {
   // ===========================================================================
 
   hasHook(pluginId: string, hookName: HookName): boolean {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     return registered?.hooks[hookName] !== undefined
   }
 
@@ -922,20 +936,15 @@ export class PluginLifecycleHooks {
    * no plugin is wired. Distinct from the per-plugin `hasHook(pluginId, …)`.
    */
   hasAnyHook(hookName: HookName): boolean {
-    for (const reg of this.registeredHooks.values()) {
-      if (reg.hooks[hookName] !== undefined) return true
-    }
-    return false
+    return listHookContributors(hookName as keyof PluginHooksAll).length > 0
   }
 
   getPluginsWithHook(hookName: HookName): string[] {
-    return Array.from(this.registeredHooks.entries())
-      .filter(([_, reg]) => reg.hooks[hookName] !== undefined)
-      .map(([id]) => id)
+    return listHookContributors(hookName as keyof PluginHooksAll)
   }
 
   getRegisteredPlugins(): string[] {
-    return Array.from(this.registeredHooks.keys())
+    return listRegisteredHookPlugins()
   }
 
   /**
@@ -944,7 +953,7 @@ export class PluginLifecycleHooks {
    * see which lifecycle hooks a plugin contributes, not just filter by them.
    */
   getHooksByPlugin(pluginId: string): string[] {
-    const registered = this.registeredHooks.get(pluginId)
+    const registered = this.registered(pluginId)
     if (!registered) return []
     return Object.keys(registered.hooks).filter(
       (name) => registered.hooks[name as HookName] !== undefined
@@ -952,8 +961,7 @@ export class PluginLifecycleHooks {
   }
 
   clear(): void {
-    this.registeredHooks.clear()
-    this.hookExecutionOrder = []
+    __resetHookRegistryForTesting()
   }
 }
 
@@ -990,21 +998,21 @@ export class PluginEventHooks {
    * Get all plugins with hooks sorted by priority
    */
   private getPluginsByPriority(hookName: keyof PluginHooksAll): string[] {
-    const store = usePluginStore.getState()
-    const pluginsWithHook: { id: string; priority: HookPriority }[] = []
-
-    for (const [pluginId, plugin] of Object.entries(store.plugins)) {
-      const hooks = plugin.hooks as PluginHooksAll | undefined
-      if (plugin.status === "enabled" && hooks?.[hookName]) {
-        pluginsWithHook.push({
-          id: pluginId,
-          priority: this.getPriority(pluginId, hookName),
-        })
-      }
-    }
-
-    return pluginsWithHook
-      .sort((a, b) => priorityToNumber(b.priority) - priorityToNumber(a.priority))
+    // Reads the SAME registry `PluginLifecycleHooks` writes to. This used to
+    // read the Zustand plugin store directly while the other dispatcher read a
+    // class-private Map, so the two could disagree about which plugins were
+    // live. `listHookContributors` already applies the shared enabled rule and
+    // orders by registration priority; the per-hook overrides recorded via
+    // `setPriority` are layered on top of that here.
+    const contributors = listHookContributors(hookName)
+    return contributors
+      .map((id) => ({ id, priority: this.getPriority(id, hookName) }))
+      .sort((a, b) => {
+        const byPriority = priorityToNumber(b.priority) - priorityToNumber(a.priority)
+        return byPriority !== 0
+          ? byPriority
+          : contributors.indexOf(a.id) - contributors.indexOf(b.id)
+      })
       .map((p) => p.id)
   }
 

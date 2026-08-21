@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select"
 import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { cn } from "@/lib/utils"
+import { DORMANT_HOOK_HANDLER_FIELDS } from "@/lib/claude/hooks"
 import type { HookHandler, HookHandlerType } from "@/lib/claude/hooks"
 import { knownHookRuntimeCapabilities } from "@/lib/claude/hooks/runtime-capabilities"
 
@@ -47,6 +48,8 @@ export function emptyHandlerForType(type: HookHandlerType): HookHandler {
     case "prompt":
     case "agent":
       return { type, prompt: "" }
+    case "plugin":
+      return { type, pluginId: "", hookId: "" }
   }
 }
 
@@ -63,6 +66,13 @@ export function HookHandlerForm({
   }
 
   const error = validateHandler(value)
+  // Fields this handler carries that no runner executes. They only appear on a
+  // handler that came from a hand-edited settings.json (or a config pasted from
+  // Claude Code), so the notice shows exactly when it is actionable rather than
+  // as permanent boilerplate. See `DORMANT_HOOK_HANDLER_FIELDS`.
+  const inertFields = DORMANT_HOOK_HANDLER_FIELDS.filter(
+    (f) => (value as Record<string, unknown>)[f] !== undefined
+  )
 
   return (
     <div
@@ -100,6 +110,16 @@ export function HookHandlerForm({
           <Trash2Icon className="size-3.5" />
         </Button>
       </div>
+
+      {inertFields.length > 0 ? (
+        <p
+          className="flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-500"
+          data-testid="handler-inert-fields"
+        >
+          <InfoIcon className="mt-0.5 size-3 shrink-0" />
+          {t("inertFields", { fields: inertFields.join(", ") })}
+        </p>
+      ) : null}
 
       {value.type === "command" ? (
         <div className="space-y-1">
@@ -198,6 +218,30 @@ export function HookHandlerForm({
             />
           </div>
         </>
+      ) : value.type === "plugin" ? (
+        <>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("pluginIdLabel")}</Label>
+            <Input
+              value={value.pluginId}
+              onChange={(e) => onChange({ ...value, pluginId: e.target.value })}
+              placeholder={t("pluginIdPlaceholder")}
+              className="font-mono text-xs"
+              data-testid="handler-plugin-id"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("hookIdLabel")}</Label>
+            <Input
+              value={value.hookId}
+              onChange={(e) => onChange({ ...value, hookId: e.target.value })}
+              placeholder={t("hookIdPlaceholder")}
+              className="font-mono text-xs"
+              data-testid="handler-hook-id"
+            />
+            <p className="text-[11px] text-muted-foreground">{t("pluginHint")}</p>
+          </div>
+        </>
       ) : (
         <>
           <div className="space-y-1">
@@ -267,6 +311,8 @@ export function validateHandler(
   | "serverRequired"
   | "toolRequired"
   | "promptRequired"
+  | "pluginIdRequired"
+  | "hookIdRequired"
   | null {
   if (h.type === "command") {
     return h.command.trim() === "" ? "commandRequired" : null
@@ -277,6 +323,12 @@ export function validateHandler(
   }
   if (h.type === "prompt" || h.type === "agent") {
     return h.prompt.trim() ? null : "promptRequired"
+  }
+  if (h.type === "plugin") {
+    // Both halves are load-bearing: a wrong id fails OPEN and silently, so the
+    // save gate is the only place a typo can still be caught.
+    if (!h.pluginId.trim()) return "pluginIdRequired"
+    return h.hookId.trim() ? null : "hookIdRequired"
   }
   if (h.type !== "webhook") return null
   const url = h.url.trim()

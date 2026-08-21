@@ -39,6 +39,31 @@ jest.mock("@/stores/plugin-runtime", () => ({
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import {
+  registerPluginHookContribution,
+  __resetHookRegistryForTesting,
+} from "@/lib/plugin/registries/hook-registry"
+/**
+ * Seed the plugin runtime for a dispatch test.
+ *
+ * Hooks now live in ONE place (`lib/plugin/registries/hook-registry.ts`) rather
+ * than being written to the Zustand store and a class-private Map and read
+ * apart. The store mock still supplies each plugin's `status`, because that is
+ * where enablement genuinely lives and the registry reads it rather than
+ * mirroring it.
+ */
+function seedPlugins(state: {
+  plugins: Record<string, { status?: string; hooks?: unknown } | undefined>
+}) {
+  const getState = usePluginStore.getState as unknown as jest.Mock
+  getState.mockReturnValue(state)
+  __resetHookRegistryForTesting()
+  for (const [pluginId, row] of Object.entries(state.plugins)) {
+    if (row?.hooks) {
+      registerPluginHookContribution(pluginId, row.hooks as never)
+    }
+  }
+}
 
 describe("Plugin Hooks System", () => {
   describe("HookPriority enum", () => {
@@ -318,7 +343,7 @@ describe("hasAnyHook predicates", () => {
     beforeEach(() => {
       eventHooks = getPluginEventHooks()
       jest.clearAllMocks()
-      ;(usePluginStore.getState as jest.Mock).mockReturnValue({ plugins: {} })
+      seedPlugins({ plugins: {} })
     })
 
     it("is false when no plugin contributes the hook", () => {
@@ -326,7 +351,7 @@ describe("hasAnyHook predicates", () => {
     })
 
     it("is true when an enabled plugin contributes the hook", () => {
-      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+      seedPlugins({
         plugins: { p1: { status: "enabled", hooks: { onUserPromptSubmit: jest.fn() } } },
       })
       expect(eventHooks.hasAnyHook("onUserPromptSubmit")).toBe(true)
@@ -335,7 +360,7 @@ describe("hasAnyHook predicates", () => {
     })
 
     it("ignores disabled plugins (enabled-only, matching the dispatch path)", () => {
-      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+      seedPlugins({
         plugins: { p1: { status: "disabled", hooks: { onUserPromptSubmit: jest.fn() } } },
       })
       expect(eventHooks.hasAnyHook("onUserPromptSubmit")).toBe(false)
@@ -347,6 +372,11 @@ describe("hasAnyHook predicates", () => {
 
     beforeEach(() => {
       lifecycleHooks = new PluginLifecycleHooks()
+      // Reset the shared runtime: `hasAnyHook` is now enabled-filtered (it
+      // gates dispatch, and dispatch respects enablement), so a plugin row
+      // left "disabled" by a previous test would suppress the registration
+      // this test makes.
+      seedPlugins({ plugins: {} })
     })
 
     it("is false before any registration", () => {
@@ -363,6 +393,23 @@ describe("hasAnyHook predicates", () => {
       lifecycleHooks.registerHooks("p1", { onMessageReceive: (m) => m })
       lifecycleHooks.unregisterHooks("p1")
       expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(false)
+    })
+
+    it("ignores a registered-but-disabled plugin, like the dispatch path", () => {
+      // Previously this dispatcher had NO enabled check while the event
+      // dispatcher did, so a disabled plugin kept receiving fan-out hooks from
+      // one of the two and not the other. One registry, one rule.
+      // Seed FIRST: `seedPlugins` resets the registry, so registering before it
+      // would make this pass because the hook vanished, not because the plugin
+      // is disabled.
+      seedPlugins({ plugins: { p1: { status: "disabled" } } })
+      lifecycleHooks.registerHooks("p1", { onMessageReceive: (m) => m })
+      expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(false)
+
+      // Same registration, enabled ⇒ visible. Proves the status is what moved.
+      seedPlugins({ plugins: { p1: { status: "enabled" } } })
+      lifecycleHooks.registerHooks("p1", { onMessageReceive: (m) => m })
+      expect(lifecycleHooks.hasAnyHook("onMessageReceive")).toBe(true)
     })
   })
 })
@@ -685,7 +732,6 @@ describe("Hook Type Definitions", () => {
 
 describe("PluginEventHooks - timeout and new dispatchers", () => {
   let eventHooks: PluginEventHooks
-  const { usePluginStore } = jest.requireMock("@/stores/plugin-runtime")
 
   beforeEach(() => {
     eventHooks = new PluginEventHooks()
@@ -694,7 +740,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
   describe("executeHook timeout", () => {
     it("should not crash when hooks throw errors", () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "error-plugin": {
             status: "enabled",
@@ -715,7 +761,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should handle hooks that complete before timeout", async () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "fast-plugin": {
             status: "enabled",
@@ -733,7 +779,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
   describe("Pet dispatchers", () => {
     function withHooks(hooks: Record<string, unknown>) {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: { "pet-plugin": { status: "enabled", hooks } },
       })
     }
@@ -780,7 +826,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
   describe("Code Execution dispatchers", () => {
     it("should dispatch onCodeExecutionStart", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -795,7 +841,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should dispatch onCodeExecutionError", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -813,7 +859,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
   describe("MCP Server dispatchers", () => {
     it("should dispatch onMCPServerConnect", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -828,7 +874,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should dispatch onMCPServerDisconnect", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -843,7 +889,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should dispatch onMCPToolCall", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -858,7 +904,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should dispatch onMCPToolResult", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "test-plugin": {
             status: "enabled",
@@ -873,7 +919,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("should skip disabled plugins", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "disabled-plugin": {
             status: "disabled",
@@ -887,7 +933,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
 
     it("should handle plugin errors gracefully", () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "error-plugin": {
             status: "enabled",
@@ -916,14 +962,14 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     } as const
 
     it("returns allow + original req when no plugins are registered", async () => {
-      usePluginStore.getState.mockReturnValue({ plugins: {} })
+      seedPlugins({ plugins: {} })
       const out = await eventHooks.dispatchTerminalWillSpawn({ ...baseReq })
       expect(out.decision).toBe("allow")
       expect(out.req).toEqual({ ...baseReq })
     })
 
     it("returns allow when the only subscriber returns 'allow'", async () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "allow-plugin": {
             status: "enabled",
@@ -936,7 +982,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
 
     it("short-circuits to deny when any subscriber returns 'deny'", async () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           "deny-plugin": {
             status: "enabled",
@@ -949,7 +995,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
 
     it("merges mutations from a subscriber into the resolved request", async () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           mutator: {
             status: "enabled",
@@ -970,7 +1016,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
 
     it("treats undefined / void returns as allow", async () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           silent: {
             status: "enabled",
@@ -983,7 +1029,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
     })
 
     it("treats hook errors as allow (never wedges the dock)", async () => {
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           buggy: {
             status: "enabled",
@@ -1001,7 +1047,7 @@ describe("PluginEventHooks - timeout and new dispatchers", () => {
 
     it("dispatchTerminalLifecycle fans out without blocking", () => {
       const handler = jest.fn()
-      usePluginStore.getState.mockReturnValue({
+      seedPlugins({
         plugins: {
           audit: {
             status: "enabled",
@@ -1088,16 +1134,15 @@ describe("PluginLifecycleHooks - Team hook isolation (fire-and-forget)", () => {
 
 describe("PluginEventHooks - Workflow Node + Trigger Hooks", () => {
   const hooks = getPluginEventHooks()
-  const getState = usePluginStore.getState as jest.Mock
 
   function withHook(hookName: string, fn: jest.Mock) {
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: { "test-plugin": { status: "enabled", hooks: { [hookName]: fn } } },
     })
   }
 
   afterEach(() => {
-    getState.mockReturnValue({ plugins: {} })
+    seedPlugins({ plugins: {} })
   })
 
   it("dispatchWorkflowNodeStart calls the enabled plugin's hook", () => {
@@ -1132,10 +1177,9 @@ describe("PluginEventHooks - Workflow Node + Trigger Hooks", () => {
 
 describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
   const hooks = getPluginEventHooks()
-  const getState = usePluginStore.getState as jest.Mock
 
   afterEach(() => {
-    getState.mockReturnValue({ plugins: {} })
+    seedPlugins({ plugins: {} })
   })
 
   const inbound = {
@@ -1148,13 +1192,13 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
   }
 
   it("returns allow when no plugins are registered", async () => {
-    getState.mockReturnValue({ plugins: {} })
+    seedPlugins({ plugins: {} })
     const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
     expect(d).toEqual({ action: "allow" })
   })
 
   it("returns allow when the plugin returns nothing", async () => {
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: { p: { status: "enabled", hooks: { onConnectorInbound: () => undefined } } },
     })
     const d = await hooks.dispatchConnectorDecision("onConnectorInbound", inbound)
@@ -1163,7 +1207,7 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
 
   it("first block short-circuits", async () => {
     const later = jest.fn(() => ({ action: "transform", segments: [] }))
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: {
         a: {
           status: "enabled",
@@ -1177,7 +1221,7 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
   })
 
   it("transforms chain — last transform wins", async () => {
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: {
         a: {
           status: "enabled",
@@ -1204,7 +1248,7 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
   })
 
   it("a throwing plugin is treated as allow (fail-open for plugin errors)", async () => {
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: {
         a: {
           status: "enabled",
@@ -1222,7 +1266,7 @@ describe("PluginEventHooks - dispatchConnectorDecision (plugin⇄IM)", () => {
 
   it("dispatches the outbound hook with the outbound payload", async () => {
     const fn = jest.fn(() => ({ action: "allow" }))
-    getState.mockReturnValue({
+    seedPlugins({
       plugins: { p: { status: "enabled", hooks: { onConnectorOutbound: fn } } },
     })
     const outbound = {
@@ -1244,7 +1288,7 @@ describe("executeHook timer hygiene", () => {
   it("clears the timeout racer once the hook settles", async () => {
     jest.useFakeTimers()
     try {
-      ;(usePluginStore.getState as jest.Mock).mockReturnValue({
+      seedPlugins({
         plugins: {
           fast: {
             status: "enabled",

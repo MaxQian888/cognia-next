@@ -81,6 +81,7 @@ export { createMessagePartAPI, purgeMessagePartRenderersForPlugin } from "./mess
 export { createToolResultAPI, purgeToolResultRenderersForPlugin } from "./tool-result-api"
 export { createGitAPI, NoActiveRepoError } from "./git-api"
 export { createGoalAPI, NoJudgeModelError } from "./goal-api"
+export { createHooksAPI } from "./hooks-api"
 export { createPlanAPI, NoPlannerModelError } from "./plan-api"
 export { createMemoryAPI } from "./memory-api"
 export { createTeamAPI } from "./team-api"
@@ -155,6 +156,7 @@ export type {
   PluginGitConflictResolution,
 } from "./git-api"
 export type { PluginGoalAPI, PluginGoalCreateInput } from "./goal-api"
+export type { PluginHooksAPI, PluginHookBinding } from "./hooks-api"
 export type {
   PluginMemoryAPI,
   PluginMemoryListFilter,

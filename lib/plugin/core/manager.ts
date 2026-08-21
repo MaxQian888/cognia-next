@@ -24,6 +24,7 @@ import type {
   PluginTool,
   PluginToolContext,
   PluginRuntimeProfile,
+  PluginStatus,
   PluginVerificationAction,
   PluginVerificationDiagnostic,
   PluginVerificationSnapshot,
@@ -329,19 +330,56 @@ interface DiscoveredPlugin {
   descriptor?: ExtensionDescriptor
 }
 
-interface RuntimePluginState {
-  manifest: PluginManifest
-  status: Plugin["status"]
-  path: string
-  source?: PluginSource
-  installRootKind?: PluginInstallRootKind
-  compatibilityDiagnostics?: ExtensionCompatibilityDiagnostic[]
-  config?: Record<string, unknown>
+/**
+ * Wire shape of one entry from `plugin_get_all` / `plugin_runtime_snapshot`,
+ * mirroring the Rust `PluginRuntimeSnapshot`
+ * (crates/cognia-plugin-runtime/src/lib.rs).
+ *
+ * The struct carries no `serde(rename_all)`, so the fields stay **snake_case**
+ * on the wire, and the two `Option` fields have no `skip_serializing_if`, so
+ * they are always present (as `null`). `status` is a free-form `String` on the
+ * Rust side — validate it with `isPluginStatus` before handing it to a typed
+ * store setter. Deliberately minimal: TS owns all the rich metadata, so there
+ * is no manifest, path, or source here to discover a plugin from.
+ */
+interface PluginRuntimeSnapshot {
+  plugin_id: string
+  version: string
+  status: string
+  last_error: string | null
+  loaded_at: string | null
+  install_path: string
 }
 
-interface RuntimePluginSnapshotEntry {
-  plugin: RuntimePluginState
-  grantedPermissions?: string[]
+/**
+ * Every `PluginStatus`, as a keyed record rather than an array.
+ *
+ * The record shape is the point: `Record<PluginStatus, true>` makes a member
+ * added to the union a compile error here, whereas `readonly PluginStatus[]`
+ * only asks that the entries *be* statuses and says nothing about covering
+ * them. Under the array, a new status would have narrowed to `false` in
+ * `isPluginStatus` and `reconcileWithRuntimeLedger` would have silently skipped
+ * every plugin the native runtime reported in it — a stale status in the store
+ * with no error anywhere.
+ */
+const PLUGIN_STATUSES: Record<PluginStatus, true> = {
+  discovered: true,
+  installed: true,
+  loading: true,
+  loaded: true,
+  enabling: true,
+  enabled: true,
+  disabling: true,
+  disabled: true,
+  suspended: true,
+  unloading: true,
+  error: true,
+  updating: true,
+}
+
+/** Narrow the runtime ledger's free-form status string to the typed union. */
+function isPluginStatus(value: unknown): value is PluginStatus {
+  return typeof value === "string" && Object.hasOwn(PLUGIN_STATUSES, value)
 }
 
 type PluginActivationRuntimeEvent =
@@ -4672,6 +4710,43 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Reconcile the plugin store against the native runtime's status ledger.
+   *
+   * The ledger is deliberately narrow, so this pass is too. Rust returns
+   * `PluginRuntimeSnapshot { plugin_id, version, status, last_error,
+   * loaded_at, install_path }` (crates/cognia-plugin-runtime/src/lib.rs) —
+   * there is no manifest and no source on it, so nothing can be *discovered*
+   * from here. `scanPlugins()` owns discovery and every caller
+   * (`initialize`, the rollback refresh, the updater refresh) runs it
+   * immediately before this, so a ledger id the store has never seen is
+   * skipped rather than materialized into a manifest-less ghost record.
+   *
+   * Two traps constrain what may be adopted:
+   *
+   * 1. The ledger is IN-MEMORY. `PluginRuntimeState::new` starts with an empty
+   *    map and nothing seeds it from disk (pinned by the Rust
+   *    `state_starts_empty` test), so on a genuine cold start this is a no-op.
+   *    It only carries entries inside a live host process — after a renderer
+   *    reload, and on the rollback/updater refresh paths.
+   * 2. Because of that reload case, a live-claiming status must never be
+   *    adopted. `restorePluginStates()` only enables plugins still marked
+   *    `installed`, and `handleActivationEvent()` skips anything already
+   *    marked `enabled` — so writing a stale `enabled` back into the store
+   *    after a reload would strand the plugin in BOTH restore paths: rendered
+   *    as enabled, never actually loaded into the fresh JS context. The JS
+   *    runtime, not the native ledger, is the authority on whether a plugin
+   *    instance exists here.
+   *
+   * What survives both constraints is `error`: a terminal, native-side
+   * failure the store would otherwise render as a healthy `installed` plugin.
+   * Adopting it cannot strand anything, because `enablePlugin()` gates on
+   * intent/dirty/already-enabled and never on `error`, so the user can still
+   * enable the plugin by hand. Every other ledger status either asserts
+   * liveness (unsafe per trap 2) or restates the persisted lifecycle intent
+   * that `restorePluginStates()` already reads directly — where a stale
+   * ledger value could only wrongly suppress a legitimate restore.
+   */
   async syncRuntimeState(): Promise<void> {
     const store = usePluginStore.getState()
 
@@ -4682,111 +4757,47 @@ export class PluginManager {
     }
 
     try {
-      const runtimeSnapshot = await invoke<RuntimePluginSnapshotEntry[]>("plugin_runtime_snapshot")
-      for (const entry of runtimeSnapshot) {
-        const runtime = entry.plugin
-        const validation = validatePluginManifest(runtime.manifest, {
-          governanceMode: this.pluginPointGovernanceMode,
-        })
-        if (!validation.valid) {
-          loggers.manager.warn(
-            `Invalid runtime manifest for ${runtime.manifest.id}:`,
-            validation.diagnostics || validation.errors
-          )
-          continue
-        }
-        const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
-          validation.diagnostics || []
-        )
-        const existing = store.plugins[runtime.manifest.id]
-        const projection = this.buildDiscoveryProjection(
-          runtime.manifest,
-          runtime.path,
-          runtime.source || "local",
-          [...capabilityContractDiagnostics, ...(runtime.compatibilityDiagnostics || [])],
-          this.collectObservedSources(existing),
-          runtime.installRootKind
-        )
-        store.discoverPlugin(runtime.manifest, projection.source, runtime.path, {
-          installRootKind: projection.installRootKind,
-          compatibilityDiagnostics: projection.compatibilityDiagnostics,
-          descriptor: projection.descriptor,
-        })
-
-        if (!existing) {
-          await store.installPlugin(runtime.manifest.id)
-        }
-
-        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
-
-        if (runtime.status) {
-          store.setPluginStatus(runtime.manifest.id, runtime.status)
-        }
-
-        if (runtime.config && typeof runtime.config === "object") {
-          store.setPluginConfig(runtime.manifest.id, runtime.config)
-        }
-
-        const permissionUnion = new Set<PluginPermission>(runtime.manifest.permissions || [])
-        for (const permission of entry.grantedPermissions || []) {
-          permissionUnion.add(permission as PluginPermission)
-        }
-        this.registerPluginPermissions(runtime.manifest.id, Array.from(permissionUnion))
+      // `plugin_get_all` is the list-shaped command (src-tauri/src/lib.rs
+      // generate_handler!); it takes no arguments. Its per-plugin sibling
+      // `plugin_runtime_snapshot` REQUIRES a `pluginId` and returns a single
+      // record, so it can never serve this pass.
+      const snapshots = await invoke<PluginRuntimeSnapshot[]>("plugin_get_all")
+      if (!Array.isArray(snapshots)) {
+        loggers.manager.warn("plugin_get_all returned a non-array payload; skipping runtime sync")
+        return
       }
-      return
-    } catch {
-      // Fall back to legacy endpoint.
-    }
 
-    try {
-      const runtimePlugins = await invoke<RuntimePluginState[]>("plugin_get_all")
-      for (const runtime of runtimePlugins) {
-        const validation = validatePluginManifest(runtime.manifest, {
-          governanceMode: this.pluginPointGovernanceMode,
-        })
-        if (!validation.valid) {
-          loggers.manager.warn(
-            `Invalid runtime manifest for ${runtime.manifest.id}:`,
-            validation.diagnostics || validation.errors
+      for (const snapshot of snapshots) {
+        // Wire shape is snake_case: the Rust struct carries no
+        // `serde(rename_all)`, so these field names are load-bearing.
+        const pluginId = snapshot?.plugin_id
+        if (!pluginId) continue
+
+        const existing = store.plugins[pluginId]
+        if (!existing) {
+          // No manifest on the ledger, so this cannot be discovered here.
+          loggers.manager.debug(
+            `[plugin:${pluginId}] present in the runtime ledger but not in the store; skipping`
           )
           continue
         }
-        const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
-          validation.diagnostics || []
-        )
-        const existing = store.plugins[runtime.manifest.id]
-        const projection = this.buildDiscoveryProjection(
-          runtime.manifest,
-          runtime.path,
-          runtime.source || "local",
-          [...capabilityContractDiagnostics, ...(runtime.compatibilityDiagnostics || [])],
-          this.collectObservedSources(existing),
-          runtime.installRootKind
-        )
-        store.discoverPlugin(runtime.manifest, projection.source, runtime.path, {
-          installRootKind: projection.installRootKind,
-          compatibilityDiagnostics: projection.compatibilityDiagnostics,
-          descriptor: projection.descriptor,
-        })
 
-        if (!existing) {
-          await store.installPlugin(runtime.manifest.id)
+        // `status` is a free-form String on the Rust side (`upsert_status`
+        // preserves any value verbatim), so it must be validated before it
+        // reaches a typed store setter.
+        if (!isPluginStatus(snapshot.status)) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] unrecognized runtime status "${snapshot.status}"; ignoring`
+          )
+          continue
         }
 
-        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
+        if (snapshot.status !== "error" || existing.status === "error") continue
 
-        if (runtime.status) {
-          store.setPluginStatus(runtime.manifest.id, runtime.status)
-        }
-
-        if (runtime.config && typeof runtime.config === "object") {
-          store.setPluginConfig(runtime.manifest.id, runtime.config)
-        }
-
-        this.registerPluginPermissions(runtime.manifest.id, runtime.manifest.permissions || [])
+        store.setPluginError(pluginId, snapshot.last_error || "Plugin runtime reported an error")
       }
     } catch (error) {
-      // Non-fatal in web mode or when backend command is unavailable.
+      // Non-fatal: the command is absent on hosts without the plugin runtime.
       loggers.manager.debug("Runtime state sync skipped:", error)
     }
   }
@@ -5542,6 +5553,23 @@ export class PluginManager {
     try {
       const { clearCustomAIProvidersByPlugin } = await import("@/lib/plugin/api/ai-provider-api")
       clearCustomAIProvidersByPlugin(pluginId)
+    } catch {
+      // best effort — early-teardown import failures must not abort cleanup
+    }
+
+    // Drop runtime-registered importers — the same asymmetry as the AI
+    // providers above, and the last two imperative registries with no bulk
+    // cleanup. `ctx.import.registerChatImporter` left the plugin's importer
+    // live inside `detectFormat` / `importChatExport`, and
+    // `ctx.import.registerImporter` left it matching filenames in
+    // `getCustomImporterOwnersForFile` — which is what authorizes chat
+    // ATTACHMENT BYTES to an importer's owner. Both survived disable and
+    // uninstall unless the plugin happened to call its own disposer.
+    try {
+      const { unregisterImportersByPlugin } = await import("@/lib/data/import-registry")
+      unregisterImportersByPlugin(pluginId)
+      const { clearCustomImportersByPlugin } = await import("@/lib/plugin/api/import-api")
+      clearCustomImportersByPlugin(pluginId)
     } catch {
       // best effort — early-teardown import failures must not abort cleanup
     }

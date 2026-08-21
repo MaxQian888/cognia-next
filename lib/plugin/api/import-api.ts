@@ -133,6 +133,26 @@ export function getCustomImporterOwnersForFile(filename: string, mimeType?: stri
   return [...owners]
 }
 
+/**
+ * Drop every custom importer registered by `pluginId`. Called from the plugin
+ * manager's disable path.
+ *
+ * Without it, `ctx.import.registerImporter` was the one imperative plugin
+ * registration in this file with no bulk cleanup: a disabled or uninstalled
+ * plugin kept matching filenames in {@link getCustomImporterOwnersForFile},
+ * which is what authorizes chat-attachment BYTES to an importer's owner
+ * (`lib/chat/attachments/dispatch.ts`). Returns the number removed.
+ */
+export function clearCustomImportersByPlugin(pluginId: string): number {
+  let removed = 0
+  for (const [importerId, registration] of [...customImporters.entries()]) {
+    if (registration.ownerPluginId !== pluginId) continue
+    customImporters.delete(importerId)
+    removed += 1
+  }
+  return removed
+}
+
 /** Clear all custom importers (test isolation). */
 export function clearCustomImporters(): void {
   customImporters.clear()
