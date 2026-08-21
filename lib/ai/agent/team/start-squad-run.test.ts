@@ -135,6 +135,36 @@ describe("startSquadRun — launching", () => {
     expect(h.runCalls[0]!.deps.notifierDeps).toEqual({ marker: true })
   })
 
+  it("reports the Squad's name so a caller need not import the store", async () => {
+    // Importing the agent-team store into a chat surface would drag the whole
+    // orchestration graph into its bundle.
+    const h = harness()
+    const res = await startSquadRun(
+      { squadId: "squad-1", goal: "g", origin: "chat", triggeredFrom: chatTrigger },
+      h.deps
+    )
+    expect(res.squadName).toBe("S")
+  })
+
+  it("omits the name when the Squad row carries none", async () => {
+    const h = harness()
+    h.deps.loadStore = async () => ({
+      getTeam: (id: string) => ({ id }),
+      getTeammates: () => [],
+      getTeamTasks: () => [],
+      updateTeam: () => undefined,
+      addMessage: () => undefined,
+      setTaskStatus: () => undefined,
+      updateTeammate: () => undefined,
+    })
+    const res = await startSquadRun(
+      { squadId: "squad-1", goal: "g", origin: "chat", triggeredFrom: chatTrigger },
+      h.deps
+    )
+    expect(res.started).toBe(true)
+    expect(res).not.toHaveProperty("squadName")
+  })
+
   it("leaves the stored objective alone for a blank goal", async () => {
     const h = harness()
     await startSquadRun(

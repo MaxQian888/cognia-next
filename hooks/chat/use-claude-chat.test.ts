@@ -3084,6 +3084,64 @@ describe("useClaudeChat — Squad dispatch", () => {
     expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "ok")
   })
 
+  it("leaves a record of the handoff in the conversation right away", async () => {
+    // A Squad run takes minutes. A conversation that shows nothing until it
+    // finishes reads as broken.
+    squadSession()
+    startSquadRunMock.mockResolvedValueOnce({
+      started: true,
+      runId: "run_team_abc123def456",
+      squadName: "Research Squad",
+    })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    chatState.replaceSessionMessages.mockClear()
+    await act(async () => {
+      await result.current.send("ship it")
+    })
+
+    const writes = chatState.replaceSessionMessages.mock.calls.filter(
+      (c) =>
+        c[0] === "sess-1" &&
+        (c[1] as Array<{ parts?: Array<{ type?: string }> }>).some((m) =>
+          m.parts?.some((part) => part.type === "squad-run")
+        )
+    )
+    expect(writes.length).toBeGreaterThan(0)
+    const messages = writes.at(-1)![1] as Array<{
+      role: string
+      parts: Array<Record<string, unknown>>
+    }>
+    const part = messages.at(-1)!.parts[0]!
+    expect(part).toEqual(
+      expect.objectContaining({
+        type: "squad-run",
+        // The EXECUTION run id, which is what the journal and every control
+        // verb are keyed by — not the raw lifecycle id.
+        runId: "execution:team:run_team_abc123def456",
+        squadId: "squad-1",
+        squadName: "Research Squad",
+        objective: "ship it",
+      })
+    )
+  })
+
+  it("falls back to the Squad id when the run could not name it", async () => {
+    squadSession()
+    startSquadRunMock.mockResolvedValueOnce({ started: true, runId: "run_team_abc123def456" })
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+    await act(async () => {
+      await result.current.send("go")
+    })
+    const write = chatState.replaceSessionMessages.mock.calls
+      .map((c) => c[1] as Array<{ parts?: Array<Record<string, unknown>> }>)
+      .reverse()
+      .find((list) => list.some((m) => m.parts?.some((p) => p.type === "squad-run")))
+    const part = write!.at(-1)!.parts!.find((p) => p.type === "squad-run")!
+    expect(part.squadName).toBe("squad-1")
+  })
+
   it("reports a failed dispatch instead of leaving the session held", async () => {
     squadSession()
     startSquadRunMock.mockResolvedValueOnce({ started: false, reason: "squad_not_found" })

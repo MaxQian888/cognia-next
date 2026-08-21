@@ -25,6 +25,7 @@ import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
+import { SquadRunPart } from "@/components/chat/message-parts/squad-run-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { GroundingPart } from "@/components/chat/message-parts/grounding-part"
@@ -79,6 +80,7 @@ import { isSourcesPart, isToolUseSummaryPart } from "@/lib/claude/parts-extensio
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
+  SquadRunPart as SquadRunPartType,
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
   GroundingPart as GroundingPartType,
@@ -1432,6 +1434,10 @@ function renderPart(
     const dp = part as unknown as AgentTeamDispatchPartType
     const fromName = characterById?.get(dp.from)?.name
     return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} mode={mode} />
+  }
+
+  if (type === "squad-run") {
+    return <SquadRunPart key={key} part={part as unknown as SquadRunPartType} />
   }
 
   if (type === "text") {

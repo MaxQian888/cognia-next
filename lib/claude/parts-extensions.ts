@@ -142,6 +142,35 @@ export interface AgentTeamDispatchPart {
   sessionId: string
 }
 
+/**
+ * SquadRunPart — the conversation's record of handing a turn to a Squad.
+ *
+ * One part per Squad turn, written when the run is launched rather than when
+ * it finishes: a Squad run takes minutes, and a conversation that shows
+ * nothing until then reads as broken. The part carries only identity; the
+ * renderer live-queries the execution run for status, per-member activity and
+ * the final result, so a reload picks the run back up mid-flight and history
+ * stays truthful instead of frozen at whatever was known when it was written.
+ *
+ * `runId` is the EXECUTION run id (`execution:team:<sourceRunId>`), which is
+ * what the journal, the run list and every control verb are keyed by.
+ */
+export interface SquadRunPart {
+  type: "squad-run"
+  /** Execution run id — `execution:team:<sourceRunId>`. */
+  runId: string
+  squadId: string
+  /** Name at dispatch time, so a deleted Squad still reads as something. */
+  squadName: string
+  /** What the Squad was asked to do. */
+  objective: string
+}
+
+export function isSquadRunPart(part: unknown): part is SquadRunPart {
+  const p = part as { type?: unknown; runId?: unknown; squadId?: unknown }
+  return p?.type === "squad-run" && typeof p.runId === "string" && typeof p.squadId === "string"
+}
+
 export function isAgentTeamDispatchPart(part: unknown): part is AgentTeamDispatchPart {
   const p = part as { type?: unknown; to?: unknown; task?: unknown }
   return (

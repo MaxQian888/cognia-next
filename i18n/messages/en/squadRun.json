@@ -1,0 +1,15 @@
+{
+  "activityStatus": {
+    "blocked": "Blocked",
+    "completed": "Done",
+    "failed": "Failed",
+    "pending": "Pending",
+    "running": "Running",
+    "skipped": "Skipped"
+  },
+  "journalUnavailable": "Activity for this run is not on this device.",
+  "memberActivity": "{count, plural, =1 {1 step} other {# steps}}",
+  "omittedActivity": "{count, plural, =1 {1 earlier step not shown} other {# earlier steps not shown}}",
+  "openRun": "Open run",
+  "runUnavailable": "Run not on this device"
+}

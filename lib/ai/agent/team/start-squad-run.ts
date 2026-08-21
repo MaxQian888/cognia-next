@@ -77,6 +77,15 @@ export interface StartSquadRunInput {
 export interface StartSquadRunResult {
   started: boolean
   runId?: string
+  /**
+   * The Squad's display name as the store had it at dispatch.
+   *
+   * Returned rather than looked up by the caller so a chat surface does not
+   * have to import the agent-team store — which would drag the whole
+   * orchestration graph into the chat bundle — and so the name is the one the
+   * run actually used.
+   */
+  squadName?: string
   reason?: "squad_not_found" | "no_squad_id" | "dispatch_error"
 }
 
@@ -182,7 +191,9 @@ export async function startSquadRun(
     return { started: false, reason: "dispatch_error" }
   }
 
-  if (!store.getTeam(squadId)) return { started: false, reason: "squad_not_found" }
+  const squad = store.getTeam(squadId) as { name?: unknown } | undefined
+  if (!squad) return { started: false, reason: "squad_not_found" }
+  const squadName = typeof squad.name === "string" ? squad.name : undefined
 
   const entryPersona = input.characterId
     ? await (deps.loadCharacter ?? defaultLoadCharacter)(input.characterId)
@@ -258,5 +269,5 @@ export async function startSquadRun(
   // notification path; they must never reject the caller's dispatch.
   void Promise.resolve(runTeamLifecycle(squadId, lifecycleDeps)).catch(() => undefined)
 
-  return { started: true, runId }
+  return { started: true, runId, ...(squadName ? { squadName } : {}) }
 }

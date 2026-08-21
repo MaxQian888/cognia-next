@@ -1,0 +1,15 @@
+{
+  "activityStatus": {
+    "blocked": "被阻塞",
+    "completed": "已完成",
+    "failed": "失败",
+    "pending": "待开始",
+    "running": "进行中",
+    "skipped": "已跳过"
+  },
+  "journalUnavailable": "本机没有该运行的活动记录。",
+  "memberActivity": "{count, plural, other {# 个步骤}}",
+  "omittedActivity": "{count, plural, other {另有 # 个更早的步骤未显示}}",
+  "openRun": "查看运行",
+  "runUnavailable": "本机没有该运行记录"
+}

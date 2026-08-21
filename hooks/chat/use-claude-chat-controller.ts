@@ -1023,6 +1023,33 @@ export function useClaudeChat() {
             chatTurnPerformance.finish(sessionId, "failed")
             return
           }
+          // Leave the conversation's own record of the handoff, now rather
+          // than when the run finishes. A Squad run takes minutes, and a
+          // conversation that shows nothing for that long reads as broken.
+          // The part carries identity only; everything else is live-queried
+          // from the run, so this stays true after a reload instead of
+          // freezing at whatever was known at dispatch.
+          const squadMessage: UIMessage = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            parts: [
+              {
+                type: "squad-run",
+                runId: agentTeamExecutionRunId(result.runId),
+                squadId,
+                squadName: result.squadName ?? squadId,
+                objective: providerText,
+              },
+            ] as unknown as UIMessage["parts"],
+          }
+          // Committed directly rather than through the per-session coalescer:
+          // that exists to batch streaming deltas, and there is exactly one
+          // message here. Routing it through the rAF debounce would only
+          // delay the one thing the user is waiting to see.
+          const withSquadMessage = [...next, squadMessage]
+          store.getState().replaceSessionMessages(sessionId, withSquadMessage)
+          await persistMessages(sessionId, withSquadMessage).catch(() => undefined)
+
           // Release the hold when the run ends, however it ends. Without this
           // the conversation would queue follow-ups forever.
           const { watchSquadRunSettlement } = await import("@/lib/ai/agent/team/watch-squad-run")
