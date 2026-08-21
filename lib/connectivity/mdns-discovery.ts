@@ -5,12 +5,15 @@
  *
  * Two roles:
  *   - **Mobile**: scans for `_cognia._tcp` services on the LAN and surfaces
- *     them to the pair page's "附近设备" list. No Capacitor mDNS plugin is
- *     currently wired — `defaultMobileLoader` rejects, `subscribe()` returns
- *     a no-op, and lan-scanner falls back to the IP-segment probe.
- *   - **Desktop**: advertises via Rust (`src-tauri/src/companion_api/mdns.rs`).
- *     The Tauri command surface is kept here so any TS code that wants to
- *     start/stop the broadcaster has one place to import.
+ *     them to the pair page's "附近设备" list, via `capacitor-zeroconf`
+ *     (registered at mobile boot from `PluginHeaders`, see
+ *     `lib/capacitor/register-plugins.ts`). When the plugin is absent
+ *     `subscribe()` degrades to a no-op and `lan-scanner` falls back to the
+ *     IP-segment probe.
+ *   - **Desktop**: advertises via Rust (`src-tauri/src/companion_api/mdns.rs`),
+ *     and browses via `lib/connectivity/mdns-browse.ts`. The Tauri command
+ *     surface is kept here so any TS code that wants to start/stop the
+ *     broadcaster has one place to import.
  */
 
 import { makeDefaultLoader } from "@/lib/capacitor/_shared"

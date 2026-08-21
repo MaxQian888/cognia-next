@@ -8,8 +8,8 @@
  * are mDNS-anonymised hostnames.
  *
  * Used by `lan-scanner.ts` as the seed for the IP-segment fallback probe;
- * the mDNS path inside Capacitor (`@jonz94/capacitor-mdns`) does not
- * require this and is preferred when available.
+ * the mDNS path inside Capacitor (`capacitor-zeroconf`) does not require
+ * this and is preferred when available.
  *
  * The implementation is intentionally bare:
  *   1. open an `RTCPeerConnection` with no STUN servers (so candidates

@@ -254,6 +254,9 @@ describe("scanLan", () => {
       mdnsSubscribe: mdns.subscribe as never,
       getLocalIps: async () => [],
       fetchImpl: fetchMock,
+      // The loopback probe is a separate path with its own switch; disable it
+      // so this stays a test of the /24 sweep alone.
+      enableLoopbackProbe: false,
     })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result).toEqual([])
@@ -315,6 +318,7 @@ describe("scanLan", () => {
       getLocalIps: getLocalIps as never,
       fetchImpl: fetchMock,
       enableProbeFallback: false,
+      enableLoopbackProbe: false,
     })
     expect(getLocalIps).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -564,5 +568,95 @@ describe("pickProbeTargets", () => {
     const out = pickProbeTargets(["10.1.0.5"])
     expect(out.length).toBe(253)
     expect(out).toContain("10.1.0.1")
+  })
+})
+
+/**
+ * Loopback browser-access path — the browser tab's only route to discovery.
+ * mDNS needs a multicast socket and the /24 sweep is seeded by ICE candidates
+ * browsers anonymise away, so without this a tab finds nothing, ever.
+ */
+describe("scanLan — loopback probe", () => {
+  const found = {
+    kind: "found" as const,
+    baseUrl: "http://127.0.0.1:27891",
+    health: {
+      version: "1.2.3",
+      fingerprint: "sha256-abc",
+      advertisedPort: 27890,
+      serverId: "install-1",
+    },
+  }
+
+  function scanWith(loopbackProbe: unknown, extra: Record<string, unknown> = {}) {
+    const mdns = makeMdns()
+    return scanLan({
+      signal: new AbortController().signal,
+      onFound: jest.fn(),
+      mdnsWindowMs: 5,
+      mdnsSubscribe: mdns.subscribe as never,
+      getLocalIps: async () => [],
+      fetchImpl: jest.fn() as unknown as typeof fetch,
+      loopbackProbe: loopbackProbe as never,
+      ...extra,
+    })
+  }
+
+  it("surfaces a Host found on loopback, with its verified fingerprint", async () => {
+    const result = await scanWith(jest.fn(async () => found))
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      id: "127.0.0.1:27891",
+      source: "loopback",
+      baseUrl: "http://127.0.0.1:27891",
+      serverVersion: "1.2.3",
+      fingerprint: "sha256-abc",
+      serverId: "install-1",
+    })
+  })
+
+  it("reports a Host that refused this origin instead of dropping it silently", async () => {
+    // The 403 comes back without CORS headers, so the fetch failure looks
+    // exactly like a closed port. Reporting "nothing found" would state an
+    // absence the probe just disproved.
+    const onLoopbackBlocked = jest.fn()
+    const result = await scanWith(
+      jest.fn(async () => ({
+        kind: "blocked" as const,
+        baseUrl: "http://127.0.0.1:27891",
+        origin: "http://localhost:3000",
+      })),
+      { onLoopbackBlocked }
+    )
+
+    expect(onLoopbackBlocked).toHaveBeenCalledWith({
+      baseUrl: "http://127.0.0.1:27891",
+      origin: "http://localhost:3000",
+    })
+    // A blocked Host is not connectable, so it must not enter the server list.
+    expect(result).toEqual([])
+  })
+
+  it("stays quiet when nothing answers on loopback", async () => {
+    const onLoopbackBlocked = jest.fn()
+    const result = await scanWith(
+      jest.fn(async () => ({ kind: "absent" as const })),
+      {
+        onLoopbackBlocked,
+      }
+    )
+
+    expect(onLoopbackBlocked).not.toHaveBeenCalled()
+    expect(result).toEqual([])
+  })
+
+  it("does not run when the caller disables it", async () => {
+    // On a phone or the desktop shell, `127.0.0.1` is the device itself —
+    // there is nothing to discover there.
+    const loopbackProbe = jest.fn(async () => found)
+    await scanWith(loopbackProbe, { enableLoopbackProbe: false })
+
+    expect(loopbackProbe).not.toHaveBeenCalled()
   })
 })

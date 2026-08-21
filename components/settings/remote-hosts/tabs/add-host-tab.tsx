@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import type { AuthFetcher } from "@/lib/tauri/companion-auth"
 import { useRemoteHostStore, type RemoteHost } from "@/stores/remote-host/remote-host-store"
+import { LanDiscoveryPanel } from "./lan-discovery-panel"
 
 export interface AddHostTabProps {
   /** Called after a host is successfully paired (e.g. to switch tabs). */
@@ -82,6 +83,8 @@ export function AddHostTab({ onPaired, fetcher }: AddHostTabProps) {
         />
         <p className="text-xs text-muted-foreground">{t("add.payloadHint")}</p>
       </div>
+
+      <LanDiscoveryPanel payload={payload} onUseAddress={setPayload} />
 
       <div className="space-y-1.5">
         <Label htmlFor="remote-host-label">{t("add.labelLabel")}</Label>

@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   CircleCheckIcon,
   HistoryIcon,
+  MonitorIcon,
   PinIcon,
   RouterIcon,
   ShieldCheckIcon,
@@ -40,6 +41,9 @@ export interface ServerCardProps {
 const SOURCE_TO_ICON = {
   paired: PinIcon,
   mdns: WifiIcon,
+  // Loopback is this computer, not the network — a monitor reads truer than
+  // a Wi-Fi or router glyph for "the Host running right here".
+  loopback: MonitorIcon,
   probe: RouterIcon,
   history: HistoryIcon,
 } as const
@@ -47,6 +51,7 @@ const SOURCE_TO_ICON = {
 const SOURCE_TO_KEY = {
   paired: "viaPaired",
   mdns: "viaMdns",
+  loopback: "viaLoopback",
   probe: "viaProbe",
   history: "viaHistory",
 } as const
@@ -93,6 +98,7 @@ export function ServerCard({
           "inline-flex size-10 shrink-0 items-center justify-center rounded-md",
           server.source === "paired" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
           server.source === "mdns" && "bg-success/10 text-success",
+          server.source === "loopback" && "bg-primary/10 text-primary",
           server.source === "probe" && "bg-warning/10 text-warning",
           server.source === "history" && "bg-muted text-muted-foreground"
         )}

@@ -65,7 +65,7 @@ export function DiscoverStep({
   const tPerm = useTranslations("mobile.pair.permissions")
   const reduce = useReducedMotion()
 
-  const { servers, scanning, permissionDenied, rescan } = useLanScan({
+  const { servers, scanning, permissionDenied, rescan, loopbackBlocked } = useLanScan({
     history,
     paired,
     mdnsWindowMs: SCAN_WINDOW_MS,
@@ -88,7 +88,9 @@ export function DiscoverStep({
     [sorted]
   )
   const live = useMemo(
-    () => sorted.filter((s) => s.source === "mdns" || s.source === "probe"),
+    // `loopback` belongs here too: a browser tab has no other way to find a
+    // Host, so omitting it would discover one and then never show it.
+    () => sorted.filter((s) => s.source === "mdns" || s.source === "probe" || s.source === "loopback"),
     [sorted]
   )
   const foundCount = sorted.length
@@ -192,7 +194,22 @@ export function DiscoverStep({
         />
       ) : null}
 
-      {showEmpty ? (
+      {/* A Host answered on loopback but refused this browser's origin. Shown
+          above the empty state because it *contradicts* it: something is
+          running here, it just will not talk to this tab yet. */}
+      {loopbackBlocked ? (
+        <div
+          className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
+          data-testid="pair-discover-loopback-blocked"
+        >
+          <p className="font-medium">{t("loopbackBlockedTitle")}</p>
+          <p className="mt-1 text-muted-foreground">
+            {t("loopbackBlockedBody", { origin: loopbackBlocked.origin })}
+          </p>
+        </div>
+      ) : null}
+
+      {showEmpty && !loopbackBlocked ? (
         <EmptyState
           icon={SearchXIcon}
           title={t("emptyTitle")}

@@ -10,6 +10,8 @@ import { fetchHealthz } from "./healthz"
 import type { DiscoveredService } from "./mdns-discovery"
 import { subscribe as subscribeMdns } from "./mdns-discovery"
 import { enumerateSlash24, getPrivateLocalIps } from "./local-ip"
+import { discoverLoopbackHost } from "./loopback-discovery"
+import { detectPlatform } from "@/lib/platform/detect"
 
 /**
  * High-level LAN scan that surfaces every cognia desktop server it can
@@ -35,7 +37,7 @@ import { enumerateSlash24, getPrivateLocalIps } from "./local-ip"
  * deduplicated list of servers it could surface within the time window.
  */
 
-export type DiscoveredServerSource = "paired" | "mdns" | "probe" | "history"
+export type DiscoveredServerSource = "paired" | "mdns" | "loopback" | "probe" | "history"
 
 export interface DiscoveredServer {
   /** Stable id used for dedupe — `ip:port`. */
@@ -101,6 +103,25 @@ export interface ScanLanOptions {
   getLocalIps?: typeof getPrivateLocalIps
   /** Test seam — healthz fetcher. Defaults to the real `fetchHealthz`. */
   healthzFetcher?: typeof fetchHealthz
+  /**
+   * Probe this machine's loopback browser-access listener (ADR-0085 /
+   * `browser_access.rs`). Defaults to on **in a browser only**: it is the one
+   * discovery path a tab can use — mDNS needs a multicast socket and the /24
+   * sweep is seeded by ICE candidates that browsers anonymise away. On a phone
+   * or the desktop shell `127.0.0.1` is the device itself, so there is nothing
+   * to discover and the probe is skipped.
+   */
+  enableLoopbackProbe?: boolean
+  /**
+   * Called when a Host answers on loopback but refuses this browser's origin.
+   * Carries the exact origin string the user must allowlist on that machine.
+   * Separate from `onFound` because a blocked Host is not a connectable
+   * server — but reporting it as "nothing found" would state an absence we
+   * just disproved.
+   */
+  onLoopbackBlocked?: (info: { baseUrl: string; origin: string }) => void
+  /** Test seam — loopback probe. Defaults to the real `discoverLoopbackHost`. */
+  loopbackProbe?: typeof discoverLoopbackHost
   /** Primary companion port — 27890. The full probe set
    *  (`PROBE_PORTS`) is only applied to paired/emulator IPs to keep
    *  generic /24 fan-out bounded. */
@@ -146,6 +167,9 @@ export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]>
     getLocalIps = getPrivateLocalIps,
     healthzFetcher = fetchHealthz,
     port = DEFAULT_PORT,
+    enableLoopbackProbe = detectPlatform() === "web",
+    onLoopbackBlocked,
+    loopbackProbe = discoverLoopbackHost,
   } = opts
 
   const dedupe = new Map<string, DiscoveredServer>()
@@ -217,6 +241,37 @@ export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]>
     await Promise.allSettled(enrichments)
   })()
 
+  // Loopback browser-access listener — the browser tab's only discovery
+  // path. Runs alongside mDNS/probe rather than as a fallback: it answers in
+  // milliseconds when it answers at all, and on web the other two paths
+  // structurally cannot produce anything.
+  const loopbackTask = (async () => {
+    if (!enableLoopbackProbe || signal.aborted) return
+    const outcome = await loopbackProbe({ signal, fetchImpl })
+    if (signal.aborted) return
+    if (outcome.kind === "found") {
+      const url = new URL(outcome.baseUrl)
+      const loopbackPort = Number.parseInt(url.port, 10)
+      emit({
+        // Same `ip:port` id convention as the mdns/probe paths, so a repeat
+        // sweep upserts the entry instead of stacking duplicates.
+        id: `${url.hostname}:${loopbackPort}`,
+        ip: url.hostname,
+        port: loopbackPort,
+        baseUrl: outcome.baseUrl,
+        source: "loopback",
+        serverVersion: outcome.health.version,
+        fingerprint: outcome.health.fingerprint,
+        serverId: outcome.health.serverId,
+        discoveredAt: Date.now(),
+      })
+      return
+    }
+    if (outcome.kind === "blocked") {
+      onLoopbackBlocked?.({ baseUrl: outcome.baseUrl, origin: outcome.origin })
+    }
+  })()
+
   const mdnsWindow = new Promise<void>((resolve) => setTimeout(resolve, mdnsWindowMs))
   const abortPromise = new Promise<void>((resolve) => {
     if (signal.aborted) {
@@ -225,7 +280,7 @@ export async function scanLan(opts: ScanLanOptions): Promise<DiscoveredServer[]>
     }
     signal.addEventListener("abort", () => resolve(), { once: true })
   })
-  await Promise.race([Promise.all([probeTask, mdnsWindow]), abortPromise])
+  await Promise.race([Promise.all([probeTask, loopbackTask, mdnsWindow]), abortPromise])
 
   if (unsub) {
     try {
@@ -311,7 +366,10 @@ function expandToPortTargets(
  */
 export function rankSource(source: DiscoveredServerSource): number {
   if (source === "paired") return 4
-  if (source === "mdns") return 3
+  // `loopback` shares the mdns tier: both arrive with a `/healthz`-verified
+  // fingerprint, unlike a bare probe hit. They can never collide on an id
+  // anyway — a loopback entry is always `127.0.0.1`/`localhost`.
+  if (source === "mdns" || source === "loopback") return 3
   if (source === "probe") return 2
   return 1
 }

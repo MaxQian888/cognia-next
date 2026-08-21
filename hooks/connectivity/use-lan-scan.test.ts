@@ -5,7 +5,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 import { useLanScan } from "./use-lan-scan"
-import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
+import type { DiscoveredServer, scanLan } from "@/lib/connectivity/lan-scanner"
 import type { MdnsPermissionOutcome } from "@/lib/connectivity/mdns-permission"
 
 function server(overrides: Partial<DiscoveredServer> = {}): DiscoveredServer {
@@ -92,5 +92,52 @@ describe("useLanScan", () => {
     act(() => result.current.rescan())
     await waitFor(() => expect(scan).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(result.current.servers).toHaveLength(1))
+  })
+})
+
+/**
+ * Loopback-blocked reporting — the browser case where a Host is running on
+ * this machine but has not allowlisted this tab's origin.
+ */
+describe("useLanScan — loopbackBlocked", () => {
+  const BLOCKED = { baseUrl: "http://127.0.0.1:27891", origin: "http://localhost:3000" }
+
+  it("surfaces the origin the Host refused", async () => {
+    const scan = jest.fn(async (opts: Parameters<typeof scanLan>[0]) => {
+      opts.onLoopbackBlocked?.(BLOCKED)
+      return []
+    })
+
+    const { result } = renderHook(() => useLanScan({ scan: scan as never }))
+
+    await waitFor(() => expect(result.current.loopbackBlocked).toEqual(BLOCKED))
+  })
+
+  it("starts null and stays null when nothing is blocked", async () => {
+    // `null` means "no blocked Host was reported", never "no Host exists" —
+    // the banner it drives must not be shown on a scan that never ran.
+    const scan = jest.fn(async () => [])
+
+    const { result } = renderHook(() => useLanScan({ scan: scan as never }))
+
+    expect(result.current.loopbackBlocked).toBeNull()
+    await waitFor(() => expect(result.current.scanning).toBe(false))
+    expect(result.current.loopbackBlocked).toBeNull()
+  })
+
+  it("clears the banner on a rescan so a fixed allowlist stops showing it", async () => {
+    let blockThisRun = true
+    const scan = jest.fn(async (opts: Parameters<typeof scanLan>[0]) => {
+      if (blockThisRun) opts.onLoopbackBlocked?.(BLOCKED)
+      return []
+    })
+
+    const { result } = renderHook(() => useLanScan({ scan: scan as never }))
+    await waitFor(() => expect(result.current.loopbackBlocked).toEqual(BLOCKED))
+
+    blockThisRun = false
+    act(() => result.current.rescan())
+
+    await waitFor(() => expect(result.current.loopbackBlocked).toBeNull())
   })
 })

@@ -174,6 +174,55 @@ describe("<DiscoverStep />", () => {
     await waitFor(() => expect(screen.getByTestId("empty-state")).toBeInTheDocument())
   })
 
+  it("lists a Host found on the loopback browser-access listener", async () => {
+    // A browser tab reaches Hosts only this way. Before this, `loopback` was
+    // filtered out of the nearby group and a discovered Host rendered nowhere.
+    const scan = makeScanStub({
+      hits: [
+        {
+          id: "127.0.0.1:27891",
+          ip: "127.0.0.1",
+          port: 27891,
+          baseUrl: "http://127.0.0.1:27891",
+          source: "loopback",
+          serverVersion: "1.2.3",
+          discoveredAt: 0,
+        },
+      ],
+    })
+    render(<DiscoverStep onSelect={() => {}} onSkip={() => {}} scan={scan as never} />)
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-source="loopback"]')).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+  })
+
+  it("explains a Host that refused this browser instead of claiming none exists", async () => {
+    const scan = jest.fn(
+      async ({
+        onLoopbackBlocked,
+      }: {
+        onLoopbackBlocked?: (info: { baseUrl: string; origin: string }) => void
+      }) => {
+        onLoopbackBlocked?.({
+          baseUrl: "http://127.0.0.1:27891",
+          origin: "http://localhost:3000",
+        })
+        return []
+      }
+    )
+    render(<DiscoverStep onSelect={() => {}} onSkip={() => {}} scan={scan as never} />)
+
+    const banner = await screen.findByTestId("pair-discover-loopback-blocked")
+    // This file's next-intl stub echoes keys and drops interpolation, so the
+    // origin itself is asserted where it is plumbed (`use-lan-scan.test.ts`);
+    // here we pin that the banner renders instead of the empty state.
+    expect(banner).toBeInTheDocument()
+    // The empty state would contradict the banner: something *is* running.
+    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument()
+  })
+
   it("groups history entries under the Recent heading", async () => {
     const history: DiscoveredServer[] = [
       {

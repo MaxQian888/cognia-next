@@ -57,6 +57,19 @@ export interface UseLanScanResult {
   permissionDenied: boolean
   /** Explicit re-run (resets transient state, then scans again). */
   rescan: () => void
+  /**
+   * Set when a Host answered on this machine's loopback browser-access
+   * listener but refused this browser's origin. Carries the exact origin
+   * string to allowlist on that machine. `null` in every other case —
+   * including "we never looked", which is why the UI must not read a `null`
+   * as "no Host here".
+   */
+  loopbackBlocked: LoopbackBlockedInfo | null
+}
+
+export interface LoopbackBlockedInfo {
+  baseUrl: string
+  origin: string
 }
 
 const EMPTY_HISTORY: readonly DiscoveredServer[] = []
@@ -81,6 +94,7 @@ export function useLanScan(options: UseLanScanOptions = {}): UseLanScanResult {
   const [scanning, setScanning] = useState<boolean>(() => enabled)
   const [permission, setPermission] = useState<MdnsPermissionKind | null>(null)
   const [permissionDenied, setPermissionDenied] = useState(false)
+  const [loopbackBlocked, setLoopbackBlocked] = useState<LoopbackBlockedInfo | null>(null)
   const [runToken, setRunToken] = useState(0)
 
   const abortRef = useRef<AbortController | null>(null)
@@ -108,6 +122,9 @@ export function useLanScan(options: UseLanScanOptions = {}): UseLanScanResult {
 
       setScanning(true)
       setPermissionDenied(false)
+      // Cleared per run: a Host that has since been allowlisted (or stopped)
+      // must not keep showing yesterday's blocked banner.
+      setLoopbackBlocked(null)
       if (resetOnRun) setServers(seedFromHistory(stableHistory))
 
       if (requestPermission) {
@@ -127,6 +144,9 @@ export function useLanScan(options: UseLanScanOptions = {}): UseLanScanResult {
           mdnsWindowMs,
           history: stableHistory as DiscoveredServer[],
           paired,
+          onLoopbackBlocked: (info) => {
+            if (!cancelled) setLoopbackBlocked(info)
+          },
           onFound: (svc) => {
             if (cancelled) return
             setServers((prev) => {
@@ -152,5 +172,5 @@ export function useLanScan(options: UseLanScanOptions = {}): UseLanScanResult {
     // not a reactive dependency).
   }, [enabled, runToken, stableHistory])
 
-  return { servers, scanning, permission, permissionDenied, rescan }
+  return { servers, scanning, permission, permissionDenied, rescan, loopbackBlocked }
 }
