@@ -248,7 +248,6 @@ import {
   resolveMemberConfig,
   resolveSendOptions,
 } from "./build-options"
-import type { BuildOptionsContext } from "./build-options"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type {
   AppSettings,
@@ -3657,7 +3656,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
         platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
       } as ChatSession),
       character: makeChar({ enableComputerUse: true }),
-      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as unknown as AdapterInstanceRow,
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
     })
     const names = (opts.pluginTools ?? []).map((tool) => tool.name)
     expect(names).not.toContain("computer_use")
@@ -3702,7 +3701,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
         platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
       } as ChatSession),
       character: makeChar(),
-      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as unknown as AdapterInstanceRow,
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
     })
     expect(opts.allowedTools ?? []).not.toContain("mcp__cognia__schedule_task")
   })
@@ -3723,7 +3722,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
         platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
       } as ChatSession),
       character: makeChar(),
-      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as unknown as AdapterInstanceRow,
+      imAdapterRow: { id: "telegram", hostCapabilityCeiling: [] } as AdapterInstanceRow,
     })
     expect((opts.pluginTools ?? []).map((tool) => tool.name)).not.toContain("ocr_extract")
   })
@@ -5394,21 +5393,21 @@ describe("resolveSendOptions — reusable Agent Knowledge Bases", () => {
 
 describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   afterEach(() => {
+    delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
     delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
     delete process.env.NEXT_PUBLIC_CLAUDE_SDK_PARITY_V1
   })
 
-  it("stamps the resolved execution spec with no flag set at all", async () => {
-    // ADR-0090 retirement: stamping is unconditional. It used to require the
-    // resolver flag, which meant a default install never carried an `execution`
-    // spec and the sidecar always took the legacy provider branch.
+  it("leaves SendOptions unstamped while both flags are off", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
-    expect(opts.execution).toBeTruthy()
+    expect(opts.execution).toBeUndefined()
   })
 
-  it("still stamps when the route-tickets flag is on, so the switch issues tickets", async () => {
-    // The Settings → Gateway → Route tickets switch writes only this flag, and
-    // it is the only thing that makes a `gateway` route eligible at all.
+  it("stamps when only the route-tickets flag is on, so the switch issues tickets", async () => {
+    // The Settings → Gateway → Route tickets switch writes only this flag.
+    // While the block also demanded `agentExecutionResolverV2`, flipping it
+    // changed nothing on a default install and the tickets panel could never
+    // list anything.
     process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "1"
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(opts.execution).toBeTruthy()
@@ -5423,6 +5422,7 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   })
 
   it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const onResolvedExecutionSpec = jest.fn()
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1" }),
@@ -5462,6 +5462,7 @@ describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
   })
 
   it("uses the durable caller's final run identity before fingerprinting", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1" }),
       executionIdentity: { runId: "execution:agent:session:message", attemptId: "recovery-2" },
