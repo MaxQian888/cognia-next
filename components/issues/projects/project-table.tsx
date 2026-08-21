@@ -32,8 +32,14 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
     <div className="min-w-0 flex-1 overflow-auto" data-testid="project-table">
       <table className="w-full min-w-[52rem] border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
-          <tr className="border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <th scope="col" className="px-4 py-2 font-semibold">
+          <tr className="whitespace-nowrap border-b text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {/*
+              `w-full` on ONE column is the table idiom for "absorb the slack";
+              without it the name gets a content-based width and `max-w-0` on
+              the cell collapses it to a few characters — which is the wrong
+              column to squeeze.
+            */}
+            <th scope="col" className="w-full px-4 py-2 font-semibold">
               {t("projects.nameLabel")}
             </th>
             <th scope="col" className="px-3 py-2 font-semibold">
@@ -48,7 +54,12 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
             <th scope="col" className="px-3 py-2 font-semibold">
               {t("projects.targetDate")}
             </th>
-            <th scope="col" className="w-48 px-3 py-2 font-semibold">
+            {/*
+              A minimum rather than a width: `w-full` on the name column wins
+              the slack, and without a floor the progress bar shrinks to a stub
+              that reads as broken rather than as "barely started".
+            */}
+            <th scope="col" className="min-w-40 px-3 py-2 font-semibold">
               {t("projects.progress")}
             </th>
             <th scope="col" className="px-3 py-2 text-right font-semibold">
@@ -71,7 +82,7 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
                   selected && "bg-accent"
                 )}
               >
-                <td className="max-w-0 px-4 py-2">
+                <td className="w-full max-w-0 px-4 py-2">
                   {/*
                     The name cell is the row's button. Making the <tr> clickable
                     would leave keyboard users with no way in, and wrapping a row
@@ -108,7 +119,7 @@ export function ProjectTable({ projects, progressById, selectedId, onSelect }: P
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
                   {project.targetDate ? new Date(project.targetDate).toLocaleDateString() : "—"}
                 </td>
-                <td className="px-3 py-2">
+                <td className="min-w-40 px-3 py-2">
                   <div className="flex items-center gap-2">
                     <Progress
                       value={(progress?.ratio ?? 0) * 100}

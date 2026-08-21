@@ -45,10 +45,11 @@ jest.mock("@dnd-kit/core", () => ({
     return { setNodeRef: jest.fn(), isOver: false }
   },
 }))
+const mockSortableKeyboardCoordinates = jest.fn()
 jest.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   verticalListSortingStrategy: jest.fn(),
-  sortableKeyboardCoordinates: jest.fn(),
+  sortableKeyboardCoordinates: (...a: unknown[]) => mockSortableKeyboardCoordinates(...a),
   useSortable: () => ({
     attributes: {},
     listeners: {},
@@ -407,6 +408,75 @@ describe("IssueBoard", () => {
         start: ["Space"],
         cancel: ["Escape"],
         end: ["Space"],
+      })
+    })
+
+    /**
+     * dnd-kit's own getter ranks every droppable by corner distance, and on six
+     * full-height columns that meant picking a card up in `todo` and being told
+     * the target was `canceled`, with the arrows unable to change it. Left and
+     * Right walk the columns here instead; Up and Down stay dnd-kit's.
+     */
+    describe("coordinate getter", () => {
+      const COLUMN_RECTS = new Map(
+        ISSUE_STATUSES.map((status, index) => [
+          `col:${status}`,
+          { left: 12 + index * 276, top: 12, width: 264, height: 600 },
+        ])
+      )
+      const context = {
+        collisionRect: { left: 288, top: 60, width: 246, height: 120 },
+        droppableRects: COLUMN_RECTS,
+      }
+
+      function getter() {
+        render(<IssueBoard items={[item()]} />)
+        return keyboardSensorOptions?.coordinateGetter as (
+          event: { code: string; preventDefault: () => void },
+          args: unknown
+        ) => { x: number; y: number } | undefined
+      }
+
+      it("steps to the column next door on ArrowRight", () => {
+        const next = getter()({ code: "ArrowRight", preventDefault: jest.fn() }, { context })
+        // in_progress starts at 12 + 2*276 = 564, plus the card inset.
+        expect(next).toEqual({ x: 572, y: 60 })
+      })
+
+      it("steps back on ArrowLeft", () => {
+        const next = getter()({ code: "ArrowLeft", preventDefault: jest.fn() }, { context })
+        expect(next).toEqual({ x: 20, y: 60 })
+      })
+
+      it("stops at the board's edge rather than wrapping", () => {
+        const atEnd = {
+          ...context,
+          collisionRect: { left: 12 + 5 * 276, top: 60, width: 246, height: 120 },
+        }
+        expect(
+          getter()({ code: "ArrowRight", preventDefault: jest.fn() }, { context: atEnd })
+        ).toBeUndefined()
+      })
+
+      it("claims the keystroke so the board does not scroll under the card", () => {
+        const preventDefault = jest.fn()
+        getter()({ code: "ArrowRight", preventDefault }, { context })
+        expect(preventDefault).toHaveBeenCalled()
+      })
+
+      it("hands the vertical arrows back to dnd-kit's sortable getter", () => {
+        const event = { code: "ArrowDown", preventDefault: jest.fn() }
+        getter()(event, { context })
+        expect(mockSortableKeyboardCoordinates).toHaveBeenCalledWith(event, { context })
+      })
+
+      it("is inert before anything has been measured", () => {
+        expect(
+          getter()(
+            { code: "ArrowRight", preventDefault: jest.fn() },
+            { context: { collisionRect: null, droppableRects: COLUMN_RECTS } }
+          )
+        ).toBeUndefined()
       })
     })
   })

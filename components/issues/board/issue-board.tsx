@@ -44,6 +44,7 @@ import {
   type DropAnimation,
 } from "@dnd-kit/core"
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
+import type { KeyboardCoordinateGetter } from "@dnd-kit/core"
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useTranslations } from "next-intl"
@@ -52,11 +53,14 @@ import { useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { useBoardEdgeScroll } from "@/hooks/issues/use-board-edge-scroll"
 import {
   buildIssueColumns,
+  columnDropId,
+  ISSUE_BOARD_COLUMN_ORDER,
   resolveIssueDrop,
   resolveIssueDropPreview,
   type IssueDropAction,
 } from "@/lib/issues/board-model"
 import { allowedIssueMoveTargets } from "@/lib/issues/state-machine"
+import { nextBoardColumnCoordinates, type BoardRect } from "@/lib/issues/board-keyboard"
 import { resolveColumnCollapsed } from "@/lib/issues/views"
 import type { IssueStatus } from "@/types/issues"
 import type { UnifiedIssueItem } from "@/types/issues/unified"
@@ -92,6 +96,42 @@ const KEYBOARD_CODES = {
  * The y threshold is dnd-kit's own default.
  */
 const AUTO_SCROLL = { threshold: { x: 0, y: 0.2 } }
+
+/**
+ * Left/Right walk the COLUMNS; Up/Down stay dnd-kit's sortable getter.
+ *
+ * dnd-kit's own getter assumes one sortable list. On six lists side by side,
+ * each wrapped in a full-height column droppable, it ranks every droppable by
+ * corner distance and picks whichever corner is nearest — which in practice
+ * meant picking a card up in `todo` and being told the target was `canceled`,
+ * with the arrow keys unable to change it. Vertical movement inside a column is
+ * an ordinary sortable list, so that half is left alone.
+ */
+const boardCoordinateGetter: KeyboardCoordinateGetter = (event, args) => {
+  const direction =
+    event.code === "ArrowRight" ? "right" : event.code === "ArrowLeft" ? "left" : null
+  if (!direction) return sortableKeyboardCoordinates(event, args)
+
+  // dnd-kit's own getter does this for the arrows it handles; ours has to as
+  // well, or the board scrolls sideways under the card being moved.
+  event.preventDefault()
+
+  const { collisionRect, droppableRects } = args.context
+  if (!collisionRect) return undefined
+
+  const columnRects = new Map<IssueStatus, BoardRect>()
+  for (const status of ISSUE_BOARD_COLUMN_ORDER) {
+    const rect = droppableRects.get(columnDropId(status))
+    if (rect) columnRects.set(status, rect)
+  }
+
+  // Absolute client coordinates, matching what `sortableKeyboardCoordinates`
+  // returns — the target's top-left, not a delta.
+  const next = nextBoardColumnCoordinates(direction, collisionRect, columnRects)
+  // Null means the board's edge: returning nothing leaves the card put, which
+  // is what stopping at the end should feel like.
+  return next ?? undefined
+}
 
 export interface IssueBoardProps {
   items: readonly UnifiedIssueItem[]
@@ -137,7 +177,7 @@ export function IssueBoard({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
+      coordinateGetter: boardCoordinateGetter,
       keyboardCodes: KEYBOARD_CODES,
     })
   )
