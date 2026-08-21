@@ -33,6 +33,7 @@ export type ControlCommandName =
   | "goal"
   | "tasks"
   | "schedule"
+  | "handoff"
 
 export interface ControlCommandSpec {
   name: ControlCommandName
@@ -67,6 +68,14 @@ export const CONTROL_COMMAND_SPECS: readonly ControlCommandSpec[] = [
     readonly: false,
     nativeExposed: false,
     usage: "/schedule <interval> <prompt> | cron <expr> <prompt> | off <n|id>",
+  },
+  // Not native-exposed: a bot menu item is a poor fit for a verb that only
+  // makes sense while a delegated task is actually running.
+  {
+    name: "handoff",
+    readonly: false,
+    nativeExposed: false,
+    usage: "/handoff [name] | back [note]",
   },
 ]
 

@@ -10,6 +10,7 @@ describe("control command registry", () => {
         "commands",
         "dir",
         "goal",
+        "handoff",
         "help",
         "mode",
         "model",

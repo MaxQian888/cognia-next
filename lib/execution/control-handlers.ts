@@ -294,6 +294,41 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
       return
     }
 
+    if (command.action === "resume") {
+      // Handing the work back is a control on the SAME run, not a new request —
+      // which is why the handoff never terminated the delegation. Resolving the
+      // interrupt is what unblocks it, and clearing the assignee runs
+      // `setAssignee`'s own restore path for the mode and routing the
+      // assignment had overridden.
+      const pending = await getDb()
+        .executionRunInterrupts.where("[runId+status]")
+        .equals([command.runId, "pending"])
+        .toArray()
+      const handoff = command.interruptId
+        ? pending.find((interrupt) => interrupt.id === command.interruptId)
+        : pending.find((interrupt) => interrupt.type === "human_handoff")
+      if (handoff?.type === "human_handoff") {
+        const { resumeDelegationHandoff } = await import("./delegation-handoff")
+        await resumeDelegationHandoff({
+          runId: command.runId,
+          interruptId: handoff.id,
+          actor: command.actor,
+        })
+        // A note attached to the return is a correction, and it travels the
+        // same way every other correction does — through the engine's own
+        // steering gate, never into the journal.
+        if (command.steerMessage?.trim()) {
+          const live = (await listChildExecutionRuns(command.runId)).filter((child) =>
+            ACTIVE_STATUSES.has(child.status)
+          )
+          for (const child of live) {
+            await forwardToChild(child, { ...command, action: "steer" }).catch(() => undefined)
+          }
+        }
+        return
+      }
+    }
+
     const children = (await listChildExecutionRuns(command.runId)).filter((child) =>
       ACTIVE_STATUSES.has(child.status)
     )

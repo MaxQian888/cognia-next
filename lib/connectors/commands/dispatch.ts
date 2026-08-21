@@ -54,6 +54,7 @@ import {
 } from "@/lib/connectors/conversation-admission"
 import { parseControlCommand, isReadonlyCommand } from "./parse"
 import { handleGoalCommand } from "./goal"
+import { handleHandoffCommand } from "./handoff"
 import { handleScheduleCommand, type ScheduleCommandScheduler } from "./schedule"
 import * as R from "./render"
 
@@ -81,6 +82,8 @@ export interface ControlCommandDeps {
   isKnownProvider?: (provider: string) => Promise<boolean>
   /** Injectable `/goal` handler (defaults to the real connector goal router). */
   handleGoal?: typeof handleGoalCommand
+  /** Injectable `/handoff` handler (defaults to the real delegation handoff). */
+  handleHandoff?: typeof handleHandoffCommand
   scheduler?: ScheduleCommandScheduler
   getAgentTopicStatus?: (conversationKey: string) => Promise<
     R.AgentTopicStatusView & {
@@ -662,6 +665,25 @@ export async function maybeHandleControlCommand(
       // audit) and `ensureSession` (the IM-bound session the guard checks).
       const handleGoal = deps.handleGoal ?? handleGoalCommand
       await handleGoal({ event, arg, ensureSession, reply })
+      return true
+    }
+
+    case "handoff": {
+      // Lives in `commands/handoff.ts` for the same reason `/goal` does: a
+      // subcommand grammar plus a durable side effect is more than a `case`.
+      const handleHandoff = deps.handleHandoff ?? handleHandoffCommand
+      await handleHandoff({
+        event,
+        arg,
+        reply,
+        deps: {
+          operatorIds: Array.isArray(adapterRow.settings.runOperatorUserIds)
+            ? adapterRow.settings.runOperatorUserIds.filter(
+                (value): value is string => typeof value === "string"
+              )
+            : [],
+        },
+      })
       return true
     }
 

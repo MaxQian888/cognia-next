@@ -157,11 +157,25 @@ export async function expireRunInterruptFromSource(
   )
 }
 
-/** Reconcile durable approvals after startup without replaying privileged work. */
+/**
+ * Reconcile durable approvals after startup without replaying privileged work.
+ *
+ * Branches on the interrupt TYPE at the deadline, because "nobody answered in
+ * time" does not mean the same thing for all of them. For a tool approval it
+ * means deny and move on. For a `human_handoff` it means a person is late —
+ * expiring it would silently un-assign work they still own and resume an agent
+ * on a task somebody else is mid-way through. That one is marked overdue and
+ * left pending; see `delegation-handoff.ts`.
+ */
 export async function recoverPendingRunInterrupts(now: number = Date.now()): Promise<void> {
   const pending = await getDb().executionRunInterrupts.where("status").equals("pending").toArray()
   for (const interrupt of pending) {
     if (interrupt.expiresAt <= now) {
+      if (interrupt.type === "human_handoff") {
+        const { markOverdueHandoffs } = await import("./delegation-handoff")
+        await markOverdueHandoffs(now).catch(() => undefined)
+        continue
+      }
       await expireRunInterruptFromSource(interrupt.runId, interrupt.id, now)
       continue
     }
