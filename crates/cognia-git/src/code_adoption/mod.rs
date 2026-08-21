@@ -3,7 +3,7 @@
 //! Quantifies how much code the in-app coding agent writes into the user's git
 //! workspace per turn, entirely on-device. Reverse-infers the per-turn delta
 //! from workspace fingerprints (`fingerprint`), reconciles it into per-file
-//! metrics + hunk line-ranges reusing `crate::git` diffs (`attribution`), and
+//! metrics + hunk line-ranges reusing this crate's diffs (`attribution`), and
 //! serializes the turn's window state in a process-global engine (`engine`).
 //! No diff body is ever persisted, and nothing leaves the device.
 //!

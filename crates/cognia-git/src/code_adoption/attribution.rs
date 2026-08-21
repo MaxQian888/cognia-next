@@ -1,9 +1,9 @@
 //! Reconcile a baseline snapshot against the current one into per-file
-//! attributions, reusing `crate::git::diff::file_diff` for the hard part
+//! attributions, reusing `crate::diff::file_diff` for the hard part
 //! (hunk line-range extraction). We keep only metrics + hunk ranges — never
 //! the diff body — so nothing sensitive is persisted.
 
-use crate::git::diff::file_diff;
+use crate::diff::file_diff;
 
 use super::fingerprint::{Snapshot, MAX_FILES};
 use super::FileAttribution;

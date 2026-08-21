@@ -48,6 +48,35 @@ dirs = "6"
 log = "0.4"
 russh = { version = "=0.62.6", default-features = false, features = ["ring", "rsa"] }
 thiserror = "2"
+# ADR-0067 Tier C — `terminal_host_service` moved in from `app_lib`;
+# versions copied verbatim from `src-tauri/Cargo.toml` so the move adds
+# no new version to the lock.
+base64 = "0.23"
+chrono = { version = "0.4", features = ["serde"] }
+ed25519-dalek = "3"
+hex = "0.4"
+once_cell = "1"
+rand = "0.10"
+sha2 = "0.11"
+# `terminal_host_service` mints its own bootstrap secret + descriptor signing
+# key. It talks to `keyring` directly (as it did in `app_lib`); the per-OS
+# backend features below mirror `src-tauri` and `cognia-secrets` — without them
+# keyring silently falls back to its MOCK store and the secrets never persist.
+keyring = { version = "4", default-features = false }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "4", features = ["windows-native-keyring-store"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "4", features = ["apple-native-keyring-store"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Chosen over `linux-native` (kernel keyutils), which is wiped on reboot.
+keyring = { version = "4", features = ["zbus-secret-service-keyring-store"] }
+
+[target.'cfg(unix)'.dependencies]
+# chmod on the host socket / descriptor files.
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

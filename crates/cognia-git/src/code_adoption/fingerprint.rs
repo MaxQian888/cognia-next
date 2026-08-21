@@ -8,9 +8,9 @@
 //! tracked one.
 //!
 //! Uses `git2` directly (a direct dependency of `src-tauri`) rather than
-//! `crate::git::status::status`, because we need the repository `workdir()` to
+//! `crate::status::status`, because we need the repository `workdir()` to
 //! `stat` files and want a single repo open. The harder diff/hunk extraction
-//! is what we reuse from `crate::git::diff` (see `attribution.rs`).
+//! is what we reuse from `crate::diff` (see `attribution.rs`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::UNIX_EPOCH;

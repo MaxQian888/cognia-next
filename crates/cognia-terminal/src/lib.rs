@@ -34,6 +34,12 @@ pub mod replay;
 pub mod session;
 pub mod ssh;
 pub mod ssh_forward;
+// ADR-0067 Tier C — the durable terminal-host service moved in from
+// `app_lib` (it had zero `crate::` deps there and already built on this
+// crate's host/host_wire/session). `app_lib` re-aliases it so
+// `crate::terminal_host_service::…` (companion_api, terminal_host_bridge,
+// bin/cognia-server) resolves unchanged.
+pub mod terminal_host_service;
 
 use std::collections::HashMap;
 use std::sync::Arc;

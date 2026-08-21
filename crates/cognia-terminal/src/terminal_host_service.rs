@@ -16,9 +16,9 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use base64::Engine;
-use cognia_terminal::host::{ClientIdentity, TerminalHost, TerminalHostConfig};
-use cognia_terminal::host_wire::serve_host_stream;
-use cognia_terminal::session::{PathInjection, SessionOrigin, SpawnRequest};
+use crate::host::{ClientIdentity, TerminalHost, TerminalHostConfig};
+use crate::host_wire::serve_host_stream;
+use crate::session::{PathInjection, SessionOrigin, SpawnRequest};
 use ed25519_dalek::{Signer, SigningKey};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -198,7 +198,7 @@ pub async fn terminal_remote_access_enabled() -> bool {
 
 fn default_terminal_profile() -> SpawnRequest {
     SpawnRequest {
-        shell: cognia_terminal::headless::default_headless_shell(),
+        shell: crate::headless::default_headless_shell(),
         args: Vec::new(),
         cwd: None,
         env: HashMap::new(),
@@ -648,7 +648,17 @@ fn terminal_script_dir() -> PathBuf {
             return path;
         }
     }
-    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // Dev fallback — the scripts live under src-tauri/resources/terminal/;
+    // CARGO_MANIFEST_DIR is crates/cognia-terminal, two hops below the
+    // workspace root (ADR-0067 extraction). Pointing at the crate-local
+    // `resources/terminal` (which does not exist) would silently strip shell
+    // integration instead of failing, so mirror `commands::resolve_script_dir`.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let development = manifest
+        .ancestors()
+        .nth(2)
+        .map(|root| root.join("src-tauri"))
+        .unwrap_or(manifest)
         .join("resources")
         .join("terminal");
     if development.is_dir() {
@@ -1005,9 +1015,16 @@ mod tests {
 
     #[test]
     fn service_argument_quoting_handles_spaces_and_metacharacters() {
-        let quoted = quote_service_arg(r#"/path with space/\"terminal\""#);
+        // Pre-existing bug, surfaced by the ADR-0067 move: the input was written
+        // as a RAW string containing `\"`, so the backslashes were literal. Correct
+        // escaping doubles them (`\\\"`), which the assertion could never match —
+        // the test asserted that a literal backslash silently disappears. The
+        // metacharacter this means to cover is a bare quote.
+        let quoted = quote_service_arg(r#"/path with space/"terminal""#);
         assert!(quoted.starts_with('"'));
         assert!(quoted.ends_with('"'));
         assert!(quoted.contains("\\\"terminal\\\""));
+        // A literal backslash must survive as an escaped pair.
+        assert!(quote_service_arg(r"a\b").contains(r"a\\b"));
     }
 }

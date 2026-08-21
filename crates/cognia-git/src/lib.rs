@@ -11,6 +11,9 @@
 
 pub mod blame;
 pub mod branch;
+// ADR-0067 Tier C — local code-adoption tracking moved in from `app_lib`;
+// its only cross-module need was this crate's `diff::file_diff`.
+pub mod code_adoption;
 pub mod commands;
 pub mod commit;
 pub mod diff;

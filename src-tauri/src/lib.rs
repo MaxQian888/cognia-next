@@ -27,7 +27,10 @@ mod capture;
 pub use cognia_ccswitch as ccswitch;
 mod claude;
 mod cli_bridge;
-mod code_adoption;
+// ADR-0067 Tier C — extracted into `crates/cognia-git` (its only outward
+// dep was `crate::git::diff::file_diff`); re-aliased so
+// `code_adoption::commands::…` in generate_handler! resolves unchanged.
+pub use cognia_git::code_adoption;
 mod codeserver;
 mod codex_app_dispatch;
 // ADR-0067 Phase 6 — extracted to cognia-core; re-aliased so `crate::command_error`
@@ -144,7 +147,10 @@ mod shutdown;
 pub use cognia_skills as skills;
 mod provider_diagnostics;
 mod subscription;
-mod supervision_backoff;
+// ADR-0067 Tier C — extracted to `crates/cognia-core` (pure std, zero deps);
+// re-aliased so `crate::supervision_backoff::CrashBackoff` (claude/sidecar,
+// headless/brain) resolves unchanged.
+pub use cognia_core::supervision_backoff;
 pub mod task_workspace;
 mod telemetry;
 // ADR-0067 Tier B — extracted to `crates/cognia-terminal`; re-aliased so
@@ -153,7 +159,10 @@ mod telemetry;
 pub use cognia_scheduling::timing;
 pub use cognia_terminal as terminal;
 pub mod terminal_host_bridge;
-pub mod terminal_host_service;
+// ADR-0067 Tier C — extracted to `crates/cognia-terminal` (zero `crate::`
+// deps, already built on that crate's host/session); re-aliased so every
+// `crate::terminal_host_service::…` call site resolves unchanged.
+pub use cognia_terminal::terminal_host_service;
 // ADR-0067 follow-up — extracted to `crates/cognia-tts`; re-aliased so
 // `crate::tts::…` (generate_handler!) resolves unchanged.
 pub use cognia_tts as tts;
