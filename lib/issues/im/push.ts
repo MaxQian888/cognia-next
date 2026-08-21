@@ -24,7 +24,12 @@ import { hasActiveIssueRun } from "@/lib/db/issue-runs"
 import { allowedIssueMoveTargets } from "@/lib/issues/state-machine"
 import { listIssueRunOptions } from "@/lib/issues/run/registry"
 import { issueHref } from "@/lib/issues/sources/local-source"
-import { buildIssueCardSurface, type IssueCardLabels } from "./card"
+import {
+  buildIssueCardSurface,
+  buildIssueRunChoiceSurface,
+  type IssueCardLabels,
+  type IssueRunChoiceLabels,
+} from "./card"
 
 /** Where the desktop board lives for deep links pushed into IM. */
 export const ISSUE_BOARD_ORIGIN_ENV = "NEXT_PUBLIC_APP_ORIGIN"
@@ -169,6 +174,60 @@ export async function pushIssueCard(
       conversationKey: input.conversationKey,
       reason: "pii_blocked",
       fields: { issueId: issue.id },
+    })
+    return { status: "pii_blocked", surfaceId }
+  }
+  const platform = parseConversationKey(input.conversationKey).platform
+  await deps.enqueue({
+    adapterId: input.adapterId,
+    conversationKey: input.conversationKey,
+    request: {
+      conversationRef: { platform, adapterId: input.adapterId },
+      segments: [deps.buildSegment(surfaceId, surface)],
+      metadata: { idempotencyKey: input.idempotencyKey ?? newIdempotencyKey() },
+    },
+    source: "skill",
+  })
+  return { status: "sent", surfaceId }
+}
+
+export interface PushIssueRunChoiceInput {
+  adapterId: string
+  conversationKey: string
+  issue: Pick<Issue, "id" | "identifier" | "title">
+  options: ReadonlyArray<{ id: string; label: string }>
+  idempotencyKey?: string
+  labels?: Partial<IssueRunChoiceLabels>
+}
+
+/**
+ * Push the "which engine?" card.
+ *
+ * Same PII gate and same governed queue as every other issue push. One card,
+ * one binding per option — each button carries its own `adapterId`, so the
+ * choice is made by the person rather than by registration order.
+ */
+export async function pushIssueRunChoice(
+  input: PushIssueRunChoiceInput,
+  overrides?: Partial<IssueImPushDeps>
+): Promise<{ status: "sent" | "pii_blocked"; surfaceId: string }> {
+  const deps = await resolveDeps(overrides)
+  const surfaceId = `issue-run-choice:${input.issue.id}:${newIdempotencyKey().slice(0, 8)}`
+  const surface = buildIssueRunChoiceSurface({
+    surfaceId,
+    issue: input.issue,
+    options: input.options,
+    ...(input.labels ? { labels: input.labels } : {}),
+  })
+  const mirror = String(surface.widget?.fallbackText ?? "")
+  if (!deps.isPiiSafe(mirror)) {
+    await deps.audit({
+      adapterId: input.adapterId,
+      kind: "issue.im_pii_blocked",
+      at: deps.now(),
+      conversationKey: input.conversationKey,
+      reason: "pii_blocked",
+      fields: { issueId: input.issue.id },
     })
     return { status: "pii_blocked", surfaceId }
   }

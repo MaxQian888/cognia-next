@@ -4,6 +4,8 @@ import {
   actorDisplay,
   buildCreateIssueConfirmSurface,
   buildIssueCardSurface,
+  buildIssueRunChoiceSurface,
+  issueRunOptionLabel,
 } from "./card"
 
 const issue: Pick<
@@ -123,5 +125,58 @@ describe("buildCreateIssueConfirmSurface", () => {
     expect(c.root.children).toEqual(["draftTitle", "summary", "actions"])
     expect(surface.title).toBe("File it?")
     expect(c.actions.children).toEqual(["project_p1", "cancel"])
+  })
+})
+
+describe("buildIssueRunChoiceSurface", () => {
+  const issue = { id: "i1", identifier: "MERC-4", title: "Fix the importer" }
+
+  it("gives each engine its own button carrying its own adapter id", () => {
+    // One binding per option is what moves the decision from registration
+    // order to the person: the pressed button says which engine it meant.
+    const surface = buildIssueRunChoiceSurface({
+      surfaceId: "s1",
+      issue,
+      options: [
+        { id: "agent-a", label: "Single agent" },
+        { id: "agent-b", label: "Agent team" },
+      ],
+    })
+    const payloads = ["run_agent-a", "run_agent-b"].map(
+      (id) => (surface.components[id] as { bindingPayload: Record<string, unknown> }).bindingPayload
+    )
+    expect(payloads).toEqual([
+      { action: "run", issueId: "i1", adapterId: "agent-a" },
+      { action: "run", issueId: "i1", adapterId: "agent-b" },
+    ])
+    expect((surface.components.actions as { children: string[] }).children).toEqual([
+      "run_agent-a",
+      "run_agent-b",
+    ])
+  })
+
+  it("numbers the options for an adapter with no buttons", () => {
+    const surface = buildIssueRunChoiceSurface({
+      surfaceId: "s1",
+      issue,
+      options: [
+        { id: "a", label: "Single agent" },
+        { id: "b", label: "Agent team" },
+      ],
+    })
+    const mirror = String(surface.widget?.fallbackText)
+    expect(mirror).toContain("1. Single agent")
+    expect(mirror).toContain("2. Agent team")
+    expect(mirror).toContain("Reply with a number")
+  })
+})
+
+describe("issueRunOptionLabel", () => {
+  it("names the built-in kinds and falls back to the id for anything else", () => {
+    // A plugin-registered adapter shows its own id: a worse label, never a
+    // wrong one — which is why the map lives here and not on the adapter
+    // contract, where every plugin author would have to fill it in.
+    expect(issueRunOptionLabel({ id: "x", kind: "agent-team" })).toBe("Agent team")
+    expect(issueRunOptionLabel({ id: "my-plugin-runner" })).toBe("my-plugin-runner")
   })
 })

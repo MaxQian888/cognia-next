@@ -413,3 +413,154 @@ describe("handleIssueActionCallback", () => {
     await deleteSiblingBindings("lark-1", "nothing")
   })
 })
+
+describe("▶ Run with more than one capable engine", () => {
+  it("asks which engine instead of taking whichever registered first", async () => {
+    // The old rule was "first adapter whose verdict is ok". With one engine
+    // that IS the only answer; with several it silently picked on registration
+    // order — an ordering nobody chose and nothing displays.
+    const { issue } = await seed("todo")
+    const start = jest.fn()
+    for (const id of ["agent-a", "agent-b"]) {
+      getIssueRunRegistry().register({
+        id,
+        kind: id === "agent-a" ? "agent-task" : "agent-team",
+        canRun: async () => ({ ok: true }),
+        start: start as never,
+        poll: async () => ({ state: "running" }) as never,
+      })
+    }
+    const choices: unknown[] = []
+    const { deps, audits } = harness({
+      pushRunChoice: (async (input: unknown) => {
+        choices.push(input)
+        return { status: "sent", surfaceId: "s" }
+      }) as never,
+    })
+
+    const out = await handleIssueActionCallback(
+      { binding: binding({ action: "run", issueId: issue.id }), adapterId: "lark-1" },
+      deps
+    )
+
+    expect(out).toEqual({ kind: "run_choice", adapterIds: ["agent-a", "agent-b"] })
+    expect(start).not.toHaveBeenCalled()
+    expect(choices).toHaveLength(1)
+    expect((choices[0] as { options: Array<{ id: string; label: string }> }).options).toEqual([
+      { id: "agent-a", label: "Single agent" },
+      { id: "agent-b", label: "Agent team" },
+    ])
+    expect(audits.at(-1)).toMatchObject({
+      kind: "issue.card_action",
+      fields: { choices: ["agent-a", "agent-b"] },
+    })
+  })
+
+  it("runs the engine the person picked on the choice card", async () => {
+    const { issue } = await seed("todo")
+    const started: string[] = []
+    for (const id of ["agent-a", "agent-b"]) {
+      getIssueRunRegistry().register({
+        id,
+        kind: id === "agent-a" ? "agent-task" : "agent-team",
+        canRun: async () => ({ ok: true }),
+        start: async (target, ctx) => {
+          started.push(id)
+          return createIssueRun({
+            issueId: target.issue.id,
+            projectId: "w1",
+            adapterId: id,
+            kind: "agent-task",
+            targetId: "t",
+            by: ctx.by,
+          })
+        },
+        poll: async () => ({ state: "running" }) as never,
+      })
+    }
+    const { deps } = harness()
+
+    const out = await handleIssueActionCallback(
+      {
+        binding: binding({ action: "run", issueId: issue.id, adapterId: "agent-b" }),
+        adapterId: "lark-1",
+      },
+      deps
+    )
+
+    expect(started).toEqual(["agent-b"])
+    expect(out).toMatchObject({ kind: "run_started", adapterId: "agent-b" })
+  })
+
+  it("refuses a stale or forged adapter id rather than running the wrong engine", async () => {
+    const { issue } = await seed("todo")
+    getIssueRunRegistry().register({
+      id: "agent-a",
+      kind: "agent-task",
+      canRun: async () => ({ ok: true }),
+      start: (async () => {
+        throw new Error("must not run")
+      }) as never,
+      poll: async () => ({ state: "running" }) as never,
+    })
+    const { deps, sent } = harness()
+
+    const out = await handleIssueActionCallback(
+      {
+        binding: binding({ action: "run", issueId: issue.id, adapterId: "not-registered" }),
+        adapterId: "lark-1",
+      },
+      deps
+    )
+
+    expect(out.kind).toBe("run_refused")
+    expect(sent.at(-1)).toMatchObject({ text: expect.stringContaining("Cannot run") })
+  })
+
+  it("stays one tap when only one engine can take it", async () => {
+    const { issue } = await seed("todo")
+    const started: string[] = []
+    getIssueRunRegistry().register({
+      id: "only",
+      kind: "agent-task",
+      canRun: async () => ({ ok: true }),
+      start: async (target, ctx) => {
+        started.push("only")
+        return createIssueRun({
+          issueId: target.issue.id,
+          projectId: "w1",
+          adapterId: "only",
+          kind: "agent-task",
+          targetId: "t",
+          by: ctx.by,
+        })
+      },
+      poll: async () => ({ state: "running" }) as never,
+    })
+    getIssueRunRegistry().register({
+      id: "refuses",
+      kind: "agent-team",
+      canRun: async () => ({ ok: false, reason: "no-team" }),
+      start: (async () => {
+        throw new Error("must not run")
+      }) as never,
+      poll: async () => ({ state: "running" }) as never,
+    })
+    const choices: unknown[] = []
+    const { deps } = harness({
+      pushRunChoice: (async (input: unknown) => {
+        choices.push(input)
+        return { status: "sent", surfaceId: "s" }
+      }) as never,
+    })
+
+    const out = await handleIssueActionCallback(
+      { binding: binding({ action: "run", issueId: issue.id }), adapterId: "lark-1" },
+      deps
+    )
+
+    expect(choices).toHaveLength(0)
+    expect(started).toEqual(["only"])
+    expect(out).toMatchObject({ kind: "run_started", adapterId: "only" })
+  })
+})

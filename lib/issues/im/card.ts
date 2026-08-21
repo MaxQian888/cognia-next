@@ -30,7 +30,14 @@ import type { Issue, IssueActor, IssueProject, IssueStatus } from "@/types/issue
 /** What one issue-card button does. Persisted as the binding payload. */
 export type IssueActionPayload =
   | { action: "move"; issueId: string; to: IssueStatus }
-  | { action: "run"; issueId: string }
+  /**
+   * `adapterId` is present only on a CHOICE card's buttons. Its absence means
+   * "run this issue" and is answered by the handler; its presence means "run it
+   * on this engine" and was answered by the person. Keeping one action rather
+   * than two is what lets the plain Run button stay one tap when there is only
+   * one possible answer.
+   */
+  | { action: "run"; issueId: string; adapterId?: string }
   | {
       action: "create"
       draft: IssueDraft
@@ -177,6 +184,88 @@ export function buildIssueCardSurface(input: IssueCardSurfaceInput): A2UISegment
     surfaceType: "inline",
     title,
     widget: { fallbackText: mirror.filter(Boolean).join("\n") },
+  }
+}
+
+export interface IssueRunChoiceLabels {
+  title: string
+  prompt: string
+  hint: string
+}
+
+export const DEFAULT_ISSUE_RUN_CHOICE_LABELS: IssueRunChoiceLabels = {
+  title: "Which engine should run this?",
+  prompt: "More than one engine can take this issue.",
+  hint: "Reply with a number to choose",
+}
+
+/**
+ * Display names for the built-in run kinds.
+ *
+ * Lives here rather than on `IssueRunAdapter` on purpose: the adapter contract
+ * is engine-facing, and a plugin-registered adapter that is not in this map
+ * simply shows its own id, which is a worse label but never a wrong one.
+ */
+const RUN_KIND_LABEL: Record<string, string> = {
+  "agent-task": "Single agent",
+  "agent-team": "Agent team",
+  "github-loop": "GitHub loop",
+}
+
+export function issueRunOptionLabel(option: { id: string; kind?: string }): string {
+  return RUN_KIND_LABEL[option.kind ?? option.id] ?? option.id
+}
+
+export interface IssueRunChoiceSurfaceInput {
+  surfaceId: string
+  issue: Pick<Issue, "id" | "identifier" | "title">
+  /** Only the adapters that can actually run it — a refused one is not a choice. */
+  options: ReadonlyArray<{ id: string; label: string }>
+  labels?: Partial<IssueRunChoiceLabels>
+}
+
+/**
+ * Build the "which engine?" card. Pure.
+ *
+ * Exists because ▶ Run used to take the FIRST adapter that said yes. With one
+ * engine registered that is the only answer; with several it silently picks one
+ * on registration order — an ordering nobody chose and nothing displays. Asking
+ * is the only honest option, and it costs a tap only when the ambiguity is real.
+ */
+export function buildIssueRunChoiceSurface(input: IssueRunChoiceSurfaceInput): A2UISegmentContent {
+  const labels: IssueRunChoiceLabels = {
+    ...DEFAULT_ISSUE_RUN_CHOICE_LABELS,
+    ...(input.labels ?? {}),
+  }
+  const title = `${input.issue.identifier} — ${labels.title}`
+  const components: Record<string, unknown> = {
+    root: { component: "Card", title, children: ["prompt", "actions"] },
+    prompt: { component: "Text", text: `${input.issue.title}\n${labels.prompt}` },
+  }
+  const actionIds: string[] = []
+  const mirror: string[] = [`# ${title}`, input.issue.title, labels.prompt]
+  let numeric = 1
+  for (const option of input.options) {
+    const id = `run_${option.id}`
+    components[id] = {
+      component: "Button",
+      text: option.label,
+      action: `run:${option.id}`,
+      ...issuePayloadHint({ action: "run", issueId: input.issue.id, adapterId: option.id }),
+    }
+    actionIds.push(id)
+    mirror.push(`${numeric++}. ${option.label}`)
+  }
+  components.actions = { component: "Row", children: actionIds }
+  mirror.push(labels.hint)
+
+  return {
+    components,
+    dataModel: {},
+    rootId: "root",
+    surfaceType: "inline",
+    title,
+    widget: { fallbackText: mirror.join("\n") },
   }
 }
 

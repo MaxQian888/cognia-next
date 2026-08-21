@@ -32,8 +32,8 @@ import { patchConversationOverride } from "@/lib/db/conversation-overrides"
 import { createIssue, getIssue, moveIssue } from "@/lib/db/issues"
 import { hasActiveIssueRun } from "@/lib/db/issue-runs"
 import { IssueRunRefusedError, listIssueRunOptions, startIssueRun } from "@/lib/issues/run/registry"
-import type { IssueActionPayload, IssueDraft } from "./card"
-import { pushIssueCard, pushIssueText, type IssueImPushDeps } from "./push"
+import { issueRunOptionLabel, type IssueActionPayload, type IssueDraft } from "./card"
+import { pushIssueCard, pushIssueRunChoice, pushIssueText, type IssueImPushDeps } from "./push"
 
 export interface HandleIssueActionInput {
   binding: ConnectorCallbackBindingRow
@@ -57,6 +57,8 @@ export interface IssueActionHandlerDeps {
   now: () => number
   /** Which workspace an IM-created issue lands in. */
   resolveWorkspaceId: () => Promise<string | null>
+  /** Injected so the ambiguity card can be asserted without a transport. */
+  pushRunChoice: typeof pushIssueRunChoice
 }
 
 async function defaultDeps(): Promise<IssueActionHandlerDeps> {
@@ -64,6 +66,7 @@ async function defaultDeps(): Promise<IssueActionHandlerDeps> {
   return {
     audit: (entry) => appendAudit(entry as never),
     now: Date.now,
+    pushRunChoice: pushIssueRunChoice,
     resolveWorkspaceId: async () => {
       const { useProjectStore } = await import("@/stores/project/project-store")
       const active = useProjectStore.getState().activeProjectId
@@ -88,7 +91,16 @@ export function readIssueActionPayload(
   }
   if (action === "run") {
     if (typeof payload.issueId !== "string") return null
-    return { action, issueId: payload.issueId }
+    return {
+      action,
+      issueId: payload.issueId,
+      // Only a choice card's buttons carry one. An unknown id is not silently
+      // dropped here — the handler re-checks it against the live verdicts, so a
+      // stale or forged id refuses rather than running the wrong engine.
+      ...(typeof payload.adapterId === "string" && payload.adapterId
+        ? { adapterId: payload.adapterId }
+        : {}),
+    }
   }
   if (action === "create") {
     const draft = payload.draft as Partial<IssueDraft> | undefined
@@ -173,6 +185,8 @@ export type IssueActionOutcome =
   | { kind: "move_denied"; reason: string }
   | { kind: "run_started"; issue: Issue; adapterId: string }
   | { kind: "run_refused"; reason: string }
+  /** More than one engine could take it; the person was asked which. */
+  | { kind: "run_choice"; adapterIds: string[] }
   | { kind: "created"; issue: Issue }
   | { kind: "create_cancelled" }
   | { kind: "ignored"; reason: string }
@@ -237,7 +251,37 @@ export async function handleIssueActionCallback(
     }
     case "run": {
       const options = await listIssueRunOptions(payload.issueId)
-      const first = options.find((option) => option.verdict.ok)
+      const runnable = options.filter((option) => option.verdict.ok)
+      // A button that already names its engine was pressed on the choice card
+      // below; the person, not registration order, picked it. Its verdict is
+      // still re-checked here because the card may be minutes old.
+      const chosen = payload.adapterId
+        ? runnable.find((option) => option.adapter.id === payload.adapterId)
+        : runnable.length === 1
+          ? runnable[0]
+          : undefined
+      if (!chosen && payload.adapterId === undefined && runnable.length > 1) {
+        // ▶ Run used to take the FIRST adapter that said yes. With one engine
+        // registered that IS the only answer; with several it silently picked
+        // on an ordering nobody chose and nothing displays. Ask instead — the
+        // extra tap is spent only when the ambiguity is real.
+        const issue = (await getIssue(payload.issueId))!
+        await deps.pushRunChoice({
+          adapterId: input.adapterId,
+          conversationKey,
+          issue,
+          options: runnable.map((option) => ({
+            id: option.adapter.id,
+            label: issueRunOptionLabel({ id: option.adapter.id, kind: option.adapter.kind }),
+          })),
+        })
+        await audit("issue.card_action", {
+          issueId: payload.issueId,
+          choices: runnable.map((option) => option.adapter.id),
+        })
+        return { kind: "run_choice", adapterIds: runnable.map((option) => option.adapter.id) }
+      }
+      const first = chosen
       if (!first) {
         const refused = options.find((option) => !option.verdict.ok)?.verdict
         const reason = refused && !refused.ok ? refused.reason : "adapter-missing"
