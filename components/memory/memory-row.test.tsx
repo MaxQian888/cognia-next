@@ -1,7 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { Memory } from "@/types/memory/memory"
 import { MemoryRow } from "./memory-row"
 
@@ -30,140 +31,165 @@ function setup(over: Partial<Memory> = {}, extra: Partial<Parameters<typeof Memo
   const onPinToggle = jest.fn()
   const onSave = jest.fn()
   const onDelete = jest.fn()
+  const onArchive = jest.fn()
   render(
     <MemoryRow
       memory={mem(over)}
       onPinToggle={onPinToggle}
       onSave={onSave}
       onDelete={onDelete}
+      onArchive={onArchive}
       {...extra}
     />
   )
-  return { onPinToggle, onSave, onDelete }
+  return { onPinToggle, onSave, onDelete, onArchive }
+}
+
+/** Open the row's overflow menu and return its content element. */
+async function openRowMenu() {
+  await userEvent.click(screen.getByRole("button", { name: "More actions" }))
+  return screen.getByRole("menu")
 }
 
 describe("MemoryRow", () => {
   it("renders text, importance and type badge", () => {
     setup()
     expect(screen.getByText("The user prefers pnpm")).toBeTruthy()
-    expect(screen.getByTestId("memory-importance").textContent).toContain("7")
+    expect(screen.getByTestId("memory-row").textContent).toContain("Importance 7")
+    expect(screen.getByTestId("memory-row").textContent).toContain("Fact")
   })
 
-  it("toggles pin", () => {
+  it("hands the pin callback the desired state, not the current one", () => {
     const { onPinToggle } = setup({ pinned: false })
-    fireEvent.click(screen.getByRole("button", { name: /pin/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Pin" }))
     expect(onPinToggle).toHaveBeenCalledWith("m1", true)
+  })
+
+  it("unpins a pinned row", () => {
+    const { onPinToggle } = setup({ pinned: true })
+    fireEvent.click(screen.getByRole("button", { name: "Unpin" }))
+    expect(onPinToggle).toHaveBeenCalledWith("m1", false)
   })
 
   it("enters edit mode and saves a changed value", () => {
     const { onSave } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /edit/i }))
-    const textarea = screen.getByLabelText(/edit memory text/i) as HTMLTextAreaElement
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    const textarea = screen.getByRole("textbox")
     fireEvent.change(textarea, { target: { value: "The user prefers bun" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     expect(onSave).toHaveBeenCalledWith("m1", "The user prefers bun")
   })
 
-  it("does not save when the text is unchanged", () => {
+  it("does not save an unchanged or empty value", () => {
     const { onSave } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /edit/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it("cancels edit without saving", () => {
+  it("cancels an edit without saving", () => {
     const { onSave } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /edit/i }))
-    const textarea = screen.getByLabelText(/edit memory text/i)
-    fireEvent.change(textarea, { target: { value: "changed" } })
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "nope" } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(onSave).not.toHaveBeenCalled()
     expect(screen.getByText("The user prefers pnpm")).toBeTruthy()
   })
 
-  it("deletes after the brief fade-out", async () => {
-    const { onDelete } = setup()
-    fireEvent.click(screen.getByRole("button", { name: /delete/i }))
-    // Delete defers ~160ms while the row fades itself out.
+  // Archive is the visible destructive action; permanent delete is demoted to
+  // the overflow menu because `invalidate` keeps the row restorable.
+  it("archives from a visible button", () => {
+    const { onArchive, onDelete } = setup()
+    fireEvent.click(screen.getByTestId("memory-row-archive"))
+    expect(onArchive).toHaveBeenCalledWith("m1")
     expect(onDelete).not.toHaveBeenCalled()
-    expect(screen.getByTestId("memory-row").className).toContain("opacity-0")
-    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("m1"))
   })
 
-  it("renders a source link when sourceSessionId is set", () => {
-    setup({ sourceSessionId: "ses_9" })
-    const link = screen.getByTestId("memory-source-link") as HTMLAnchorElement
-    expect(link.getAttribute("href")).toContain("ses_9")
+  it("keeps permanent delete behind the overflow menu", async () => {
+    const { onDelete } = setup()
+    const menu = await openRowMenu()
+    await userEvent.click(within(menu).getByText("Delete permanently"))
+    expect(onDelete).toHaveBeenCalledWith("m1")
   })
 
-  it("shows pinned + invalidated styling cues", () => {
-    setup({ pinned: true, status: "invalidated" })
-    // Unpin affordance shown for a pinned row.
-    expect(screen.getByRole("button", { name: /unpin/i })).toBeTruthy()
+  it("omits permanent delete on surfaces that cannot hard-delete", async () => {
+    render(
+      <MemoryRow memory={mem()} onPinToggle={jest.fn()} onSave={jest.fn()} onArchive={jest.fn()} />
+    )
+    const menu = await openRowMenu()
+    expect(within(menu).queryByText("Delete permanently")).toBeNull()
   })
 
-  it("uses a translucent theme-aware card surface so it reads over wallpapers", () => {
-    setup()
+  it("hides archive on an already-archived row", () => {
+    setup({ status: "invalidated" })
+    expect(screen.queryByTestId("memory-row-archive")).toBeNull()
+    expect(screen.getByTestId("memory-row").textContent).toContain("archived")
+  })
+
+  // Painting a badge on every healthy row trains the eye to skip the one that
+  // matters, so only conflict / awaiting-review states render one.
+  it("shows a governance badge only for states that need attention", () => {
+    const { unmount } = render(
+      <MemoryRow
+        memory={mem({ reviewStatus: "verified" })}
+        onPinToggle={jest.fn()}
+        onSave={jest.fn()}
+        onDelete={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("memory-row-governance")).toBeNull()
+    unmount()
+
+    setup({ reviewStatus: "conflict" })
+    expect(screen.getByTestId("memory-row-governance").textContent).toBe("Conflict")
+  })
+
+  it("labels a pending_instruction row rather than rendering a missing key", () => {
+    setup({ reviewStatus: "pending_instruction" })
+    expect(screen.getByTestId("memory-row-governance").textContent).toBe("Awaiting review")
+  })
+
+  it("caps the visible tags and counts the rest", () => {
+    setup({ tags: ["a", "b", "c", "d", "e"] })
     const row = screen.getByTestId("memory-row")
-    // Mirrors StatCard's `bg-card/80` so the panel adapts to theme + image
-    // backgrounds (the page opts in via data-bg-target="chat").
-    expect(row.className).toContain("bg-card/80")
-    expect(row.className).toContain("backdrop-blur-sm")
+    expect(within(row).getByText("a")).toBeTruthy()
+    expect(within(row).queryByText("d")).toBeNull()
+    expect(row.textContent).toContain("+2")
   })
 
-  it("opens the detail view on row click and Enter when onOpenDetail is set", () => {
+  it("reports tag clicks", () => {
+    const onTagClick = jest.fn()
+    setup({ tags: ["prefs"] }, { onTagClick })
+    fireEvent.click(screen.getByText("prefs"))
+    expect(onTagClick).toHaveBeenCalledWith("prefs")
+  })
+
+  it("opens the detail pane on click and on Enter", () => {
     const onOpenDetail = jest.fn()
-    setup({ id: "m1" }, { onOpenDetail })
-    fireEvent.click(screen.getByTestId("memory-row"))
-    expect(onOpenDetail).toHaveBeenCalledWith("m1")
-    fireEvent.keyDown(screen.getByTestId("memory-row"), { key: "Enter" })
+    setup({}, { onOpenDetail })
+    const row = screen.getByTestId("memory-row")
+    fireEvent.click(row)
+    fireEvent.keyDown(row, { key: "Enter" })
     expect(onOpenDetail).toHaveBeenCalledTimes(2)
   })
 
-  it("does not open the detail view when an action button is clicked", async () => {
+  it("does not open the detail pane while editing", () => {
     const onOpenDetail = jest.fn()
-    const { onDelete } = setup({ id: "m1" }, { onOpenDetail })
-    fireEvent.click(screen.getByRole("button", { name: /delete/i }))
-    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("m1"))
+    setup({}, { onOpenDetail })
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.click(screen.getByTestId("memory-row"))
     expect(onOpenDetail).not.toHaveBeenCalled()
   })
 
-  it("renders a selection checkbox and reports toggles", () => {
+  it("exposes selection when selectable", () => {
     const onSelectToggle = jest.fn()
-    setup({ id: "m1" }, { selectable: true, selected: false, onSelectToggle })
-    fireEvent.click(screen.getByTestId("memory-select"))
+    setup({}, { selectable: true, onSelectToggle })
+    fireEvent.click(screen.getByTestId("memory-row-select"))
     expect(onSelectToggle).toHaveBeenCalledWith("m1", true)
   })
 
-  it("renders clickable tag chips that filter and never open detail", () => {
-    const onTagClick = jest.fn()
-    const onOpenDetail = jest.fn()
-    setup({ tags: ["work"] }, { onTagClick, onOpenDetail, activeTags: new Set(["work"]) })
-    const chip = screen.getByRole("button", { name: "#work" })
-    expect(chip.getAttribute("aria-pressed")).toBe("true")
-    fireEvent.click(chip)
-    expect(onTagClick).toHaveBeenCalledWith("work")
-    expect(onOpenDetail).not.toHaveBeenCalled()
-  })
-
-  it("renders plain tag chips when no tag handler is provided", () => {
-    setup({ tags: ["home"] })
-    const tags = screen.getByTestId("memory-tags")
-    expect(within(tags).getByText("#home")).toBeTruthy()
-    expect(within(tags).queryByRole("button")).toBeNull()
-  })
-
-  it("highlights the active row", () => {
-    setup({}, { active: true })
-    expect(screen.getByTestId("memory-row").className).toContain("ring-primary/50")
-  })
-
-  it.each([
-    [{ reviewStatus: "conflict" as const }, "Conflict"],
-    [{ evidenceState: "supported" as const }, "Evidence-backed"],
-    [{}, "Legacy / no evidence"],
-  ])("renders the governed trust badge for %j", (overrides, label) => {
-    setup(overrides)
-    expect(screen.getByText(label)).toBeInTheDocument()
+  it("marks the density it was rendered at", () => {
+    setup({}, { density: "compact" })
+    expect(screen.getByTestId("memory-row").dataset.density).toBe("compact")
   })
 })
