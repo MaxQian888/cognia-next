@@ -195,10 +195,10 @@ test("newWorkflowAction requests workflow creation and routes to /workflows", ()
   expect(router.push).toHaveBeenCalledWith("/workflows")
 })
 
-test("newAgentTeamAction requests agent-team creation and routes to /agent-teams", () => {
+test("newAgentTeamAction requests Squad creation and routes to /squads", () => {
   newAgentTeamAction(router)
   expect(requestCreate).toHaveBeenCalledWith("agentTeam")
-  expect(router.push).toHaveBeenCalledWith("/agent-teams")
+  expect(router.push).toHaveBeenCalledWith("/settings?section=squads")
 })
 
 test("newCharacterAction requests character creation and routes to characters tab", () => {

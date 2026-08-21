@@ -113,7 +113,6 @@
     "newFolder": "New folder",
     "newFolderName": "New folder",
     "openSessions": "Open sessions",
-    "orderPending": "{count, plural, one {# update} other {# updates}}",
     "renameFolder": "Rename folder",
     "resizeHandle": "Resize sidebar",
     "searchAria": "Search conversations",
@@ -177,7 +176,6 @@
   "guildRail": {
     "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
-    "agentTeams": "Agent teams",
     "aliases": {
       "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
     },
@@ -231,6 +229,7 @@
     "sites": "Sites",
     "skills": "Skills",
     "sourceControl": "Source Control",
+    "squads": "Squads",
     "templates": "Templates",
     "twin": "Digital twin",
     "unreadCount": "{count, plural, one {# unread} other {# unread}}",
@@ -246,6 +245,7 @@
       "collect": "Collect",
       "collectAria": "Collect background run {runId}",
       "logTail": "Log",
+      "openInRuns": "Open in Agent Runs",
       "reDispatched": "re-dispatched",
       "rerun": "Re-run",
       "stop": "Stop"
@@ -393,7 +393,6 @@
     },
     "go": {
       "a2ui": "Mini-Apps",
-      "agentTeams": "Agent Teams",
       "canvas": "Canvas",
       "discover": "Discover",
       "dms": "Chats",
@@ -405,6 +404,7 @@
       "settings": "Settings",
       "sites": "Sites",
       "skills": "Skills",
+      "squads": "Squads",
       "twin": "Twin Workbench",
       "workflows": "Workflows"
     },
@@ -418,11 +418,11 @@
       "label": "Help"
     },
     "run": {
-      "agentTeams": "Agent Teams",
       "killSwitch": "Automation Kill-Switch",
       "label": "Run",
       "newWorkflowRun": "New Workflow Run",
-      "openScheduler": "Open Scheduler"
+      "openScheduler": "Open Scheduler",
+      "squads": "Squads"
     },
     "shortcut": {
       "cmdOrCtrl0": "Ctrl+0",

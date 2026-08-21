@@ -178,7 +178,7 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
           case "go-twin":
           case "go-skills":
           case "go-plugins":
-          case "go-agent-teams":
+          case "go-squads":
           case "go-scheduler":
           case "go-discover":
           case "go-a2ui":

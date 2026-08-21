@@ -113,7 +113,6 @@
     "newFolder": "新建文件夹",
     "newFolderName": "新建文件夹",
     "openSessions": "打开会话列表",
-    "orderPending": "{count} 条更新",
     "renameFolder": "重命名文件夹",
     "resizeHandle": "调整侧边栏宽度",
     "searchAria": "搜索对话",
@@ -177,7 +176,6 @@
   "guildRail": {
     "a2ui": "小应用",
     "agentRuns": "智能体运行",
-    "agentTeams": "智能体团队",
     "aliases": {
       "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
     },
@@ -231,6 +229,7 @@
     "sites": "站点",
     "skills": "技能",
     "sourceControl": "源代码管理",
+    "squads": "小队",
     "templates": "模板",
     "twin": "数字分身",
     "unreadCount": "{count} 条未读",
@@ -246,6 +245,7 @@
       "collect": "收集",
       "collectAria": "收集后台运行 {runId}",
       "logTail": "日志",
+      "openInRuns": "在运行中心打开",
       "reDispatched": "已重新派发",
       "rerun": "重新运行",
       "stop": "停止"
@@ -393,7 +393,6 @@
     },
     "go": {
       "a2ui": "迷你应用",
-      "agentTeams": "智能体团队",
       "canvas": "Canvas",
       "discover": "发现",
       "dms": "对话",
@@ -405,6 +404,7 @@
       "settings": "设置",
       "sites": "站点",
       "skills": "技能",
+      "squads": "小队",
       "twin": "Twin 工作台",
       "workflows": "工作流"
     },
@@ -418,11 +418,11 @@
       "label": "帮助"
     },
     "run": {
-      "agentTeams": "智能体团队",
       "killSwitch": "自动化紧急停止",
       "label": "运行",
       "newWorkflowRun": "新建工作流运行",
-      "openScheduler": "打开调度器"
+      "openScheduler": "打开调度器",
+      "squads": "小队"
     },
     "shortcut": {
       "cmdOrCtrl0": "Ctrl+0",

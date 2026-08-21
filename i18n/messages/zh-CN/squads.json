@@ -1,0 +1,14 @@
+{
+  "fleet": {
+    "configure": "配置这个小队",
+    "description": "每个小队此刻在做什么。",
+    "emptyDescription": "先去设置里新建一个，然后在输入框把会话交给它。",
+    "emptyTitle": "还没有小队",
+    "inspectorLabel": "小队详情",
+    "manageAction": "管理小队",
+    "memberCount": "{count, plural, =0 {暂无成员} other {# 名成员}}",
+    "railLabel": "小队列表",
+    "summary": "共 {total} 个小队，{live, plural, =0 {当前空闲} other {# 个在跑}}",
+    "title": "小队"
+  }
+}

@@ -860,8 +860,8 @@ export function TitleBar() {
                     {tMenu("go.plugins")}
                     <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl5")}</DropdownMenuShortcut>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-agent-teams")}>
-                    {tMenu("go.agentTeams")}
+                  <DropdownMenuItem onSelect={handleGo("go-squads")}>
+                    {tMenu("go.squads")}
                     <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl6")}</DropdownMenuShortcut>
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleGo("go-scheduler")}>
@@ -896,8 +896,8 @@ export function TitleBar() {
                   <DropdownMenuItem onSelect={handleGo("go-scheduler")}>
                     {tMenu("run.openScheduler")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleGo("go-agent-teams")}>
-                    {tMenu("run.agentTeams")}
+                  <DropdownMenuItem onSelect={handleGo("go-squads")}>
+                    {tMenu("run.squads")}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"
@@ -1174,8 +1174,8 @@ export function TitleBar() {
                       {tMenu("go.plugins")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl5")}</MenubarShortcut>
                     </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-agent-teams")}>
-                      {tMenu("go.agentTeams")}
+                    <MenubarItem onSelect={handleGo("go-squads")}>
+                      {tMenu("go.squads")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl6")}</MenubarShortcut>
                     </MenubarItem>
                     <MenubarItem onSelect={handleGo("go-scheduler")}>
@@ -1208,8 +1208,8 @@ export function TitleBar() {
                     <MenubarItem onSelect={handleGo("go-scheduler")}>
                       {tMenu("run.openScheduler")}
                     </MenubarItem>
-                    <MenubarItem onSelect={handleGo("go-agent-teams")}>
-                      {tMenu("run.agentTeams")}
+                    <MenubarItem onSelect={handleGo("go-squads")}>
+                      {tMenu("run.squads")}
                     </MenubarItem>
                     <MenubarSeparator />
                     <MenubarItem
@@ -1524,7 +1524,7 @@ const SHORTCUT_ROWS: Array<{ labelKey: string; shortcutKey: string }> = [
   { labelKey: "go.twin", shortcutKey: "shortcut.cmdOrCtrl3" },
   { labelKey: "go.skills", shortcutKey: "shortcut.cmdOrCtrl4" },
   { labelKey: "go.plugins", shortcutKey: "shortcut.cmdOrCtrl5" },
-  { labelKey: "go.agentTeams", shortcutKey: "shortcut.cmdOrCtrl6" },
+  { labelKey: "go.squads", shortcutKey: "shortcut.cmdOrCtrl6" },
   { labelKey: "go.scheduler", shortcutKey: "shortcut.cmdOrCtrl7" },
   { labelKey: "go.discover", shortcutKey: "shortcut.cmdOrCtrl8" },
   { labelKey: "tools.automationKillSwitch", shortcutKey: "shortcut.ctrlAltK" },

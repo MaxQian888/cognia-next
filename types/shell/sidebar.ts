@@ -46,7 +46,7 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   { id: "issues", route: "/issues", i18nKey: "issues", group: "feature" },
   { id: "skills", route: "/skills", i18nKey: "skills", group: "feature" },
   { id: "plugins", route: "/plugins", i18nKey: "plugins", group: "feature" },
-  { id: "agent-teams", route: "/agent-teams", i18nKey: "agentTeams", group: "feature" },
+  { id: "squads", route: "/squads", i18nKey: "squads", group: "feature" },
   { id: "scheduler", route: "/scheduler", i18nKey: "scheduler", group: "feature" },
   { id: "goals", route: "/goals", i18nKey: "goals", group: "feature" },
   { id: "pet", route: "/pet", i18nKey: "pet", group: "feature" },
@@ -151,7 +151,18 @@ export const GUILD_RAIL_WIDTH_PX = 56
  *
  * Order matters: it is the render order on the rail.
  */
-export const DEFAULT_PINNED_IDS = ["issues", "inbox", "workflows", "agent-teams"] as const
+/**
+ * Ids that changed name after a layout was already persisted.
+ *
+ * The id doubles as the persistence key, so renaming one silently drops it
+ * from every saved rail — the item does not move, it disappears. Mapped on
+ * read instead, which costs one lookup and keeps the rename invisible.
+ */
+export const LEGACY_SIDEBAR_NAV_IDS: Readonly<Record<string, string>> = {
+  "agent-teams": "squads",
+}
+
+export const DEFAULT_PINNED_IDS = ["issues", "inbox", "workflows", "squads"] as const
 
 /** Default: the four ids above pinned, everything else in "More", nothing hidden. */
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayout = {

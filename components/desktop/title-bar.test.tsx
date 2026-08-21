@@ -1421,7 +1421,7 @@ test("File > New Workflow signals create + routes to /workflows", async () => {
   await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/workflows"))
 })
 
-test("File > New Agent Team signals create + routes to /agent-teams", async () => {
+test("File > New Squad signals create + routes to the Squads library", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
@@ -1429,7 +1429,7 @@ test("File > New Agent Team signals create + routes to /agent-teams", async () =
   await user.click(await screen.findByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.newAgentTeam"))
   expect(requestCreate).toHaveBeenCalledWith("agentTeam")
-  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/agent-teams"))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/settings?section=squads"))
 })
 
 test("File > New Character signals create + routes to settings characters tab", async () => {
@@ -1576,7 +1576,7 @@ test.each([
   ["go.sites", "/sites"],
   ["go.skills", "/skills"],
   ["go.plugins", "/plugins"],
-  ["go.agentTeams", "/agent-teams"],
+  ["go.squads", "/squads"],
   ["go.scheduler", "/scheduler"],
   ["go.discover", "/discover"],
   ["go.a2ui", "/a2ui"],

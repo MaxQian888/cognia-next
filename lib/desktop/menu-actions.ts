@@ -1,5 +1,6 @@
 "use client"
 
+import { settingsHref } from "@/lib/settings/deep-link"
 import { invoke } from "@tauri-apps/api/core"
 
 /**
@@ -81,7 +82,7 @@ export const MENU_ACTION_IDS = [
   "go-twin",
   "go-skills",
   "go-plugins",
-  "go-agent-teams",
+  "go-squads",
   "go-scheduler",
   "go-discover",
   "go-a2ui",
@@ -173,7 +174,7 @@ export const GO_ROUTES: Record<string, string> = {
   "go-twin": "/twin",
   "go-skills": "/skills",
   "go-plugins": "/plugins",
-  "go-agent-teams": "/agent-teams",
+  "go-squads": "/squads",
   "go-scheduler": "/scheduler",
   "go-discover": "/discover",
   "go-a2ui": "/a2ui",
@@ -216,7 +217,10 @@ export function newWorkflowAction(router: AppRouterInstance): void {
 export function newAgentTeamAction(router: AppRouterInstance): void {
   log.info("menu action new-agent-team")
   useUIStore.getState().requestCreate("agentTeam")
-  router.push("/agent-teams")
+  // Creating a Squad lives in Settings now, with the other cross-conversation
+  // assets. `/squads` answers "what is running" and has no create surface, so
+  // routing there would leave the signal with nobody to consume it.
+  router.push(settingsHref("squads"))
 }
 
 export function newCharacterAction(router: AppRouterInstance): void {

@@ -163,7 +163,7 @@ test("does not render the account switcher in the rail", () => {
 test("renders a pinned rail button for every default-pinned feature", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   // Three pins, not eleven: the rail keeps the destinations work arrives in.
-  for (const key of ["inbox", "workflows", "agentTeams"]) {
+  for (const key of ["inbox", "workflows", "squads"]) {
     expect(screen.getByLabelText(key)).toBeInTheDocument()
   }
   // Configure-once features and the auxiliary group both live behind "More".
@@ -607,7 +607,7 @@ test("the sheet variant still reaches every navigation destination", async () =>
   expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument()
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
-  for (const key of ["inbox", "workflows", "agentTeams"]) {
+  for (const key of ["inbox", "workflows", "squads"]) {
     expect(screen.getByLabelText(key)).toBeInTheDocument()
   }
   await user.click(screen.getByTestId("guild-more"))

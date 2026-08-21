@@ -41,7 +41,7 @@ describe("sidebar nav meta", () => {
     // three meet (an inbox that fills up, workflows you re-run, teams you hand
     // tasks to). Its two management siblings — /projects and /workspace — are
     // configure-occasionally and stay in "More".
-    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["issues", "inbox", "workflows", "agent-teams"])
+    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["issues", "inbox", "workflows", "squads"])
   })
 
   it("leaves the remaining features to the More popover", () => {

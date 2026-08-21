@@ -19,7 +19,7 @@
  * mounted.
  */
 
-import { Suspense, useCallback, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { MenuIcon } from "lucide-react"
@@ -29,6 +29,7 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { PanelTransition } from "@/components/settings/common/panel-transition"
 import { AgentTeamTemplatesSection } from "@/components/settings/agent/agent-team-templates-section"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useUIStore } from "@/stores/ui-store"
 import {
   SQUAD_TAB_PARAM,
   parseSquadPanelId,
@@ -90,6 +91,21 @@ function SquadsSectionInner() {
     })
     navigate(squadPanelId(squad.id))
   }, [createTeam, navigate, t])
+
+  // `File > New Squad` fires a create request and routes here. Without a
+  // consumer the menu item would land on the library and do nothing.
+  const pendingCreate = useUIStore((s) => s.pendingCreateRequest)
+  const clearPendingCreate = useUIStore((s) => s.clearPendingCreate)
+  useEffect(() => {
+    if (pendingCreate?.kind !== "agentTeam") return
+    clearPendingCreate()
+    // Intentional bridge from the Zustand create signal to a store write plus
+    // navigation. The signal originates outside React (a native menu event),
+    // so there is no render-time path to react to it; the page this replaces
+    // bridged it the same way.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    handleCreate()
+  }, [pendingCreate, clearPendingCreate, handleCreate])
 
   const parsed = parseSquadPanelId(activePanel)
   const activeSquad = parsed.kind === "squad" ? teams[parsed.id] : undefined

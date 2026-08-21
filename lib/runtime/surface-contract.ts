@@ -152,9 +152,20 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "squads",
+    route: "/squads",
+    navigation: true,
+    standalone: "full",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
+    // The page `/squads` replaces. Still routable, and still declared, until
+    // its own removal lands — an undeclared route is treated as unavailable,
+    // which would break it for anyone holding a link.
     id: "agent-teams",
     route: "/agent-teams",
-    navigation: true,
+    navigation: false,
     standalone: "full",
     companion: "remote",
     offline: "cached-read",

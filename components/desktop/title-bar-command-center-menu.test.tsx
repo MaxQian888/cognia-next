@@ -94,7 +94,7 @@ describe("TitleBarCommandCenterMenu", () => {
       "go-inbox",
       "go-workflows",
       "go-sites",
-      "go-agent-teams",
+      "go-squads",
       "go-scheduler",
       "go-discover",
       "go-plugins",

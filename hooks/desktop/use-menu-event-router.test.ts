@@ -50,7 +50,7 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "go-twin",
     "go-skills",
     "go-plugins",
-    "go-agent-teams",
+    "go-squads",
     "go-scheduler",
     "go-discover",
     "go-a2ui",
