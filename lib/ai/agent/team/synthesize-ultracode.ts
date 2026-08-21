@@ -1,8 +1,8 @@
 /**
  * Translate an ultracode plan into a runnable VisualWorkflow of `pattern.*`
  * nodes (ADR-0022 addendum). Sibling to `synthesize-workflow.ts`: pure (no
- * Dexie / no dispatch), shapes types only, and emits the same `__team__:` id
- * prefix so the UI never tries to load a definition for it.
+ * Dexie / no dispatch), shapes types only, and mints its id through the same
+ * `buildTeamWorkflowId` so the UI never tries to load a definition for it.
  *
  * Wiring rule (forward-only DAG, Kahn-validated by construction):
  *  - sweep / loop nodes accumulate into the current "finding sources".
@@ -16,7 +16,6 @@
  *    plan omits one.
  */
 
-import { nanoid } from "nanoid"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import {
   VERIFIER_LENSES,
@@ -26,6 +25,7 @@ import {
 } from "@/types/agent/ultracode"
 import type { VisualWorkflow, WorkflowEdge, WorkflowNode } from "@/types/workflow/visual"
 import { resolveRetryPolicy } from "./synthesize-workflow"
+import { buildTeamWorkflowId } from "./team-workflow-id"
 
 export interface SynthesizeUltracodeInput {
   team: AgentTeam
@@ -151,7 +151,7 @@ export function synthesizeUltracodeWorkflow(
 
   const now = Date.now()
   const workflow: VisualWorkflow = {
-    id: `__team__:${input.team.id}:${nanoid(8)}`,
+    id: buildTeamWorkflowId(input.team.id),
     schemaVersion: 1,
     name: `${input.team.name} — ultracode`,
     description: input.plan.summary,

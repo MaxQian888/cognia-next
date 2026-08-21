@@ -39,7 +39,8 @@ import type { AgentTeamState } from "./types"
  *   - Live runtime ephemera (`messages` / `events` / `consensus` /
  *     `delegations` / shared-memory) stay in-memory — they carry
  *     non-serializable handles + unbounded churn, and run HISTORY is already
- *     durable in Dexie `workflowRuns` (workflowId `__team__:<teamId>:<nonce>`).
+ *     durable in Dexie `workflowRuns`, under an id minted by
+ *     `lib/ai/agent/team/team-workflow-id.ts`.
  *   - Any team persisted mid-run (`planning` / `executing` / `paused`) has no
  *     live controller after restart, so its status is reset to `idle` to avoid
  *     a phantom "live" run in the UI.

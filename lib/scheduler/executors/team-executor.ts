@@ -15,7 +15,7 @@
  * runs after relaunch. A team that was never created (or was deleted) still
  * fails cleanly with a "team not found" error. Live runtime ephemera
  * (messages/events/consensus) are not persisted — run history lives in Dexie
- * `workflowRuns` (workflowId `__team__:<teamId>:<nonce>`).
+ * `workflowRuns`, under an id minted by `lib/ai/agent/team/team-workflow-id.ts`.
  */
 
 import type { AgentTeamTaskPayload, ScheduledTask, TaskExecution } from "@/types/scheduler"

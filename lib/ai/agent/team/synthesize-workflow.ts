@@ -7,13 +7,13 @@
  * no abort signal) — it only shapes types. Validates non-empty input,
  * dep id references, and absence of cycles (Kahn's algorithm).
  *
- * Synthesized workflow id has the `__team__:<teamId>:<nonce>` prefix; the
- * UI must not attempt to load a workflow definition for this id. The full
- * snapshot lives on the workflowRuns row.
+ * Synthesized workflow id is minted by `buildTeamWorkflowId` (the one owner of
+ * the `__team__:` format); the UI must not attempt to load a workflow
+ * definition for this id. The full snapshot lives on the workflowRuns row.
  */
 
-import { nanoid } from "nanoid"
 import { isTaskReviewEnabled, resolveMaxRevisions, reviewNodeId } from "./task-review-policy"
+import { buildTeamWorkflowId } from "./team-workflow-id"
 import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
 import type {
@@ -255,7 +255,7 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   // doesn't fire; team-level cancellation flows through the external AbortSignal.
 
   const now = Date.now()
-  const workflowId = `__team__:${input.team.id}:${nanoid(8)}`
+  const workflowId = buildTeamWorkflowId(input.team.id)
 
   const workflow: VisualWorkflow = {
     id: workflowId,

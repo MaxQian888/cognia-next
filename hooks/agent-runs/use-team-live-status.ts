@@ -6,15 +6,17 @@
  *
  * The store's `team.status` is written optimistically by `agentTeamManager.start`
  * and mirrored back at terminal — it is a UI convenience, not the source of
- * truth. The newest `workflowRuns` row for `__team__:<teamId>:*` is the durable
- * record. This hook joins the two: the live store status wins while it is
- * non-terminal (so an in-flight run shows immediately, before its run row lands
- * or updates); otherwise the newest run row's status is the truth; with no run
- * row yet, the store status is the only signal.
+ * truth. The newest `workflowRuns` row under this team's
+ * `teamWorkflowIdPrefix` is the durable record. This hook joins the two: the
+ * live store status wins while it is non-terminal (so an in-flight run shows
+ * immediately, before its run row lands or updates); otherwise the newest run
+ * row's status is the truth; with no run row yet, the store status is the only
+ * signal.
  */
 import { useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { getDb } from "@/lib/db/schema"
+import { teamWorkflowIdPrefix } from "@/lib/ai/agent/team/team-workflow-id"
 import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
 import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
 
@@ -63,7 +65,7 @@ export function pickNewestRunStatus(rows: WorkflowRunRow[]): RunStatus | undefin
 }
 
 export function useTeamLiveStatus(team: AgentTeam): TeamStatus {
-  const prefix = `__team__:${team.id}:`
+  const prefix = teamWorkflowIdPrefix(team.id)
   const newestRunStatus = useLiveQuery(
     async () =>
       pickNewestRunStatus(
