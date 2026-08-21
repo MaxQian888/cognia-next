@@ -11,7 +11,6 @@ import {
   addIssueComment,
   addIssueLabel,
   applyRuntimeIssueStatus,
-  countIssuesByStatus,
   createIssue,
   deleteIssue,
   getIssue,
@@ -419,36 +418,6 @@ describe("applyRuntimeIssueStatus", () => {
     await applyRuntimeIssueStatus(reviewing.id, "todo", AGENT)
     row = (await getIssue(reviewing.id))!
     expect(row.status).toBe("in_review")
-  })
-})
-
-describe("countIssuesByStatus", () => {
-  it("returns a zeroed record for an empty workspace", async () => {
-    expect(await countIssuesByStatus("empty")).toEqual({
-      backlog: 0,
-      todo: 0,
-      in_progress: 0,
-      in_review: 0,
-      done: 0,
-      canceled: 0,
-    })
-  })
-
-  it("counts a workspace's issues without seeing another's", async () => {
-    await make({ status: "todo" })
-    await make({ status: "todo" })
-    await make({ status: "done" })
-
-    const other = (await createIssueProject({ projectId: "w2", name: "Other" })).id
-    await createIssue({
-      projectId: "w2",
-      issueProjectId: other,
-      title: "elsewhere",
-      status: "todo",
-      createdBy: HUMAN,
-    })
-
-    expect(await countIssuesByStatus("w1")).toMatchObject({ todo: 2, done: 1, backlog: 0 })
   })
 })
 

@@ -506,18 +506,3 @@ export async function applyRuntimeIssueStatus(
     })
   })
 }
-
-/** Count by status for a workspace — feeds the workspace overview summary. */
-export async function countIssuesByStatus(projectId: string): Promise<Record<IssueStatus, number>> {
-  const rows = await getDb().issues.where("projectId").equals(projectId).toArray()
-  const counts = {
-    backlog: 0,
-    todo: 0,
-    in_progress: 0,
-    in_review: 0,
-    done: 0,
-    canceled: 0,
-  } satisfies Record<IssueStatus, number>
-  for (const row of rows) counts[row.status] += 1
-  return counts
-}

@@ -257,10 +257,11 @@ export function toggleColumnCollapse(
 /**
  * How many items each built-in view would show, for the rail's counts.
  *
- * Computed from the item set already in memory rather than from
- * `countIssuesByStatus`, which only ever saw the local Dexie table — the rail
- * has to count federated rows too or its numbers would contradict the board
- * standing next to it.
+ * Computed from the item set already in memory rather than from a Dexie
+ * count: the rail has to count federated rows too, or its numbers would
+ * contradict the board standing next to it. (A `countIssuesByStatus` helper
+ * used to exist for exactly this and saw only the local table; it was removed
+ * rather than wired, because it could never have given the right answer.)
  */
 export function countIssuesPerView(
   items: readonly UnifiedIssueItem[],
