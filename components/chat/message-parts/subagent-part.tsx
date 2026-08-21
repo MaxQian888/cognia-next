@@ -21,6 +21,7 @@
 import { memo, useEffect, useMemo, useState, type MouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
+import { toast } from "sonner"
 import {
   AlertTriangleIcon,
   BanIcon,
@@ -45,7 +46,7 @@ import { SUB_AGENT_STATUS_CONFIG } from "@/types/agent/sub-agent"
 import type { SubAgentToolCall, SubAgentTokenUsage } from "@/types/agent/sub-agent"
 import type { AgentFlowMode } from "@/types/appearance"
 import { ChainOfThoughtStep } from "@/components/ai-elements/chain-of-thought"
-import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
 import { BackgroundedRunControls } from "@/components/chat/message-parts/backgrounded-run-controls"
 import {
   ToolActivityGroup,
@@ -91,6 +92,24 @@ type SubagentLogEntry = { level: string; message: string; data?: unknown }
 function isStreamTextLog(log: { data?: unknown }): boolean {
   const d = log.data
   return typeof d === "object" && d !== null && (d as { stream?: unknown }).stream === "text"
+}
+
+/**
+ * Open an imported subagent's inner transcript, or explain why it is not there.
+ *
+ * `kind: "subagent"` sessions are hidden from every listing surface, so a
+ * missing one is invisible: `setActiveSession` on an id with no row swaps the
+ * pane to an empty conversation that looks like a bug in the transcript rather
+ * than an absent record.
+ */
+async function openNestedTranscript(sessionId: string, missingMessage: string): Promise<void> {
+  const { getSession } = await import("@/lib/db/sessions")
+  const exists = await getSession(sessionId).catch(() => undefined)
+  if (!exists) {
+    toast.error(missingMessage)
+    return
+  }
+  useChatStore.getState().setActiveSession(sessionId)
 }
 
 /**
@@ -222,9 +241,16 @@ const SubagentLogBody = memo(function SubagentLogBody({
         // Imported subagent (ADR-0062): drill into the hidden nested session
         // holding this run's full inner transcript. In-app store navigation,
         // not a route link.
+        //
+        // The target is checked on click rather than on render: a long
+        // transcript can carry dozens of these cards, and a Dexie live query per
+        // card to grey out a button is far more expensive than the miss it
+        // guards. Navigating to a missing session used to swap the pane to a
+        // blank conversation with no explanation — reachable whenever the inner
+        // transcript did not survive a round trip.
         <button
           type="button"
-          onClick={() => useChatStore.getState().setActiveSession(nestedSessionId)}
+          onClick={() => void openNestedTranscript(nestedSessionId, t("transcriptMissing"))}
           className="inline-flex items-center gap-1 text-xs underline"
           data-testid="subagent-open-transcript"
         >
@@ -402,7 +428,7 @@ export const SubagentPart = memo(function SubagentPart({
           />
         </div>
         {rejectionBanner}
-        <MotionCollapse open={isOpen}>
+        <ReadingCollapse open={isOpen}>
           {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
           <div className="ml-[13px] mb-1 space-y-2 border-l pl-3 pt-1">
             <SubagentLogBody
@@ -418,7 +444,7 @@ export const SubagentPart = memo(function SubagentPart({
               cutOff={cutOff}
             />
           </div>
-        </MotionCollapse>
+        </ReadingCollapse>
       </div>
     )
   }

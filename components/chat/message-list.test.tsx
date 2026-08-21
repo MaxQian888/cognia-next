@@ -18,21 +18,10 @@ jest.mock("@/components/ai-elements/shimmer", () => {
 // isolated from its timers and motion wiring. The stub echoes `compact` so the
 // tests below can tell the two modes apart.
 jest.mock("./thinking-indicator", () => ({
-  ChatThinkingIndicator: ({
-    compact,
-    onPhaseChange,
-  }: {
-    compact?: boolean
-    onPhaseChange?: () => void
-  }) =>
+  ChatThinkingIndicator: ({ compact }: { compact?: boolean }) =>
     ReactForMocks.createElement(
       "span",
-      {
-        // The real indicator calls this when its skeleton/tips reveal grows the
-        // row; exposing it as a click lets a test drive the re-pin.
-        "data-test": "thinking-phase",
-        onClick: () => onPhaseChange?.(),
-      },
+      { "data-test": "thinking-phase" },
       compact ? "Claude is working…" : "Claude is thinking…"
     ),
 }))
@@ -1858,59 +1847,6 @@ describe("MessageList — best-effort paths that must not surface as failures", 
       "data-message",
       "closed"
     )
-  })
-})
-
-describe("MessageList — re-pinning for the thinking indicator's own growth", () => {
-  function renderStreaming() {
-    const Wrapper = withAdapter(makeAdapter())
-    const view = render(
-      <Wrapper>
-        <MessageList messages={[userMsg("m1", "hi")]} status="streaming" />
-      </Wrapper>
-    )
-    const scrollEl = view.container.querySelector('[role="log"]')!
-    Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true })
-    Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true })
-    const box = { top: 0 }
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => box.top,
-      set: (v: number) => {
-        box.top = v
-      },
-    })
-    return { scrollEl, box }
-  }
-
-  it("re-pins when the indicator's skeleton reveals", () => {
-    // The stick-to-bottom effect only reacts to `messages`/`status`, so it
-    // cannot see this row growing on its own internal timer.
-    const { box } = renderStreaming()
-    box.top = 0
-    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
-    expect(box.top).toBe(1000)
-  })
-
-  it("does not re-pin once the user has scrolled up", () => {
-    const { scrollEl, box } = renderStreaming()
-    act(() => {
-      fireEvent.scroll(scrollEl)
-    })
-    box.top = 400
-    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
-    expect(box.top).toBe(400)
-  })
-
-  it("does not re-pin when auto-scroll is switched off", () => {
-    useSettingsStore.setState({
-      settings: { composerBehavior: { autoScrollOnStream: false } } as never,
-    })
-    const { box } = renderStreaming()
-    box.top = 0
-    fireEvent.click(document.querySelector("[data-test='thinking-phase']")!)
-    expect(box.top).toBe(0)
-    useSettingsStore.setState({ settings: {} as never })
   })
 })
 

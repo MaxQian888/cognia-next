@@ -78,11 +78,24 @@ describe("ChatThinkingIndicator", () => {
     expect(getByTestId("chat-thinking-indicator").textContent).toContain("🤖")
   })
 
-  it("calls onPhaseChange when phases change (re-pin scroll)", () => {
-    const onPhaseChange = jest.fn()
-    render(<ChatThinkingIndicator onPhaseChange={onPhaseChange} />)
-    // Fires at least once on mount so the list re-pins as the row appears.
-    expect(onPhaseChange).toHaveBeenCalled()
+  it("sizes the label cell to every verb, so rotating it cannot move the dots", () => {
+    // ADR-0138 — the label was a plain <span> that changed width with the verb,
+    // shunting the bouncing dots sideways every 3 seconds for the whole turn.
+    // Every verb is now stacked invisibly in one grid cell behind the visible
+    // one, so the cell is as wide as the longest from the first frame.
+    const verbs = ["Thinking…", "Pondering…", "Cogitating at considerable length…"]
+    rawState.verbs = verbs
+    const { getByTestId } = render(<ChatThinkingIndicator />)
+    const sizers = Array.from(
+      getByTestId("chat-thinking-indicator").querySelectorAll("span.invisible")
+    )
+    expect(sizers.map((node) => node.textContent)).toEqual(verbs)
+    for (const sizer of sizers) {
+      expect(sizer).toHaveClass("col-start-1", "row-start-1")
+    }
+    // The visible label shares the cell rather than sitting beside it.
+    const shimmer = getByTestId("chat-thinking-indicator").querySelector(".shimmer")!
+    expect(shimmer).toHaveClass("col-start-1", "row-start-1")
   })
 
   it("drops the pulse animation under reduced motion", () => {

@@ -24,20 +24,32 @@
  * `useFlowMotion()` so the OS / appearance "reduce motion" preference collapses
  * the pulse, the collapse-reveal, and the tip crossfade to static output.
  *
- * `onPhaseChange` fires whenever the visible height grows (skeleton/tips reveal
- * or tip rotation) so the message list can re-pin the scroll to the bottom —
- * the stick-to-bottom effect there only watches `messages`/`status` and is
- * otherwise blind to this row's internal timers.
+ * ADR-0138 — this row runs for MINUTES on a tool-heavy turn, so anything here
+ * that moves is a permanent tremor at the foot of the reading column, right
+ * under the reply. Two things did:
+ *
+ *   - the label rotates a verb every 3s, and a plain `<span>` changes width
+ *     with it, which shunted the bouncing dots sideways on every rotation. The
+ *     label now sits in a grid cell sized by every verb stacked invisibly
+ *     behind it, so the cell is as wide as the longest verb from frame one and
+ *     the swap is pure opacity;
+ *   - the tip rotates every 5s, and tips of different lengths wrap to one line
+ *     or two. The tip box is a fixed two lines tall (clamped), so a rotation
+ *     can no longer change the row's height.
+ *
+ * It also used to call back on every phase/tip change so the list could force a
+ * scroll pin. That is gone: `useStickToBottom` watches the content box, so the
+ * one growth that IS real — the skeleton and tip revealing — is followed
+ * without this row knowing anything about scrolling.
  */
 
-import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { SparklesIcon } from "lucide-react"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { LoadingDots } from "@/components/ui/loading-states"
 import { Skeleton } from "@/components/ui/skeleton"
-import { MotionCollapse, useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import { ReadingCollapse, useFlowMotion } from "@/components/chat/motion/motion-reveal"
 import { ThinkingTips } from "@/components/chat/thinking-tips"
 import { useThinkingPhase } from "@/hooks/chat/use-thinking-phase"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
@@ -47,8 +59,6 @@ import { cn } from "@/lib/utils"
 export interface ChatThinkingIndicatorProps {
   /** Session-bound character (1:1 chat) — tints the pulsing avatar when set. */
   directCharacter?: Character | null
-  /** Called when the row's height grows, so the list can re-pin scroll. */
-  onPhaseChange?: () => void
   /** Assistant content is already on screen — drop the skeleton placeholder. */
   compact?: boolean
   className?: string
@@ -56,7 +66,6 @@ export interface ChatThinkingIndicatorProps {
 
 export function ChatThinkingIndicator({
   directCharacter,
-  onPhaseChange,
   compact = false,
   className,
 }: ChatThinkingIndicatorProps) {
@@ -72,12 +81,6 @@ export function ChatThinkingIndicator({
   })
   const label =
     verbs.length > 0 ? (verbs[verbIndex % verbs.length] ?? t("thinking")) : t("thinking")
-
-  // Re-pin scroll whenever the indicator grows or the tip rotates. This is a
-  // plain callback (not setState), so it's clear of the set-state-in-effect rule.
-  useEffect(() => {
-    onPhaseChange?.()
-  }, [showSkeleton, showTips, tipIndex, onPhaseChange])
 
   const tinted = directCharacter ? avatarColor(directCharacter) : undefined
 
@@ -98,23 +101,36 @@ export function ChatThinkingIndicator({
         >
           {directCharacter ? avatarGlyph(directCharacter) : <SparklesIcon className="size-3.5" />}
         </span>
-        <Shimmer as="span" className="text-sm">
-          {label}
-        </Shimmer>
+        {/* One grid cell holding every verb: the invisible copies size it to
+            the longest one, so rotating the label cannot move the dots. */}
+        <span className="grid">
+          {verbs.map((verb) => (
+            <span
+              key={verb}
+              aria-hidden
+              className="invisible col-start-1 row-start-1 whitespace-nowrap text-sm"
+            >
+              {verb}
+            </span>
+          ))}
+          <Shimmer as="span" className="col-start-1 row-start-1 whitespace-nowrap text-sm">
+            {label}
+          </Shimmer>
+        </span>
         <LoadingDots className={cn("ml-0.5", reduce && "opacity-70 [&_*]:animate-none")} />
       </div>
 
-      <MotionCollapse open={showSkeleton && !compact}>
+      <ReadingCollapse open={showSkeleton && !compact}>
         <div className="space-y-2 pl-8 pt-1" data-testid="thinking-skeleton" aria-hidden>
           <Skeleton className="h-3.5 w-3/4" />
           <Skeleton className="h-3.5 w-5/6" />
           <Skeleton className="h-3.5 w-1/2" />
         </div>
-      </MotionCollapse>
+      </ReadingCollapse>
 
-      <MotionCollapse open={showTips && tips.length > 0}>
+      <ReadingCollapse open={showTips && tips.length > 0}>
         <ThinkingTips tips={tips} index={tipIndex} className="pl-8" />
-      </MotionCollapse>
+      </ReadingCollapse>
     </div>
   )
 }

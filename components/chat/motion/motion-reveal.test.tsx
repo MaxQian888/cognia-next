@@ -7,6 +7,7 @@ import { render, renderHook } from "@testing-library/react"
 import {
   MotionCollapse,
   MessageMotionProvider,
+  ReadingCollapse,
   MotionPopover,
   MotionReveal,
   MotionSelectionIndicator,
@@ -116,6 +117,48 @@ describe("MotionCollapse", () => {
       </MotionCollapse>
     )
     expect(getByTestId("body")).toBeTruthy()
+  })
+})
+
+describe("ReadingCollapse", () => {
+  it("renders children in a plain div when open and reduced", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { getByTestId } = render(
+      <ReadingCollapse open>
+        <span data-testid="body">x</span>
+      </ReadingCollapse>
+    )
+    expect(getByTestId("body")).toBeTruthy()
+  })
+
+  it("renders nothing when closed, in either motion mode", () => {
+    for (const reduce of [true, false]) {
+      useSettingsStore.setState({ settings: { motion: { reduce, speed: 1 } } as never })
+      const { queryByTestId, unmount } = render(
+        <ReadingCollapse open={false}>
+          <span data-testid="body">x</span>
+        </ReadingCollapse>
+      )
+      expect(queryByTestId("body")).toBeNull()
+      unmount()
+    }
+  })
+
+  it("animates opacity and transform only — never height", () => {
+    // ADR-0138 — this is the whole reason the variant exists. Every row in the
+    // reading area is watched by a ResizeObserver, so a height tween is one
+    // layout change per frame for the length of the animation.
+    useSettingsStore.setState({ settings: { motion: { reduce: false, speed: 1 } } as never })
+    const { container, getByTestId } = render(
+      <ReadingCollapse open>
+        <span data-testid="body">x</span>
+      </ReadingCollapse>
+    )
+    expect(getByTestId("body")).toBeTruthy()
+    const wrapper = container.firstElementChild as HTMLElement
+    expect(wrapper.style.height).toBe("")
+    expect(wrapper.style.overflow).toBe("")
+    expect(wrapper.style.opacity).toBe("1")
   })
 })
 

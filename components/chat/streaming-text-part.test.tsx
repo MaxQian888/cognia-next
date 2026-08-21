@@ -119,18 +119,31 @@ describe("StreamingTextPart", () => {
     expect(getByTestId("msg-response").textContent).toBe("")
   })
 
-  it("renders a blinking caret alongside the streaming text", () => {
-    const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
-    const caret = getByTestId("streaming-caret")
-    expect(caret).toBeInTheDocument()
-    expect(caret).toHaveClass("w-0")
-    expect(caret.firstElementChild).toHaveClass("animate-pulse")
+  it("uses Streamdown's own caret rather than a sibling element", () => {
+    // ADR-0138 — the hand-rolled caret was a sibling of <MessageResponse> inside
+    // MessageContent's flex column, so it held a 16px row plus an 8px gap under
+    // the reply for the whole turn and vanished in one 24px step at the seal.
+    // Streamdown renders it as an ::after on the last block: inline, no box.
+    const { container } = render(<StreamingTextPart text="hello" isStreaming={true} />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      caret?: string
+      className?: string
+    }
+    expect(props.caret).toBe("block")
+    expect(props.className).toContain("[&>*:last-child]:after:animate-pulse")
+    // Nothing else is rendered beside the response.
+    expect(container.firstElementChild?.childElementCount ?? 0).toBe(0)
   })
 
-  it("renders a static caret under reduced motion", () => {
+  it("keeps the caret but drops its blink under reduced motion", () => {
     flowMotion.reduce = true
-    const { getByTestId } = render(<StreamingTextPart text="hello" isStreaming={true} />)
-    expect(getByTestId("streaming-caret").firstElementChild).not.toHaveClass("animate-pulse")
+    render(<StreamingTextPart text="hello" isStreaming={true} />)
+    const props = mockMessageResponse.mock.calls.at(-1)?.[0] as {
+      caret?: string
+      className?: string
+    }
+    expect(props.caret).toBe("block")
+    expect(props.className).not.toContain("animate-pulse")
   })
 
   it("supplies incremental parsing and off-screen block containment to Streamdown", () => {

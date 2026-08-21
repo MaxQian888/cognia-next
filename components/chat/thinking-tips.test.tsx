@@ -44,4 +44,24 @@ describe("ThinkingTips", () => {
     const { getByRole } = render(<ThinkingTips tips={["alpha"]} index={0} />)
     expect(getByRole("note")).toHaveAttribute("aria-live", "polite")
   })
+
+  it("holds a fixed two-line box whatever the tip's length", () => {
+    // ADR-0138 — the tip rotates every 5s for the whole of a tool-heavy turn.
+    // Tips of different lengths wrapped to one line or two, so the row's height
+    // changed under the reply on every rotation. The box is now a constant.
+    for (const tip of ["a", "a".repeat(400)]) {
+      const { container, unmount } = render(<ThinkingTips tips={[tip]} index={0} />)
+      expect(container.querySelector(".line-clamp-2")).toHaveClass("h-8")
+      unmount()
+    }
+  })
+
+  it("cross-fades tips in one grid cell, with no transform and no empty beat", () => {
+    // `mode="wait"` left the cell empty between tips (a height change), and the
+    // old crossfade translated on `y`. Both are gone: one cell, opacity only.
+    const { getByRole } = render(<ThinkingTips tips={["alpha", "beta"]} index={0} />)
+    const note = getByRole("note")
+    expect(note).toHaveClass("grid")
+    expect(note.firstElementChild).toHaveClass("col-start-1", "row-start-1")
+  })
 })

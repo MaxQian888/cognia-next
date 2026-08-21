@@ -696,7 +696,6 @@ export function MessageList({
                     <div className="px-3 sm:px-5">
                       <ChatThinkingIndicator
                         directCharacter={directCharacter}
-                        onPhaseChange={pinNow}
                         compact={thinking === "compact"}
                       />
                     </div>

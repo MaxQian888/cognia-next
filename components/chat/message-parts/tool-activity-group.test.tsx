@@ -22,7 +22,7 @@ jest.mock("next-intl", () => ({
 const mockMotion = { reduce: true, durationScale: 1 }
 jest.mock("@/components/chat/motion/motion-reveal", () => ({
   useFlowMotion: () => mockMotion,
-  MotionCollapse: ({ open, children }: { open: boolean; children: unknown }) =>
+  ReadingCollapse: ({ open, children }: { open: boolean; children: unknown }) =>
     open ? ReactForMock.createElement("div", null, children as never) : null,
   MotionStatusSwap: ({ children }: { children: unknown }) =>
     ReactForMock.createElement(ReactForMock.Fragment, null, children as never),

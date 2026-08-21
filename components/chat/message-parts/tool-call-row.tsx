@@ -51,7 +51,7 @@ import {
   describeToolResult,
   type ToolResultDescriptor,
 } from "@/lib/chat/tool-result-summary"
-import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
 import { ToolSemanticBadges } from "@/components/ai-elements/tool-semantic-badges"
 import { cn } from "@/lib/utils"
 
@@ -184,12 +184,12 @@ export const ToolCallRow = memo(function ToolCallRow({
         </MotionStatusSwap>
         <span className="sr-only">{statusLabel}</span>
       </button>
-      <MotionCollapse open={open}>
+      <ReadingCollapse open={open}>
         {/* ml aligns the left rule under the chevron (px-1.5 + half of size-3.5). */}
         <div className="ml-[13px] mb-1 space-y-3 border-l pl-3 pt-1 text-popover-foreground">
           <ToolDetailBody part={part} sessionId={sessionId} />
         </div>
-      </MotionCollapse>
+      </ReadingCollapse>
     </div>
   )
 })

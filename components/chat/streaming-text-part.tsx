@@ -247,41 +247,40 @@ function StreamingTextPartInner({
   const plugins = selectStreamdownPlugins(markdown)
   const lineNumbers = markdown?.codeLineNumbers ?? true
   const codeWrap = markdown?.codeWrap ?? false
-  // Reduced motion: a static (non-blinking) caret so we still signal "more is
-  // coming" without an animation. `animate-pulse` is a guaranteed Tailwind
+  // ADR-0138 — the caret is Streamdown's own (`caret="block"`), not a hand-rolled
+  // element. Ours was a sibling of `<MessageResponse>` inside `MessageContent`'s
+  // flex column, so it held a permanent 16px row plus an 8px gap under the reply
+  // for the whole turn and vanished in one 24px step when the turn sealed.
+  // Streamdown renders `▋` as an `::after` on the last block: inline, at the end
+  // of the last text node, contributing no box of its own — and it suppresses
+  // itself inside an unclosed code fence, which the sibling span never did.
+  //
+  // Reduced motion keeps the caret and drops only the blink, so "more is coming"
+  // still reads without an animation. `animate-pulse` is a guaranteed Tailwind
   // utility (no dependency on `animate-caret-blink`).
   const { reduce } = useFlowMotion()
   return (
-    <>
-      <MessageResponse
-        BlockComponent={ContainedStreamdownBlock}
-        className={cn("typeset typeset-chat", codeWrap && "[&_pre]:whitespace-pre-wrap")}
-        components={components}
-        controls={richControls === "hidden" ? false : { table: false }}
-        data-rich-controls={richControls}
-        isAnimating={isStreaming}
-        lineNumbers={lineNumbers}
-        mode="streaming"
-        parseMarkdownIntoBlocksFn={parser}
-        plugins={plugins}
-        rehypePlugins={chatStreamdownRehypePlugins}
-        urlTransform={chatMarkdownUrlTransform}
-      >
-        {text}
-      </MessageResponse>
-      <span
-        aria-hidden
-        data-testid="streaming-caret"
-        className="relative inline-block h-4 w-0 align-middle"
-      >
-        <span
-          className={cn(
-            "absolute bottom-0 left-0.5 h-4 w-[2px] rounded-full bg-foreground/60",
-            !reduce && "animate-pulse"
-          )}
-        />
-      </span>
-    </>
+    <MessageResponse
+      BlockComponent={ContainedStreamdownBlock}
+      caret="block"
+      className={cn(
+        "typeset typeset-chat",
+        codeWrap && "[&_pre]:whitespace-pre-wrap",
+        !reduce && "[&>*:last-child]:after:animate-pulse"
+      )}
+      components={components}
+      controls={richControls === "hidden" ? false : { table: false }}
+      data-rich-controls={richControls}
+      isAnimating={isStreaming}
+      lineNumbers={lineNumbers}
+      mode="streaming"
+      parseMarkdownIntoBlocksFn={parser}
+      plugins={plugins}
+      rehypePlugins={chatStreamdownRehypePlugins}
+      urlTransform={chatMarkdownUrlTransform}
+    >
+      {text}
+    </MessageResponse>
   )
 }
 

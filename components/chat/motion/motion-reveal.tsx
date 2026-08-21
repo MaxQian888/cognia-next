@@ -169,6 +169,48 @@ export function MotionCollapse({ open, children, className }: MotionCollapseProp
   )
 }
 
+/**
+ * The reading area's disclosure — {@link MotionCollapse} without the height.
+ *
+ * ADR-0138: inside the transcript, motion may only touch `opacity` and
+ * `transform`. Every row there is watched by a `ResizeObserver` (the
+ * virtualizer's `measureElement`, and the content observer behind
+ * `useStickToBottom`), so a 280 ms height tween is not one layout change — it is
+ * one per frame for the length of the animation, each re-publishing the
+ * virtualizer's offsets and re-pinning the scroll. A tool card opening halfway
+ * up a long reply therefore drags every row below it, frame by frame, and that
+ * churn lands on the same main thread that is decoding the stream.
+ *
+ * So the box takes its final size in a single layout pass and only the paint is
+ * animated: a quick fade with a 2px settle, both compositor-only. What is lost
+ * is the sense of the body *unfurling*; what is gained is that expanding a card
+ * costs exactly one reflow instead of seventeen.
+ *
+ * Closing is instantaneous by design — there is no `AnimatePresence` here.
+ * Keeping the outgoing body mounted through an exit is precisely the height
+ * animation this exists to avoid.
+ *
+ * {@link MotionCollapse} stays as-is for the settings panels, where nothing
+ * measures the box and the unfurl is worth having.
+ */
+export function ReadingCollapse({ open, children, className }: MotionCollapseProps) {
+  const { reduce, durationScale } = useFlowMotion()
+
+  if (!open) return null
+  if (reduce) return <div className={className}>{children}</div>
+
+  return (
+    <motion.div
+      className={className}
+      initial={{ opacity: 0, y: -2 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: MOBILE_DURATION.fast * durationScale, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
 export interface MotionSelectionIndicatorProps {
   /**
    * Shared identity for one selectable group. Every item in the group passes

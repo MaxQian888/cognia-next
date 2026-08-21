@@ -36,7 +36,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
 
-import { MotionCollapse, MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
+import { MotionStatusSwap, ReadingCollapse } from "@/components/chat/motion/motion-reveal"
 import {
   aggregateToolStatus,
   countErroredTools,
@@ -239,9 +239,9 @@ export function ToolActivityGroup({ entries, mode, renderChild }: ToolActivityGr
         ) : null}
       </div>
 
-      <MotionCollapse open={groupOpen}>
+      <ReadingCollapse open={groupOpen}>
         <div className={cn(simplified ? "pl-4 pt-0.5 pb-1" : "border-t p-2")}>{body}</div>
-      </MotionCollapse>
+      </ReadingCollapse>
     </div>
   )
 }
