@@ -1,0 +1,45 @@
+# ADR-0067 Tier C — the confined filesystem surface, extracted from `app_lib`.
+#
+# 23 `#[tauri::command]`s and the process-global allowed-roots / remote
+# git-workspace registries, none of which touch `AppHandle`. Its only outward
+# edge was `crate::agents::paths::vendor_roots()` (now a path dep), while
+# 37 of its 38 inbound edges come from `companion_api/rpc/*` — extracting it
+# clears those blocking edges ahead of the companion_api work.
+#
+# Owns `gray_matter` (front-matter parsing for slash commands / skills) and
+# `ignore` (gitignore-aware workspace walks).
+[package]
+name = "cognia-files"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Confined filesystem access, workspace search and skill scanning for cognia."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_files"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Front-matter on slash-command / skill markdown. `default-features = false`
+# keeps the JSON+TOML engines out; must stay byte-identical to src-tauri's
+# declaration or cargo builds a second copy.
+gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
+# Gitignore-aware recursive walks for workspace search.
+ignore = "0.4"
+# Case-insensitive content search over workspace files.
+regex = "1"
+# Per-OS roots for the default export directory.
+dirs = "6"
+# Denied-path warnings on the remote (companion) origin.
+log = "0.4"
+# The async command shells hand blocking IO to `spawn_blocking`; `macros` is
+# for the `#[tokio::test]` in this file.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "sync", "time"] }
+# The pi-agent vendor root feeds skill scanning.
+cognia-agents = { path = "../cognia-agents" }
+# The command shells only; the fns stay in the `files` submodule (E0255).
+tauri = { version = "=2.11.5", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }

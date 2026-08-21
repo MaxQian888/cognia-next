@@ -140,6 +140,8 @@ cognia-git = { path = "../crates/cognia-git" }
 cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 # ADR-0067 Tier C — multi-agent MCP config IO (owns `toml_edit`).
 cognia-agents = { path = "../crates/cognia-agents" }
+# ADR-0067 Tier C — confined filesystem surface (owns `gray_matter`, `ignore`).
+cognia-files = { path = "../crates/cognia-files" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane
@@ -199,7 +201,8 @@ dirs = "6"
 # `directories` (separate from `dirs`) gives us the per-platform config_dir
 # the CLI bridge writes its endpoint file into. Used only by `cli_bridge`.
 directories = "6"
-ignore = "0.4"
+# ADR-0067 Tier C — `ignore` moved to `crates/cognia-files` with the
+# workspace-search walker; no `src-tauri/src` file references it.
 
 # System scheduler — async-trait abstraction over Windows Task Scheduler /
 # launchd / systemd, plus a sqlite-backed metadata store for recovery.
@@ -217,7 +220,9 @@ rusqlite = { version = "0.37", features = ["backup", "bundled"] }
 # `CredentialStore` at boot so the crate never touches `secret_store` directly.
 cognia-vector = { path = "../crates/cognia-vector" }
 
-gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
+# ADR-0067 Tier C — `gray_matter` moved to `crates/cognia-files` with the
+# slash-command / skill front-matter parsing; no `src-tauri/src` file
+# references it.
 wait-timeout = "0.2"
 # ADR-0067 Tier B — `portable-pty` moved to `crates/cognia-terminal` together
 # with `src-tauri/src/terminal/` (the path this comment named no longer exists).

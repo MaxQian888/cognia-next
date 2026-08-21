@@ -54,7 +54,7 @@ pub struct GitWorkspaceRegistration {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct RemoteGitWorkspace {
+pub struct RemoteGitWorkspace {
     pub workspace_id: String,
     pub display_name: String,
     #[serde(skip_serializing)]
@@ -141,7 +141,7 @@ fn set_remote_git_workspaces(
     registry.insert(account_id, workspaces);
 }
 
-pub(crate) fn list_remote_git_workspaces(account_id: &str) -> Vec<RemoteGitWorkspace> {
+pub fn list_remote_git_workspaces(account_id: &str) -> Vec<RemoteGitWorkspace> {
     let mut workspaces = remote_git_workspaces_registry()
         .read()
         .ok()
@@ -152,7 +152,7 @@ pub(crate) fn list_remote_git_workspaces(account_id: &str) -> Vec<RemoteGitWorks
     workspaces
 }
 
-pub(crate) fn resolve_remote_git_workspace_path(
+pub fn resolve_remote_git_workspace_path(
     account_id: &str,
     workspace_id: &str,
     relative_path: Option<&str>,
@@ -173,7 +173,7 @@ pub(crate) fn resolve_remote_git_workspace_path(
 /// the workspace root. Shared by the desktop registry lookup above and by the
 /// headless host, whose workspaces are the directories under its
 /// policy-owned workspaces root rather than a renderer-registered list.
-pub(crate) fn resolve_git_workspace_relative_path(
+pub fn resolve_git_workspace_relative_path(
     workspace: &RemoteGitWorkspace,
     relative_path: Option<&str>,
 ) -> Result<PathBuf, String> {
@@ -225,7 +225,7 @@ pub fn seed_default_allowed_roots() {
     // entirely, so seed the resolved dir too. (The other vendors' overrides —
     // `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME` — are likewise unseeded above; that
     // predates this and is deliberately left alone here.)
-    let pi_agent_dir = crate::agents::paths::vendor_roots().pi_agent_dir;
+    let pi_agent_dir = cognia_agents::paths::vendor_roots().pi_agent_dir;
     if !pi_agent_dir.is_empty() {
         add_allowed_root(pi_agent_dir);
     }
@@ -251,7 +251,7 @@ fn is_path_allowed(path: &str) -> bool {
 /// by companion file operations. This resolves the deepest existing ancestor,
 /// so a symlinked workspace cannot escape containment. The registry's existing
 /// empty-at-startup behavior is preserved for headless/test bootstrap.
-pub(crate) fn is_remote_workspace_path_allowed(path: &str) -> bool {
+pub fn is_remote_workspace_path_allowed(path: &str) -> bool {
     let roots: Vec<String> = active_workspace_roots_registry()
         .read()
         .map(|guard| guard.iter().cloned().collect())
@@ -291,7 +291,7 @@ fn is_path_within_roots(path: &str, roots: &[String]) -> bool {
 /// device over the companion API, which has no such gesture and is the real
 /// exfil / backdoor-write surface.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FsOrigin {
+pub enum FsOrigin {
     Local,
     Remote,
 }
@@ -362,7 +362,7 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
         .map_err(|e| format!("read_text_file task failed: {e}"))?
 }
 
-pub(crate) fn read_text_file_impl(path: String, origin: FsOrigin) -> Result<String, String> {
+pub fn read_text_file_impl(path: String, origin: FsOrigin) -> Result<String, String> {
     enforce_check_path(&path, "read_text_file", origin)?;
     std::fs::read_to_string(&path).map_err(|e| format!("read {}: {}", path, e))
 }
@@ -377,7 +377,7 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
         .map_err(|e| format!("write_text_file task failed: {e}"))?
 }
 
-pub(crate) fn write_text_file_impl(
+pub fn write_text_file_impl(
     path: String,
     content: String,
     origin: FsOrigin,
@@ -403,7 +403,7 @@ pub async fn ensure_dir(path: String) -> Result<(), String> {
         .map_err(|e| format!("ensure_dir task failed: {e}"))?
 }
 
-pub(crate) fn ensure_dir_impl(path: String, origin: FsOrigin) -> Result<(), String> {
+pub fn ensure_dir_impl(path: String, origin: FsOrigin) -> Result<(), String> {
     enforce_check_path(&path, "ensure_dir", origin)?;
     std::fs::create_dir_all(&path).map_err(|e| format!("mkdir {}: {}", path, e))
 }
@@ -1215,7 +1215,7 @@ fn reject_symlinked_final(final_path: &Path) -> Result<(), String> {
 /// inside one of `allowed_roots`, and reject a symlinked final component.
 /// Returns the absolute path to write to. Empty `allowed_roots` => `Err` (no
 /// implicit any-path).
-pub(crate) fn validate_confined_path(
+pub fn validate_confined_path(
     path: &str,
     allowed_roots: &[String],
 ) -> Result<PathBuf, String> {

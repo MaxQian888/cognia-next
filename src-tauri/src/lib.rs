@@ -53,7 +53,12 @@ pub use cognia_automation::cua_sandbox;
 // the optional bollard/kube stacks); re-aliased so `crate::external_agent::…`
 // (companion_api rpc, headless, claude, generate_handler!) resolves unchanged.
 pub use cognia_external_agent as external_agent;
-mod files;
+// ADR-0067 Tier C — extracted to `crates/cognia-files`. The submodule (not
+// the crate) is re-exported, because the 23 `#[tauri::command]` fns must be
+// referenced at their definition site; this keeps every `files::…` entry in
+// generate_handler! and every `crate::files::…` call site in
+// `companion_api/rpc/*`, `companion_api/acp` and `codeserver` unchanged.
+pub use cognia_files::files;
 pub mod fleet;
 mod fonts;
 // ADR-0067 — extracted to `crates/cognia-core`; re-aliased so `crate::fs_atomic`
