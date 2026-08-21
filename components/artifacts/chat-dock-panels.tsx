@@ -62,7 +62,10 @@ import { ProjectOverviewPanel } from "./workspace-mode/project-overview-panel"
 import { MemoryWorkbenchPanel } from "@/components/context-workbench/panels/memory-workbench-panel"
 import { SourceControlWorkbenchPanel } from "@/components/context-workbench/panels/source-control-workbench-panel"
 import { LogsWorkbenchPanel } from "@/components/context-workbench/panels/logs-workbench-panel"
-import { AgentStatusWorkbenchPanel } from "@/components/context-workbench/panels/agent-status-workbench-panel"
+import {
+  SQUAD_CONTEXT_PANEL_ID,
+  SquadContextPanel,
+} from "@/components/context-workbench/panels/squad-context-panel"
 import {
   TEAM_MEMBERS_PANEL_ID,
   TeamMembersPanel,
@@ -643,14 +646,20 @@ export function useSessionSurfacePanels({
         renderer: () => <LogsWorkbenchPanel />,
       },
       {
-        id: "agent-status",
+        // The Squad running THIS conversation. Its predecessor showed
+        // whichever Squad the old workspace page happened to have selected —
+        // global state in a rail whose every other panel follows the resource
+        // in front of you. Takes the same slot so a customised rail order
+        // survives.
+        id: SQUAD_CONTEXT_PANEL_ID,
         activity: "ai",
-        labelKey: "contextWorkbench.agentStatusPanel.title",
-        icon: BotIcon,
+        labelKey: "contextWorkbench.squadPanel.title",
+        icon: UsersIcon,
         order: 16,
         appliesTo: (resource) => resource.kind === "session",
         retention: "stateful",
-        renderer: () => <AgentStatusWorkbenchPanel />,
+        scope: "session",
+        renderer: () => <SquadContextPanel sessionId={activeSessionId} />,
       },
       {
         // Team conversations only — the roster, the shared notes and the

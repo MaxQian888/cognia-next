@@ -551,7 +551,7 @@ describe("useSessionSurfacePanels", () => {
       ["metadata", "inspect", 50],
       ["memory", "inspect", 55],
       ["logs", "inspect", 60],
-      ["agent-status", "ai", 16],
+      ["squad-context", "ai", 16],
       ["team-members", "ai", 17],
     ])
   })

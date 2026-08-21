@@ -40,6 +40,7 @@ const PANEL_ID_CONSTANTS: Record<string, string> = {
   SIDECHAT_PANEL_ID: "session-sidechat",
   SESSION_ARTIFACT_LIST_PANEL_ID: "artifacts",
   TEAM_MEMBERS_PANEL_ID: "team-members",
+  SQUAD_CONTEXT_PANEL_ID: "squad-context",
 }
 
 function declaredPanels(): Map<string, string> {

@@ -66,13 +66,15 @@
     "startedAt": "开始时间"
   },
   "status": {
+    "awaiting_approval": "等待批准",
     "cancelled": "已取消",
     "completed": "已完成",
     "executing": "执行中",
     "failed": "失败",
     "idle": "空闲",
     "paused": "已暂停",
-    "planning": "规划中"
+    "planning": "规划中",
+    "shutdown": "已关闭"
   },
   "taskStatus": {
     "blocked": "阻塞",

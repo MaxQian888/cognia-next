@@ -32,26 +32,6 @@
     "workspace": "工作区"
   },
   "activityRailLabel": "上下文工作台活动",
-  "agentStatusPanel": {
-    "active": "{count, plural, other {# 个运行中}}",
-    "emptyDescription": "向团队添加成员即可在此查看状态。",
-    "emptyTitle": "暂无成员",
-    "noTeam": "无 Agent 团队",
-    "noTeamDescription": "启动 Agent 团队会话即可在此查看状态。",
-    "openFullPage": "打开 Agent 工作区",
-    "statuses": {
-      "awaiting_approval": "等待审批",
-      "cancelled": "已取消",
-      "completed": "已完成",
-      "executing": "执行中",
-      "failed": "失败",
-      "idle": "空闲",
-      "paused": "已暂停",
-      "planning": "规划中",
-      "shutdown": "已关闭"
-    },
-    "title": "Agent 状态"
-  },
   "aiActions": "AI 操作",
   "aiLoading": "正在准备资源会话…",
   "artifactSelectionComment": {
@@ -339,6 +319,17 @@
     "staged": "{count, plural, other {# 项已暂存}}",
     "title": "源代码管理",
     "unstaged": "{count, plural, other {# 项变更}}"
+  },
+  "squadPanel": {
+    "awaitingYou": "{count, plural, other {有 # 项待你决定}}",
+    "missingDescription": "该会话绑定的小队已被删除。请在输入框里另选一个，或改回单个 Agent。",
+    "missingTitle": "小队已不存在",
+    "noMembersDescription": "这个小队尚未配置任何成员。",
+    "noMembersTitle": "还没有成员",
+    "title": "小队",
+    "unboundDescription": "在输入框的执行体控件里选一个小队，即可把这个会话交给团队。",
+    "unboundTitle": "由单个 Agent 承担",
+    "working": "{count, plural, =0 {空闲} other {# 个在跑}}"
   },
   "teamMembersPanel": {
     "title": "团队成员"

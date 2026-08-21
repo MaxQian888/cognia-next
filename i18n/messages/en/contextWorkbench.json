@@ -32,26 +32,6 @@
     "workspace": "Workspace"
   },
   "activityRailLabel": "Context Workbench activities",
-  "agentStatusPanel": {
-    "active": "{count, plural, one {# active} other {# active}}",
-    "emptyDescription": "Add teammates to the team to see their status here.",
-    "emptyTitle": "No teammates",
-    "noTeam": "No agent team",
-    "noTeamDescription": "Start an agent team session to see status here.",
-    "openFullPage": "Open agent workspace",
-    "statuses": {
-      "awaiting_approval": "Awaiting approval",
-      "cancelled": "Cancelled",
-      "completed": "Completed",
-      "executing": "Executing",
-      "failed": "Failed",
-      "idle": "Idle",
-      "paused": "Paused",
-      "planning": "Planning",
-      "shutdown": "Shutdown"
-    },
-    "title": "Agent Status"
-  },
   "aiActions": "AI actions",
   "aiLoading": "Preparing the resource conversation…",
   "artifactSelectionComment": {
@@ -339,6 +319,17 @@
     "staged": "{count, plural, one {# staged} other {# staged}}",
     "title": "Source Control",
     "unstaged": "{count, plural, one {# change} other {# changes}}"
+  },
+  "squadPanel": {
+    "awaitingYou": "{count, plural, =1 {Waiting on your decision} other {Waiting on # decisions}}",
+    "missingDescription": "This conversation is bound to a Squad that no longer exists. Pick another one in the composer, or go back to a single agent.",
+    "missingTitle": "Squad unavailable",
+    "noMembersDescription": "This Squad has no teammates configured.",
+    "noMembersTitle": "No members yet",
+    "title": "Squad",
+    "unboundDescription": "Pick a Squad from the executor control in the composer to hand this conversation to a team.",
+    "unboundTitle": "Runs on a single agent",
+    "working": "{count, plural, =0 {Idle} =1 {1 working} other {# working}}"
   },
   "teamMembersPanel": {
     "title": "Team members"

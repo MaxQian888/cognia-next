@@ -66,13 +66,15 @@
     "startedAt": "Started"
   },
   "status": {
+    "awaiting_approval": "Awaiting approval",
     "cancelled": "Cancelled",
     "completed": "Completed",
     "executing": "Executing",
     "failed": "Failed",
     "idle": "Idle",
     "paused": "Paused",
-    "planning": "Planning"
+    "planning": "Planning",
+    "shutdown": "Shut down"
   },
   "taskStatus": {
     "blocked": "Blocked",
