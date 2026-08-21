@@ -250,6 +250,9 @@ export async function startSquadRun(
     const seed = {
       sourceRunId: runId,
       objective: input.goal.trim() || squadId,
+      // Names the conversation on the run itself, so the run list and any
+      // gate can find their way back to the thread that is waiting.
+      sessionId: input.session.id,
       startedAt: now,
       updatedAt: now,
     }

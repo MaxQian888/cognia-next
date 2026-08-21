@@ -69,13 +69,35 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
     [teammatesRecord, gate.gateType, gate.teamId]
   )
 
+  // This dialog is mounted at the app root so a gate is answerable from
+  // whatever surface the user is on (ADR-0045). The cost is that answering it
+  // leaves nothing behind — the modal is gone and no surface can say what was
+  // approved, or when. Write the decision back into the conversation the run
+  // belongs to. Fire-and-forget and best-effort: the run is waiting on the
+  // answer, and losing the answer would be far worse than losing the note.
+  const recordAnswer = (decision: "approved" | "rejected" | "dismissed"): void => {
+    if (!gate.runId) return
+    void import("@/lib/ai/agent/team/record-gate-answer")
+      .then(({ recordSquadGateAnswer }) =>
+        recordSquadGateAnswer({
+          runId: gate.runId,
+          gateType: gate.gateType,
+          decision,
+          title: gate.title,
+        })
+      )
+      .catch(() => undefined)
+  }
+
   const approveAndClose = (payload?: unknown): void => {
     approve(payload)
     close(gate.key)
+    recordAnswer("approved")
   }
   const rejectAndClose = (feedback?: string): void => {
     reject(feedback)
     close(gate.key)
+    recordAnswer("rejected")
   }
 
   // Restored-from-persistence gate: the approval-bus waiter died with the
@@ -93,7 +115,16 @@ function GateModalItem({ gate }: { gate: PendingGate }): React.ReactElement {
           </DialogHeader>
           {gate.body && <p className="text-sm text-muted-foreground">{gate.body}</p>}
           <DialogFooter>
-            <Button variant="secondary" onClick={() => close(gate.key)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                close(gate.key)
+                // A stale gate is dismissed, not answered — the waiter died
+                // with the previous page. Worth recording precisely because
+                // it means the run got no decision from this dialog.
+                recordAnswer("dismissed")
+              }}
+            >
               {t("dismissStale")}
             </Button>
           </DialogFooter>

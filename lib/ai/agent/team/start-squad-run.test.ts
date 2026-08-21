@@ -238,6 +238,25 @@ describe("startSquadRun — run binding", () => {
     expect(ensureImTeamExecutionRunMock).not.toHaveBeenCalled()
   })
 
+  it("names the conversation on the run so a gate can find its way back", async () => {
+    // `ExecutionRun.sessionId` was an indexed column team runs never filled,
+    // so nothing could answer "which conversation started this?".
+    const h = harness()
+    await startSquadRun(
+      {
+        squadId: "squad-1",
+        goal: "g",
+        origin: "chat",
+        triggeredFrom: chatTrigger,
+        session: session(),
+      },
+      h.deps
+    )
+    expect(ensureTeamExecutionRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "s1" })
+    )
+  })
+
   it("creates the connector binding when the caller asks for one", async () => {
     const h = harness()
     await startSquadRun(

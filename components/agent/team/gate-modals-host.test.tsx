@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import en from "@/i18n/messages/en.json"
 import { GateModalsHost } from "./gate-modals-host"
@@ -10,6 +10,10 @@ import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 const approveMock = jest.fn()
+const recordGateAnswerMock = jest.fn(async () => "s1")
+jest.mock("@/lib/ai/agent/team/record-gate-answer", () => ({
+  recordSquadGateAnswer: (...args: unknown[]) => recordGateAnswerMock(...(args as [never])),
+}))
 const rejectMock = jest.fn()
 jest.mock("@/lib/runtime/approval-bus", () => ({
   approve: (...args: unknown[]) => approveMock(...args),
@@ -39,6 +43,7 @@ const openGate = (
 
 beforeEach(() => {
   approveMock.mockClear()
+  recordGateAnswerMock.mockClear()
   rejectMock.mockClear()
   act(() => {
     usePendingGatesStore.setState({ gates: [] })
@@ -68,6 +73,31 @@ describe("GateModalsHost", () => {
       { extraTokens: 1000 }
     )
     expect(usePendingGatesStore.getState().gates).toHaveLength(0)
+  })
+
+  it("records the decision where it applies, since the modal itself vanishes", async () => {
+    // This dialog is app-root mounted so it is answerable from anywhere; the
+    // cost is that nothing afterwards can say what was approved or when.
+    renderHost()
+    openGate()
+    fireEvent.change(screen.getByPlaceholderText(/50000/), { target: { value: "1000" } })
+    fireEvent.click(screen.getByRole("button", { name: /Approve/i }))
+    await waitFor(() =>
+      expect(recordGateAnswerMock).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", gateType: "budget", decision: "approved" })
+      )
+    )
+  })
+
+  it("records a rejection too, and distinctly", async () => {
+    renderHost()
+    openGate()
+    fireEvent.click(screen.getByRole("button", { name: /Reject/i }))
+    await waitFor(() =>
+      expect(recordGateAnswerMock).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: "rejected" })
+      )
+    )
   })
 
   it("reject resolves the bus waiter and removes the gate", () => {

@@ -166,6 +166,32 @@ export interface SquadRunPart {
   objective: string
 }
 
+/**
+ * SquadGatePart — what a human decided, left where the decision was made.
+ *
+ * The gate dialog itself stays app-root mounted (ADR-0045) so it is answerable
+ * from whatever surface the user happens to be on. But a modal disappears the
+ * moment it is answered, and nothing afterwards could say what was approved,
+ * or by whom, or when. This is that record, written into the conversation the
+ * run belongs to.
+ */
+export interface SquadGatePart {
+  type: "squad-gate"
+  /** Execution run id — `execution:team:<sourceRunId>`. */
+  runId: string
+  /** `budget` | `deadlock` | `plan` | `teammate_fix` | `replan` | ... */
+  gateType: string
+  decision: "approved" | "rejected" | "dismissed"
+  /** The gate's own title, as the dialog showed it. */
+  title: string
+  answeredAt: number
+}
+
+export function isSquadGatePart(part: unknown): part is SquadGatePart {
+  const p = part as { type?: unknown; runId?: unknown; decision?: unknown }
+  return p?.type === "squad-gate" && typeof p.runId === "string" && typeof p.decision === "string"
+}
+
 export function isSquadRunPart(part: unknown): part is SquadRunPart {
   const p = part as { type?: unknown; runId?: unknown; squadId?: unknown }
   return p?.type === "squad-run" && typeof p.runId === "string" && typeof p.squadId === "string"

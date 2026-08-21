@@ -30,6 +30,15 @@ export interface TeamExecutionRunSeed {
   sourceRunId: string
   objective: string
   projectId?: string
+  /**
+   * The conversation that asked for this run.
+   *
+   * `ExecutionRun.sessionId` has been an indexed column all along and team
+   * runs never filled it, so nothing could answer "which conversation started
+   * this?" — not the run list, and not a gate trying to find its way back to
+   * the thread that is waiting on it.
+   */
+  sessionId?: string
   startedAt: number
   updatedAt: number
 }
@@ -43,6 +52,7 @@ export async function ensureTeamExecutionRun(seed: TeamExecutionRunSeed): Promis
         kind: "team",
         sourceId: seed.sourceRunId,
         ...(seed.projectId ? { projectId: seed.projectId } : {}),
+        ...(seed.sessionId ? { sessionId: seed.sessionId } : {}),
         title: seed.objective,
         status: "running",
         currentRevision: 0,

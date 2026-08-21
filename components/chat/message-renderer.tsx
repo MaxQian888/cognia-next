@@ -26,6 +26,7 @@ import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2u
 import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { SquadRunPart } from "@/components/chat/message-parts/squad-run-part"
+import { SquadGatePart } from "@/components/chat/message-parts/squad-gate-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { GroundingPart } from "@/components/chat/message-parts/grounding-part"
@@ -81,6 +82,7 @@ import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
   SquadRunPart as SquadRunPartType,
+  SquadGatePart as SquadGatePartType,
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
   GroundingPart as GroundingPartType,
@@ -1438,6 +1440,10 @@ function renderPart(
 
   if (type === "squad-run") {
     return <SquadRunPart key={key} part={part as unknown as SquadRunPartType} />
+  }
+
+  if (type === "squad-gate") {
+    return <SquadGatePart key={key} part={part as unknown as SquadGatePartType} />
   }
 
   if (type === "text") {

@@ -7,6 +7,14 @@
     "running": "进行中",
     "skipped": "已跳过"
   },
+  "gate": {
+    "decision": {
+      "approved": "已批准",
+      "dismissed": "已忽略",
+      "rejected": "已拒绝"
+    },
+    "openRun": "运行"
+  },
   "journalUnavailable": "本机没有该运行的活动记录。",
   "memberActivity": "{count, plural, other {# 个步骤}}",
   "omittedActivity": "{count, plural, other {另有 # 个更早的步骤未显示}}",

@@ -7,6 +7,14 @@
     "running": "Running",
     "skipped": "Skipped"
   },
+  "gate": {
+    "decision": {
+      "approved": "Approved",
+      "dismissed": "Dismissed",
+      "rejected": "Rejected"
+    },
+    "openRun": "Run"
+  },
   "journalUnavailable": "Activity for this run is not on this device.",
   "memberActivity": "{count, plural, =1 {1 step} other {# steps}}",
   "omittedActivity": "{count, plural, =1 {1 earlier step not shown} other {# earlier steps not shown}}",
