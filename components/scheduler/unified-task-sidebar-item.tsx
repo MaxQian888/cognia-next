@@ -5,7 +5,8 @@
  * driven by the item's `capabilities` so the same component works for app /
  * workflow / backup / plugin / system kinds with no per-kind divergence.
  *
- * Replaces both `TaskSidebarItem` (app-only) and the inline `<div role="button">`
+ * The only row type the scheduler list renders. It replaced the app-only
+ * `TaskSidebarItem` (since deleted) and the inline `<div role="button">`
  * system-task block that used to live in `SchedulerSidebar`.
  *
  * Interaction contract: clicking the row only selects it; the quick actions

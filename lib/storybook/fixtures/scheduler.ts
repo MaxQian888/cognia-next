@@ -20,6 +20,7 @@ import type {
   UnifiedItemStatus,
 } from "@/types/scheduler/unified"
 import { makeUnifiedId } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun, UnifiedRunStatus } from "@/types/scheduler/unified-runs"
 import type {
   SystemTask,
   SystemTaskTrigger,
@@ -191,6 +192,38 @@ export function makeUnifiedItemSet(): UnifiedScheduledItem[] {
       status: "active",
       triggerSummary: { type: "once", runAtMs: BASE + 2 * DAY },
     }),
+  ]
+}
+
+let unifiedRunSeq = 0
+
+/** Build a `UnifiedExecutionRun` — the cross-source run record. */
+export function makeUnifiedRun(over: Partial<UnifiedExecutionRun> = {}): UnifiedExecutionRun {
+  unifiedRunSeq += 1
+  const kind: ScheduledItemKind = over.kind ?? "app"
+  const status: UnifiedRunStatus = over.status ?? "succeeded"
+  const startedAt = over.startedAt ?? BASE - unifiedRunSeq * HOUR
+  return {
+    unifiedId: makeUnifiedId(kind, `run-${unifiedRunSeq}`),
+    kind,
+    itemUnifiedId: makeUnifiedId(kind, `src-${unifiedRunSeq}`),
+    itemName: `Scheduled item ${unifiedRunSeq}`,
+    status,
+    startedAt,
+    finishedAt: status === "running" ? undefined : startedAt + 1_850,
+    durationMs: status === "running" ? undefined : 1_850,
+    origin: { tableName: "schedulerDb.executions", nativeId: `run-${unifiedRunSeq}` },
+    ...over,
+  }
+}
+
+/** A small mixed set of unified runs spanning several kinds and outcomes. */
+export function makeUnifiedRunSet(): UnifiedExecutionRun[] {
+  return [
+    makeUnifiedRun({ kind: "app", itemName: "Overnight digest", status: "succeeded" }),
+    makeUnifiedRun({ kind: "workflow", itemName: "Nightly ETL workflow", status: "failed" }),
+    makeUnifiedRun({ kind: "backup", itemName: "Weekly full backup", status: "succeeded" }),
+    makeUnifiedRun({ kind: "connector", itemName: "Slack daily summary", status: "running" }),
   ]
 }
 

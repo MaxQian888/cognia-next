@@ -14,7 +14,10 @@ jest.mock("next-intl", () => ({
 
 jest.mock("./task-execution-chart", () => ({
   __esModule: true,
-  TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
+  TaskExecutionChart: ({ runs }: { runs: unknown[] }) => (
+    <div data-testid="task-execution-chart-stub" data-points={runs.length} />
+  ),
+  toChartPointsFromUnifiedRuns: (runs: unknown[]) => runs,
 }))
 
 // Stub the execution monitor — it has its own dedicated test and pulls live
@@ -25,18 +28,23 @@ jest.mock("@/components/execution/execution-monitor-panel", () => ({
 }))
 
 // Stub the calendar/timeline views — they have their own dedicated tests; here
-// we only assert the dashboard routes to the right one for the active mode.
+// we only assert the dashboard routes to the right one for the active mode and
+// hands it the merged item list.
 jest.mock("./scheduler-calendar-view", () => ({
   __esModule: true,
-  SchedulerCalendarView: () => <div data-testid="calendar-view-stub" />,
+  SchedulerCalendarView: ({ items }: { items: unknown[] }) => (
+    <div data-testid="calendar-view-stub" data-items={items.length} />
+  ),
 }))
 jest.mock("./scheduler-timeline-view", () => ({
   __esModule: true,
-  SchedulerTimelineView: () => <div data-testid="timeline-view-stub" />,
+  SchedulerTimelineView: ({ items }: { items: unknown[] }) => (
+    <div data-testid="timeline-view-stub" data-items={items.length} />
+  ),
 }))
 
 // Stub the unified runs widget — it has its own test and pulls live Dexie
-// sources; here we only assert the dashboard swaps to it.
+// sources; here we only assert the dashboard mounts it.
 jest.mock("./unified-recent-runs", () => ({
   __esModule: true,
   UnifiedRecentRuns: () => <div data-testid="unified-recent-runs-stub" />,
@@ -50,71 +58,63 @@ jest.mock("@/hooks/scheduler/use-scheduler-dashboard-view", () => ({
 }))
 
 import { SchedulerDashboardView } from "./scheduler-dashboard-view"
-import type { ScheduledTask, TaskExecution, TaskStatistics } from "@/types/scheduler"
+import { deriveUnifiedStatistics } from "@/lib/scheduler/unified-filter"
+import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
-const stats: TaskStatistics = {
-  totalTasks: 10,
-  activeTasks: 6,
-  pausedTasks: 2,
-  totalExecutions: 100,
-  successfulExecutions: 95,
-  failedExecutions: 5,
-  averageDuration: 1000,
-  upcomingExecutions: 2,
+const NOW = 1_800_000_000_000
+
+function makeItem(overrides: Partial<UnifiedScheduledItem> & { sourceId: string }) {
+  const kind: ScheduledItemKind = overrides.kind ?? "app"
+  return {
+    unifiedId: `${kind}:${overrides.sourceId}`,
+    kind,
+    name: `Item ${overrides.sourceId}`,
+    status: "active",
+    triggerSummary: { type: "interval", intervalMs: 60_000 },
+    origin: { deepLinkHref: "/scheduler" },
+    capabilities: { runNow: true, pause: true, edit: true, delete: true },
+    ...overrides,
+  } as UnifiedScheduledItem
 }
 
-const upcoming: ScheduledTask[] = [
-  {
-    id: "t1",
+const ITEMS: UnifiedScheduledItem[] = [
+  makeItem({
+    sourceId: "t1",
     name: "Upcoming task 1",
-    status: "active",
-    nextRunAt: new Date(Date.now() + 60_000),
-  } as unknown as ScheduledTask,
-  {
-    id: "t2",
-    name: "Upcoming task 2",
-    status: "paused",
-    nextRunAt: new Date(Date.now() + 120_000),
-  } as unknown as ScheduledTask,
+    nextRunAt: NOW + 60_000,
+    successCount: 95,
+    failureCount: 5,
+  }),
+  makeItem({
+    sourceId: "wf",
+    kind: "workflow",
+    name: "Upcoming workflow",
+    nextRunAt: NOW + 120_000,
+  }),
+  makeItem({ sourceId: "p1", name: "Paused one", status: "paused" }),
 ]
 
-const recent: TaskExecution[] = [
+const RUNS: UnifiedExecutionRun[] = [
   {
-    id: "e1",
-    taskId: "t1",
-    taskName: "Task 1",
-    status: "completed",
-    startedAt: new Date(Date.now() - 60_000),
-    completedAt: new Date(Date.now() - 30_000),
-    duration: 30_000,
-  } as unknown as TaskExecution,
-  {
-    id: "e2",
-    taskId: "t2",
-    taskName: "Task 2",
-    status: "failed",
-    startedAt: new Date(Date.now() - 90_000),
-    duration: 1000,
-  } as unknown as TaskExecution,
-  {
-    id: "e3",
-    taskId: "t3",
-    taskName: "Task 3",
-    status: "running",
-    startedAt: new Date(Date.now() - 5_000),
-    duration: 5000,
-  } as unknown as TaskExecution,
+    unifiedId: "app:r1",
+    kind: "app",
+    itemUnifiedId: "app:t1",
+    itemName: "Run 1",
+    status: "succeeded",
+    startedAt: NOW - 60_000,
+  } as UnifiedExecutionRun,
 ]
 
 function setup(overrides: Partial<React.ComponentProps<typeof SchedulerDashboardView>> = {}) {
+  const items = overrides.items ?? ITEMS
   const props: React.ComponentProps<typeof SchedulerDashboardView> = {
-    statistics: stats,
-    activeTasks: [],
-    pausedTasks: [],
-    upcomingTasks: upcoming,
-    recentExecutions: recent,
-    schedulerStatus: "running",
-    onSelectTask: jest.fn(),
+    statistics: deriveUnifiedStatistics(items),
+    items,
+    recentRuns: RUNS,
+    onSelectItem: jest.fn(),
+    onSelectRun: jest.fn(),
+    now: NOW,
     ...overrides,
   }
   return { props, ...render(<SchedulerDashboardView {...props} />) }
@@ -125,115 +125,82 @@ beforeEach(() => {
 })
 
 describe("SchedulerDashboardView", () => {
-  it("always renders the view toggle, even when statistics is null", () => {
-    setup({ statistics: null })
+  it("pairs the view toggle with the active view's name", () => {
+    setup()
     expect(screen.getByTestId("scheduler-dashboard-view-toggle")).toBeInTheDocument()
-    // Overview body bails out → no summary band rendered.
-    expect(screen.queryByTestId("scheduler-overview-summary")).toBeNull()
+    expect(screen.getByTestId("scheduler-dashboard-title")).toHaveTextContent(
+      "dashboardView.overview"
+    )
   })
 
-  it("renders the summary band and the success rate in overview mode", () => {
+  it("renders the summary band over the merged cross-source counts", () => {
     setup()
     expect(screen.getByTestId("scheduler-overview-summary")).toBeInTheDocument()
-    expect(screen.getByText("10")).toBeInTheDocument()
+    // 3 items across app + workflow, not the app-store's own task count.
+    expect(screen.getByTestId("summary-total-items")).toHaveTextContent("3")
     expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("95%")
   })
 
-  it("renders the calendar view when mode is calendar", () => {
+  it("renders '—' rather than 0% when no source has recorded a run", () => {
+    setup({ items: [makeItem({ sourceId: "fresh" })] })
+    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("—")
+  })
+
+  it("hands the calendar view the whole merged list", () => {
     viewState.view = "calendar"
-    setup({ tasks: [] })
-    expect(screen.getByTestId("calendar-view-stub")).toBeInTheDocument()
+    setup()
+    expect(screen.getByTestId("calendar-view-stub")).toHaveAttribute("data-items", "3")
     expect(screen.queryByTestId("scheduler-overview-summary")).toBeNull()
   })
 
-  it("renders the timeline view when mode is timeline", () => {
+  it("hands the timeline view the whole merged list", () => {
     viewState.view = "timeline"
-    setup({ tasks: [] })
-    expect(screen.getByTestId("timeline-view-stub")).toBeInTheDocument()
+    setup()
+    expect(screen.getByTestId("timeline-view-stub")).toHaveAttribute("data-items", "3")
   })
 
-  it("renders the upcoming tasks list and dispatches onSelectTask on click", () => {
-    const onSelectTask = jest.fn()
-    setup({ onSelectTask })
-    fireEvent.click(screen.getByText("Upcoming task 1"))
-    expect(onSelectTask).toHaveBeenCalledWith("t1")
+  it("lists upcoming runs from every source and dispatches the unifiedId", () => {
+    const onSelectItem = jest.fn()
+    setup({ onSelectItem })
+    expect(screen.getByTestId("overview-upcoming-app:t1")).toBeInTheDocument()
+    expect(screen.getByTestId("overview-upcoming-workflow:wf")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("overview-upcoming-app:t1"))
+    expect(onSelectItem).toHaveBeenCalledWith("app:t1")
   })
 
-  it("renders the no-upcoming empty state when upcomingTasks is empty", () => {
-    setup({ upcomingTasks: [] })
+  it("omits paused items from upcoming", () => {
+    setup()
+    expect(screen.queryByTestId("overview-upcoming-app:p1")).toBeNull()
+  })
+
+  it("renders the no-upcoming empty state when nothing is scheduled ahead", () => {
+    setup({ items: [makeItem({ sourceId: "p", status: "paused" })] })
     expect(screen.getByText("noUpcomingTasks")).toBeInTheDocument()
   })
 
-  it("renders recent executions with task names and durations", () => {
+  it("charts the cross-source runs it is given", () => {
     setup()
-    expect(screen.getByText("Task 1")).toBeInTheDocument()
-    expect(screen.getByText("Task 2")).toBeInTheDocument()
-    expect(screen.getByText("Task 3")).toBeInTheDocument()
+    expect(screen.getByTestId("task-execution-chart-stub")).toHaveAttribute("data-points", "1")
   })
 
-  it("renders a status icon for every execution state, including pending", () => {
-    const { container } = setup({
-      recentExecutions: [
-        ...recent,
-        { id: "e4", taskId: "t4", taskName: "Task 4", status: "pending" } as TaskExecution,
-      ],
-    })
-    // completed / failed / running / pending → four distinct icon colours.
-    expect(container.querySelector(".text-green-500")).not.toBeNull()
-    expect(container.querySelector(".text-red-500")).not.toBeNull()
-    expect(container.querySelector(".text-blue-500")).not.toBeNull()
-    expect(screen.getByText("Task 4")).toBeInTheDocument()
-  })
-
-  it("swaps in the unified cross-kind runs widget when onSelectRun is supplied", () => {
-    setup({ onSelectRun: jest.fn() })
+  it("always mounts the unified cross-kind recent-runs widget", () => {
+    setup()
     expect(screen.getByTestId("unified-recent-runs-stub")).toBeInTheDocument()
-    expect(screen.queryByTestId("overview-recent")).toBeNull()
   })
 
-  it("renders the no-recent-executions empty state when recentExecutions is empty", () => {
-    setup({ recentExecutions: [] })
-    expect(screen.getByText("noRecentExecutions")).toBeInTheDocument()
-  })
-
-  it("renders the kind summary strip when countsByKind is supplied", () => {
-    setup({
-      countsByKind: { app: 4, workflow: 2, backup: 1, plugin: 0, system: 3, connector: 0 },
-      activeCountsByKind: {
-        app: 2,
-        workflow: 1,
-        backup: 0,
-        plugin: 0,
-        system: 1,
-        connector: 0,
-      },
-    })
-    expect(screen.getByTestId("kind-summary-strip")).toBeInTheDocument()
-    expect(screen.getByTestId("kind-summary-app")).toBeInTheDocument()
-    expect(screen.getByTestId("kind-summary-workflow")).toBeInTheDocument()
-  })
-
-  it("omits the kind summary strip when countsByKind is absent", () => {
-    setup()
-    expect(screen.queryByTestId("kind-summary-strip")).toBeNull()
-  })
-
-  it("passes a low success rate through to the summary band", () => {
-    setup({ statistics: { ...stats, successfulExecutions: 50, totalExecutions: 100 } })
-    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("50%")
-  })
-
-  it("renders 0% success when totalExecutions is zero", () => {
-    setup({ statistics: { ...stats, successfulExecutions: 0, totalExecutions: 0 } })
-    expect(screen.getByTestId("summary-success-rate")).toHaveTextContent("0%")
+  it("wires the kind rail back to the sidebar filter", () => {
+    const onSelectKind = jest.fn()
+    setup({ onSelectKind, selectedKinds: new Set<ScheduledItemKind>(["workflow"]) })
+    fireEvent.click(screen.getByTestId("kind-summary-app"))
+    expect(onSelectKind).toHaveBeenCalledWith("app")
+    expect(screen.getByTestId("kind-summary-workflow")).toHaveAttribute("aria-pressed", "true")
   })
 
   it("lays the overview out as flat blocks rather than nested cards", () => {
     const { container } = setup()
-    // The summary, upcoming and recent blocks are plain sections — the only
-    // `Card` left in the overview tree belongs to a stubbed child widget.
+    // The summary and upcoming blocks are plain sections — the only `Card`s in
+    // the overview tree belong to stubbed child widgets.
     expect(container.querySelectorAll('[data-slot="card"]')).toHaveLength(0)
     expect(screen.getByTestId("overview-upcoming")).toBeInTheDocument()
-    expect(screen.getByTestId("overview-recent")).toBeInTheDocument()
   })
 })

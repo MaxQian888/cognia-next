@@ -39,9 +39,12 @@ import { SchedulerUpcomingRail } from "@/components/scheduler/scheduler-upcoming
 import { QuickWorkflowTriggerDialog } from "@/components/scheduler/dialogs/quick-workflow-trigger-dialog"
 import { BackupScheduleDialog } from "@/components/scheduler/backup-schedule-dialog"
 import { TaskDependencyDialog } from "@/components/scheduler/task-dependency-dialog"
+import { DeleteItemDialog } from "@/components/scheduler/delete-item-dialog"
 import { toUnifiedFromTaskExecution } from "@/hooks/scheduler/use-unified-recent-runs"
-import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
+import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+import { deriveUnifiedFacets, type UnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
+import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
 import { useTranslations } from "next-intl"
@@ -54,12 +57,7 @@ export default function SchedulerPage() {
   const {
     tasks,
     executions,
-    statistics,
     selectedTask,
-    activeTasks,
-    pausedTasks,
-    upcomingTasks,
-    recentExecutions,
     schedulerStatus,
     filter,
     isLoading,
@@ -78,8 +76,6 @@ export default function SchedulerPage() {
     setFilter,
     clearFilter,
     refresh,
-    loadRecentExecutions,
-    loadUpcomingTasks,
     cleanupOldExecutions,
     cancelPluginExecution,
     getActivePluginCount: _getActivePluginCount,
@@ -134,16 +130,27 @@ export default function SchedulerPage() {
   useEffect(() => {
     bootstrapSchedulerSources()
   }, [])
-  const {
-    items: unifiedItems,
-    countsByKind,
-    activeCountsByKind,
-  } = useUnifiedScheduledItems({ registry: getSchedulerSourceRegistry() })
+  const { items: unifiedItems, statistics: unifiedStatistics } = useUnifiedScheduledItems({
+    registry: getSchedulerSourceRegistry(),
+  })
+  // Cross-source run history — feeds the overview's 7-day chart. The chart used
+  // to read the app-only `recentExecutions` slice while every number beside it
+  // counted all six sources.
+  const { runs: unifiedRecentRuns } = useUnifiedRecentRuns({ limit: 200 })
 
   // --- New layout state ---
   const [mobileView, setMobileView] = useState<"list" | "detail">("list")
+  // Filter state lives here because it drives three things at once: the rows
+  // the sidebar renders, the facet counts on its controls, and the keyboard
+  // cursor below. All four axes narrow the SAME unified list — before this,
+  // search and status quietly filtered an app-only array that was never
+  // rendered, so typing in the search box changed nothing on screen.
   const [searchQuery, setSearchQuery] = useState(filter.search || "")
-  const [activeFilter, setActiveFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState<UnifiedStatusFilter>("all")
+  const [selectedKinds, setSelectedKinds] = useState<ReadonlySet<ScheduledItemKind>>(
+    () => new Set()
+  )
+  const [loopOnly, setLoopOnly] = useState(false)
   // Shared three-tier breakpoint (matches the Inbox shell): mobile < 768px.
   const breakpoint = useBreakpoint()
   const isMobile = breakpoint === "mobile"
@@ -153,7 +160,10 @@ export default function SchedulerPage() {
   // --- Dialog / sheet state ---
   const [showCreateSheet, setShowCreateSheet] = useState(false)
   const [showEditSheet, setShowEditSheet] = useState(false)
-  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null)
+  // One confirmation for every destructive delete on this page. The list rows
+  // used to call the source adapter straight from the hover menu — no dialog,
+  // no undo — while the detail pane asked first. Now both routes land here.
+  const [pendingDelete, setPendingDelete] = useState<UnifiedScheduledItem | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showSystemCreateSheet, setShowSystemCreateSheet] = useState(false)
   const [showSystemEditSheet, setShowSystemEditSheet] = useState(false)
@@ -183,31 +193,46 @@ export default function SchedulerPage() {
     [systemTasks, systemEditTaskId]
   )
 
-  // Filter tasks by search + activeFilter
-  const filteredTasks = useMemo(() => {
-    let result = tasks
-    if (activeFilter === "active") result = result.filter((t) => t.status === "active")
-    else if (activeFilter === "paused") result = result.filter((t) => t.status === "paused")
-    // /loop interval tasks self-identify via tags (see lib/loop/interval.ts).
-    else if (activeFilter === "loop") result = result.filter((t) => t.tags?.includes("loop"))
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      result = result.filter(
-        (t) => t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q)
-      )
-    }
-    return result
-  }, [tasks, activeFilter, searchQuery])
+  // The single filtering pass for the whole page: the rows the sidebar renders
+  // AND the facet counts on its controls, so a control can never advertise a
+  // count the list does not contain.
+  const facets = useMemo(
+    () =>
+      deriveUnifiedFacets(unifiedItems, {
+        search: searchQuery,
+        status: statusFilter,
+        kinds: selectedKinds,
+        loopOnly,
+      }),
+    [unifiedItems, searchQuery, statusFilter, selectedKinds, loopOnly]
+  )
+  const visibleItems = facets.visibleItems
 
-  // Load recent executions and upcoming tasks on init
-  useEffect(() => {
-    if (isInitialized) {
-      loadRecentExecutions(20)
-      loadUpcomingTasks(5)
-    }
-  }, [isInitialized, loadRecentExecutions, loadUpcomingTasks])
+  const toggleKindFilter = useCallback((kind: ScheduledItemKind) => {
+    setSelectedKinds((prev) => {
+      const next = new Set(prev)
+      if (next.has(kind)) next.delete(kind)
+      else next.add(kind)
+      return next
+    })
+  }, [])
 
-  // Debounced search filter (syncs to store filter for hook-side filtering)
+  const clearKindFilters = useCallback(() => {
+    setSelectedKinds(new Set())
+    setLoopOnly(false)
+  }, [])
+
+  /** Resets every axis, search included — the empty state's "start over". */
+  const resetFilters = useCallback(() => {
+    setSearchQuery("")
+    setStatusFilter("all")
+    setSelectedKinds(new Set())
+    setLoopOnly(false)
+  }, [])
+
+  // Mirror the query into the app-scheduler store so its own `listTasks(filter)`
+  // reads stay consistent with what the user typed. The rendered list is driven
+  // by `facets` above, not by this.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (searchQuery.trim()) {
@@ -222,8 +247,8 @@ export default function SchedulerPage() {
   // Reset highlighted index when filter or search query changes — adjust state
   // during render based on the previous value (React's recommended pattern
   // for derived resets).
-  const [prevFilterKey, setPrevFilterKey] = useState(`${activeFilter}|${searchQuery}`)
-  const filterKey = `${activeFilter}|${searchQuery}`
+  const filterKey = `${statusFilter}|${searchQuery}|${loopOnly}|${[...selectedKinds].sort().join(",")}`
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey)
   if (filterKey !== prevFilterKey) {
     setPrevFilterKey(filterKey)
     setHighlightedIndex(-1)
@@ -242,11 +267,10 @@ export default function SchedulerPage() {
   )
 
   const handleCleanup = useCallback(async () => {
-    const deleted = await cleanupOldExecutions(30)
-    if (deleted > 0) {
-      loadRecentExecutions(20)
-    }
-  }, [cleanupOldExecutions, loadRecentExecutions])
+    // The overview's chart and recent-runs list poll `useUnifiedRecentRuns`,
+    // so they pick the deletion up on their own — no app-only reload needed.
+    await cleanupOldExecutions(30)
+  }, [cleanupOldExecutions])
 
   const handleCreateTask = useCallback(
     async (input: CreateScheduledTaskInput) => {
@@ -341,12 +365,35 @@ export default function SchedulerPage() {
     [selectedSystemTask, updateSystemTask, clearSystemError, validateTask]
   )
 
+  /**
+   * Ask before deleting an app task addressed by its raw id — the detail pane
+   * and the keyboard shortcut still speak that language. Plugin-scheduler rows
+   * share the app store's table, so both kinds are candidates.
+   */
+  const requestDeleteTask = useCallback(
+    (taskId: string) => {
+      const item = unifiedItems.find(
+        (candidate) =>
+          candidate.sourceId === taskId && (candidate.kind === "app" || candidate.kind === "plugin")
+      )
+      if (item) setPendingDelete(item)
+    },
+    [unifiedItems]
+  )
+
   const handleDeleteConfirm = useCallback(async () => {
-    if (deleteTaskId) {
-      await deleteTask(deleteTaskId)
-      setDeleteTaskId(null)
+    const item = pendingDelete
+    if (!item) return
+    setPendingDelete(null)
+    if (item.kind === "app" || item.kind === "plugin") {
+      // Go through the store so the selection and the cached slices are
+      // reconciled, not just the Dexie row.
+      await deleteTask(item.sourceId)
+      return
     }
-  }, [deleteTaskId, deleteTask])
+    const source = getSchedulerSourceRegistry().getSource(item.kind)
+    await source?.delete(item.sourceId)
+  }, [pendingDelete, deleteTask])
 
   const handleSystemDeleteConfirm = useCallback(async () => {
     if (systemDeleteTaskId) {
@@ -477,17 +524,18 @@ export default function SchedulerPage() {
   // pause/resume/run/delete its native rows. Memoized so the memoized sidebar
   // rows keep referentially-stable handlers across page re-renders.
   const unifiedActions = useMemo(() => {
-    const dispatch =
-      (action: "runNow" | "pause" | "resume" | "delete") => (item: UnifiedScheduledItem) => {
-        const source = getSchedulerSourceRegistry().getSource(item.kind)
-        if (!source) return
-        void source[action](item.sourceId)
-      }
+    const dispatch = (action: "runNow" | "pause" | "resume") => (item: UnifiedScheduledItem) => {
+      const source = getSchedulerSourceRegistry().getSource(item.kind)
+      if (!source) return
+      void source[action](item.sourceId)
+    }
     return {
       runNow: dispatch("runNow"),
       pause: dispatch("pause"),
       resume: dispatch("resume"),
-      delete: dispatch("delete"),
+      // Deletes are irreversible: park the item and let the shared
+      // confirmation dialog dispatch it.
+      delete: (item: UnifiedScheduledItem) => setPendingDelete(item),
     }
   }, [])
 
@@ -509,6 +557,49 @@ export default function SchedulerPage() {
     [handleSelectTask, selectTask]
   )
 
+  /**
+   * Select by `unifiedId` — what the overview's upcoming rows, the calendar,
+   * and the agenda hand back. Unknown ids are ignored rather than clearing the
+   * pane (a projected run can outlive the item that produced it).
+   */
+  const handleSelectUnifiedId = useCallback(
+    (unifiedId: string) => {
+      const item = unifiedItems.find((candidate) => candidate.unifiedId === unifiedId)
+      if (item) handleSelectUnifiedItem(item)
+    },
+    [unifiedItems, handleSelectUnifiedItem]
+  )
+
+  /**
+   * `unifiedId` of whatever the detail pane is showing, so the sidebar can mark
+   * the row regardless of which of the three detail surfaces owns it.
+   */
+  const selectedUnifiedId = selectedTask
+    ? `app:${selectedTask.id}`
+    : selectedUnifiedItem
+      ? selectedUnifiedItem.unifiedId
+      : inspectTaskId
+        ? `system:${inspectTaskId}`
+        : null
+
+  // All three detail surfaces, matching `selectedUnifiedId` above — a system
+  // task routes through `inspectTaskId` and clears the other two, so leaving it
+  // out marked the sidebar row selected while the rail (the context strip that
+  // exists precisely for "an item has taken the pane over") stayed hidden.
+  const isDetailOpen = Boolean(selectedTask || selectedUnifiedItem || inspectTaskId)
+
+  /** The row the keyboard cursor sits on, addressed the way the list is. */
+  const highlightedUnifiedId =
+    highlightedIndex >= 0 && highlightedIndex < visibleItems.length
+      ? visibleItems[highlightedIndex].unifiedId
+      : null
+
+  /** Pin a kind from the overview's kind rail. */
+  const handleSelectKindFromOverview = useCallback(
+    (kind: ScheduledItemKind) => toggleKindFilter(kind),
+    [toggleKindFilter]
+  )
+
   const handleToggleUnifiedSelection = useCallback(
     (item: UnifiedScheduledItem) => toggleMultiSelection(item.unifiedId),
     [toggleMultiSelection]
@@ -522,20 +613,23 @@ export default function SchedulerPage() {
 
       if (e.key === "ArrowDown") {
         e.preventDefault()
-        setHighlightedIndex((prev) => Math.min(prev + 1, filteredTasks.length - 1))
+        setHighlightedIndex((prev) => Math.min(prev + 1, visibleItems.length - 1))
       } else if (e.key === "ArrowUp") {
         e.preventDefault()
         setHighlightedIndex((prev) => Math.max(prev - 1, 0))
       } else if (
         e.key === "Enter" &&
         highlightedIndex >= 0 &&
-        highlightedIndex < filteredTasks.length
+        highlightedIndex < visibleItems.length
       ) {
         e.preventDefault()
-        handleSelectTask(filteredTasks[highlightedIndex].id)
+        // The cursor walks the rendered list, whatever kind each row is — it
+        // used to walk an app-only array while the list showed all six sources,
+        // so Enter opened a different row than the one highlighted.
+        handleSelectUnifiedItem(visibleItems[highlightedIndex])
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedTask) {
         e.preventDefault()
-        setDeleteTaskId(selectedTask.id)
+        requestDeleteTask(selectedTask.id)
       } else if (e.key === "n" && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
         handleCreateClick()
@@ -558,11 +652,12 @@ export default function SchedulerPage() {
   }, [
     handleCreateClick,
     handleRefresh,
-    handleSelectTask,
+    handleSelectUnifiedItem,
+    requestDeleteTask,
     selectedTask,
     selectTask,
     isMobile,
-    filteredTasks,
+    visibleItems,
     highlightedIndex,
   ])
 
@@ -576,35 +671,30 @@ export default function SchedulerPage() {
     const SidebarComponent = variant === "chrome" ? SchedulerSidebar : SchedulerSidebarContent
     return (
       <SidebarComponent
-        tasks={filteredTasks}
-        systemTasks={systemTasks}
-        unifiedItems={unifiedItems}
-        countsByKind={countsByKind}
-        selectedTaskId={selectedTask?.id ?? null}
+        items={unifiedItems}
+        facets={facets}
+        selectedUnifiedId={selectedUnifiedId}
+        highlightedUnifiedId={highlightedUnifiedId}
         schedulerStatus={schedulerStatus}
         schedulerHost={schedulerHost}
-        statistics={statistics}
-        activeCount={activeTasks.length}
-        pausedCount={pausedTasks.length}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        activeFilter={activeFilter}
-        onFilterChange={setActiveFilter}
-        onSelectTask={handleSelectTask}
-        onSelectSystemTask={setInspectTaskId}
-        onSelectUnifiedItem={handleSelectUnifiedItem}
-        onRunNow={handleRunNow}
-        onPause={handlePause}
-        onResume={handleResume}
-        onDelete={setDeleteTaskId}
-        onUnifiedRunNow={unifiedActions.runNow}
-        onUnifiedPause={unifiedActions.pause}
-        onUnifiedResume={unifiedActions.resume}
-        onUnifiedDelete={unifiedActions.delete}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        selectedKinds={selectedKinds}
+        onToggleKind={toggleKindFilter}
+        loopOnly={loopOnly}
+        onLoopOnlyChange={setLoopOnly}
+        onClearKindFilters={clearKindFilters}
+        onResetFilters={resetFilters}
+        onSelectItem={handleSelectUnifiedItem}
+        onRunNow={unifiedActions.runNow}
+        onPause={unifiedActions.pause}
+        onResume={unifiedActions.resume}
+        onDelete={unifiedActions.delete}
         selectedUnifiedIds={multiSelection}
         onToggleUnifiedSelection={handleToggleUnifiedSelection}
         onCreate={handleCreateClick}
-        highlightedIndex={highlightedIndex}
       />
     )
   }
@@ -628,7 +718,7 @@ export default function SchedulerPage() {
             onPause={handlePause}
             onResume={handleResume}
             onRunNow={handleRunNow}
-            onDelete={setDeleteTaskId}
+            onDelete={requestDeleteTask}
             onEdit={() => setShowEditSheet(true)}
             onUnifiedRunNow={unifiedActions.runNow}
             onUnifiedPause={unifiedActions.pause}
@@ -638,9 +728,11 @@ export default function SchedulerPage() {
           />
         }
         header={
-          <div className="space-y-2">
+          <div>
             <SchedulerContentHeader
-              selectedTaskName={selectedTask?.name}
+              // Whatever the pane is showing — the breadcrumb used to read
+              // "Overview" while a workflow trigger's detail filled the pane.
+              selectedTaskName={selectedTask?.name ?? selectedUnifiedItem?.name}
               isRefreshing={isLoading}
               onCreate={handleCreateClick}
               onCreateSystemTask={() => setShowSystemCreateSheet(true)}
@@ -685,7 +777,7 @@ export default function SchedulerPage() {
                     onPause={handlePause}
                     onResume={handleResume}
                     onRunNow={handleRunNow}
-                    onDelete={setDeleteTaskId}
+                    onDelete={requestDeleteTask}
                     onEdit={() => setShowEditSheet(true)}
                     onCancelPluginExecution={cancelPluginExecution}
                     isPluginExecutionActive={isPluginExecutionActive}
@@ -714,30 +806,34 @@ export default function SchedulerPage() {
               ) : (
                 <SchedulerErrorBoundary panelName="dashboard">
                   <SchedulerDashboardView
-                    statistics={statistics}
-                    activeTasks={activeTasks}
-                    pausedTasks={pausedTasks}
-                    upcomingTasks={upcomingTasks}
-                    recentExecutions={recentExecutions}
-                    schedulerStatus={schedulerStatus}
-                    onSelectTask={handleSelectTask}
-                    tasks={tasks}
-                    countsByKind={countsByKind}
-                    activeCountsByKind={activeCountsByKind}
+                    statistics={unifiedStatistics}
+                    items={unifiedItems}
+                    recentRuns={unifiedRecentRuns}
+                    onSelectItem={handleSelectUnifiedId}
                     onSelectRun={setSelectedRun}
+                    onSelectKind={handleSelectKindFromOverview}
+                    selectedKinds={selectedKinds}
                   />
                 </SchedulerErrorBoundary>
               )}
             </motion.div>
           </AnimatePresence>
         }
+        /*
+          The rail is the *global* context strip: what runs next and what ran
+          last, regardless of what the detail pane shows. On the overview that
+          would be a third copy of blocks already on screen, so it only appears
+          once a specific item has taken the pane over.
+        */
         rail={
-          <SchedulerUpcomingRail
-            upcomingTasks={upcomingTasks}
-            recentExecutions={recentExecutions}
-            onSelectTask={handleSelectTask}
-            onSelectRun={setSelectedRun}
-          />
+          isDetailOpen ? (
+            <SchedulerUpcomingRail
+              items={unifiedItems}
+              recentRuns={unifiedRecentRuns}
+              onSelectItem={handleSelectUnifiedId}
+              onSelectRun={setSelectedRun}
+            />
+          ) : undefined
         }
       />
 
@@ -767,9 +863,6 @@ export default function SchedulerPage() {
         onShowSystemEditSheetChange={setShowSystemEditSheet}
         onEditSystemTask={handleEditSystemTask}
         selectedSystemTask={selectedSystemTask}
-        deleteTaskId={deleteTaskId}
-        onDeleteTaskIdChange={setDeleteTaskId}
-        onDeleteConfirm={handleDeleteConfirm}
         systemDeleteTaskId={systemDeleteTaskId}
         onSystemDeleteTaskIdChange={setSystemDeleteTaskId}
         onSystemDeleteConfirm={handleSystemDeleteConfirm}
@@ -834,6 +927,16 @@ export default function SchedulerPage() {
         onBackfill={(range) => {
           if (!selectedTask) return Promise.resolve(0)
           return backfillTask(selectedTask.id, range)
+        }}
+      />
+
+      <DeleteItemDialog
+        item={pendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        onConfirm={() => {
+          void handleDeleteConfirm()
         }}
       />
 

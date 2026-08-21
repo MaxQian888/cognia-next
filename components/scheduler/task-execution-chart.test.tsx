@@ -26,8 +26,13 @@ jest.mock("recharts", () => ({
   CartesianGrid: () => <div />,
 }))
 
-import { TaskExecutionChart } from "./task-execution-chart"
+import {
+  TaskExecutionChart,
+  toChartPointsFromExecutions,
+  toChartPointsFromUnifiedRuns,
+} from "./task-execution-chart"
 import type { TaskExecution } from "@/types/scheduler"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 function buildExec(overrides: Partial<TaskExecution> = {}): TaskExecution {
   return {
@@ -40,50 +45,100 @@ function buildExec(overrides: Partial<TaskExecution> = {}): TaskExecution {
   } as unknown as TaskExecution
 }
 
+function buildRun(overrides: Partial<UnifiedExecutionRun> = {}): UnifiedExecutionRun {
+  return {
+    unifiedId: "app:r1",
+    kind: "app",
+    itemUnifiedId: "app:t1",
+    itemName: "Task",
+    status: "succeeded",
+    startedAt: Date.now(),
+    ...overrides,
+  } as UnifiedExecutionRun
+}
+
+describe("toChartPointsFromExecutions", () => {
+  it("maps the three plotted statuses and drops the rest", () => {
+    const points = toChartPointsFromExecutions([
+      buildExec({ status: "completed" }),
+      buildExec({ status: "failed" }),
+      buildExec({ status: "running" }),
+      buildExec({ status: "pending" } as Partial<TaskExecution>),
+    ])
+    expect(points.map((p) => p.outcome)).toEqual(["completed", "failed", "running"])
+  })
+
+  it("narrows to one task when a taskId is given", () => {
+    const points = toChartPointsFromExecutions(
+      [buildExec({ taskId: "t1" }), buildExec({ taskId: "other" })],
+      "t1"
+    )
+    expect(points).toHaveLength(1)
+  })
+})
+
+describe("toChartPointsFromUnifiedRuns", () => {
+  it("maps every source's run outcomes onto the chart's three bands", () => {
+    const points = toChartPointsFromUnifiedRuns([
+      buildRun({ kind: "workflow", status: "succeeded" }),
+      buildRun({ kind: "backup", status: "failed" }),
+      buildRun({ kind: "connector", status: "running" }),
+    ])
+    expect(points.map((p) => p.outcome)).toEqual(["completed", "failed", "running"])
+  })
+
+  it("drops runs the three-band chart has no honest bucket for", () => {
+    const points = toChartPointsFromUnifiedRuns([
+      buildRun({ status: "cancelled" }),
+      buildRun({ status: "skipped" }),
+    ])
+    expect(points).toEqual([])
+  })
+})
+
 describe("TaskExecutionChart", () => {
-  it("renders an empty state when no executions match", () => {
-    render(<TaskExecutionChart executions={[]} />)
+  it("renders an empty state when there are no points", () => {
+    render(<TaskExecutionChart runs={[]} />)
     expect(screen.getByTestId("task-execution-chart")).toBeInTheDocument()
     expect(screen.getByText(/noData|No execution data/)).toBeInTheDocument()
   })
 
   it("renders the chart with stacked bars when data is present", () => {
-    const execs = [
-      buildExec({ status: "completed" }),
-      buildExec({ status: "failed" }),
-      buildExec({ status: "running" }),
-    ]
-    render(<TaskExecutionChart executions={execs} />)
+    render(
+      <TaskExecutionChart
+        runs={toChartPointsFromExecutions([
+          buildExec({ status: "completed" }),
+          buildExec({ status: "failed" }),
+          buildExec({ status: "running" }),
+        ])}
+      />
+    )
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument()
     expect(screen.getByTestId("bar-completed")).toBeInTheDocument()
     expect(screen.getByTestId("bar-failed")).toBeInTheDocument()
     expect(screen.getByTestId("bar-running")).toBeInTheDocument()
   })
 
-  it("filters executions by taskId when provided", () => {
-    const execs = [
-      buildExec({ taskId: "t1", status: "completed" }),
-      buildExec({ taskId: "other", status: "completed" }),
-    ]
-    render(<TaskExecutionChart executions={execs} taskId="t1" />)
+  it("plots cross-source runs, not just app executions", () => {
+    render(
+      <TaskExecutionChart
+        runs={toChartPointsFromUnifiedRuns([buildRun({ kind: "backup", status: "succeeded" })])}
+      />
+    )
     expect(screen.getByTestId("bar-chart")).toBeInTheDocument()
   })
 
-  it("renders the empty state when filtered taskId has no executions", () => {
-    const execs = [buildExec({ taskId: "other", status: "completed" })]
-    render(<TaskExecutionChart executions={execs} taskId="t1" />)
-    expect(screen.getByText(/noData|No execution data/)).toBeInTheDocument()
-  })
-
   it("forwards className", () => {
-    const { container } = render(<TaskExecutionChart executions={[]} className="extra-class" />)
+    const { container } = render(<TaskExecutionChart runs={[]} className="extra-class" />)
     expect(container.querySelector(".extra-class")).not.toBeNull()
   })
 
-  it("ignores executions on dates older than 7 days", () => {
-    // Old execution that won't fit any of the last-7-days buckets.
-    const old = buildExec({ startedAt: new Date("2000-01-01"), status: "completed" })
-    render(<TaskExecutionChart executions={[old]} />)
+  it("ignores runs on dates older than 7 days", () => {
+    render(
+      <TaskExecutionChart
+        runs={[{ startedAt: new Date("2000-01-01").getTime(), outcome: "completed" }]}
+      />
+    )
     // Result: empty bucket, so empty-state renders.
     expect(screen.getByText(/noData|No execution data/)).toBeInTheDocument()
   })

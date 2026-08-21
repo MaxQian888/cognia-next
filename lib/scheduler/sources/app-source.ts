@@ -9,7 +9,7 @@
  * uses today.
  */
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
 import type {
@@ -115,7 +115,10 @@ function createTaskSource(
 ): ScheduledItemSource<CreateScheduledTaskInput, UpdateScheduledTaskInput> {
   const scheduler = deps.scheduler ?? getTaskScheduler()
   const db = deps.db ?? schedulerDb
-  const observe = deps.observe ?? ((querier) => liveQuery(querier))
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const observe = deps.observe ?? ((querier) => Dexie.liveQuery(querier))
 
   return {
     kind,
@@ -202,6 +205,7 @@ export function toUnified(task: ScheduledTask): UnifiedScheduledItem {
     lastRunAt: task.lastRunAt ? task.lastRunAt.getTime() : undefined,
     successCount: task.successCount,
     failureCount: task.failureCount,
+    tags: task.tags,
     origin: {
       tableName: "tasks",
       deepLinkHref: `/scheduler?taskId=${encodeURIComponent(task.id)}`,

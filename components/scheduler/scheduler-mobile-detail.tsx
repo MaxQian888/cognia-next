@@ -31,7 +31,7 @@ import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 import { TaskStatsCards } from "./task-stats-cards"
-import { TaskExecutionChart } from "./task-execution-chart"
+import { TaskExecutionChart, toChartPointsFromExecutions } from "./task-execution-chart"
 import { TaskExecutionHistory } from "./task-execution-history"
 import { TaskConfiguration } from "./task-configuration"
 import { TaskNotificationDisplay } from "./task-notification-display"
@@ -169,7 +169,7 @@ export function SchedulerMobileDetailView({
         <div className="flex-1 min-h-0 overflow-auto p-4">
           <div className="space-y-5">
             <TaskStatsCards task={task} executions={executions ?? []} />
-            <TaskExecutionChart executions={executions ?? []} taskId={task.id} />
+            <TaskExecutionChart runs={toChartPointsFromExecutions(executions ?? [], task.id)} />
             <TaskExecutionHistory
               executions={executions ?? []}
               onSelectExecution={

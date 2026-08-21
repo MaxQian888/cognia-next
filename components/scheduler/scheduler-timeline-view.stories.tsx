@@ -2,12 +2,17 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { SchedulerTimelineView } from "./scheduler-timeline-view"
-import { makeScheduledTask, makeCronTrigger, FIXTURE_NOW } from "@/lib/storybook/fixtures/scheduler"
+import {
+  makeUnifiedItem,
+  makeUnifiedItemSet,
+  FIXTURE_NOW,
+} from "@/lib/storybook/fixtures/scheduler"
 
 // `SchedulerTimelineView` is pure: it projects the next `windowDays` of runs
-// from the supplied `tasks` via `computeUpcomingOccurrences`, groups them by
-// local day, and renders a day-headed agenda. `now` is pinned to `FIXTURE_NOW`
-// (a Monday) so the "Today" / "Tomorrow" headers and row order are stable.
+// from the supplied unified `items` via `computeUnifiedOccurrences`, groups
+// them by local day, and renders a day-headed agenda. `now` is pinned to
+// `FIXTURE_NOW` (a Monday) so the "Today" / "Tomorrow" headers and row order
+// are stable.
 const NOW = new Date(FIXTURE_NOW)
 
 const meta = {
@@ -16,7 +21,7 @@ const meta = {
   parameters: { layout: "padded" },
   args: {
     now: NOW,
-    onSelectTask: fn(),
+    onSelectItem: fn(),
   },
   decorators: [
     (Story) => (
@@ -30,35 +35,29 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// Several tasks across the default 14-day window → multiple day groups, each
-// with a run count and trigger-type badge per row.
+// Every source across the default 14-day window → multiple day groups, each
+// with a run count and a per-source accent on every row.
 export const Populated: Story = {
   args: {
-    tasks: [
-      makeScheduledTask({ name: "Weekday digest", status: "active" }),
-      makeScheduledTask({
-        name: "Hourly sync",
-        status: "active",
-        trigger: makeCronTrigger({ cronExpression: "0 * * * *" }),
-      }),
-      makeScheduledTask({
-        name: "Daily backup",
-        status: "active",
-        trigger: makeCronTrigger({ cronExpression: "0 2 * * *" }),
-      }),
-    ],
+    items: makeUnifiedItemSet(),
   },
 }
 
 // A short 3-day window narrows the agenda to the next few days.
 export const ShortWindow: Story = {
   args: {
-    tasks: [
-      makeScheduledTask({ name: "Weekday digest", status: "active" }),
-      makeScheduledTask({
+    items: [
+      makeUnifiedItem({
+        kind: "app",
+        name: "Weekday digest",
+        status: "active",
+        triggerSummary: { type: "cron", cron: "0 9 * * 1-5" },
+      }),
+      makeUnifiedItem({
+        kind: "backup",
         name: "Daily backup",
         status: "active",
-        trigger: makeCronTrigger({ cronExpression: "0 2 * * *" }),
+        triggerSummary: { type: "cron", cron: "0 2 * * *" },
       }),
     ],
     windowDays: 3,
@@ -68,6 +67,6 @@ export const ShortWindow: Story = {
 // No projected runs → the empty agenda state.
 export const Empty: Story = {
   args: {
-    tasks: [],
+    items: [],
   },
 }

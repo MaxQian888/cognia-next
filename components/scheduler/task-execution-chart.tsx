@@ -1,21 +1,78 @@
 "use client"
 
 /**
- * TaskExecutionChart - Enhanced 7-day stacked bar chart with gradient fills
- * Supports optional taskId prop to filter executions for a single task.
+ * TaskExecutionChart — 7-day stacked bar chart of run outcomes.
+ *
+ * The chart takes an already-normalized {@link ExecutionChartPoint} list
+ * rather than a `TaskExecution[]`, because it renders in two different
+ * universes: the task detail pane charts one app task's executions, while the
+ * scheduler overview charts every source's runs. Feeding it the app-only row
+ * type made the overview's "Execution History" quietly app-only too, next to
+ * headline numbers that counted all six sources.
+ *
+ * Call sites map with {@link toChartPointsFromExecutions} or
+ * {@link toChartPointsFromUnifiedRuns}.
  */
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
 import { BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TaskExecution } from "@/types/scheduler"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
+
+/** The only thing the chart needs to know about a run. */
+export interface ExecutionChartPoint {
+  /** Epoch ms the run started. */
+  startedAt: number
+  outcome: "completed" | "failed" | "running"
+}
+
+/**
+ * Map app `TaskExecution` rows, optionally narrowed to one task. Statuses the
+ * chart doesn't plot (`pending`, `cancelled`, …) are dropped rather than
+ * silently counted as something else.
+ */
+export function toChartPointsFromExecutions(
+  executions: readonly TaskExecution[],
+  taskId?: string
+): ExecutionChartPoint[] {
+  const points: ExecutionChartPoint[] = []
+  for (const exec of executions) {
+    if (taskId && exec.taskId !== taskId) continue
+    if (exec.status !== "completed" && exec.status !== "failed" && exec.status !== "running") {
+      continue
+    }
+    points.push({ startedAt: exec.startedAt.getTime(), outcome: exec.status })
+  }
+  return points
+}
+
+/** Map cross-source `UnifiedExecutionRun` records. */
+export function toChartPointsFromUnifiedRuns(
+  runs: readonly UnifiedExecutionRun[]
+): ExecutionChartPoint[] {
+  const points: ExecutionChartPoint[] = []
+  for (const run of runs) {
+    const outcome =
+      run.status === "succeeded"
+        ? "completed"
+        : run.status === "failed"
+          ? "failed"
+          : run.status === "running"
+            ? "running"
+            : undefined
+    // `cancelled` / `skipped` runs are neither a success nor a failure; the
+    // three-band chart has no honest bucket for them.
+    if (!outcome) continue
+    points.push({ startedAt: run.startedAt, outcome })
+  }
+  return points
+}
 
 interface TaskExecutionChartProps {
-  executions: TaskExecution[]
-  /** Optional task ID to filter executions for a single task */
-  taskId?: string
+  runs: ExecutionChartPoint[]
   className?: string
 }
 
@@ -34,32 +91,26 @@ function getDateKey(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-export function TaskExecutionChart({ executions, taskId, className }: TaskExecutionChartProps) {
+function TaskExecutionChartImpl({ runs, className }: TaskExecutionChartProps) {
   const t = useTranslations("scheduler")
 
   const chartData = useMemo(() => {
-    const filtered = taskId ? executions.filter((e) => e.taskId === taskId) : executions
-
     const days = getLast7Days()
     const buckets: Record<string, { completed: number; failed: number; running: number }> = {}
     for (const day of days) {
       buckets[day] = { completed: 0, failed: 0, running: 0 }
     }
 
-    for (const exec of filtered) {
-      const key = getDateKey(exec.startedAt)
-      if (buckets[key]) {
-        if (exec.status === "completed") buckets[key].completed++
-        else if (exec.status === "failed") buckets[key].failed++
-        else if (exec.status === "running") buckets[key].running++
-      }
+    for (const point of runs) {
+      const key = getDateKey(new Date(point.startedAt))
+      if (buckets[key]) buckets[key][point.outcome]++
     }
 
     return days.map((day) => ({
       name: day,
       ...buckets[day],
     }))
-  }, [executions, taskId])
+  }, [runs])
 
   const hasData = chartData.some((d) => d.completed + d.failed + d.running > 0)
 
@@ -171,3 +222,12 @@ export function TaskExecutionChart({ executions, taskId, className }: TaskExecut
     </div>
   )
 }
+
+/**
+ * Memoized: the scheduler overview re-renders once a second (the shared clock
+ * ticker drives its countdown labels), and recharts is by far the most
+ * expensive thing on that page. `runs` is memoized by every caller, so identical
+ * props skip the whole chart subtree.
+ */
+export const TaskExecutionChart = memo(TaskExecutionChartImpl)
+TaskExecutionChart.displayName = "TaskExecutionChart"

@@ -3,12 +3,15 @@
 /**
  * Shared upcoming-run list rendered by BOTH the calendar day panel and the
  * timeline agenda. Previously each view carried its own near-identical row
- * markup, and each one repeated a task's name once per projected run — a
+ * markup, and each one repeated an item's name once per projected run — a
  * 5-minute interval produced a wall of identical lines.
  *
- * Here the runs are collapsed per task via {@link groupOccurrencesByTask}: one
- * row per task, carrying its fire times as a compact chip strip (capped, with
- * a "+n" overflow). Clicking anywhere on the row routes to `onSelectTask`.
+ * Here the runs are collapsed per item via {@link groupOccurrencesByTask}: one
+ * row per item, carrying its fire times as a compact chip strip (capped, with
+ * a "+n" overflow). Clicking anywhere on the row routes to `onSelectItem`.
+ *
+ * Each row carries its source's accent dot (matching `kindConfig`), so a month
+ * full of projected runs still reads as "which subsystem scheduled this".
  */
 
 import { useMemo } from "react"
@@ -19,13 +22,15 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { groupOccurrencesByTask, type Occurrence } from "@/lib/scheduler/upcoming-occurrences"
 import { listContainerVariants, listItemVariants, staticIf } from "./scheduler-motion"
+import type { ScheduledItemKind } from "@/types/scheduler/unified"
 
 /** How many fire times are printed before collapsing into "+n". */
 export const MAX_VISIBLE_TIMES = 4
 
 export interface OccurrenceListProps {
   occurrences: Occurrence[]
-  onSelectTask: (taskId: string) => void
+  /** Receives the clicked row's routing id (a `unifiedId`). */
+  onSelectItem: (id: string) => void
   /**
    * Prefix for each row's `data-testid` — `calendar-occ` in the calendar day
    * panel, `timeline-occ` in the agenda, so either surface stays addressable.
@@ -36,7 +41,7 @@ export interface OccurrenceListProps {
 
 export function OccurrenceList({
   occurrences,
-  onSelectTask,
+  onSelectItem,
   testIdPrefix,
   className,
 }: OccurrenceListProps) {
@@ -67,7 +72,7 @@ export function OccurrenceList({
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => onSelectTask(group.taskId)}
+              onClick={() => onSelectItem(group.taskId)}
               data-testid={`${testIdPrefix}-${group.taskId}`}
               aria-label={t("occurrenceList.rowAria", {
                 name: group.taskName,
@@ -76,7 +81,8 @@ export function OccurrenceList({
               className="h-auto w-full items-start justify-start gap-2.5 px-2 py-1.5 text-left whitespace-normal"
             >
               <span
-                className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"
+                data-testid={`${testIdPrefix}-${group.taskId}-kind`}
+                className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", kindAccent(group.kind))}
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1">
@@ -105,4 +111,26 @@ export function OccurrenceList({
       })}
     </motion.ul>
   )
+}
+
+/**
+ * The kind's accent as a background colour. `kindConfig` carries `text-*`
+ * classes (the icon tint); the dot needs the matching `bg-*`, and Tailwind
+ * cannot see a runtime-built class name, so the mapping is spelled out.
+ */
+function kindAccent(kind: ScheduledItemKind): string {
+  switch (kind) {
+    case "app":
+      return "bg-indigo-500"
+    case "workflow":
+      return "bg-violet-500"
+    case "backup":
+      return "bg-orange-500"
+    case "plugin":
+      return "bg-emerald-500"
+    case "system":
+      return "bg-slate-500"
+    case "connector":
+      return "bg-cyan-500"
+  }
 }

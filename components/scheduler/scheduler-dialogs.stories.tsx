@@ -32,10 +32,6 @@ const meta = {
     onEditSystemTask: fn(),
     selectedSystemTask: null,
 
-    deleteTaskId: null,
-    onDeleteTaskIdChange: fn(),
-    onDeleteConfirm: fn(),
-
     systemDeleteTaskId: null,
     onSystemDeleteTaskIdChange: fn(),
     onSystemDeleteConfirm: fn(),
@@ -85,13 +81,6 @@ export const EditSystemTask: Story = {
   args: {
     showSystemEditSheet: true,
     selectedSystemTask: makeSystemTask({ name: "Nightly disk cleanup" }),
-  },
-}
-
-/** Delete-confirmation alert for an app task. */
-export const DeleteConfirmation: Story = {
-  args: {
-    deleteTaskId: "task-to-delete",
   },
 }
 

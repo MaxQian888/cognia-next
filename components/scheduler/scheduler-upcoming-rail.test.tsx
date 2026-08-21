@@ -1,62 +1,32 @@
 /** @jest-environment jsdom */
 
 import { render, screen, fireEvent } from "@testing-library/react"
-import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
+import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, _vars?: Record<string, unknown>) => key,
 }))
 
-let mockRuns: UnifiedExecutionRun[] = []
-jest.mock("@/hooks/scheduler/use-unified-recent-runs", () => ({
-  useUnifiedRecentRuns: () => ({ runs: mockRuns, isLoading: false }),
-}))
-
 import { SchedulerUpcomingRail } from "./scheduler-upcoming-rail"
 
-function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
-  return {
-    id: "task-1",
-    name: "Daily summary",
-    type: "chat",
-    trigger: { type: "cron", cronExpression: "0 9 * * *" },
-    config: {
-      timeoutMs: 60_000,
-      maxRetries: 0,
-      retryDelayMs: 0,
-      allowConcurrent: false,
-      runMissedOnStartup: false,
-      maxMissedRuns: 0,
-    },
-    notification: {
-      onStart: false,
-      onComplete: false,
-      onError: false,
-      channels: [],
-    },
-    status: "active",
-    runCount: 0,
-    successCount: 0,
-    failureCount: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    nextRunAt: new Date(Date.now() + 600_000),
-    ...overrides,
-  } as ScheduledTask
-}
+const NOW = 1_800_000_000_000
 
-function makeExecution(overrides: Partial<TaskExecution> = {}): TaskExecution {
+function makeItem(overrides: Partial<UnifiedScheduledItem> = {}): UnifiedScheduledItem {
+  const kind: ScheduledItemKind = overrides.kind ?? "app"
+  const sourceId = overrides.sourceId ?? "task-1"
   return {
-    id: "exec-1",
-    taskId: "task-1",
-    taskName: "Daily summary",
-    status: "completed",
-    startedAt: new Date(Date.now() - 120_000),
-    completedAt: new Date(Date.now() - 60_000),
-    duration: 60_000,
+    unifiedId: `${kind}:${sourceId}`,
+    kind,
+    sourceId,
+    name: "Daily summary",
+    status: "active",
+    triggerSummary: { type: "cron", cron: "0 9 * * *" },
+    nextRunAt: NOW + 600_000,
+    origin: { deepLinkHref: "/scheduler" },
+    capabilities: { runNow: true, pause: true, edit: true, delete: true },
     ...overrides,
-  } as TaskExecution
+  } as UnifiedScheduledItem
 }
 
 function makeRun(overrides: Partial<UnifiedExecutionRun> = {}): UnifiedExecutionRun {
@@ -66,96 +36,113 @@ function makeRun(overrides: Partial<UnifiedExecutionRun> = {}): UnifiedExecution
     itemUnifiedId: "app:task-1",
     itemName: "Cross-kind run",
     status: "succeeded",
-    startedAt: Date.now() - 60_000,
+    startedAt: NOW - 60_000,
     origin: { tableName: "schedulerDb.executions", nativeId: "run-1" },
     ...overrides,
-  }
+  } as UnifiedExecutionRun
 }
 
 describe("SchedulerUpcomingRail", () => {
-  beforeEach(() => {
-    mockRuns = []
-  })
-
-  it("renders the upcoming and recent sections with empty state copy", () => {
+  it("renders both sections with empty-state copy", () => {
     render(
-      <SchedulerUpcomingRail upcomingTasks={[]} recentExecutions={[]} onSelectTask={jest.fn()} />
+      <SchedulerUpcomingRail
+        items={[]}
+        recentRuns={[]}
+        onSelectItem={jest.fn()}
+        onSelectRun={jest.fn()}
+        now={NOW}
+      />
     )
     expect(screen.getByTestId("scheduler-upcoming-rail")).toBeInTheDocument()
     expect(screen.getByTestId("upcoming-rail-no-upcoming")).toBeInTheDocument()
     expect(screen.getByTestId("upcoming-rail-no-recent")).toBeInTheDocument()
   })
 
-  it("renders up to 5 upcoming tasks and fires onSelectTask on click", () => {
-    const tasks = Array.from({ length: 7 }, (_, i) =>
-      makeTask({ id: `task-${i}`, name: `Task ${i}` })
+  it("lists at most 5 upcoming items and fires onSelectItem with the unifiedId", () => {
+    const items = Array.from({ length: 7 }, (_, i) =>
+      makeItem({ sourceId: `task-${i}`, name: `Task ${i}`, nextRunAt: NOW + (i + 1) * 60_000 })
     )
-    const onSelectTask = jest.fn()
+    const onSelectItem = jest.fn()
     render(
       <SchedulerUpcomingRail
-        upcomingTasks={tasks}
-        recentExecutions={[]}
-        onSelectTask={onSelectTask}
+        items={items}
+        recentRuns={[]}
+        onSelectItem={onSelectItem}
+        onSelectRun={jest.fn()}
+        now={NOW}
       />
     )
     expect(screen.getAllByRole("button")).toHaveLength(5)
-    fireEvent.click(screen.getByTestId("upcoming-rail-upcoming-task-2"))
-    expect(onSelectTask).toHaveBeenCalledWith("task-2")
+    fireEvent.click(screen.getByTestId("upcoming-rail-upcoming-app:task-2"))
+    expect(onSelectItem).toHaveBeenCalledWith("app:task-2")
   })
 
-  it("uses yellow status dot for paused upcoming tasks", () => {
+  it("draws upcoming rows from every source, soonest first", () => {
+    const items = [
+      makeItem({ kind: "backup", sourceId: "bk", name: "Backup", nextRunAt: NOW + 20_000 }),
+      makeItem({ kind: "workflow", sourceId: "wf", name: "ETL", nextRunAt: NOW + 10_000 }),
+    ]
     render(
       <SchedulerUpcomingRail
-        upcomingTasks={[makeTask({ id: "p1", status: "paused", name: "Paused" })]}
-        recentExecutions={[]}
-        onSelectTask={jest.fn()}
+        items={items}
+        recentRuns={[]}
+        onSelectItem={jest.fn()}
+        onSelectRun={jest.fn()}
+        now={NOW}
       />
     )
-    const button = screen.getByTestId("upcoming-rail-upcoming-p1")
-    expect(button.querySelector(".bg-yellow-500")).toBeInTheDocument()
+    const rows = screen.getAllByRole("button")
+    expect(rows[0]).toHaveAttribute("data-testid", "upcoming-rail-upcoming-workflow:wf")
+    expect(rows[1]).toHaveAttribute("data-testid", "upcoming-rail-upcoming-backup:bk")
   })
 
-  it("falls back to app-only recent executions when onSelectRun is not provided", () => {
-    const execs = [makeExecution({ id: "e1", taskName: "Recent A" })]
+  it("omits paused items — a paused item has no next run", () => {
     render(
-      <SchedulerUpcomingRail upcomingTasks={[]} recentExecutions={execs} onSelectTask={jest.fn()} />
+      <SchedulerUpcomingRail
+        items={[makeItem({ sourceId: "p1", status: "paused", name: "Paused" })]}
+        recentRuns={[]}
+        onSelectItem={jest.fn()}
+        onSelectRun={jest.fn()}
+        now={NOW}
+      />
     )
-    expect(screen.getByTestId("upcoming-rail-recent-e1")).toBeInTheDocument()
-    expect(screen.getByText("Recent A")).toBeInTheDocument()
+    expect(screen.getByTestId("upcoming-rail-no-upcoming")).toBeInTheDocument()
   })
 
-  it("uses unified runs when onSelectRun is provided and triggers it on click", () => {
-    mockRuns = [makeRun({ unifiedId: "app:run-x", itemName: "Unified run" })]
+  it("lists the recent runs it is given and opens one on click", () => {
+    const runs = [makeRun({ unifiedId: "app:run-x", itemName: "Unified run" })]
     const onSelectRun = jest.fn()
     render(
       <SchedulerUpcomingRail
-        upcomingTasks={[]}
-        recentExecutions={[]}
-        onSelectTask={jest.fn()}
+        items={[]}
+        recentRuns={runs}
+        onSelectItem={jest.fn()}
         onSelectRun={onSelectRun}
+        now={NOW}
       />
     )
     const row = screen.getByTestId("upcoming-rail-recent-app:run-x")
-    expect(row).toBeInTheDocument()
+    expect(row).toHaveTextContent("Unified run")
     fireEvent.click(row)
-    expect(onSelectRun).toHaveBeenCalledWith(mockRuns[0])
+    expect(onSelectRun).toHaveBeenCalledWith(runs[0])
   })
 
-  it("renders the no-recent empty state when onSelectRun is set but hook returns no runs", () => {
-    mockRuns = []
+  it("caps the recent list at 5 rows", () => {
+    const runs = Array.from({ length: 8 }, (_, i) => makeRun({ unifiedId: `app:run-${i}` }))
     render(
       <SchedulerUpcomingRail
-        upcomingTasks={[]}
-        recentExecutions={[]}
-        onSelectTask={jest.fn()}
+        items={[]}
+        recentRuns={runs}
+        onSelectItem={jest.fn()}
         onSelectRun={jest.fn()}
+        now={NOW}
       />
     )
-    expect(screen.getByTestId("upcoming-rail-no-recent")).toBeInTheDocument()
+    expect(screen.getAllByRole("button")).toHaveLength(5)
   })
 
   it("paints status dots by run status", () => {
-    mockRuns = [
+    const runs = [
       makeRun({ unifiedId: "k:1", status: "succeeded" }),
       makeRun({ unifiedId: "k:2", status: "failed" }),
       makeRun({ unifiedId: "k:3", status: "running" }),
@@ -163,10 +150,11 @@ describe("SchedulerUpcomingRail", () => {
     ]
     render(
       <SchedulerUpcomingRail
-        upcomingTasks={[]}
-        recentExecutions={[]}
-        onSelectTask={jest.fn()}
+        items={[]}
+        recentRuns={runs}
+        onSelectItem={jest.fn()}
         onSelectRun={jest.fn()}
+        now={NOW}
       />
     )
     expect(

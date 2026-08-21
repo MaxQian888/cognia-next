@@ -2,20 +2,28 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { SchedulerUpcomingRail } from "./scheduler-upcoming-rail"
-import { makeScheduledTask, makeTaskExecution } from "@/lib/storybook/fixtures/scheduler"
+import {
+  makeUnifiedItem,
+  makeUnifiedRun,
+  makeUnifiedRunSet,
+  FIXTURE_NOW,
+} from "@/lib/storybook/fixtures/scheduler"
 
 // `SchedulerUpcomingRail` is a props-only xl-only side rail listing the next
-// upcoming runs and the most recent executions. Without an `onSelectRun`
-// handler it renders purely from the `upcomingTasks` / `recentExecutions`
-// props (the cross-kind unified hook path is opt-in and intentionally not
-// exercised here). The rail is `xl:flex` / hidden below, so stories force it
-// visible via a wide flex parent.
+// upcoming runs and the most recent runs, both cross-source. `now` is pinned to
+// `FIXTURE_NOW` so the relative timestamps stay stable. The rail is `xl:flex` /
+// hidden below, so stories force it visible via a wide flex parent.
+const NOW = FIXTURE_NOW
+const MINUTE = 60_000
+
 const meta = {
   title: "Scheduler/SchedulerUpcomingRail",
   component: SchedulerUpcomingRail,
   parameters: { layout: "fullscreen" },
   args: {
-    onSelectTask: fn(),
+    now: NOW,
+    onSelectItem: fn(),
+    onSelectRun: fn(),
   },
   decorators: [
     (Story) => (
@@ -33,53 +41,49 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 const upcoming = [
-  makeScheduledTask({ name: "Morning digest", status: "active" }),
-  makeScheduledTask({ name: "Hourly inbox sync", status: "active" }),
-  makeScheduledTask({ name: "Weekly report", status: "paused" }),
+  makeUnifiedItem({ kind: "app", name: "Morning digest", nextRunAt: NOW + 5 * MINUTE }),
+  makeUnifiedItem({ kind: "workflow", name: "Nightly ETL", nextRunAt: NOW + 30 * MINUTE }),
+  makeUnifiedItem({ kind: "backup", name: "Weekly full backup", nextRunAt: NOW + 90 * MINUTE }),
 ]
 
-const recent = [
-  makeTaskExecution({ taskName: "Morning digest", status: "completed" }),
-  makeTaskExecution({ taskName: "Hourly inbox sync", status: "failed" }),
-  makeTaskExecution({ taskName: "Nightly backup", status: "running" }),
-]
+const recent = makeUnifiedRunSet()
 
 export const Populated: Story = {
   args: {
-    upcomingTasks: upcoming,
-    recentExecutions: recent,
+    items: upcoming,
+    recentRuns: recent,
   },
 }
 
 export const Empty: Story = {
   args: {
-    upcomingTasks: [],
-    recentExecutions: [],
+    items: [],
+    recentRuns: [],
   },
 }
 
 export const OnlyUpcoming: Story = {
   args: {
-    upcomingTasks: upcoming,
-    recentExecutions: [],
+    items: upcoming,
+    recentRuns: [],
   },
 }
 
 export const OnlyRecent: Story = {
   args: {
-    upcomingTasks: [],
-    recentExecutions: recent,
+    items: [],
+    recentRuns: recent,
   },
 }
 
 // More than the 5-row cap on each section — the rail slices to the cap.
 export const Overflowing: Story = {
   args: {
-    upcomingTasks: Array.from({ length: 8 }, (_, i) =>
-      makeScheduledTask({ name: `Upcoming task ${i + 1}`, status: "active" })
+    items: Array.from({ length: 8 }, (_, i) =>
+      makeUnifiedItem({ name: `Upcoming item ${i + 1}`, nextRunAt: NOW + (i + 1) * MINUTE })
     ),
-    recentExecutions: Array.from({ length: 8 }, (_, i) =>
-      makeTaskExecution({ taskName: `Past run ${i + 1}`, status: "completed" })
+    recentRuns: Array.from({ length: 8 }, (_, i) =>
+      makeUnifiedRun({ itemName: `Past run ${i + 1}`, status: "succeeded" })
     ),
   },
 }

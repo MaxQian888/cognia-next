@@ -18,7 +18,7 @@
  * automatically.
  */
 
-import { liveQuery } from "dexie"
+import Dexie from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
 import { executeDeployedWorkflow } from "@/lib/workflow/runtime/execution-authority"
@@ -95,7 +95,10 @@ export function createWorkflowSource(
         triggerKind: "trigger.manual",
         payload: { triggerId },
       }))
-  const observe = deps.observe ?? ((querier) => liveQuery(querier))
+  // `Dexie.liveQuery`, not a named `liveQuery` import: dexie's CJS build makes
+  // `liveQuery` non-enumerable, so SWC's wildcard interop drops it the moment a
+  // module also imports the `Dexie` default. See `lib/db/outbound-jobs.ts`.
+  const observe = deps.observe ?? ((querier) => Dexie.liveQuery(querier))
   const listRuns =
     deps.listRuns ??
     ((limit: number) => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray())

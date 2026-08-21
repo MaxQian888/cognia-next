@@ -6,22 +6,32 @@
  * The old overview stacked five `StatCard`s plus a six-chip kind strip, so the
  * page opened with eleven boxes competing for attention while saying very
  * little. This is one band instead: two readings that actually matter
- * (how many tasks exist and how they split; how the runs have been going),
- * each with a proportional bar that carries the comparison the numbers alone
- * can't, and a hairline-separated kind rail underneath.
+ * (how many things are scheduled and how they split; how the runs have been
+ * going), each with a proportional bar that carries the comparison the numbers
+ * alone can't, and a hairline-separated kind rail underneath.
+ *
+ * Both readings come from {@link UnifiedStatistics}, i.e. the same merged list
+ * the sidebar renders. They used to come from the app-only scheduler store, so
+ * the headline announced "2 tasks" directly beside a list of 4 rows.
  */
 
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
-import type { TaskStatistics } from "@/types/scheduler"
+import type { UnifiedStatistics } from "@/lib/scheduler/unified-filter"
 import { SCHEDULED_ITEM_KINDS, type ScheduledItemKind } from "@/types/scheduler/unified"
 
 export interface SchedulerOverviewSummaryProps {
-  statistics: TaskStatistics
-  countsByKind?: Record<ScheduledItemKind, number>
-  activeCountsByKind?: Record<ScheduledItemKind, number>
+  statistics: UnifiedStatistics
+  /**
+   * When supplied, each kind in the rail becomes a button that pins that kind
+   * in the sidebar filter — the rail is the natural place to ask "show me only
+   * the workflow triggers", and it used to be inert.
+   */
+  onSelectKind?: (kind: ScheduledItemKind) => void
+  /** Kinds currently pinned in the sidebar, so the rail can mark them. */
+  selectedKinds?: ReadonlySet<ScheduledItemKind>
   className?: string
 }
 
@@ -49,24 +59,29 @@ function share(part: number, total: number): number {
 
 export function SchedulerOverviewSummary({
   statistics,
-  countsByKind,
-  activeCountsByKind,
+  onSelectKind,
+  selectedKinds,
   className,
 }: SchedulerOverviewSummaryProps) {
   const t = useTranslations("scheduler")
 
   const {
-    totalTasks,
-    activeTasks,
-    pausedTasks,
-    totalExecutions,
-    successfulExecutions,
-    failedExecutions,
+    totalItems,
+    activeItems,
+    pausedItems,
+    otherItems,
+    totalRuns,
+    successfulRuns,
+    failedRuns,
+    successRate,
+    countsByKind,
+    activeCountsByKind,
   } = statistics
-  const idleTasks = Math.max(0, totalTasks - activeTasks - pausedTasks)
-  const successRate =
-    totalExecutions > 0 ? Math.round((successfulExecutions / totalExecutions) * 100) : 0
-  const tone = successRateTone(successRate)
+
+  // No run has ever been recorded: a red 0% would read as "everything is
+  // failing" on a fresh install. Say nothing instead of saying something false.
+  const hasRuns = successRate !== null
+  const tone = hasRuns ? successRateTone(successRate) : null
 
   return (
     <section
@@ -80,7 +95,12 @@ export function SchedulerOverviewSummary({
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
             {t("totalTasks")}
           </p>
-          <p className="mt-0.5 text-3xl font-semibold tabular-nums leading-none">{totalTasks}</p>
+          <p
+            className="mt-0.5 text-3xl font-semibold tabular-nums leading-none"
+            data-testid="summary-total-items"
+          >
+            {totalItems}
+          </p>
 
           <div
             className="mt-3 flex h-1.5 w-full overflow-hidden rounded-full bg-muted"
@@ -89,23 +109,23 @@ export function SchedulerOverviewSummary({
             <span
               data-testid="summary-bar-active"
               className="bg-green-500"
-              style={{ width: `${share(activeTasks, totalTasks)}%` }}
+              style={{ width: `${share(activeItems, totalItems)}%` }}
             />
             <span
               data-testid="summary-bar-paused"
               className="bg-yellow-500"
-              style={{ width: `${share(pausedTasks, totalTasks)}%` }}
+              style={{ width: `${share(pausedItems, totalItems)}%` }}
             />
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-            <Legend dot="bg-green-500" label={t("activeTasks")} value={activeTasks} />
-            <Legend dot="bg-yellow-500" label={t("pausedTasks")} value={pausedTasks} />
-            {idleTasks > 0 && (
+            <Legend dot="bg-green-500" label={t("activeTasks")} value={activeItems} />
+            <Legend dot="bg-yellow-500" label={t("pausedTasks")} value={pausedItems} />
+            {otherItems > 0 && (
               <Legend
                 dot="bg-muted-foreground/40"
                 label={t("statuses.disabled")}
-                value={idleTasks}
+                value={otherItems}
               />
             )}
           </div>
@@ -117,55 +137,88 @@ export function SchedulerOverviewSummary({
             {t("successRate")}
           </p>
           <p
-            className={cn("mt-0.5 text-3xl font-semibold tabular-nums leading-none", tone.text)}
+            className={cn(
+              "mt-0.5 text-3xl font-semibold tabular-nums leading-none",
+              tone ? tone.text : "text-muted-foreground/60"
+            )}
             data-testid="summary-success-rate"
           >
-            {successRate}%
+            {hasRuns ? `${successRate}%` : "—"}
           </p>
 
           <Progress
-            value={successRate}
+            value={successRate ?? 0}
             aria-label={t("successRate")}
-            className={cn("mt-3 h-1.5 bg-muted", progressIndicatorTone[tone.bar])}
+            className={cn(
+              "mt-3 h-1.5 bg-muted",
+              tone ? progressIndicatorTone[tone.bar] : undefined
+            )}
           />
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-            <Legend dot="bg-blue-500" label={t("totalExecutions")} value={totalExecutions} />
-            <Legend dot="bg-green-500" label={t("successful")} value={successfulExecutions} />
-            <Legend dot="bg-red-500" label={t("failed")} value={failedExecutions} />
+            {hasRuns ? (
+              <>
+                <Legend dot="bg-blue-500" label={t("totalExecutions")} value={totalRuns} />
+                <Legend dot="bg-green-500" label={t("successful")} value={successfulRuns} />
+                <Legend dot="bg-red-500" label={t("failed")} value={failedRuns} />
+              </>
+            ) : (
+              <span className="text-muted-foreground" data-testid="summary-no-runs">
+                {t("dashboard.noRunsYet")}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {countsByKind && (
-        <div
-          data-testid="kind-summary-strip"
-          className="flex flex-wrap items-baseline gap-y-1 border-t border-border/50 pt-3 text-xs"
-        >
-          {SCHEDULED_ITEM_KINDS.map((kind) => {
-            const total = countsByKind[kind] ?? 0
-            const active = activeCountsByKind?.[kind] ?? 0
+      <div
+        data-testid="kind-summary-strip"
+        className="flex flex-wrap items-baseline gap-y-1 border-t border-border/50 pt-3 text-xs"
+      >
+        {SCHEDULED_ITEM_KINDS.map((kind) => {
+          const total = countsByKind[kind] ?? 0
+          const active = activeCountsByKind[kind] ?? 0
+          const isPinned = selectedKinds?.has(kind) === true
+          const body = (
+            <>
+              <span className={cn(total > 0 && "font-medium")}>{t(`kindFilter.${kind}`)}</span>
+              <span className="tabular-nums">{total}</span>
+              {active > 0 && (
+                <span className="text-[10px] tabular-nums text-green-500">
+                  {t("active")} {active}
+                </span>
+              )}
+            </>
+          )
+          const shell = cn(
+            "flex items-baseline gap-1.5 border-l border-border/50 px-3 first:border-l-0 first:pl-0",
+            total === 0 && "text-muted-foreground/50",
+            isPinned && "text-primary"
+          )
+
+          if (!onSelectKind) {
             return (
-              <span
-                key={kind}
-                data-testid={`kind-summary-${kind}`}
-                className={cn(
-                  "flex items-baseline gap-1.5 border-l border-border/50 px-3 first:border-l-0 first:pl-0",
-                  total === 0 && "text-muted-foreground/50"
-                )}
-              >
-                <span className={cn(total > 0 && "font-medium")}>{t(`kindFilter.${kind}`)}</span>
-                <span className="tabular-nums">{total}</span>
-                {active > 0 && (
-                  <span className="text-[10px] tabular-nums text-green-500">
-                    {t("active")} {active}
-                  </span>
-                )}
+              <span key={kind} data-testid={`kind-summary-${kind}`} className={shell}>
+                {body}
               </span>
             )
-          })}
-        </div>
-      )}
+          }
+
+          return (
+            <button
+              key={kind}
+              type="button"
+              data-testid={`kind-summary-${kind}`}
+              data-pinned={isPinned || undefined}
+              aria-pressed={isPinned}
+              onClick={() => onSelectKind(kind)}
+              className={cn(shell, "rounded-sm hover:text-foreground")}
+            >
+              {body}
+            </button>
+          )
+        })}
+      </div>
     </section>
   )
 }

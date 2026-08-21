@@ -13,13 +13,20 @@ jest.mock("next-intl", () => ({
 import { OccurrenceList, MAX_VISIBLE_TIMES } from "./occurrence-list"
 import type { Occurrence } from "@/lib/scheduler/upcoming-occurrences"
 
-function occ(taskId: string, taskName: string, hour: number, minute = 0): Occurrence {
+function occ(
+  taskId: string,
+  taskName: string,
+  hour: number,
+  minute = 0,
+  kind: Occurrence["kind"] = "app"
+): Occurrence {
   return {
     taskId,
     taskName,
     taskType: "chat",
     triggerType: "cron",
     status: "active",
+    kind,
     date: new Date(2026, 0, 5, hour, minute, 0, 0),
   }
 }
@@ -33,7 +40,7 @@ describe("OccurrenceList", () => {
           occ("t1", "Daily Brief", 12),
           occ("t2", "Sync", 10),
         ]}
-        onSelectTask={jest.fn()}
+        onSelectItem={jest.fn()}
         testIdPrefix="timeline-occ"
       />
     )
@@ -47,7 +54,7 @@ describe("OccurrenceList", () => {
     render(
       <OccurrenceList
         occurrences={[occ("t1", "Daily Brief", 9), occ("t1", "Daily Brief", 12)]}
-        onSelectTask={jest.fn()}
+        onSelectItem={jest.fn()}
         testIdPrefix="timeline-occ"
       />
     )
@@ -61,7 +68,7 @@ describe("OccurrenceList", () => {
       occ("t1", "Every 5m", 9, i * 5)
     )
     render(
-      <OccurrenceList occurrences={many} onSelectTask={jest.fn()} testIdPrefix="calendar-occ" />
+      <OccurrenceList occurrences={many} onSelectItem={jest.fn()} testIdPrefix="calendar-occ" />
     )
     const overflow = screen.getByTestId("calendar-occ-t1-overflow")
     expect(overflow.textContent).toContain("occurrenceList.moreTimes")
@@ -72,7 +79,7 @@ describe("OccurrenceList", () => {
     render(
       <OccurrenceList
         occurrences={[occ("t1", "Daily Brief", 9), occ("t1", "Daily Brief", 9)]}
-        onSelectTask={jest.fn()}
+        onSelectItem={jest.fn()}
         testIdPrefix="timeline-occ"
       />
     )
@@ -81,24 +88,24 @@ describe("OccurrenceList", () => {
     expect(screen.queryByTestId("timeline-occ-t1-overflow")).toBeNull()
   })
 
-  it("dispatches onSelectTask when a row is clicked", () => {
-    const onSelectTask = jest.fn()
+  it("dispatches onSelectItem with the row's routing id", () => {
+    const onSelectItem = jest.fn()
     render(
       <OccurrenceList
         occurrences={[occ("t1", "Daily Brief", 9)]}
-        onSelectTask={onSelectTask}
+        onSelectItem={onSelectItem}
         testIdPrefix="timeline-occ"
       />
     )
     fireEvent.click(screen.getByTestId("timeline-occ-t1"))
-    expect(onSelectTask).toHaveBeenCalledWith("t1")
+    expect(onSelectItem).toHaveBeenCalledWith("t1")
   })
 
   it("labels each row with its name and run count", () => {
     render(
       <OccurrenceList
         occurrences={[occ("t1", "Daily Brief", 9), occ("t1", "Daily Brief", 12)]}
-        onSelectTask={jest.fn()}
+        onSelectItem={jest.fn()}
         testIdPrefix="timeline-occ"
       />
     )
@@ -112,7 +119,7 @@ describe("OccurrenceList", () => {
     render(
       <OccurrenceList
         occurrences={[occ("t1", "Daily Brief", 9), occ("t1", "Daily Brief", 12)]}
-        onSelectTask={jest.fn()}
+        onSelectItem={jest.fn()}
         testIdPrefix="timeline-occ"
       />
     )
@@ -120,7 +127,26 @@ describe("OccurrenceList", () => {
   })
 
   it("renders nothing but the list shell for an empty input", () => {
-    render(<OccurrenceList occurrences={[]} onSelectTask={jest.fn()} testIdPrefix="calendar-occ" />)
+    render(<OccurrenceList occurrences={[]} onSelectItem={jest.fn()} testIdPrefix="calendar-occ" />)
     expect(screen.getByTestId("calendar-occ-list").children).toHaveLength(0)
+  })
+})
+
+describe("OccurrenceList kind accents", () => {
+  it("tints each row's dot by the source that scheduled the run", () => {
+    render(
+      <OccurrenceList
+        occurrences={[
+          occ("app:1", "App task", 9, 0, "app"),
+          occ("workflow:2", "Workflow trigger", 10, 0, "workflow"),
+          occ("backup:3", "Backup", 11, 0, "backup"),
+        ]}
+        onSelectItem={jest.fn()}
+        testIdPrefix="timeline-occ"
+      />
+    )
+    expect(screen.getByTestId("timeline-occ-app:1-kind").className).toMatch(/bg-indigo-500/)
+    expect(screen.getByTestId("timeline-occ-workflow:2-kind").className).toMatch(/bg-violet-500/)
+    expect(screen.getByTestId("timeline-occ-backup:3-kind").className).toMatch(/bg-orange-500/)
   })
 })

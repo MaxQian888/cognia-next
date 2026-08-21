@@ -15,15 +15,26 @@
  */
 
 import type { ScheduledTask, ScheduledTaskStatus, ScheduledTaskType } from "@/types/scheduler"
+import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
 import { getNextCronTimes } from "./cron-parser"
 
 /** A single projected future run of a task. */
 export interface Occurrence {
+  /**
+   * Routing id. App-only projections carry the `ScheduledTask` id; unified
+   * projections carry the `unifiedId`, so the surface that renders them can
+   * hand it straight back to the page's selection handler.
+   */
   taskId: string
   taskName: string
   taskType: ScheduledTaskType
   triggerType: ScheduledTask["trigger"]["type"]
   status: ScheduledTaskStatus
+  /**
+   * Which source scheduled this run — drives the per-kind accent in the
+   * calendar and agenda. App-only projections report `app`/`plugin`.
+   */
+  kind: ScheduledItemKind
   /** The instant this run is projected to fire. */
   date: Date
 }
@@ -63,6 +74,7 @@ export function computeUpcomingOccurrences(
         taskType: task.type,
         triggerType: task.trigger.type,
         status: task.status,
+        kind: task.type === "plugin" ? "plugin" : "app",
         date,
       })
     }
@@ -79,6 +91,22 @@ export function computeUpcomingOccurrences(
   return out
 }
 
+/**
+ * The shape both projections reduce to — a trigger description plus the
+ * scheduler's own idea of when the item fires next. Keeping the expansion in
+ * one place is what lets the calendar and the agenda show workflow / backup /
+ * connector runs on exactly the same terms as app tasks.
+ */
+interface ScheduleSpec {
+  type: ScheduledTask["trigger"]["type"]
+  cron?: string
+  intervalMs?: number
+  runAtMs?: number
+  timezone?: string
+  /** Epoch ms of the next scheduled fire, when the source knows it. */
+  nextRunAtMs?: number
+}
+
 /** Expand a single task's trigger into in-window run instants. */
 function expandTrigger(
   task: ScheduledTask,
@@ -87,40 +115,139 @@ function expandTrigger(
   maxPerTask: number
 ): Date[] {
   const { trigger } = task
+  return expandSchedule(
+    {
+      type: trigger.type,
+      cron: trigger.cronExpression,
+      intervalMs: trigger.intervalMs,
+      runAtMs: trigger.runAt?.getTime(),
+      timezone: trigger.timezone,
+      nextRunAtMs: task.nextRunAt?.getTime(),
+    },
+    from,
+    windowEnd,
+    maxPerTask
+  )
+}
 
-  if (trigger.type === "cron" && trigger.cronExpression) {
+function expandSchedule(
+  spec: ScheduleSpec,
+  from: Date,
+  windowEnd: Date,
+  maxPerTask: number
+): Date[] {
+  if (spec.type === "cron" && spec.cron) {
     // Enumerate up to maxPerTask future fires, then keep those in the window.
-    return getNextCronTimes(trigger.cronExpression, maxPerTask, from, trigger.timezone).filter(
+    return getNextCronTimes(spec.cron, maxPerTask, from, spec.timezone).filter(
       (d) => d >= from && d < windowEnd
     )
   }
 
-  if (trigger.type === "interval" && trigger.intervalMs && trigger.intervalMs > 0) {
+  if (spec.type === "interval" && spec.intervalMs && spec.intervalMs > 0) {
     const out: Date[] = []
     // Anchor on the task's known next run when it is still in the future;
     // otherwise step forward from the window start. This keeps the projected
     // phase aligned with what the scheduler will actually do.
     const anchorMs =
-      task.nextRunAt && task.nextRunAt.getTime() > from.getTime()
-        ? task.nextRunAt.getTime()
-        : from.getTime() + trigger.intervalMs
+      spec.nextRunAtMs !== undefined && spec.nextRunAtMs > from.getTime()
+        ? spec.nextRunAtMs
+        : from.getTime() + spec.intervalMs
     for (
       let t = anchorMs;
       t < windowEnd.getTime() && out.length < maxPerTask;
-      t += trigger.intervalMs
+      t += spec.intervalMs
     ) {
       if (t >= from.getTime()) out.push(new Date(t))
     }
     return out
   }
 
-  if (trigger.type === "once" && trigger.runAt) {
-    const at = trigger.runAt
-    return at >= from && at < windowEnd ? [new Date(at.getTime())] : []
+  if (spec.type === "once" && spec.runAtMs !== undefined) {
+    const at = spec.runAtMs
+    return at >= from.getTime() && at < windowEnd.getTime() ? [new Date(at)] : []
   }
 
   // event triggers (and malformed triggers) have no deterministic schedule.
   return []
+}
+
+/**
+ * Cross-source projection — the unified counterpart of
+ * {@link computeUpcomingOccurrences}.
+ *
+ * The calendar and agenda used to receive the app-only `ScheduledTask[]`, so a
+ * workspace whose schedule was mostly workflow triggers and backups rendered
+ * an almost-empty month. They now project every source through the same
+ * expansion, and each occurrence carries its `kind` so the surface can tint
+ * the row by origin.
+ *
+ * Only `active` items are projected — a paused workflow trigger has no next
+ * run, exactly as a paused app task has none. Items whose source reports a
+ * `nextRunAt` but no expandable trigger (event-driven rows, opaque OS tasks)
+ * still contribute that single known instant, so an OS-scheduled task is not
+ * silently missing from the month.
+ */
+export function computeUnifiedOccurrences(
+  items: readonly UnifiedScheduledItem[],
+  window: OccurrenceWindow
+): Occurrence[] {
+  const { from, days } = window
+  const maxPerTask = window.maxPerTask ?? DEFAULT_MAX_PER_TASK
+  const windowEnd = new Date(from.getTime() + days * DAY_MS)
+  const out: Occurrence[] = []
+
+  for (const item of items) {
+    if (item.status !== "active") continue
+    const summary = item.triggerSummary
+    let dates = expandSchedule(
+      {
+        type: summary.type,
+        cron: summary.cron,
+        intervalMs: summary.intervalMs,
+        runAtMs: summary.runAtMs,
+        timezone: summary.timezone,
+        nextRunAtMs: item.nextRunAt,
+      },
+      from,
+      windowEnd,
+      maxPerTask
+    )
+
+    // Fall back to the single instant the source already knows about, so an
+    // item with an opaque or event trigger is not dropped from the view.
+    if (
+      dates.length === 0 &&
+      item.nextRunAt !== undefined &&
+      item.nextRunAt >= from.getTime() &&
+      item.nextRunAt < windowEnd.getTime()
+    ) {
+      dates = [new Date(item.nextRunAt)]
+    }
+
+    for (const date of dates) {
+      out.push({
+        taskId: item.unifiedId,
+        taskName: item.name,
+        // Unified rows have no `ScheduledTaskType`; the trigger type is the
+        // only classification the shared row markup actually renders.
+        taskType: "custom",
+        triggerType: summary.type,
+        status: "active",
+        kind: item.kind,
+        date,
+      })
+    }
+  }
+
+  out.sort((a, b) => {
+    const d = a.date.getTime() - b.date.getTime()
+    if (d !== 0) return d
+    const n = a.taskName.localeCompare(b.taskName)
+    if (n !== 0) return n
+    return a.taskId.localeCompare(b.taskId)
+  })
+
+  return out
 }
 
 /** A day bucket of occurrences (local calendar day). */
@@ -173,6 +300,7 @@ export interface OccurrenceTaskGroup {
   taskType: ScheduledTaskType
   triggerType: ScheduledTask["trigger"]["type"]
   status: ScheduledTaskStatus
+  kind: ScheduledItemKind
   /** Ascending, de-duplicated run instants for this task in the bucket. */
   times: Date[]
 }
@@ -195,6 +323,7 @@ export function groupOccurrencesByTask(occurrences: Occurrence[]): OccurrenceTas
         taskType: occ.taskType,
         triggerType: occ.triggerType,
         status: occ.status,
+        kind: occ.kind,
         times: [occ.date],
       })
       continue

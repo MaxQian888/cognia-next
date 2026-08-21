@@ -57,12 +57,12 @@ export interface SchedulerDialogsProps {
   onEditSystemTask: (input: CreateSystemTaskInput) => Promise<void>
   selectedSystemTask: SystemTask | null
 
-  // Delete confirmation
-  deleteTaskId: string | null
-  onDeleteTaskIdChange: (id: string | null) => void
-  onDeleteConfirm: () => Promise<void>
-
-  // System delete confirmation
+  /**
+   * System-task delete confirmation. App / plugin / workflow / backup /
+   * connector deletes go through the page's shared `DeleteItemDialog` — OS
+   * tasks keep their own because the copy has to warn about the OS-level
+   * registration, not just the row.
+   */
   systemDeleteTaskId: string | null
   onSystemDeleteTaskIdChange: (id: string | null) => void
   onSystemDeleteConfirm: () => Promise<void>
@@ -99,9 +99,6 @@ export function SchedulerDialogs({
   onShowSystemEditSheetChange,
   onEditSystemTask,
   selectedSystemTask,
-  deleteTaskId,
-  onDeleteTaskIdChange,
-  onDeleteConfirm,
   systemDeleteTaskId,
   onSystemDeleteTaskIdChange,
   onSystemDeleteConfirm,
@@ -241,28 +238,6 @@ export function SchedulerDialogs({
           </div>
         </SheetContent>
       </Sheet>
-
-      {/* Delete Confirmation */}
-      <AlertDialog open={!!deleteTaskId} onOpenChange={() => onDeleteTaskIdChange(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteTask") || "Delete Task"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("deleteTaskConfirm") ||
-                "Are you sure you want to delete this task? This action cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel") || "Cancel"}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={onDeleteConfirm}
-              className="bg-destructive text-destructive-foreground"
-            >
-              {t("delete") || "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Delete System Task Confirmation */}
       <AlertDialog

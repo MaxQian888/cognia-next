@@ -110,7 +110,10 @@ describe("executeWorkflowTask", () => {
       environment: "staging",
       entrypoint: "schedule",
       caller: "scheduler:task:task-wf",
-      idempotencyKey: "task-wf:exec-wf",
+      // Keyed on the scheduled occurrence, never on the execution row: that row
+      // is minted per host, which is exactly how one cron tick used to run on
+      // two machines at once.
+      idempotencyKey: "sched:task-wf:1786845600000",
       triggerKind: "trigger.manual",
       triggerOriginAt: new Date("2026-08-16T02:00:00Z").getTime(),
       payload: { a: 1 },

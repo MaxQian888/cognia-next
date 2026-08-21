@@ -37,6 +37,12 @@ import { RendererTimingDriver } from "./timing/renderer-driver"
 import { RustDaemonTimingDriver } from "./timing/rust-daemon-driver"
 import { NodeTimingDriver } from "./timing/node-driver"
 import { detectPlatform } from "@/lib/platform/detect"
+import { authorityHostLiveness } from "@/lib/placement/authority-host"
+import {
+  readExecutionAuthorityConfig,
+  resolveExecutionAuthority,
+  type AuthorityDecision as ExecutionAuthorityDecision,
+} from "@/lib/placement/authority"
 import type { LeaderAwareTimingDriver, SchedulerTimingDriver } from "@/types/scheduler"
 import { loggers } from "@cognia/logging"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
@@ -306,11 +312,67 @@ class TaskSchedulerImpl {
     if (perTask.size === 0) this.runningByTask.delete(execution.taskId)
   }
 
-  /** True when this instance is the timing authority allowed to arm tasks. */
+  /**
+   * True when this instance is the timing authority allowed to arm tasks.
+   *
+   * Two gates, in order. The driver's own leader election wins when it has one
+   * — a tab lock or an alarm daemon knows better than any cross-host config.
+   * Otherwise the answer used to be an unconditional `true`, so two desktops
+   * signed into the same account each armed the same cron and each fired it;
+   * now it defers to the configured execution authority (ADR-0128 decision 6,
+   * revised). Unconfigured still means self-authority, so a single-machine
+   * install is unchanged.
+   */
   private isTimingAuthority(): boolean {
     const driver = this.driver
-    if (!driver || !driver.supportsLeaderElection) return true
-    return (driver as LeaderAwareTimingDriver).isLeader()
+    if (driver?.supportsLeaderElection && !(driver as LeaderAwareTimingDriver).isLeader()) {
+      return false
+    }
+    const decision = this.resolveHostAuthority()
+    if (decision.degraded && decision.authorityHostId) {
+      // The work runs here, but the divergence from what was configured has to
+      // be visible — a team whose cron silently stopped moving is the outcome
+      // this prevents. Audited once per episode, not once per tick.
+      void this.announceDegradedAuthority(decision.authorityHostId, decision.unreachableForMs)
+    }
+    return decision.isAuthority
+  }
+
+  /** Cached so a per-tick authority check does not re-read storage each time. */
+  private authorityAnnouncedFor: string | null = null
+
+  private resolveHostAuthority(): ExecutionAuthorityDecision {
+    try {
+      const config = readExecutionAuthorityConfig()
+      if (!config.hostId) return { isAuthority: true, degraded: false, authorityHostId: null }
+      return resolveExecutionAuthority({
+        config,
+        authorityLiveness: authorityHostLiveness(config.hostId),
+        now: Date.now(),
+      })
+    } catch {
+      // A broken authority config must never stop every schedule on this host.
+      return { isAuthority: true, degraded: false, authorityHostId: null }
+    }
+  }
+
+  private async announceDegradedAuthority(
+    authorityHostId: string,
+    unreachableForMs: number | undefined
+  ): Promise<void> {
+    if (this.authorityAnnouncedFor === authorityHostId) return
+    this.authorityAnnouncedFor = authorityHostId
+    try {
+      const { recordPlacementDegraded } = await import("@/lib/placement/degraded-audit")
+      await recordPlacementDegraded({
+        reason: unreachableForMs === undefined ? "authority_unknown" : "authority_unreachable",
+        authorityHostId,
+        ...(unreachableForMs !== undefined ? { unreachableForMs } : {}),
+        at: Date.now(),
+      })
+    } catch {
+      // Best-effort; the schedule already runs.
+    }
   }
 
   /**

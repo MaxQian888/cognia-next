@@ -10,38 +10,39 @@ jest.mock("next-intl", () => ({
 }))
 
 import { SchedulerTimelineView } from "./scheduler-timeline-view"
-import type { ScheduledTask, TaskTrigger } from "@/types/scheduler"
+import type {
+  ScheduledItemKind,
+  UnifiedScheduledItem,
+  UnifiedTriggerSummary,
+} from "@/types/scheduler/unified"
 
 const FROM = new Date(2026, 0, 5, 0, 0, 0, 0)
 
-function task(id: string, name: string, trigger: TaskTrigger): ScheduledTask {
+function item(
+  sourceId: string,
+  name: string,
+  triggerSummary: UnifiedTriggerSummary,
+  kind: ScheduledItemKind = "app",
+  overrides: Partial<UnifiedScheduledItem> = {}
+): UnifiedScheduledItem {
   return {
-    id,
+    unifiedId: `${kind}:${sourceId}`,
+    kind,
+    sourceId,
     name,
-    type: "chat",
     status: "active",
-    trigger,
-    config: {
-      timeout: 1,
-      maxRetries: 0,
-      retryDelay: 0,
-      runMissedOnStartup: false,
-      allowConcurrent: false,
-    },
-    notification: { onStart: false, onComplete: false, onError: false },
-    runCount: 0,
-    successCount: 0,
-    failureCount: 0,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
+    triggerSummary,
+    origin: { deepLinkHref: "/scheduler" },
+    capabilities: { runNow: true, pause: true, edit: true, delete: true },
+    ...overrides,
   }
 }
 
 describe("SchedulerTimelineView", () => {
   it("renders day-grouped occurrences", () => {
-    const tasks = [task("daily", "Daily Brief", { type: "cron", cronExpression: "0 9 * * *" })]
+    const items = [item("daily", "Daily Brief", { type: "cron", cron: "0 9 * * *" })]
     render(
-      <SchedulerTimelineView tasks={tasks} onSelectTask={jest.fn()} now={FROM} windowDays={3} />
+      <SchedulerTimelineView items={items} onSelectItem={jest.fn()} now={FROM} windowDays={3} />
     )
     expect(screen.getByTestId("scheduler-timeline-view")).toBeInTheDocument()
     // First day section is "today".
@@ -49,18 +50,56 @@ describe("SchedulerTimelineView", () => {
     expect(screen.getAllByText("Daily Brief").length).toBeGreaterThan(0)
   })
 
-  it("dispatches onSelectTask when a row is clicked", () => {
-    const onSelectTask = jest.fn()
-    const tasks = [task("daily", "Daily Brief", { type: "cron", cronExpression: "0 9 * * *" })]
+  it("agendas every source, not just app tasks", () => {
+    const items = [
+      item("daily", "Daily Brief", { type: "cron", cron: "0 9 * * *" }, "app"),
+      item("etl", "Nightly ETL", { type: "cron", cron: "0 10 * * *" }, "workflow"),
+      item("queue", "Outbound queue", { type: "cron", cron: "0 11 * * *" }, "connector"),
+    ]
     render(
-      <SchedulerTimelineView tasks={tasks} onSelectTask={onSelectTask} now={FROM} windowDays={2} />
+      <SchedulerTimelineView items={items} onSelectItem={jest.fn()} now={FROM} windowDays={2} />
     )
-    fireEvent.click(screen.getAllByTestId("timeline-occ-daily")[0])
-    expect(onSelectTask).toHaveBeenCalledWith("daily")
+    expect(screen.getAllByTestId("timeline-occ-app:daily").length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId("timeline-occ-workflow:etl").length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId("timeline-occ-connector:queue").length).toBeGreaterThan(0)
+  })
+
+  it("includes an item whose trigger cannot be expanded but has a known next run", () => {
+    const items = [
+      item("os", "OS health check", { type: "event", eventType: "os" }, "system", {
+        nextRunAt: FROM.getTime() + 4 * 60 * 60 * 1000,
+      }),
+    ]
+    render(
+      <SchedulerTimelineView items={items} onSelectItem={jest.fn()} now={FROM} windowDays={2} />
+    )
+    expect(screen.getByTestId("timeline-occ-system:os")).toBeInTheDocument()
+  })
+
+  it("dispatches onSelectItem with the unifiedId when a row is clicked", () => {
+    const onSelectItem = jest.fn()
+    const items = [item("etl", "Nightly ETL", { type: "cron", cron: "0 9 * * *" }, "workflow")]
+    render(
+      <SchedulerTimelineView items={items} onSelectItem={onSelectItem} now={FROM} windowDays={2} />
+    )
+    fireEvent.click(screen.getAllByTestId("timeline-occ-workflow:etl")[0])
+    expect(onSelectItem).toHaveBeenCalledWith("workflow:etl")
+  })
+
+  it("skips paused items — a paused trigger has no next run", () => {
+    const items = [
+      item("daily", "Daily Brief", { type: "cron", cron: "0 9 * * *" }, "app", {
+        status: "paused",
+      }),
+    ]
+    render(
+      <SchedulerTimelineView items={items} onSelectItem={jest.fn()} now={FROM} windowDays={3} />
+    )
+    expect(screen.getByTestId("scheduler-timeline-empty")).toBeInTheDocument()
   })
 
   it("renders the empty state when no upcoming runs", () => {
-    render(<SchedulerTimelineView tasks={[]} onSelectTask={jest.fn()} now={FROM} />)
+    render(<SchedulerTimelineView items={[]} onSelectItem={jest.fn()} now={FROM} />)
     expect(screen.getByTestId("scheduler-timeline-empty")).toBeInTheDocument()
   })
 })

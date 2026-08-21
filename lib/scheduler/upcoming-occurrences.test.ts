@@ -1,4 +1,5 @@
 import {
+  computeUnifiedOccurrences,
   computeUpcomingOccurrences,
   countOccurrencesByDay,
   dayKey,
@@ -189,6 +190,7 @@ describe("groupOccurrencesByTask", () => {
       taskType: "chat",
       triggerType: "cron",
       status: "active",
+      kind: "app",
     })
   })
 
@@ -221,6 +223,163 @@ function occ(iso: string, taskId = "x", taskName = "X"): Occurrence {
     taskType: "chat",
     triggerType: "cron",
     status: "active",
+    kind: "app",
     date: new Date(iso),
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cross-source projection (computeUnifiedOccurrences)
+// ---------------------------------------------------------------------------
+
+describe("computeUnifiedOccurrences", () => {
+  const from = new Date("2026-03-02T00:00:00Z")
+
+  function unified(
+    overrides: Partial<import("@/types/scheduler/unified").UnifiedScheduledItem> & {
+      sourceId: string
+    }
+  ): import("@/types/scheduler/unified").UnifiedScheduledItem {
+    const kind = overrides.kind ?? "app"
+    return {
+      unifiedId: `${kind}:${overrides.sourceId}`,
+      kind,
+      name: "Item",
+      status: "active",
+      triggerSummary: { type: "interval", intervalMs: 60 * 60 * 1000 },
+      origin: { deepLinkHref: "/scheduler" },
+      capabilities: { runNow: true, pause: true, edit: true, delete: true },
+      ...overrides,
+    } as import("@/types/scheduler/unified").UnifiedScheduledItem
+  }
+
+  it("projects every source, not just app items", () => {
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({ sourceId: "a", kind: "app", name: "App task" }),
+        unified({
+          sourceId: "b",
+          kind: "workflow",
+          name: "Workflow trigger",
+          triggerSummary: { type: "cron", cron: "0 * * * *" },
+        }),
+        unified({
+          sourceId: "c",
+          kind: "backup",
+          name: "Backup",
+          triggerSummary: { type: "interval", intervalMs: 2 * 60 * 60 * 1000 },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(new Set(occ.map((o) => o.kind))).toEqual(new Set(["app", "workflow", "backup"]))
+  })
+
+  it("tags each occurrence with its source kind and routes by unifiedId", () => {
+    const occ = computeUnifiedOccurrences(
+      [unified({ sourceId: "x", kind: "connector", name: "Outbound queue" })],
+      { from, days: 1 }
+    )
+    expect(occ[0].kind).toBe("connector")
+    expect(occ[0].taskId).toBe("connector:x")
+  })
+
+  it("skips items that are not active", () => {
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({ sourceId: "p", status: "paused" }),
+        unified({ sourceId: "d", status: "disabled" }),
+      ],
+      { from, days: 2 }
+    )
+    expect(occ).toEqual([])
+  })
+
+  it("anchors interval expansion on the source-reported next run", () => {
+    const nextRunAt = from.getTime() + 15 * 60 * 1000
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({
+          sourceId: "a",
+          nextRunAt,
+          triggerSummary: { type: "interval", intervalMs: 60 * 60 * 1000 },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(occ[0].date.getTime()).toBe(nextRunAt)
+  })
+
+  it("falls back to the known next run for a trigger it cannot expand", () => {
+    const nextRunAt = from.getTime() + 3 * 60 * 60 * 1000
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({
+          sourceId: "sys",
+          kind: "system",
+          nextRunAt,
+          triggerSummary: { type: "event", eventType: "os" },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(occ).toHaveLength(1)
+    expect(occ[0].date.getTime()).toBe(nextRunAt)
+    expect(occ[0].kind).toBe("system")
+  })
+
+  it("drops an unexpandable item whose next run is outside the window", () => {
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({
+          sourceId: "sys",
+          kind: "system",
+          nextRunAt: from.getTime() + 30 * 24 * 60 * 60 * 1000,
+          triggerSummary: { type: "event" },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(occ).toEqual([])
+  })
+
+  it("returns occurrences sorted ascending by date", () => {
+    const occ = computeUnifiedOccurrences(
+      [
+        unified({
+          sourceId: "late",
+          nextRunAt: from.getTime() + 5 * 60 * 60 * 1000,
+          triggerSummary: { type: "once", runAtMs: from.getTime() + 5 * 60 * 60 * 1000 },
+        }),
+        unified({
+          sourceId: "early",
+          triggerSummary: { type: "once", runAtMs: from.getTime() + 60 * 60 * 1000 },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(occ.map((o) => o.taskId)).toEqual(["app:early", "app:late"])
+  })
+})
+
+describe("computeUpcomingOccurrences kind tagging", () => {
+  it("labels app-store rows by whether they belong to the plugin scheduler", () => {
+    const from = new Date("2026-01-05T00:00:00")
+    const [appOcc] = computeUpcomingOccurrences(
+      [makeTask({ id: "a", type: "chat", trigger: { type: "cron", cronExpression: "0 * * * *" } })],
+      { from, days: 1 }
+    )
+    const [pluginOcc] = computeUpcomingOccurrences(
+      [
+        makeTask({
+          id: "p",
+          type: "plugin",
+          trigger: { type: "cron", cronExpression: "0 * * * *" },
+        }),
+      ],
+      { from, days: 1 }
+    )
+    expect(appOcc.kind).toBe("app")
+    expect(pluginOcc.kind).toBe("plugin")
+  })
+})

@@ -5,7 +5,8 @@
 
 // Layout components (new)
 export { FilterChips } from "./filter-chips"
-export { TaskSidebarItem } from "./task-sidebar-item"
+export { SchedulerFilterBar } from "./scheduler-filter-bar"
+export type { SchedulerFilterBarProps } from "./scheduler-filter-bar"
 export { SchedulerSidebar, SchedulerSidebarContent } from "./scheduler-sidebar"
 export { SchedulerShell, SCHEDULER_PANEL_STORAGE_KEY } from "./scheduler-shell"
 export { BackfillDialog } from "./backfill-dialog"
@@ -39,6 +40,8 @@ export { TimezoneSelect } from "./timezone-select"
 export { TaskTemplateGallery } from "./task-template-gallery"
 export { ExportTasksDialog, ImportTasksDialog } from "./import-export-dialog"
 export { SystemTaskInspectSheet } from "./system-task-inspect-sheet"
+export { DeleteItemDialog } from "./delete-item-dialog"
+export type { DeleteItemDialogProps } from "./delete-item-dialog"
 
 // Page-level composition (moved from app/scheduler/)
 export { SchedulerContentHeader } from "./scheduler-content-header"

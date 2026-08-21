@@ -128,9 +128,6 @@ function buildProps(overrides: Partial<DialogProps> = {}): DialogProps {
     onShowSystemEditSheetChange: jest.fn(),
     onEditSystemTask: jest.fn(async () => undefined),
     selectedSystemTask: null,
-    deleteTaskId: null,
-    onDeleteTaskIdChange: jest.fn(),
-    onDeleteConfirm: jest.fn(async () => undefined),
     systemDeleteTaskId: null,
     onSystemDeleteTaskIdChange: jest.fn(),
     onSystemDeleteConfirm: jest.fn(async () => undefined),
@@ -313,23 +310,6 @@ describe("SchedulerDialogs", () => {
     )
     fireEvent.click(screen.getByTestId("system-task-form-submit"))
     expect(onEditSystemTask).toHaveBeenCalledWith({ name: "system-submitted" })
-  })
-
-  it("opens the delete AlertDialog when deleteTaskId is set and dispatches confirm/cancel", () => {
-    const onDeleteTaskIdChange = jest.fn()
-    const onDeleteConfirm = jest.fn(async () => undefined)
-    render(
-      <SchedulerDialogs
-        {...buildProps({
-          deleteTaskId: "t1",
-          onDeleteTaskIdChange,
-          onDeleteConfirm,
-        })}
-      />
-    )
-    // Confirm
-    fireEvent.click(screen.getAllByText("delete")[0]!)
-    expect(onDeleteConfirm).toHaveBeenCalled()
   })
 
   it("opens the system delete AlertDialog and dispatches confirm", () => {

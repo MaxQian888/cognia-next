@@ -49,6 +49,7 @@ import { MobileSchedulerStatStrip } from "@/components/mobile/scheduler/mobile-s
 import { SchedulerHostBar } from "@/components/scheduler/scheduler-host-bar"
 import { FilterChips, SchedulerMobileDetailView, TaskForm } from "@/components/scheduler"
 import { KindFilterChips } from "@/components/scheduler/kind-filter-chips"
+import { filterUnifiedItems, isUnifiedStatusFilter } from "@/lib/scheduler/unified-filter"
 import { UnifiedTaskSidebarItem } from "@/components/scheduler/unified-task-sidebar-item"
 import { useScheduler } from "@/hooks/scheduler"
 import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
@@ -126,22 +127,18 @@ export default function MobileSchedulerPage() {
    */
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<UnifiedScheduledItem | null>(null)
 
-  // Derived: filter by search / kind / status
-  const visibleItems = useMemo(() => {
-    let result = unifiedItems
-    if (selectedKinds.size > 0) {
-      result = result.filter((item) => selectedKinds.has(item.kind))
-    }
-    if (activeFilter === "active") result = result.filter((i) => i.status === "active")
-    else if (activeFilter === "paused") result = result.filter((i) => i.status === "paused")
-    const q = searchQuery.trim().toLowerCase()
-    if (q) {
-      result = result.filter(
-        (i) => i.name.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q)
-      )
-    }
-    return result
-  }, [unifiedItems, selectedKinds, activeFilter, searchQuery])
+  // Derived: filter by search / kind / status. Shares the desktop page's
+  // filtering engine (`lib/scheduler/unified-filter.ts`) so the two surfaces
+  // can't drift on what "active" or a search hit means.
+  const visibleItems = useMemo(
+    () =>
+      filterUnifiedItems(unifiedItems, {
+        search: searchQuery,
+        status: isUnifiedStatusFilter(activeFilter) ? activeFilter : "all",
+        kinds: selectedKinds,
+      }),
+    [unifiedItems, selectedKinds, activeFilter, searchQuery]
+  )
 
   const grouped = useMemo(() => {
     const groups = new Map<ScheduledItemKind, UnifiedScheduledItem[]>()

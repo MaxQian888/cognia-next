@@ -12,6 +12,12 @@
  *   phone / cloud companion → defaults to the paired host (always-on); "this
  *     device" only ticks while the app is open, and the bar says so.
  *   plain desktop / web-standalone → no paired host, bar states the fact.
+ *
+ * Presentation is tiered by how much the bar has to say. With a paired host to
+ * switch to (or a suspended local schedule) it is a bordered band carrying an
+ * action; on a plain desktop it still states the fact — that is the recorded
+ * decision — but as one quiet line instead of a full-width card, because that
+ * case is permanent and actionless and was eating a whole row of the pane.
  */
 
 import { useTranslations } from "next-intl"
@@ -43,13 +49,20 @@ export function SchedulerHostBar({ className }: SchedulerHostBarProps) {
         ? t("pairedDesktop")
         : t("pairedCloud")
 
+  // Does the bar carry anything the user can act on or be surprised by?
+  const isActionable = pairedAvailable || desktopDrivingRemote
+
   return (
     <div
       className={[
-        "flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs",
+        "flex flex-wrap items-center gap-2 text-xs",
+        isActionable
+          ? "rounded-md border bg-muted/30 px-3 py-2"
+          : "px-4 py-1.5 text-muted-foreground",
         className ?? "",
       ].join(" ")}
       data-testid="scheduler-host-bar"
+      data-variant={isActionable ? "banner" : "note"}
       role="status"
     >
       {target === "paired" ? (
@@ -57,7 +70,7 @@ export function SchedulerHostBar({ className }: SchedulerHostBarProps) {
       ) : (
         <MonitorSmartphoneIcon className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      <span className="font-medium">
+      <span className={isActionable ? "font-medium" : undefined}>
         {t("managing", { host: target === "paired" ? pairedLabel : t("thisDevice") })}
       </span>
       {target === "local" && desktopDrivingRemote && (

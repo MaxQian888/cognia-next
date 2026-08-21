@@ -44,7 +44,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { TaskStatsCards } from "./task-stats-cards"
-import { TaskExecutionChart } from "./task-execution-chart"
+import { TaskExecutionChart, toChartPointsFromExecutions } from "./task-execution-chart"
 import { TaskExecutionHistory } from "./task-execution-history"
 import { TaskConfiguration } from "./task-configuration"
 import { TaskNotificationDisplay } from "./task-notification-display"
@@ -310,7 +310,7 @@ export function TaskDetailView({
           <TaskStatsCards task={task} executions={executions} />
 
           <div className="mt-5">
-            <TaskExecutionChart executions={executions} taskId={task.id} />
+            <TaskExecutionChart runs={toChartPointsFromExecutions(executions, task.id)} />
           </div>
 
           <div className="mt-5">

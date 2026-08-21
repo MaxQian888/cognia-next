@@ -16,6 +16,7 @@ jest.mock("./task-stats-cards", () => ({
 jest.mock("./task-execution-chart", () => ({
   __esModule: true,
   TaskExecutionChart: () => <div data-testid="task-execution-chart-stub" />,
+  toChartPointsFromExecutions: () => [],
 }))
 jest.mock("./task-execution-history", () => ({
   __esModule: true,

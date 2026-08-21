@@ -1405,6 +1405,72 @@ describe("TaskScheduler", () => {
       expect(driver.stop).toHaveBeenCalled()
     })
 
+    it("stands down when another host is the configured execution authority", async () => {
+      // Two desktops signed into one account each armed the same cron and each
+      // fired it, because this returned an unconditional `true` whenever the
+      // driver had no leader election — which is every driver in production.
+      const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+      useRemoteHostStore.setState({
+        activeHostId: null,
+        hosts: [
+          {
+            id: "host-authority",
+            label: "build box",
+            config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+            credentialRef: "ref",
+            addedAt: 1,
+            connectionState: "ready",
+            lastConnectedAt: Date.now(),
+          },
+        ] as never,
+      })
+      window.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+      )
+
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      jest.mocked(driver.arm).mockClear()
+      await sched.initialize()
+
+      expect(driver.arm).not.toHaveBeenCalled()
+      sched.stop()
+      window.localStorage.removeItem("cognia-execution-authority-v1")
+    })
+
+    it("takes over, and says so, when the configured authority is long gone", async () => {
+      // Silence would mean the team's schedules stop the day that machine is
+      // shut down, with nothing anywhere explaining why.
+      const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+      useRemoteHostStore.setState({
+        activeHostId: null,
+        hosts: [
+          {
+            id: "host-authority",
+            label: "build box",
+            config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+            credentialRef: "ref",
+            addedAt: 1,
+            connectionState: "disconnected",
+            lastConnectedAt: Date.now() - 86_400_000,
+          },
+        ] as never,
+      })
+      window.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+      )
+
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      expect(mockSchedulerDb.getTasksByStatus).toHaveBeenCalledWith("active")
+      sched.stop()
+      window.localStorage.removeItem("cognia-execution-authority-v1")
+    })
+
     it("keeps event-triggered tasks off the timing driver without warning", async () => {
       const driver = makeMockDriver()
       const sched = createTaskScheduler(driver)

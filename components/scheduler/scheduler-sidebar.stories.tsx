@@ -2,12 +2,8 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { fn } from "storybook/test"
 
 import { SchedulerSidebarContent } from "./scheduler-sidebar"
-import {
-  makeScheduledTask,
-  makeSystemTask,
-  makeTaskStatistics,
-  makeUnifiedItemSet,
-} from "@/lib/storybook/fixtures/scheduler"
+import { makeUnifiedItemSet } from "@/lib/storybook/fixtures/scheduler"
+import { deriveUnifiedFacets } from "@/lib/scheduler/unified-filter"
 import type { ScheduledItemKind } from "@/types/scheduler/unified"
 
 // `SchedulerSidebarContent` is the provider-free content variant rendered inside
@@ -20,12 +16,17 @@ const meta = {
   args: {
     schedulerStatus: "running",
     searchQuery: "",
-    activeFilter: "all",
-    selectedTaskId: null,
+    statusFilter: "all",
+    selectedKinds: new Set<ScheduledItemKind>(),
+    loopOnly: false,
+    selectedUnifiedId: null,
     onSearchChange: fn(),
-    onFilterChange: fn(),
-    onSelectTask: fn(),
-    onSelectSystemTask: fn(),
+    onStatusFilterChange: fn(),
+    onToggleKind: fn(),
+    onLoopOnlyChange: fn(),
+    onClearKindFilters: fn(),
+    onResetFilters: fn(),
+    onSelectItem: fn(),
     onRunNow: fn(),
     onPause: fn(),
     onResume: fn(),
@@ -44,77 +45,52 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-const appTasks = [
-  makeScheduledTask({ id: "a1", name: "Overnight digest", status: "active" }),
-  makeScheduledTask({ id: "a2", name: "Weekly report", status: "paused" }),
-  makeScheduledTask({ id: "a3", name: "Loop poll", status: "active", tags: ["loop"] }),
-]
-
 const unifiedItems = makeUnifiedItemSet()
-const countsByKind = unifiedItems.reduce(
-  (acc, item) => {
-    acc[item.kind] = (acc[item.kind] ?? 0) + 1
-    return acc
-  },
-  { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 } as Record<
-    ScheduledItemKind,
-    number
-  >
-)
 
-/** Legacy app + system split (no unified items supplied). */
-export const Legacy: Story = {
+/** The default view — every source merged and grouped by kind. */
+export const Default: Story = {
   args: {
-    tasks: appTasks,
-    systemTasks: [makeSystemTask()],
-    statistics: makeTaskStatistics(),
-    activeCount: 2,
-    pausedCount: 1,
+    items: unifiedItems,
+    facets: deriveUnifiedFacets(unifiedItems),
+    selectedUnifiedId: unifiedItems[0]?.unifiedId ?? null,
+    selectedUnifiedIds: [],
+    onToggleUnifiedSelection: fn(),
   },
 }
 
-/** Unified view — items grouped into collapsible per-kind sections. */
-export const Unified: Story = {
+/** A pinned kind — the footer reports how much is hidden and offers a reset. */
+export const KindFiltered: Story = {
   args: {
-    tasks: appTasks,
-    systemTasks: [makeSystemTask()],
-    unifiedItems,
-    countsByKind,
-    statistics: makeTaskStatistics(),
-    activeCount: 2,
-    pausedCount: 1,
-    selectedTaskId: "src-1",
-    onSelectUnifiedItem: fn(),
-    onUnifiedRunNow: fn(),
-    onUnifiedPause: fn(),
-    onUnifiedResume: fn(),
-    onUnifiedDelete: fn(),
-    selectedUnifiedIds: [],
-    onToggleUnifiedSelection: fn(),
+    items: unifiedItems,
+    selectedKinds: new Set<ScheduledItemKind>(["workflow"]),
+    facets: deriveUnifiedFacets(unifiedItems, {
+      kinds: new Set<ScheduledItemKind>(["workflow"]),
+    }),
+  },
+}
+
+/** A search that matches nothing — the filtered empty state with its reset CTA. */
+export const NoMatches: Story = {
+  args: {
+    items: unifiedItems,
+    searchQuery: "zzzz",
+    facets: deriveUnifiedFacets(unifiedItems, { search: "zzzz" }),
   },
 }
 
 /** Stopped scheduler — the status dot turns red. */
 export const Stopped: Story = {
   args: {
-    tasks: appTasks,
-    systemTasks: [],
+    items: unifiedItems,
+    facets: deriveUnifiedFacets(unifiedItems),
     schedulerStatus: "stopped",
-    statistics: makeTaskStatistics({ totalExecutions: 0, successfulExecutions: 0 }),
-    activeCount: 2,
-    pausedCount: 1,
   },
 }
 
-/** Empty unified state — the create CTA is shown. */
+/** No source has anything scheduled — the create CTA is shown. */
 export const Empty: Story = {
   args: {
-    tasks: [],
-    systemTasks: [],
-    unifiedItems: [],
-    countsByKind: { app: 0, workflow: 0, backup: 0, plugin: 0, system: 0, connector: 0 },
-    statistics: makeTaskStatistics({ totalTasks: 0, activeTasks: 0, totalExecutions: 0 }),
-    activeCount: 0,
-    pausedCount: 0,
+    items: [],
+    facets: deriveUnifiedFacets([]),
   },
 }

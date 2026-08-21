@@ -24,6 +24,7 @@ import {
   getSchedulerSourceRegistry,
   type SchedulerSourceRegistry,
 } from "@/lib/scheduler/sources/registry"
+import { deriveUnifiedStatistics, type UnifiedStatistics } from "@/lib/scheduler/unified-filter"
 
 export interface UseUnifiedItemsResult {
   items: UnifiedScheduledItem[]
@@ -33,21 +34,18 @@ export interface UseUnifiedItemsResult {
   countsByKind: Record<ScheduledItemKind, number>
   /** Active counts per kind. */
   activeCountsByKind: Record<ScheduledItemKind, number>
+  /**
+   * Headline readings over the *same* merged list the page renders — the
+   * overview used to compute these from the app-only store, so it announced
+   * "2 tasks" above a list of 4. See `lib/scheduler/unified-filter.ts`.
+   */
+  statistics: UnifiedStatistics
 }
 
 export interface UseUnifiedItemsOptions {
   /** Override the registry (tests inject a stub registry). */
   registry?: SchedulerSourceRegistry
 }
-
-const EMPTY_COUNTS = {
-  app: 0,
-  workflow: 0,
-  backup: 0,
-  plugin: 0,
-  system: 0,
-  connector: 0,
-} satisfies Record<ScheduledItemKind, number>
 
 export function useUnifiedScheduledItems(
   options: UseUnifiedItemsOptions = {}
@@ -84,17 +82,15 @@ export function useUnifiedScheduledItems(
     return merged
   }, [snapshotByKind])
 
-  const { countsByKind, activeCountsByKind } = useMemo(() => {
-    const counts = { ...EMPTY_COUNTS }
-    const actives = { ...EMPTY_COUNTS }
-    for (const [kind, list] of Object.entries(snapshotByKind) as Array<
-      [ScheduledItemKind, UnifiedScheduledItem[]]
-    >) {
-      counts[kind] = list.length
-      actives[kind] = list.filter((i) => i.status === "active").length
-    }
-    return { countsByKind: counts, activeCountsByKind: actives }
-  }, [snapshotByKind])
+  // One aggregation pass over the merged list feeds both the per-kind chips
+  // and the overview headline, so the two can never disagree.
+  const statistics = useMemo(() => deriveUnifiedStatistics(items), [items])
 
-  return { items, errors, countsByKind, activeCountsByKind }
+  return {
+    items,
+    errors,
+    countsByKind: statistics.countsByKind,
+    activeCountsByKind: statistics.activeCountsByKind,
+    statistics,
+  }
 }

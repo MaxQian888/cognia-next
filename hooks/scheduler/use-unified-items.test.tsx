@@ -138,6 +138,45 @@ describe("useUnifiedScheduledItems", () => {
     expect(result.current.activeCountsByKind.workflow).toBe(0)
   })
 
+  it("derives the overview statistics from the same merged list", () => {
+    const registry = createSchedulerSourceRegistry()
+    const app = makeControlledSource("app")
+    const backup = makeControlledSource("backup")
+    registry.register(app.source)
+    registry.register(backup.source)
+
+    const { result } = renderHook(() => useUnifiedScheduledItems({ registry }))
+
+    act(() => {
+      app.emit([
+        makeUnified("app", "1", { status: "active", successCount: 9, failureCount: 1 }),
+        makeUnified("app", "2", { status: "paused" }),
+      ])
+      backup.emit([makeUnified("backup", "b1", { status: "active" })])
+    })
+
+    // The headline counts every source, not just the app store.
+    expect(result.current.statistics.totalItems).toBe(3)
+    expect(result.current.statistics.activeItems).toBe(2)
+    expect(result.current.statistics.pausedItems).toBe(1)
+    expect(result.current.statistics.successRate).toBe(90)
+    // ...and it is the very same object the kind chips read.
+    expect(result.current.statistics.countsByKind).toBe(result.current.countsByKind)
+  })
+
+  it("reports a null success rate until something has actually run", () => {
+    const registry = createSchedulerSourceRegistry()
+    const app = makeControlledSource("app")
+    registry.register(app.source)
+
+    const { result } = renderHook(() => useUnifiedScheduledItems({ registry }))
+    act(() => {
+      app.emit([makeUnified("app", "1", { status: "active" })])
+    })
+
+    expect(result.current.statistics.successRate).toBeNull()
+  })
+
   it("unsubscribes every source on unmount", () => {
     const registry = createSchedulerSourceRegistry()
     const app = makeControlledSource("app")

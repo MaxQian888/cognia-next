@@ -2,11 +2,12 @@
 
 /**
  * Timeline (agenda) view for the scheduler dashboard. Projects the next runs of
- * all active tasks via {@link computeUpcomingOccurrences}, groups them by local
- * day, and renders a day-headed agenda. Each day's runs go through the shared
+ * every active scheduled item — across all sources — via
+ * {@link computeUnifiedOccurrences}, groups them by local day, and renders a
+ * day-headed agenda. Each day's runs go through the shared
  * {@link OccurrenceList} (also used by the calendar day panel), which collapses
- * them per task so a frequent trigger reads as one row with its fire times
- * instead of a wall of identical lines. Rows are clickable → `onSelectTask`.
+ * them per item so a frequent trigger reads as one row with its fire times
+ * instead of a wall of identical lines. Rows are clickable → `onSelectItem`.
  *
  * This is the mobile-friendly projection (a single scrolling column), so the
  * dashboard falls back to it on narrow screens even when "calendar" is chosen.
@@ -17,17 +18,19 @@ import { useLocale, useTranslations } from "next-intl"
 import { CalendarClock } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import type { ScheduledTask } from "@/types/scheduler"
+import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import {
-  computeUpcomingOccurrences,
+  computeUnifiedOccurrences,
   dayKey,
   groupOccurrencesByDay,
 } from "@/lib/scheduler/upcoming-occurrences"
 import { OccurrenceList } from "./occurrence-list"
 
 export interface SchedulerTimelineViewProps {
-  tasks: ScheduledTask[]
-  onSelectTask: (taskId: string) => void
+  /** Every scheduled item, merged across sources. */
+  items: UnifiedScheduledItem[]
+  /** Receives the clicked row's `unifiedId`. */
+  onSelectItem: (unifiedId: string) => void
   /** Window length in days. Defaults to 14. */
   windowDays?: number
   /** Injectable "now" for deterministic tests. */
@@ -36,8 +39,8 @@ export interface SchedulerTimelineViewProps {
 }
 
 export function SchedulerTimelineView({
-  tasks,
-  onSelectTask,
+  items,
+  onSelectItem,
   windowDays = 14,
   now,
   className,
@@ -48,9 +51,9 @@ export function SchedulerTimelineView({
   const from = useMemo(() => now ?? new Date(), [now])
 
   const days = useMemo(() => {
-    const occ = computeUpcomingOccurrences(tasks, { from, days: windowDays })
+    const occ = computeUnifiedOccurrences(items, { from, days: windowDays })
     return groupOccurrencesByDay(occ)
-  }, [tasks, from, windowDays])
+  }, [items, from, windowDays])
 
   const dateFmt = useMemo(
     () => new Intl.DateTimeFormat(locale, { weekday: "short", month: "short", day: "numeric" }),
@@ -94,7 +97,7 @@ export function SchedulerTimelineView({
           </div>
           <OccurrenceList
             occurrences={day.occurrences}
-            onSelectTask={onSelectTask}
+            onSelectItem={onSelectItem}
             testIdPrefix="timeline-occ"
             className="mt-1"
           />

@@ -95,6 +95,12 @@ export interface UnifiedScheduledItem {
   lastRunAt?: number
   successCount?: number
   failureCount?: number
+  /**
+   * Source-native labels carried through so cross-source filters can reason
+   * about them (the `/loop` status filter matches the `loop` tag written by
+   * `lib/loop/interval.ts`). Sources with no tag concept leave this unset.
+   */
+  tags?: string[]
   origin: UnifiedItemOrigin
   capabilities: UnifiedItemCapabilities
 }

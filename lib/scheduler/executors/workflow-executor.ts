@@ -90,6 +90,8 @@ export async function executeWorkflowTask(
   // executor module graph at load time (and out of test hoisting order).
   const { executeDeployedWorkflow, WorkflowAdmissionError } =
     await import("@/lib/workflow/runtime/execution-authority")
+  const { scheduledOccurrenceIdempotencyKey } =
+    await import("@/lib/workflow/runtime/trigger-idempotency")
 
   const startedAt = Date.now()
   let admittedRunId: string | undefined
@@ -99,7 +101,13 @@ export async function executeWorkflowTask(
       environment: payload.environment,
       entrypoint: "schedule",
       caller: `scheduler:task:${task.id}`,
-      idempotencyKey: payload.idempotencyKey ?? `${task.id}:${execution.id}`,
+      idempotencyKey:
+        payload.idempotencyKey ??
+        scheduledOccurrenceIdempotencyKey({
+          taskId: task.id,
+          ...(execution.scheduledFor ? { scheduledFor: execution.scheduledFor.getTime() } : {}),
+          fallbackExecutionId: execution.id,
+        }),
       triggerKind: payload.triggerId ? "trigger.cron" : "trigger.manual",
       triggerId: payload.triggerId,
       triggerOriginAt: execution.scheduledFor?.getTime() ?? execution.startedAt.getTime(),

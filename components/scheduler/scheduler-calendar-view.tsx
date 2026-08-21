@@ -3,11 +3,15 @@
 /**
  * Calendar (month grid) view for the scheduler dashboard. Renders a Monday-first
  * month matrix with a per-day run-density indicator (dots, capped with "+n")
- * computed from {@link computeUpcomingOccurrences}. Selecting a day reveals that
+ * computed from {@link computeUnifiedOccurrences}. Selecting a day reveals that
  * day's runs in an inline panel — rendered by the shared {@link OccurrenceList},
- * the same collapsed-per-task list the timeline agenda uses, so a task with many
- * fires that day is one row and not N repeats. A row click routes to
- * `onSelectTask`.
+ * the same collapsed-per-item list the timeline agenda uses, so an item with
+ * many fires that day is one row and not N repeats. A row click routes to
+ * `onSelectItem` with the item's `unifiedId`.
+ *
+ * The view projects every scheduler source, not just app tasks: a workspace
+ * whose schedule is mostly workflow triggers and backups used to render an
+ * almost-empty month here.
  *
  * Only future runs are projected, so days before "today" in the current month
  * are intentionally empty. The grid is horizontally scroll-safe on narrow
@@ -21,9 +25,9 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
-import type { ScheduledTask } from "@/types/scheduler"
+import type { UnifiedScheduledItem } from "@/types/scheduler/unified"
 import {
-  computeUpcomingOccurrences,
+  computeUnifiedOccurrences,
   countOccurrencesByDay,
   dayKey,
   type Occurrence,
@@ -56,16 +60,18 @@ export function buildMonthMatrix(year: number, month: number): MonthCell[] {
 }
 
 export interface SchedulerCalendarViewProps {
-  tasks: ScheduledTask[]
-  onSelectTask: (taskId: string) => void
+  /** Every scheduled item, merged across sources. */
+  items: UnifiedScheduledItem[]
+  /** Receives the clicked row's `unifiedId`. */
+  onSelectItem: (unifiedId: string) => void
   /** Injectable "now" for deterministic tests. */
   now?: Date
   className?: string
 }
 
 export function SchedulerCalendarView({
-  tasks,
-  onSelectTask,
+  items,
+  onSelectItem,
   now,
   className,
 }: SchedulerCalendarViewProps) {
@@ -88,8 +94,8 @@ export function SchedulerCalendarView({
     const gridEnd = cells[cells.length - 1].date
     const spanDays = Math.ceil((gridEnd.getTime() - today.getTime()) / DAY_MS) + 1
     if (spanDays <= 0) return [] as Occurrence[]
-    return computeUpcomingOccurrences(tasks, { from: today, days: spanDays })
-  }, [tasks, today, cells])
+    return computeUnifiedOccurrences(items, { from: today, days: spanDays })
+  }, [items, today, cells])
 
   const countsByDay = useMemo(() => countOccurrencesByDay(occurrences), [occurrences])
   const selectedOccurrences = useMemo(
@@ -252,7 +258,7 @@ export function SchedulerCalendarView({
         ) : (
           <OccurrenceList
             occurrences={selectedOccurrences}
-            onSelectTask={onSelectTask}
+            onSelectItem={onSelectItem}
             testIdPrefix="calendar-occ"
           />
         )}
