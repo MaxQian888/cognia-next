@@ -29,6 +29,7 @@ import type { MessageSegment } from "@/types/connectors/segment"
 import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
 import { statFile } from "@/lib/file/file-operations"
 import { SLACK_A2UI_CAPABILITY, SLACK_CAPS } from "./capability"
+import { enrichSlackInboundMedia } from "./inbound-media"
 import {
   parseSlackEventCallback,
   parseSlackInteractivePayload,
@@ -415,6 +416,11 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
               // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
               if (!(await gateInboundEvent(opts.id, event))) continue
               lastActivityAt = Date.now()
+              // Download what the parser could only reference: `url_private`
+              // needs the bot token, so without this the model was handed a
+              // link that answers a login page. After the gate — a message
+              // that is going to be dropped costs no downloads.
+              await enrichSlackInboundMedia(event, { botToken: opts.botToken })
               await ctx.emit(event)
             }
           }
@@ -469,6 +475,11 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
               // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
               if (!(await gateInboundEvent(opts.id, event))) continue
               lastActivityAt = Date.now()
+              // Download what the parser could only reference: `url_private`
+              // needs the bot token, so without this the model was handed a
+              // link that answers a login page. After the gate — a message
+              // that is going to be dropped costs no downloads.
+              await enrichSlackInboundMedia(event, { botToken: opts.botToken })
               await ctx.emit(event)
             }
           }

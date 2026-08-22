@@ -151,6 +151,9 @@ function buildSegments(event: SlackMessageEvent): MessageSegment[] {
           alt: file.name,
           width: file.original_w,
           height: file.original_h,
+          // Slack names the exact type; the model's `media_type` must match
+          // the bytes, and the generic fallback downstream is PNG.
+          mimeType: mime,
         })
       } else if (mime.startsWith("audio/")) {
         // Slack treats voice messages as audio files with the same shape
