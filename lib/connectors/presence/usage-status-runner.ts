@@ -24,6 +24,10 @@ import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-inst
 import { enqueueGoverned as enqueueOutbound } from "@/lib/connectors/delivery-gateway"
 import { getBus } from "@/lib/connectors/bus"
 import { appendAudit } from "@/lib/connectors/audit"
+import {
+  effectiveCapabilitiesForRow,
+  suppressionFor,
+} from "@/lib/connectors/effective-capabilities"
 import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import {
   buildUsageCardMarkdown,
@@ -87,10 +91,25 @@ export async function runUsagePresenceRefresh(args: {
 
   const state: UsagePresenceState = { ...row.presenceState }
   const errors: string[] = []
+  /**
+   * Errors that are a permanent property of how this bot is configured rather
+   * than something that went wrong on this tick. They belong in `lastError`
+   * (the operator should see them) but NOT in the audit log, which would
+   * otherwise take a new `adapter.error` row every interval, forever, for a
+   * condition no retry can change.
+   */
+  const configurationGaps: string[] = []
 
   // ── Badge tier ─────────────────────────────────────────────────────────
   if (config.mode === "badge" || config.mode === "both") {
-    if (typeof adapter.setPresenceStatus === "function") {
+    // A method-presence check is not the same question. A webhook-mode Discord
+    // adapter DOES implement `setPresenceStatus` — it just throws "gateway not
+    // connected" every time, because presence is a gateway op. Ask what this
+    // instance can actually serve.
+    const suppression = suppressionFor(effectiveCapabilitiesForRow(row), "presence.status")
+    if (suppression) {
+      configurationGaps.push(`badge: unavailable (${suppression.reason}: ${suppression.detail})`)
+    } else if (typeof adapter.setPresenceStatus === "function") {
       try {
         await adapter.setPresenceStatus({
           text: formatShortStatus(snapshot),
@@ -103,7 +122,7 @@ export async function runUsagePresenceRefresh(args: {
         errors.push(`badge: ${err instanceof Error ? err.message : String(err)}`)
       }
     } else {
-      errors.push("badge: adapter does not implement setPresenceStatus")
+      configurationGaps.push("badge: adapter does not implement setPresenceStatus")
     }
   }
 
@@ -117,7 +136,8 @@ export async function runUsagePresenceRefresh(args: {
   }
 
   state.lastRefreshAt = now
-  state.lastError = errors.length > 0 ? errors.join("; ") : undefined
+  const surfaced = [...configurationGaps, ...errors]
+  state.lastError = surfaced.length > 0 ? surfaced.join("; ") : undefined
   await updateAdapterInstance(adapterId, { presenceState: state }).catch(() => {})
 
   if (errors.length > 0) {
@@ -131,13 +151,15 @@ export async function runUsagePresenceRefresh(args: {
   }
 
   // Partial failure still returns success — the next tick retries; the
-  // error detail lives in presenceState.lastError + the audit trail.
+  // error detail lives in presenceState.lastError + the audit trail. A
+  // configuration gap rides along here because this run genuinely did not do
+  // what it was asked to; only the AUDIT is spared the repetition.
   return {
     success: true,
     output: {
       tokens: snapshot.totalTokens,
       costUsd: snapshot.costUsd,
-      errors: errors.length > 0 ? errors : undefined,
+      errors: surfaced.length > 0 ? surfaced : undefined,
     },
   }
 }

@@ -29,7 +29,9 @@ const NOW = new Date("2026-07-08T10:00:00Z").getTime()
 
 async function seedAdapter(
   presence?: AdapterInstanceRow["presence"],
-  presenceState?: AdapterInstanceRow["presenceState"]
+  presenceState?: AdapterInstanceRow["presenceState"],
+  /** Override the platform / transport so capability rules can be exercised. */
+  identity?: Partial<Pick<AdapterInstanceRow, "type" | "transportMode" | "settings">>
 ): Promise<AdapterInstanceRow> {
   const row = await createAdapterInstance({
     id: "ad-1",
@@ -37,6 +39,7 @@ async function seedAdapter(
     displayName: "Lark Bot",
     enabled: true,
     transportMode: "gateway",
+    ...identity,
     settings: {},
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: { mode: "auto" } as unknown as AdapterInstanceRow["trigger"],
@@ -193,6 +196,63 @@ describe("runUsagePresenceRefresh", () => {
     await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
     const updated = await getAdapterInstance(row.id)
     expect(updated!.presenceState!.lastError).toContain("setPresenceStatus")
+  })
+
+  it("does not attempt a badge the instance cannot serve", async () => {
+    // A webhook-mode Discord adapter DOES implement setPresenceStatus; it just
+    // throws "gateway not connected" every tick. Asking the method whether the
+    // capability exists gets the wrong answer.
+    const row = await seedAdapter(
+      { enabled: true, mode: "badge", intervalMinutes: 5, window: "today" },
+      undefined,
+      { type: "discord", transportMode: "webhook" }
+    )
+    const setPresenceStatus = jest.fn()
+    mockGetAdapter.mockReturnValue(fakeAdapter({ setPresenceStatus }))
+
+    const res = await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    expect(setPresenceStatus).not.toHaveBeenCalled()
+    expect(res.success).toBe(true)
+    const updated = await getAdapterInstance(row.id)
+    expect(updated!.presenceState!.lastError).toContain("transport_unsupported")
+  })
+
+  it("does not audit a permanent configuration gap on every tick", async () => {
+    // The gap cannot resolve by retrying, so an `adapter.error` row per
+    // interval is noise that buries the anomalies the audit exists for.
+    const row = await seedAdapter(
+      { enabled: true, mode: "badge", intervalMinutes: 5, window: "today" },
+      undefined,
+      { type: "discord", transportMode: "webhook" }
+    )
+    mockGetAdapter.mockReturnValue(fakeAdapter({ setPresenceStatus: jest.fn() }))
+    // Audit rows survive between tests in this suite (same adapter id), so
+    // start from a known-empty table rather than asserting on a total.
+    await getDb().connectorAudit.clear()
+
+    await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    const audits = await getDb().connectorAudit.where("adapterId").equals(row.id).toArray()
+    expect(audits.filter((a) => a.kind === "adapter.error")).toHaveLength(0)
+  })
+
+  it("still audits a real runtime failure", async () => {
+    const row = await seedAdapter({
+      enabled: true,
+      mode: "badge",
+      intervalMinutes: 5,
+      window: "today",
+    })
+    mockGetAdapter.mockReturnValue(
+      fakeAdapter({ setPresenceStatus: jest.fn().mockRejectedValue(new Error("boom")) })
+    )
+    await getDb().connectorAudit.clear()
+
+    await runUsagePresenceRefresh({ adapterId: row.id, now: NOW })
+
+    const audits = await getDb().connectorAudit.where("adapterId").equals(row.id).toArray()
+    expect(audits.filter((a) => a.kind === "adapter.error")).toHaveLength(1)
   })
 
   it("card mode enqueues a markdown card and records the creating job id", async () => {
