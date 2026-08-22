@@ -43,6 +43,7 @@ import {
 } from "./serialize"
 import { startQQGateway } from "./gateway-client"
 import { startWebhookTransport } from "./transport-webhook"
+import { enrichQQInboundMedia } from "./inbound-media"
 
 export interface QQOfficialAdapterOptions {
   id: string
@@ -173,6 +174,11 @@ export function createQQOfficialAdapter(opts: QQOfficialAdapterOptions): Platfor
     }
     if (!(await gateInboundEvent(opts.id, event))) return
     lastActivityAt = Date.now()
+    // Download what the parser could only reference, so a picture sent to the
+    // bot reaches the model as an image rather than as the text
+    // `[image: https://gchat.qpic.cn/…]`. After the gate: a message that is
+    // going to be dropped costs no downloads.
+    await enrichQQInboundMedia(event)
     await ctx.emit(event)
   }
 
