@@ -1,5 +1,8 @@
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
-import type { ExternalAgentStore, StoredExternalAgentConfig } from "./types"
+import type {
+  ExternalAgentStore,
+  LifecycleExternalAgentConfig,
+  StoredExternalAgentConfig,
+} from "./types"
 
 // Config hydration
 // ============================================================================
@@ -18,12 +21,14 @@ import type { ExternalAgentStore, StoredExternalAgentConfig } from "./types"
  * the stored object only when the agent actually changes, so unchanged agents
  * keep yielding the same hydrated instance, and a changed one re-hydrates.
  */
-const hydratedConfigs = new WeakMap<StoredExternalAgentConfig, ExternalAgentConfig>()
+const hydratedConfigs = new WeakMap<StoredExternalAgentConfig, LifecycleExternalAgentConfig>()
 
-export function hydrateAgentConfig(stored: StoredExternalAgentConfig): ExternalAgentConfig {
+export function hydrateAgentConfig(
+  stored: StoredExternalAgentConfig
+): LifecycleExternalAgentConfig {
   const cached = hydratedConfigs.get(stored)
   if (cached) return cached
-  const hydrated: ExternalAgentConfig = {
+  const hydrated: LifecycleExternalAgentConfig = {
     ...stored,
     createdAt: new Date(stored.createdAt),
     updatedAt: new Date(stored.updatedAt),

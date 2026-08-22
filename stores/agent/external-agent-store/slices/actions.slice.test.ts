@@ -776,3 +776,118 @@ describe("useExternalAgentStore Tauri-only no-op guards", () => {
     expect(useExternalAgentStore.getState().terminalIds).toEqual([])
   })
 })
+
+describe("patchLifecycle", () => {
+  beforeEach(() => {
+    reset()
+    jest.clearAllMocks()
+  })
+
+  const addAgent = () =>
+    useExternalAgentStore.getState().addAgent({
+      name: "Codex",
+      protocol: "acp",
+      transport: "stdio",
+      process: { command: "codex", args: ["app-server"] },
+    })
+
+  it("stores lifecycle fields alongside the config", () => {
+    const id = addAgent()
+
+    useExternalAgentStore.getState().patchLifecycle(id, {
+      runtimeBinding: { runtimeId: "codex-acp", ownership: "system" },
+      lifecycleStatus: "ready",
+    })
+
+    const stored = useExternalAgentStore.getState().getAgent(id)
+    expect(stored?.runtimeBinding).toEqual({ runtimeId: "codex-acp", ownership: "system" })
+    expect(stored?.lifecycleStatus).toBe("ready")
+    // The config itself is untouched.
+    expect(stored?.name).toBe("Codex")
+  })
+
+  it("merges successive patches instead of replacing them", () => {
+    const id = addAgent()
+    const store = () => useExternalAgentStore.getState()
+
+    store().patchLifecycle(id, { credentialRefs: { apiKey: `${id}:apiKey` } })
+    store().patchLifecycle(id, { lifecycleStatus: "needs-consent" })
+
+    const stored = store().getAgent(id)
+    expect(stored?.credentialRefs).toEqual({ apiKey: `${id}:apiKey` })
+    expect(stored?.lifecycleStatus).toBe("needs-consent")
+  })
+
+  it("deletes a field passed as undefined, which is how consent is revoked", () => {
+    const id = addAgent()
+    const store = () => useExternalAgentStore.getState()
+
+    store().patchLifecycle(id, {
+      unsandboxedConsent: {
+        agentId: id,
+        runtimeId: "codex-acp",
+        executablePath: "C:\\tools\\npx.cmd",
+        executableDigest: "a".repeat(64),
+        runtimeVersion: "1.0.0",
+        commandDigest: "b".repeat(64),
+        policyRevision: 1,
+        hostId: "host-1",
+        confirmedAt: "2026-08-22T00:00:00.000Z",
+      },
+    })
+    expect(store().getAgent(id)?.unsandboxedConsent).toBeDefined()
+
+    store().patchLifecycle(id, { unsandboxedConsent: undefined })
+
+    const stored = store().getAgent(id)
+    expect(stored?.unsandboxedConsent).toBeUndefined()
+    // Deleted, not merely set to undefined -- a persisted record that still
+    // carries the key would keep claiming a consent exists.
+    expect("unsandboxedConsent" in (stored as object)).toBe(false)
+  })
+
+  it("is a no-op when nothing actually changes", () => {
+    const id = addAgent()
+    const store = () => useExternalAgentStore.getState()
+
+    store().patchLifecycle(id, { lifecycleStatus: "ready" })
+    const first = store().agents[id]
+
+    store().patchLifecycle(id, { lifecycleStatus: "ready" })
+
+    // Reconciliation re-affirms the same verdict on every startup. Replacing
+    // the stored object anyway would mint a fresh hydrated config each time and
+    // defeat the identity cache that keeps useSyncExternalStore from looping.
+    expect(store().agents[id]).toBe(first)
+    expect(store().getAgent(id)).toBe(store().getAgent(id))
+  })
+
+  it("is a no-op when deleting a field that was never set", () => {
+    const id = addAgent()
+    const store = () => useExternalAgentStore.getState()
+    const before = store().agents[id]
+
+    store().patchLifecycle(id, { unsandboxedConsent: undefined })
+
+    expect(store().agents[id]).toBe(before)
+  })
+
+  it("re-hydrates once the verdict genuinely changes", () => {
+    const id = addAgent()
+    const store = () => useExternalAgentStore.getState()
+
+    store().patchLifecycle(id, { lifecycleStatus: "ready" })
+    const ready = store().getAgent(id)
+
+    store().patchLifecycle(id, { lifecycleStatus: "blocked" })
+
+    expect(store().getAgent(id)).not.toBe(ready)
+    expect(store().getAgent(id)?.lifecycleStatus).toBe("blocked")
+  })
+
+  it("ignores an unknown agent", () => {
+    const store = () => useExternalAgentStore.getState()
+    expect(() => store().patchLifecycle("missing", { lifecycleStatus: "ready" })).not.toThrow()
+    expect(store().getAgent("missing")).toBeUndefined()
+  })
+})

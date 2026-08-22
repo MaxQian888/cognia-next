@@ -245,6 +245,43 @@ export const createExternalAgentActionsSlice = (
     })
   },
 
+  patchLifecycle: (id, fields): void => {
+    set((state) => {
+      const agent = state.agents[id]
+      if (!agent) return state
+
+      const updated: StoredExternalAgentConfig = { ...agent }
+      const target = updated as unknown as Record<string, unknown>
+      const current = agent as unknown as Record<string, unknown>
+      let changed = false
+
+      // An explicitly-present `undefined` means "remove this", which is how a
+      // revoked Windows consent or a cleared reason code actually disappears.
+      // Spreading `fields` would keep the key with an undefined value and the
+      // persisted record would still claim to have one.
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined) {
+          if (!(key in current)) continue
+          delete target[key]
+          changed = true
+        } else {
+          if (JSON.stringify(current[key]) === JSON.stringify(value)) continue
+          target[key] = value
+          changed = true
+        }
+      }
+
+      // Reconciliation runs on every startup and re-affirms the same verdict
+      // for most agents. Replacing the stored object anyway would mint a fresh
+      // hydrated config each time and defeat the identity cache that keeps
+      // `useSyncExternalStore` from looping (see `hydrateAgentConfig`).
+      if (!changed) return state
+
+      updated.updatedAt = new Date().toISOString()
+      return { agents: { ...state.agents, [id]: updated } }
+    })
+  },
+
   removeAgent: (id: string): void => {
     set((state) => {
       const { [id]: _removed, ...rest } = state.agents

@@ -8,19 +8,29 @@ import type {
   CreateExternalAgentInput,
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
+import type { ExternalAgentLifecycleFields } from "@/types/agent/external-agent-lifecycle"
 import type {
   ExternalAgentSpawnConfig,
   TerminalInfo,
   TerminalOutputResult,
 } from "@/lib/native/external-agent"
 
-export interface StoredExternalAgentConfig extends Omit<
-  ExternalAgentConfig,
-  "createdAt" | "updatedAt"
-> {
+/**
+ * A persisted configuration.
+ *
+ * Carries the lifecycle-plane fields (runtime binding, credential references,
+ * reconciliation verdict, Windows consent) alongside the Agent config itself.
+ * They are stored, never edited directly: {@link ExternalAgentActions.patchLifecycle}
+ * is the only writer, and the lifecycle service is its only caller.
+ */
+export interface StoredExternalAgentConfig
+  extends Omit<ExternalAgentConfig, "createdAt" | "updatedAt">, ExternalAgentLifecycleFields {
   createdAt: string
   updatedAt: string
 }
+
+/** A configuration as callers read it back, lifecycle fields included. */
+export type LifecycleExternalAgentConfig = ExternalAgentConfig & ExternalAgentLifecycleFields
 
 /**
  * Running agent instance (runtime state)
@@ -102,8 +112,15 @@ export interface ExternalAgentActions {
   ) => string | null
   updateAgent: (id: string, updates: UpdateExternalAgentInput) => void
   removeAgent: (id: string) => void
-  getAgent: (id: string) => ExternalAgentConfig | undefined
-  getAllAgents: () => ExternalAgentConfig[]
+  getAgent: (id: string) => LifecycleExternalAgentConfig | undefined
+  getAllAgents: () => LifecycleExternalAgentConfig[]
+  /**
+   * Persist lifecycle-plane fields that are not part of the user edit surface.
+   *
+   * An explicitly `undefined` field is DELETED rather than ignored, which is
+   * what makes revoking a Windows consent actually remove it.
+   */
+  patchLifecycle: (id: string, fields: ExternalAgentLifecycleFields) => void
 
   // Connection status
   setConnectionStatus: (id: string, status: ExternalAgentConnectionStatus) => void
