@@ -16,21 +16,35 @@
  *      its file is gone; anything unconfirmed goes to `connectorCleanupJobs`
  *      so the ciphertext is retried rather than orphaned. Best-effort at this
  *      level for the same reason as step 1.
- *   3. Row delete — the only step that is allowed to throw.
+ *   3. Residue reap (`reapAdapterResidue`) — every OTHER table this adapter
+ *      wrote to: audit, dedup ledger, queued outbound, inbox telemetry, the
+ *      Lark session tables, per-conversation overrides, and the identities only
+ *      this bot ever saw. All of it is unreachable once the row is gone, and
+ *      none of it has a sweep of its own. See that module for the two
+ *      categories deliberately kept.
+ *   4. Row delete — the only step that is allowed to throw.
  *
- * Order matters: secrets go first so a failure in step 3 leaves the row
- * (visible, retryable) rather than an orphaned credential.
+ * Order matters: secrets go first so a failure in step 4 leaves the row
+ * (visible, retryable) rather than an orphaned credential. The reap runs BEFORE
+ * the row delete for the same reason — a half-reaped adapter whose row survives
+ * can be removed again; one whose row is already gone cannot be found.
  */
 
 import { isTauri } from "@/lib/tauri"
 import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
 import { pruneAttachmentsForAdapter } from "@/lib/connectors/attachment-fetcher"
+import { reapAdapterResidue, type AdapterResidueReport } from "@/lib/connectors/adapter-residue"
 import { deleteAdapterInstance } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
-/** The subset of a row the removal path needs — full rows satisfy it too. */
+/**
+ * The subset of a row the removal path needs — full rows satisfy it too.
+ * `type` is optional because a plugin may remove an id whose row is already
+ * gone; without it the conversation-scoped residue cannot be located, and the
+ * reap reports those tables as unreachable instead of claiming they were clean.
+ */
 export type RemovableAdapterInstance = Pick<AdapterInstanceRow, "id"> &
-  Partial<Pick<AdapterInstanceRow, "credentialsRef">>
+  Partial<Pick<AdapterInstanceRow, "type" | "credentialsRef">>
 
 export interface RemoveAdapterInstanceResult {
   /** Keyring accounts that were deleted (empty off-desktop). */
@@ -39,6 +53,8 @@ export interface RemoveAdapterInstanceResult {
   failedCredentials: string[]
   /** Attachments removed (blob + row); `null` when the prune itself failed. */
   prunedAttachments: number | null
+  /** Per-table counts of the derived rows reaped, and any table that refused. */
+  residue: AdapterResidueReport
 }
 
 export async function removeAdapterInstance(
@@ -68,7 +84,9 @@ export async function removeAdapterInstance(
     prunedAttachments = null
   }
 
+  const residue = await reapAdapterResidue(row)
+
   await deleteAdapterInstance(row.id)
 
-  return { purgedCredentials, failedCredentials, prunedAttachments }
+  return { purgedCredentials, failedCredentials, prunedAttachments, residue }
 }

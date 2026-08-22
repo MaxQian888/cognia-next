@@ -198,7 +198,10 @@ export function deliveryTargetFromEvent(event: NormalizedInboundEvent): Conversa
   }
 }
 
-const KEY_SEP = ":"
+/** Separator every `conversationKey` uses. Exported so a prefix scan cannot
+ * hard-code it out of sync with {@link buildConversationKey}. */
+export const CONVERSATION_KEY_SEP = ":"
+const KEY_SEP = CONVERSATION_KEY_SEP
 
 export function buildConversationKey(
   platform: PlatformKind,

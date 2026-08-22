@@ -99,8 +99,9 @@ export function AdapterListRow({
     setRemoving(true)
     try {
       // Shared removal path: keyring purge (desktop, best-effort) → attachment
-      // cache prune (best-effort) → row + heartbeat delete. Same seam the
-      // plugin API's `deleteInstance` uses, so the two can't drift.
+      // cache prune (best-effort) → residue reap (audit, ledger, queued
+      // outbound, overrides, identities) → row + heartbeat delete. Same seam
+      // the plugin API's `deleteInstance` uses, so the two can't drift.
       await removeAdapterInstance(row)
       if (selected) setSelectedAdapterId(null)
       setRemoveOpen(false)

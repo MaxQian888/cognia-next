@@ -1,6 +1,6 @@
 /**
  * Tests for lib/connectors/remove-adapter-instance.ts — the shared removal
- * path (keyring purge → attachment prune → row delete).
+ * path (keyring purge → attachment prune → residue reap → row delete).
  */
 
 const mockIsTauri = jest.fn().mockReturnValue(true)
@@ -21,6 +21,14 @@ jest.mock("@/lib/db/adapter-instances", () => ({
   deleteAdapterInstance: (...args: unknown[]) => mockDelete(...args),
 }))
 
+// The reaper talks to Dexie; this suite is the node-env orchestration test, so
+// it stubs the reaper the same way it stubs the prune. `adapter-residue.test.ts`
+// covers the real deletes against the real schema.
+const mockReap = jest.fn().mockResolvedValue({ reaped: {}, failed: [] })
+jest.mock("@/lib/connectors/adapter-residue", () => ({
+  reapAdapterResidue: (...args: unknown[]) => mockReap(...args),
+}))
+
 import { removeAdapterInstance } from "./remove-adapter-instance"
 
 const ROW = {
@@ -34,6 +42,7 @@ beforeEach(() => {
   mockKeyringDelete.mockResolvedValue(undefined)
   mockPrune.mockResolvedValue(0)
   mockDelete.mockResolvedValue(undefined)
+  mockReap.mockResolvedValue({ reaped: {}, failed: [] })
 })
 
 describe("removeAdapterInstance", () => {
@@ -46,13 +55,19 @@ describe("removeAdapterInstance", () => {
       order.push("prune")
       return 3
     })
+    mockReap.mockImplementation(async () => {
+      order.push("reap")
+      return { reaped: { connectorAudit: 2 }, failed: [] }
+    })
     mockDelete.mockImplementation(async () => {
       order.push("delete")
     })
 
     const result = await removeAdapterInstance(ROW)
 
-    expect(order).toEqual(["keyring:botToken", "keyring:extra", "prune", "delete"])
+    // The reap must precede the row delete: a half-reaped adapter whose row
+    // survives can be removed again; one whose row is gone cannot be found.
+    expect(order).toEqual(["keyring:botToken", "keyring:extra", "prune", "reap", "delete"])
     expect(mockKeyringDelete).toHaveBeenCalledWith("tg-1", "botToken")
     expect(mockKeyringDelete).toHaveBeenCalledWith("tg-1", "extra")
     expect(mockPrune).toHaveBeenCalledWith("tg-1")
@@ -61,6 +76,7 @@ describe("removeAdapterInstance", () => {
       purgedCredentials: ["botToken", "extra"],
       failedCredentials: [],
       prunedAttachments: 3,
+      residue: { reaped: { connectorAudit: 2 }, failed: [] },
     })
   })
 
