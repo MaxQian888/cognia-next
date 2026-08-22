@@ -25,6 +25,7 @@ import type {
   ExternalAgentConnectionStatus,
   ExternalAgentSessionExtensionSupport,
   AcpAvailableCommand,
+  ExternalAgentTokenUsage,
 } from "@/types/agent/external-agent"
 import {
   resolveCommandCompactionCapability,
@@ -33,6 +34,7 @@ import {
   type ExternalAgentCompactionOptions,
   type ExternalAgentProviderUndoCapability,
 } from "./session-capabilities"
+import type { ExternalAgentCapabilityMatrix } from "@cognia/agent-config-types/external-agent-capability"
 
 /**
  * Protocol adapter interface
@@ -336,6 +338,66 @@ export interface SessionCreateOptions {
 /**
  * Base class for protocol adapters providing common functionality
  */
+/**
+ * Fold a context-window `usage_update` into the running usage.
+ *
+ * The protocol reports OCCUPANCY (`used` / `size`) and a cumulative cost, not a
+ * prompt/completion split — see `canonical-contract.ts`. So `used` becomes
+ * `contextTokens`, `size` becomes the window, and `totalTokens` is only filled
+ * when nothing better has arrived: overwriting a real breakdown with an
+ * occupancy figure would silently halve a caller's token accounting.
+ */
+export function foldUsageUpdate(
+  current: ExternalAgentTokenUsage | undefined,
+  event: { used: number; size: number; cost?: { amount: number; currency: string } | null }
+): ExternalAgentTokenUsage {
+  const base: ExternalAgentTokenUsage = current ?? {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+  }
+  return {
+    ...base,
+    contextTokens: event.used,
+    ...(event.size > 0 ? { modelContextWindow: event.size } : {}),
+    ...(base.totalTokens === 0 ? { totalTokens: event.used } : {}),
+    ...(event.cost
+      ? { providerCost: { amount: event.cost.amount, currency: event.cost.currency } }
+      : {}),
+  }
+}
+
+/**
+ * The turn's usage: the terminal figure when there is one, otherwise the last
+ * streamed one.
+ *
+ * Not a deep merge. When `done` reports usage it is the adapter's final,
+ * authoritative accounting and must not be diluted by an earlier partial —
+ * except for the two fields `done` structurally cannot carry on some adapters
+ * (the live context window, and a provider-reported cost that only ever
+ * arrives on a `usage_update`), which are carried forward when the final
+ * figure is silent about them.
+ */
+export function mergeTurnUsage(
+  final: ExternalAgentTokenUsage | undefined,
+  streamed: ExternalAgentTokenUsage | undefined
+): ExternalAgentTokenUsage | undefined {
+  if (!final) return streamed
+  if (!streamed) return final
+  return {
+    ...final,
+    ...(final.contextTokens === undefined && streamed.contextTokens !== undefined
+      ? { contextTokens: streamed.contextTokens }
+      : {}),
+    ...(final.modelContextWindow === undefined && streamed.modelContextWindow !== undefined
+      ? { modelContextWindow: streamed.modelContextWindow }
+      : {}),
+    ...(final.providerCost === undefined && streamed.providerCost !== undefined
+      ? { providerCost: streamed.providerCost }
+      : {}),
+  }
+}
+
 export abstract class BaseProtocolAdapter implements ProtocolAdapter {
   respondToElicitation?(response: AcpElicitationResponse): Promise<void>
   abstract readonly protocol: string
@@ -467,7 +529,15 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
     let currentThinking = ""
     let success = true
     let error: string | undefined
-    let tokenUsage: ExternalAgentResult["tokenUsage"]
+    // Two sources, deliberately kept apart until the end. `done` carries the
+    // authoritative final figure when an adapter has one; the streaming
+    // `usage_update` / `message_end` events are the running one. Reading only
+    // `done` (which is what this used to do) meant every adapter that reports
+    // usage mid-stream and settles without repeating it — OpenCode, and any
+    // ACP agent that sends `usage_update` — returned a result with no usage at
+    // all, while the events the caller had just seen carried it.
+    let finalUsage: ExternalAgentResult["tokenUsage"]
+    let streamedUsage: ExternalAgentResult["tokenUsage"]
 
     try {
       for await (const event of this.prompt(sessionId, message, options)) {
@@ -544,9 +614,20 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
             error = event.error
             break
 
+          case "usage_update":
+            // A context-window report. It carries occupancy rather than a
+            // prompt/completion split, so it can only FILL what nothing else
+            // has said — never overwrite a real breakdown with zeros.
+            streamedUsage = foldUsageUpdate(streamedUsage, event)
+            break
+
+          case "message_end":
+            if (event.tokenUsage) streamedUsage = event.tokenUsage
+            break
+
           case "done":
             success = event.success
-            tokenUsage = event.tokenUsage
+            if (event.tokenUsage) finalUsage = event.tokenUsage
             break
         }
       }
@@ -572,7 +653,7 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
         steps,
         toolCalls,
         duration: Date.now() - startTime,
-        tokenUsage,
+        tokenUsage: mergeTurnUsage(finalUsage, streamedUsage),
         error,
       }
     } catch (err) {
@@ -693,6 +774,34 @@ export type ProtocolAdapterFactory = () => ProtocolAdapter
 /** protocol id → owning pluginId, for bulk cleanup on plugin disable. */
 const pluginAdapterOwners = new Map<string, string>()
 
+/**
+ * protocol id → what the contributing manifest DECLARED about it.
+ *
+ * Kept beside the factory rather than inside it because the declaration has to
+ * be readable without instantiating an adapter: the static preflight answers
+ * "can this configuration possibly work?" before anything is spawned, and
+ * constructing an adapter to ask would defeat the point of a preflight.
+ */
+const pluginAdapterMetadata = new Map<string, PluginProtocolAdapterMetadata>()
+
+/**
+ * Registration metadata for a plugin-contributed protocol.
+ *
+ * `capabilities` being absent is a real state, not a missing field: a plugin
+ * that predates capability declarations registers fine and every capability
+ * stays `unknown`, which fails closed against a hard requirement while still
+ * letting the handshake prove the adapter works.
+ */
+export interface PluginProtocolAdapterMetadata {
+  pluginId: string
+  /** The bare contribution id, i.e. the half after the colon. */
+  adapterId: string
+  /** Adapter version, if the manifest declared one. */
+  version?: string
+  /** Layer-2 capability refinement from the manifest, if declared. */
+  capabilities?: ExternalAgentCapabilityMatrix
+}
+
 // ----------------------------------------------------------------------------
 // Registry change notifications
 //
@@ -750,7 +859,12 @@ function emitProtocolAdapterRegistryChange(change: ProtocolAdapterRegistryChange
 export function registerPluginProtocolAdapter(
   protocol: string,
   factory: ProtocolAdapterFactory,
-  opts: { pluginId: string }
+  opts: {
+    pluginId: string
+    adapterId?: string
+    version?: string
+    capabilities?: ExternalAgentCapabilityMatrix
+  }
 ): boolean {
   const existingOwner = pluginAdapterOwners.get(protocol)
   if (protocolAdapterRegistry.has(protocol) && existingOwner !== opts.pluginId) {
@@ -758,6 +872,12 @@ export function registerPluginProtocolAdapter(
   }
   protocolAdapterRegistry.register(protocol, factory)
   pluginAdapterOwners.set(protocol, opts.pluginId)
+  pluginAdapterMetadata.set(protocol, {
+    pluginId: opts.pluginId,
+    adapterId: opts.adapterId ?? protocol.slice(opts.pluginId.length + 1),
+    ...(opts.version ? { version: opts.version } : {}),
+    ...(opts.capabilities ? { capabilities: opts.capabilities } : {}),
+  })
   emitProtocolAdapterRegistryChange({
     kind: "register",
     protocols: [protocol],
@@ -776,6 +896,7 @@ export function unregisterPluginProtocolAdaptersByPlugin(pluginId: string): numb
     if (owner === pluginId) {
       protocolAdapterRegistry.unregister(protocol)
       pluginAdapterOwners.delete(protocol)
+      pluginAdapterMetadata.delete(protocol)
       removedProtocols.push(protocol)
     }
   }
@@ -786,6 +907,19 @@ export function unregisterPluginProtocolAdaptersByPlugin(pluginId: string): numb
 /** Returns the owning pluginId for a protocol, or undefined for a built-in. */
 export function getPluginProtocolAdapterOwner(protocol: string): string | undefined {
   return pluginAdapterOwners.get(protocol)
+}
+
+/**
+ * What the manifest declared about a plugin-contributed protocol.
+ *
+ * `undefined` for a built-in protocol — which is not a gap: a built-in's
+ * capability row lives in `protocol/agent-capabilities.json`, and answering
+ * from here as well would be the second source of truth this contract removes.
+ */
+export function getPluginProtocolAdapterMetadata(
+  protocol: string
+): PluginProtocolAdapterMetadata | undefined {
+  return pluginAdapterMetadata.get(protocol)
 }
 
 /**

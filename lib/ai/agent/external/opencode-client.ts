@@ -115,12 +115,21 @@ function toBase64(input: string): string {
 }
 
 /** Map an OpenCode AssistantMessage `tokens` object to canonical token usage. */
-function mapOpenCodeTokens(tokens?: {
-  input?: number
-  output?: number
-  reasoning?: number
-  cache?: { read?: number; write?: number }
-}): ExternalAgentTokenUsage | undefined {
+function mapOpenCodeTokens(
+  tokens?: {
+    input?: number
+    output?: number
+    reasoning?: number
+    cache?: { read?: number; write?: number }
+  },
+  /**
+   * OpenCode's own `cost` for the turn: a bare number, no currency. It was
+   * read off `message.updated` and then dropped on the floor, so a paid
+   * OpenCode turn reported tokens but never a price. Carried through verbatim
+   * — Cognia does not price external turns and must not invent the unit.
+   */
+  cost?: number
+): ExternalAgentTokenUsage | undefined {
   if (!tokens) return undefined
   const input = tokens.input ?? 0
   const output = tokens.output ?? 0
@@ -132,6 +141,9 @@ function mapOpenCodeTokens(tokens?: {
     totalTokens: input + output + reasoning,
     cacheReadTokens: tokens.cache?.read,
     cacheWriteTokens: tokens.cache?.write,
+    ...(typeof cost === "number" && Number.isFinite(cost)
+      ? { providerCost: { amount: cost } }
+      : {}),
   }
 }
 
@@ -1845,7 +1857,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
           finish?: string
           time?: { completed?: number }
         }
-        const tokenUsage = mapOpenCodeTokens(assistant.tokens)
+        const tokenUsage = mapOpenCodeTokens(assistant.tokens, assistant.cost)
         const errorMessage = assistant.error
           ? assistant.error.data?.message || assistant.error.name || "Assistant error"
           : undefined

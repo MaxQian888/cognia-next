@@ -1,5 +1,7 @@
 import {
   BaseProtocolAdapter,
+  foldUsageUpdate,
+  mergeTurnUsage,
   ProtocolAdapterRegistry,
   protocolAdapterRegistry,
   registerPluginProtocolAdapter,
@@ -18,6 +20,7 @@ import type {
   ExternalAgentMessage,
   ExternalAgentEvent,
   ExternalAgentExecutionOptions,
+  ExternalAgentResult,
   AcpPermissionResponse,
 } from "@/types/agent/external-agent"
 
@@ -633,5 +636,179 @@ describe("plugin overlay — per-plugin protocols + change events", () => {
     ).not.toThrow()
     expect(protocolAdapterRegistry.has("p1:a")).toBe(true)
     unsubscribe()
+  })
+})
+
+describe("turn usage folding", () => {
+  const message: ExternalAgentMessage = {
+    id: "m1",
+    role: "user",
+    content: [{ type: "text", text: "hi" }],
+    timestamp: new Date(),
+  }
+
+  async function runWith(events: ExternalAgentEvent[]) {
+    const adapter = new TestAdapter()
+    await adapter.connect({} as ExternalAgentConfig)
+    adapter.events = events
+    return adapter.execute("s1", message)
+  }
+
+  const done = (tokenUsage?: ExternalAgentResult["tokenUsage"]): ExternalAgentEvent => ({
+    type: "done",
+    sessionId: "s1",
+    timestamp: new Date(),
+    success: true,
+    ...(tokenUsage ? { tokenUsage } : {}),
+  })
+
+  it("keeps the terminal figure when `done` reports one", async () => {
+    const result = await runWith([
+      { type: "usage_update", sessionId: "s1", timestamp: new Date(), used: 10, size: 200 },
+      done({ promptTokens: 7, completionTokens: 3, totalTokens: 10 }),
+    ])
+    expect(result.tokenUsage).toMatchObject({
+      promptTokens: 7,
+      completionTokens: 3,
+      totalTokens: 10,
+    })
+  })
+
+  it("falls back to the streamed figure when `done` is silent", async () => {
+    // This is the case that used to return NOTHING: OpenCode reports usage on
+    // `message_end` and settles without repeating it, so a caller that had just
+    // watched the tokens go by got a result with no usage at all.
+    const result = await runWith([
+      {
+        type: "message_end",
+        sessionId: "s1",
+        timestamp: new Date(),
+        messageId: "a1",
+        tokenUsage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      },
+      done(),
+    ])
+    expect(result.tokenUsage).toMatchObject({
+      promptTokens: 5,
+      completionTokens: 5,
+      totalTokens: 10,
+    })
+  })
+
+  it("takes the LAST streamed figure, not the first", async () => {
+    const result = await runWith([
+      {
+        type: "message_end",
+        sessionId: "s1",
+        timestamp: new Date(),
+        messageId: "a1",
+        tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      },
+      {
+        type: "message_end",
+        sessionId: "s1",
+        timestamp: new Date(),
+        messageId: "a2",
+        tokenUsage: { promptTokens: 9, completionTokens: 1, totalTokens: 10 },
+      },
+      done(),
+    ])
+    expect(result.tokenUsage?.totalTokens).toBe(10)
+  })
+
+  it("carries a provider-reported cost that only a usage_update had", async () => {
+    const result = await runWith([
+      {
+        type: "usage_update",
+        sessionId: "s1",
+        timestamp: new Date(),
+        used: 120,
+        size: 200000,
+        cost: { amount: 0.42, currency: "USD" },
+      },
+      done({ promptTokens: 100, completionTokens: 20, totalTokens: 120 }),
+    ])
+    expect(result.tokenUsage).toMatchObject({
+      totalTokens: 120,
+      providerCost: { amount: 0.42, currency: "USD" },
+      modelContextWindow: 200000,
+    })
+  })
+
+  it("reports no usage when nothing did", async () => {
+    expect((await runWith([done()])).tokenUsage).toBeUndefined()
+  })
+})
+
+describe("foldUsageUpdate", () => {
+  it("records occupancy without inventing a prompt/completion split", () => {
+    const folded = foldUsageUpdate(undefined, { used: 30, size: 1000 })
+    expect(folded).toEqual({
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 30,
+      contextTokens: 30,
+      modelContextWindow: 1000,
+    })
+  })
+
+  it("never overwrites a real breakdown with an occupancy figure", () => {
+    // `used` is context occupancy, not the turn's tokens. Letting it win would
+    // silently halve a caller's accounting on any agent that sends both.
+    const folded = foldUsageUpdate(
+      { promptTokens: 900, completionTokens: 100, totalTokens: 1000 },
+      { used: 30, size: 1000 }
+    )
+    expect(folded.totalTokens).toBe(1000)
+    expect(folded.contextTokens).toBe(30)
+  })
+
+  it("omits a zero window rather than claiming the model has none", () => {
+    expect(foldUsageUpdate(undefined, { used: 5, size: 0 })).not.toHaveProperty(
+      "modelContextWindow"
+    )
+  })
+
+  it("ignores a null cost", () => {
+    expect(foldUsageUpdate(undefined, { used: 5, size: 10, cost: null })).not.toHaveProperty(
+      "providerCost"
+    )
+  })
+})
+
+describe("mergeTurnUsage", () => {
+  const final = { promptTokens: 7, completionTokens: 3, totalTokens: 10 }
+
+  it("returns whichever one exists", () => {
+    expect(mergeTurnUsage(final, undefined)).toBe(final)
+    expect(mergeTurnUsage(undefined, final)).toBe(final)
+    expect(mergeTurnUsage(undefined, undefined)).toBeUndefined()
+  })
+
+  it("does not let a streamed partial dilute a final breakdown", () => {
+    const merged = mergeTurnUsage(final, {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 30,
+      contextTokens: 30,
+    })
+    expect(merged).toMatchObject({ promptTokens: 7, completionTokens: 3, totalTokens: 10 })
+  })
+
+  it("carries forward only what the final figure structurally cannot hold", () => {
+    const merged = mergeTurnUsage(final, {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      contextTokens: 30,
+      modelContextWindow: 900,
+      providerCost: { amount: 1.5 },
+    })
+    expect(merged).toMatchObject({
+      totalTokens: 10,
+      contextTokens: 30,
+      modelContextWindow: 900,
+      providerCost: { amount: 1.5 },
+    })
   })
 })

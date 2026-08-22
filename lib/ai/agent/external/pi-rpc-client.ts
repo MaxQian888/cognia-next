@@ -32,6 +32,7 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
+  ExternalAgentTokenUsage,
 } from "@/types/agent/external-agent"
 
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -289,6 +290,15 @@ interface PiProcess {
   /** Resolves when the bundled extension reports itself ready. */
   handshake: Promise<void>
   settleHandshake?: () => void
+  /**
+   * Events that arrived while a `done` was being held for its usage query.
+   *
+   * `done` is the terminal event a consumer returns on, so anything dispatched
+   * during that round-trip must not overtake it — it would reach the iterator
+   * after the caller has already stopped reading, or ahead of the terminal
+   * event it precedes. Buffered here and flushed straight after `done`.
+   */
+  deferredWhileSettling?: ExternalAgentEvent[]
 }
 
 /**
@@ -853,12 +863,67 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       if (canonical.type === "permission_request") {
         this.pendingDialogs.set(canonical.request.id, { sessionId, method: "confirm" })
       }
-      for (const queue of record.queues) queue.push(canonical)
       if (canonical.type === "done") {
-        // Attach usage lazily: `get_session_stats` is a round-trip, so only
-        // pay for it once a turn actually finishes.
-        void this.attachUsage(sessionId)
+        // `get_session_stats` is a round-trip, so it is only paid for once a
+        // turn actually finishes — but it has to finish BEFORE `done` reaches
+        // the consumer. `prompt()` returns on `done`, and `execute()` reads
+        // `tokenUsage` off that event, so firing the query afterwards meant the
+        // usage landed on a session object nobody was still reading: every Pi
+        // turn reported zero tokens and zero cost.
+        record.deferredWhileSettling ??= []
+        void this.emitSettledWithUsage(sessionId, record, canonical)
+        continue
       }
+      // While a `done` is held, everything behind it waits too — see
+      // `deferredWhileSettling`.
+      if (record.deferredWhileSettling) {
+        record.deferredWhileSettling.push(canonical)
+        continue
+      }
+      for (const queue of record.queues) queue.push(canonical)
+    }
+  }
+
+  /**
+   * Attach the turn's usage to `done`, then release it.
+   *
+   * A failed stats query must not strand the turn: the `done` is pushed either
+   * way, just without usage. Usage is reporting; the turn already succeeded.
+   *
+   * The record is passed in rather than re-read after the await, and the queues
+   * are read off it directly: a session torn down mid-round-trip (a close, a
+   * process exit) removes it from `this.processes`, and looking it up again
+   * there would drop the terminal event on the floor — leaving every consumer's
+   * `for await` waiting forever on a `done` that had already been produced.
+   * Delivering into the queues the turn was streaming to is always correct;
+   * a queue nobody is reading is simply garbage-collected with its consumer.
+   */
+  private async emitSettledWithUsage(
+    sessionId: string,
+    record: PiProcess,
+    done: ExternalAgentEvent & { type: "done" }
+  ): Promise<void> {
+    const tokenUsage = await this.readSessionUsage(sessionId)
+    // A canonical `usage_update` before `done` as well, so a streaming consumer
+    // that never inspects the terminal event still sees the turn's cost.
+    if (tokenUsage) {
+      for (const queue of record.queues) {
+        queue.push({
+          type: "usage_update",
+          sessionId,
+          timestamp: new Date(),
+          used: tokenUsage.contextTokens ?? tokenUsage.totalTokens,
+          size: tokenUsage.modelContextWindow ?? 0,
+        })
+      }
+    }
+    const settled = tokenUsage ? { ...done, tokenUsage } : done
+    for (const queue of record.queues) queue.push(settled)
+    // Release anything that arrived behind the held `done`, in arrival order.
+    const deferred = record.deferredWhileSettling ?? []
+    record.deferredWhileSettling = undefined
+    for (const event of deferred) {
+      for (const queue of record.queues) queue.push(event)
     }
   }
 
@@ -876,16 +941,25 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     record.busy = false
   }
 
-  private async attachUsage(sessionId: string): Promise<void> {
+  /**
+   * The turn's usage, and the session's mirror of it.
+   *
+   * Returns `undefined` rather than throwing: usage is reporting, not
+   * correctness, and a stats query that fails must never fail a turn that
+   * succeeded.
+   */
+  private async readSessionUsage(sessionId: string): Promise<ExternalAgentTokenUsage | undefined> {
     const session = this._sessions.get(sessionId)
     const record = this.processes.get(sessionId)
-    if (!session || !record || record.exited) return
+    if (!session || !record || record.exited) return undefined
     try {
       const stats = await record.peer.sendCommand<PiSessionStats>("get_session_stats")
-      session.tokenUsage = piStatsToTokenUsage(stats)
+      const tokenUsage = piStatsToTokenUsage(stats)
+      session.tokenUsage = tokenUsage
       session.lastActivityAt = new Date()
+      return tokenUsage
     } catch {
-      // Usage is reporting, not correctness — never fail a completed turn.
+      return undefined
     }
   }
 

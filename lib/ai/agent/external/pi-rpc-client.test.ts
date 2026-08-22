@@ -266,6 +266,11 @@ interface FakeHostOptions {
    * line-framing test silently exercise the raw path.
    */
   framing?: "raw" | "line"
+  /**
+   * Commands the fake refuses instead of auto-answering. Used to prove that a
+   * failed side query (usage stats) still lets the turn complete.
+   */
+  failCommands?: readonly string[]
 }
 
 function createFakeHost(options: FakeHostOptions = {}): FakeHost {
@@ -274,6 +279,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
     resolverUnsupported = false,
     autoHandshake = true,
     framing = "raw",
+    failCommands = [],
   } = options
   const listeners = new Map<string, Set<(payload: unknown) => void>>()
   const spawns: FakeHost["spawns"] = []
@@ -354,6 +360,7 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
         // period in every test that closes a session.
         const frame = JSON.parse(message) as { type: string; id: string }
         if (AUTO_REPLY.has(frame.type)) {
+          const failed = failCommands.includes(frame.type)
           queueMicrotask(() =>
             emitFrame(
               agentId,
@@ -361,8 +368,10 @@ function createFakeHost(options: FakeHostOptions = {}): FakeHost {
                 id: frame.id,
                 type: "response",
                 command: frame.type,
-                success: true,
-                data: AUTO_REPLY.get(frame.type),
+                success: !failed,
+                ...(failed
+                  ? { error: `${frame.type} unavailable` }
+                  : { data: AUTO_REPLY.get(frame.type) }),
               }) + "\n"
             )
           )
@@ -950,6 +959,52 @@ describe("PiRpcClientAdapter — streaming", () => {
     return { adapter, events, iterator, agentId: "agent-1:sess-1" }
   }
 
+  it("carries the turn's usage ON the done event, not after it", async () => {
+    // `attachUsage` used to be fired with `void` AFTER `done` was pushed.
+    // `prompt()` returns on `done` and `execute()` reads `tokenUsage` off it,
+    // so the stats landed on a session object nobody was still reading and
+    // every Pi turn reported zero tokens.
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const events: ExternalAgentEvent[] = []
+    const iterator = (async () => {
+      for await (const event of adapter.prompt("sess-1", message)) events.push(event)
+      return events
+    })()
+    await Promise.resolve()
+    await Promise.resolve()
+    replyTo(host, "prompt", null)
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+
+    const settled = (await iterator).find((event) => event.type === "done")
+    expect(settled).toMatchObject({
+      type: "done",
+      tokenUsage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+  })
+
+  it("still completes the turn when the stats query fails", async () => {
+    // Usage is reporting, not correctness: a failed `get_session_stats` must
+    // never strand a turn that already succeeded.
+    const host = createFakeHost({ failCommands: ["get_session_stats"] })
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const events: ExternalAgentEvent[] = []
+    const iterator = (async () => {
+      for await (const event of adapter.prompt("sess-1", message)) events.push(event)
+      return events
+    })()
+    await Promise.resolve()
+    await Promise.resolve()
+    replyTo(host, "prompt", null)
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+
+    const seen = await iterator
+    expect(seen.map((event) => event.type)).toEqual(["done"])
+    expect(seen[0]).not.toHaveProperty("tokenUsage")
+  })
+
   it("streams text and completes only on agent_settled", async () => {
     const host = createFakeHost()
     const { iterator, agentId } = await startTurn(host)
@@ -968,7 +1023,16 @@ describe("PiRpcClientAdapter — streaming", () => {
     host.emitStdout(agentId, JSON.stringify({ type: "agent_settled" }) + "\n")
 
     const events = await iterator
-    expect(events).toEqual(["message_start", "message_delta", "progress", "progress", "done"])
+    // `usage_update` before `done`: the turn's cost has to reach a streaming
+    // consumer that never inspects the terminal event.
+    expect(events).toEqual([
+      "message_start",
+      "message_delta",
+      "progress",
+      "progress",
+      "usage_update",
+      "done",
+    ])
   })
 
   // ── Host framing parity ──────────────────────────────────────────────────
@@ -996,7 +1060,7 @@ describe("PiRpcClientAdapter — streaming", () => {
         "\n"
     )
 
-    expect(await iterator).toEqual(["message_start", "message_delta", "done"])
+    expect(await iterator).toEqual(["message_start", "message_delta", "usage_update", "done"])
   })
 
   it("reassembles a frame split across several line events", async () => {
@@ -1019,7 +1083,7 @@ describe("PiRpcClientAdapter — streaming", () => {
         "\n"
     )
 
-    expect(await iterator).toEqual(["message_delta", "done"])
+    expect(await iterator).toEqual(["message_delta", "usage_update", "done"])
   })
 
   it("ignores line events once the host has proved it speaks raw", async () => {
@@ -1032,7 +1096,7 @@ describe("PiRpcClientAdapter — streaming", () => {
     host.emitStdoutLines(agentId, JSON.stringify({ type: "message_start" }))
     host.emitStdout(agentId, JSON.stringify({ type: "agent_settled" }) + "\n")
 
-    expect(await iterator).toEqual(["message_start", "done"])
+    expect(await iterator).toEqual(["message_start", "usage_update", "done"])
   })
 
   it("treats the prompt response as acceptance, not completion", async () => {
@@ -1082,7 +1146,7 @@ describe("PiRpcClientAdapter — streaming", () => {
     host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
     await runA
 
-    expect(seenA).toEqual(["done"])
+    expect(seenA).toEqual(["usage_update", "done"])
   })
 
   it("surfaces an unexpected process exit as an error and ends the turn", async () => {

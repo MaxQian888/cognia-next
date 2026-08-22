@@ -878,6 +878,49 @@ describe("translateSdkEvent", () => {
     })
   })
 
+  it("keeps the provider's own cost, without inventing a currency", () => {
+    // `cost` was read off `message.updated` and then dropped, so a paid
+    // OpenCode turn reported tokens but never a price. OpenCode returns a bare
+    // number, so the currency stays ABSENT rather than being guessed as USD —
+    // a fabricated unit is worse than a missing one in anything that sums it.
+    const events = a.translateSdkEvent("s1", {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "m1",
+          role: "assistant",
+          tokens: { input: 100, output: 40 },
+          cost: 0.0123,
+          time: { created: 1, completed: 2 },
+        },
+      },
+    } as never)
+    const end = events.find((e) => e.type === "message_end") as {
+      tokenUsage?: { providerCost?: { amount: number; currency?: string } }
+    }
+    expect(end?.tokenUsage?.providerCost).toEqual({ amount: 0.0123 })
+    expect(end?.tokenUsage?.providerCost).not.toHaveProperty("currency")
+  })
+
+  it("reports no cost when the provider reported none", () => {
+    const events = a.translateSdkEvent("s1", {
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "m1",
+          role: "assistant",
+          tokens: { input: 10, output: 1 },
+          time: { created: 1, completed: 2 },
+        },
+      },
+    } as never)
+    const end = events.find((e) => e.type === "message_end") as {
+      tokenUsage?: { providerCost?: unknown }
+    }
+    expect(end?.tokenUsage).toBeDefined()
+    expect(end?.tokenUsage).not.toHaveProperty("providerCost")
+  })
+
   it("emits an error event when an assistant message carries a provider error", () => {
     const events = a.translateSdkEvent("s1", {
       type: "message.updated",

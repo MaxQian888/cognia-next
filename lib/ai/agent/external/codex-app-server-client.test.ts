@@ -330,6 +330,41 @@ describe("CodexAppServerAdapter", () => {
       expect((turn.params as Record<string, unknown>).threadId).toBe("thr_1")
     })
 
+    it("carries the turn's usage all the way into execute()'s result", async () => {
+      // Codex already puts the final figure on `done`; this pins the OTHER
+      // half — that `BaseProtocolAdapter.execute()` does not drop it on the way
+      // out. The folding rewrite that fixed OpenCode and Pi touches exactly
+      // that path, and a Codex regression there would be silent: the events
+      // would still look right and only the returned result would be empty.
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const running = adapter.execute(session.id, userMessage("hi"))
+
+      await Promise.resolve()
+      feed("item/completed", {
+        threadId: "thr_1",
+        item: { id: "a1", type: "agentMessage", text: "Hello" },
+      })
+      feed("thread/tokenUsage/updated", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        tokenUsage: {
+          total: { inputTokens: 40, outputTokens: 9, totalTokens: 49 },
+          last: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+          modelContextWindow: 272_000,
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      const result = await running
+      expect(result.tokenUsage).toMatchObject({
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+        modelContextWindow: 272_000,
+      })
+    })
+
     it("emits a single message_delta from a completed item when no deltas streamed", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()
