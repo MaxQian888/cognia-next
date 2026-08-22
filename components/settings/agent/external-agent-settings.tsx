@@ -5,7 +5,7 @@
  * Provides UI for configuring external agents, connection settings, and delegation rules
  */
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import {
   Plus,
@@ -30,10 +30,16 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
+import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
+import { lifecycleErrorMessage } from "@/lib/ai/agent/external/lifecycle/error-messages"
+import { getExternalAgentLifecycleService } from "@/lib/ai/agent/external/lifecycle/service"
+import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
 import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
 import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
 import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
+import { isTauri } from "@/lib/tauri"
+import { platform as tauriPlatform } from "@tauri-apps/plugin-os"
 import { cn } from "@/lib/utils"
 import { pickDirectory } from "@/lib/files/file-bridge"
 import { toast } from "@/components/ui/sonner"
@@ -102,6 +108,7 @@ import { extensionPolicyArgs, type PiExtensionPolicy } from "@/lib/ai/agent/exte
 import type {
   ExternalAgentConnectionStatus,
   CreateExternalAgentInput,
+  UpdateExternalAgentInput,
   AcpPermissionMode,
   ExternalAgentProtocol,
   ExternalAgentTransport,
@@ -310,24 +317,6 @@ function FormSection({
     </Collapsible>
   )
 }
-
-/**
- * Protocols offered in the editor's manual picker. `codex-app-server` used to be
- * reachable only through the preset gallery even though the form has a full
- * options branch for it; the transport-less protocols round out the union so a
- * hand-configured agent can target any supported backend.
- */
-const PROTOCOL_OPTIONS: readonly { value: ExternalAgentProtocol; label: string }[] = [
-  // i18n-exempt: protocol identifiers (brand/technical), matching the manager dialog.
-  { value: "acp", label: "ACP (Agent Client Protocol)" },
-  { value: "codex-app-server", label: "Codex app-server (JSON-RPC)" },
-  { value: "pi-rpc", label: "Pi native RPC" },
-  { value: "opencode", label: "OpenCode (HTTP + SSE)" },
-  { value: "opencode-v2", label: "OpenCode V2 (Preview)" },
-  { value: "a2a", label: "A2A (Agent-to-Agent)" },
-  { value: "http", label: "HTTP" },
-  { value: "websocket", label: "WebSocket" },
-]
 
 // =============================================================================
 // Agent Editor Dialog
@@ -697,9 +686,14 @@ function AgentEditorDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROTOCOL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                  {externalProtocolOptions(formData.protocol).map((option) => (
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      disabled={!option.selectable}
+                    >
                       {option.value === "opencode-v2" ? t("opencodeV2Protocol") : option.label}
+                      {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1414,7 +1408,19 @@ function AgentDetail({
 }: AgentDetailProps) {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
-  const { getConnectionStatus, getAgentValidity, updateAgent } = useExternalAgentStore()
+  const { getConnectionStatus, getAgentValidity } = useExternalAgentStore()
+
+  // Even a metadata-only write goes through the lifecycle service. The Pi
+  // migration next to it rewrites `process`, which IS runtime-affecting, and
+  // having one of the two paths bypass the service is how the store and the
+  // live adapter drifted apart in the first place.
+  const applyUpdate = useCallback(
+    async (updates: UpdateExternalAgentInput) => {
+      const lifecycle = await getExternalAgentLifecycleService()
+      await lifecycle.updateConfig(agent.id, updates)
+    },
+    [agent.id]
+  )
 
   const status = getConnectionStatus(agent.id)
   const isConnected = status === "connected"
@@ -1529,11 +1535,9 @@ function AgentDetail({
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                updateAgent(agent.id, {
-                  metadata: { providerUndoWarningAcknowledged: false },
-                })
-              }
+              onClick={() => {
+                void applyUpdate({ metadata: { providerUndoWarningAcknowledged: false } })
+              }}
               data-testid="reset-provider-undo-warning"
             >
               {t("providerUndoWarningReset")}
@@ -1647,7 +1651,9 @@ function AgentDetail({
         <PiMigrationCard
           agent={agent}
           blockers={runtimeValidity?.executable === false ? ["command_missing"] : []}
-          onApply={(next) => updateAgent(agent.id, next)}
+          onApply={(next) => {
+            void applyUpdate(next)
+          }}
         />
       </CardContent>
     </Card>
@@ -1701,6 +1707,7 @@ function RailItem({
 export function ExternalAgentSettings() {
   const t = useTranslations("externalAgent.settings")
   const tCommon = useTranslations("common")
+  const tErrors = useTranslations("externalAgent.lifecycleErrors")
 
   // Store
   const {
@@ -1708,9 +1715,6 @@ export function ExternalAgentSettings() {
     getAgent,
     getConnectionStatus,
     getAgentValidity,
-    addAgent,
-    updateAgent,
-    removeAgent,
     enabled,
     setEnabled,
     defaultPermissionMode,
@@ -1725,6 +1729,20 @@ export function ExternalAgentSettings() {
 
   // Hook for connection management
   const { connect, disconnect } = useExternalAgent()
+
+  // Platform gate. Resolved once: `isMacPlatform`-style helpers read the Tauri
+  // OS plugin, which is synchronous but only meaningful on desktop — a browser
+  // shell has no spawn path to sandbox and must not show the warning.
+  const sandboxAvailable = useMemo(() => {
+    if (!isTauri()) return true
+    try {
+      return externalAgentSandboxSupportsPlatform(tauriPlatform())
+    } catch {
+      // The OS plugin is unavailable (older shell / test env). Refusing here
+      // would put a scary banner in front of users we know nothing about.
+      return true
+    }
+  }, [])
 
   // Check if a specific agent is connecting
   const isConnecting = useCallback(
@@ -1752,12 +1770,23 @@ export function ExternalAgentSettings() {
   const agents = getAllAgents()
 
   // Handlers
+  //
+  // Every mutation goes through the lifecycle service rather than the store.
+  // Writing to the store directly persisted the change and left the runtime
+  // manager holding the old state: an agent added here was not registered
+  // until the next app restart, an edit left the previous configuration
+  // connected, and a delete could leave the child process running.
   const handleAddAgent = useCallback(
-    (data: CreateExternalAgentInput) => {
-      addAgent(data)
-      toast.success(t("agentAdded"))
+    async (data: CreateExternalAgentInput) => {
+      try {
+        const lifecycle = await getExternalAgentLifecycleService()
+        await lifecycle.createConfig(data)
+        toast.success(t("agentAdded"))
+      } catch (error) {
+        toast.error(lifecycleErrorMessage(error, tErrors))
+      }
     },
-    [addAgent, t]
+    [t, tErrors]
   )
 
   const handleEditAgent = useCallback((agentId: string) => {
@@ -1766,23 +1795,33 @@ export function ExternalAgentSettings() {
   }, [])
 
   const handleUpdateAgent = useCallback(
-    (data: CreateExternalAgentInput) => {
-      if (editingAgentId) {
-        updateAgent(editingAgentId, data)
-        toast.success(t("agentUpdated"))
-      }
+    async (data: CreateExternalAgentInput) => {
+      const agentId = editingAgentId
       setEditingAgentId(null)
+      if (!agentId) return
+      try {
+        const lifecycle = await getExternalAgentLifecycleService()
+        await lifecycle.updateConfig(agentId, data)
+        toast.success(t("agentUpdated"))
+      } catch (error) {
+        toast.error(lifecycleErrorMessage(error, tErrors))
+      }
     },
-    [editingAgentId, updateAgent, t]
+    [editingAgentId, t, tErrors]
   )
 
-  const handleDeleteAgent = useCallback(() => {
-    if (deleteConfirmId) {
-      removeAgent(deleteConfirmId)
+  const handleDeleteAgent = useCallback(async () => {
+    const agentId = deleteConfirmId
+    setDeleteConfirmId(null)
+    if (!agentId) return
+    try {
+      const lifecycle = await getExternalAgentLifecycleService()
+      await lifecycle.removeConfig(agentId)
       toast.success(t("agentRemoved"))
-      setDeleteConfirmId(null)
+    } catch (error) {
+      toast.error(lifecycleErrorMessage(error, tErrors))
     }
-  }, [deleteConfirmId, removeAgent, t])
+  }, [deleteConfirmId, t, tErrors])
 
   const handleConnect = useCallback(
     async (agentId: string) => {
@@ -1859,6 +1898,20 @@ export function ExternalAgentSettings() {
           </Button>
         </div>
       </div>
+
+      {/* Cognia never runs an external agent unsandboxed, and only macOS
+          Seatbelt and Linux bubblewrap qualify. Until now the only place that
+          knew was a throw inside the launcher, so a Windows user could
+          configure an agent, save it, connect it, and discover at spawn time
+          that it could never have run. */}
+      {!sandboxAvailable && (
+        <div
+          className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+          data-testid="external-agent-sandbox-unavailable"
+        >
+          {t("sandboxUnavailableOnPlatform")}
+        </div>
+      )}
 
       {/* Two-pane body. The outer div only declares the container (an element
           cannot query the container it declares); the inner div does the

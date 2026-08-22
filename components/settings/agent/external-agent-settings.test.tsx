@@ -16,7 +16,7 @@ import React from "react"
 import { render, screen, within, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ExternalAgentSettings } from "./external-agent-settings"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import type { CreateExternalAgentInput, ExternalAgentConfig } from "@/types/agent/external-agent"
 
 // ---- Mocks -----------------------------------------------------------------
 
@@ -85,6 +85,22 @@ const mockAgentRich: ExternalAgentConfig = {
 const addAgentMock = jest.fn()
 const updateAgentMock = jest.fn()
 const removeAgentMock = jest.fn()
+
+// Mutations go through the lifecycle service, not the store: a store write
+// persisted the change and left the runtime manager holding the old state, so
+// an agent added here was not registered until the next app restart.
+// Typed parameters, so `mock.calls[0][0]` is an input rather than an
+// element of an empty tuple.
+const createConfigMock = jest.fn(async (_input: CreateExternalAgentInput) => "agent-new")
+const updateConfigMock = jest.fn(async () => {})
+const removeConfigMock = jest.fn(async () => {})
+jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
+  getExternalAgentLifecycleService: async () => ({
+    createConfig: createConfigMock,
+    updateConfig: updateConfigMock,
+    removeConfig: removeConfigMock,
+  }),
+}))
 // An agent reconciliation blocked at startup. Before the verdict was rendered
 // this looked identical to one the user had simply switched off.
 const mockAgentBlocked = {
@@ -202,6 +218,18 @@ jest.mock("@/lib/ai/agent/external/config-normalizer", () => ({
   getExternalAgentExecutionBlockReason: () => null,
 }))
 
+// Platform gate for the mandatory-sandbox banner. jsdom is not Tauri, so the
+// default is "desktop shell absent" — which must NOT show the warning.
+const isTauriMock = jest.fn(() => false)
+const platformMock = jest.fn(() => "macos")
+jest.mock("@/lib/tauri", () => ({
+  ...(jest.requireActual("@/lib/tauri") as Record<string, unknown>),
+  isTauri: () => isTauriMock(),
+}))
+jest.mock("@tauri-apps/plugin-os", () => ({
+  platform: () => platformMock(),
+}))
+
 // ---- Tests -----------------------------------------------------------------
 
 describe("ExternalAgentSettings — preset onboarding", () => {
@@ -209,6 +237,9 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     addAgentMock.mockClear()
     updateAgentMock.mockClear()
     removeAgentMock.mockClear()
+    createConfigMock.mockClear()
+    updateConfigMock.mockClear()
+    removeConfigMock.mockClear()
     connectMock.mockClear()
     disconnectMock.mockClear()
     pickDirectoryMock.mockReset()
@@ -313,8 +344,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await act(async () => {
       await user.click(screen.getByRole("button", { name: /^add$/i }))
     })
-    expect(addAgentMock).toHaveBeenCalledTimes(1)
-    const input = addAgentMock.mock.calls[0][0]
+    expect(createConfigMock).toHaveBeenCalledTimes(1)
+    const input = createConfigMock.mock.calls[0][0]
     expect(input.protocol).toBe("codex-app-server")
     // Defaults: workspaceWrite sandbox with network off; no effort/summary
     // overrides until the user picks them.
@@ -336,8 +367,8 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await act(async () => {
       await user.click(screen.getByRole("button", { name: /^add$/i }))
     })
-    const input = addAgentMock.mock.calls[0][0]
-    expect(input.codexOptions.extraSkillRoots).toEqual(["/team/skills", "/opt/more"])
+    const input = createConfigMock.mock.calls[0][0]
+    expect(input.codexOptions?.extraSkillRoots).toEqual(["/team/skills", "/opt/more"])
   })
 
   it("appends a folder chosen via Browse and never duplicates it", async () => {
@@ -385,12 +416,12 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await act(async () => {
       await user.click(screen.getByRole("button", { name: /^add$/i }))
     })
-    const input = addAgentMock.mock.calls[0][0]
+    const input = createConfigMock.mock.calls[0][0]
     expect(input.protocol).toBe("pi-rpc")
     expect(input.process).toMatchObject({ command: "pi" })
     // Isolation is the default, and it has to reach `metadata` — the adapter
     // reads it from there when building spawn args.
-    expect(input.metadata.piExtensionPolicy).toBe("isolated")
+    expect(input.metadata?.piExtensionPolicy).toBe("isolated")
   })
 
   it("shows the exact isolation flags so the claim is inspectable", async () => {
@@ -434,7 +465,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await act(async () => {
       await user.click(screen.getByRole("button", { name: /^add$/i }))
     })
-    const input = addAgentMock.mock.calls[0][0]
+    const input = createConfigMock.mock.calls[0][0]
     expect(input).toMatchObject({
       protocol: "opencode-v2",
       transport: "sse",
@@ -457,7 +488,7 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     await act(async () => {
       await user.click(within(detail).getByTestId("reset-provider-undo-warning"))
     })
-    expect(updateAgentMock).toHaveBeenCalledWith("agent-2", {
+    expect(updateConfigMock).toHaveBeenCalledWith("agent-2", {
       metadata: { providerUndoWarningAcknowledged: false },
     })
   })
@@ -655,5 +686,38 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     // The AlertDialog confirmation surfaces (delete title from the messages).
     expect(await screen.findByRole("alertdialog")).toBeInTheDocument()
+  })
+})
+
+describe("ExternalAgentSettings — mandatory sandbox platform gate", () => {
+  afterEach(() => {
+    isTauriMock.mockReturnValue(false)
+    platformMock.mockReturnValue("macos")
+  })
+
+  it("says nothing in a browser shell, which has no spawn path to sandbox", () => {
+    isTauriMock.mockReturnValue(false)
+    platformMock.mockReturnValue("windows")
+    render(<ExternalAgentSettings />)
+    expect(screen.queryByTestId("external-agent-sandbox-unavailable")).not.toBeInTheDocument()
+  })
+
+  it("says nothing on a platform that can sandbox", () => {
+    isTauriMock.mockReturnValue(true)
+    platformMock.mockReturnValue("macos")
+    render(<ExternalAgentSettings />)
+    expect(screen.queryByTestId("external-agent-sandbox-unavailable")).not.toBeInTheDocument()
+  })
+
+  it("warns on Windows BEFORE the user configures an agent", () => {
+    // The only thing that knew this before was a throw inside the CLI's
+    // launcher, so a Windows user could configure an agent, save it, connect
+    // it, and only then find out it could never have run.
+    isTauriMock.mockReturnValue(true)
+    platformMock.mockReturnValue("windows")
+    render(<ExternalAgentSettings />)
+    expect(screen.getByTestId("external-agent-sandbox-unavailable")).toHaveTextContent(
+      /mandatory sandbox/i
+    )
   })
 })
