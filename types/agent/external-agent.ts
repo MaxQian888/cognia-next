@@ -10,6 +10,8 @@
 // Protocol Types
 // ============================================================================
 
+import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
+
 /**
  * Supported external agent protocols
  */
@@ -181,7 +183,15 @@ export interface ExternalAgentLastRunSnapshot {
 }
 
 /**
- * Capability snapshot projected as canonical runtime facts.
+ * Handshake evidence, projected as canonical runtime facts.
+ *
+ * NOT a capability authority — that is
+ * {@link ExternalAgentCapabilityProfileV1} (ADR-0090 external SSOT), which
+ * merges this handshake with the protocol manifest, the adapter's real methods
+ * and the host's ceilings. What survives here is the raw negotiation record:
+ * which protocol answered, whether it demanded auth, and which unstable session
+ * extensions it admitted. Reading `hasAgentCapabilities` as "this agent can do
+ * things" is exactly the kind of half-answer the profile replaced.
  */
 export interface ExternalAgentCapabilitySnapshot {
   protocol: ExternalAgentProtocol
@@ -193,6 +203,13 @@ export interface ExternalAgentCapabilitySnapshot {
 
 /**
  * Benchmark gap grades for external-agent adaptation.
+ *
+ * The benchmark map records ADAPTATION WORK — what a reference implementation
+ * does, what Cognia does instead, and whether a difference was accepted on
+ * purpose. It is not a capability source: `ExternalAgentCapabilityProfileV1`
+ * (ADR-0090 external SSOT) answers "can this agent do X?", and an
+ * `intentional-deviation` here is a review record, not a verdict a surface may
+ * gate on.
  */
 export type ExternalAgentBenchmarkGapGrade = "blocking" | "major" | "minor"
 
@@ -1528,6 +1545,20 @@ export interface ExternalAgentTokenUsage {
   contextTokens?: number
   /** The live model's authoritative context-window size, when reported. */
   modelContextWindow?: number
+  /**
+   * Cost the PROVIDER reported for this turn.
+   *
+   * Carried verbatim and never derived. OpenCode returns a bare number with no
+   * currency, so `currency` stays absent rather than being guessed as USD — a
+   * fabricated unit is worse than a missing one in anything that later sums or
+   * displays it. Cognia does not price external turns itself; this is the
+   * agent's own figure, and callers should present it as such.
+   */
+  providerCost?: {
+    amount: number
+    /** Only when the provider named one. Absent means "unit unknown". */
+    currency?: string
+  }
 }
 
 // ============================================================================
@@ -2204,6 +2235,20 @@ export interface ExternalAgentInstance {
   sessions: Map<string, ExternalAgentSession>
   /** Discovered capabilities */
   capabilities?: AcpCapabilities
+  /**
+   * The merged capability answer for this agent (ADR-0090 external SSOT).
+   *
+   * Distinct from {@link capabilities}, which is only the raw ACP handshake
+   * block. The profile is the protocol manifest row, the preset/plugin
+   * refinement, the adapter's real methods, this handshake and the host's
+   * ceilings, merged in fixed precedence — the single artifact the CLI, the
+   * TUI, the desktop panel and the execution resolver all read, instead of
+   * each keeping its own table.
+   *
+   * Absent until the agent has connected. A profile whose `negotiated` is
+   * false must never freeze an execution spec.
+   */
+  capabilityProfile?: ExternalAgentCapabilityProfileV1
   /** Available tools */
   tools?: AcpToolInfo[]
   /** Runtime validity snapshot used for gating/projection */

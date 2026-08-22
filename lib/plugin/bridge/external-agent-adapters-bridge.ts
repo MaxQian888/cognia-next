@@ -154,6 +154,13 @@ export async function registerExternalAgentAdaptersForPlugin(
       }
       const ok = registerPluginProtocolAdapter(protocol, factory, {
         pluginId,
+        adapterId: def.id,
+        ...(def.version ? { version: def.version } : {}),
+        // Forwarded verbatim. Validation of the CELLS is the capability
+        // contract's job (`mergeExternalAgentCapabilities` refuses to let a
+        // refinement widen a protocol refusal), not the bridge's — the bridge
+        // only decides whether the adapter loads.
+        ...(def.capabilities ? { capabilities: def.capabilities } : {}),
       })
       if (!ok) {
         // Unreachable through the namespaced id, but keep the signal honest.

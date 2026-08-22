@@ -24,6 +24,7 @@
  */
 
 import type { PluginContributionBackend } from "@/types/plugin/plugin"
+import type { ExternalAgentCapabilityMatrix } from "@cognia/agent-config-types/external-agent-capability"
 
 /**
  * One protocol-adapter contribution inside
@@ -56,4 +57,27 @@ export interface PluginExternalAgentAdapterDef {
    * `() => ProtocolAdapter` function. REQUIRED.
    */
   export?: string
+  /**
+   * Adapter version, recorded on the capability profile.
+   *
+   * Not the plugin's version: an adapter can be rewritten against a new
+   * upstream protocol release without the plugin's own version moving, and the
+   * profile digest has to change when that happens or a cached capability
+   * answer outlives the adapter it described.
+   */
+  version?: string
+  /**
+   * What this adapter's protocol can do (ADR-0090 external SSOT, merge layer 2).
+   *
+   * OPTIONAL, and its absence is not an error — a plugin written before
+   * capability declarations existed keeps loading, with every capability
+   * `unknown`. `unknown` never satisfies a hard requirement, so an undeclared
+   * adapter degrades to "prove it at the handshake" rather than to a silent yes.
+   *
+   * This is a REFINEMENT, not an override: it may fill in what the built-in
+   * protocol row left unmeasured or tighten what it allowed, and it can never
+   * widen a capability the protocol itself refuses. A plugin author is not in a
+   * position to overrule the wire format.
+   */
+  capabilities?: ExternalAgentCapabilityMatrix
 }
