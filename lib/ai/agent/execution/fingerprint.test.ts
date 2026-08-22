@@ -1,4 +1,4 @@
-import { canonicalizeSpec, computeExecutionFingerprint } from "./fingerprint"
+import { canonicalizeSpec, computeExecutionFingerprint, computeStableDigest } from "./fingerprint"
 
 describe("canonicalizeSpec", () => {
   it("sorts object keys recursively so key order never matters", () => {
@@ -121,5 +121,43 @@ describe("computeExecutionFingerprint", () => {
     const zh2 = computeExecutionFingerprint({ ...spec, deploymentRef: "部署-二" })
     expect(zh).not.toBe(zh2)
     expect(zh).toBe(computeExecutionFingerprint({ ...spec, deploymentRef: "部署-一" }))
+  })
+})
+
+describe("computeStableDigest", () => {
+  it("namespaces the digest so two kinds of identity are distinguishable", () => {
+    // Both the execution spec and the external-agent capability profile need a
+    // stable identity, and both appear in the same logs. Without the prefix an
+    // equal-valued pair would be indistinguishable at a glance.
+    const value = { protocol: "acp", capabilities: { mcp: "native" } }
+    expect(computeStableDigest("eacp1", value)).toMatch(/^eacp1-[0-9a-f]+$/)
+    expect(computeStableDigest("eacp1", value)).not.toBe(computeStableDigest("aexf1", value))
+  })
+
+  it("is the function the execution fingerprint is defined in terms of", () => {
+    const spec = { runtimeAdapter: "external", modelBindings: { primary: "inherit" } }
+    expect(computeExecutionFingerprint(spec)).toBe(computeStableDigest("aexf1", spec))
+  })
+
+  it("agrees across key order, as two hosts computing it independently must", () => {
+    expect(computeStableDigest("eacp1", { b: 1, a: { d: 2, c: 3 } })).toBe(
+      computeStableDigest("eacp1", { a: { c: 3, d: 2 }, b: 1 })
+    )
+  })
+
+  it("ignores a `digest` field so the value cannot depend on itself", () => {
+    // A capability profile carries its own digest. Re-digesting the profile
+    // after stamping it would otherwise produce a different answer every time,
+    // and nothing could ever be compared against a stored one.
+    const profile = { protocol: "acp", negotiated: true }
+    const stamped = { ...profile, digest: computeStableDigest("eacp1", profile) }
+    expect(computeStableDigest("eacp1", stamped)).toBe(stamped.digest)
+  })
+
+  it("still changes when anything that is not volatile changes", () => {
+    const base = { protocol: "acp", negotiated: true }
+    expect(computeStableDigest("eacp1", { ...base, negotiated: false })).not.toBe(
+      computeStableDigest("eacp1", base)
+    )
   })
 })

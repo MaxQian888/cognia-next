@@ -49,7 +49,11 @@ import {
   type TaskWorkspaceRunLease,
 } from "@/lib/task-workspace/run-lease"
 import { useSettingsStore } from "@/stores/settings"
-import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import type {
+  AgentCapabilityEvidence,
+  AgentCapabilityId,
+  ResolvedAgentExecutionSpec,
+} from "@cognia/agent-config-types/agent-execution"
 import { rebindResolvedAgentExecutionHost } from "@/lib/ai/agent/execution/resolve-agent-execution-spec"
 import type { TeammateExecutionTarget } from "@/types/agent/agent-team"
 import {
@@ -79,6 +83,28 @@ export interface TokenUsage {
  * from the generic "no available teammate", which is retryable because any
  * teammate will do — here only one will, so retrying cannot help.
  */
+/**
+ * The teammate's external runtime could not be reached.
+ *
+ * A distinct class rather than a bare `Error` because the caller's correct
+ * response differs from a retryable pool miss: the external agent is missing
+ * from this HOST (a browser shell, an uninstalled CLI, a disabled plugin), so
+ * re-driving the same dispatch will hit the same wall until the environment
+ * changes.
+ */
+export class ExternalRuntimeUnavailableError extends Error {
+  constructor(
+    readonly teammateName: string,
+    readonly wantedRuntime: string
+  ) {
+    super(
+      `dispatchTeammate: "${teammateName}" is configured to run on "${wantedRuntime}", ` +
+        `which is unavailable on this host; the task was NOT re-routed to the built-in engine`
+    )
+    this.name = "ExternalRuntimeUnavailableError"
+  }
+}
+
 export class UnavailableRequiredTeammateError extends Error {
   constructor(readonly teammateId: string) {
     super(`dispatchTeammate: required teammate "${teammateId}" is unavailable`)
@@ -149,7 +175,7 @@ export interface DispatchTeammateResult {
    * value keys the run notifier copy and is forwarded onto the
    * `action.team.task` workflow node output.
    */
-  degradedReason?: "sidecar-unavailable" | "external-agent-unavailable"
+  degradedReason?: "sidecar-unavailable"
 }
 
 function toSpanUsage(usage: TokenUsage): SpanUsage {
@@ -669,17 +695,85 @@ export async function dispatchTeammate(
   let frozenExecutionSpec: ResolvedAgentExecutionSpec | undefined
   let executionTarget: TeammateExecutionTarget = { mode: "colocate" }
   let externalAgentId: string | null = null
-  if (runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0) {
-    // External-backed teammate: route to the external CLI agent when a preset
-    // resolves (desktop-only). On web/mobile or unknown preset this returns
-    // null and we fall through to the built-in path below.
+  const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
+  if (wantsExternal) {
+    // External-backed teammate: route to the external CLI agent. On web/mobile,
+    // with an unknown preset, or with the contributing plugin disabled, this
+    // returns null — which is now a HARD FAILURE, see below.
     const { resolveTeammateExternalAgent } = await import("./resolve-external-backing")
     externalAgentId = await resolveTeammateExternalAgent(teammate, resolvedCaps, teamCtx)
     if (externalAgentId) channel = "external"
   }
+
+  // A teammate the user pointed at Codex does not get quietly run on Claude.
+  //
+  // This used to notify and fall back: the resolver was fed `runtime: "claude"`
+  // whenever the external agent had not resolved, so the frozen spec recorded
+  // the built-in rail and everything downstream — model, tools, session store,
+  // cost attribution — described a run the user never asked for. A warning
+  // toast is not consent. The only fallback that would be legitimate is one the
+  // teammate DECLARES, and no such field exists yet, so the honest outcome is
+  // to fail with something a caller can act on.
+  if (wantsExternal && !externalAgentId) {
+    const wantedAgent =
+      runtime !== "claude" ? runtime : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
+    const failure = new ExternalRuntimeUnavailableError(teammate.name, wantedAgent)
+    teamCtx.notifier.notify({
+      level: "critical",
+      title: "External runtime unavailable",
+      body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — the task was not run on a different engine.`,
+      runId: teamCtx.runId,
+      teamId: teamCtx.teamId,
+      taskId: args.taskId,
+      dedupeKey: `external-unavailable:${teamCtx.runId}:${teammate.id}`,
+    })
+    // This throw happens BEFORE the main try/catch that normally settles the
+    // pool, so the claim has to be returned here or the run deadlocks waiting
+    // on a teammate that is still marked busy.
+    teamCtx.pool.recordFailure(teammate.id, failure)
+    if (args.recordToStore) {
+      teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, failure.message)
+    }
+    release("failure", failure)
+    throw failure
+  }
   if (channel !== "external" && args.preferToolEnabled !== false && runtime === "claude") {
     const { isTauri } = await import("@/lib/tauri")
     if (isTauri()) channel = "sidecar"
+  }
+
+  // The negotiated capability projection for the resolved external agent.
+  //
+  // Read from the manager (which built it at handshake time) rather than
+  // re-derived here: a second derivation is a second answer, and the point of
+  // the profile is that there is only one. `undefined` for a built-in teammate,
+  // and for an external agent whose profile is not negotiated — the resolver
+  // drops an un-negotiated projection anyway, but not sending one keeps the
+  // reason for the fallback visible at the call site.
+  let externalCapabilities:
+    | {
+        effective: AgentCapabilityId[]
+        support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
+        profileDigest: string
+        negotiated: boolean
+      }
+    | undefined
+  if (externalAgentId) {
+    const [{ getExternalAgentManager }, { projectExternalAgentCapabilitiesToSpec }] =
+      await Promise.all([
+        import("@/lib/ai/agent/external/manager"),
+        import("@cognia/agent-config-types/external-agent-capability"),
+      ])
+    const profile = getExternalAgentManager().getAgentCapabilityProfile(externalAgentId)
+    if (profile) {
+      const projection = projectExternalAgentCapabilitiesToSpec(profile)
+      externalCapabilities = {
+        effective: projection.effective,
+        support: projection.support,
+        profileDigest: profile.digest,
+        negotiated: profile.negotiated,
+      }
+    }
   }
 
   // ADR-0090: the unified resolver owns the channel decision. It is fed the
@@ -717,12 +811,18 @@ export async function dispatchTeammate(
       flags: getAgentExecutionFlags(),
       policy: poolPick ? { ...binding.policy, deploymentRef: poolPick } : binding.policy,
       legacy: {
-        runtime: externalAgentId ? runtime : "claude",
+        // Honest by construction: the guard above guarantees that a non-claude
+        // runtime reached a resolved external agent, so there is no case left
+        // where this would have to be rewritten to "claude".
+        runtime,
         modelId: modelHint ?? teammate.config?.model,
-        toolsEnabled: externalAgentId
-          ? args.preferToolEnabled !== false
-          : runtime === "claude" && args.preferToolEnabled !== false,
+        toolsEnabled: args.preferToolEnabled !== false,
       },
+      // ADR-0090 external SSOT: the negotiated capability profile is what the
+      // spec freezes against, not the `external` family fallback. Absent for a
+      // built-in teammate and for an agent that has not completed its
+      // handshake — the resolver refuses an un-negotiated profile itself.
+      ...(externalCapabilities ? { externalCapabilities } : {}),
       identity: { sessionId: teamCtx.runId, runId: teamCtx.runId },
     })
     frozenExecutionSpec = spec
@@ -754,15 +854,11 @@ export async function dispatchTeammate(
   // Degradation is a first-class, machine-readable outcome (ADR-0090 Phase 6):
   // both notifier copies key off these derived reasons, and the winning reason
   // rides the dispatch result so workflow events / plugin meta can surface it.
-  const wantsExternal = runtime !== "claude" || resolvedCaps.externalAgentPresetIds.length > 0
   const sidecarDegraded =
     channel === "text" && runtime === "claude" && args.preferToolEnabled !== false
-  const externalDegraded = wantsExternal && channel !== "external"
-  const degradedReason: DispatchTeammateResult["degradedReason"] = externalDegraded
-    ? "external-agent-unavailable"
-    : sidecarDegraded
-      ? "sidecar-unavailable"
-      : undefined
+  const degradedReason: DispatchTeammateResult["degradedReason"] = sidecarDegraded
+    ? "sidecar-unavailable"
+    : undefined
   if (sidecarDegraded) {
     // A tool-capable `claude` teammate could not get the desktop sidecar. On a
     // desktop target this "should never happen"; when it does the teammate
@@ -779,25 +875,6 @@ export async function dispatchTeammate(
       dedupeKey: `text-fallback:${teamCtx.runId}:${teammate.id}`,
     })
   }
-  if (externalDegraded) {
-    // An external-CLI-backed teammate (e.g. runtime "codex"/"claude-code", or a
-    // teammate carrying an external-agent preset) could not reach its external
-    // agent — the browser/mobile shell has no external-agent host, or the CLI is
-    // not installed. Rather than SILENTLY running the task on the built-in engine
-    // (wrong model + wrong tools than the user asked for), surface the fallback.
-    const wantedAgent =
-      runtime !== "claude" ? runtime : (resolvedCaps.externalAgentPresetIds[0] ?? "external agent")
-    teamCtx.notifier.notify({
-      level: "warn",
-      title: "External runtime unavailable",
-      body: `${teammate.name} is configured to run on "${wantedAgent}", but that external agent is unavailable here — falling back to the built-in engine.`,
-      runId: teamCtx.runId,
-      teamId: teamCtx.teamId,
-      taskId: args.taskId,
-      dedupeKey: `external-fallback:${teamCtx.runId}:${teammate.id}`,
-    })
-  }
-
   const durableRepositoryId =
     args.repositoryId ??
     teamCtx.team.config?.repositories?.find((repository) => repository.role === "primary")?.id ??

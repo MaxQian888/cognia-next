@@ -156,6 +156,20 @@ export const RUNTIME_CAPABILITIES: Record<AgentRuntimeAdapterId, readonly AgentC
     "set-model",
     "compaction",
   ],
+  // NOT a description of any concrete external agent.
+  //
+  // Every external agent speaks a different protocol, and what one can do is
+  // answered by its `ExternalAgentCapabilityProfileV1` (ADR-0090 external
+  // SSOT) — the merge of the protocol manifest row, the preset/plugin
+  // refinement, the adapter's real methods, the handshake and the host's
+  // ceilings. Callers that have a negotiated profile pass its projection as
+  // `externalCapabilities` and this list is not consulted at all.
+  //
+  // What remains here is the FAMILY FALLBACK: the shape of the widest external
+  // agent, used when a caller resolves a spec without a live agent (shadow
+  // recording, a teammate binding preview, a spec resolved before connect).
+  // Reading it as "what this agent can do" is exactly the bug the profile
+  // exists to remove, which is why the profile-carrying path bypasses it.
   external: [
     "streaming",
     "session.multi-turn",
@@ -217,6 +231,33 @@ export interface AgentExecutionResolveInput {
     suiteVersion?: string
     disabledOptional: AgentCapabilityId[]
   }
+  /**
+   * The negotiated external-agent capability profile, projected onto the v2
+   * vocabulary (ADR-0090 external SSOT).
+   *
+   * Supplied whenever the caller has actually contacted the agent. It REPLACES
+   * {@link RUNTIME_CAPABILITIES}.external rather than intersecting with it: the
+   * profile has already applied the host's ceilings, and intersecting with a
+   * family-wide fallback would strip capabilities this particular agent
+   * demonstrably has.
+   *
+   * Ignored unless the resolved adapter is `external` — a profile cannot make
+   * the claude-agent-sdk rail do anything different.
+   */
+  externalCapabilities?: {
+    /** v2 ids the profile reports as usable. */
+    effective: readonly AgentCapabilityId[]
+    /** Per-id verdicts, including the reason for everything non-native. */
+    support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>
+    /** `ExternalAgentCapabilityProfileV1.digest`, recorded as the record ref. */
+    profileDigest: string
+    /**
+     * False for a profile built before the handshake. Such a profile may be
+     * recorded but must never freeze an execution decision, so the resolver
+     * refuses to adopt it — see `resolveExternalCapabilities`.
+     */
+    negotiated: boolean
+  }
 }
 
 export interface AgentExecutionResolution {
@@ -272,6 +313,48 @@ function deterministicIdentity(
   }
 }
 
+/**
+ * The external capability projection this resolution may actually use.
+ *
+ * Two guards, and both matter:
+ *   - a projection is meaningless unless the resolved adapter is `external`;
+ *   - a projection built BEFORE the handshake describes what we hoped, not
+ *     what the agent answered, and freezing a spec from it is precisely the
+ *     failure the two-phase admission exists to prevent. Such a profile is
+ *     dropped here rather than at the call site, so no caller can opt out.
+ */
+function resolveExternalCapabilities(
+  adapter: AgentRuntimeAdapterId,
+  projection: AgentExecutionResolveInput["externalCapabilities"]
+): AgentExecutionResolveInput["externalCapabilities"] | undefined {
+  if (adapter !== "external") return undefined
+  if (!projection?.negotiated) return undefined
+  return projection
+}
+
+/**
+ * Keep the profile's own verdicts, and add one for anything the caller asked
+ * about that the profile had nothing to say on.
+ */
+function mergeProfileSupport(
+  fromProfile: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>>,
+  effective: readonly AgentCapabilityId[],
+  asked: readonly AgentCapabilityId[]
+): Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>> {
+  const support: Partial<Record<AgentCapabilityId, AgentCapabilityEvidence>> = { ...fromProfile }
+  for (const cap of effective) {
+    if (!support[cap]) support[cap] = { support: "native" }
+  }
+  for (const cap of asked) {
+    if (support[cap]) continue
+    support[cap] = {
+      support: "unsupported",
+      reason: `the external agent's capability profile has no verdict for "${cap}"`,
+    }
+  }
+  return support
+}
+
 let traceCounter = 0
 
 /**
@@ -312,7 +395,10 @@ export function resolveAgentExecutionSpec(
   const hostRef = resolveHostRef(input)
   const identity = deterministicIdentity(input.identity)
 
-  const theoreticalRuntimeCaps = RUNTIME_CAPABILITIES[adapter]
+  const externalProfile = resolveExternalCapabilities(adapter, input.externalCapabilities)
+  const theoreticalRuntimeCaps = externalProfile
+    ? externalProfile.effective
+    : RUNTIME_CAPABILITIES[adapter]
   const runtimeCaps = input.environment.hostCapabilities
     ? theoreticalRuntimeCaps.filter((capability) =>
         input.environment.hostCapabilities!.includes(capability)
@@ -349,7 +435,16 @@ export function resolveAgentExecutionSpec(
             ? { suiteVersion: input.certifiedPath.suiteVersion }
             : {}),
         }
-      : { evidence: "native" },
+      : externalProfile
+        ? {
+            // An external agent is never "native" to Cognia's own rail. The
+            // profile digest rides as the record ref so a run can be traced
+            // back to the exact capability answer it was frozen against —
+            // that identity is the whole reason the profile has a digest.
+            evidence: "experimental" as const,
+            recordRef: externalProfile.profileDigest,
+          }
+        : { evidence: "native" },
     capabilities: {
       effective,
       disabledOptional: [
@@ -358,7 +453,13 @@ export function resolveAgentExecutionSpec(
           (cap) => !disabledOptional.includes(cap)
         ) ?? []),
       ],
-      support: buildCapabilitySupport(adapter, effective, [...requires, ...prefers]),
+      support: externalProfile
+        ? // The profile already carries a verdict for EVERY id, with the layer
+          // and reason that produced it. Regenerating them from `effective`
+          // would flatten "the handshake said no" and "nobody ever measured
+          // this" into the same anonymous `unsupported`.
+          mergeProfileSupport(externalProfile.support, effective, [...requires, ...prefers])
+        : buildCapabilitySupport(adapter, effective, [...requires, ...prefers]),
     },
     credential: input.policy?.credentialProfileRef
       ? {

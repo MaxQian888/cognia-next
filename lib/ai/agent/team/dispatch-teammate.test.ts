@@ -1,4 +1,5 @@
-import { dispatchTeammate } from "./dispatch-teammate"
+import { dispatchTeammate, ExternalRuntimeUnavailableError } from "./dispatch-teammate"
+import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
 import type { TeamRunContext } from "./team-run-context"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
@@ -100,9 +101,32 @@ jest.mock("./resolve-external-backing", () => ({
   resolveTeammateExternalAgent: (...a: unknown[]) => resolveExternalMock(...a),
 }))
 
+// Passthrough spy on the ONE resolver, so a test can assert what was handed to
+// it. Mocking its RESULT would defeat the purpose — the point of these
+// assertions is that the real resolver receives the real projection.
+const resolveSpecMock = jest.fn()
+jest.mock("@/lib/ai/agent/execution/resolve-agent-execution-spec", () => {
+  const actual = jest.requireActual("@/lib/ai/agent/execution/resolve-agent-execution-spec")
+  return {
+    ...actual,
+    resolveAgentExecutionSpec: (input: unknown) => {
+      resolveSpecMock(input)
+      return actual.resolveAgentExecutionSpec(input)
+    },
+  }
+})
+
 const externalExecuteMock = jest.fn()
+// The capability profile the manager reports for the resolved external agent.
+// `undefined` by default so the existing suites exercise the "no negotiated
+// profile" path; individual tests set it to assert the projection reaches the
+// frozen spec.
+let externalCapabilityProfileMock: unknown
 jest.mock("@/lib/ai/agent/external/manager", () => ({
-  getExternalAgentManager: () => ({ execute: (...a: unknown[]) => externalExecuteMock(...a) }),
+  getExternalAgentManager: () => ({
+    execute: (...a: unknown[]) => externalExecuteMock(...a),
+    getAgentCapabilityProfile: () => externalCapabilityProfileMock,
+  }),
 }))
 
 const applyTeammateTwinContextMock = jest.fn()
@@ -864,17 +888,23 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(resolveProviderAttemptOptionsMock).not.toHaveBeenCalled()
   })
 
-  it("falls back to text-only when external backing does not resolve", async () => {
+  it("fails rather than running a codex teammate on the built-in engine", async () => {
+    // This used to fall back to the text rail with a warning toast. A warning
+    // is not consent: the run would have used a different model and a
+    // different tool surface than the teammate is configured for, and every
+    // downstream record — spec, cost, trace — would have described it as
+    // intended.
     isTauriMock.mockReturnValue(true)
     resolveExternalMock.mockResolvedValue(null) // e.g. unknown preset / web
     executeAgentMock.mockResolvedValue({ text: "acp result" })
     const { ctx } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
 
-    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })
-
-    expect(result.channel).toBe("text")
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "x" })).rejects.toThrow(
+      ExternalRuntimeUnavailableError
+    )
     expect(runAndCaptureMock).not.toHaveBeenCalled()
     expect(externalExecuteMock).not.toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
   })
 
   it("dispatches to the external CLI agent when a preset resolves", async () => {
@@ -1027,25 +1057,64 @@ describe("dispatchTeammate — tool-enabled sidecar path", () => {
     expect(runAndCaptureMock).not.toHaveBeenCalled()
   })
 
-  it("warns (never silently) and falls back when the external runtime is unavailable", async () => {
+  it("reports the unavailable runtime and releases the teammate", async () => {
     // Non-claude runtime, but no external agent resolves (web/mobile or the CLI
-    // is not installed). The task must NOT silently run as the built-in engine
-    // without telling the user their chosen runtime was dropped.
+    // is not installed). The user hears about it AND the task fails — the pool
+    // slot has to come back, or the run deadlocks on a teammate that is still
+    // marked busy.
     isTauriMock.mockReturnValue(false)
     resolveExternalMock.mockResolvedValue(null)
     executeAgentMock.mockResolvedValue({ text: "fallback answer" })
-    const { ctx, notifier } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
+    const { ctx, notifier, pool } = makeCtx(makeTeammate({ config: { runtime: "codex" } }))
 
-    const result = await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+    await expect(dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })).rejects.toMatchObject({
+      name: "ExternalRuntimeUnavailableError",
+      wantedRuntime: "codex",
+    })
 
-    expect(result.channel).toBe("text")
     expect(notifier.notify).toHaveBeenCalledWith(
       expect.objectContaining({
-        level: "warn",
+        level: "critical",
         title: "External runtime unavailable",
-        dedupeKey: "external-fallback:run1:tm1",
+        dedupeKey: "external-unavailable:run1:tm1",
       })
     )
+    expect(pool.recordFailure).toHaveBeenCalled()
+    expect(executeAgentMock).not.toHaveBeenCalled()
+  })
+
+  it("freezes the spec against the NEGOTIATED external profile, not the family fallback", async () => {
+    isTauriMock.mockReturnValue(true)
+    resolveExternalMock.mockResolvedValue("agent-1")
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "ok" })
+    // An ACP profile grants `mcp` — which the `external` family fallback in
+    // RUNTIME_CAPABILITIES does NOT list — and refuses `steer`, which it does.
+    // Reading either from the fallback table gets both backwards, so the
+    // resolved spec is the assertion that the profile actually won.
+    externalCapabilityProfileMock = negotiateCapabilityProfile({
+      protocol: "acp",
+      liveFacts: {},
+    })
+    const { ctx } = makeCtx(makeTeammate({ config: { runtime: "claude-code" } }))
+
+    await dispatchTeammate(ctx, { taskId: "t1", prompt: "go" })
+
+    const input = resolveSpecMock.mock.calls.at(-1)?.[0] as
+      | {
+          legacy?: { runtime?: string }
+          externalCapabilities?: {
+            effective: string[]
+            profileDigest: string
+            negotiated: boolean
+          }
+        }
+      | undefined
+    expect(input?.externalCapabilities?.negotiated).toBe(true)
+    expect(input?.externalCapabilities?.effective).toContain("mcp")
+    expect(input?.externalCapabilities?.effective).not.toContain("steer")
+    expect(input?.externalCapabilities?.profileDigest).toMatch(/^eacp1-/)
+    // And the runtime reaches the resolver as itself, not rewritten to "claude".
+    expect(input?.legacy?.runtime).toBe("claude-code")
   })
 
   it("forwards the teammate's resolved MCP servers into the external session", async () => {

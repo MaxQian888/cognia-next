@@ -30,6 +30,11 @@ const VOLATILE_KEYS = new Set([
   // no information while churning the fingerprint every time a capability
   // gains a verdict.
   "support",
+  // A digest field is the OUTPUT of this function for whatever object carries
+  // it (see `computeStableDigest`), so hashing it would make the value depend
+  // on itself. No execution-spec field is named `digest`; the external-agent
+  // capability profile's is.
+  "digest",
 ])
 
 function canonicalize(value: unknown): unknown {
@@ -79,10 +84,23 @@ function fnv1a128(input: string): string {
 }
 
 /**
+ * Deterministic digest of any canonicalizable value, under a caller-chosen
+ * prefix.
+ *
+ * Shared with the external-agent capability profile (ADR-0090 external SSOT),
+ * which needs the same property for the same reason — a stable identity that
+ * two hosts compute independently and can compare as one string. The prefix
+ * keeps the two namespaces distinguishable in a log where both appear.
+ */
+export function computeStableDigest(prefix: string, value: unknown): string {
+  return `${prefix}-${fnv1a128(canonicalizeSpec(value))}`
+}
+
+/**
  * Compute the deterministic fingerprint for a (partial) execution spec.
  * Callers pass the resolved spec object BEFORE stamping
  * `executionFingerprint` (the field is excluded either way).
  */
 export function computeExecutionFingerprint(spec: unknown): string {
-  return `aexf1-${fnv1a128(canonicalizeSpec(spec))}`
+  return computeStableDigest("aexf1", spec)
 }

@@ -1,6 +1,7 @@
 import {
   AGENT_CAPABILITY_IDS,
   validateResolvedAgentExecutionSpec,
+  type AgentCapabilityId,
 } from "@cognia/agent-config-types/agent-execution"
 
 import type { AgentExecutionFlag } from "./feature-flags"
@@ -415,5 +416,132 @@ describe("contract v2 capability verdicts", () => {
       reason: `runtime adapter "claude-agent-sdk" does not implement "${UNSERVED_BY_CLAUDE}"`,
     })
     expect(validateResolvedAgentExecutionSpec(spec).ok).toBe(true)
+  })
+})
+
+describe("negotiated external capability profile", () => {
+  /**
+   * A capability the external FAMILY FALLBACK does not list. Derived rather
+   * than written down: these tests exist to prove a negotiated profile
+   * REPLACES that list, and a hardcoded id would stop proving it the day the
+   * fallback grows.
+   */
+  const BEYOND_THE_FALLBACK = (() => {
+    const fallback = new Set(RUNTIME_CAPABILITIES.external)
+    const id = AGENT_CAPABILITY_IDS.find((c) => !fallback.has(c))
+    if (!id) throw new Error("the external fallback now lists everything — pick a new probe")
+    return id
+  })()
+
+  const teammate = { surface: "team" as const, legacy: { runtime: "codex" } }
+
+  function profile(
+    overrides: Partial<NonNullable<AgentExecutionResolveInput["externalCapabilities"]>> = {}
+  ) {
+    return {
+      effective: ["streaming", BEYOND_THE_FALLBACK] as AgentCapabilityId[],
+      support: {} as NonNullable<AgentExecutionResolveInput["externalCapabilities"]>["support"],
+      profileDigest: "eacp1-0123456789abcdef",
+      negotiated: true,
+      ...overrides,
+    }
+  }
+
+  it("replaces the family fallback with what this agent actually answered", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({ ...teammate, externalCapabilities: profile() })
+    )
+
+    expect(spec.runtimeAdapter).toBe("external")
+    expect(spec.capabilities.effective).toEqual(["streaming", BEYOND_THE_FALLBACK])
+    // Not intersected with the fallback: the profile has already applied the
+    // agent's own ceilings, and intersecting would strip capabilities this
+    // particular agent demonstrably has.
+    for (const cap of RUNTIME_CAPABILITIES.external) {
+      if (cap === "streaming") continue
+      expect(spec.capabilities.effective).not.toContain(cap)
+    }
+  })
+
+  it("traces the run back to the capability answer it was frozen against", () => {
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({ ...teammate, externalCapabilities: profile() })
+    )
+
+    // An external agent is never native to Cognia's own rail, and the digest
+    // is the whole reason the profile has one.
+    expect(spec.compatibility).toEqual({
+      evidence: "experimental",
+      recordRef: "eacp1-0123456789abcdef",
+    })
+    expect(validateResolvedAgentExecutionSpec(spec).ok).toBe(true)
+  })
+
+  it("refuses a profile built before the handshake", () => {
+    // This is the whole point of two-phase admission: a pre-handshake profile
+    // describes what we hoped for, and freezing a spec from it is the failure
+    // the split exists to prevent. It is dropped HERE so no caller can opt out.
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({ ...teammate, externalCapabilities: profile({ negotiated: false }) })
+    )
+
+    expect(spec.capabilities.effective).toEqual([...RUNTIME_CAPABILITIES.external])
+    expect(spec.compatibility).toEqual({ evidence: "native" })
+  })
+
+  it("ignores a profile when the resolved adapter is not external", () => {
+    // A capability profile cannot make the claude-agent-sdk rail behave
+    // differently, so a stale one riding along must not widen it.
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        legacy: { providerId: "anthropic", toolsEnabled: true },
+        externalCapabilities: profile(),
+      })
+    )
+
+    expect(spec.runtimeAdapter).toBe("claude-agent-sdk")
+    expect(spec.capabilities.effective).toEqual([...RUNTIME_CAPABILITIES["claude-agent-sdk"]])
+    expect(spec.compatibility).toEqual({ evidence: "native" })
+  })
+
+  it("keeps the profile's own reason instead of an anonymous refusal", () => {
+    const { spec, missingRequired } = resolveAgentExecutionSpec(
+      baseInput({
+        ...teammate,
+        externalCapabilities: profile({
+          support: {
+            mcp: { support: "unsupported", reason: "this protocol cannot carry an MCP server" },
+          },
+        }),
+        policy: {
+          executionKind: "agent",
+          runtimePolicy: "auto",
+          routePolicy: "direct",
+          requires: ["mcp"],
+        },
+      })
+    )
+
+    expect(missingRequired).toEqual(["mcp"])
+    // Regenerating verdicts from `effective` would flatten "the handshake said
+    // no" and "nobody ever measured this" into the same empty `unsupported`.
+    expect(spec.capabilities.support?.mcp).toEqual({
+      support: "unsupported",
+      reason: "this protocol cannot carry an MCP server",
+    })
+  })
+
+  it("still clamps a negotiated profile to what the host backend can serve", () => {
+    // The profile carries the AGENT's ceilings, not the host's. A headless
+    // host that cannot stream does not gain streaming because the agent can.
+    const { spec } = resolveAgentExecutionSpec(
+      baseInput({
+        ...teammate,
+        environment: { ...headless, hostCapabilities: [BEYOND_THE_FALLBACK] },
+        externalCapabilities: profile(),
+      })
+    )
+
+    expect(spec.capabilities.effective).toEqual([BEYOND_THE_FALLBACK])
   })
 })
