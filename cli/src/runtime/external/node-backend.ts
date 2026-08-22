@@ -333,6 +333,14 @@ export class NodeExternalAgentBackend {
         return undefined as T
       case "check_command_exists":
         return (await commandExists(String(args.command))) as T
+      // Version certification runs on every host. The caller names a catalog
+      // id; the command, its arguments and its timeout are read from the
+      // shared catalog here, exactly as the desktop host reads them from its
+      // compiled-in copy, so neither arm can widen into arbitrary exec.
+      case "external_agent_probe_runtime_version": {
+        const { probeRuntimeVersion } = await import("./version-probe")
+        return (await probeRuntimeVersion(String(args.runtimeId))) as T
+      }
       // The Pi adapter cannot touch the filesystem itself (it also runs in the
       // renderer under static export), so each host answers "is the bundled
       // extension the one we shipped?" in its own way behind one command name.
