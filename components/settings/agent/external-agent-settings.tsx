@@ -26,9 +26,11 @@ import {
   Sparkles,
   Route,
   PackageIcon,
+  Boxes,
 } from "lucide-react"
 import Link from "next/link"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
+import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
 import { cn } from "@/lib/utils"
 import { pickDirectory } from "@/lib/files/file-bridge"
 import { toast } from "@/components/ui/sonner"
@@ -1632,7 +1634,11 @@ function AgentDetail({
 
 /** What the right-hand detail pane is currently showing. */
 type DetailView =
-  { kind: "gallery" } | { kind: "global" } | { kind: "delegation" } | { kind: "agent"; id: string }
+  | { kind: "gallery" }
+  | { kind: "global" }
+  | { kind: "delegation" }
+  | { kind: "runtimes" }
+  | { kind: "agent"; id: string }
 
 /** A single entry in the left navigation rail. */
 function RailItem({
@@ -1863,6 +1869,13 @@ export function ExternalAgentSettings() {
                 onClick={() => setView({ kind: "gallery" })}
                 dataTestId="nav-quick-start"
               />
+              <RailItem
+                icon={Boxes}
+                label={t("runtimes.title")}
+                active={view.kind === "runtimes"}
+                onClick={() => setView({ kind: "runtimes" })}
+                dataTestId="nav-runtimes"
+              />
             </nav>
 
             <div className="space-y-1.5">
@@ -1995,6 +2008,11 @@ export function ExternalAgentSettings() {
           {/* Detail pane */}
           <section className="min-w-0 flex-1 @3xl/agents-pane:overflow-y-auto @3xl/agents-pane:pr-1">
             {view.kind === "delegation" && <DelegationRulesSection disabled={!enabled} />}
+
+            {/* The catalog, the version probe and the certification policy all
+                existed with no caller: a verdict was computed for nobody. This
+                is where they surface. */}
+            {view.kind === "runtimes" && <RuntimeGovernancePanel />}
 
             {view.kind === "gallery" && (
               <div className="space-y-4">

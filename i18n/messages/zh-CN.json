@@ -9789,6 +9789,19 @@
     },
     "executionPlan": "执行计划",
     "externalAgents": "外部代理",
+    "lifecycleErrors": {
+      "activeSessions": "仍有会话在运行。请先结束会话后重试。",
+      "adapterUnavailable": "提供该 Agent 协议的插件未启用。",
+      "consentRequired": "此操作需要你确认后才能继续。",
+      "credentialMissing": "缺少必需的凭据。请在该 Agent 的设置中重新填写。",
+      "integrityFailed": "下载内容与预期校验值不符，已终止安装。",
+      "platformUnsupported": "该 Agent 无法在此设备上运行。",
+      "runtimeMissing": "该 Agent 的运行时尚未安装。请先安装后重试。",
+      "runtimeReferenced": "仍有其他 Agent 在使用该运行时，未执行移除。",
+      "unknown": "操作失败，未做任何更改。",
+      "versionUncertified": "该版本尚未通过认证。请查看详情并确认后再运行。",
+      "versionUnsupported": "已安装的版本不受支持。请更新运行时后重试。"
+    },
     "manage": "管理",
     "manageAgents": "管理代理",
     "manager": {
@@ -9891,6 +9904,42 @@
       "websocketProtocolComingSoon": "WebSocket（即将支持）"
     },
     "runCommand": "运行 /{name}",
+    "runtimes": {
+      "activeSessions": "正在运行的会话",
+      "description": "你配置的 Agent 实际运行的是什么，以及 Cognia 是否认证过该版本。",
+      "detectedVersion": "已安装版本",
+      "emptyDescription": "配置一个使用运行时的 Agent 后，它会出现在这里。",
+      "emptyTitle": "暂无需要检查的运行时",
+      "executable": "程序",
+      "hostCannotInspect": "此设备无法查看已安装的运行时。请在桌面端打开 Cognia 查看。",
+      "noSupportedRange": "Cognia 尚未认证",
+      "openDocs": "安装与更新说明",
+      "ownership": {
+        "managed": "由 Cognia 安装",
+        "remote": "远程运行",
+        "system": "由你自己安装"
+      },
+      "refresh": "重新检查",
+      "supportedRange": "支持的版本",
+      "title": "已安装的运行时",
+      "unpinnedLaunch": "此运行时每次启动都会从软件包仓库重新下载，因此上面的版本只代表上一次运行，且可能在未经你确认的情况下发生变化。",
+      "usedBy": "被多少 Agent 使用",
+      "verdict": {
+        "certified": "已认证",
+        "missing": "未安装",
+        "supportedUncertified": "未认证",
+        "unparseable": "无法读取版本",
+        "unsupported": "不受支持"
+      },
+      "verdictHelp": {
+        "certified": "Cognia 已在该 Agent 上测试过这个确切版本。",
+        "missing": "Cognia 在此设备上找不到该运行时。请先安装，然后重新检查。",
+        "supportedUncertified": "Cognia 未测试过这个版本。它可以运行，但由此产生的问题不在保障范围内。",
+        "unparseable": "运行时没有返回 Cognia 能读懂的版本号，因此无法检查。",
+        "unsupported": "该版本超出了这个 Agent 支持的范围。请先升级再依赖它。"
+      },
+      "versionUnknown": "未检测到"
+    },
     "selectAgent": "选择代理",
     "selectorComingSoon": "即将推出",
     "selectorPluginUnavailable": "插件未启用",

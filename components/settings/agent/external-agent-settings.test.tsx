@@ -489,6 +489,19 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(screen.getAllByText(/delegation rules/i).length).toBeGreaterThan(1)
   })
 
+  it("reaches the installed-runtimes panel from the rail", async () => {
+    // The catalog, the version probe and the certification policy had no
+    // caller at all: a verdict was computed for nobody. This is the guard that
+    // the surface consuming them stays reachable.
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("nav-runtimes"))
+    })
+    expect(await screen.findByTestId("runtime-governance-card")).toBeInTheDocument()
+    expect(screen.queryByTestId("preset-gallery-card")).not.toBeInTheDocument()
+  })
+
   it("returns to the quick-start gallery after an agent has been selected", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)

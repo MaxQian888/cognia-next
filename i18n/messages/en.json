@@ -9789,6 +9789,19 @@
     },
     "executionPlan": "Execution Plan",
     "externalAgents": "External Agents",
+    "lifecycleErrors": {
+      "activeSessions": "Sessions are still running. End them first, then try again.",
+      "adapterUnavailable": "The plugin that provides this agent's protocol is not enabled.",
+      "consentRequired": "This needs your confirmation before it can continue.",
+      "credentialMissing": "A required credential is missing. Re-enter it in this agent's settings.",
+      "integrityFailed": "The download did not match its expected checksum, so it was not installed.",
+      "platformUnsupported": "This agent cannot run on this device.",
+      "runtimeMissing": "This agent's runtime is not installed. Install it, then try again.",
+      "runtimeReferenced": "Another agent still uses this runtime, so it was not removed.",
+      "unknown": "Something went wrong. Nothing was changed.",
+      "versionUncertified": "This version has not been certified. Review the details and confirm before running it.",
+      "versionUnsupported": "The installed version is not supported. Update the runtime and try again."
+    },
     "manage": "Manage",
     "manageAgents": "Manage Agents",
     "manager": {
@@ -9891,6 +9904,42 @@
       "websocketProtocolComingSoon": "WebSocket (coming soon)"
     },
     "runCommand": "Run /{name}",
+    "runtimes": {
+      "activeSessions": "Sessions running now",
+      "description": "What your configured agents actually run, and whether Cognia has certified that version.",
+      "detectedVersion": "Installed version",
+      "emptyDescription": "Runtimes appear here once you configure an agent that uses one.",
+      "emptyTitle": "No runtimes to check yet",
+      "executable": "Program",
+      "hostCannotInspect": "This device cannot see installed runtimes. Open Cognia on your desktop to check them.",
+      "noSupportedRange": "Not yet certified by Cognia",
+      "openDocs": "Installation and update instructions",
+      "ownership": {
+        "managed": "Installed by Cognia",
+        "remote": "Runs remotely",
+        "system": "Installed by you"
+      },
+      "refresh": "Re-check",
+      "supportedRange": "Supported versions",
+      "title": "Installed runtimes",
+      "unpinnedLaunch": "This runtime is fetched fresh from the package registry every time it starts, so the version above describes the last run and can change without asking you.",
+      "usedBy": "Used by agents",
+      "verdict": {
+        "certified": "Certified",
+        "missing": "Not installed",
+        "supportedUncertified": "Not certified",
+        "unparseable": "Version unreadable",
+        "unsupported": "Unsupported"
+      },
+      "verdictHelp": {
+        "certified": "Cognia has tested this exact version with this agent.",
+        "missing": "Cognia could not find this runtime on this device. Install it, then re-check.",
+        "supportedUncertified": "Cognia has not tested this version. It will run, but problems with it are not covered.",
+        "unparseable": "The runtime did not report a version Cognia could read, so it cannot be checked.",
+        "unsupported": "This version is outside the range this agent supports. Update it before relying on it."
+      },
+      "versionUnknown": "Not detected"
+    },
     "selectAgent": "Select Agent",
     "selectorComingSoon": "Coming soon",
     "selectorPluginUnavailable": "Plugin off",
