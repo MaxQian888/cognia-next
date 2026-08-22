@@ -1041,6 +1041,7 @@ pub fn run() {
             external_agent::commands::acp_terminal_get_info,
             external_agent::commands::acp_terminal_list,
             external_agent::commands::check_command_exists,
+            external_agent::commands::external_agent_probe_runtime_version,
             pi_extension::resolve_pi_extension,
             logging::commands::native_logging_get_readiness,
             logging::commands::native_logging_get_log_directory,

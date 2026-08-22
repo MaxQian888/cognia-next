@@ -364,6 +364,23 @@ pub async fn check_command_exists(command: String) -> Result<bool, String> {
     Ok(super::command_resolver::check_command_exists(&command))
 }
 
+/// Read the installed version of one catalogued runtime.
+///
+/// The renderer passes a catalog id and nothing else: the command, its argument
+/// vector and its timeout come from the compiled-in
+/// `protocol/external-agent-runtimes.json`. Accepting a command line from the
+/// renderer would make this an arbitrary-exec surface, which is the same reason
+/// the DeepSeek Harness commands below derive every path host-side.
+///
+/// Returns facts only. The certification verdict is rendered by
+/// `assessRuntimeVersion()` in TypeScript, shared with the headless host.
+#[tauri::command]
+pub async fn external_agent_probe_runtime_version(
+    runtime_id: String,
+) -> Result<crate::version_probe::RuntimeVersionProbe, String> {
+    crate::version_probe::probe_runtime_version(&runtime_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +393,24 @@ mod tests {
             check_command_exists("definitely-not-a-real-binary-xyz-123".to_string()).await,
             Ok(false)
         );
+    }
+
+    #[tokio::test]
+    async fn probe_runtime_version_rejects_an_id_the_catalog_does_not_govern() {
+        let error = external_agent_probe_runtime_version("nope".to_string())
+            .await
+            .unwrap_err();
+        assert!(error.contains("unknown runtime"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn probe_runtime_version_reads_a_catalogued_runtime() {
+        // Whether the CLI is installed on this machine is not the point: the
+        // command must answer with an observation either way, never an error.
+        let probe = external_agent_probe_runtime_version("codex-app-server".to_string())
+            .await
+            .expect("a catalogued runtime always yields an observation");
+        assert_eq!(probe.output.is_none(), probe.executable_path.is_none());
     }
 
     #[test]

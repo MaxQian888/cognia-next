@@ -344,6 +344,7 @@ commands.allow = [
   "ensure_dir",
   "ensure_dir_confined",
   "ensure_system_lsp_host",
+  "external_agent_probe_runtime_version",
   "fleet_codex_hooks_capabilities",
   "fleet_codex_hooks_install",
   "fleet_codex_hooks_status",
