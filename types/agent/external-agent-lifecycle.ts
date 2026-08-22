@@ -451,6 +451,43 @@ export interface ExternalAgentRuntimeStatus {
 }
 
 // ============================================================================
+// Lifecycle fields carried on a saved configuration
+// ============================================================================
+
+/**
+ * Where a saved Agent stands in the lifecycle, independent of whether it is
+ * currently connected.
+ *
+ * `blocked` is deliberately distinct from "disabled": a user disables an Agent,
+ * whereas reconciliation blocks one it cannot honestly start. The reason code
+ * is what turns that into an actionable message instead of a silent failure.
+ */
+export type ExternalAgentLifecycleStatus =
+  "ready" | "needs-credentials" | "needs-consent" | "needs-runtime" | "blocked"
+
+/**
+ * Lifecycle fields stored alongside an {@link ExternalAgentConfig}.
+ *
+ * Kept as a separate interface so the lifecycle plane can be built and tested
+ * without widening the Agent config contract, and so the eventual field
+ * addition on the config is a mechanical intersection rather than a rewrite.
+ */
+export interface ExternalAgentLifecycleFields {
+  /** What this Agent runs, and how it was obtained. */
+  runtimeBinding?: ExternalAgentRuntimeBinding
+  /** Keyring references replacing every inline secret. */
+  credentialRefs?: ExternalAgentCredentialRefs
+  /** Reconciliation verdict from the last startup or mutation. */
+  lifecycleStatus?: ExternalAgentLifecycleStatus
+  /** Why the Agent is not `ready`, when it is not. */
+  lifecycleReasonCode?: ExternalAgentLifecycleErrorCode
+  /** Non-localized detail behind `lifecycleReasonCode`. */
+  lifecycleReason?: string
+  /** Windows-only, per-Agent consent to launch outside the sandbox. */
+  unsandboxedConsent?: UnsandboxedLaunchConsent
+}
+
+// ============================================================================
 // Version assessment
 // ============================================================================
 
