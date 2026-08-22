@@ -12,4 +12,10 @@ External agents: one lifecycle, real secrets storage, and a runtime catalog that
 
 **Every shipped agent runtime is now catalogued.** The catalog records where a runtime comes from, which platforms it supports, how to read its installed version, and which versions are certified. Removing an agent's configuration and uninstalling a shared runtime are now separate actions, and a runtime cannot be uninstalled while sessions are still using it or while another agent still points at it — a check that previously could never fire because the live-session count was always reported as zero. Cognia never removes a runtime you installed yourself.
 
+**Cognia can now install an agent runtime and take it back out again.** Managed installs go to a staging area first, get checked against their expected version and checksum, and have to actually start before they replace anything — so a failed install leaves your working version untouched, and one healthy previous version is kept so you can go back. Package installs use a locked dependency list rather than resolving fresh at install time, downloads are checksum-verified before anything is unpacked, and switching to a different package manager asks first because it changes what gets installed.
+
+**Agent directory listings now say which agents Cognia can install for you.** Agents published with a verified download are installable in place; the rest are listed with a link so you can install them yourself, instead of being offered an install that would fetch an unverified package.
+
+**Installing an agent CLI from the terminal app now tells you who manages it.** Those installs go through your own package manager (npm, Homebrew, a vendor script), so Cognia cannot verify, update or remove them afterwards — the install screen now says so instead of looking the same as a managed install.
+
 Four agent runtimes (the Codex, Gemini, Qwen and Pi adapters) still start through `npx`, which fetches the package fresh on every launch. That is now recorded as a known gap with a written reason and counted by a build check, so it can be closed rather than forgotten.
