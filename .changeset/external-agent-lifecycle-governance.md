@@ -18,4 +18,10 @@ External agents: one lifecycle, real secrets storage, and a runtime catalog that
 
 **Installing an agent CLI from the terminal app now tells you who manages it.** Those installs go through your own package manager (npm, Homebrew, a vendor script), so Cognia cannot verify, update or remove them afterwards — the install screen now says so instead of looking the same as a managed install.
 
-Four agent runtimes (the Codex, Gemini, Qwen and Pi adapters) still start through `npx`, which fetches the package fresh on every launch. That is now recorded as a known gap with a written reason and counted by a build check, so it can be closed rather than forgotten.
+**Cognia now reads the version of each agent runtime you have installed, and says whether it has been certified.** A new "Installed runtimes" screen in External Agent settings lists the runtimes your configured agents actually use, with the installed version, the versions Cognia supports, the program that would run, how many agents use it and how many sessions are live. Nothing there is guessed: the version comes from running the runtime's own `--version`, and a device that cannot check — a browser or a phone — says so instead of reporting that nothing is installed.
+
+The version check previously could not work at all. The recorded probe commands were assembled wrongly and would have started the agent instead of printing a version, and four of them would have reported the version of `npx` rather than the agent's.
+
+Four agent runtimes (the Codex, Gemini, Qwen and Pi adapters) still start through `npx`, which fetches the package fresh on every launch. That is now recorded as a known gap with a written reason and counted by a build check, and the runtimes screen marks each one, so the version you are shown is never mistaken for a promise about the next launch.
+
+Installing, updating and removing a runtime for you is still unavailable and now says so plainly instead of failing in an unclear way.
