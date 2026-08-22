@@ -53,6 +53,7 @@ import { resolveReplySnippet } from "./inbound-reply"
 import { createReverseWsTransport } from "./transport-reverse-ws"
 import { createForwardWsTransport } from "./transport-forward-ws"
 import type { OneBotTransport } from "./transport"
+import { enrichOneBotInboundMedia } from "./inbound-media"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 
 // ---------------------------------------------------------------------------
@@ -342,6 +343,13 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
           if (!(await gateInboundEvent(opts.id, result.parsed))) return
           lastActivityAt = Date.now()
+          // Download what the parser could only reference, so a picture sent
+          // into the group reaches the model as an image rather than as the
+          // text `[image: …]`. After the gate: a message that is going to be
+          // dropped costs no downloads.
+          await enrichOneBotInboundMedia(result.parsed, {
+            forwardWsUrl: opts.forwardWsUrl,
+          })
           await ctx.emit(result.parsed)
         }
       },
