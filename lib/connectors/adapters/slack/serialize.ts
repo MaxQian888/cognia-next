@@ -10,7 +10,7 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import { segmentsToPlainText } from "@/types/connectors/segment"
 import {
   buildSlackA2UIBlocks,
-  clampBlocks,
+  paginateBlocks,
   segmentsToBlocks,
   type SlackAnyBlock,
 } from "./block-kit"
@@ -21,6 +21,23 @@ export interface SerializedSlackCall {
   method: "POST"
   url: string
   payload: Record<string, unknown>
+}
+
+/**
+ * A message that did not fit in Slack's 50-block cap, split into the messages
+ * that will actually be posted.
+ *
+ * `pages[0]` is the message the conversation shows; the rest are continuations
+ * the adapter posts into the same thread so a long answer stays together
+ * instead of being scattered down the channel. Every page carries its own
+ * top-level `text`, because that is the string Slack reads to screen readers
+ * and shows in notifications — a continuation without one is silent to both.
+ */
+export interface SerializedSlackPages {
+  channel: string
+  threadTs?: string
+  /** One `chat.postMessage` payload per page. Never empty. */
+  pages: Array<Record<string, unknown>>
 }
 
 /**
@@ -48,7 +65,43 @@ function blocksAndTextPayload(blocks: SlackAnyBlock[], req: OutboundRequest) {
   const text = segmentsToPlainText(req.segments).trim()
   if (blocks.length === 0 && text.length === 0) throw new SlackEmptyMessageError()
   if (blocks.length === 0) return { text }
-  return { blocks: clampBlocks(blocks), ...(text ? { text } : {}) }
+  // Single-page callers keep the first page; `buildPagePayloads` is the path
+  // that actually posts the remainder.
+  const pages = paginateBlocks(blocks)
+  return { blocks: pages[0], ...(text ? { text } : {}) }
+}
+
+/**
+ * Build one `chat.postMessage` payload per page.
+ *
+ * The fallback `text` is deliberately per-page rather than repeated verbatim:
+ * a screen-reader user hearing the same summary five times learns nothing, so
+ * continuations are labelled with their position instead.
+ */
+function buildPagePayloads(
+  blocks: SlackAnyBlock[],
+  req: OutboundRequest,
+  channel: string,
+  threadTs: string | undefined
+): SerializedSlackPages {
+  const text = segmentsToPlainText(req.segments).trim()
+  if (blocks.length === 0 && text.length === 0) throw new SlackEmptyMessageError()
+
+  if (blocks.length === 0) {
+    const payload: Record<string, unknown> = { channel, text }
+    if (threadTs) payload["thread_ts"] = threadTs
+    return { channel, threadTs, pages: [payload] }
+  }
+
+  const pageBlocks = paginateBlocks(blocks)
+  const pages = pageBlocks.map((page, index) => {
+    const fallback =
+      index === 0 ? text || "(message)" : `(continued ${index + 1}/${pageBlocks.length})`
+    const payload: Record<string, unknown> = { channel, blocks: page, text: fallback }
+    if (threadTs) payload["thread_ts"] = threadTs
+    return payload
+  })
+  return { channel, threadTs, pages }
 }
 
 /** Extract channelId from the conversation reference. */
@@ -91,12 +144,13 @@ export function serializePostMessage(req: OutboundRequest): SerializedSlackCall 
  * (Header / Section / Image / Actions / Input + callback bindings). All
  * other segment types delegate to the sync `segmentsToBlocks`.
  *
- * Returns one chat.postMessage call carrying the merged blocks list.
+ * Returns one `chat.postMessage` payload PER PAGE: a projected answer longer
+ * than 50 blocks becomes several messages rather than losing its tail.
  */
 export async function serializePostMessageAsync(
   req: OutboundRequest,
   adapterId: string
-): Promise<SerializedSlackCall> {
+): Promise<SerializedSlackPages> {
   const channel = channelIdFromRef(req)
   const threadTs = threadTsFromRef(req)
   const blocks: SlackAnyBlock[] = []
@@ -122,14 +176,7 @@ export async function serializePostMessageAsync(
     }
   }
 
-  const payload: Record<string, unknown> = { channel, ...blocksAndTextPayload(blocks, req) }
-  if (threadTs) payload["thread_ts"] = threadTs
-
-  return {
-    method: "POST",
-    url: `${SLACK_API_BASE}/chat.postMessage`,
-    payload,
-  }
+  return buildPagePayloads(blocks, req, channel, threadTs)
 }
 
 function buildConversationKeyFromRef(req: OutboundRequest, channelId: string): string | undefined {
@@ -261,6 +308,6 @@ export function serializeOutbound(req: OutboundRequest): SerializedSlackCall {
 export async function serializeOutboundAsync(
   req: OutboundRequest,
   adapterId: string
-): Promise<SerializedSlackCall> {
+): Promise<SerializedSlackPages> {
   return serializePostMessageAsync(req, adapterId)
 }

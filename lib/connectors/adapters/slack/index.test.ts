@@ -488,6 +488,82 @@ describe("createSlackAdapter", () => {
     expect(reqPayload.headers["Authorization"]).toBe("Bearer xoxb-test-token")
   })
 
+  it("send() posts every page of a message that exceeds the 50-block cap", async () => {
+    // 120 markdown segments → 120 blocks → three messages. Before this, blocks
+    // 51+ were sliced off before the request was even built, so the reply just
+    // stopped mid-thought with no error anywhere.
+    mockInvoke.mockResolvedValue(makeSendOkResp("1234.5678"))
+    const adapter = makeAdapter()
+    const segments = Array.from({ length: 120 }, (_, i) => ({
+      type: "markdown" as const,
+      md: `line ${i}`,
+    }))
+
+    const result = await adapter.send({
+      conversationRef: { platform: "slack" as const, adapterId: "sl-1", channelId: "C01CHANNEL" },
+      segments,
+      metadata: { idempotencyKey: "k-pages" },
+    })
+    expect(result.ok).toBe(true)
+
+    const posts = mockInvoke.mock.calls
+      .filter(([cmd]: [string]) => cmd === "connectors_http_request")
+      .map(([, args]: [string, { req: { url: string; body?: string } }]) => args.req)
+      .filter((r) => r.url.includes("chat.postMessage"))
+    expect(posts).toHaveLength(3)
+
+    const bodies = posts.map((r) => JSON.parse(r.body ?? "{}") as Record<string, unknown>)
+    expect((bodies[0].blocks as unknown[]).length).toBe(50)
+    expect((bodies[1].blocks as unknown[]).length).toBe(50)
+    expect((bodies[2].blocks as unknown[]).length).toBe(20)
+    // Nothing is lost: every block is delivered exactly once.
+    expect(bodies.reduce((n, b) => n + (b.blocks as unknown[]).length, 0)).toBe(120)
+
+    // Continuations are threaded under the first message so a long answer stays
+    // together instead of being scattered down the channel.
+    expect(bodies[0].thread_ts).toBeUndefined()
+    expect(bodies[1].thread_ts).toBe("1234.5678")
+    expect(bodies[2].thread_ts).toBe("1234.5678")
+
+    // Every page carries its own top-level text — that is what Slack reads to
+    // screen readers and shows in notifications.
+    expect(typeof bodies[0].text).toBe("string")
+    expect(bodies[1].text).toBe("(continued 2/3)")
+    expect(bodies[2].text).toBe("(continued 3/3)")
+
+    // The id still identifies the FIRST message, so edit/delete/reactions keep
+    // working exactly as before.
+    expect(result.platformMessageId).toBe("C01CHANNEL:1234.5678")
+  }, 15000)
+
+  it("send() reports a partial delivery when a continuation page fails", async () => {
+    // Pages already posted cannot be recalled, so claiming success would hide a
+    // truncated answer and claiming a clean failure would let a retry post the
+    // first pages twice.
+    let call = 0
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd !== "connectors_http_request") return undefined
+      call += 1
+      return call === 1 ? makeSendOkResp("1234.5678") : makeErrResp(200, "channel_not_found")
+    })
+    const adapter = makeAdapter()
+    const segments = Array.from({ length: 60 }, (_, i) => ({
+      type: "markdown" as const,
+      md: `line ${i}`,
+    }))
+
+    const result = await adapter.send({
+      conversationRef: { platform: "slack" as const, adapterId: "sl-1", channelId: "C01CHANNEL" },
+      segments,
+      metadata: { idempotencyKey: "k-partial" },
+    })
+
+    expect(result.ok).toBe(false)
+    // The first page's id is still reported, so the delivered part is traceable.
+    expect(result.platformMessageId).toBe("C01CHANNEL:1234.5678")
+    expect(result.error?.message).toMatch(/split into 2 parts; 1 were delivered/)
+  }, 15000)
+
   it("send() returns error result when API returns 4xx", async () => {
     mockInvoke.mockResolvedValue(makeErrResp(200, "channel_not_found"))
 

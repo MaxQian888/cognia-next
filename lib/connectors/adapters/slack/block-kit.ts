@@ -62,9 +62,16 @@ export function escapeSlackMrkdwn(text: string): string {
 
 // ---------------------------------------------------------------------------
 // Block Kit hard limits (https://api.slack.com/reference/block-kit)
-// Enforced by truncation, matching the defensive-trim precedent of
-// `serializeAssistantSuggestedPrompts` (which slices to Slack's cap instead
-// of letting the API 4xx).
+//
+// Character caps are enforced by truncation, matching the defensive-trim
+// precedent of `serializeAssistantSuggestedPrompts`: a label one character
+// over its cap is still a usable label.
+//
+// The 50-BLOCK cap is different in kind and is NOT truncated. A long answer
+// projected to Block Kit routinely exceeds 50 blocks, and dropping the tail
+// silently deleted the end of the reply — the user saw a message that simply
+// stopped, with no error, no audit row, and nothing in the logs. Blocks are
+// paginated across messages instead; see `paginateBlocks`.
 // ---------------------------------------------------------------------------
 
 /** Slack rejects messages with more than 50 blocks. */
@@ -82,9 +89,25 @@ function truncateWithEllipsis(text: string, max: number): string {
   return `${text.slice(0, Math.max(0, max - 1))}…`
 }
 
-/** Clamp a blocks list to Slack's 50-blocks-per-message hard cap. */
-export function clampBlocks<T>(blocks: T[]): T[] {
-  return blocks.length > MAX_BLOCKS_PER_MESSAGE ? blocks.slice(0, MAX_BLOCKS_PER_MESSAGE) : blocks
+/**
+ * Split a blocks list into messages of at most 50 blocks each.
+ *
+ * Replaces the old `clampBlocks`, which returned `blocks.slice(0, 50)` — so
+ * everything past the fiftieth block was discarded before the request was even
+ * built. Nothing reported it: the send succeeded, Slack was happy, and the
+ * reply just ended mid-thought.
+ *
+ * An empty input yields no pages rather than one empty page, so callers can
+ * distinguish "nothing to send" from "one blank message".
+ */
+export function paginateBlocks<T>(blocks: T[], max = MAX_BLOCKS_PER_MESSAGE): T[][] {
+  if (blocks.length === 0) return []
+  const size = Math.max(1, max)
+  const pages: T[][] = []
+  for (let i = 0; i < blocks.length; i += size) {
+    pages.push(blocks.slice(i, i + size))
+  }
+  return pages
 }
 
 // ---------------------------------------------------------------------------

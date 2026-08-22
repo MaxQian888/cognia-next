@@ -1,5 +1,5 @@
 import {
-  clampBlocks,
+  paginateBlocks,
   escapeSlackMrkdwn,
   MAX_BLOCKS_PER_MESSAGE,
   segmentToBlock,
@@ -133,14 +133,38 @@ describe("segmentsToBlocks", () => {
   })
 })
 
-describe("clampBlocks", () => {
-  it("truncates to Slack's 50-blocks-per-message cap", () => {
+describe("paginateBlocks", () => {
+  it("keeps every block when a message exceeds the 50-block cap", () => {
+    // The bug this replaces: `clampBlocks` returned `slice(0, 50)`, so a long
+    // answer lost its tail with no error anywhere.
     const blocks = Array.from({ length: 60 }, (_, i) => ({ i }))
-    expect(clampBlocks(blocks)).toHaveLength(MAX_BLOCKS_PER_MESSAGE)
+    const pages = paginateBlocks(blocks)
+    expect(pages).toHaveLength(2)
+    expect(pages[0]).toHaveLength(MAX_BLOCKS_PER_MESSAGE)
+    expect(pages[1]).toHaveLength(10)
+    expect(pages.flat()).toEqual(blocks)
   })
 
-  it("leaves lists at or under the cap untouched", () => {
+  it("returns a single page for a list at or under the cap", () => {
     const blocks = Array.from({ length: 50 }, (_, i) => ({ i }))
-    expect(clampBlocks(blocks)).toBe(blocks)
+    const pages = paginateBlocks(blocks)
+    expect(pages).toHaveLength(1)
+    expect(pages[0]).toEqual(blocks)
+  })
+
+  it("splits an exact multiple without emitting a trailing empty page", () => {
+    const pages = paginateBlocks(Array.from({ length: 100 }, (_, i) => ({ i })))
+    expect(pages).toHaveLength(2)
+    expect(pages.every((page) => page.length === MAX_BLOCKS_PER_MESSAGE)).toBe(true)
+  })
+
+  it("yields no pages for an empty list", () => {
+    // Distinguishable from "one blank message", which Slack would reject.
+    expect(paginateBlocks([])).toEqual([])
+  })
+
+  it("preserves order across page boundaries", () => {
+    const blocks = Array.from({ length: 137 }, (_, i) => ({ i }))
+    expect(paginateBlocks(blocks).flat()).toEqual(blocks)
   })
 })

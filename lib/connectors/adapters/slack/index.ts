@@ -646,20 +646,59 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       // skip chat.postMessage entirely — completeUploadExternal with
       // channel_id already shares the files into the conversation.
       if (rest.length > 0 || uploads.length === 0) {
-        const call = await serializeOutboundAsync({ ...req, segments: rest }, opts.id)
-        const result = (await doRequest("POST", "chat.postMessage", call.payload)) as {
-          ts?: string
-          channel?: string
-        } | null
-        // Composite "<channelId>:<ts>" — message-scoped follow-ups (edit /
-        // delete / reactions / pins) are channel-scoped on Slack, so the
-        // channel must ride in the platform message id.
-        const channel = result?.channel ?? String(call.payload["channel"] ?? "")
-        platformMessageId = result?.ts
-          ? channel
-            ? `${channel}:${result.ts}`
-            : result.ts
-          : undefined
+        const serialized = await serializeOutboundAsync({ ...req, segments: rest }, opts.id)
+
+        // A projection longer than Slack's 50-block cap becomes several
+        // messages. Continuations are threaded under the first one so a long
+        // answer stays together instead of being scattered down the channel —
+        // and, when the conversation is already a thread, they simply join it.
+        let continuationThreadTs = serialized.threadTs
+        for (const [index, payload] of serialized.pages.entries()) {
+          const pagePayload =
+            index === 0 || !continuationThreadTs
+              ? payload
+              : { ...payload, thread_ts: continuationThreadTs }
+
+          let result: { ts?: string; channel?: string } | null
+          try {
+            result = (await doRequest("POST", "chat.postMessage", pagePayload)) as {
+              ts?: string
+              channel?: string
+            } | null
+          } catch (err) {
+            if (index === 0) throw err
+            // Earlier pages are already posted and cannot be recalled. Report
+            // the partial delivery rather than claiming success (which would
+            // hide a truncated answer) or a clean failure (which would let a
+            // retry post the first pages a second time).
+            return {
+              ok: false,
+              platformMessageId,
+              error: {
+                ...toOutboundError(err),
+                message:
+                  `Slack message was split into ${serialized.pages.length} parts; ` +
+                  `${index} were delivered before this failed: ` +
+                  `${toOutboundError(err).message}`,
+              },
+            }
+          }
+
+          if (index === 0) {
+            // Composite "<channelId>:<ts>" — message-scoped follow-ups (edit /
+            // delete / reactions / pins) are channel-scoped on Slack, so the
+            // channel must ride in the platform message id.
+            const channel = result?.channel ?? String(payload["channel"] ?? "")
+            platformMessageId = result?.ts
+              ? channel
+                ? `${channel}:${result.ts}`
+                : result.ts
+              : undefined
+            // Root the continuations on the first page when we are not already
+            // inside a thread.
+            if (!continuationThreadTs && result?.ts) continuationThreadTs = result.ts
+          }
+        }
       }
 
       for (const seg of uploads) {
