@@ -15,7 +15,9 @@ import type { OutboundRequest, OutboundResult } from "@/types/connectors/outboun
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
+import { createTelegramAlbumBuffer, type TelegramAlbumBuffer } from "./album"
 import {
+  albumGroupIdOf,
   parseTelegramUpdate,
   parseTelegramCallbackQuery,
   parseTelegramForceReplyCorrelation,
@@ -123,6 +125,11 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
   let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+  /**
+   * Album assembly for this run. Replaced on every `start`; the initial value
+   * exists so `stop()` before a `start()` has something inert to flush.
+   */
+  let albums: TelegramAlbumBuffer = createTelegramAlbumBuffer({ onFlush: () => {} })
 
   /**
    * Custom error wrapper carrying the Telegram-side `retry_after`. The
@@ -203,6 +210,20 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
+
+    // Rebuilt per start so a restart never inherits parts of an album whose
+    // conversation may no longer be routed the same way.
+    albums = createTelegramAlbumBuffer({
+      onFlush: async (event) => {
+        if (!(await gateInboundEvent(opts.id, event))) return
+        await ctx.emit(event)
+      },
+      onError: (error) => {
+        ctx.logger.warn("telegram:album flush failed", {
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      },
+    })
 
     healthState = "running"
     healthReason = undefined
@@ -324,9 +345,14 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
           // Regular message / edit / reaction → message event.
           const event = parseTelegramUpdate(opts.id, opts.selfId, update)
           if (event) {
+            lastActivityAt = Date.now()
+            // An album arrives as N updates sharing a media_group_id. Buffer
+            // them so the bot answers the message the user sent instead of
+            // once per photo; the gate runs on the assembled event, because
+            // the caption (what the gate reads) is on only one part.
+            if (albums.offer(event, albumGroupIdOf(update))) continue
             // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
             if (!(await gateInboundEvent(opts.id, event))) continue
-            lastActivityAt = Date.now()
             await ctx.emit(event)
           }
         }
@@ -350,6 +376,9 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     stopCalled = true
     abortController?.abort()
     abortController = null
+    // A half-assembled album is a message the user sent. Emit what arrived
+    // rather than dropping it on the floor at shutdown.
+    await albums.flushAll()
     healthState = "down"
     healthReason = undefined
   }

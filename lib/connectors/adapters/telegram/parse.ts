@@ -163,6 +163,12 @@ export interface TelegramMessage {
   contact?: TelegramContact
   dice?: TelegramDice
   reply_to_message?: TelegramMessage
+  /**
+   * Present on every part of an album. Telegram has no multi-media message on
+   * the wire: N updates share this id and the caption rides on exactly one of
+   * them. `lib/connectors/adapters/telegram/album.ts` reassembles them.
+   */
+  media_group_id?: string
   /** Set on edited_message updates — Telegram's wall-clock for the edit. */
   edit_date?: number
 }
@@ -195,9 +201,8 @@ export interface TelegramMessageReactionUpdated {
   new_reaction: TelegramReactionType[]
 }
 
-// GAP: media_group_id album aggregation (multi-photo posts arrive as N
-// separate updates sharing media_group_id) and my_chat_member handling
-// (bot added/removed/permission changes) are not implemented — follow-up.
+// GAP: my_chat_member handling (bot added/removed/permission changes) is not
+// implemented — follow-up. Album aggregation now lives in `./album.ts`.
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
@@ -699,6 +704,18 @@ export async function parseTelegramForceReplyCorrelation(
  * - inline-message-only callback_query (no anchoring chat).
  * - empty / unrecognised update types.
  */
+/**
+ * The album this update belongs to, or `undefined`.
+ *
+ * Only a NEW message can be an album part: an edit addresses one specific part
+ * of an already-delivered album, so re-buffering it would hold an edit for the
+ * album window and then merge it into a group it does not belong to.
+ */
+export function albumGroupIdOf(update: TelegramUpdate): string | undefined {
+  const msg = update.message ?? update.channel_post
+  return msg?.media_group_id
+}
+
 export function parseTelegramUpdate(
   adapterId: string,
   selfId: string,

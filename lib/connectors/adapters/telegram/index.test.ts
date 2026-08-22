@@ -156,6 +156,53 @@ describe("createTelegramAdapter", () => {
     expect(emitted[0].messageId).toBe("1")
   })
 
+  it("emits ONE event for an album instead of one per photo", async () => {
+    // Three updates sharing a media_group_id — Telegram's only representation
+    // of "here are three photos with a caption". Before this, the bot answered
+    // three times and two of the three saw no caption at all.
+    const album = [1, 2, 3].map((id) => ({
+      update_id: id,
+      message: {
+        message_id: id,
+        from: { id: 111, first_name: "Alice" },
+        chat: { id: 111, type: "private" },
+        date: 1000000,
+        media_group_id: "mg-1",
+        photo: [{ file_id: `f${id}`, file_unique_id: `u${id}`, width: 10, height: 10 }],
+        ...(id === 2 ? { caption: "what are these" } : {}),
+      },
+    }))
+    let pollCount = 0
+    mockInvoke.mockImplementation(async () => {
+      pollCount += 1
+      if (pollCount === 1) return makeOkUpdateResp(album)
+      await new Promise((r) => setTimeout(r, 50000))
+      return makeOkUpdateResp([])
+    })
+
+    const adapter = createTelegramAdapter({
+      id: "tg-album",
+      displayName: "Test Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "987654321",
+    })
+
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await new Promise((r) => setTimeout(r, 30))
+    // stop() flushes the open group, so the assertion does not wait out the
+    // album window.
+    await adapter.stop()
+
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0].messageId).toBe("1")
+    // The caption rode on part 2 and still reaches the trigger matcher.
+    expect(emitted[0].plainText).toContain("what are these")
+    expect(emitted[0].segments.filter((s) => s.type === "image")).toHaveLength(3)
+    expect(emitted[0].channelData?.telegramAlbum).toEqual({ messageIds: ["1", "2", "3"] })
+  })
+
   it("send() calls the correct Telegram API method", async () => {
     mockInvoke.mockResolvedValue(makeSendOkResp(888))
 
