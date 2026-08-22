@@ -40,10 +40,11 @@ export interface CapabilitySuppression {
   reason: CapabilitySuppressionReason
   /**
    * Machine-readable specifics for the reason: the scopes that would have
-   * satisfied it, the upstream feature token, the setting name, or the scenes
-   * where the capability does exist. Rendered by the capability matrix UI and
-   * carried into `connector.capability_suppressed` audit rows, so it must stay
-   * free of secrets — scope names and setting keys only, never values.
+   * satisfied it, the upstream feature token, the setting name, the scenes
+   * where the capability does exist, or the transports that carry it.
+   *
+   * Rendered verbatim by the capability matrix card, so it must stay free of
+   * secrets — scope names, feature tokens and setting KEYS only, never values.
    */
   detail: string
 }

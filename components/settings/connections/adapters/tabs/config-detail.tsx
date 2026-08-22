@@ -57,6 +57,7 @@ import { UsagePresence } from "../../forms/usage-presence"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterTransportLabelKey } from "../platform-meta"
 import { ConnectedScopesCard } from "./connected-scopes-card"
+import { CapabilityMatrixCard } from "./capability-matrix-card"
 
 export interface ConfigDetailProps {
   row: AdapterInstanceRow
@@ -124,6 +125,12 @@ export function ConfigDetail({ row }: ConfigDetailProps) {
       {/* Read-only granted OAuth scopes (persisted by the platform OAuth
        * handlers). Renders only for adapters that recorded scopes. */}
       <ConnectedScopesCard row={row} />
+
+      {/* What the projection says this INSTANCE can serve, and — the point of
+       * the card — why anything it cannot is unavailable. Without it the
+       * projection's verdict only ever reached its callers, so a capability
+       * a re-authorization would restore just silently disappeared. */}
+      <CapabilityMatrixCard row={row} />
 
       <h3 className="pt-2 text-sm font-semibold">{t("sections.behavior")}</h3>
       <AdapterBehaviorDefaults adapterId={row.id} />

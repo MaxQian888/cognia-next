@@ -26748,6 +26748,19 @@
           "searchPlaceholder": "Search platforms…",
           "title": "Add a connector"
         },
+        "capabilityMatrix": {
+          "availableLabel": "Available",
+          "reasons": {
+            "instance_setting_off": "Turned off by this bot's “{detail}” setting.",
+            "missing_oauth_scope": "The connector was not granted the access this needs ({detail}). Re-authorize it to add them.",
+            "scene_unsupported": "The platform only offers this in: {detail}.",
+            "transport_unsupported": "Needs the {detail} transport; this bot uses a different one.",
+            "upstream_impl_unsupported": "The server this bot connects to does not implement {detail}."
+          },
+          "scopeHint": "Resolved for this bot as configured. Some capabilities are also limited to particular conversations, and a few depend on the individual message.",
+          "title": "What this bot can do",
+          "unavailableLabel": "Not available on this bot"
+        },
         "comingSoon": "Coming soon",
         "configure": "Configure",
         "configureAria": "Configure {name}",
