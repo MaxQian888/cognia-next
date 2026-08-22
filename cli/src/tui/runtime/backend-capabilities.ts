@@ -11,19 +11,34 @@
  * one capability set — so an unsupported feature can be shown as unavailable
  * WITH a reason instead of failing silently.
  *
- * A capability has two sources, merged here:
- *   - the preset's static declaration (a protocol either has a slot for the
- *     feature or it does not), and
- *   - what the agent negotiated during `initialize` (an ACP agent advertises
- *     MCP and session-load support per implementation).
+ * {@link BackendFeature} stays: it is this TUI's display vocabulary, and it does
+ * not map one-to-one onto capability ids (`skills` and `plugins` describe
+ * Cognia's tool host, not anything the agent supports). What changed is where
+ * the ANSWERS come from. This module used to decide them from its own reading
+ * of the preset — a third table alongside the CLI's `PROTOCOL_CAPABILITIES`
+ * and the renderer's `RUNTIME_CAPABILITIES.external` — and it got several
+ * wrong: it reported `mcp` supported for every external backend including the
+ * ones with no per-session MCP channel at all, and `hooks` unsupported with
+ * "only the built-in agent reports this" when the real reason is that the CLI
+ * (unlike the renderer) does not wrap external turns in the hook runtime.
  *
- * Pure — the caller supplies the negotiated half.
+ * Now every row is a PROJECTION of the external capability profile (ADR-0090
+ * external SSOT) plus the tool host's real state. Pure — the caller supplies
+ * the negotiated half and the tool-host half.
  */
 import type {
   AcpCapabilities,
   AcpPermissionMode,
   ExternalAgentProtocol,
 } from "@/types/agent/external-agent"
+import {
+  isCapabilityUsable,
+  type ExternalAgentCapabilityId,
+  type ExternalAgentCapabilityProfileV1,
+} from "@cognia/agent-config-types/external-agent-capability"
+import { negotiateCapabilityProfile } from "@/lib/ai/agent/external/capability-profile"
+import { liveCapabilityFacts } from "@/lib/ai/agent/external/capability-live-facts"
+import { getPresetConfig } from "@/lib/ai/agent/external/presets"
 // Pure mode arithmetic (a protocol→supported-modes table plus a permissiveness
 // rank), NOT the protocol stack this module otherwise keeps out of its graph:
 // `permission-modes` → `permission-cascade` → `sandbox/policy-bridge` are three
@@ -135,7 +150,14 @@ export function effectivePermissionMode(
 
 const SUPPORTED: FeatureSupport = { supported: true }
 
-/** Reasons, written once so every surface phrases a gap identically. */
+/**
+ * English wording for the profile's `reasonKey` vocabulary.
+ *
+ * The profile carries KEYS, not sentences, because the desktop panel renders
+ * the same verdicts through next-intl. This TUI is English-only, so it owns the
+ * English half — and both surfaces are explaining the same cell rather than
+ * inventing their own account of why a row is grey.
+ */
 const REASON = {
   sidecarOnly: "only the built-in agent reports this",
   noProtocolSlot: "the agent protocol has no equivalent",
@@ -143,7 +165,47 @@ const REASON = {
   noToolHost: "this agent cannot attach Cognia's tool bridge",
   noManifest: "the current policy resolved no tools of this kind",
   restartRequired: "changing this restarts the agent's context",
+  noHookRuntime: "the CLI does not run Cognia's hooks around an external turn",
+  noSandbox: "this platform cannot run the mandatory sandbox",
+  noSubagentDispatch: "the dispatch_agent tool was not projected",
+  notNegotiated: "the agent did not advertise it during initialize",
+  adapterMethodMissing: "Cognia's adapter does not implement it",
+  noPerSessionMcpServers: "the agent protocol has no per-session MCP channel",
+  perThreadConfigOverride: "carried as a per-thread config override",
+  codexOptionsChannel: "carried on the Codex options channel",
+  noMidTurnApproval: "this transport cannot carry a mid-turn approval",
+  launchTimeAuthorityOnly: "authority is granted at launch and cannot change mid-run",
+  committedRepliesOnly: "this channel reports committed replies only",
+  cancelKillsRuntime: "cancelling ends the whole runtime, not just the turn",
+  advertisedCompactCommand: "the agent advertises a /compact command",
+  noAdvertisedCompactCommand: "the agent advertises no /compact command",
+  nativeSummarizeRoute: "served by the provider's own summarize route",
+  noManifestRow: "nothing describes this protocol's capabilities",
+  cogniaHookRuntime: "Cognia's hook runtime wraps the turn",
+  cogniaDispatchAgent: "served by Cognia's dispatch_agent tool",
 } as const
+
+/**
+ * Turn a profile cell into a display verdict.
+ *
+ * `unknown` renders as unsupported, and that is the honest projection: the TUI
+ * has to draw the row one way or the other, and offering a feature nobody has
+ * verified is the failure mode this module exists to prevent. The reason still
+ * distinguishes the two — "the agent did not advertise it" reads differently
+ * from "the protocol has no equivalent".
+ */
+function fromProfile(
+  profile: ExternalAgentCapabilityProfileV1,
+  id: ExternalAgentCapabilityId
+): FeatureSupport {
+  const cell = profile.effective[id]
+  if (isCapabilityUsable(cell.level)) return SUPPORTED
+  const key = cell.reasonKey as keyof typeof REASON | undefined
+  const reason =
+    (key && REASON[key]) ??
+    (cell.level === "unknown" ? "nothing has verified this for the running agent" : undefined)
+  return reason ? { supported: false, reason } : { supported: false }
+}
 
 /**
  * Presets whose adapter reads the Codex metadata channel (`codexOptions`).
@@ -249,58 +311,105 @@ export function canHostCogniaTools(negotiated: AcpCapabilities | undefined): boo
  * behaviour would be exactly the silent lie this module exists to prevent.
  */
 export function externalCapabilities(input: ExternalCapabilityInput): BackendCapabilities {
-  const codexChannel = usesCodexOptions(input.presetId ?? input.backend)
-  // Protocols whose live session exposes a config-options channel (model and
-  // thinking selectors). ACP advertises `configOptions`; `pi-rpc` answers the
-  // equivalent from `get_state` + `get_available_models` /
-  // `get_available_thinking_levels`.
-  const configOptionsChannel = input.protocol === "acp" || input.protocol === "pi-rpc"
-  // Pi exposes a first-class `compact` command and a native thinking-level
-  // control, rather than the slash-command heuristic other agents need.
-  const piRpc = input.protocol === "pi-rpc"
   const unsupported = (reason: string): FeatureSupport => ({ supported: false, reason })
   const host = input.toolHost
   const attachable = host ? host.attachable : canHostCogniaTools(input.negotiated)
+  const toolHostRunning = attachable && (host ? host.running : true)
+
+  const presetId = input.presetId ?? input.backend
+  const profile = negotiateCapabilityProfile({
+    // A caller that already launched the agent knows its protocol; one that is
+    // only describing a preset does not, and the preset registry is the static
+    // answer. Falling back to the BACKEND ID (which is a preset id, never a
+    // protocol) would silently produce a profile with no manifest row — every
+    // capability `unknown`, every row greyed out with no explanation.
+    protocol: input.protocol ?? resolvePresetProtocol(presetId) ?? presetId,
+    presetId,
+    hostFacts: {
+      toolHostRunning,
+      subagentDispatchProjected: host?.subagentDispatch ?? false,
+      // The CLI's external-agent session does not wrap the turn in Cognia's
+      // lifecycle hooks. The renderer does; that difference is the whole
+      // reason this is a host fact rather than a protocol row, and reporting
+      // it as "only the built-in agent reports this" named the wrong cause.
+      hookRuntimeAvailable: false,
+    },
+    // The launch path already refused an unsandboxable platform before this
+    // point, so a connected agent is by construction on a supported one.
+    ceilings: { sandboxAvailable: true },
+    liveFacts: liveCapabilityFacts({
+      ...(input.negotiated ? { negotiated: input.negotiated } : {}),
+    }),
+  })
+
   /** A Cognia-projected feature is available only when something real backs it. */
   const projected = (count: number): FeatureSupport => {
     if (!attachable) return unsupported(REASON.noToolHost)
     if (host && !host.running) return unsupported(REASON.noToolHost)
     return count > 0 ? SUPPORTED : unsupported(REASON.noManifest)
   }
+
   return {
     backend: input.backend,
     ...(input.presetId ? { presetId: input.presetId } : {}),
     ...(input.protocol ? { protocol: input.protocol } : {}),
     builtin: false,
     features: {
-      // Forwarded at session/new, so a `/mcp` toggle restarts the agent context.
-      mcp: SUPPORTED,
+      // Was unconditionally SUPPORTED. Only ACP carries MCP servers at
+      // `session/new`; Codex reaches the same outcome through a per-thread
+      // config override, and OpenCode / Pi / DSH have no channel at all — so
+      // `/mcp` used to offer a toggle that forwarded nothing on four of seven
+      // protocols.
+      mcp: fromProfile(profile, "mcp"),
       // Read when the agent is registered, so a change needs a reconnect.
-      thinking: codexChannel || piRpc ? SUPPORTED : unsupported(REASON.noProtocolSlot),
-      // Skills now ride the CANONICAL system prompt (catalog + `load_skill`),
-      // which every external backend receives — this was Codex-only back when
-      // the only channel was Codex's native skill-root scan.
+      thinking: fromProfile(profile, "thinking"),
+      // Skills and plugin tools are NOT agent capabilities: they ride Cognia's
+      // tool host. Mapping them onto `skills.native` / `plugins.native` would
+      // claim the AGENT supports them, which is a different (and false) thing.
       skills: attachable ? SUPPORTED : unsupported(REASON.noToolHost),
-      // Plugin/web/`ask_user`/`load_skill` reach the agent through the Cognia
-      // host bridge, so the honest answer is whatever the bridge produced.
       plugins: projected(host?.hostToolCount ?? 0),
-      compact: piRpc ? SUPPORTED : unsupported(REASON.noProtocolSlot),
-      resume: input.negotiated?.multiTurn ? SUPPORTED : unsupported(REASON.noProtocolSlot),
-      rateLimits: unsupported(REASON.sidecarOnly),
-      mcpLogs: unsupported(REASON.agentOwned),
-      hooks: unsupported(REASON.sidecarOnly),
+      compact: fromProfile(profile, "compaction"),
+      resume: fromProfile(profile, "session.resume"),
+      rateLimits: fromProfile(profile, "rate-limit-reporting"),
+      mcpLogs: fromProfile(profile, "mcp.logs"),
+      hooks: fromProfile(profile, "hooks.lifecycle"),
       // `dispatch_agent` is a host tool, so subagent models apply exactly when
       // the dispatch tool was actually projected — a bridge that never started
       // has no dispatch tool no matter what the manifest said it would carry.
-      subagentModels: projected(host?.subagentDispatch ? 1 : 0),
-      // Native Codex enumerates models through `model/list`; ACP agents expose
-      // their model selector from the live session's `configOptions` instead.
-      modelPicker:
-        supportsModelListing(input.presetId ?? input.backend) || configOptionsChannel
-          ? SUPPORTED
-          : unsupported(REASON.noProtocolSlot),
+      subagentModels: fromProfile(profile, "subagents.model-selection"),
+      // Two different routes to the same user-visible affordance: the native
+      // Codex app-server enumerates models without a session (`model/list`),
+      // while ACP and Pi expose a per-session selector. Either one means the
+      // picker has something to show.
+      modelPicker: pickBetter(
+        fromProfile(profile, "models.list"),
+        fromProfile(profile, "set-model")
+      ),
     },
   }
+}
+
+/**
+ * The wire protocol a preset speaks, or undefined for an id no preset claims.
+ *
+ * Deliberately tolerant: the registry throws for a malformed id, and a lookup
+ * failure here must degrade to "unknown protocol" rather than take down a
+ * render.
+ */
+function resolvePresetProtocol(presetId: string | undefined): string | undefined {
+  if (!presetId) return undefined
+  try {
+    return getPresetConfig(presetId)?.protocol
+  } catch {
+    return undefined
+  }
+}
+
+/** Supported wins; otherwise keep the first reason, which is the more specific. */
+function pickBetter(a: FeatureSupport, b: FeatureSupport): FeatureSupport {
+  if (a.supported) return a
+  if (b.supported) return b
+  return a
 }
 
 /** Is `feature` usable right now? Unknown capabilities read as supported so a

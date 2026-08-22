@@ -15,12 +15,32 @@
  *
  * Cognia tools and context are never dropped to make a backend fit. If a
  * backend cannot host them, that is a capability failure, not a downgrade.
+ *
+ * What this module no longer does is DECIDE what a backend can do. It used to
+ * carry its own `PROTOCOL_CAPABILITIES` table — a third answer alongside the
+ * renderer's `RUNTIME_CAPABILITIES.external` and the TUI's
+ * `externalCapabilities()` — and the three disagreed. It claimed `steer` for
+ * OpenCode, whose adapter has no `steerTurn` at all, so a `--requires steer`
+ * run was admitted here and then failed at the first steer. Capabilities now
+ * come from the external SSOT (ADR-0090): the protocol manifest row, the
+ * preset refinement and this host's ceilings.
+ *
+ * Selection is the STATIC half of a two-phase admission, so it refuses only
+ * what is already definitely wrong. A capability nothing has measured yet
+ * passes here and is re-checked against the negotiated profile after the
+ * handshake — refusing an `unknown` at selection would reject agents that work.
  */
 
 import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-execution"
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"
+import {
+  isCapabilityUsable,
+  type ExternalAgentCapabilityId,
+} from "@cognia/agent-config-types/external-agent-capability"
 
 import { getAvailablePresets, getPresetConfig } from "@/lib/ai/agent/external/presets"
+import { preflightExternalAgent } from "@/lib/ai/agent/external/capability-preflight"
+import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
 
 /** The built-in Cognia sidecar. Not a preset — it is the default host. */
 export const BUILTIN_BACKEND = "builtin"
@@ -66,41 +86,6 @@ export const BUILTIN_CAPABILITIES: readonly AgentCapabilityId[] = [
   "compaction",
 ]
 
-/**
- * Capabilities every external agent backend provides regardless of protocol.
- * Deliberately conservative: anything not on this list must be proven per
- * protocol rather than assumed, because assuming a capability a backend lacks
- * is exactly how a caller ends up with a silently degraded run.
- */
-const EXTERNAL_BASE_CAPABILITIES: readonly AgentCapabilityId[] = [
-  "streaming",
-  "session.multi-turn",
-  "tools.ordinary",
-  "tools.results",
-  "tools.errors",
-  "upstream-errors",
-  "stream-interruption",
-]
-
-/**
- * Per-protocol additions on top of {@link EXTERNAL_BASE_CAPABILITIES}. Keyed by
- * the preset's `protocol`, since capability is a property of the wire protocol
- * rather than of the individual executable.
- */
-const PROTOCOL_CAPABILITIES: Record<string, readonly AgentCapabilityId[]> = {
-  acp: ["mcp", "permissions.interrupt-resume", "session.resume", "set-model", "images"],
-  codex: ["mcp", "permissions.interrupt-resume", "session.resume", "set-model"],
-  "codex-app-server": [
-    "mcp",
-    "permissions.interrupt-resume",
-    "session.resume",
-    "set-model",
-    "steer",
-  ],
-  opencode: ["mcp", "session.resume", "set-model", "steer", "compaction"],
-  "opencode-v2": ["mcp", "session.resume", "set-model", "steer", "compaction"],
-}
-
 export type BackendSelection =
   { ok: true; backend: SelectedBackend } | { ok: false; error: AgentStructuredError }
 
@@ -121,10 +106,60 @@ export interface BackendSelectResult extends SelectedBackend {
   disabledOptional: AgentCapabilityId[]
 }
 
-/** Capability set for an external preset, derived from its protocol. */
-export function capabilitiesForProtocol(protocol: string | undefined): AgentCapabilityId[] {
-  const extra = protocol ? (PROTOCOL_CAPABILITIES[protocol] ?? []) : []
-  return [...new Set([...EXTERNAL_BASE_CAPABILITIES, ...extra])]
+/**
+ * The CLI's own host facts, as the capability profile sees them.
+ *
+ * Both halves are deliberate. `hookRuntimeAvailable` is false because the CLI's
+ * external-agent session does not run Cognia's lifecycle hooks around an
+ * external turn (the renderer does), and `toolHostRunning` is false because the
+ * broker has not started at SELECTION time — it is a live fact, and claiming it
+ * here would be a pre-handshake guess.
+ */
+const CLI_SELECTION_HOST_FACTS = {
+  toolHostRunning: false,
+  subagentDispatchProjected: false,
+  hookRuntimeAvailable: false,
+} as const
+
+/**
+ * Capability set for an external preset, from the external SSOT.
+ *
+ * Returns only the v2 ids: the external-only axes (`models.list`,
+ * `mcp.logs`, …) have no place in `SelectedBackend.capabilities`, which feeds
+ * `AgentExecutionEnvironment.hostCapabilities` and must speak the closed
+ * vocabulary the resolver understands.
+ */
+export function capabilitiesForProtocol(
+  protocol: string | undefined,
+  presetId?: string
+): AgentCapabilityId[] {
+  if (!protocol) return []
+  const preflight = preflightExternalAgent({
+    protocol,
+    ...(presetId ? { presetId } : {}),
+    hostFacts: CLI_SELECTION_HOST_FACTS,
+    ceilings: { sandboxAvailable: externalAgentSandboxSupportsPlatform() },
+    // Selection must not depend on the adapter registry: the CLI resolves a
+    // backend id before any protocol module is loaded, and a registry miss
+    // there would read as "the plugin is disabled".
+    hasAdapter: () => true,
+  })
+  const capabilities: AgentCapabilityId[] = []
+  for (const [id, cell] of Object.entries(preflight.profile.effective)) {
+    if (!isCapabilityUsable(cell.level)) continue
+    if (isExternalOnly(id as ExternalAgentCapabilityId)) continue
+    capabilities.push(id as AgentCapabilityId)
+  }
+  return capabilities
+}
+
+function isExternalOnly(id: ExternalAgentCapabilityId): boolean {
+  return (
+    id === "mcp.logs" ||
+    id === "rate-limit-reporting" ||
+    id === "subagents.model-selection" ||
+    id === "models.list"
+  )
 }
 
 /**
@@ -166,7 +201,7 @@ export function selectBackend(
       id: requested,
       kind: "external",
       displayName: preset.name ?? requested,
-      capabilities: capabilitiesForProtocol(preset.protocol),
+      capabilities: capabilitiesForProtocol(preset.protocol, requested),
     }
   }
 

@@ -18,8 +18,11 @@ function registry(presets: Record<string, Preset>) {
   }
 }
 
+// Real protocol ids. The old fixture used `protocol: "codex"`, which is not a
+// protocol any adapter registers — it only "worked" because the private
+// capability table happened to have a key by that name.
 const PRESETS = registry({
-  codex: { name: "Codex CLI", protocol: "codex" },
+  codex: { name: "Codex CLI", protocol: "codex-app-server" },
   "claude-code": { name: "Claude Code", protocol: "acp" },
   "opencode-server": { name: "OpenCode (managed)", protocol: "opencode" },
   mystery: { name: "Mystery Agent" },
@@ -116,11 +119,13 @@ describe("selectBackend — capabilities", () => {
   it("reports an unmet preference without failing the run", () => {
     const result = selectBackend({
       ...PRESETS,
-      requested: "codex",
+      requested: "claude-code",
       prefers: ["steer", "mcp"],
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
+    // ACP has no mid-turn input method; it does carry MCP servers at
+    // `session/new`.
     expect(result.backend.disabledOptional).toEqual(["steer"])
   })
 
@@ -131,42 +136,61 @@ describe("selectBackend — capabilities", () => {
 })
 
 describe("capabilitiesForProtocol", () => {
-  it("gives every external backend the conservative base set", () => {
-    const base = capabilitiesForProtocol(undefined)
-    expect(base).toEqual(
+  it("reports the protocol's own capabilities, not a shared base set", () => {
+    // There is no longer a "base set every external agent has". A2A, for
+    // instance, negotiates streaming per Agent Card, so claiming it statically
+    // would be a guess — and the old base set did exactly that for all seven.
+    const acp = capabilitiesForProtocol("acp")
+    expect(acp).toEqual(
       expect.arrayContaining([
         "streaming",
         "session.multi-turn",
         "tools.ordinary",
         "tools.results",
         "tools.errors",
+        "mcp",
+        "permissions.interrupt-resume",
       ])
     )
-    // Not assumed without proof.
-    expect(base).not.toContain("mcp")
-    expect(base).not.toContain("subagents.native")
+    expect(capabilitiesForProtocol("a2a")).not.toContain("streaming")
   })
 
-  it("adds protocol-specific capabilities on top of the base set", () => {
-    expect(capabilitiesForProtocol("acp")).toContain("permissions.interrupt-resume")
-    expect(capabilitiesForProtocol("opencode")).toContain("compaction")
+  it("no longer claims steering for OpenCode", () => {
+    // The old table listed `steer` for opencode. Its adapter has no
+    // `steerTurn`, and the protocol has no mid-turn input method, so a
+    // `--requires steer` run was admitted here and failed at the first steer.
+    expect(capabilitiesForProtocol("opencode")).not.toContain("steer")
     expect(capabilitiesForProtocol("codex-app-server")).toContain("steer")
   })
 
-  it("does not duplicate a capability present in both sets", () => {
+  it("does not claim MCP for protocols that cannot carry a server", () => {
+    // Only ACP forwards MCP servers at `session/new`; Codex reaches the same
+    // outcome through a per-thread config override. OpenCode and Pi have no
+    // per-session channel at all.
+    expect(capabilitiesForProtocol("acp")).toContain("mcp")
+    expect(capabilitiesForProtocol("codex-app-server")).toContain("mcp")
+    expect(capabilitiesForProtocol("opencode")).not.toContain("mcp")
+    expect(capabilitiesForProtocol("pi-rpc")).not.toContain("mcp")
+  })
+
+  it("does not duplicate a capability", () => {
     const caps = capabilitiesForProtocol("opencode")
     expect(new Set(caps).size).toBe(caps.length)
   })
 
-  it("treats an unknown protocol as base-only rather than guessing", () => {
-    expect(capabilitiesForProtocol("telepathy")).toEqual(capabilitiesForProtocol(undefined))
+  it("claims nothing for a protocol nothing describes", () => {
+    // An unknown protocol has no manifest row, so every capability is
+    // `unknown` — and `unknown` is never usable. Answering with a base set here
+    // is how an unrecognized backend used to be credited with streaming.
+    expect(capabilitiesForProtocol("telepathy")).toEqual([])
+    expect(capabilitiesForProtocol(undefined)).toEqual([])
   })
 })
 
 describe("supportsNativeSteering", () => {
-  it("is true only for backends that advertise steer", () => {
-    const steering = selectBackend({ ...PRESETS, requested: "opencode-server" })
-    const notSteering = selectBackend({ ...PRESETS, requested: "codex" })
+  it("is true only for backends whose protocol has a mid-turn input method", () => {
+    const steering = selectBackend({ ...PRESETS, requested: "codex" })
+    const notSteering = selectBackend({ ...PRESETS, requested: "opencode-server" })
     expect(steering.ok && supportsNativeSteering(steering.backend)).toBe(true)
     expect(notSteering.ok && supportsNativeSteering(notSteering.backend)).toBe(false)
   })

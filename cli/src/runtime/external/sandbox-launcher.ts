@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url"
 
 import type { ExternalAgentLaunch, NodeExternalAgentSpawnConfig } from "./node-backend"
 import { toolHostRuntimeDir } from "../../agent/tool-host/protocol"
+import {
+  SANDBOX_SUPPORTED_PLATFORMS,
+  agentStateWritableRoots as policyAgentStateWritableRoots,
+  isAgentStateFileRoot,
+} from "@/lib/ai/agent/external/security-policy"
 
 export interface SandboxLauncherRuntime {
   platform: NodeJS.Platform
@@ -89,9 +94,16 @@ export function findSandboxLauncher(
   return runtime.candidates.find(runtime.isExecutable)
 }
 
-/** Can this platform host external agents at all? Fails closed off macOS/Linux. */
+/**
+ * Can this platform host external agents at all? Fails closed off macOS/Linux.
+ *
+ * The platform list is the shared security policy's, not a literal here: the
+ * settings UI has to be able to say "external agents cannot run on this
+ * machine" BEFORE a user configures one, and it cannot import this Node-only
+ * module to find out.
+ */
 export function sandboxSupportsPlatform(platform: NodeJS.Platform = process.platform): boolean {
-  return platform === "darwin" || platform === "linux"
+  return (SANDBOX_SUPPORTED_PLATFORMS as readonly string[]).includes(platform)
 }
 
 export function buildSandboxLauncherArgs(
@@ -113,43 +125,28 @@ export function buildSandboxLauncherArgs(
   ]
 }
 
+/**
+ * The agent's own state directories, absolute.
+ *
+ * The RULES live in `protocol/external-agent-security-policy.json` (shared with
+ * the Rust launcher, which keeps compiled-in literals and is checked against
+ * the same file by `pnpm audit:agent-capabilities`). Only the join to the real
+ * home directory happens here. While this list was hand-maintained in two
+ * places it lacked an OpenCode rule on both sides, so `opencode serve` could
+ * not persist a session inside the sandbox and resume started over every time.
+ */
 function agentStateWritableRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
-  const command = config.command.toLowerCase().replace(/\.(?:exe|cmd|bat)$/i, "")
-  const npxPackage =
-    command === "npx" ? (config.args ?? []).find((arg) => !arg.startsWith("-")) : undefined
-  const target = npxPackage ?? command
-  const roots: string[] = []
-  if (/codex/.test(target)) roots.push(path.join(homedir, ".codex"))
-  if (/claude/.test(target)) {
-    roots.push(
-      path.join(homedir, ".claude"),
-      path.join(homedir, ".claude.json"),
-      path.join(homedir, ".claude.json.backup")
-    )
-  }
-  if (/gemini/.test(target)) roots.push(path.join(homedir, ".gemini"))
-  if (/qwen/.test(target)) roots.push(path.join(homedir, ".qwen"))
-  if (target === "pi-acp" || command === "pi") roots.push(path.join(homedir, ".pi"))
-  if (/copilot/.test(target)) {
-    roots.push(path.join(homedir, ".copilot"), path.join(homedir, ".cache", "copilot"))
-  }
-  if (/kiro/.test(target)) roots.push(path.join(homedir, ".kiro"))
-  if (/droid|factory/.test(target)) roots.push(path.join(homedir, ".factory"))
-  if (/cursor/.test(target)) roots.push(path.join(homedir, ".cursor"))
-  if (command === "npx") roots.push(path.join(homedir, ".npm"))
-  return roots
+  return policyAgentStateWritableRoots(config.command, config.args ?? []).map((root) =>
+    path.join(homedir, ...root.split("/"))
+  )
 }
 
 function agentStateDirectoryRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
-  return agentStateWritableRoots(config, homedir).filter(
-    (root) => !path.basename(root).startsWith(".claude.json")
-  )
+  return agentStateWritableRoots(config, homedir).filter((root) => !isAgentStateFileRoot(root))
 }
 
 function agentStateFileRoots(config: NodeExternalAgentSpawnConfig, homedir: string): string[] {
-  return agentStateWritableRoots(config, homedir).filter((root) =>
-    path.basename(root).startsWith(".claude.json")
-  )
+  return agentStateWritableRoots(config, homedir).filter((root) => isAgentStateFileRoot(root))
 }
 
 /** The real host runtime. Exported so its fs shims are directly testable — as an

@@ -85,24 +85,29 @@ describe("externalCapabilities", () => {
     ).toMatch(/tool bridge/)
   })
 
-  it("offers ACP model selection through the session config-option channel", () => {
-    // `model/list` is native-app-server only. ACP agents expose model choices
-    // from the live session via configOptions instead of a global catalog.
+  it("offers model selection through either route the protocol provides", () => {
+    // Two different routes to the same affordance: the native app-server
+    // enumerates models without a session (`model/list`), while ACP exposes a
+    // per-session selector (`session/set_model`). The old table only knew the
+    // first, so it blocked the picker on the Codex ACP shim — and answered
+    // "the agent protocol has no equivalent" about a protocol that has one.
     const native = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
     const shim = externalCapabilities({ backend: "codex", presetId: "codex" })
     const acp = externalCapabilities({ backend: "claude-code", protocol: "acp" })
 
     expect(supportsFeature(native, "modelPicker")).toBe(true)
-    expect(featureBlockedReason(shim, "modelPicker")).toMatch(/no equivalent/)
+    expect(supportsFeature(shim, "modelPicker")).toBe(true)
     expect(supportsFeature(acp, "modelPicker")).toBe(true)
-    // Narrower than the metadata channel on purpose — the shim still forwards
-    // reasoning effort, it just cannot list models.
-    expect(supportsFeature(shim, "thinking")).toBe(true)
+    // The shim speaks ACP, which has no reasoning-effort control — only the
+    // native app-server's Codex options channel does.
+    expect(supportsFeature(shim, "thinking")).toBe(false)
+    expect(supportsFeature(native, "thinking")).toBe(true)
   })
 
-  it("does not optimistically enable model selection before protocol negotiation", () => {
-    const unknown = externalCapabilities({ backend: "claude-code" })
-    expect(featureBlockedReason(unknown, "modelPicker")).toMatch(/no equivalent/)
+  it("claims nothing for a protocol nothing describes", () => {
+    const unknown = externalCapabilities({ backend: "telepathy", protocol: "telepathy" as never })
+    expect(featureBlockedReason(unknown, "modelPicker")).toMatch(/nothing describes/)
+    expect(supportsFeature(unknown, "mcp")).toBe(false)
   })
 
   it("reads session resume off what the agent negotiated", () => {
@@ -112,9 +117,11 @@ describe("externalCapabilities", () => {
         "resume"
       )
     ).toBe(true)
+    // ACP resume is gated on the agent advertising `loadSession`, so the reason
+    // names the handshake rather than blaming the protocol.
     expect(
       featureBlockedReason(externalCapabilities({ backend: "claude-code" }), "resume")
-    ).toMatch(/no equivalent/)
+    ).toMatch(/did not advertise/)
   })
 
   it("recognises both Codex preset spellings as the metadata channel", () => {
@@ -127,11 +134,13 @@ describe("externalCapabilities", () => {
   })
 
   it("still blocks everything the sidecar alone can do", () => {
+    // `compact` and `resume` left this list because the native Codex
+    // app-server really has `thread/compact/start` and `thread/resume`; the old
+    // table had no per-protocol entry for either and greyed them out for every
+    // external backend.
     const caps = externalCapabilities({ backend: "codex", presetId: "codex-app-server" })
     expect(blockedFeatures(caps)).toEqual([
       "plugins",
-      "compact",
-      "resume",
       "rateLimits",
       "mcpLogs",
       "hooks",
@@ -157,10 +166,13 @@ describe("supportsFeature", () => {
 
 describe("unsupportedFeatureMessage", () => {
   it("names the feature, the backend and the reason", () => {
+    // The `codex` preset is the ACP shim, whose only compaction route is a
+    // `/compact` the agent may or may not advertise — so before any command
+    // list arrives the honest answer is that nothing has verified it.
     const message = unsupportedFeatureMessage(externalCapabilities({ backend: "codex" }), "compact")
     expect(message).toContain("Context compaction")
     expect(message).toContain("codex")
-    expect(message).toContain("no equivalent")
+    expect(message).toContain("nothing has verified this")
   })
 
   it("degrades to a bare statement when there is no capability set", () => {
