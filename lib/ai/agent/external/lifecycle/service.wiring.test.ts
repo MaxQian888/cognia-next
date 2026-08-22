@@ -39,6 +39,9 @@ const createKeyringStore = jest.fn((_namespace: string) => ({
   delete: jest.fn(),
 }))
 const getDeviceId = jest.fn(async () => "device-abc")
+// Jest runs in neither Tauri nor the headless brain, so the default is the
+// browser answer; flip it to prove the on-host branch as well.
+const supportsProcesses = jest.fn(() => false)
 
 jest.mock("@/stores/agent/external-agent-store", () => ({
   useExternalAgentStore: { getState: () => storeState },
@@ -55,6 +58,10 @@ jest.mock("@/lib/credentials/keyring-store", () => ({
 jest.mock("@/lib/device/device-identity", () => ({
   getDeviceId: () => getDeviceId(),
 }))
+jest.mock("../agent-transport", () => ({
+  agentInvoke: jest.fn(),
+  supportsExternalAgents: () => supportsProcesses(),
+}))
 
 import { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } from "../security-policy"
 import { EXTERNAL_AGENT_KEYRING_NAMESPACE } from "./credentials"
@@ -68,6 +75,7 @@ import {
 beforeEach(() => {
   jest.clearAllMocks()
   getDeviceId.mockResolvedValue("device-abc")
+  supportsProcesses.mockReturnValue(false)
   __resetLifecycleServiceForTests()
 })
 
@@ -146,11 +154,21 @@ describe("createDefaultLifecycleDependencies", () => {
     expect(deps.now()).toBeInstanceOf(Date)
   })
 
-  it("leaves the runtime host absent until a host implements it", async () => {
+  it("leaves the runtime host absent on a host with no processes", async () => {
     const deps = await createDefaultLifecycleDependencies()
-    // Honest absence: install/uninstall refuse with `platform_unsupported`
-    // rather than pretending to have run.
+    // Honest absence: a browser or Capacitor shell cannot see what is
+    // installed, so every runtime operation refuses with
+    // `platform_unsupported` rather than reporting an empty state.
     expect(deps.runtimeHost).toBeUndefined()
+  })
+
+  it("builds the runtime host on a host that has processes", async () => {
+    supportsProcesses.mockReturnValue(true)
+    const deps = await createDefaultLifecycleDependencies()
+    // Without this the version plane is inert: `inspectRuntime` throws
+    // `platform_unsupported` on desktop and no runtime is ever certified.
+    expect(deps.runtimeHost).toBeDefined()
+    expect(typeof deps.runtimeHost?.inspect).toBe("function")
   })
 })
 

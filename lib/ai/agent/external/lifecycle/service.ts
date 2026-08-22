@@ -895,6 +895,7 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
   const { createKeyringStore } = await import("@/lib/credentials/keyring-store")
   const { getDeviceId } = await import("@/lib/device/device-identity")
   const { EXTERNAL_AGENT_SECURITY_POLICY_VERSION } = await import("../security-policy")
+  const { createHostRuntimeHost } = await import("./native-runtime-host")
 
   const state = () => useExternalAgentStore.getState()
 
@@ -914,6 +915,11 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
       isProtocolAvailable: (protocol) => protocolAdapterRegistry.has(protocol),
     },
     keyring: createKeyringStore(EXTERNAL_AGENT_KEYRING_NAMESPACE),
+    // Absent on a host with no processes (browser, Capacitor). The service
+    // then refuses every runtime operation with `platform_unsupported`, which
+    // is the truth: such a host cannot see what is installed, let alone
+    // install anything.
+    runtimeHost: await createHostRuntimeHost(),
     // A host with no stable device identity gets a per-process one, which makes
     // every stored consent fail its host check rather than silently apply.
     hostId: (await getDeviceId()) ?? `ephemeral:${Math.random().toString(36).slice(2)}`,

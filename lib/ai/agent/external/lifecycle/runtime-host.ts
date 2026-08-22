@@ -331,7 +331,18 @@ export function createRuntimeHost(deps: RuntimeHostDependencies): LifecycleRunti
 
     async checkForUpdate(runtimeId) {
       const entry = requireEntry(runtimeId)
-      if (!entry.updateChannel || !deps.fetchUpdateChannel) return null
+      // Nothing to check: this runtime publishes no update channel.
+      if (!entry.updateChannel) return null
+      // Something to check that this host cannot reach. Returning `null` here
+      // would report "you are up to date" on the strength of never having
+      // looked, which is the failure mode a governance plane exists to avoid.
+      if (!deps.fetchUpdateChannel) {
+        throw new ExternalAgentLifecycleError(
+          "platform_unsupported",
+          `${runtimeId} publishes an update channel, but this host cannot fetch one`,
+          { runtimeId }
+        )
+      }
 
       const document = await deps.fetchUpdateChannel(entry.updateChannel.url)
       const offered = readChannelVersion(document)

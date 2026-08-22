@@ -361,13 +361,17 @@ describe("checkForUpdate", () => {
     await expect(runtimeHost.checkForUpdate("example")).resolves.toBeNull()
   })
 
-  it("returns nothing when the host cannot fetch channels at all", async () => {
+  it("refuses rather than reporting up-to-date when it cannot fetch the channel", async () => {
+    // "No update available" and "I never looked" are different answers. A host
+    // with no fetcher must not give the first one.
     catalogEntries.set("example", {
       ...managedEntry,
       updateChannel: { url: "https://example.test/channel.json" },
     })
     const { runtimeHost } = build()
-    await expect(runtimeHost.checkForUpdate("example")).resolves.toBeNull()
+    await expect(runtimeHost.checkForUpdate("example")).rejects.toMatchObject({
+      code: "platform_unsupported",
+    })
     catalogEntries.set("example", managedEntry)
   })
 
