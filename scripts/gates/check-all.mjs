@@ -154,12 +154,14 @@ const REGISTRY = [
   // could ship with an unpinned `npx -y` launch, no version policy and no
   // uninstall path while every other gate stayed green. Also counts the
   // remaining unpinned launches so the hole shrinks instead of going quiet.
-  //
-  // Its sibling `audit:agent-capabilities` is deliberately NOT here yet:
-  // `scripts/gates/check-agent-capabilities.mjs` and the manifest it reads
-  // land with the capability SSOT change, and a registry entry pointing at a
-  // script that does not exist fails every gate run for everyone.
   { script: "audit:external-agent-runtimes", group: "audit" },
+  // Its sibling: the capability answer per protocol, plus the binary allowlist
+  // and sandbox state roots the Rust launcher keeps compiled in. Those literals
+  // cannot read the JSON at runtime — an allowlist that does is not one — so
+  // this is what stops the two from drifting. It found three real drifts the
+  // day it was written, including a missing OpenCode state root that silently
+  // cost every sandboxed OpenCode session its resume history.
+  { script: "audit:agent-capabilities", group: "audit" },
   { script: "audit:agent-control-methods", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
