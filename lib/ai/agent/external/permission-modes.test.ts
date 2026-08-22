@@ -92,3 +92,43 @@ describe("permission-modes", () => {
     })
   })
 })
+
+describe("permission modes derived from the capability manifest", () => {
+  it("refuses `default` on a transport that cannot ask mid-turn", () => {
+    // The DSH SDK client's `respondToPermission` throws: upstream grants every
+    // authority at launch. The table used to claim all five modes, so a user
+    // could pick "ask me per tool call", see it persisted, and then get
+    // workspace-write behaviour with no prompt.
+    expect(supportedPermissionModes("dsh-sdk")).not.toContain("default")
+    expect(supportedPermissionModes("dsh-sdk")).toContain("plan")
+  })
+
+  it("keeps `default` on the pass-through transports, where it is not a promise", () => {
+    // For a2a / http / websocket `default` is the only mode and it means "the
+    // remote agent owns its policy" — not "Cognia will ask". Stripping it would
+    // leave nothing to clamp to.
+    for (const protocol of ["a2a", "http", "websocket"] as const) {
+      expect(supportedPermissionModes(protocol)).toEqual(["default"])
+    }
+  })
+
+  it("keeps `default` on protocols that really do carry the question", () => {
+    for (const protocol of [
+      "acp",
+      "codex-app-server",
+      "opencode",
+      "opencode-v2",
+      "pi-rpc",
+    ] as const) {
+      expect(supportedPermissionModes(protocol)).toContain("default")
+    }
+  })
+
+  it("never adapts a mode to one the protocol does not support", () => {
+    for (const mode of ALL_PERMISSION_MODES) {
+      const adapted = adaptPermissionMode(mode, "dsh-sdk")
+      expect(supportedPermissionModes("dsh-sdk")).toContain(adapted.mode)
+      expect(adapted.mode).not.toBe("default")
+    }
+  })
+})

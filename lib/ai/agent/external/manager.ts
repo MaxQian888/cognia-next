@@ -81,11 +81,21 @@ import {
 } from "./canonical-contract"
 import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
 import { isTauri } from "@/lib/tauri"
+import { negotiateCapabilityProfile, withRegisteredPluginDeclaration } from "./capability-profile"
+import { liveCapabilityFacts } from "./capability-live-facts"
+import { externalAgentPresetIdOf } from "./preset-identity"
+import { externalAgentSandboxSupportsPlatform } from "./security-policy"
+import type {
+  ExternalAgentCapabilityProfileV1,
+  ExternalAgentHostCeilings,
+  ExternalAgentHostFacts,
+} from "@cognia/agent-config-types/external-agent-capability"
 import type {
   ExternalAgentCompactionCapability,
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
 } from "./session-capabilities"
+import type { AcpAvailableCommand } from "@/types/agent/external-agent"
 import {
   canonicalEventFromExternalEvent,
   createEnvelopeSequencer,
@@ -1385,6 +1395,7 @@ export class ExternalAgentManager {
 
     this.instances.delete(agentId)
     this.eventListeners.delete(agentId)
+    this.capabilityCommandSignatures.delete(agentId)
 
     externalAgentManagerLogger.info("Removed external agent", { agentId })
   }
@@ -1426,8 +1437,14 @@ export class ExternalAgentManager {
       // Drop the adapter so no resident protocol logic outlives the plugin that
       // contributed it. The config/instance stays for restore + UI explanation.
       this.adapters.delete(agentId)
+      this.capabilityCommandSignatures.delete(agentId)
       const instance = this.instances.get(agentId)
       if (instance) {
+        // The profile described what the now-unloaded adapter could do. Keeping
+        // it would let a surface answer "this agent supports steering" about an
+        // agent that has no adapter at all — the same stale-answer failure the
+        // profile exists to remove, one level up.
+        instance.capabilityProfile = undefined
         this.updateInstanceState(agentId, instance, {
           connectionStatus: "disconnected",
           status: "idle",
@@ -1595,6 +1612,11 @@ export class ExternalAgentManager {
         })
         instance.capabilities = adapter.capabilities
         instance.tools = adapter.tools
+        // ADR-0090 external SSOT: the handshake has happened, so this is the
+        // first moment a capability answer may be trusted. Every surface reads
+        // the profile from here; nothing re-derives capabilities from the
+        // preset, the protocol or the adapter's method list on its own.
+        this.refreshCapabilityProfile(agentId, instance, adapter)
 
         externalAgentManagerLogger.info("Connected to external agent", { agentId })
         return
@@ -2943,6 +2965,149 @@ export class ExternalAgentManager {
    */
   getAgentCapabilities(agentId: string): AcpCapabilities | undefined {
     return this.instances.get(agentId)?.capabilities
+  }
+
+  /**
+   * The merged capability profile for a connected agent (ADR-0090 external SSOT).
+   *
+   * `undefined` before the agent connects, and that absence is meaningful: it
+   * is the difference between "we have not asked yet" and "we asked and the
+   * answer is no". Callers that need a pre-connect answer build a DECLARED
+   * profile themselves via `preflightExternalAgent`, which is explicitly not
+   * allowed to freeze an execution decision.
+   */
+  getAgentCapabilityProfile(agentId: string): ExternalAgentCapabilityProfileV1 | undefined {
+    const instance = this.instances.get(agentId)
+    if (!instance?.capabilityProfile) return instance?.capabilityProfile
+    const adapter = this.adapters.get(agentId)
+    // Recompute when the agent's advertised command set has moved. ACP has no
+    // compaction method, so `/compact` being advertised is the ONLY evidence
+    // for the `compaction` capability — and it arrives mid-session, after the
+    // connect-time profile was built. Reading a stale profile here is how a
+    // `/compact` that works reports as unavailable for the rest of the session.
+    const signature = this.advertisedCommandSignature(instance)
+    if (adapter && signature !== this.capabilityCommandSignatures.get(agentId)) {
+      this.refreshCapabilityProfile(agentId, instance, adapter)
+    }
+    return instance.capabilityProfile
+  }
+
+  /**
+   * Command signature the cached profile was built against.
+   *
+   * Kept in the manager rather than on the instance: it is cache bookkeeping,
+   * and `ExternalAgentInstance` is a contract other surfaces read.
+   */
+  private capabilityCommandSignatures = new Map<string, string>()
+
+  private advertisedCommandSignature(instance: ExternalAgentInstance): string {
+    const commands = this.collectAdvertisedCommands(instance)
+    return commands
+      ? commands
+          .map((command) => command.name)
+          .sort()
+          .join("\u0000")
+      : ""
+  }
+
+  /**
+   * Rebuild the capability profile from what is known right now.
+   *
+   * Called on connect, and again whenever a session's advertised command list
+   * changes — `compaction` is genuinely per-session on ACP (the only route is
+   * a `/compact` the agent chose to advertise), so a profile computed at
+   * connect time would answer it wrong for the rest of the agent's life.
+   */
+  private refreshCapabilityProfile(
+    agentId: string,
+    instance: ExternalAgentInstance,
+    adapter: ProtocolAdapter
+  ): void {
+    const availableCommands = this.collectAdvertisedCommands(instance)
+    const presetId = externalAgentPresetIdOf(instance.config)
+    const profile = negotiateCapabilityProfile(
+      withRegisteredPluginDeclaration({
+        protocol: instance.config.protocol,
+        ...(presetId ? { presetId } : {}),
+        adapter: adapter as unknown as Record<string, unknown>,
+        hostFacts: this.resolveHostFacts(),
+        ceilings: this.resolveHostCeilings(),
+        liveFacts: liveCapabilityFacts({
+          ...(adapter.capabilities ? { negotiated: adapter.capabilities } : {}),
+          ...(availableCommands ? { availableCommands } : {}),
+        }),
+      })
+    )
+    instance.capabilityProfile = profile
+    this.capabilityCommandSignatures.set(agentId, this.advertisedCommandSignature(instance))
+    if (profile.drift.length > 0) {
+      // Drift is a maintenance signal, not a session failure: the agent in
+      // front of us disagrees with a checked-in manifest row, and the row is
+      // the thing that needs updating.
+      externalAgentManagerLogger.warn("External agent capability drift", {
+        agentId,
+        protocol: instance.config.protocol,
+        drift: profile.drift,
+      })
+    }
+  }
+
+  /**
+   * What the RENDERER host adds to an external turn.
+   *
+   * `hookRuntimeAvailable` is unconditionally true here because the renderer's
+   * execution seams call `observeExternalAgentEvent` / `gateExternalAgentPermission`
+   * on every external turn with no host gate — the plugin hook system (System
+   * A) runs in-process everywhere, and the settings.json command runtime
+   * (System B) additionally on desktop. The CLI, which wraps nothing, reports
+   * `false`, and that difference is exactly why this is a host fact rather
+   * than a protocol row.
+   *
+   * The tool host is a CLI facility: the renderer projects Cognia's tools into
+   * an external agent through per-session MCP servers, not through the
+   * broker/socket bridge, so there is no broker to report as running here.
+   */
+  private resolveHostFacts(): ExternalAgentHostFacts {
+    return {
+      toolHostRunning: false,
+      subagentDispatchProjected: false,
+      hookRuntimeAvailable: true,
+    }
+  }
+
+  /**
+   * Hard clamps for this host.
+   *
+   * Sandbox availability is the only one today, and it is a real refusal
+   * rather than a degradation: Cognia never runs an external agent
+   * unsandboxed, so a platform without Seatbelt or bubblewrap cannot run one
+   * at all. Off-desktop there is no spawn path to sandbox in the first place,
+   * so the clamp does not apply.
+   */
+  private resolveHostCeilings(): ExternalAgentHostCeilings {
+    if (!isTauri()) return { sandboxAvailable: true }
+    return { sandboxAvailable: externalAgentSandboxSupportsPlatform() }
+  }
+
+  /**
+   * The union of every live session's advertised commands.
+   *
+   * Union rather than "the newest session" because the commands are a property
+   * of the AGENT; a session that has not received its `available_commands`
+   * notification yet must not retract what another session already proved.
+   */
+  private collectAdvertisedCommands(
+    instance: ExternalAgentInstance
+  ): AcpAvailableCommand[] | undefined {
+    const seen = new Map<string, AcpAvailableCommand>()
+    let sawAny = false
+    for (const session of instance.sessions.values()) {
+      const commands = session.metadata?.availableCommands as AcpAvailableCommand[] | undefined
+      if (!commands) continue
+      sawAny = true
+      for (const command of commands) seen.set(command.name, command)
+    }
+    return sawAny ? [...seen.values()] : undefined
   }
 
   /**

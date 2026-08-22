@@ -538,6 +538,78 @@ describe("Capability helpers (unsupported / ok / error)", () => {
   })
 })
 
+describe("capability profile (ADR-0090 external SSOT)", () => {
+  it("has no profile before the agent connects", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ enabled: false }))
+    // Absence is the point: "we have not asked" and "we asked and the answer
+    // is no" must not render identically.
+    expect(m.getAgentCapabilityProfile("agent-1")).toBeUndefined()
+  })
+
+  it("builds a NEGOTIATED profile once the handshake completes", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const profile = m.getAgentCapabilityProfile("agent-1")
+    expect(profile?.negotiated).toBe(true)
+    expect(profile?.protocol).toBe("acp")
+    expect(profile?.digest).toMatch(/^eacp1-/)
+  })
+
+  it("resolves adapter-method capabilities from the live instance", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const profile = m.getAgentCapabilityProfile("agent-1")
+    // MockAdapter implements setSessionMode/setSessionModel but no steerTurn,
+    // which is exactly what `supportsSteering` reports for it.
+    expect(profile?.effective["permissions.set-mode"].level).toBe("native")
+    expect(profile?.effective["set-model"].level).toBe("native")
+    expect(profile?.effective.steer.level).toBe("unsupported")
+    expect(m.supportsSteering("agent-1")).toBe(false)
+  })
+
+  it("reports the renderer's hook runtime as a HOST capability", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    // No external protocol models Cognia's lifecycle hooks, so the manifest row
+    // is `unknown`; the renderer wraps every external turn, so the host layer
+    // answers it.
+    expect(m.getAgentCapabilityProfile("agent-1")?.effective["hooks.lifecycle"]).toMatchObject({
+      level: "equivalent",
+    })
+  })
+
+  it("re-answers compaction when the agent advertises /compact mid-session", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    // ACP's only compaction route is a `/compact` the agent chose to advertise,
+    // so before any command list arrives nothing has measured it. `unknown`,
+    // not `unsupported` — the distinction is what lets it flip below.
+    expect(m.getAgentCapabilityProfile("agent-1")?.effective.compaction.level).toBe("unknown")
+
+    const session = await m.createSession("agent-1")
+    session.metadata = { availableCommands: [{ name: "compact", description: "" }] }
+
+    expect(m.getAgentCapabilityProfile("agent-1")?.effective.compaction).toMatchObject({
+      level: "equivalent",
+      evidence: "handshake",
+    })
+  })
+
+  it("drops the profile when the contributing plugin is disabled", async () => {
+    const m = freshManager()
+    protocolAdapterRegistry.register("wire:demo", () => currentMock as never)
+    await m.addAgent(buildBaseConfig({ id: "p-agent", protocol: "wire:demo" as never }))
+    expect(m.getAgentCapabilityProfile("p-agent")).toBeDefined()
+
+    await m.teardownAgentsByProtocols(["wire:demo"])
+    // The adapter is gone; a surface must not keep answering "this agent can
+    // steer" about an agent with no adapter at all.
+    expect(m.getAgentCapabilityProfile("p-agent")).toBeUndefined()
+    protocolAdapterRegistry.unregister("wire:demo")
+  })
+})
+
 describe("Session extensions: list/fork/resume", () => {
   it("listSessions throws unsupported error when adapter lacks listSessions", async () => {
     const m = freshManager()

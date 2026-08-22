@@ -60,6 +60,7 @@ import type {
   ExternalAgentCompactionOptions,
   ExternalAgentProviderUndoCapability,
 } from "@/lib/ai/agent/external/session-capabilities"
+import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
 
 // ============================================================================
 // Validity projection
@@ -1822,6 +1823,15 @@ export function useExternalAgentById(agentId: string | null): {
   agent: ExternalAgentInstance | null
   isConnected: boolean
   capabilities: AcpCapabilities | null
+  /**
+   * The merged capability answer (ADR-0090 external SSOT).
+   *
+   * `capabilities` above is only the raw ACP handshake block, which is why
+   * every surface that consumed it had to add its own reading of the protocol
+   * on top — and each did it differently. This is the same artifact the CLI,
+   * the TUI and the execution resolver read. `null` before the agent connects.
+   */
+  capabilityProfile: ExternalAgentCapabilityProfileV1 | null
   tools: AcpToolInfo[]
 } {
   const { agents } = useExternalAgent()
@@ -1832,6 +1842,7 @@ export function useExternalAgentById(agentId: string | null): {
     agent,
     isConnected: agent?.connectionStatus === "connected",
     capabilities: agent?.capabilities || null,
+    capabilityProfile: agent?.capabilityProfile ?? null,
     tools: agent?.tools || [],
   }
 }

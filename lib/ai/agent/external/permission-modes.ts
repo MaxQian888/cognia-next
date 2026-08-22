@@ -1,5 +1,7 @@
 import type { AcpPermissionMode, ExternalAgentProtocol } from "@/types/agent/external-agent"
+import { isCapabilityUsable } from "@cognia/agent-config-types/external-agent-capability"
 import { MODE_RANK } from "./permission-cascade"
+import { externalCapabilityManifest } from "./capability-manifest"
 
 /**
  * Per-backend permission-mode capability map.
@@ -48,13 +50,22 @@ export const ALL_PERMISSION_MODES: readonly AcpPermissionMode[] = [
  * - `a2a` / `http` / `websocket` — fire-and-forget request/response transports
  *   with no client-side tool-approval loop, so only the pass-through `default`
  *   is meaningful; the remote agent owns its own policy.
+ * - `dsh-sdk` — everything EXCEPT `default`. That exception is derived, not
+ *   listed: see {@link supportedPermissionModes}.
  */
 export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
   ExternalAgentProtocol,
   readonly AcpPermissionMode[]
 > = {
   acp: ALL_PERMISSION_MODES,
-  "dsh-sdk": ALL_PERMISSION_MODES,
+  // The launch-time modes only. `default` means "ask me per tool call", and
+  // this transport cannot carry the question — `respondToPermission` on the DSH
+  // SDK client throws, and the preset's own description says authority is
+  // granted at launch. Listing all five here meant a user could pick `default`,
+  // see it persisted, and get workspace-write behaviour with no prompt.
+  // Enforced by {@link supportedPermissionModes} against the capability
+  // manifest, so this row cannot drift back.
+  "dsh-sdk": ["acceptEdits", "bypassPermissions", "plan", "dontAsk"],
   "pi-rpc": ALL_PERMISSION_MODES,
   "codex-app-server": ["default", "acceptEdits", "bypassPermissions", "plan"],
   opencode: ["default", "acceptEdits", "bypassPermissions", "plan"],
@@ -72,7 +83,39 @@ export const PROTOCOL_PERMISSION_MODE_SUPPORT: Record<
 export function supportedPermissionModes(
   protocol: ExternalAgentProtocol
 ): readonly AcpPermissionMode[] {
-  return PROTOCOL_PERMISSION_MODE_SUPPORT[protocol] ?? ALL_PERMISSION_MODES
+  const declared = PROTOCOL_PERMISSION_MODE_SUPPORT[protocol] ?? ALL_PERMISSION_MODES
+  // `default` means "ask me per tool call" for any backend that has a local
+  // authority model — and a protocol the capability manifest says cannot carry
+  // a mid-turn question cannot honour that. Deriving the exception here rather
+  // than trusting each row to remember is what stops a new protocol repeating
+  // the DSH mistake: the row gets written before anyone checks the transport,
+  // and the manifest is where that check already lives.
+  //
+  // The `length > 1` qualifier is what keeps a2a / http / websocket intact. For
+  // them `default` is not a promise to ask, it is the pass-through: the remote
+  // agent owns its own policy and there is no other mode to offer. Stripping it
+  // would leave the picker empty and clamp to nothing.
+  if (declared.length > 1 && declared.includes("default") && !protocolCanAskMidTurn(protocol)) {
+    return declared.filter((mode) => mode !== "default")
+  }
+  return declared
+}
+
+/**
+ * Can this protocol interrupt a turn to ask for approval?
+ *
+ * Reads the shipped capability manifest (ADR-0090 external SSOT). A protocol
+ * with no manifest row — a plugin's — is given the benefit of the doubt: its
+ * adapter clamps at runtime, and refusing `default` for every contributed
+ * protocol would break the ones that do implement approval.
+ */
+function protocolCanAskMidTurn(protocol: ExternalAgentProtocol): boolean {
+  const row =
+    externalCapabilityManifest().protocols[
+      protocol as keyof ReturnType<typeof externalCapabilityManifest>["protocols"]
+    ]
+  if (!row) return true
+  return isCapabilityUsable(row.capabilities["permissions.interrupt-resume"].level)
 }
 
 /**
