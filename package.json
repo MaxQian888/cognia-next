@@ -15,7 +15,6 @@
     "agent:sdk:test": "jest packages/agent/src --runInBand",
     "audit:adapter-capabilities": "node scripts/gates/check-adapter-capability-parity.mjs",
     "audit:adr-catalog": "node scripts/gates/check-adr-catalog.mjs",
-    "audit:agent-capabilities": "node scripts/gates/check-agent-capabilities.mjs",
     "audit:agent-control-methods": "node scripts/gates/check-agent-control-methods.mjs",
     "audit:ai-elements": "node scripts/gates/check-ai-elements-adoption.mjs",
     "audit:ai-elements:test": "node --test scripts/gates/check-ai-elements-adoption.test.mjs",

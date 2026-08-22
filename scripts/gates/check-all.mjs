@@ -150,16 +150,15 @@ const REGISTRY = [
   // three languages. This binds all four to protocol/agent-control-methods.json
   // and refuses to let a still-`planned` control reach a live Query object.
   { script: "audit:adapter-capabilities", group: "audit" },
-  // The external-agent SSOT (ADR-0090). Two protocol manifests whose consumers
-  // span TypeScript AND a compiled-in Rust allowlist — the one pairing a
-  // comment could not hold together, and did not: Rust refused the binary the
-  // shipped `claude-code` preset spawns while carrying one no preset names.
-  { script: "audit:agent-capabilities", group: "audit" },
-  // The install-side twin of `audit:agent-capabilities`: presets described
-  // commands and nothing described runtimes, so a preset could ship with an
-  // unpinned `npx -y` launch, no version policy and no uninstall path while
-  // every other gate stayed green. Also counts the remaining unpinned launches
-  // so the hole shrinks instead of going quiet.
+  // Presets described commands and nothing described runtimes, so a preset
+  // could ship with an unpinned `npx -y` launch, no version policy and no
+  // uninstall path while every other gate stayed green. Also counts the
+  // remaining unpinned launches so the hole shrinks instead of going quiet.
+  //
+  // Its sibling `audit:agent-capabilities` is deliberately NOT here yet:
+  // `scripts/gates/check-agent-capabilities.mjs` and the manifest it reads
+  // land with the capability SSOT change, and a registry entry pointing at a
+  // script that does not exist fails every gate run for everyone.
   { script: "audit:external-agent-runtimes", group: "audit" },
   { script: "audit:agent-control-methods", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
