@@ -357,6 +357,17 @@ export interface BackendInstallState {
   /** Accumulated installer stdout/stderr, newest last. */
   output: string
   status: "running" | "error"
+  /**
+   * Who will own what this install puts on disk.
+   *
+   * `user-managed` means the command hands off to the user's own package
+   * manager: it installs outside any root Cognia owns, leaves no receipt, and
+   * Cognia can neither verify nor remove it afterwards. The page says so,
+   * because an install that looks the same as a managed one but behaves
+   * completely differently is the kind of thing users discover at uninstall
+   * time.
+   */
+  ownership?: "cognia-managed" | "user-managed"
 }
 
 /** Health + context snapshot shown by the `/status` panel. */
@@ -1303,7 +1314,13 @@ export type TuiAction =
   /** Re-enter the connecting phase (retry, or a `/backend` switch). */
   | { type: "BACKEND_CONNECT_RETRY"; backend: string }
   /** Begin installing the missing agent binary — enters the `"installing"` page. */
-  | { type: "BACKEND_INSTALL_START"; name: string; display: string }
+  | {
+      type: "BACKEND_INSTALL_START"
+      name: string
+      display: string
+      /** Who will own what this install puts on disk. */
+      ownership?: "cognia-managed" | "user-managed"
+    }
   /** Append a line of installer output to the `"installing"` page. */
   | { type: "BACKEND_INSTALL_OUTPUT"; chunk: string }
   /** The install failed — return to the failure page, which shows `message`. */

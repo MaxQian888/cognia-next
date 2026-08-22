@@ -23,12 +23,33 @@
 import { spawn as nodeSpawn } from "node:child_process"
 import readline from "node:readline"
 
+import { findRuntimeById, isDistributionInstallable } from "@/lib/ai/agent/external/runtime-catalog"
+
 import { resolveAgentSearchPath } from "../../runtime/external/agent-path"
 
 export type InstallMethodKind = "npm" | "pnpm" | "brew" | "curl"
 
+/**
+ * Who owns the bytes an install method puts on disk.
+ *
+ * Every method here is `user-managed`: a global `npm install -g`, a Homebrew
+ * formula and a vendor `curl | sh` all install outside any root Cognia owns.
+ * Cognia produces no receipt for them, cannot verify them afterwards, cannot
+ * roll them back, and must never delete them. Saying so in the type is what
+ * keeps the TUI from presenting them as equivalent to a managed install — they
+ * are an explicit handoff to the user's own package manager.
+ *
+ * A `cognia-managed` method exists only where the runtime catalog carries a
+ * fully pinned distribution (exact version plus an approved frozen lock, or an
+ * https artifact with a checksum). None do yet; the branch is here so adding
+ * one is a catalog edit rather than a rewrite of this module.
+ */
+export type InstallOwnership = "cognia-managed" | "user-managed"
+
 export interface InstallMethod {
   kind: InstallMethodKind
+  /** Who owns what this method installs. See {@link InstallOwnership}. */
+  ownership: InstallOwnership
   /** Short label for the method, shown on the install choice (e.g. "npm"). */
   label: string
   /** The exact command line shown to the user before it runs. */
@@ -43,6 +64,14 @@ export interface InstallMethod {
 export interface InstallPlan {
   /** The agent binary this plan installs (the command that was missing). */
   command: string
+  /**
+   * Catalog runtime this plan installs.
+   *
+   * Binds the TUI's offers to the same source the desktop governs, so a plan
+   * cannot drift into installing something the catalog does not describe.
+   * `undefined` only for prerequisites that are not agent runtimes at all.
+   */
+  runtimeId?: string
   /** Agent display name, used in the prompt ("Install Factory Droid?"). */
   name: string
   /** Install methods, most-preferred first. May be empty (docs-only agents). */
@@ -53,6 +82,7 @@ export interface InstallPlan {
 
 const npm = (label: string, pkg: string): InstallMethod => ({
   kind: "npm",
+  ownership: "user-managed",
   label: "npm",
   display: `npm install -g ${pkg}`,
   command: "npm",
@@ -62,6 +92,7 @@ const npm = (label: string, pkg: string): InstallMethod => ({
 
 const brew = (formula: string): InstallMethod => ({
   kind: "brew",
+  ownership: "user-managed",
   label: "Homebrew",
   display: `brew install ${formula}`,
   command: "brew",
@@ -76,6 +107,7 @@ const curl = (url: string, shell: "sh" | "bash", curlFlags = "-fsSL"): InstallMe
   const pipeline = `curl ${curlFlags} ${url} | ${shell}`
   return {
     kind: "curl",
+    ownership: "user-managed",
     label: `${shell} installer`,
     display: pipeline,
     command: shell,
@@ -92,24 +124,28 @@ const curl = (url: string, shell: "sh" | "bash", curlFlags = "-fsSL"): InstallMe
 export const INSTALL_PLANS: Record<string, InstallPlan> = {
   "claude-agent-acp": {
     command: "claude-agent-acp",
+    runtimeId: "claude-agent-acp",
     name: "Claude Agent ACP adapter",
     methods: [npm("npm", "@agentclientprotocol/claude-agent-acp")],
     docsUrl: "https://github.com/agentclientprotocol/claude-agent-acp",
   },
   codex: {
     command: "codex",
+    runtimeId: "codex-app-server",
     name: "OpenAI Codex CLI",
     methods: [npm("npm", "@openai/codex"), brew("codex")],
     docsUrl: "https://developers.openai.com/codex/cli",
   },
   copilot: {
     command: "copilot",
+    runtimeId: "copilot-cli",
     name: "GitHub Copilot CLI",
     methods: [npm("npm", "@github/copilot")],
     docsUrl: "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server",
   },
   opencode: {
     command: "opencode",
+    runtimeId: "opencode",
     name: "OpenCode",
     methods: [
       npm("npm", "opencode-ai"),
@@ -120,12 +156,14 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
   },
   "cursor-agent": {
     command: "cursor-agent",
+    runtimeId: "cursor-agent",
     name: "Cursor CLI",
     methods: [curl("https://cursor.com/install", "bash", "-fsS")],
     docsUrl: "https://docs.cursor.com/en/cli/overview",
   },
   droid: {
     command: "droid",
+    runtimeId: "droid",
     name: "Factory Droid",
     methods: [curl("https://app.factory.ai/cli", "sh")],
     docsUrl: "https://docs.factory.ai/cli/getting-started/quickstart",
@@ -134,6 +172,7 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
     // Kiro's installer requires an interactive AWS Builder ID / IAM Identity
     // Center browser sign-in, so it cannot run unattended — docs only.
     command: "kiro-cli",
+    runtimeId: "kiro-cli",
     name: "Kiro CLI",
     methods: [],
     docsUrl: "https://kiro.dev/docs/cli/installation/",
@@ -141,11 +180,54 @@ export const INSTALL_PLANS: Record<string, InstallPlan> = {
   npx: {
     // A missing `npx` means Node itself is absent; installing Node is out of
     // scope for an in-TUI installer, so this is docs-only.
+    // No `runtimeId`: Node is a prerequisite, not an agent runtime.
     command: "npx",
     name: "Node.js (provides npx)",
     methods: [],
     docsUrl: "https://nodejs.org/en/download",
   },
+}
+
+/**
+ * What Cognia can offer for a missing runtime, catalog first.
+ *
+ * A `cognia-managed` offer means Cognia installs into a root it owns, verifies
+ * it, and can update, roll back and remove it. Anything else is an explicit
+ * handoff: the install runs the user's own package manager, leaves no receipt,
+ * and Cognia will never touch those files again. The TUI has to be able to tell
+ * the two apart, which is why this returns the ownership rather than a bare
+ * list of commands.
+ */
+export interface InstallOffer {
+  ownership: InstallOwnership
+  /** Present for a managed offer: what the catalog would install. */
+  managedVersion?: string
+  /** User-managed methods, most-preferred first. Empty for docs-only agents. */
+  methods: InstallMethod[]
+  docsUrl?: string
+}
+
+export function installOfferFor(plan: InstallPlan): InstallOffer {
+  const entry = plan.runtimeId ? findRuntimeById(plan.runtimeId) : undefined
+  const managed = entry?.distributions.find(isDistributionInstallable)
+
+  if (managed) {
+    return {
+      ownership: "cognia-managed",
+      managedVersion: managed.version,
+      // A managed install supersedes the global ones rather than sitting
+      // alongside them: offering both would let a user install the governed
+      // copy and then shadow it with an unpinned global one.
+      methods: [],
+      docsUrl: entry?.docsUrl ?? plan.docsUrl,
+    }
+  }
+
+  return {
+    ownership: "user-managed",
+    methods: plan.methods,
+    docsUrl: entry?.docsUrl ?? plan.docsUrl,
+  }
 }
 
 /** The install plan for a missing command, or `undefined` when none is known. */

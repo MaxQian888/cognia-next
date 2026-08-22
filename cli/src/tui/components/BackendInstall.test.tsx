@@ -60,3 +60,33 @@ describe("BackendInstall", () => {
     expect(container.textContent ?? "").toContain("Installing OpenAI Codex CLI")
   })
 })
+
+describe("BackendInstall — install ownership", () => {
+  const base: BackendInstallState = {
+    name: "Factory Droid",
+    display: "curl -fsSL https://app.factory.ai/cli | sh",
+    output: "",
+    status: "running",
+  }
+
+  it("says who owns a user-managed install", () => {
+    const { container } = render(
+      <BackendInstall install={{ ...base, ownership: "user-managed" }} maxRows={12} />
+    )
+    // Users discover the difference at uninstall time otherwise.
+    expect(container.textContent).toContain("your own package manager")
+    expect(container.textContent).toContain("does not manage, verify or remove it")
+  })
+
+  it("says nothing extra for a Cognia-managed install", () => {
+    const { container } = render(
+      <BackendInstall install={{ ...base, ownership: "cognia-managed" }} maxRows={12} />
+    )
+    expect(container.textContent).not.toContain("your own package manager")
+  })
+
+  it("says nothing when ownership was not recorded", () => {
+    const { container } = render(<BackendInstall install={base} maxRows={12} />)
+    expect(container.textContent).not.toContain("your own package manager")
+  })
+})

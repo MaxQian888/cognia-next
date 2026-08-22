@@ -1863,6 +1863,7 @@ function reduceInner(state: TuiState, action: TuiAction): TuiState {
           display: action.display,
           output: "",
           status: "running",
+          ownership: action.ownership,
         },
       }
     }

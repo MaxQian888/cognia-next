@@ -57,6 +57,13 @@ export function BackendInstall({
       <Text color={theme.muted} dimColor>
         {`$ ${install.display}`}
       </Text>
+      {install.ownership === "user-managed" ? (
+        <Text color={theme.muted} dimColor>
+          {
+            "  This installs through your own package manager. Cognia does not manage, verify or remove it."
+          }
+        </Text>
+      ) : null}
       {visible.map((line, i) => (
         <Text key={i} color={theme.muted} dimColor>
           {line}

@@ -2953,3 +2953,24 @@ describe("BYPASS_ACK", () => {
     expect(s.bypassAcknowledged).toBe(true)
   })
 })
+
+describe("BACKEND_INSTALL_START — install ownership", () => {
+  it("carries ownership onto the install page", () => {
+    const next = reduce(base(), {
+      type: "BACKEND_INSTALL_START",
+      name: "Factory Droid",
+      display: "curl -fsSL https://app.factory.ai/cli | sh",
+      ownership: "user-managed",
+    })
+    expect(next.backendInstall?.ownership).toBe("user-managed")
+  })
+
+  it("leaves ownership unset when the dispatcher did not record one", () => {
+    const next = reduce(base(), {
+      type: "BACKEND_INSTALL_START",
+      name: "Factory Droid",
+      display: "curl … | sh",
+    })
+    expect(next.backendInstall?.ownership).toBeUndefined()
+  })
+})

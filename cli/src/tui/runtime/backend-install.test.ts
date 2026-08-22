@@ -2,12 +2,16 @@
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
 
+import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
+
 import {
   INSTALL_PLANS,
+  installOfferFor,
   pickInstallMethod,
   resolveInstallPlan,
   runInstall,
   type InstallMethod,
+  type InstallPlan,
   type RunInstallDeps,
 } from "./backend-install"
 
@@ -207,5 +211,82 @@ describe("runInstall", () => {
       onLine: () => {},
     })
     expect(result).toEqual({ ok: true, exitCode: 0, signal: null })
+  })
+})
+
+describe("catalog reconciliation", () => {
+  it("binds every agent plan to a runtime the catalog governs", () => {
+    // A plan that installs something the catalog does not describe is an
+    // ungoverned install path hiding behind a governed-looking UI.
+    const unknown = Object.values(INSTALL_PLANS)
+      .filter((plan) => plan.runtimeId && !findRuntimeById(plan.runtimeId))
+      .map((plan) => `${plan.command} -> ${plan.runtimeId}`)
+    expect(unknown).toEqual([])
+  })
+
+  it("leaves only a non-runtime prerequisite unbound", () => {
+    const unbound = Object.values(INSTALL_PLANS).filter((plan) => !plan.runtimeId)
+    // Node provides `npx`; it is a prerequisite, not an agent runtime.
+    expect(unbound.map((plan) => plan.command)).toEqual(["npx"])
+  })
+
+  it("marks every global install method as user-managed", () => {
+    for (const plan of Object.values(INSTALL_PLANS)) {
+      for (const method of plan.methods) {
+        // `npm install -g`, brew and vendor curl scripts all install outside
+        // any root Cognia owns: no receipt, no verification, no rollback.
+        expect(method.ownership).toBe("user-managed")
+      }
+    }
+  })
+})
+
+describe("installOfferFor", () => {
+  const plan: InstallPlan = {
+    command: "droid",
+    runtimeId: "droid",
+    name: "Factory Droid",
+    methods: [
+      {
+        kind: "curl",
+        ownership: "user-managed",
+        label: "sh installer",
+        display: "curl -fsSL https://example.test | sh",
+        command: "sh",
+        args: ["-c", "curl -fsSL https://example.test | sh"],
+        requires: ["curl", "sh"],
+      },
+    ],
+    docsUrl: "https://docs.example.test",
+  }
+
+  it("hands off to the user's own package manager when nothing is pinned", () => {
+    const offer = installOfferFor(plan)
+    expect(offer.ownership).toBe("user-managed")
+    expect(offer.methods).toHaveLength(1)
+    expect(offer.managedVersion).toBeUndefined()
+  })
+
+  it("prefers the catalog's docs URL over the plan's", () => {
+    // The catalog is the source; a plan's copy is a convenience that can drift.
+    const offer = installOfferFor(plan)
+    expect(offer.docsUrl).toBe(findRuntimeById("droid")?.docsUrl)
+  })
+
+  it("falls back to the plan's docs URL for an unbound prerequisite", () => {
+    const offer = installOfferFor({
+      command: "npx",
+      name: "Node.js",
+      methods: [],
+      docsUrl: "https://nodejs.org/en/download",
+    })
+    expect(offer.ownership).toBe("user-managed")
+    expect(offer.docsUrl).toBe("https://nodejs.org/en/download")
+  })
+
+  it("reports an unknown runtime as user-managed rather than crashing", () => {
+    const offer = installOfferFor({ ...plan, runtimeId: "ghost" })
+    expect(offer.ownership).toBe("user-managed")
+    expect(offer.docsUrl).toBe("https://docs.example.test")
   })
 })
