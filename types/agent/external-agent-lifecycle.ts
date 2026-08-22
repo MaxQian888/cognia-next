@@ -509,8 +509,18 @@ export interface ExternalAgentLifecycleFields {
  * tied to executable identity + version, and everything else fails closed with
  * install/update guidance rather than launching and hoping.
  */
-export type ExternalAgentVersionVerdict =
-  "certified" | "supported-uncertified" | "unsupported" | "unparseable" | "missing"
+export const EXTERNAL_AGENT_VERSION_VERDICTS = [
+  "certified",
+  "supported-uncertified",
+  "unsupported",
+  "unparseable",
+  "missing",
+] as const
+
+// An array rather than a bare union so a test can iterate it: the UI looks its
+// labels up with a template key, which `lint:i18n` cannot see, and a verdict
+// added without its strings would render the raw key path to the user.
+export type ExternalAgentVersionVerdict = (typeof EXTERNAL_AGENT_VERSION_VERDICTS)[number]
 
 export interface ExternalAgentVersionAssessment {
   runtimeId: string
