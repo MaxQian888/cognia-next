@@ -337,10 +337,25 @@ export interface ExternalAgentRuntimeCatalogEntry {
   docsUrl?: string
 }
 
+/**
+ * Accounting for runtimes that still launch through a network-resolving package
+ * runner (`npx -y <pkg>`).
+ *
+ * Each entry is a known governance hole with a written reason, in the same
+ * spirit as the security policy's `manualOnly` block: the gate fails on any
+ * unpinned launch that is NOT listed, so the hole stays visible and the list
+ * may only shrink.
+ */
+export interface ExternalAgentUnpinnedLaunchWaivers {
+  /** `runtimeId` -> why it is not pinned yet. */
+  runtimes: Record<string, string>
+}
+
 /** The whole catalog as it is persisted in `protocol/external-agent-runtimes.json`. */
 export interface ExternalAgentRuntimeCatalog {
   version: number
   runtimes: ExternalAgentRuntimeCatalogEntry[]
+  unpinnedLaunchWaivers: ExternalAgentUnpinnedLaunchWaivers
 }
 
 // ============================================================================
