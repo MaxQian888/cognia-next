@@ -90,16 +90,28 @@ export interface RuntimeHostDependencies {
   ): Promise<Omit<RuntimeProbeObservation, "parser" | "checkedAt">>
   /** Fetch a signed update-channel document. Absent = no update checking. */
   fetchUpdateChannel?(url: string): Promise<unknown>
+  /**
+   * Runtimes discovered at runtime rather than shipped in the catalog.
+   *
+   * ACP Registry entries live here. They go through the identical staged
+   * install — a discovered runtime gets no shortcut around verification,
+   * health-checking or receipts just because it was not in the JSON.
+   */
+  dynamicRuntimes?(): Iterable<ExternalAgentRuntimeCatalogEntry>
 }
 
-function requireEntry(runtimeId: string): ExternalAgentRuntimeCatalogEntry {
-  const entry = findRuntimeById(runtimeId)
-  if (!entry) {
-    throw new ExternalAgentLifecycleError("runtime_missing", `unknown runtime: ${runtimeId}`, {
-      runtimeId,
-    })
+function findEntry(
+  runtimeId: string,
+  dynamic?: () => Iterable<ExternalAgentRuntimeCatalogEntry>
+): ExternalAgentRuntimeCatalogEntry | undefined {
+  // The shipped catalog wins: a discovered entry must never be able to shadow
+  // a runtime whose policy the repo actually governs.
+  const shipped = findRuntimeById(runtimeId)
+  if (shipped) return shipped
+  for (const entry of dynamic?.() ?? []) {
+    if (entry.runtimeId === runtimeId) return entry
   }
-  return entry
+  return undefined
 }
 
 function requireManaged(entry: ExternalAgentRuntimeCatalogEntry): void {
@@ -114,6 +126,16 @@ function requireManaged(entry: ExternalAgentRuntimeCatalogEntry): void {
 
 export function createRuntimeHost(deps: RuntimeHostDependencies): LifecycleRuntimeHost {
   const { host, receipts } = deps
+
+  const requireEntry = (runtimeId: string): ExternalAgentRuntimeCatalogEntry => {
+    const entry = findEntry(runtimeId, deps.dynamicRuntimes)
+    if (!entry) {
+      throw new ExternalAgentLifecycleError("runtime_missing", `unknown runtime: ${runtimeId}`, {
+        runtimeId,
+      })
+    }
+    return entry
+  }
 
   async function buildContext(
     entry: ExternalAgentRuntimeCatalogEntry,

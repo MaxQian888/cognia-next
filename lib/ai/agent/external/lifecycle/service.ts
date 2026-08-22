@@ -34,6 +34,7 @@ import {
   type ExternalAgentLifecycleErrorCode,
   type ExternalAgentLifecycleFields,
   type ExternalAgentLifecycleStatus,
+  type ExternalAgentRuntimeCatalogEntry,
   type ExternalAgentRuntimeReceipt,
   type ExternalAgentRuntimeStatus,
   type ExternalAgentUpdateCandidate,
@@ -50,6 +51,11 @@ import {
   normalizePlatform,
   runtimeSupportsPlatform,
 } from "../runtime-catalog"
+// Type-only: importing this module for real pulls the registry client, and
+// through it proxy-fetch and the settings store, into the boot graph. Startup
+// rehydration imports this service, so a static import would make every launch
+// pay for a listing most users never open.
+import type { RegistryDiscoveryResult } from "./registry-discovery"
 import { externalAgentSandboxSupportsPlatform } from "../security-policy"
 import {
   EXTERNAL_AGENT_KEYRING_NAMESPACE,
@@ -168,6 +174,15 @@ export function isRuntimeAffectingUpdate(updates: UpdateExternalAgentInput): boo
 // ============================================================================
 
 export class ExternalAgentLifecycleService {
+  /**
+   * Registry entries discovered this session.
+   *
+   * Session-scoped on purpose: a registry listing is a snapshot of a remote
+   * document, and persisting it would create a second, staler catalog nobody
+   * updates.
+   */
+  private readonly discoveredRuntimes = new Map<string, ExternalAgentRuntimeCatalogEntry>()
+
   constructor(private readonly deps: LifecycleDependencies) {}
 
   // --------------------------------------------------------------------
@@ -529,8 +544,41 @@ export class ExternalAgentLifecycleService {
       .filter((config) => config.runtimeBinding?.runtimeId === runtimeId)
   }
 
+  /**
+   * List the ACP Registry, classified into what Cognia can install and what it
+   * can only point the user at.
+   *
+   * The registry client was written with real care — exact versions, https
+   * archives, mandatory checksums, traversal refusal — and then had no caller,
+   * which made it a dormant capability rather than a lifecycle. This is the
+   * production entry point.
+   *
+   * Discovered runtimes are remembered for this session so
+   * {@link installRuntime} can resolve one; they are NOT written to the shipped
+   * catalog, and a discovered id can never shadow a runtime the repo governs.
+   */
+  async discoverRegistryRuntimes(platformKey: string): Promise<RegistryDiscoveryResult> {
+    const { discoverRegistryAgents, registryCatalogEntry } = await import("./registry-discovery")
+    const result = await discoverRegistryAgents({ platformKey })
+    const platform = normalizePlatform(platformKey.split("-")[0])
+
+    for (const entry of result.entries) {
+      if (entry.kind !== "managed") continue
+      this.discoveredRuntimes.set(entry.runtimeId, registryCatalogEntry(entry, [platform]))
+    }
+
+    return result
+  }
+
+  /** Runtimes discovered this session, for a runtime host to resolve. */
+  discoveredRuntimeEntries(): Iterable<ExternalAgentRuntimeCatalogEntry> {
+    return this.discoveredRuntimes.values()
+  }
+
   async inspectRuntime(runtimeId: string): Promise<ExternalAgentRuntimeStatus> {
-    const entry = findRuntimeById(runtimeId)
+    // The shipped catalog wins, so a discovered entry can never shadow a
+    // runtime whose policy the repo actually governs.
+    const entry = findRuntimeById(runtimeId) ?? this.discoveredRuntimes.get(runtimeId)
     if (!entry) {
       throw new ExternalAgentLifecycleError("runtime_missing", `unknown runtime: ${runtimeId}`, {
         runtimeId,

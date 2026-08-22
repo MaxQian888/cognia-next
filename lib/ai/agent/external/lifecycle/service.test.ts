@@ -7,6 +7,7 @@ import type {
   UpdateExternalAgentInput,
 } from "@/types/agent/external-agent"
 import { ExternalAgentLifecycleError } from "@/types/agent/external-agent-lifecycle"
+import { resetAcpRegistryCacheForTests } from "../acp-registry"
 
 import {
   ExternalAgentLifecycleService,
@@ -705,5 +706,99 @@ describe("reviewAll", () => {
     // reconcile() registers; reviewAll() deliberately does not, so startup
     // rehydration does not end up registering every agent twice.
     expect(manager.addAgent).not.toHaveBeenCalled()
+  })
+})
+
+describe("registry discovery", () => {
+  const REGISTRY = {
+    version: "1.0.0",
+    agents: [
+      {
+        id: "binary-agent",
+        name: "Binary Agent",
+        version: "1.2.3",
+        description: "installable",
+        website: "https://example.test",
+        distribution: {
+          binary: {
+            "darwin-arm64": {
+              archive: "https://example.test/a.tar.gz",
+              sha256: "c".repeat(64),
+              cmd: "bin/agent",
+            },
+          },
+        },
+      },
+      {
+        id: "npx-agent",
+        name: "Npx Agent",
+        version: "2.0.0",
+        description: "discovery only",
+        distribution: { npx: { package: "@example/npx-agent" } },
+      },
+    ],
+  }
+
+  beforeEach(() => {
+    resetAcpRegistryCacheForTests()
+    global.fetch = (async () =>
+      new Response(JSON.stringify(REGISTRY), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch
+  })
+
+  it("classifies the listing and remembers only what it can install", async () => {
+    const { service } = build()
+
+    const result = await service.discoverRegistryRuntimes("darwin-arm64")
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual(["managed", "user-managed"])
+    // The npx entry is discovery only: there is no approved frozen lock for an
+    // arbitrary registry package.
+    expect([...service.discoveredRuntimeEntries()].map((entry) => entry.runtimeId)).toEqual([
+      "registry:binary-agent",
+    ])
+  })
+
+  it("certifies nothing about a discovered runtime", async () => {
+    const { service } = build()
+    await service.discoverRegistryRuntimes("darwin-arm64")
+
+    const [entry] = [...service.discoveredRuntimeEntries()]
+    expect(entry.supportedRange).toBeUndefined()
+    expect(entry.certifiedVersions).toBeUndefined()
+    expect(entry.platforms).toEqual(["darwin"])
+  })
+
+  it("lets inspectRuntime resolve a discovered runtime", async () => {
+    const runtimeHost = {
+      inspect: jest.fn(async () => ({
+        assessment: {
+          runtimeId: "registry:binary-agent",
+          verdict: "supported-uncertified" as const,
+          checkedAt: "2026-08-22T12:00:00.000Z",
+        },
+      })),
+      install: jest.fn(),
+      checkForUpdate: jest.fn(),
+      update: jest.fn(),
+      rollback: jest.fn(),
+      uninstall: jest.fn(),
+    } as unknown as LifecycleRuntimeHost
+    const { service } = build({ runtimeHost })
+    await service.discoverRegistryRuntimes("darwin-arm64")
+
+    const status = await service.inspectRuntime("registry:binary-agent")
+
+    expect(status.ownership).toBe("managed")
+    expect(status.assessment.verdict).toBe("supported-uncertified")
+  })
+
+  it("still refuses a runtime nobody discovered or catalogued", async () => {
+    const { service } = build({ runtimeHost: {} as unknown as LifecycleRuntimeHost })
+    await expect(service.inspectRuntime("registry:ghost")).rejects.toMatchObject({
+      code: "runtime_missing",
+    })
   })
 })
