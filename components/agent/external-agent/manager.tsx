@@ -104,6 +104,8 @@ import {
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/presets"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
+import { externalProtocolOptions } from "@/lib/ai/agent/external/protocol-options"
+import { ExternalAgentCapabilityMatrix } from "./capability-matrix"
 
 import type { AddAgentFormData } from "@/types/agent/component-types"
 import type { SessionObservationSummary } from "@/types/agent/agent-trace"
@@ -112,17 +114,6 @@ const DEFAULT_TIMEOUT_MS = "300000"
 const DEFAULT_RETRY_MAX_RETRIES = "3"
 const DEFAULT_RETRY_DELAY_MS = "1000"
 const DEFAULT_RETRY_MAX_DELAY_MS = "30000"
-
-/** Built-in protocol <SelectItem> values; anything else is plugin-contributed. */
-const BUILTIN_PROTOCOL_OPTIONS = [
-  "acp",
-  "opencode",
-  "opencode-v2",
-  "a2a",
-  "http",
-  "websocket",
-  "custom",
-]
 
 const DEFAULT_ADD_AGENT_FORM_DATA: AddAgentFormData = {
   name: "",
@@ -579,27 +570,23 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {/* A plugin-contributed protocol (`${pluginId}:${id}`) is not
-                        one of the built-in items; render it so the controlled
-                        Select preserves the value instead of clearing it. */}
-                    {formData.protocol && !BUILTIN_PROTOCOL_OPTIONS.includes(formData.protocol) && (
-                      <SelectItem value={formData.protocol}>{formData.protocol}</SelectItem>
-                    )}
-                    {/* i18n-exempt: protocol identifier (brand/technical) */}
-                    <SelectItem value="acp">ACP</SelectItem>
-                    {/* i18n-exempt: protocol identifier (brand/technical) */}
-                    <SelectItem value="opencode">OpenCode</SelectItem>
-                    <SelectItem value="opencode-v2">{tSettings("opencodeV2Protocol")}</SelectItem>
-                    <SelectItem value="a2a">{tManager("a2aProtocol")}</SelectItem>
-                    <SelectItem value="http" disabled>
-                      {tManager("httpProtocolComingSoon")}
-                    </SelectItem>
-                    <SelectItem value="websocket" disabled>
-                      {tManager("websocketProtocolComingSoon")}
-                    </SelectItem>
-                    <SelectItem value="custom" disabled>
-                      {tManager("customProtocolComingSoon")}
-                    </SelectItem>
+                    {/* Derived from the REGISTERED protocols, plus whatever the
+                        form already holds. The hand-written list this replaced
+                        offered http/websocket/custom as "coming soon" — none of
+                        them has ever had an adapter — while omitting the three
+                        protocols that do. */}
+                    {externalProtocolOptions(formData.protocol).map((option) => (
+                      <SelectItem
+                        key={option.value}
+                        value={option.value}
+                        disabled={!option.selectable}
+                      >
+                        {option.value === "opencode-v2"
+                          ? tSettings("opencodeV2Protocol")
+                          : option.label}
+                        {option.reasonKey ? ` — ${tManager(option.reasonKey)}` : ""}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1700,6 +1687,12 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                   {tDiag("recommendedActions", { actions: activeRecommendedActions.join(" | ") })}
                 </p>
               ) : null}
+              {/* The merged capability answer, so a user whose /compact does
+                  nothing has somewhere to look. Same artifact the CLI and the
+                  execution resolver read — not a fourth reading of the preset. */}
+              <div className="sm:col-span-2">
+                <ExternalAgentCapabilityMatrix profile={activeAgent?.capabilityProfile} />
+              </div>
             </div>
           </CollapsibleSection>
         )}

@@ -750,7 +750,9 @@ describe("ExternalAgentManager", () => {
 
     // The protocol dropdown is the second combobox (after the preset quick-start).
     fireEvent.click(screen.getAllByRole("combobox")[1])
-    const a2aOption = await screen.findByRole("option", { name: "A2A" })
+    // The picker is now derived from the REGISTERED protocols and labels them
+    // with their full brand names, so the match is by prefix rather than exact.
+    const a2aOption = await screen.findByRole("option", { name: /^A2A/ })
     expect(a2aOption).not.toHaveAttribute("aria-disabled", "true")
     fireEvent.click(a2aOption)
 
