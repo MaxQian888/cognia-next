@@ -87,6 +87,15 @@
   },
   "executionPlan": "Execution Plan",
   "externalAgents": "External Agents",
+  "lifecycle": {
+    "statusLabel": {
+      "needsCredentials": "Needs credentials",
+      "needsConsent": "Needs your permission",
+      "needsRuntime": "Runtime not installed",
+      "blocked": "Cannot start"
+    },
+    "noReason": "Cognia stopped this agent and did not record why. Re-check its settings."
+  },
   "lifecycleErrors": {
     "activeSessions": "Sessions are still running. End them first, then try again.",
     "adapterUnavailable": "The plugin that provides this agent's protocol is not enabled.",
@@ -534,6 +543,8 @@
     "description": "Windows cannot run Cognia's sandbox, so {agent} would run with your full account access.",
     "executableLabel": "Program that will run",
     "invalidation": "This permission covers exactly this program, version and command. If any of them change, you will be asked again.",
+    "reviewAction": "Review and allow…",
+    "revoke": "Withdraw this permission",
     "risk": "Outside the sandbox, this agent can read and change any file your account can, run any program, and reach the network without restriction. Cognia cannot limit it once it starts.",
     "title": "Run this agent without the sandbox?",
     "versionLabel": "Version",

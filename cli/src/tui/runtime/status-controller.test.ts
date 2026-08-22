@@ -93,11 +93,16 @@ describe("collectStatusReport — backend", () => {
     expect(report.agentBackend).toBe("codex")
     expect(report.provider).toBe("codex (codex-app-server)")
     expect(report.blockedFeatures).toEqual(
-      expect.arrayContaining(["Context compaction", "Rate limits", "Lifecycle hooks"])
+      expect.arrayContaining(["Rate limits", "Lifecycle hooks", "MCP logs"])
     )
     // …and the bridged ones are NOT listed as blocked.
     expect(report.blockedFeatures).not.toContain("MCP servers")
     expect(report.blockedFeatures).not.toContain("Thinking level")
+    // Nor is compaction. This row used to be reported blocked because the TUI
+    // kept its own hand-written table; the capability SSOT records
+    // `compaction: native` for this protocol, evidenced by the adapter code
+    // that implements it (`protocol/agent-capabilities.json`).
+    expect(report.blockedFeatures).not.toContain("Context compaction")
   })
 
   it("never borrows the built-in provider's model or window for an external agent", () => {

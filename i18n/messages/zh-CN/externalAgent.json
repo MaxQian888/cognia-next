@@ -87,6 +87,15 @@
   },
   "executionPlan": "执行计划",
   "externalAgents": "外部代理",
+  "lifecycle": {
+    "statusLabel": {
+      "needsCredentials": "缺少凭据",
+      "needsConsent": "需要你的许可",
+      "needsRuntime": "运行时未安装",
+      "blocked": "无法启动"
+    },
+    "noReason": "Cognia 停用了这个 Agent，但没有记录原因。请检查它的设置。"
+  },
   "lifecycleErrors": {
     "activeSessions": "仍有会话在运行。请先结束会话后重试。",
     "adapterUnavailable": "提供该 Agent 协议的插件未启用。",
@@ -534,6 +543,8 @@
     "description": "Windows 无法运行 Cognia 的沙箱，因此 {agent} 将以你账户的完整权限运行。",
     "executableLabel": "将要运行的程序",
     "invalidation": "该授权仅适用于此程序、此版本与此命令。其中任意一项发生变化时，都会再次询问你。",
+    "reviewAction": "查看并允许…",
+    "revoke": "撤回该许可",
     "risk": "在沙箱之外，该 Agent 可以读取和修改你账户能访问的任意文件、运行任意程序，并不受限制地访问网络。一旦启动，Cognia 无法再对其加以限制。",
     "title": "在无沙箱的情况下运行该 Agent？",
     "versionLabel": "版本",

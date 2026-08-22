@@ -500,6 +500,42 @@ describe("uninstallRuntime", () => {
     })
   })
 
+  it("records what the probe saw onto every agent bound to that runtime", async () => {
+    // The consent check compares an approval against the binding. If a probe's
+    // findings never land there, the binding has no digest and no version, and
+    // the executable/version invalidations can never fire.
+    const { service, store, host } = withHost([
+      stdioConfig({ runtimeBinding: { runtimeId: "codex-acp", ownership: "system" } }),
+      stdioConfig({
+        id: "agent-2",
+        runtimeBinding: { runtimeId: "droid", ownership: "system" },
+      }),
+    ])
+    ;(host.inspect as jest.Mock).mockResolvedValue({
+      assessment: {
+        runtimeId: "codex-acp",
+        verdict: "supported-uncertified",
+        detectedVersion: "1.2.3",
+        executablePath: "/usr/bin/codex-acp",
+        executableDigest: "e".repeat(64),
+        checkedAt: "2026-08-22T12:00:00.000Z",
+      },
+    })
+
+    await service.inspectRuntime("codex-acp")
+
+    expect(store.getAgent("agent-1")?.runtimeBinding).toMatchObject({
+      resolvedExecutablePath: "/usr/bin/codex-acp",
+      pinnedVersion: "1.2.3",
+      executableDigest: "e".repeat(64),
+    })
+    // …and leaves an agent bound to a different runtime alone.
+    expect(store.getAgent("agent-2")?.runtimeBinding).toEqual({
+      runtimeId: "droid",
+      ownership: "system",
+    })
+  })
+
   it("reports honestly on a host that cannot install anything", async () => {
     const { service } = build({}, [])
     await expect(service.installRuntime("deepseek-harness")).rejects.toMatchObject({
@@ -509,41 +545,52 @@ describe("uninstallRuntime", () => {
 })
 
 describe("Windows unsandboxed consent", () => {
-  const identity = {
-    runtimeId: "codex-acp",
-    executablePath: "C:\\tools\\npx.cmd",
-    executableDigest: "a".repeat(64),
-    runtimeVersion: "1.0.0",
-    commandDigest: "b".repeat(64),
-  }
+  /** A config bound to an eligible runtime, as `createConfig`/`reviewAll` bind it. */
+  const boundConfig = (binding: Record<string, unknown> = {}) =>
+    stdioConfig({
+      runtimeBinding: {
+        runtimeId: "codex-acp",
+        ownership: "system",
+        resolvedExecutablePath: "C:\\tools\\npx.cmd",
+        pinnedVersion: "1.0.0",
+        ...binding,
+      },
+    })
 
   it("refuses on macOS, where the sandbox is mandatory", async () => {
-    const { service } = build({ platform: "darwin" }, [stdioConfig()])
-    await expect(service.grantUnsandboxedWindowsConsent("agent-1", identity)).rejects.toMatchObject(
-      { code: "platform_unsupported" }
-    )
+    const { service } = build({ platform: "darwin" }, [boundConfig()])
+    await expect(service.grantUnsandboxedWindowsConsent("agent-1")).rejects.toMatchObject({
+      code: "platform_unsupported",
+    })
   })
 
   it("refuses on Linux, where the sandbox is mandatory", async () => {
-    const { service } = build({ platform: "linux" }, [stdioConfig()])
-    await expect(service.grantUnsandboxedWindowsConsent("agent-1", identity)).rejects.toMatchObject(
-      { code: "platform_unsupported" }
-    )
+    const { service } = build({ platform: "linux" }, [boundConfig()])
+    await expect(service.grantUnsandboxedWindowsConsent("agent-1")).rejects.toMatchObject({
+      code: "platform_unsupported",
+    })
   })
 
   it("refuses a runtime the catalog does not mark eligible", async () => {
+    const { service } = build({ platform: "win32" }, [boundConfig({ runtimeId: "droid" })])
+    await expect(service.grantUnsandboxedWindowsConsent("agent-1")).rejects.toMatchObject({
+      code: "platform_unsupported",
+    })
+  })
+
+  it("refuses an agent bound to no runtime, rather than approving an unknown command", async () => {
     const { service } = build({ platform: "win32" }, [stdioConfig()])
-    await expect(
-      service.grantUnsandboxedWindowsConsent("agent-1", { ...identity, runtimeId: "droid" })
-    ).rejects.toMatchObject({ code: "platform_unsupported" })
+    await expect(service.grantUnsandboxedWindowsConsent("agent-1")).rejects.toMatchObject({
+      code: "runtime_missing",
+    })
   })
 
   it("binds consent to the host and policy revision it was given under", async () => {
     const { service, store } = build({ platform: "win32", hostId: "win-host", policyRevision: 7 }, [
-      stdioConfig(),
+      boundConfig(),
     ])
 
-    const consent = await service.grantUnsandboxedWindowsConsent("agent-1", identity)
+    const consent = await service.grantUnsandboxedWindowsConsent("agent-1")
 
     expect(consent).toMatchObject({
       agentId: "agent-1",
@@ -552,15 +599,53 @@ describe("Windows unsandboxed consent", () => {
       confirmedAt: "2026-08-22T12:00:00.000Z",
     })
     expect(store.getAgent("agent-1")?.unsandboxedConsent).toEqual(consent)
+    // The approval is now what the readiness check reads, so the agent stops
+    // being reported as needing one.
+    expect(store.getAgent("agent-1")?.lifecycleStatus).toBe("ready")
+  })
+
+  it("describes the command that would run, not one the caller supplied", async () => {
+    // The UI used to hand in its own identity; it described what it displayed
+    // while the check described what would run.
+    const { service, store } = build({ platform: "win32", hostId: "win-host" }, [
+      boundConfig({ executableDigest: "c".repeat(64) }),
+    ])
+
+    const consent = await service.grantUnsandboxedWindowsConsent("agent-1")
+
+    expect(consent.executablePath).toBe("C:\\tools\\npx.cmd")
+    expect(consent.executableDigest).toBe("c".repeat(64))
+    expect(consent.runtimeVersion).toBe("1.0.0")
+    expect(consent).toEqual(
+      expect.objectContaining(service.launchIdentity(store.getAgent("agent-1")!)!)
+    )
+  })
+
+  it("invalidates an approval once the executable underneath it changes", async () => {
+    // This could not fire before: the check read the digest out of the consent
+    // it was checking, so it compared a value with itself.
+    const { service, store } = build({ platform: "win32", hostId: "win-host" }, [
+      boundConfig({ executableDigest: "c".repeat(64) }),
+    ])
+    await service.grantUnsandboxedWindowsConsent("agent-1")
+    expect(store.getAgent("agent-1")?.lifecycleStatus).toBe("ready")
+
+    store.patchLifecycle("agent-1", {
+      runtimeBinding: {
+        ...store.getAgent("agent-1")!.runtimeBinding!,
+        executableDigest: "d".repeat(64),
+      },
+    })
+
+    await expect(service.connect("agent-1")).rejects.toMatchObject({ code: "consent_required" })
+    expect(store.getAgent("agent-1")?.lifecycleStatus).toBe("needs-consent")
   })
 
   it("revoking consent removes the record and stops the agent", async () => {
     const { service, store, manager } = build({ platform: "win32", hostId: "win-host" }, [
-      stdioConfig({
-        runtimeBinding: { runtimeId: "codex-acp", ownership: "system" },
-      }),
+      boundConfig(),
     ])
-    await service.grantUnsandboxedWindowsConsent("agent-1", identity)
+    await service.grantUnsandboxedWindowsConsent("agent-1")
     await service.connect("agent-1").catch(() => {})
     manager.instances.set("agent-1", { sessions: new Map() })
 

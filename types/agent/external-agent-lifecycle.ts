@@ -390,6 +390,18 @@ export interface ExternalAgentRuntimeBinding {
   resolvedExecutablePath?: string
   /** Version this binding was last certified against. */
   pinnedVersion?: string
+  /**
+   * SHA-256 of the executable the last probe resolved.
+   *
+   * This is what makes `executable-changed` reachable. The consent check used
+   * to read the digest out of the consent record it was checking, so it
+   * compared a value with itself and could never invalidate; the identity is
+   * now built from the binding, which the runtime probe writes.
+   *
+   * Absent for a package runner: the resolved file there is `npx`, not the
+   * runtime, so its digest would report "unchanged" across a package swap.
+   */
+  executableDigest?: string
 }
 
 /** Result of the post-install / pre-activation health check. */
@@ -473,8 +485,18 @@ export interface ExternalAgentRuntimeStatus {
  * whereas reconciliation blocks one it cannot honestly start. The reason code
  * is what turns that into an actionable message instead of a silent failure.
  */
-export type ExternalAgentLifecycleStatus =
-  "ready" | "needs-credentials" | "needs-consent" | "needs-runtime" | "blocked"
+export const EXTERNAL_AGENT_LIFECYCLE_STATUSES = [
+  "ready",
+  "needs-credentials",
+  "needs-consent",
+  "needs-runtime",
+  "blocked",
+] as const
+
+// An array rather than a bare union so a test can walk it: the notice that
+// renders these looks its label up with a template key, which `lint:i18n`
+// cannot see.
+export type ExternalAgentLifecycleStatus = (typeof EXTERNAL_AGENT_LIFECYCLE_STATUSES)[number]
 
 /**
  * Lifecycle fields stored alongside an {@link ExternalAgentConfig}.

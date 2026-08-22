@@ -242,10 +242,7 @@ export class ExternalAgentLifecycleService {
     id: string,
     updates: UpdateExternalAgentInput & Partial<ExternalAgentLifecycleFields>
   ): Promise<void> {
-    const before = this.deps.store.getAgent(id)
-    if (!before) {
-      throw new ExternalAgentLifecycleError("runtime_missing", `unknown agent: ${id}`, { id })
-    }
+    const before = this.requireConfig(id)
 
     const secrets = extractInlineCredentials(updates as ExternalAgentConfig)
     const hasNewSecrets = occupiedSlots(secrets).length > 0
@@ -317,10 +314,7 @@ export class ExternalAgentLifecycleService {
 
   /** Connect an Agent, refusing first if it is not in a state that can run. */
   async connect(id: string): Promise<void> {
-    const config = this.deps.store.getAgent(id)
-    if (!config) {
-      throw new ExternalAgentLifecycleError("runtime_missing", `unknown agent: ${id}`, { id })
-    }
+    const config = this.requireConfig(id)
 
     const verdict = await this.assessReadiness(config)
     if (verdict.status !== "ready") {
@@ -503,15 +497,31 @@ export class ExternalAgentLifecycleService {
    * no path — consent or otherwise — that relaxes it. Refuses on Windows too
    * unless the catalog marks this specific runtime eligible.
    */
-  async grantUnsandboxedWindowsConsent(
-    id: string,
-    identity: Omit<UnsandboxedLaunchIdentity, "agentId" | "hostId" | "policyRevision">
-  ): Promise<UnsandboxedLaunchConsent> {
+  /**
+   * Record the user's approval to launch this Agent outside the sandbox.
+   *
+   * The identity is derived here rather than supplied by the caller. A UI that
+   * assembled its own would be describing what it *displayed*, and the check
+   * that later re-reads it describes what would *run* — the two drifting apart
+   * is how an approval ends up covering a command nobody agreed to. Both sides
+   * now go through {@link launchIdentity}.
+   */
+  async grantUnsandboxedWindowsConsent(id: string): Promise<UnsandboxedLaunchConsent> {
     if (normalizePlatform(this.deps.platform) !== "win32") {
       throw new ExternalAgentLifecycleError(
         "platform_unsupported",
         "unsandboxed launch consent exists only on Windows desktop",
         { platform: this.deps.platform }
+      )
+    }
+
+    const config = this.requireConfig(id)
+    const identity = this.launchIdentity(config)
+    if (!identity) {
+      throw new ExternalAgentLifecycleError(
+        "runtime_missing",
+        `agent ${id} is not bound to a catalogued runtime, so there is nothing to approve`,
+        { agentId: id }
       )
     }
 
@@ -526,12 +536,10 @@ export class ExternalAgentLifecycleService {
 
     const consent: UnsandboxedLaunchConsent = {
       ...identity,
-      agentId: id,
-      hostId: this.deps.hostId,
-      policyRevision: this.deps.policyRevision,
       confirmedAt: this.deps.now().toISOString(),
     }
     this.deps.store.patchLifecycle(id, { unsandboxedConsent: consent })
+    this.markVerdict(id, await this.assessReadiness({ ...config, unsandboxedConsent: consent }))
     return consent
   }
 
@@ -618,6 +626,7 @@ export class ExternalAgentLifecycleService {
 
     const host = this.requireRuntimeHost()
     const { assessment, receipt } = await host.inspect(runtimeId)
+    this.recordProbeOnBindings(runtimeId, assessment)
 
     return {
       runtimeId,
@@ -751,6 +760,44 @@ export class ExternalAgentLifecycleService {
     }
   }
 
+  /**
+   * Write what the probe just learned onto every Agent bound to this runtime.
+   *
+   * Without this the binding never carries an executable digest or a version,
+   * and the unsandboxed-consent check has nothing current to compare an
+   * approval against — `executable-changed` and `version-changed` stay
+   * unreachable no matter how many times the binary is swapped.
+   *
+   * `patchLifecycle` no-ops when nothing changed, so re-checking an unchanged
+   * runtime does not churn the store.
+   */
+  private recordProbeOnBindings(
+    runtimeId: string,
+    assessment: ExternalAgentVersionAssessment
+  ): void {
+    for (const config of this.deps.store.getAllAgents()) {
+      const binding = config.runtimeBinding
+      if (binding?.runtimeId !== runtimeId) continue
+      this.deps.store.patchLifecycle(config.id, {
+        runtimeBinding: {
+          ...binding,
+          resolvedExecutablePath: assessment.executablePath,
+          pinnedVersion: assessment.detectedVersion,
+          executableDigest: assessment.executableDigest,
+        },
+      })
+    }
+  }
+
+  /** The saved config, or a typed error naming the id that is not there. */
+  private requireConfig(id: string): LifecycleAgentConfig {
+    const config = this.deps.store.getAgent(id)
+    if (!config) {
+      throw new ExternalAgentLifecycleError("runtime_missing", `unknown agent: ${id}`, { id })
+    }
+    return config
+  }
+
   private markVerdict(id: string, verdict: ReadinessVerdict): void {
     this.deps.store.patchLifecycle(id, {
       lifecycleStatus: verdict.status,
@@ -835,28 +882,44 @@ export class ExternalAgentLifecycleService {
     return undefined
   }
 
-  private assessConsent(config: LifecycleAgentConfig): ReadinessVerdict | undefined {
-    if (externalAgentSandboxSupportsPlatform(this.deps.platform)) return undefined
-
+  /**
+   * What this Agent would launch, as the consent record describes it.
+   *
+   * One implementation for both sides of the check. Every field comes from the
+   * saved config and its runtime binding — never from the consent being
+   * checked. The digest used to be read out of `config.unsandboxedConsent`,
+   * which meant the executable comparison was a value against itself: the
+   * `executable-changed` and `version-changed` invalidations could not fire,
+   * and a swapped binary kept an old approval. The binding carries both now,
+   * written by {@link inspectRuntime}.
+   */
+  launchIdentity(config: LifecycleAgentConfig): UnsandboxedLaunchIdentity | undefined {
     const binding = config.runtimeBinding
     const entry = binding ? findRuntimeById(binding.runtimeId) : undefined
-    if (!entry) return undefined
+    if (!entry || !binding) return undefined
 
     const launch = {
       command: config.process?.command ?? entry.systemCommand ?? "",
       args: config.process?.args ?? entry.launchArgs ?? [],
     }
-    const identity: UnsandboxedLaunchIdentity = {
+    return {
       agentId: config.id,
       runtimeId: entry.runtimeId,
-      executablePath: binding?.resolvedExecutablePath ?? launch.command,
-      executableDigest: config.unsandboxedConsent?.executableDigest ?? "",
-      runtimeVersion: binding?.pinnedVersion ?? "",
+      executablePath: binding.resolvedExecutablePath ?? launch.command,
+      executableDigest: binding.executableDigest ?? "",
+      runtimeVersion: binding.pinnedVersion ?? "",
       commandDigest: canonicalLaunchCommandString(launch),
       policyRevision: this.deps.policyRevision,
       hostId: this.deps.hostId,
-      provider: binding?.provider,
+      provider: binding.provider,
     }
+  }
+
+  private assessConsent(config: LifecycleAgentConfig): ReadinessVerdict | undefined {
+    if (externalAgentSandboxSupportsPlatform(this.deps.platform)) return undefined
+
+    const identity = this.launchIdentity(config)
+    if (!identity) return undefined
 
     const { valid, reasons } = assessUnsandboxedConsent(config.unsandboxedConsent, identity)
     if (valid) return undefined
