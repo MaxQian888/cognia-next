@@ -150,6 +150,17 @@ const REGISTRY = [
   // three languages. This binds all four to protocol/agent-control-methods.json
   // and refuses to let a still-`planned` control reach a live Query object.
   { script: "audit:adapter-capabilities", group: "audit" },
+  // The external-agent SSOT (ADR-0090). Two protocol manifests whose consumers
+  // span TypeScript AND a compiled-in Rust allowlist — the one pairing a
+  // comment could not hold together, and did not: Rust refused the binary the
+  // shipped `claude-code` preset spawns while carrying one no preset names.
+  { script: "audit:agent-capabilities", group: "audit" },
+  // The install-side twin of `audit:agent-capabilities`: presets described
+  // commands and nothing described runtimes, so a preset could ship with an
+  // unpinned `npx -y` launch, no version policy and no uninstall path while
+  // every other gate stayed green. Also counts the remaining unpinned launches
+  // so the hole shrinks instead of going quiet.
+  { script: "audit:external-agent-runtimes", group: "audit" },
   { script: "audit:agent-control-methods", group: "audit" },
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
@@ -218,6 +229,7 @@ const REGISTRY = [
   // `node --test` over web/scripts/ — the evidence pipeline and the two capture
   // scripts. Introduced by ADR-0092 but never registered, so it ran nowhere.
   { script: "web:test:scripts", group: "gate-tests" },
+  { script: "audit:external-agent-runtimes:test", group: "gate-tests" },
   { script: "test:coverage:runner:test", group: "gate-tests" },
   { script: "sidecar:codeserver-agent:test", group: "gate-tests" },
 
