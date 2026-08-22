@@ -203,6 +203,9 @@ function buildSegments(msg: DiscordMessage): MessageSegment[] {
         alt: att.filename,
         width: att.width,
         height: att.height,
+        // Discord names the exact type; the model's `media_type` must match
+        // the bytes, and the generic fallback downstream is PNG.
+        mimeType: contentType,
       })
     } else if (contentType.startsWith("audio/")) {
       // Discord voice messages are audio attachments with `duration_secs`.

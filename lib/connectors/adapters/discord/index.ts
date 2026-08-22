@@ -36,6 +36,7 @@ import {
   serializeFetchHistory,
   renderDiscordContentRun,
 } from "./serialize"
+import { enrichDiscordInboundMedia } from "./inbound-media"
 import { sendDiscordVoiceMessage } from "./voice-upload"
 import { startGatewayClient } from "./gateway-client"
 import type { GatewayClient } from "./gateway-client"
@@ -460,6 +461,11 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
             // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
             if (!(await gateInboundEvent(opts.id, event))) continue
             lastActivityAt = Date.now()
+            // Download what the parser could only reference, so a posted
+            // screenshot reaches the model as a picture rather than as the
+            // text `[image: https://cdn.discordapp.com/…]`. After the gate:
+            // a message that is going to be dropped costs no downloads.
+            await enrichDiscordInboundMedia(event)
             await ctx.emit(event)
           }
         }
