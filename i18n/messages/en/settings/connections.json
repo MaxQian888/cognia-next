@@ -1679,6 +1679,7 @@
     "titleNew": "Add WeCom (企业微信) Bot",
     "welcomeHelp": "Sent when a user opens the bot chat (enter_chat). Leave blank to send no welcome.",
     "welcomeLabel": "Welcome message (optional)",
-    "welcomePlaceholder": "Hi! How can I help you today?"
+    "welcomePlaceholder": "Hi! How can I help you today?",
+    "testConflictLiveConnection": "This bot already has its one WeCom connection open. Stop the bot before testing different credentials — WeCom allows only one connection per bot, and testing now would drop the live one."
   }
 }

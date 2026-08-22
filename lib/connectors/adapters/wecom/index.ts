@@ -26,6 +26,7 @@ import type {
 } from "@/types/connectors/adapter"
 import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
 import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import { registerWeComLiveConnection, weComCredentialFingerprint } from "./live-connection"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { buildConversationKey } from "@/types/connectors/event"
 import {
@@ -188,6 +189,8 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
    * swallow exactly that many before letting an ack resolve `pending`.
    */
   const ackDebts = new Map<string, number>()
+  /** Clears this bot's entry in the live-connection registry; see `subscribe`. */
+  let unregisterLiveConnection: (() => void) | null = null
 
   const wsUrl = opts._wsUrl ?? WECOM_WS_URL
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
@@ -446,6 +449,17 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
     healthState = "running"
     healthReason = undefined
     lastActivityAt = Date.now()
+    // Claim this bot's single connection slot so the settings form's "test
+    // connection" answers from HERE instead of opening a second socket that
+    // would fight this one. Re-run on every reconnect; last writer wins,
+    // which is right because only one socket can exist.
+    unregisterLiveConnection?.()
+    unregisterLiveConnection = registerWeComLiveConnection({
+      adapterId: opts.id,
+      botId,
+      credentialFingerprint: await weComCredentialFingerprint(botId, secret),
+      health,
+    })
   }
 
   async function connectOnce(): Promise<void> {
@@ -762,6 +776,11 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
 
   async function stop(): Promise<void> {
     stopCalled = true
+    // Release the connection slot before the socket goes: once this adapter is
+    // stopping, a probe for these credentials must open its own connection
+    // rather than read a health value that is about to become "down".
+    unregisterLiveConnection?.()
+    unregisterLiveConnection = null
     cleanupListeners()
     rejectAllPending("adapter stopped")
     activeReqIds.clear()

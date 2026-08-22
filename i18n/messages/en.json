@@ -28230,6 +28230,7 @@
         "sectionQuickCommands": "Quick commands",
         "sectionQuickCommandsDesc": "Buttons pushed on enter_chat as a template_card menu — each maps a trigger key to a prompt or slash command.",
         "testButtonLabel": "Test credentials",
+        "testConflictLiveConnection": "This bot already has its one WeCom connection open. Stop the bot before testing different credentials — WeCom allows only one connection per bot, and testing now would drop the live one.",
         "testCredentialScopeHelp": "Testing mints a short-lived access token from WeCom to verify the corp credentials.",
         "testCredentialsAria": "Test WeCom credentials",
         "testFailedLabel": "Credential test failed",

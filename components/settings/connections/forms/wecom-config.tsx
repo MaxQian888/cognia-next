@@ -93,8 +93,13 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
         setTestResult({ ok: true })
         toast.success(t("testSucceededToast"))
       } else {
-        setTestResult({ ok: false, error: result.error })
-        toast.error(t("testFailedToast", { error: result.error }))
+        // The conflict is not a credential failure and must not read like one:
+        // WeCom allows one connection per bot, so nothing could be tested
+        // without taking the running bot's slot. Say what to do instead.
+        const conflict = result.code === "live_connection_conflict"
+        const detail = conflict ? t("testConflictLiveConnection") : result.error
+        setTestResult({ ok: false, error: detail })
+        toast.error(conflict ? detail : t("testFailedToast", { error: result.error }))
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
@@ -127,7 +132,10 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
         if (!botId.trim() || !secret.trim()) throw new Error(t("credentialsRequired"))
         try {
           await preflightConnectorConfig({
-            probe: () => probeWeComCredentials(botId.trim(), secret.trim()),
+            // Saving new credentials IS a request to replace the connection —
+            // the adapter restarts onto them immediately — so this path may
+            // take the slot where the test button must not.
+            probe: () => probeWeComCredentials(botId.trim(), secret.trim(), { intent: "replace" }),
           })
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error)

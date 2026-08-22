@@ -28230,6 +28230,7 @@
         "sectionQuickCommands": "快捷指令",
         "sectionQuickCommandsDesc": "进入会话（enter_chat）时推送一张 template_card 菜单卡，每行映射到一个提示词或斜杠命令。",
         "testButtonLabel": "测试凭据",
+        "testConflictLiveConnection": "该机器人的唯一一条企业微信长连接已在使用中。企业微信每个机器人只允许一条连接，现在测试会挤掉正在运行的那条——请先停止机器人，再测试新凭据。",
         "testCredentialScopeHelp": "测试会向企业微信申请一个短期访问令牌，以验证企业凭据。",
         "testCredentialsAria": "测试企业微信凭据",
         "testFailedLabel": "凭据测试失败",
