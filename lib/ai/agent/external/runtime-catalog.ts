@@ -15,14 +15,19 @@
  */
 
 import CATALOG from "@/protocol/external-agent-runtimes.json"
+import type { ExternalAgentConfig } from "@/types/agent/external-agent"
 import {
   isJsRuntimeProvider,
   type ExternalAgentDistribution,
   type ExternalAgentLifecycleErrorCode,
   type ExternalAgentRuntimeCatalog,
+  type ExternalAgentRuntimeBinding,
   type ExternalAgentRuntimeCatalogEntry,
   type ExternalAgentRuntimeProvider,
 } from "@/types/agent/external-agent-lifecycle"
+
+import { externalAgentPresetIdOf } from "./preset-identity"
+import { baseCommandName } from "./security-policy"
 
 const catalog = CATALOG as unknown as ExternalAgentRuntimeCatalog
 
@@ -48,6 +53,70 @@ export function findRuntimeByPresetId(
 /** Every preset id the catalog claims to cover. */
 export function catalogedPresetIds(): string[] {
   return EXTERNAL_AGENT_RUNTIMES.flatMap((entry) => entry.presetIds)
+}
+
+// ============================================================================
+// Binding a saved configuration to a runtime
+// ============================================================================
+
+/**
+ * Which catalogued runtime a saved configuration actually launches.
+ *
+ * Two routes, in order. A config created from a preset carries the preset id on
+ * `metadata.preset`, which is the exact answer. A hand-configured one does not,
+ * so it is matched on what it would run: protocol plus the base launch command,
+ * disambiguated by the package name when several runtimes share a package
+ * runner (four of them launch through `npx`).
+ *
+ * Returns `undefined` rather than guessing when the match is ambiguous. An
+ * incorrect binding is worse than none: it would attribute an agent's live
+ * sessions to the wrong runtime and let an uninstall proceed while something
+ * was still using it.
+ */
+export function findRuntimeForConfig(
+  config: Pick<ExternalAgentConfig, "metadata" | "protocol" | "process">
+): ExternalAgentRuntimeCatalogEntry | undefined {
+  const presetId = externalAgentPresetIdOf(config)
+  if (presetId) {
+    const byPreset = findRuntimeByPresetId(presetId)
+    if (byPreset) return byPreset
+  }
+
+  const command = config.process?.command
+  if (!command) return undefined
+
+  const base = baseCommandName(command)
+  const candidates = EXTERNAL_AGENT_RUNTIMES.filter(
+    (entry) =>
+      entry.systemCommand &&
+      baseCommandName(entry.systemCommand) === base &&
+      entry.protocol === config.protocol
+  )
+  if (candidates.length === 1) return candidates[0]
+  if (candidates.length === 0) return undefined
+
+  // Several runtimes share this command — for `npx` that is the norm. The
+  // package being run is what tells them apart.
+  const target = (config.process?.args ?? []).find((arg) => !arg.startsWith("-"))
+  if (!target) return undefined
+  const matched = candidates.filter((entry) => (entry.launchArgs ?? []).includes(target))
+  return matched.length === 1 ? matched[0] : undefined
+}
+
+/**
+ * The runtime binding to persist for a configuration.
+ *
+ * Without this the binding-dependent machinery is inert: live sessions are
+ * attributed to no runtime, so an uninstall's "still in use" and "still
+ * referenced" guards can never fire, and the Windows consent path never
+ * engages because there is no runtime to check eligibility against.
+ */
+export function deriveRuntimeBinding(
+  config: Pick<ExternalAgentConfig, "metadata" | "protocol" | "process">
+): ExternalAgentRuntimeBinding | undefined {
+  const entry = findRuntimeForConfig(config)
+  if (!entry) return undefined
+  return { runtimeId: entry.runtimeId, ownership: entry.ownership }
 }
 
 // ============================================================================

@@ -46,6 +46,7 @@ import {
 
 import {
   canonicalLaunchCommandString,
+  deriveRuntimeBinding,
   findRuntimeById,
   isWindowsExceptionEligible,
   normalizePlatform,
@@ -207,8 +208,15 @@ export class ExternalAgentLifecycleService {
       credentialRefs = await persistCredentials(id, secrets, this.deps.keyring)
     }
 
+    const persisted = this.deps.store.getAgent(id)
+    // Derive the binding rather than requiring every caller to know it. Without
+    // one, live sessions are attributed to no runtime and an uninstall's
+    // in-use guard can never fire.
+    const runtimeBinding =
+      input.runtimeBinding ?? (persisted ? deriveRuntimeBinding(persisted) : undefined)
+
     this.deps.store.patchLifecycle(id, {
-      ...(input.runtimeBinding ? { runtimeBinding: input.runtimeBinding } : {}),
+      ...(runtimeBinding ? { runtimeBinding } : {}),
       ...(credentialRefs ? { credentialRefs } : {}),
     })
 
@@ -375,6 +383,8 @@ export class ExternalAgentLifecycleService {
   async reviewAll(): Promise<Map<string, ReadinessVerdict>> {
     const verdicts = new Map<string, ReadinessVerdict>()
 
+    this.backfillRuntimeBindings()
+
     for (const config of this.deps.store.getAllAgents()) {
       const verdict = await this.assessReadiness(config)
       verdicts.set(config.id, verdict)
@@ -392,6 +402,27 @@ export class ExternalAgentLifecycleService {
     }
 
     return verdicts
+  }
+
+  /**
+   * Give every saved Agent a runtime binding.
+   *
+   * Configs saved before the catalog existed have none, and a config the
+   * catalog cannot match unambiguously keeps none — an incorrect binding would
+   * attribute an Agent's sessions to the wrong runtime and let an uninstall
+   * proceed while something was still using it. An existing binding is never
+   * overwritten: the user or an install may have pinned a specific one.
+   */
+  backfillRuntimeBindings(): number {
+    let bound = 0
+    for (const config of this.deps.store.getAllAgents()) {
+      if (config.runtimeBinding) continue
+      const runtimeBinding = deriveRuntimeBinding(config)
+      if (!runtimeBinding) continue
+      this.deps.store.patchLifecycle(config.id, { runtimeBinding })
+      bound += 1
+    }
+    return bound
   }
 
   /**

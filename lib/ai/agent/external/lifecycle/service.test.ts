@@ -802,3 +802,109 @@ describe("registry discovery", () => {
     })
   })
 })
+
+describe("runtime bindings", () => {
+  const preset = (id: string, overrides: Partial<LifecycleAgentConfig> = {}) =>
+    stdioConfig({ metadata: { preset: id }, ...overrides })
+
+  it("binds a new config to its runtime without the caller knowing one", async () => {
+    const { service, store } = build()
+
+    const id = await service.createConfig(
+      preset("droid", {
+        process: { command: "droid", args: ["exec"] },
+      }) as unknown as CreateExternalAgentInput
+    )
+
+    expect(store.getAgent(id)?.runtimeBinding).toEqual({
+      runtimeId: "droid",
+      ownership: "system",
+    })
+  })
+
+  it("honours a binding the caller supplied", async () => {
+    const { service, store } = build()
+    const id = await service.createConfig({
+      ...preset("droid"),
+      runtimeBinding: { runtimeId: "deepseek-harness", ownership: "managed" },
+    } as unknown as CreateExternalAgentInput)
+
+    expect(store.getAgent(id)?.runtimeBinding?.runtimeId).toBe("deepseek-harness")
+  })
+
+  it("leaves a config it cannot match unbound rather than guessing", async () => {
+    const { service, store } = build()
+    const id = await service.createConfig(
+      stdioConfig({ process: { command: "mystery-binary" } }) as unknown as CreateExternalAgentInput
+    )
+    expect(store.getAgent(id)?.runtimeBinding).toBeUndefined()
+  })
+
+  it("backfills configs saved before the catalog existed", async () => {
+    const { service, store } = build({}, [
+      preset("droid", { id: "agent-1", process: { command: "droid", args: ["exec"] } }),
+      preset("gemini-cli", {
+        id: "agent-2",
+        process: { command: "npx", args: ["-y", "@google/gemini-cli", "--acp"] },
+      }),
+      stdioConfig({ id: "agent-3", process: { command: "mystery-binary" } }),
+    ])
+
+    expect(service.backfillRuntimeBindings()).toBe(2)
+    expect(store.getAgent("agent-1")?.runtimeBinding?.runtimeId).toBe("droid")
+    expect(store.getAgent("agent-2")?.runtimeBinding?.runtimeId).toBe("gemini-cli")
+    expect(store.getAgent("agent-3")?.runtimeBinding).toBeUndefined()
+  })
+
+  it("never overwrites an existing binding", async () => {
+    const { service, store } = build({}, [
+      preset("droid", { runtimeBinding: { runtimeId: "deepseek-harness", ownership: "managed" } }),
+    ])
+
+    expect(service.backfillRuntimeBindings()).toBe(0)
+    expect(store.getAgent("agent-1")?.runtimeBinding?.runtimeId).toBe("deepseek-harness")
+  })
+
+  it("runs the backfill as part of startup review", async () => {
+    const { service, store } = build({}, [
+      preset("droid", { process: { command: "droid", args: ["exec"] } }),
+    ])
+
+    await service.reviewAll()
+
+    expect(store.getAgent("agent-1")?.runtimeBinding?.runtimeId).toBe("droid")
+  })
+
+  it("makes the uninstall guards fire, which they could not without a binding", async () => {
+    // This is the consequence that was broken: with no binding, every agent's
+    // sessions were attributed to no runtime, so `activeSessionsForRuntime`
+    // returned 0 and both uninstall guards were unreachable.
+    const runtimeHost = {
+      inspect: jest.fn(),
+      install: jest.fn(),
+      checkForUpdate: jest.fn(),
+      update: jest.fn(),
+      rollback: jest.fn(),
+      uninstall: jest.fn(async () => {}),
+    } as unknown as LifecycleRuntimeHost
+    const { service, manager } = build({ runtimeHost }, [
+      preset("deepseek-harness-readonly", {
+        process: { command: "/managed/dsh/bin/agent", args: [] },
+      }),
+    ])
+
+    await service.reviewAll()
+    manager.instances.set("agent-1", { sessions: new Map([["s1", {}]]) })
+
+    expect(service.activeSessionsForRuntime("deepseek-harness")).toBe(1)
+    await expect(service.uninstallRuntime("deepseek-harness")).rejects.toMatchObject({
+      code: "active_sessions",
+    })
+
+    manager.instances.get("agent-1")!.sessions.clear()
+    await expect(service.uninstallRuntime("deepseek-harness")).rejects.toMatchObject({
+      code: "runtime_referenced",
+    })
+    expect(runtimeHost.uninstall).not.toHaveBeenCalled()
+  })
+})

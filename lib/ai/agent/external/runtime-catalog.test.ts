@@ -10,7 +10,9 @@ import {
   UNPINNED_LAUNCH_WAIVERS,
   canonicalLaunchCommandString,
   catalogedPresetIds,
+  deriveRuntimeBinding,
   findRuntimeById,
+  findRuntimeForConfig,
   findRuntimeByPresetId,
   hasJsProviderChoice,
   hasUnpinnedLaunchWaiver,
@@ -350,5 +352,101 @@ describe("offered providers", () => {
     expect(
       hasJsProviderChoice(entry({ distributions: [jsDistribution("npm"), jsDistribution("bun")] }))
     ).toBe(true)
+  })
+})
+
+describe("binding a saved configuration to a runtime", () => {
+  function saved(overrides: Record<string, unknown> = {}) {
+    return {
+      metadata: undefined,
+      protocol: "acp",
+      process: { command: "droid", args: ["exec", "--output-format", "acp"] },
+      ...overrides,
+    } as Parameters<typeof findRuntimeForConfig>[0]
+  }
+
+  it("uses the preset id when the config carries one", () => {
+    const entry = findRuntimeForConfig(saved({ metadata: { preset: "codex" } }))
+    expect(entry?.runtimeId).toBe("codex-acp")
+  })
+
+  it("falls back to the launch command for a hand-configured agent", () => {
+    expect(findRuntimeForConfig(saved())?.runtimeId).toBe("droid")
+  })
+
+  it("requires the protocol to agree, not just the command", () => {
+    // `codex` is the command for the app-server runtime; an ACP agent that
+    // happens to name it is a different thing.
+    expect(
+      findRuntimeForConfig(saved({ protocol: "codex-app-server", process: { command: "codex" } }))
+        ?.runtimeId
+    ).toBe("codex-app-server")
+    expect(
+      findRuntimeForConfig(saved({ protocol: "acp", process: { command: "codex" } }))
+    ).toBeUndefined()
+  })
+
+  it("disambiguates the four npx runtimes by the package they run", () => {
+    const cases: [string, string][] = [
+      ["@zed-industries/codex-acp", "codex-acp"],
+      ["@google/gemini-cli", "gemini-cli"],
+      ["@qwen-code/qwen-code", "qwen-code"],
+      ["pi-acp", "pi-acp"],
+    ]
+    for (const [pkg, runtimeId] of cases) {
+      const entry = findRuntimeForConfig(
+        saved({ protocol: "acp", process: { command: "npx", args: ["-y", pkg] } })
+      )
+      expect(entry?.runtimeId).toBe(runtimeId)
+    }
+  })
+
+  it("refuses to guess when a package runner names no package", () => {
+    // An incorrect binding would attribute an agent's sessions to the wrong
+    // runtime and let an uninstall proceed while something was still using it.
+    expect(
+      findRuntimeForConfig(saved({ protocol: "acp", process: { command: "npx", args: ["-y"] } }))
+    ).toBeUndefined()
+  })
+
+  it("refuses an unknown package behind a known runner", () => {
+    expect(
+      findRuntimeForConfig(
+        saved({ protocol: "acp", process: { command: "npx", args: ["-y", "@evil/pkg"] } })
+      )
+    ).toBeUndefined()
+  })
+
+  it("returns nothing for a config with no process at all", () => {
+    expect(findRuntimeForConfig(saved({ process: undefined }))).toBeUndefined()
+  })
+
+  it("returns nothing for a command no runtime launches", () => {
+    expect(
+      findRuntimeForConfig(saved({ process: { command: "definitely-not-an-agent" } }))
+    ).toBeUndefined()
+  })
+
+  it("prefers the preset id over a conflicting command", () => {
+    const entry = findRuntimeForConfig(
+      saved({ metadata: { preset: "droid" }, process: { command: "codex" } })
+    )
+    expect(entry?.runtimeId).toBe("droid")
+  })
+
+  it("ignores a preset id the catalog does not know, and still matches by command", () => {
+    const entry = findRuntimeForConfig(saved({ metadata: { preset: "made-up" } }))
+    expect(entry?.runtimeId).toBe("droid")
+  })
+
+  it("derives the binding with the catalog's ownership", () => {
+    expect(deriveRuntimeBinding(saved())).toEqual({ runtimeId: "droid", ownership: "system" })
+    expect(
+      deriveRuntimeBinding(saved({ metadata: { preset: "deepseek-harness-readonly" } }))
+    ).toEqual({ runtimeId: "deepseek-harness", ownership: "managed" })
+  })
+
+  it("derives nothing when nothing matches", () => {
+    expect(deriveRuntimeBinding(saved({ process: undefined }))).toBeUndefined()
   })
 })
