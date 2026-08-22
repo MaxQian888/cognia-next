@@ -12,6 +12,7 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-adapter-id" })
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsKeyringGet = jest.fn().mockResolvedValue(null)
 const mockConnectorsHttpRequest = jest.fn()
 
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -21,6 +22,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsKeyringGet: (...args: unknown[]) => mockConnectorsKeyringGet(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
 }))
 
@@ -173,6 +175,10 @@ describe("TelegramConfigDialog — create new", () => {
       expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+    // Webhook mode requires a secret — the receiver 401s deliveries without one.
+    fireEvent.change(screen.getByLabelText(/webhook secret/i), {
+      target: { value: "shh-secret" },
+    })
 
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
 
@@ -297,6 +303,9 @@ describe("TelegramConfigDialog — edit existing", () => {
       expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+    fireEvent.change(screen.getByLabelText(/webhook secret/i), {
+      target: { value: "shh-secret" },
+    })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
 
     await waitFor(() => {
@@ -321,6 +330,9 @@ describe("TelegramConfigDialog — edit existing", () => {
         accounts: ["botToken", "secretToken", "webhookSecret"],
       },
     }
+    // Already configured: the secret lives in the keyring, so re-saving must
+    // not demand that the operator retype it.
+    mockConnectorsKeyringGet.mockResolvedValue("already-stored")
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={migratedRow} />)
     fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
       target: { value: "Already-Migrated" },
@@ -353,5 +365,71 @@ describe("TelegramConfigDialog — layout", () => {
     expect(dialog.className).toContain("max-h-[90vh]")
     expect(dialog.className).toContain("flex-col")
     expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
+  })
+})
+
+/**
+ * The webhook secret is load-bearing, not decorative: `verify_telegram` in
+ * `axum_app.rs` answers 401 to every delivery that arrives without one, and
+ * the adapter refuses to call `setWebhook` at all when none is stored. Saying
+ * so at save time beats letting the operator discover it from a degraded
+ * health row hours later.
+ */
+describe("TelegramConfigDialog — webhook secret requirement", () => {
+  it("blocks a webhook create with no secret", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "123:VALIDTOKEN" } })
+    fireEvent.click(screen.getByRole("combobox", { name: /transport/i }))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/webhook secret/i))
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("blocks a webhook save when nothing is stored in the keyring either", async () => {
+    mockConnectorsKeyringGet.mockResolvedValue(null)
+    const webhookRow: AdapterInstanceRow = {
+      id: "cai_webhook",
+      type: "telegram",
+      displayName: "Hook Bot",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["botToken", "secretToken", "webhookSecret"],
+      },
+      trigger: defaultPrivateChatPolicy(),
+      defaultMode: "auto",
+      createdAt: 1,
+      updatedAt: 1,
+    } as AdapterInstanceRow
+
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    fireEvent.change(screen.getByDisplayValue("Hook Bot"), { target: { value: "Renamed" } })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/webhook secret/i))
+    })
+    expect(mockUpdateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("leaves long-poll saves alone", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "123:VALIDTOKEN" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalled()
+    })
+    expect(mockConnectorsKeyringGet).not.toHaveBeenCalled()
   })
 })

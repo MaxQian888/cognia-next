@@ -50,14 +50,37 @@ description: "用 @BotFather 创建机器人、获取 Bot Token，并在 cognia 
 
 ## 3.（仅 Webhook）配置公网入口
 
-如果你在第 2 步选择了 **Webhook** 传输方式，Telegram 需要一个公网可访问的 **HTTPS** 入口才能把更新推送过来。
+如果你在第 2 步选择了 **Webhook** 传输方式，Telegram 需要一个公网可访问的 **HTTPS** 入口，并且 cognia 需要能把这个地址告诉 Telegram。
 
-1. 先在 **设置 → 移动端伴侣** 中启动 **Cloudflared Tunnel**，为 cognia 暴露一个公网 HTTPS 地址。
-2. 回到 Telegram 配置对话框的 **传输方式** 区域。隧道就绪后，表单会自动拼出该机器人的 **Webhook URL**；点击 **复制** 取走它。
-3. 保存连接器 —— cognia 会通过 Telegram 的 `setWebhook` 接口自动注册该 URL。
-4. 可选填写 **Webhook 密钥**：Telegram 会把它放进每次回调请求的 `X-Telegram-Bot-Api-Secret-Token` 请求头中，cognia 据此校验请求确实来自 Telegram。
+1. 打开 **设置 → 平台连接 → 隧道**，在该标签页启动 **Cloudflared Tunnel**。
 
-   > 隧道未运行时，表单会提示你前往 **移动端伴侣** 先把隧道启动起来；Webhook URL 在隧道就绪前不可用。
+   > 请从 **隧道** 标签页启动，而不是 **移动端伴侣**。同一时刻只会运行一条隧道，而「隧道」标签页会把它指向连接器服务——真正对外提供 `/webhook/telegram/<适配器 ID>` 的那个进程。为伴侣端启动的隧道指向的是另一个端口，Telegram 的推送会 404。
+
+2. 重新打开已保存的 Telegram 适配器。隧道就绪后，**传输方式** 区域会显示该机器人的 **Webhook URL**。
+3. 填写 **Webhook 密钥**。这是**必填项**，不是可选项：Telegram 会在每次推送的 `X-Telegram-Bot-Api-Secret-Token` 请求头中回传该密钥，而 cognia 会拒绝所有不带密钥的推送——没有密钥的 Webhook 收不到任何消息。
+4. 保存适配器。
+
+此后注册工作由 cognia 接管：适配器启动时会自行调用 Telegram 的 `setWebhook`，带上回调地址、密钥，以及与长轮询完全相同的 `allowed_updates` 列表——因此 Webhook 机器人与长轮询机器人收到的更新类型始终一致。公网地址变化时（Cloudflared 快速隧道每次重启都会换域名）它会自动重新注册；适配器停止时会调用 `deleteWebhook` 撤销注册——正是这一步让你可以把机器人切回长轮询，而不会让 Telegram 对每次 `getUpdates` 都返回 409。
+
+新建但尚未保存的 Webhook 适配器无法显示最终 URL，因为适配器 ID 此时还不存在。
+
+### 手动注册
+
+只有当你的公网入口不走隧道时才需要这样做——例如在连接器服务前面自建了反向代理。从表单复制 **Webhook URL**，自己调用 `setWebhook`，并传入与 cognia 相同的 `allowed_updates` 列表；一旦显式指定了该列表就等于放弃了 Telegram 的默认集合，凡是没列出的更新类型都会被静默丢弃：
+
+```bash
+curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://<你的域名>/webhook/telegram/<适配器 ID>",
+    "secret_token": "<你的 Webhook 密钥>",
+    "allowed_updates": ["message", "edited_message", "channel_post", "edited_channel_post", "callback_query", "message_reaction", "my_chat_member"]
+  }'
+```
+
+升级版本时请同步更新这个列表——cognia 会随功能演进往里添加新的更新类型，而手动注册的 Webhook 只会保留你当初传入的那份。
+
+如果适配器记录本身带有明确的公网地址（在部署无头实例或导入连接器时写入，而非通过本对话框填写），cognia 会注册**该**地址而不是隧道地址，并同样负责后续维护。
 
 ---
 
@@ -70,7 +93,7 @@ description: "用 @BotFather 创建机器人、获取 Bot Token，并在 cognia 
 如果适配器显示 **已停止** 或 **降级**：
 
 - 确认 `Bot Token` 正确（形如 `1234567890:ABCDEF...`）；可在桌面端用 **测试** 按钮复核。
-- 如果用的是 Webhook，确认 Cloudflared Tunnel 正在运行且 Webhook URL 已保存。
+- 如果用的是 Webhook，适配器的健康原因会直接指出问题：没有可用的公网 HTTPS 地址（隧道未运行）、未配置 Webhook 密钥、`setWebhook` 被拒绝，或者 Telegram 自己报告推送失败——出现 `Wrong response from the webhook: 404 Not Found` 说明隧道指向了错误的本地端口。
 - 如果机器人在群里收不到消息，检查是否需要用 `/setprivacy` 关闭群组隐私模式。
 - 在 设置 → 平台连接 的 **审计日志** 标签页中查看具体错误。
 
@@ -78,7 +101,7 @@ description: "用 @BotFather 创建机器人、获取 Bot Token，并在 cognia 
 
 ## 注意事项
 
-- **长轮询 vs Webhook 的取舍**：长轮询无需任何公网地址，配置最简单，适合本机或局域网运行，是默认且推荐的方式；Webhook 由 Telegram 主动推送、延迟更低，但要求一个稳定的公网 HTTPS 入口（通过 Cloudflared Tunnel 提供）。多数场景用长轮询即可。
+- **长轮询 vs Webhook 的取舍**：长轮询无需任何公网地址，配置最简单，适合本机或局域网运行，是默认且推荐的方式；Webhook 由 Telegram 主动推送、延迟更低，但要求一个公网 HTTPS 入口（通过 Cloudflared Tunnel 提供）和一个 Webhook 密钥。多数场景用长轮询即可。
 - **群组隐私模式**：默认开启时，机器人在群里只能收到 @ 它或回复它的消息。若需要它接收群内全部消息，必须在 @BotFather 用 `/setprivacy` 关闭隐私模式，并将机器人重新加入群组使设置生效。
 - **凭据安全**：`Bot Token` 与 Webhook 密钥都加密存放在系统钥匙串中，永不写入日志。请勿在公开渠道粘贴你的 `Bot Token`。
 - **历史消息**：Telegram 的 Bot API 不提供拉取任意聊天历史的接口，因此该适配器只处理实时收到的更新，无法回溯既往消息。

@@ -21,6 +21,8 @@ jest.mock("@/lib/connectors/audit", () => ({
   appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
 }))
 
+import { setConnectorListen } from "@/lib/connectors/events"
+import { TELEGRAM_ALLOWED_UPDATES } from "./allowed-updates"
 import { createTelegramAdapter } from "./index"
 
 const mockInvoke = invoke as jest.Mock
@@ -492,5 +494,315 @@ describe("createTelegramAdapter — callback chat gate (audited fix #12)", () =>
     const adapter = await startWithUpdate(makeCallbackUpdate(-500), "tg-gate-4")
     expect(mockDispatchConnectorCallback).toHaveBeenCalledTimes(1)
     await adapter.stop()
+  })
+})
+
+/**
+ * Webhook registration lifecycle.
+ *
+ * Before this existed the adapter subscribed to the local webhook event
+ * channel and reported `running` without ever telling Telegram where to push,
+ * so a bot that had never been registered by hand looked perfectly healthy and
+ * received nothing. These tests pin the registration, the reasons it refuses,
+ * and the retraction that makes a transport switch survivable.
+ */
+describe("createTelegramAdapter — webhook registration", () => {
+  let restoreListen: ReturnType<typeof setConnectorListen> | null = null
+
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    mockAppendAudit.mockClear()
+    // The transport's own subscription is not under test here; give it an
+    // inert listener so `unlisten()` on abort has something to call.
+    restoreListen = setConnectorListen(async () => () => {})
+  })
+
+  afterEach(() => {
+    if (restoreListen) setConnectorListen(restoreListen)
+    restoreListen = null
+  })
+
+  const httpOk = { status: 200, headers: {}, body: JSON.stringify({ ok: true, result: true }) }
+
+  /**
+   * Stand in for the Bot API. `getWebhookInfo` reflects the last successful
+   * `setWebhook` the way the real API does, so the adapter's steady-state
+   * probe agrees with itself unless a test deliberately says otherwise.
+   */
+  function installBotApi(
+    over: {
+      setWebhook?: { status: number; headers: Record<string, string>; body: string }
+      info?: () => Record<string, unknown>
+    } = {}
+  ) {
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "connectors_http_request") return undefined
+      const url = String((args as { req: { url: string } }).req.url)
+      if (url.endsWith("/getWebhookInfo")) {
+        const registered = botApiCalls("setWebhook").at(-1)?.url ?? ""
+        const result = over.info?.() ?? { url: registered, pending_update_count: 0 }
+        return { status: 200, headers: {}, body: JSON.stringify({ ok: true, result }) }
+      }
+      if (url.endsWith("/setWebhook") && over.setWebhook) return over.setWebhook
+      return httpOk
+    })
+  }
+
+  function botApiCalls(method: string): Record<string, unknown>[] {
+    return mockInvoke.mock.calls
+      .filter(
+        ([cmd, args]) =>
+          cmd === "connectors_http_request" &&
+          String((args as { req: { url: string } }).req.url).endsWith(`/${method}`)
+      )
+      .map(([, args]) => JSON.parse((args as { req: { body: string } }).req.body))
+  }
+
+  /** Poll until `predicate` holds; the registration runs detached from start(). */
+  async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+    for (let i = 0; i < 200; i += 1) {
+      if (predicate()) return
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw new Error(`timed out waiting for ${label}`)
+  }
+
+  function makeWebhookCtx(secret: Record<string, string | null> = { secretToken: "s3cret" }) {
+    const { ctx } = makeCtx()
+    ;(ctx.tauri.publicBaseUrl as jest.Mock).mockResolvedValue(null)
+    ;(ctx.secrets.get as jest.Mock).mockImplementation(async (name: string) => secret[name] ?? null)
+    ;(ctx.secrets.set as jest.Mock).mockResolvedValue(undefined)
+    return ctx
+  }
+
+  function makeWebhookAdapter(
+    over: Partial<Parameters<typeof createTelegramAdapter>[0]> = {},
+    tunnelUrl: () => Promise<string | null> = async () => "https://tunnel.example.com"
+  ) {
+    return createTelegramAdapter({
+      id: "tg-wh",
+      displayName: "Webhook Bot",
+      transport: "webhook",
+      botToken: async () => "TOKEN",
+      selfId: "987",
+      webhookEnvironment: { isDesktop: () => true, tunnelUrl, publicBase: () => null },
+      ...over,
+    })
+  }
+
+  it("registers the tunnel-derived URL with the secret and the shared allowed_updates", async () => {
+    installBotApi()
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => botApiCalls("setWebhook").length === 1, "setWebhook")
+
+    expect(botApiCalls("setWebhook")[0]).toEqual({
+      url: "https://tunnel.example.com/webhook/telegram/tg-wh",
+      secret_token: "s3cret",
+      allowed_updates: [...TELEGRAM_ALLOWED_UPDATES],
+      drop_pending_updates: false,
+    })
+    expect(adapter.health().state).toBe("running")
+    await adapter.stop()
+  })
+
+  it("long-poll adapters never call setWebhook", async () => {
+    // Stall after the first poll — a getUpdates mock that keeps resolving spins
+    // the loop hot (Telegram's own long-poll timeout is what paces it).
+    let polls = 0
+    mockInvoke.mockImplementation(async () => {
+      polls += 1
+      if (polls === 1)
+        return { status: 200, headers: {}, body: JSON.stringify({ ok: true, result: [] }) }
+      return await new Promise(() => {})
+    })
+    const { ctx } = makeCtx()
+    const adapter = createTelegramAdapter({
+      id: "tg-lp",
+      displayName: "Poll Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "987",
+    })
+
+    await adapter.start(ctx)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(botApiCalls("setWebhook")).toHaveLength(0)
+    await adapter.stop()
+  })
+
+  it("degrades with an actionable reason when no public URL is reachable", async () => {
+    installBotApi()
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter({}, async () => null)
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "degraded health")
+
+    expect(adapter.health().reason).toMatch(/no publicly reachable HTTPS URL/)
+    expect(botApiCalls("setWebhook")).toHaveLength(0)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "adapter.error", reason: "webhook_registration_failed" })
+    )
+    await adapter.stop()
+  })
+
+  it("refuses to register when no webhook secret is configured", async () => {
+    // The Rust receiver 401s every delivery that arrives without a secret, so
+    // registering here would point Telegram at a URL that rejects it.
+    installBotApi()
+    const ctx = makeWebhookCtx({ secretToken: null, webhookSecret: null })
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "degraded health")
+
+    expect(adapter.health().reason).toMatch(/no webhook secret is configured/)
+    expect(botApiCalls("setWebhook")).toHaveLength(0)
+    await adapter.stop()
+  })
+
+  it("migrates a legacy webhookSecret onto the key the receiver reads", async () => {
+    installBotApi()
+    const ctx = makeWebhookCtx({ secretToken: null, webhookSecret: "legacy-secret" })
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => botApiCalls("setWebhook").length === 1, "setWebhook")
+
+    expect(ctx.secrets.set).toHaveBeenCalledWith("secretToken", "legacy-secret")
+    expect(botApiCalls("setWebhook")[0].secret_token).toBe("legacy-secret")
+    await adapter.stop()
+  })
+
+  it("degrades when Telegram rejects setWebhook", async () => {
+    installBotApi({
+      setWebhook: {
+        status: 400,
+        headers: {},
+        body: JSON.stringify({ ok: false, description: "Bad webhook: failed to resolve host" }),
+      },
+    })
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "degraded health")
+
+    expect(adapter.health().reason).toMatch(/setWebhook failed:.*failed to resolve host/)
+    await adapter.stop()
+  })
+
+  it("re-registers when the tunnel hostname rotates", async () => {
+    // A Cloudflared quick tunnel gets a new hostname on every restart; the
+    // registration made at boot points nowhere from that moment on.
+    installBotApi()
+    let host = "https://first.trycloudflare.com"
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter({ _webhookRecheckMs: 5 }, async () => host)
+
+    await adapter.start(ctx)
+    await waitFor(() => botApiCalls("setWebhook").length === 1, "first setWebhook")
+
+    // Steady state costs no API calls at all.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(botApiCalls("setWebhook")).toHaveLength(1)
+
+    host = "https://second.trycloudflare.com"
+    await waitFor(() => botApiCalls("setWebhook").length === 2, "re-registration")
+    expect(botApiCalls("setWebhook")[1].url).toBe(
+      "https://second.trycloudflare.com/webhook/telegram/tg-wh"
+    )
+    await adapter.stop()
+  })
+
+  it("retracts the registration on stop so a switch to long poll is not 409'd", async () => {
+    installBotApi()
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => botApiCalls("setWebhook").length === 1, "setWebhook")
+    await adapter.stop()
+
+    expect(botApiCalls("deleteWebhook")).toEqual([{ drop_pending_updates: false }])
+  })
+
+  it("degrades when Telegram reports that deliveries are failing", async () => {
+    // setWebhook returning ok proves the URL parsed, nothing more. A tunnel
+    // pointed at the wrong local port registers cleanly and then 404s every
+    // push — which from in here is indistinguishable from an idle bot.
+    installBotApi({
+      info: () => ({
+        url: "https://tunnel.example.com/webhook/telegram/tg-wh",
+        pending_update_count: 3,
+        last_error_message: "Wrong response from the webhook: 404 Not Found",
+      }),
+    })
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter({ _webhookRecheckMs: 5 })
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "delivery degradation")
+
+    expect(adapter.health().reason).toMatch(/deliveries are failing.*404 Not Found/)
+    expect(adapter.health().reason).toMatch(/3 update\(s\) queued/)
+    await adapter.stop()
+  })
+
+  it("recovers once deliveries start landing again", async () => {
+    let failing = true
+    installBotApi({
+      info: () => ({
+        url: "https://tunnel.example.com/webhook/telegram/tg-wh",
+        pending_update_count: failing ? 3 : 0,
+        ...(failing ? { last_error_message: "Connection timed out" } : {}),
+      }),
+    })
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter({ _webhookRecheckMs: 5 })
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "delivery degradation")
+    failing = false
+    await waitFor(() => adapter.health().state === "running", "recovery")
+
+    expect(adapter.health().reason).toBeUndefined()
+    await adapter.stop()
+  })
+
+  it("re-registers when the registration was cleared out from under it", async () => {
+    let cleared = true
+    installBotApi({
+      info: () =>
+        cleared
+          ? { url: "", pending_update_count: 0 }
+          : { url: "https://tunnel.example.com/webhook/telegram/tg-wh", pending_update_count: 0 },
+    })
+    const ctx = makeWebhookCtx()
+    const adapter = makeWebhookAdapter({ _webhookRecheckMs: 5 })
+
+    await adapter.start(ctx)
+    await waitFor(() => botApiCalls("setWebhook").length >= 2, "re-registration")
+    cleared = false
+
+    expect(botApiCalls("setWebhook")[1].url).toBe(
+      "https://tunnel.example.com/webhook/telegram/tg-wh"
+    )
+    await adapter.stop()
+  })
+
+  it("does not retract a registration it never made", async () => {
+    installBotApi()
+    const ctx = makeWebhookCtx({ secretToken: null })
+    const adapter = makeWebhookAdapter()
+
+    await adapter.start(ctx)
+    await waitFor(() => adapter.health().state === "degraded", "degraded health")
+    await adapter.stop()
+
+    expect(botApiCalls("deleteWebhook")).toHaveLength(0)
   })
 })

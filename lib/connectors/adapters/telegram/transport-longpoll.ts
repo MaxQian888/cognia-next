@@ -11,6 +11,7 @@
 
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
+import { TELEGRAM_ALLOWED_UPDATES } from "./allowed-updates"
 import type { TelegramUpdate } from "./parse"
 
 export interface PollErrorInfo {
@@ -38,25 +39,6 @@ export interface LongPollOptions {
 
 const DEFAULT_BASE_URL = "https://api.telegram.org"
 const DEFAULT_TIMEOUT_SEC = 30
-
-/**
- * Update types we ask Telegram to deliver.
- *
- * The list is EXPLICIT, so Telegram's own defaults do not apply: anything not
- * named here is silently never delivered. Bot API 7.0's `message_reaction` was
- * the first casualty (audited fix #3); `my_chat_member` was the second — it is
- * in Telegram's default set, but naming any list at all opts out of that set,
- * so the bot never learned it had been added to or removed from a chat.
- */
-const ALLOWED_UPDATES = [
-  "message",
-  "edited_message",
-  "channel_post",
-  "edited_channel_post",
-  "callback_query",
-  "message_reaction",
-  "my_chat_member",
-] as const
 
 /** Poll failure carrying the HTTP / Bot-API status for classification. */
 class LongPollError extends Error {
@@ -97,7 +79,7 @@ export async function* startLongPoll(opts: LongPollOptions): AsyncGenerator<Tele
   const timeoutSec = opts.timeoutSec ?? DEFAULT_TIMEOUT_SEC
 
   const backoffBaseMs = opts._backoffBaseMs ?? 1000
-  const allowedUpdates = encodeURIComponent(JSON.stringify(ALLOWED_UPDATES))
+  const allowedUpdates = encodeURIComponent(JSON.stringify(TELEGRAM_ALLOWED_UPDATES))
 
   let offset = 0
   let attempts = 0

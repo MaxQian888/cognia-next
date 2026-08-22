@@ -27,7 +27,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import {
+  connectorsHttpRequest,
+  connectorsKeyringGet,
+  connectorsKeyringSet,
+} from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -158,6 +162,23 @@ export function TelegramConfigDialog({
     if (quietHours && (!quietHours.from || !quietHours.to || !quietHours.tz)) {
       toast.error(t("quietHoursIncomplete"))
       return
+    }
+    // Webhook mode cannot work without a secret: the local receiver
+    // (`verify_telegram` in axum_app.rs) answers 401 to every delivery that
+    // arrives without one, and the adapter therefore refuses to register the
+    // webhook at all. Say so here rather than letting the operator find out
+    // from a degraded health row. Only the desktop can read the keyring, so a
+    // browser session falls back to "a secret must have been set at some
+    // point", which is what the adapter's health reason then reports.
+    if (transport === "webhook" && !webhookSecret.trim()) {
+      const stored =
+        !isNew && desktop
+          ? await connectorsKeyringGet(row.id, "secretToken").catch(() => null)
+          : null
+      if (isNew || (desktop && !stored?.trim())) {
+        toast.error(t("webhookSecretRequired"))
+        return
+      }
     }
 
     setSaving(true)
@@ -344,7 +365,10 @@ export function TelegramConfigDialog({
         {transport === "webhook" && (
           <>
             <div className="space-y-1.5">
-              <Label htmlFor="tg-webhook-secret">{t("webhookSecretLabel")}</Label>
+              <Label htmlFor="tg-webhook-secret">
+                {t("webhookSecretLabel")}
+                <span className="ml-1 text-destructive">*</span>
+              </Label>
               <p className="text-xs text-muted-foreground">
                 {t("webhookSecretHelpPrefix")}{" "}
                 <code className="text-xs">X-Telegram-Bot-Api-Secret-Token</code>{" "}

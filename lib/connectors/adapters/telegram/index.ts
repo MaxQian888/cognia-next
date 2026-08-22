@@ -25,8 +25,17 @@ import {
 } from "./parse"
 import { serializeOutboundAsync, serializeReaction } from "./serialize"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { TELEGRAM_ALLOWED_UPDATES } from "./allowed-updates"
 import { startLongPoll } from "./transport-longpoll"
 import { startWebhookTransport } from "./transport-webhook"
+import {
+  defaultTelegramWebhookEnvironment,
+  deleteTelegramWebhook,
+  getTelegramWebhookInfo,
+  resolveTelegramWebhookUrlFromEnvironment,
+  setTelegramWebhook,
+  type TelegramWebhookEnvironment,
+} from "./webhook-registration"
 import { getBus } from "@/lib/connectors/bus"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
@@ -40,6 +49,16 @@ export interface TelegramAdapterOptions {
   botToken: () => Promise<string>
   /** Bot's own user id as a string (from getMe at startup). */
   selfId: string
+  /**
+   * Host lookups behind the webhook URL (tunnel origin, deployment origin).
+   * Injected so tests never touch the Tauri bridge.
+   */
+  webhookEnvironment?: TelegramWebhookEnvironment
+  /**
+   * How often the webhook transport re-checks that its registered URL is
+   * still the reachable one. Default 60s — see `syncWebhookRegistration`.
+   */
+  _webhookRecheckMs?: number
 }
 
 const TELEGRAM_CONFIG_SCHEMA = {
@@ -66,6 +85,9 @@ const TELEGRAM_CONFIG_SCHEMA = {
 }
 
 const TELEGRAM_API_BASE = "https://api.telegram.org"
+
+/** How often a webhook adapter re-checks that its registered URL still resolves. */
+const WEBHOOK_RECHECK_MS = 60_000
 
 /**
  * Split the `"chatId:messageId"` composite this adapter's `send()` returns as
@@ -205,6 +227,189 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     return undefined
   }
 
+  /**
+   * URL currently registered with Telegram, or null when this run has not
+   * (successfully) registered one. Doubles as the guard for `deleteWebhook`
+   * on stop: a run that never registered must not retract someone else's
+   * registration.
+   */
+  let registeredWebhookUrl: string | null = null
+  let webhookRecheckTimer: ReturnType<typeof setInterval> | null = null
+  /**
+   * True while the CURRENT degraded health came from the webhook plane. Only
+   * this plane may clear it — the transport-crash path owns its own reason and
+   * must not be overwritten by a clean delivery probe.
+   */
+  let webhookDegraded = false
+
+  /** Webhook registration could not happen — say why instead of looking healthy. */
+  function degradeWebhook(ctx: AdapterContext, reason: string): void {
+    if (stopCalled) return
+    healthState = "degraded"
+    healthReason = reason
+    webhookDegraded = true
+    ctx.logger.warn("telegram:webhook registration unavailable", { reason })
+    void appendAudit({
+      adapterId: opts.id,
+      kind: "adapter.error",
+      at: Date.now(),
+      reason: "webhook_registration_failed",
+      message: reason,
+    }).catch(() => undefined)
+  }
+
+  /**
+   * Secret Telegram must echo in `X-Telegram-Bot-Api-Secret-Token`.
+   *
+   * `verify_telegram` (axum_app.rs) reads the `secretToken` keyring key and
+   * answers 401 when it is missing, so that exact key — not the legacy
+   * `webhookSecret` alias — is what makes deliveries verifiable. Rows saved
+   * before the two were aligned only have the legacy key; copy it across
+   * rather than degrading a bot whose operator did configure a secret.
+   */
+  async function readWebhookSecret(ctx: AdapterContext): Promise<string | null> {
+    const current = (await ctx.secrets.get("secretToken").catch(() => null))?.trim()
+    if (current) return current
+    const legacy = (await ctx.secrets.get("webhookSecret").catch(() => null))?.trim()
+    if (!legacy) return null
+    await ctx.secrets.set("secretToken", legacy).catch(() => undefined)
+    return legacy
+  }
+
+  /**
+   * Ask Telegram whether the registration we made is actually delivering.
+   *
+   * A `setWebhook` that returned ok proves the URL parsed, nothing more. The
+   * tunnel can front the wrong local port, the secret can mismatch, the app
+   * can be unreachable — every one of those registers cleanly and then fails
+   * on every push, which looks exactly like an idle bot from in here.
+   * `last_error_message` is Telegram's answer and the only signal that tells
+   * the two apart, so it becomes the health reason.
+   */
+  async function probeWebhookDelivery(ctx: AdapterContext, signal: AbortSignal): Promise<void> {
+    if (registeredWebhookUrl === null) return
+    let info: Awaited<ReturnType<typeof getTelegramWebhookInfo>>
+    try {
+      info = await getTelegramWebhookInfo({ botToken: await opts.botToken() })
+    } catch (err) {
+      // A failed probe says nothing about delivery health; log and leave the
+      // current state alone rather than inventing a degradation.
+      ctx.logger.warn("telegram:getWebhookInfo failed", {
+        reason: err instanceof Error ? err.message : String(err),
+      })
+      return
+    }
+    if (signal.aborted || stopCalled) return
+
+    // Telegram is pushing somewhere else (or nowhere): the registration was
+    // cleared or overwritten out from under us. Re-take it on the next pass.
+    if (info.url !== registeredWebhookUrl) {
+      ctx.logger.warn("telegram:webhook registration was replaced externally", {
+        expected: registeredWebhookUrl,
+        actual: info.url,
+      })
+      registeredWebhookUrl = null
+      await syncWebhookRegistration(ctx, signal)
+      return
+    }
+
+    if (info.lastErrorMessage) {
+      degradeWebhook(
+        ctx,
+        `webhook deliveries are failing: ${info.lastErrorMessage}` +
+          (info.pendingUpdateCount > 0 ? ` (${info.pendingUpdateCount} update(s) queued)` : "")
+      )
+      return
+    }
+    // Deliveries recovered — clear only a degradation this plane set.
+    if (webhookDegraded && !stopCalled) {
+      webhookDegraded = false
+      healthState = "running"
+      healthReason = undefined
+    }
+  }
+
+  /**
+   * Point Telegram at the URL this install is actually reachable on.
+   *
+   * Runs on `start()` and then on an interval, because the public URL is not a
+   * constant: a Cloudflared quick tunnel gets a brand-new hostname every time
+   * it is restarted from Settings, and the registration made at boot goes
+   * nowhere from that moment on. Re-resolving and comparing against
+   * `registeredWebhookUrl` makes the no-change case free (no API call) and the
+   * rotation case self-healing within one interval.
+   */
+  async function syncWebhookRegistration(ctx: AdapterContext, signal: AbortSignal): Promise<void> {
+    if (signal.aborted || stopCalled) return
+
+    const publicBaseUrl = await ctx.tauri.publicBaseUrl().catch(() => null)
+    const resolution = await resolveTelegramWebhookUrlFromEnvironment(
+      { adapterId: opts.id, publicBaseUrl },
+      opts.webhookEnvironment ?? defaultTelegramWebhookEnvironment
+    )
+    if (signal.aborted || stopCalled) return
+
+    if (!resolution.ok) {
+      degradeWebhook(
+        ctx,
+        resolution.problem === "not_https"
+          ? "webhook not registered: the resolved callback URL is not HTTPS, which Telegram refuses"
+          : "webhook not registered: no publicly reachable HTTPS URL — start the Cloudflared tunnel " +
+              "on Settings → Platform Connections → Tunnel (the tab that points it at the " +
+              "connector server), or give this adapter an explicit public URL"
+      )
+      return
+    }
+    if (resolution.url === registeredWebhookUrl) {
+      await probeWebhookDelivery(ctx, signal)
+      return
+    }
+
+    const secretToken = await readWebhookSecret(ctx)
+    if (!secretToken) {
+      degradeWebhook(
+        ctx,
+        "webhook not registered: no webhook secret is configured, and the local receiver " +
+          "rejects every delivery that arrives without one"
+      )
+      return
+    }
+    if (signal.aborted || stopCalled) return
+
+    try {
+      await setTelegramWebhook({
+        botToken: await opts.botToken(),
+        url: resolution.url,
+        secretToken,
+      })
+    } catch (err) {
+      degradeWebhook(ctx, `setWebhook failed: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+    if (stopCalled) return
+
+    const rotated = registeredWebhookUrl !== null && registeredWebhookUrl !== resolution.url
+    registeredWebhookUrl = resolution.url
+    healthState = "running"
+    healthReason = undefined
+    webhookDegraded = false
+    ctx.logger.info("telegram:webhook registered", { url: resolution.url, rotated })
+    void appendAudit({
+      adapterId: opts.id,
+      kind: "adapter.config_changed",
+      at: Date.now(),
+      reason: rotated ? "webhook_url_rotated" : "webhook_registered",
+      fields: { webhookUrl: resolution.url, allowedUpdates: [...TELEGRAM_ALLOWED_UPDATES] },
+    }).catch(() => undefined)
+  }
+
+  /** Best-effort retraction; see {@link deleteTelegramWebhook} for why stop retracts. */
+  async function retractWebhookRegistration(): Promise<void> {
+    if (registeredWebhookUrl === null) return
+    registeredWebhookUrl = null
+    await deleteTelegramWebhook({ botToken: await opts.botToken() }).catch(() => undefined)
+  }
+
   async function start(ctx: AdapterContext): Promise<void> {
     if (abortController) return // already started
     stopCalled = false
@@ -267,6 +472,27 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
             },
           })
         : startWebhookTransport({ adapterId: opts.id, signal })
+
+    // Webhook transport: tell Telegram where to push. Deliberately NOT awaited
+    // — `start()` is awaited by the runtime supervisor and a slow Bot API call
+    // would hold up every adapter behind it; the transport subscription is
+    // already live, so an update that arrives mid-registration is not lost.
+    // Failures degrade health with a reason rather than throwing, which keeps
+    // the manual `setWebhook` escape hatch working for anyone who registered
+    // by hand before this existed.
+    if (opts.transport === "webhook") {
+      registeredWebhookUrl = null
+      webhookDegraded = false
+      void syncWebhookRegistration(ctx, signal)
+      const recheckMs = opts._webhookRecheckMs ?? WEBHOOK_RECHECK_MS
+      webhookRecheckTimer = setInterval(() => {
+        void syncWebhookRegistration(ctx, signal)
+      }, recheckMs)
+      signal.addEventListener("abort", () => {
+        if (webhookRecheckTimer) clearInterval(webhookRecheckTimer)
+        webhookRecheckTimer = null
+      })
+    }
 
     // Drive the transport in the background
     ;(async () => {
@@ -376,6 +602,14 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
     stopCalled = true
     abortController?.abort()
     abortController = null
+    if (webhookRecheckTimer) clearInterval(webhookRecheckTimer)
+    webhookRecheckTimer = null
+    // Retract the registration we made. This is what makes a transport switch
+    // survivable: a webhook left behind answers every subsequent `getUpdates`
+    // with 409, so a row flipped from webhook to long poll would never receive
+    // another message. The supervisor stops the old adapter before building
+    // the new one, so this runs at exactly the right moment.
+    await retractWebhookRegistration()
     // A half-assembled album is a message the user sent. Emit what arrived
     // rather than dropping it on the floor at shutdown.
     await albums.flushAll()

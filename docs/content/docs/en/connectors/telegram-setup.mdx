@@ -50,14 +50,56 @@ Optional @BotFather settings:
 
 ## 3. Configure Public Ingress (Webhook Only)
 
-If you selected **Webhook**, Telegram needs a public **HTTPS** endpoint.
+If you selected **Webhook**, Telegram needs a public **HTTPS** endpoint, and cognia-next needs to
+be able to tell Telegram about it.
 
-1. Start **Cloudflared Tunnel** under **Settings → Mobile Companion** to expose a public HTTPS URL.
-2. Reopen the saved Telegram adapter. Once the tunnel is ready, the **Delivery** section shows the bot's **Webhook URL**; click **Copy**.
-3. Save the adapter. cognia-next registers the URL with Telegram through `setWebhook`.
-4. Optionally enter a **Webhook Secret**. Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` request header, and cognia-next verifies it before accepting webhook updates.
+1. Open **Settings → Platform Connections → Tunnel** and start the **Cloudflared Tunnel** there.
 
-When the tunnel is not running, the form directs you back to **Mobile Companion**. A new unsaved webhook adapter cannot show its final URL until the adapter id exists.
+   > Start it from the **Tunnel** tab, not from **Mobile Companion**. Only one tunnel runs at a
+   > time, and the Tunnel tab points it at the connector server — the process that actually serves
+   > `/webhook/telegram/<adapter-id>`. A tunnel started for the companion fronts a different port,
+   > so Telegram's deliveries would 404.
+
+2. Reopen the saved Telegram adapter. Once the tunnel is ready, the **Delivery** section shows the
+   bot's **Webhook URL**.
+3. Enter a **Webhook Secret**. This is **required**, not optional: Telegram returns it in the
+   `X-Telegram-Bot-Api-Secret-Token` header of every delivery, and cognia-next rejects any delivery
+   that arrives without it. A webhook with no secret receives nothing.
+4. Save the adapter.
+
+From then on cognia-next owns the registration. When the adapter starts it calls Telegram's
+`setWebhook` itself, with the callback URL, the secret token, and the full `allowed_updates` list
+the long-poll transport uses — so a webhook bot and a long-poll bot always receive the same update
+types. It re-registers automatically when the public URL changes (a Cloudflared quick tunnel gets a
+new hostname on every restart) and retracts the registration with `deleteWebhook` when the adapter
+stops, which is what lets you switch a bot back to long polling without Telegram answering every
+`getUpdates` with 409.
+
+A new unsaved webhook adapter cannot show its final URL until the adapter id exists.
+
+### Registering by hand
+
+You only need this if your ingress does not go through the tunnel — a reverse proxy in front of the
+connector server, for example. Copy the **Webhook URL** from the form and call `setWebhook`
+yourself, passing the same `allowed_updates` list cognia-next uses; anything you leave out is
+silently never delivered, because naming a list at all opts out of Telegram's defaults:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://<your-host>/webhook/telegram/<adapter-id>",
+    "secret_token": "<your-webhook-secret>",
+    "allowed_updates": ["message", "edited_message", "channel_post", "edited_channel_post", "callback_query", "message_reaction", "my_chat_member"]
+  }'
+```
+
+Keep that list in step with the app when you upgrade — cognia-next adds update types to it as
+features need them, and a hand-registered webhook keeps whatever list it was given.
+
+If the adapter row carries an explicit public URL (set when provisioning a headless install or
+importing a connector, rather than through this dialog), cognia-next registers **that** address
+instead of the tunnel's and keeps it current for you.
 
 ---
 
@@ -70,7 +112,7 @@ When the tunnel is not running, the form directs you back to **Mobile Companion*
 If the adapter shows **stopped** or **degraded**:
 
 - Confirm the `Bot Token` is correct; it should look like `1234567890:ABCDEF...`.
-- For webhook mode, confirm the Cloudflared Tunnel is running and the saved webhook URL is the one registered with Telegram.
+- For webhook mode, the adapter's health reason names the exact problem: no reachable HTTPS URL (the tunnel is down), no webhook secret configured, a `setWebhook` rejection, or Telegram's own report that deliveries are failing — `Wrong response from the webhook: 404 Not Found` means the tunnel is pointed at the wrong local port.
 - If group messages do not arrive, check whether group privacy mode needs to be disabled through `/setprivacy`.
 - Open **Settings → Platform Connections → Audit Log** for details.
 
@@ -78,7 +120,7 @@ If the adapter shows **stopped** or **degraded**:
 
 ## Notes
 
-- **Long polling vs webhook**: long polling is the default and recommended path for most local desktop setups because it needs no public URL. Webhook delivery has lower push latency but requires a stable public HTTPS endpoint.
+- **Long polling vs webhook**: long polling is the default and recommended path for most local desktop setups because it needs no public URL. Webhook delivery has lower push latency but requires a public HTTPS endpoint and a webhook secret.
 - **Group privacy mode**: Telegram enables privacy mode by default. In groups, the bot only sees mentions, replies, and commands unless you disable privacy mode in @BotFather.
 - **Credential security**: `Bot Token` and webhook secret are encrypted in the OS keyring and never written to logs. Do not paste a bot token in public channels.
 - **History**: Telegram Bot API does not expose arbitrary chat-history fetching. The adapter only processes live updates it receives.
