@@ -1,6 +1,7 @@
 import {
   enrichInboundMedia,
   isExtractableDoc,
+  isPublicHttpUrl,
   onceAsync,
   stableMediaRef,
   type EnrichableSegment,
@@ -188,9 +189,59 @@ describe("enrichInboundMedia", () => {
   })
 })
 
+describe("isPublicHttpUrl", () => {
+  it("accepts ordinary public http(s) media hosts", () => {
+    expect(isPublicHttpUrl("https://cdn.example.com/a.png")).toBe(true)
+    expect(isPublicHttpUrl("http://gchat.qpic.cn/a.jpg")).toBe(true)
+    expect(isPublicHttpUrl("https://8.8.8.8/a.png")).toBe(true)
+  })
+
+  it("refuses loopback, LAN and the cloud metadata endpoint", () => {
+    // The download URL is remote-controlled data and Rust applies no guard of
+    // its own, so this is the only thing standing between an inbound message
+    // and a request to the host's own network.
+    expect(isPublicHttpUrl("http://127.0.0.1:8080/admin")).toBe(false)
+    expect(isPublicHttpUrl("http://localhost/x")).toBe(false)
+    expect(isPublicHttpUrl("http://router.local/x")).toBe(false)
+    expect(isPublicHttpUrl("http://169.254.169.254/latest/meta-data/")).toBe(false)
+    expect(isPublicHttpUrl("http://192.168.1.1/x")).toBe(false)
+    expect(isPublicHttpUrl("http://10.0.0.5/x")).toBe(false)
+    expect(isPublicHttpUrl("http://172.16.0.1/x")).toBe(false)
+    expect(isPublicHttpUrl("http://172.31.255.1/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[::1]/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[fd00::1]/x")).toBe(false)
+  })
+
+  it("keeps public addresses next to the private ranges", () => {
+    expect(isPublicHttpUrl("http://172.32.0.1/x")).toBe(true)
+    expect(isPublicHttpUrl("http://172.15.0.1/x")).toBe(true)
+    expect(isPublicHttpUrl("http://[2606:4700::1]/x")).toBe(true)
+  })
+
+  it("refuses anything that is not http(s)", () => {
+    expect(isPublicHttpUrl("file:///etc/passwd")).toBe(false)
+    expect(isPublicHttpUrl("tg://file/ABC")).toBe(false)
+    expect(isPublicHttpUrl("not a url")).toBe(false)
+  })
+})
+
+describe("enrichInboundMedia — download floor", () => {
+  it("refuses a plan that resolves to a host on the operator's own network", async () => {
+    const h = harness({ source: async () => ({ url: "http://127.0.0.1:9200/x.png" }) })
+    const e = makeEvent([image()])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect(h.fetchAttachment).not.toHaveBeenCalled()
+    expect((e.segments[0] as { dataBase64?: string }).dataBase64).toBeUndefined()
+  })
+})
+
 describe("enrichInboundMedia — image media type", () => {
   it("prefers the type the parser already knew", async () => {
-    const h = harness({ source: async () => ({ url: "u", mimeType: "image/gif" }) })
+    const h = harness({
+      source: async () => ({ url: "https://dl.example.com/x", mimeType: "image/gif" }),
+    })
     h.readAttachment.mockResolvedValueOnce(null).mockResolvedValueOnce("QUJD")
     const seg = { type: "image" as const, url: "https://x/a.png", mimeType: "image/webp" }
 
@@ -201,7 +252,7 @@ describe("enrichInboundMedia — image media type", () => {
 
   it("takes what the resolver learned over the plan default", async () => {
     const h = harness({
-      source: async () => ({ url: "u", mimeType: "image/gif" }),
+      source: async () => ({ url: "https://dl.example.com/x", mimeType: "image/gif" }),
       defaultImageMime: "image/jpeg",
     })
     h.readAttachment.mockResolvedValueOnce(null).mockResolvedValueOnce("QUJD")

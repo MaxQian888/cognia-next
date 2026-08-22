@@ -111,6 +111,14 @@ export interface InboundMediaPlan {
   defaultImageMime?: string
   /** Prefix for the document-extraction id, e.g. `"discord-inbound"`. */
   extractLabel: string
+  /**
+   * Opt-in widening of the `isPublicHttpUrl` floor, for the one legitimate
+   * case: a self-hosted protocol implementation serving media from an address
+   * the OPERATOR configured (OneBot's forward-WS host is routinely on the LAN).
+   * Only ever return true for a host the operator named themselves — never for
+   * one that arrived inside a message.
+   */
+  allowPrivateHost?: (url: string) => boolean
 }
 
 export interface InboundMediaDeps {
@@ -166,6 +174,44 @@ export function stableMediaRef(prefix: string, url: string): string {
     // is, and it is at least stable.
     return `${prefix}:${url}`
   }
+}
+
+/**
+ * Loopback / private / link-local hosts a download must never be aimed at.
+ *
+ * The URL a message's media lives at is remote-controlled data, and the Rust
+ * fetch command applies no guard of its own, so this is the floor: every plan
+ * passes through it before a byte is requested. It stops the obvious targets —
+ * `127.0.0.1`, a LAN address, and the cloud metadata endpoint at
+ * `169.254.169.254`. It does NOT stop a public name that resolves to a private
+ * address (DNS rebinding); catching that needs a check at resolution time,
+ * which belongs in the Rust client. Platforms whose media lives on a known
+ * host (Discord, Slack) narrow this further with their own allowlist.
+ */
+const PRIVATE_V4 = /^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/
+
+export function isPublicHttpUrl(raw: string): boolean {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return false
+  const host = url.hostname.toLowerCase()
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false
+  // IPv6 literals arrive bracketed; `::1` and the unique-local `fc00::/7` block.
+  if (host.startsWith("[")) {
+    const inner = host.slice(1, -1)
+    return !(
+      inner === "::1" ||
+      inner.startsWith("fc") ||
+      inner.startsWith("fd") ||
+      inner.startsWith("fe80")
+    )
+  }
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return !PRIVATE_V4.test(host)
+  return true
 }
 
 /**
@@ -247,6 +293,8 @@ export async function enrichInboundMedia(
       if (!bytes) {
         const source = await plan.source(seg, event)
         if (!source) continue
+        // The floor every plan passes through — see `isPublicHttpUrl`.
+        if (!isPublicHttpUrl(source.url) && !plan.allowPrivateHost?.(source.url)) continue
         resolvedMime = source.mimeType
         await fetchAttachment(adapterId, ref, source.url, source.headers)
         bytes = await readAttachment(adapterId, ref, maxBytes)
