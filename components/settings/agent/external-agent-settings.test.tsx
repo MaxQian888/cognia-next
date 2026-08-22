@@ -85,6 +85,31 @@ const mockAgentRich: ExternalAgentConfig = {
 const addAgentMock = jest.fn()
 const updateAgentMock = jest.fn()
 const removeAgentMock = jest.fn()
+// An agent reconciliation blocked at startup. Before the verdict was rendered
+// this looked identical to one the user had simply switched off.
+const mockAgentBlocked = {
+  ...mockAgentFromPreset,
+  id: "agent-4",
+  name: "Blocked Agent",
+  enabled: false,
+  lifecycleStatus: "blocked",
+  lifecycleReasonCode: "adapter_unavailable",
+  lifecycleReason: 'no protocol adapter is registered for "acp"',
+} as unknown as ExternalAgentConfig
+
+// A Windows agent whose unsandboxed launch has not been approved. The dialog
+// and the badge existed with nothing rendering them, so this state used to be
+// reported with no way to act on it.
+const mockAgentNeedsConsent = {
+  ...mockAgentFromPreset,
+  id: "agent-5",
+  name: "Awaiting Consent",
+  enabled: false,
+  lifecycleStatus: "needs-consent",
+  lifecycleReasonCode: "consent_required",
+  runtimeBinding: { runtimeId: "codex-acp", ownership: "system" },
+} as unknown as ExternalAgentConfig
+
 const connectMock = jest.fn()
 const disconnectMock = jest.fn()
 const getAgentMock = jest.fn((id: string) =>
@@ -94,11 +119,21 @@ const getAgentMock = jest.fn((id: string) =>
       ? mockAgentManual
       : id === "agent-3"
         ? mockAgentRich
-        : undefined
+        : id === "agent-4"
+          ? mockAgentBlocked
+          : id === "agent-5"
+            ? mockAgentNeedsConsent
+            : undefined
 )
 
 const externalStoreState = {
-  getAllAgents: () => [mockAgentFromPreset, mockAgentManual, mockAgentRich],
+  getAllAgents: () => [
+    mockAgentFromPreset,
+    mockAgentManual,
+    mockAgentRich,
+    mockAgentBlocked,
+    mockAgentNeedsConsent,
+  ],
   getAgent: getAgentMock,
   getConnectionStatus: (id: string) => (id === "agent-3" ? "connected" : "disconnected"),
   getAgentValidity: () => undefined,
@@ -487,6 +522,57 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(screen.queryByTestId("global-settings-card")).not.toBeInTheDocument()
     // Both the rail entry and the panel's own card title carry the label.
     expect(screen.getAllByText(/delegation rules/i).length).toBeGreaterThan(1)
+  })
+
+  it("says why an agent reconciliation switched off cannot start", async () => {
+    // `reviewAll()` has always recorded the verdict and a reason code, and
+    // nothing read it back — a blocked agent looked simply disabled.
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-4"))
+    })
+
+    const notice = await screen.findByTestId("lifecycle-status-notice")
+    expect(notice).toHaveAttribute("data-status", "blocked")
+    // The user-facing sentence, never the stored developer string.
+    expect(notice).not.toHaveTextContent("no protocol adapter is registered")
+  })
+
+  it("offers the way to give consent to an agent that is waiting on one", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-5"))
+    })
+
+    expect(await screen.findByTestId("lifecycle-status-notice")).toHaveAttribute(
+      "data-status",
+      "needs-consent"
+    )
+    // Reporting "needs your permission" with no way to give it is the state
+    // this replaces.
+    expect(screen.getByTestId("unsandboxed-consent-open")).toBeInTheDocument()
+  })
+
+  it("offers no consent action for an agent that is not waiting on one", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-4"))
+    })
+    await screen.findByTestId("lifecycle-status-notice")
+    expect(screen.queryByTestId("unsandboxed-consent-open")).not.toBeInTheDocument()
+  })
+
+  it("shows no verdict notice for a healthy agent", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-1"))
+    })
+    await screen.findByTestId("agent-detail-agent-1")
+    expect(screen.queryByTestId("lifecycle-status-notice")).not.toBeInTheDocument()
   })
 
   it("reaches the installed-runtimes panel from the rail", async () => {

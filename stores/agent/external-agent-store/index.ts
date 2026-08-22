@@ -24,6 +24,7 @@ export {
 } from "./selectors"
 export type {
   StoredExternalAgentConfig,
+  LifecycleExternalAgentConfig,
   RunningAgentInstance,
   TerminalInstance,
   ExternalAgentState,

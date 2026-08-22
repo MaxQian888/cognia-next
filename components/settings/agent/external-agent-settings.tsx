@@ -30,7 +30,10 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { piPackagesHref } from "@/lib/pi-packages/deep-link"
+import { LifecycleStatusNotice } from "@/components/agent/external-agent/lifecycle-status-notice"
 import { RuntimeGovernancePanel } from "@/components/agent/external-agent/runtime-governance-panel"
+import { UnsandboxedConsentAction } from "@/components/agent/external-agent/unsandboxed-consent-action"
+import { UnsandboxedStatusBadge } from "@/components/agent/external-agent/unsandboxed-status-badge"
 import { cn } from "@/lib/utils"
 import { pickDirectory } from "@/lib/files/file-bridge"
 import { toast } from "@/components/ui/sonner"
@@ -70,7 +73,10 @@ import {
 import { Empty, EmptyMedia, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { BrandIcon } from "@/components/icons/brand-icon"
-import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
+import {
+  useExternalAgentStore,
+  type LifecycleExternalAgentConfig,
+} from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent/use-external-agent"
 import { DelegationRulesSection } from "./delegation-rules-section"
 import { DeepSeekHarnessCard } from "./deepseek-harness-card"
@@ -95,7 +101,6 @@ import {
 import { extensionPolicyArgs, type PiExtensionPolicy } from "@/lib/ai/agent/external/pi-rpc-client"
 import type {
   ExternalAgentConnectionStatus,
-  ExternalAgentConfig,
   CreateExternalAgentInput,
   AcpPermissionMode,
   ExternalAgentProtocol,
@@ -1383,7 +1388,9 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
 // =============================================================================
 
 interface AgentDetailProps {
-  agent: ExternalAgentConfig
+  /** The stored config, lifecycle verdict included — `ExternalAgentConfig`
+   *  alone drops the fields reconciliation writes. */
+  agent: LifecycleExternalAgentConfig
   isConnecting: boolean
   onConnect: () => void
   onDisconnect: () => void
@@ -1446,11 +1453,30 @@ function AgentDetail({
                   {supportTier}
                 </Badge>
               )}
+              {/* A decision made weeks ago governs every later run; without a
+                  standing indicator the one agent with no sandbox looks exactly
+                  like the ones that have one. */}
+              <UnsandboxedStatusBadge
+                unsandboxed={Boolean(agent.unsandboxedConsent)}
+                executablePath={agent.unsandboxedConsent?.executablePath}
+              />
             </div>
             {agent.description && <CardDescription>{agent.description}</CardDescription>}
             {executionBlockedReason && (
               <p className="text-xs text-amber-600 dark:text-amber-400">{executionBlockedReason}</p>
             )}
+            {/* Reconciliation has always recorded WHY an agent cannot start and
+                nothing read it back, so one that was switched off at startup
+                looked simply disabled. */}
+            <LifecycleStatusNotice
+              status={agent.lifecycleStatus}
+              reasonCode={agent.lifecycleReasonCode}
+              action={
+                agent.lifecycleStatus === "needs-consent" ? (
+                  <UnsandboxedConsentAction agent={agent} />
+                ) : null
+              }
+            />
           </div>
           {/* Every action for this agent lives in one row next to its title —
               previously Edit/Delete sat at the very bottom of the card, below
