@@ -733,6 +733,136 @@ describe("getDb", () => {
     expect(children.every((run) => run.parentRunId !== undefined)).toBe(true)
   })
 
+  it("v178 makes the attachment cache accountable and defaults the media policy", async () => {
+    // Three defects are pinned here, because each one was silently wrong:
+    // the cache had no access stamp to evict by, deleting a row left its
+    // ciphertext behind with nothing tracking it, and an adapter row carried
+    // no media policy at all — so there was nothing for a gate to read.
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(178)
+    expect(db.connectorAttachments.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["cacheKey", "lastAccessedAt"])
+    )
+
+    const now = Date.now()
+    await db.connectorCleanupJobs.put({
+      id: "b".repeat(64),
+      adapterId: "tg-1",
+      reason: "adapter_removed",
+      attempts: 0,
+      nextAttemptAt: now,
+      createdAt: now,
+    })
+    const job = await db.connectorCleanupJobs.get("b".repeat(64))
+    expect(job?.reason).toBe("adapter_removed")
+    // Due-job lookup is index-driven, not a full scan.
+    expect(await db.connectorCleanupJobs.where("nextAttemptAt").belowOrEqual(now).count()).toBe(1)
+  })
+
+  fullSchemaIt(
+    "v178 upgrade backfills the media policy, seeds the access stamp, and drops dead fields",
+    async () => {
+      const name = `cognia-v178-attachments-${Date.now()}`
+      const legacy = new Dexie(name)
+      // v177-shaped tables: attachments keyed by fetch time with a plaintext
+      // path, adapter instances carrying the write-only OAuth flag.
+      legacy.version(177).stores({
+        connectorAttachments:
+          "&id, [adapterId+remoteRef], adapterId, mimeType, fetchedAt, expiresAt",
+        adapterInstances: "&id, type, enabled",
+      })
+      await legacy.open()
+      await legacy.table("connectorAttachments").bulkPut([
+        {
+          id: "att-old",
+          adapterId: "tg-1",
+          remoteRef: "file-1",
+          localPath: "/tmp/decrypted.png",
+          mimeType: "image/png",
+          sizeBytes: 1024,
+          fetchedAt: 5_000,
+          expiresAt: 9_000,
+        },
+        // A row that never carried a fetch time either — it must still land on
+        // a usable stamp rather than `undefined`, which no index can order.
+        {
+          id: "att-undated",
+          adapterId: "tg-1",
+          remoteRef: "file-2",
+          localPath: "/tmp/other.png",
+          mimeType: "image/png",
+          sizeBytes: 2048,
+        },
+      ])
+      await legacy.table("adapterInstances").bulkPut([
+        {
+          id: "adp-legacy",
+          type: "telegram",
+          displayName: "Legacy bot",
+          enabled: false,
+          transportMode: "longpoll",
+          settings: {},
+          credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+          trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+          defaultMode: "auto",
+          userTokenStoredAt: 1234,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        // An instance someone had already opted into cloud binaries for must
+        // keep that choice — the backfill fills gaps, it does not overwrite.
+        {
+          id: "adp-optedin",
+          type: "lark",
+          displayName: "Opted in",
+          enabled: true,
+          transportMode: "webhook",
+          settings: {},
+          credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+          trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+          defaultMode: "auto",
+          mediaModelPolicy: "allow_cloud_binary",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+      expect(upgraded.verno).toBeGreaterThanOrEqual(178)
+
+      // (1) The path to the decrypted copy is gone — the Rust migration
+      // deletes that file, and a stale path only invites someone to read it.
+      const migrated = (await upgraded.connectorAttachments.get("att-old")) as
+        (Record<string, unknown> & { lastAccessedAt?: number }) | undefined
+      expect(migrated?.localPath).toBeUndefined()
+      // The access stamp is seeded from the old fetch time so a freshly
+      // migrated cache is not uniformly "coldest" to the LRU.
+      expect(migrated?.lastAccessedAt).toBe(5_000)
+      const undated = await upgraded.connectorAttachments.get("att-undated")
+      expect(typeof undated?.lastAccessedAt).toBe("number")
+
+      // (2) The new indexes are reachable — proof the backfill populated them.
+      expect(
+        await upgraded.connectorAttachments.where("lastAccessedAt").belowOrEqual(5_000).count()
+      ).toBeGreaterThanOrEqual(1)
+
+      // (3) Media policy: gaps get the safe value, explicit choices survive.
+      const legacyInstance = (await upgraded.adapterInstances.get("adp-legacy")) as
+        (Record<string, unknown> & { mediaModelPolicy?: string }) | undefined
+      expect(legacyInstance?.mediaModelPolicy).toBe("local_extract_only")
+      expect(legacyInstance?.userTokenStoredAt).toBeUndefined()
+      expect((await upgraded.adapterInstances.get("adp-optedin"))?.mediaModelPolicy).toBe(
+        "allow_cloud_binary"
+      )
+
+      upgraded.close()
+    }
+  )
+
   it("v177 indexes the Squad a conversation runs on, separately from its team", async () => {
     // `squadId` (executor) and `teamId` (conversation shape) are different
     // questions about the same row, so the index must answer one without
@@ -3624,6 +3754,7 @@ describe("getDb", () => {
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       atResponseStrategy: "mention_only",
       chatAllowlist: ["oc_team_eng", "oc_team_pm"],
       chatBlocklist: ["oc_spam_chat"],
@@ -3637,7 +3768,6 @@ describe("getDb", () => {
         scopes: ["im:message", "bot:info", "im:resource"],
         activateStatus: 2,
       },
-      userTokenStoredAt: now - 60_000,
       createdAt: now,
       updatedAt: now,
     })
@@ -3649,7 +3779,6 @@ describe("getDb", () => {
     expect(row?.lastWhoamiResult?.botName).toBe("Cognia Bot")
     expect(row?.lastWhoamiResult?.tenantKey).toBe("tnt_v45")
     expect(row?.lastWhoamiResult?.scopes).toContain("bot:info")
-    expect(row?.userTokenStoredAt).toBe(now - 60_000)
 
     // Pre-v45 row (no new fields) still reads back fine — every new
     // column is optional, so absence is the same as "not configured".
@@ -3667,6 +3796,7 @@ describe("getDb", () => {
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "manual",
+      mediaModelPolicy: "local_extract_only",
       createdAt: now,
       updatedAt: now,
     })
@@ -3676,7 +3806,6 @@ describe("getDb", () => {
     expect(legacy?.chatBlocklist).toBeUndefined()
     expect(legacy?.lastWhoamiAt).toBeUndefined()
     expect(legacy?.lastWhoamiResult).toBeUndefined()
-    expect(legacy?.userTokenStoredAt).toBeUndefined()
   })
 
   // v107 — inbound dispatch rules (W3 multi-bot). Additive optional JSON
@@ -3698,6 +3827,7 @@ describe("getDb", () => {
       credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       dispatchRules: [
         {
           id: "rule-1",
@@ -3747,6 +3877,7 @@ describe("getDb", () => {
       credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "manual",
+      mediaModelPolicy: "local_extract_only",
       createdAt: now,
       updatedAt: now,
     })
@@ -3917,6 +4048,7 @@ describe("getDb", () => {
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       lastKnownSkillCapabilities: [
         { family: "lark.calendar", mutations: ["read", "write"] },
         { family: "lark.doc", mutations: ["read", "write", "destructive"] },
@@ -3972,6 +4104,7 @@ describe("getDb", () => {
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "manual",
+      mediaModelPolicy: "local_extract_only",
       implMetadata: {
         impl: "napcat",
         version: "4.2.1",
@@ -4065,6 +4198,7 @@ describe("getDb", () => {
         storeUnmatchedInDraftMode: true,
       },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       createdAt: now,
       updatedAt: now,
     })
@@ -4149,10 +4283,11 @@ describe("getDb", () => {
       id: "att-1",
       adapterId: "tg-1",
       remoteRef: "tg-file-id",
-      localPath: "/tmp/xyz.png",
+      cacheKey: "a".repeat(64),
       mimeType: "image/png",
       sizeBytes: 1024,
       fetchedAt: now,
+      lastAccessedAt: now,
     })
     expect((await db.connectorAttachments.get("att-1"))?.mimeType).toBe("image/png")
   })
@@ -5511,6 +5646,7 @@ describe("v106 instance-level AI binding defaults (multi-bot connectors W1/W2)",
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       defaultTeamId: "team_alpha",
       defaultModel: "claude-fable-5",
       defaultProvider: "anthropic",

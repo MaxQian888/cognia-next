@@ -187,6 +187,7 @@ export function OneBotConfigDialog({
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
+          mediaModelPolicy: "local_extract_only",
           ...(transportMode === "reverse-ws" ? { deliveryReadiness: "unknown" as const } : {}),
           quietHours: quietHours ?? undefined,
           muted,

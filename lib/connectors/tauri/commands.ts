@@ -77,9 +77,53 @@ export interface TauriHttpResponse {
   body: string
 }
 
+/**
+ * Metadata for one cached attachment, as reported by Rust.
+ *
+ * There is deliberately no local file path: the cache holds encrypted
+ * envelopes only, and `connectorsAttachmentRead` is the sole way to get the
+ * bytes back. Sizes and expiry come from the envelope, so the renderer never
+ * has to guess either one.
+ */
 export interface AttachmentRef {
-  localUrl: string
+  /** Hex SHA-256 of `"<adapterId>:<remoteRef>"` — the handle for deletes. */
+  cacheKey: string
   remoteRef: string
+  /** Real decrypted byte count. */
+  sizeBytes: number
+  createdAt: number
+  lastAccessedAt: number
+  /** Absent means the entry only ages out via the LRU budget. */
+  expiresAt?: number
+  /** True when Rust served the entry from cache without a network fetch. */
+  cached: boolean
+}
+
+/** One envelope in a cache listing — the input to orphan sweeps. */
+export interface AttachmentEntry {
+  cacheKey: string
+  sizeBytes: number
+  createdAt: number
+  lastAccessedAt: number
+  expiresAt?: number
+  /** On-disk size including envelope header and AEAD tags. */
+  diskBytes: number
+}
+
+export interface AttachmentCleanupFailure {
+  cacheKey: string
+  error: string
+}
+
+/**
+ * Outcome of a batch delete / evict / budget sweep. A key in `deleted` is
+ * gone from disk (or was already absent); anything in `failed` must go to the
+ * cleanup ledger for retry rather than having its Dexie row dropped.
+ */
+export interface AttachmentCleanupReport {
+  deleted: string[]
+  freedBytes: number
+  failed: AttachmentCleanupFailure[]
 }
 
 export interface ConnectorMediaUploadRequest {
@@ -416,17 +460,55 @@ export async function connectorsOnebotProbe(): Promise<OnebotLiveClient[]> {
 // Task 24 — attachment cache
 // ---------------------------------------------------------------------------
 
+/**
+ * Fetch (or serve from cache) one attachment. Rust owns TTL enforcement: an
+ * entry past `expiresAt` is re-fetched rather than served, so callers must not
+ * implement their own freshness check.
+ *
+ * @param ttlMs Lifetime for a freshly written entry. Omit for the 7-day
+ *   default; pass `0` for "never expires, LRU only".
+ */
 export async function connectorsAttachmentFetch(
   adapterId: string,
   remoteRef: string,
   sourceUrl: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  ttlMs?: number
 ): Promise<AttachmentRef> {
   return invoker<AttachmentRef>("connectors_attachment_fetch", {
     adapterId,
     remoteRef,
     sourceUrl,
     headers,
+    ttlMs,
+  })
+}
+
+/** List every readable cache envelope, for orphan reconciliation. */
+export async function connectorsAttachmentList(): Promise<AttachmentEntry[]> {
+  return invoker<AttachmentEntry[]>("connectors_attachment_list")
+}
+
+/** Batch-delete cache entries by key. */
+export async function connectorsAttachmentDelete(
+  cacheKeys: string[]
+): Promise<AttachmentCleanupReport> {
+  return invoker<AttachmentCleanupReport>("connectors_attachment_delete", { cacheKeys })
+}
+
+/** Drop every cached attachment belonging to one adapter instance. */
+export async function connectorsAttachmentEvictAdapter(
+  adapterId: string
+): Promise<AttachmentCleanupReport> {
+  return invoker<AttachmentCleanupReport>("connectors_attachment_evict_adapter", { adapterId })
+}
+
+/** Reap expired entries and enforce the total-bytes ceiling (LRU first). */
+export async function connectorsAttachmentEnforceBudget(
+  maxTotalBytes: number
+): Promise<AttachmentCleanupReport> {
+  return invoker<AttachmentCleanupReport>("connectors_attachment_enforce_budget", {
+    maxTotalBytes,
   })
 }
 

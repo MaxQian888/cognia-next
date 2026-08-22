@@ -245,6 +245,7 @@ describe("LarkConfigDialog — edit existing", () => {
     },
     trigger: defaultPrivateChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
   }
@@ -308,6 +309,7 @@ describe("LarkConfigDialog — send as user", () => {
     },
     trigger: defaultPrivateChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
   }
@@ -499,6 +501,7 @@ const existingCloudRow: AdapterInstanceRow = {
   },
   trigger: defaultPrivateChatPolicy(),
   defaultMode: "auto",
+  mediaModelPolicy: "local_extract_only",
   createdAt: 1000,
   updatedAt: 2000,
 }

@@ -106,6 +106,7 @@ function makeRow(rules: DispatchRule[] | undefined): AdapterInstanceRow {
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     dispatchRules: rules,
     createdAt: 0,
     updatedAt: 0,

@@ -292,6 +292,7 @@ describe("MatrixConfigDialog — edit existing", () => {
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["accessToken"] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto" as const,
+    mediaModelPolicy: "local_extract_only" as const,
     createdAt: 1,
     updatedAt: 1,
   }

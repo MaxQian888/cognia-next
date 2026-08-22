@@ -124,6 +124,7 @@ describe("DingTalkConfigDialog", () => {
       credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["appKey", "appSecret"] },
       trigger: {},
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       createdAt: 1,
       updatedAt: 2,
     } as unknown as AdapterInstanceRow

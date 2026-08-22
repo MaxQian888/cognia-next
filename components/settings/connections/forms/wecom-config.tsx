@@ -153,6 +153,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
+          mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,
           muted,
         })

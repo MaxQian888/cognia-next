@@ -173,6 +173,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: AUTO_TRIGGER,
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
     })
     autoAdapterId = autoRow.id
 
@@ -185,6 +186,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: MANUAL_TRIGGER,
       defaultMode: "manual",
+      mediaModelPolicy: "local_extract_only",
     })
     manualAdapterId = manualRow.id
 
@@ -416,6 +418,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: AUTO_TRIGGER,
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       inboundActivationPolicy: "mention_activates",
       deliveryReadiness: "mentions_only",
     })
@@ -734,6 +737,7 @@ describe("ConnectorBus dispatchInboundFull — end-to-end", () => {
         storeUnmatchedInDraftMode: false,
       },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
     })
     const bus = getBus()
     bus.registerAdapter(makeAdapter(replyRow.id))

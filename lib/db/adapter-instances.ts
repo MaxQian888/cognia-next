@@ -14,7 +14,15 @@ function newId(): string {
   return "cai_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
 }
 
-export type AdapterInstanceInput = Omit<AdapterInstanceRow, "id" | "createdAt" | "updatedAt">
+/**
+ * `mediaModelPolicy` is optional on the way in and required on the row: this
+ * function is the single place the default is applied, so a caller that forgets
+ * it gets the safe value rather than an instance with no policy at all.
+ */
+export type AdapterInstanceInput = Omit<
+  AdapterInstanceRow,
+  "id" | "createdAt" | "updatedAt" | "mediaModelPolicy"
+> & { mediaModelPolicy?: AdapterInstanceRow["mediaModelPolicy"] }
 
 export async function createAdapterInstance(
   input: AdapterInstanceInput
@@ -23,6 +31,8 @@ export async function createAdapterInstance(
   const row: AdapterInstanceRow = {
     id: newId(),
     ...input,
+    // Never inherit "may send binaries to a cloud model" implicitly.
+    mediaModelPolicy: input.mediaModelPolicy ?? "local_extract_only",
     createdAt: now,
     updatedAt: now,
   }
@@ -77,7 +87,11 @@ export type AdapterInstancePatch = Partial<
     | "chatBlocklist"
     | "lastWhoamiAt"
     | "lastWhoamiResult"
-    | "userTokenStoredAt"
+    // v178 — confirmed platform identity (sibling-bot guard) and the media
+    // policy gate. `userTokenStoredAt` was dropped: nothing read it.
+    | "selfIdentity"
+    | "mediaModelPolicy"
+    | "plugin"
     // Cross-provider help / welcome card settings.
     | "welcomeCardEnabled"
     | "helpTriggers"

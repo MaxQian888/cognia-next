@@ -61,6 +61,7 @@ function makeRow(patch: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1,
     updatedAt: 1,
     ...patch,

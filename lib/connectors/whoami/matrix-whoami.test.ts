@@ -23,6 +23,7 @@ async function seedRow(overrides: Partial<AdapterInstanceRow> = {}) {
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["accessToken"] },
     trigger: defaultGroupChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

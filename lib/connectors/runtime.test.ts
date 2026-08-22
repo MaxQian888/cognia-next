@@ -234,6 +234,7 @@ async function seedAdapter(
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     ...patch,
   } as unknown as Parameters<typeof createAdapterInstance>[0])
   // The DB row's id is auto-generated. Tests that need a specific id
@@ -2336,6 +2337,7 @@ async function putInstance(id: string, patch: Partial<AdapterInstanceRow> = {}):
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 0,
     updatedAt: 0,
     ...patch,
@@ -2444,6 +2446,7 @@ describe("installRuntime — ai-run reply quoting (ADR-0009 §3A.3)", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       createdAt: 0,
       updatedAt: 0,
     } as AdapterInstanceRow)

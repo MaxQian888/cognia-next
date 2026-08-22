@@ -152,6 +152,47 @@ export interface OutboundTuningConfig {
 }
 
 /**
+ * The bot's own identity on its platform, confirmed by a live probe.
+ *
+ * This is what makes the sibling-bot guard sound: without a confirmed
+ * account id, "is this inbound message from another one of my bots?" cannot
+ * be answered, and the guard must fail closed rather than guess.
+ */
+export interface AdapterSelfIdentitySnapshot {
+  /** The platform's own id for the account this instance authenticates as. */
+  platformAccountId: string
+  /** Bot-scoped id where the platform separates it from the account id. */
+  platformBotId?: string
+  /** Which probe established it — all three are authoritative. */
+  source: "startup_probe" | "gateway_ready" | "whoami"
+  confirmedAt: number
+}
+
+/**
+ * Where a plugin-contributed instance came from. Absent on built-in kinds.
+ * Recorded so an instance whose plugin was removed or downgraded can be
+ * reported precisely instead of silently failing to start.
+ */
+export interface AdapterPluginProvenance {
+  pluginId: string
+  /** Stable id of the connector contribution inside that plugin. */
+  contributionId: string
+  /** Plugin version that registered the contribution. */
+  pluginRelease: string
+}
+
+/**
+ * What may be handed to a model from inbound binary media.
+ *
+ *   - `local_extract_only` — the default and the only safe one: binary bodies
+ *     stay local, and only locally-derived text (OCR / transcription) may go
+ *     to a model, after passing the PII gate again.
+ *   - `allow_cloud_binary` — raw bytes may reach a cloud model. Only ever set
+ *     by an explicit, revocable per-conversation grant.
+ */
+export type MediaModelPolicy = "local_extract_only" | "allow_cloud_binary"
+
+/**
  * One row per configured adapter instance (one Telegram bot, one Discord
  * guild connection, etc.). The `credentialsRef` field points into the OS
  * keyring — it never holds the actual secret value.
@@ -469,13 +510,22 @@ export interface AdapterInstanceRow {
     activateStatus?: number
   }
   /**
-   * Wall-clock epoch ms at which a user-OAuth access token was last
-   * persisted to the keyring under `<adapterId>:user_token` +
-   * `<adapterId>:user_refresh_token`. The OAuth card uses this to decide
-   * whether to show "Connect with Lark" (undefined) versus "Re-authorise"
-   * / "Revoke" (defined). The actual token never lives in this row.
+   * The bot's confirmed identity on its platform, written by the startup
+   * probe / gateway-ready event / whoami call. Read by the sibling-bot guard,
+   * which fails closed when it is absent rather than treating an unknown
+   * sender as human.
    */
-  userTokenStoredAt?: number
+  selfIdentity?: AdapterSelfIdentitySnapshot
+  /**
+   * Provenance for plugin-contributed instances; absent for built-in kinds.
+   */
+  plugin?: AdapterPluginProvenance
+  /**
+   * Whether raw binary media from this bot may reach a cloud model. Backfilled
+   * to `local_extract_only` for every pre-v178 row and defaulted the same way
+   * on create, so the permissive value only ever exists where someone set it.
+   */
+  mediaModelPolicy: MediaModelPolicy
   /**
    * Bot-wide response-SLA target in minutes (IM delegation slice 1B). Used
    * when a conversation has no `ConversationOverrideRow.slaResponseMinutes`
@@ -1193,12 +1243,48 @@ export interface ConnectorAttachmentRow {
   id: string
   adapterId: string
   remoteRef: string
-  /** Path inside <appData>/cognia/connectors/cache (encrypted on disk). */
-  localPath: string
+  /**
+   * Hex SHA-256 of `"<adapterId>:<remoteRef>"` — the handle Rust deletes by.
+   * There is no local path: the cache stores encrypted envelopes only, and
+   * bytes come back through `connectorsAttachmentRead`.
+   */
+  cacheKey: string
   mimeType: string
+  /** Real decrypted size, as reported by Rust. Never a client-side guess. */
   sizeBytes: number
   fetchedAt: number
+  /**
+   * Last read, mirrored from the envelope so the settings UI can show cache
+   * age. The eviction authority is Rust's copy, not this one.
+   */
+  lastAccessedAt: number
   expiresAt?: number
+}
+
+/**
+ * A blob whose Dexie row is gone (or is about to be) but whose encrypted file
+ * has not been confirmed deleted yet.
+ *
+ * Deleting a cached attachment is two writes across two stores, and the disk
+ * side can fail (locked file, permissions, headless host with no Rust). The
+ * ledger is what keeps that from silently orphaning ciphertext: the Dexie row
+ * is only dropped once Rust confirms the delete, and anything else lands here
+ * to be retried with backoff and surfaced in health diagnostics.
+ */
+export interface ConnectorCleanupJobRow {
+  /** The cache key — one outstanding job per blob. */
+  id: string
+  /** Adapter the blob belonged to, for diagnostics and bulk retry. */
+  adapterId: string
+  /** Why the blob is being removed. */
+  reason: "adapter_removed" | "expired" | "evicted" | "orphaned" | "manual"
+  attempts: number
+  /** Epoch ms; the sweep skips jobs that are not due yet. */
+  nextAttemptAt: number
+  lastAttemptAt?: number
+  /** Message from the last failed attempt, shown in health diagnostics. */
+  lastError?: string
+  createdAt: number
 }
 
 /** Borrowed-shape: same ConversationReference as types/connectors/event.ts. */

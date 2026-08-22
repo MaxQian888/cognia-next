@@ -107,7 +107,13 @@ async function fetchAttachment(
   // invocation. The Lark adapter does not use ctx.fetchAttachment — it
   // resolves media keys via the dedicated upload pipeline.
   const ref = await connectorsAttachmentFetch(adapterId, remoteRef, remoteRef)
-  return { localUrl: ref.localUrl, remoteRef: ref.remoteRef }
+  // The cache stores ciphertext only, so there is no path to hand back — the
+  // handle identifies the entry and `readAttachment` returns the bytes.
+  return {
+    localUrl: `cognia-attachment:${ref.cacheKey}`,
+    remoteRef: ref.remoteRef,
+    cacheKey: ref.cacheKey,
+  }
 }
 
 function notImplemented(opName: string): () => Promise<never> {

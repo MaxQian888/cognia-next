@@ -143,8 +143,16 @@ describe("buildAdapterContext", () => {
     })
   })
 
-  it("fetchAttachment delegates to connectors_attachment_fetch", async () => {
-    mockInvoke.mockResolvedValueOnce({ localUrl: "file://a.png", remoteRef: "rr-1" })
+  it("fetchAttachment returns a cache handle, never a path to plaintext", async () => {
+    const cacheKey = "a".repeat(64)
+    mockInvoke.mockResolvedValueOnce({
+      cacheKey,
+      remoteRef: "rr-1",
+      sizeBytes: 128,
+      createdAt: 1,
+      lastAccessedAt: 1,
+      cached: false,
+    })
     const bus = makeBus()
     const ctx = buildAdapterContext({
       adapterId: "lark-7",
@@ -152,11 +160,19 @@ describe("buildAdapterContext", () => {
       bus,
     })
     const ref = await ctx.tauri.fetchAttachment("lark-7", "rr-1")
-    expect(ref).toEqual({ localUrl: "file://a.png", remoteRef: "rr-1" })
+    // The cache holds ciphertext only — an adapter that treated `localUrl` as
+    // a readable file would be reading a file that no longer exists.
+    expect(ref).toEqual({
+      localUrl: `cognia-attachment:${cacheKey}`,
+      remoteRef: "rr-1",
+      cacheKey,
+    })
     expect(mockInvoke).toHaveBeenCalledWith("connectors_attachment_fetch", {
       adapterId: "lark-7",
       remoteRef: "rr-1",
       sourceUrl: "rr-1",
+      headers: undefined,
+      ttlMs: undefined,
     })
   })
 

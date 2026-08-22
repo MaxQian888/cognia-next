@@ -106,6 +106,7 @@ describe("conversation admission", () => {
       settings: {},
       credentialsRef: { provider: "keyring", accounts: {} },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       inboundActivationPolicy: "mention_activates",
       deliveryReadiness: "all_messages_verified",

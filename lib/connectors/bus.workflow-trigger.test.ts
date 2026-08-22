@@ -91,6 +91,7 @@ describe("ConnectorBus workflow trigger fan-out", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: AUTO_TRIGGER,
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
     })
     const bus = getBus()
     bus.registerAdapter(makeAdapter(row.id))

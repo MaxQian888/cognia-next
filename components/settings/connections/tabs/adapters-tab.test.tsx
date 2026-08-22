@@ -113,6 +113,7 @@ const baseAdapter: AdapterInstanceRow = {
   credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
   trigger: defaultPrivateChatPolicy(),
   defaultMode: "auto",
+  mediaModelPolicy: "local_extract_only",
   createdAt: 1000,
   updatedAt: 1000,
 }

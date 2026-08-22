@@ -113,6 +113,7 @@ import type {
   ConnectorAuditRow,
   ConnectorDraftRow,
   ConnectorAttachmentRow,
+  ConnectorCleanupJobRow,
   ConnectorCallbackBindingRow,
   ConnectorHeartbeatRow,
   ConnectorConversationStateRow,
@@ -515,6 +516,9 @@ export class CogniaDB extends Dexie {
   conversationAssignmentEvents!: Table<ConversationAssignmentEventRow, string>
   cannedResponses!: Table<CannedResponseRow, string>
   connectorAttachments!: Table<ConnectorAttachmentRow, string>
+  // v178 — pending encrypted-blob deletions that Rust has not confirmed.
+  // See `lib/db/connector-cleanup-jobs.ts`.
+  connectorCleanupJobs!: Table<ConnectorCleanupJobRow, string>
   connectorCallbackBindings!: Table<ConnectorCallbackBindingRow, string>
   // v51 — Heartbeats split out of `connectorAudit`. Capped per-adapter by
   // the heartbeat sweep (`lib/connectors/health/heartbeat.ts`), not by the
@@ -4291,6 +4295,58 @@ export class CogniaDB extends Dexie {
       sessions:
         "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt], surfaceBindingKey, squadId",
     })
+
+    // v178 — attachment cache becomes accountable, and adapter instances
+    // carry the two facts the routing and media gates need.
+    //
+    // `connectorAttachments` previously stored a `localPath` into a decrypted
+    // copy on disk and an LRU that summed a `sizeBytes` the renderer was free
+    // to leave at 0 — so the 500 MB cap could never be reached and nothing was
+    // ever evicted. Rust now owns the envelope (real size, real TTL, real
+    // access stamp); the row keeps a `cacheKey` handle and mirrors the stamps.
+    //
+    // `connectorCleanupJobs` is the ledger that stops a failed blob delete
+    // from orphaning ciphertext forever: the Dexie row is dropped only after
+    // Rust confirms the file is gone, and every other outcome is retried.
+    //
+    // On `adapterInstances`: `mediaModelPolicy` is backfilled to the safe
+    // value so no existing bot silently gains permission to ship binaries to a
+    // cloud model, and the dead `userTokenStoredAt` flag is dropped — nothing
+    // ever read it (its own doc comment claimed an OAuth card did; that card
+    // reads the keyring).
+    this.version(178)
+      .stores({
+        connectorAttachments:
+          "&id, [adapterId+remoteRef], adapterId, cacheKey, mimeType, fetchedAt, lastAccessedAt, expiresAt",
+        connectorCleanupJobs: "&id, adapterId, reason, nextAttemptAt, createdAt",
+      })
+      .upgrade(async (tx) => {
+        const now = Date.now()
+        await tx
+          .table("connectorAttachments")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            // Pre-v178 rows have no cache key. It is a pure function of
+            // (adapterId, remoteRef), but SHA-256 is async in the browser and
+            // an upgrade callback cannot await per row, so the row is marked
+            // for lazy re-derivation instead: `attachment-fetcher` fills it on
+            // the next touch, and the orphan sweep reconciles the rest.
+            row.cacheKey ??= ""
+            // The old LRU ordered by fetch time; seed the access stamp from it
+            // so a freshly migrated cache does not look uniformly cold.
+            row.lastAccessedAt ??= typeof row.fetchedAt === "number" ? row.fetchedAt : now
+            // The decrypted copy this pointed at is deleted by the Rust
+            // migration; keeping the path would only invite someone to read it.
+            delete row.localPath
+          })
+        await tx
+          .table("adapterInstances")
+          .toCollection()
+          .modify((row: Record<string, unknown>) => {
+            row.mediaModelPolicy ??= "local_extract_only"
+            delete row.userTokenStoredAt
+          })
+      })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

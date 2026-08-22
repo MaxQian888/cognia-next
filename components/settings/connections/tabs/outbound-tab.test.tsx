@@ -159,6 +159,7 @@ function makeAdapter(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstan
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: { kind: "private_chat" } as unknown as AdapterInstanceRow["trigger"],
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

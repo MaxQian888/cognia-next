@@ -198,6 +198,7 @@ describe("OneBotConfigDialog — edit existing", () => {
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["onebotBearer"] },
     trigger: defaultGroupChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
   }
@@ -266,6 +267,7 @@ describe("OneBotConfigDialog — live-status probe", () => {
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["onebotBearer"] },
     trigger: defaultGroupChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
   }
@@ -316,6 +318,7 @@ describe("OneBotConfigDialog — transport mode", () => {
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
     trigger: defaultGroupChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
   }

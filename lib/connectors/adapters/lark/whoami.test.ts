@@ -44,6 +44,7 @@ function seedRow(overrides: Partial<AdapterInstanceRow> = {}): Promise<unknown> 
       storeUnmatchedInDraftMode: false,
     },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: now,
     updatedAt: now,
     ...overrides,

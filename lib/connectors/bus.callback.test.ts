@@ -85,6 +85,7 @@ async function seedUnguardedAdapter(): Promise<void> {
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
   } as never)
 }
 
@@ -640,6 +641,7 @@ describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
     })
     return row.id
   }
@@ -767,6 +769,7 @@ describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
       credentialsRef: { keyringService: "test", accounts: [] },
       trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
       defaultMode: "auto",
+      mediaModelPolicy: "local_extract_only",
     } as never)
     const { createWorkflow } = await import("@/lib/db/workflows")
     const wf = await createWorkflow({ name: "Shadow Flow" })

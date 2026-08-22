@@ -57,10 +57,21 @@ export interface AdapterSecrets {
 }
 
 export interface AdapterAttachmentRef {
-  /** Local file URL — the renderer can resolve via a Tauri convertFileSrc. */
+  /**
+   * Outbound uploads: the platform-side URL of the uploaded file.
+   *
+   * Inbound cache fetches: an opaque `cognia-attachment:<cacheKey>` handle,
+   * NOT a path. The connector cache holds encrypted envelopes only — there is
+   * no decrypted file to point at, and bytes come back through
+   * `ctx.tauri.readAttachment`. (This field used to promise a
+   * `convertFileSrc`-able path, which required writing every attachment to
+   * disk in the clear.)
+   */
   localUrl: string
   /** Original platform-side reference (e.g. Telegram file_id). */
   remoteRef: string
+  /** Inbound cache fetches only: the handle Rust deletes by. */
+  cacheKey?: string
 }
 
 export interface AttachmentDescriptor {

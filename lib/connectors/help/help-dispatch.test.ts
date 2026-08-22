@@ -29,6 +29,7 @@ function makeRow(over: Partial<AdapterInstanceRow> = {}): AdapterInstanceRow {
     displayName: "Cognia",
     enabled: true,
     transportMode: "gateway",
+    mediaModelPolicy: "local_extract_only",
     settings: { quickCommands: [{ triggerKey: "agenda", action: { type: "slash", value: "/x" } }] },
     credentialsRef: { keyringService: "s", accounts: [] },
     trigger: {} as never,

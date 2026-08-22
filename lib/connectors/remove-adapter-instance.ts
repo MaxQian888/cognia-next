@@ -11,8 +11,11 @@
  *   1. Keyring purge (desktop only — the keyring is a Tauri command). Every
  *      account listed in `credentialsRef.accounts` is deleted best-effort; a
  *      credential that is already gone must never block the delete.
- *   2. Attachment cache prune (`pruneAttachmentsForAdapter`) — Dexie rows for
- *      the adapter's fetched attachments. Best-effort for the same reason.
+ *   2. Attachment cache prune (`pruneAttachmentsForAdapter`) — the encrypted
+ *      blobs AND their Dexie rows. A row is only dropped once Rust confirms
+ *      its file is gone; anything unconfirmed goes to `connectorCleanupJobs`
+ *      so the ciphertext is retried rather than orphaned. Best-effort at this
+ *      level for the same reason as step 1.
  *   3. Row delete — the only step that is allowed to throw.
  *
  * Order matters: secrets go first so a failure in step 3 leaves the row
@@ -34,7 +37,7 @@ export interface RemoveAdapterInstanceResult {
   purgedCredentials: string[]
   /** Keyring accounts whose delete threw (already gone / keyring locked). */
   failedCredentials: string[]
-  /** Attachment rows pruned; `null` when the prune itself failed. */
+  /** Attachments removed (blob + row); `null` when the prune itself failed. */
   prunedAttachments: number | null
 }
 

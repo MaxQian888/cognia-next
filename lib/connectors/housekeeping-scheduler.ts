@@ -14,6 +14,11 @@ import { sweepTerminalOutboundRows } from "@/lib/db/outbound-jobs"
 import { sweepTerminalConnectorInboundJobs } from "@/lib/db/connector-inbound-jobs"
 import { sweepConnectorAuditRetention } from "@/lib/db/connector-audit"
 import { sweepConnectorHeartbeats } from "@/lib/connectors/health/heartbeat"
+import {
+  enforceAttachmentBudget,
+  reconcileOrphanedAttachments,
+  runCleanupLedger,
+} from "@/lib/connectors/attachment-fetcher"
 import { getTaskScheduler, registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
 import type { CreateScheduledTaskInput, ScheduledTaskType } from "@/types/scheduler"
 
@@ -28,6 +33,8 @@ export const EXECUTION_RUN_RETENTION_TASK_TYPE =
   "connection:housekeeping:execution-runs" satisfies ScheduledTaskType
 export const CONNECTOR_RETENTION_TASK_TYPE =
   "connection:housekeeping:connector-retention" satisfies ScheduledTaskType
+export const ATTACHMENT_CACHE_TASK_TYPE =
+  "connection:housekeeping:attachment-cache" satisfies ScheduledTaskType
 
 const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1_000
 const HOUSEKEEPING_TAG = "system:connector-housekeeping"
@@ -61,6 +68,26 @@ function registerHousekeepingExecutors(): void {
     success: true,
     output: { deleted: await sweepExecutionRunEventRetention() },
   }))
+  // Attachment cache upkeep, in dependency order: retry blobs whose delete
+  // never landed, drop ciphertext no row claims any more, then enforce the
+  // size ceiling. Running the ledger first means a blob that finally deletes
+  // is not counted against the budget and evicted twice.
+  registerTaskExecutor(ATTACHMENT_CACHE_TASK_TYPE, async () => {
+    const ledger = await runCleanupLedger()
+    const orphans = await reconcileOrphanedAttachments()
+    const budget = await enforceAttachmentBudget()
+    return {
+      success: true,
+      output: {
+        ledgerResolved: ledger.resolved,
+        ledgerStillFailing: ledger.stillFailing,
+        orphansDeleted: orphans.deleted.length,
+        orphanBytesFreed: orphans.freedBytes,
+        evicted: budget.deleted.length,
+        evictedBytesFreed: budget.freedBytes,
+      },
+    }
+  })
   registerTaskExecutor(CONNECTOR_RETENTION_TASK_TYPE, async () => ({
     success: true,
     output: {
@@ -113,11 +140,17 @@ function taskDrafts(): CreateScheduledTaskInput[] {
       type: CONNECTOR_RETENTION_TASK_TYPE,
       trigger: { type: "event", eventType: CONNECTOR_HOUSEKEEPING_EVENT },
     },
+    {
+      ...common,
+      name: "Connector attachment cache upkeep",
+      type: ATTACHMENT_CACHE_TASK_TYPE,
+      trigger: { type: "event", eventType: CONNECTOR_HOUSEKEEPING_EVENT },
+    },
   ]
 }
 
 /**
- * Register executors, ensure the four persisted internal tasks exist, then
+ * Register executors, ensure the persisted internal tasks exist, then
  * issue one boot sweep through the same event path. Safe to call repeatedly.
  */
 export async function installConnectorHousekeepingSchedule(): Promise<void> {

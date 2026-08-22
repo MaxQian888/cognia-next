@@ -93,6 +93,7 @@ export function WeChatPersonalConfigDialog({
           credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
+          mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,
           muted,
         })

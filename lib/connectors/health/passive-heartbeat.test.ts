@@ -54,6 +54,7 @@ function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRo
     credentialsRef: { keyringService: "x", accounts: [] },
     trigger: {} as never,
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

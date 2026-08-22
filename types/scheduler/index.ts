@@ -67,6 +67,7 @@ export type ScheduledTaskType =
   | "connection:housekeeping:connector-retention"
   | "connection:housekeeping:callback-bindings"
   | "connection:housekeeping:execution-runs"
+  | "connection:housekeeping:attachment-cache"
   // Usage-presence refresh (token-usage status on IM platforms) — registered
   // in `lib/connectors/presence/usage-status-runner.ts`.
   | "connection:presence:refresh"

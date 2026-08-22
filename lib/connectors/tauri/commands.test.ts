@@ -239,8 +239,13 @@ describe("connectorsResetAllWs", () => {
 describe("connectorsAttachmentFetch", () => {
   it("invokes connectors_attachment_fetch and returns AttachmentRef", async () => {
     const expectedRef: AttachmentRef = {
-      localUrl: "/var/data/cognia/connectors/cache/abc123",
+      cacheKey: "a".repeat(64),
       remoteRef: "file/BQACAgIA123",
+      sizeBytes: 20_480,
+      createdAt: 1_000,
+      lastAccessedAt: 1_000,
+      expiresAt: 605_800_000,
+      cached: false,
     }
     mockInvoke.mockResolvedValueOnce(expectedRef)
     const result = await connectorsAttachmentFetch(
@@ -254,13 +259,18 @@ describe("connectorsAttachmentFetch", () => {
       remoteRef: "file/BQACAgIA123",
       sourceUrl: "https://cdn.example.com/file.jpg",
       headers: undefined,
+      ttlMs: undefined,
     })
   })
 
   it("passes optional headers for authenticated attachment fetches", async () => {
     const expectedRef: AttachmentRef = {
-      localUrl: "/var/data/cognia/connectors/cache/mxc",
+      cacheKey: "b".repeat(64),
       remoteRef: "mxc://matrix.org/media",
+      sizeBytes: 512,
+      createdAt: 2_000,
+      lastAccessedAt: 2_000,
+      cached: true,
     }
     mockInvoke.mockResolvedValueOnce(expectedRef)
     const headers = { Authorization: "Bearer tok" }

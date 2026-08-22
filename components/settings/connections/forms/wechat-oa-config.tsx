@@ -159,6 +159,7 @@ export function WechatOaConfigDialog({
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
+          mediaModelPolicy: "local_extract_only",
           quietHours: quietHours ?? undefined,
           muted,
         })

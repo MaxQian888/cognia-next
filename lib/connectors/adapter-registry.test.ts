@@ -97,6 +97,7 @@ function makeRow(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRo
     credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
     trigger: defaultPrivateChatPolicy(),
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 1000,
     updatedAt: 2000,
     ...overrides,

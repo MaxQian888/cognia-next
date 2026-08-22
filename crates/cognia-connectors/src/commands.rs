@@ -194,19 +194,26 @@ pub async fn connectors_stop_server(
 /// previous load's leaked sockets are reaped first.
 #[tauri::command]
 pub async fn connectors_reset_all_ws() -> Result<u32, String> {
-    // Piggyback the attachment raw-cache cleanup on this once-per-boot reset:
-    // the plaintext copies decrypted for the previous session's webview are
-    // reaped before any adapter re-fetches (see the attachments.rs module
-    // header for the remaining exposure window). Best-effort — a cleanup
-    // failure must not block the WS reset.
-    match tokio::task::spawn_blocking(super::attachments::cleanup_raw_attachment_cache).await {
-        Ok(Ok(removed)) => {
-            if removed > 0 {
-                log::debug!("connectors bootstrap: removed {removed} raw attachment cache files");
+    // Piggyback the one-time attachment-cache migration on this once-per-boot
+    // reset: any plaintext copy an older build left behind is reaped, and any
+    // pre-envelope ciphertext is converted, before an adapter can re-fetch.
+    // Best-effort — a migration failure must not block the WS reset, and the
+    // completion marker means later boots short-circuit immediately.
+    match tokio::task::spawn_blocking(super::attachments::migrate_legacy_cache).await {
+        Ok(Ok(report)) => {
+            if !report.already_migrated {
+                log::info!(
+                    "connectors bootstrap: attachment cache migrated \
+                     (plaintext reaped: {}, converted: {}, expired: {}, unreadable: {})",
+                    report.plaintext_removed,
+                    report.converted,
+                    report.expired_removed,
+                    report.unreadable_removed
+                );
             }
         }
-        Ok(Err(e)) => log::warn!("connectors bootstrap: raw attachment cache cleanup failed: {e}"),
-        Err(e) => log::warn!("connectors bootstrap: raw attachment cleanup task failed: {e}"),
+        Ok(Err(e)) => log::warn!("connectors bootstrap: attachment cache migration failed: {e}"),
+        Err(e) => log::warn!("connectors bootstrap: attachment migration task failed: {e}"),
     }
 
     let generic = super::ws_client::close_all().await;
@@ -335,8 +342,55 @@ pub async fn connectors_attachment_fetch(
     remote_ref: String,
     source_url: String,
     headers: Option<std::collections::HashMap<String, String>>,
+    ttl_ms: Option<u64>,
 ) -> Result<super::attachments::AttachmentRef, String> {
-    super::attachments::fetch_attachment(adapter_id, remote_ref, source_url, headers).await
+    super::attachments::fetch_attachment(adapter_id, remote_ref, source_url, headers, ttl_ms).await
+}
+
+/// List every readable cache envelope. The renderer diffs this against its
+/// `connectorAttachments` rows to find orphaned blobs (files whose row was
+/// dropped) without trusting a client-side size or age.
+#[tauri::command]
+pub async fn connectors_attachment_list() -> Result<Vec<super::attachments::AttachmentEntry>, String>
+{
+    tokio::task::spawn_blocking(super::attachments::list_attachments)
+        .await
+        .map_err(|e| format!("attachment list task failed: {e}"))?
+}
+
+/// Batch-delete cache entries by key. Callers only drop their Dexie row once
+/// the key comes back in `deleted`; anything in `failed` goes to the cleanup
+/// ledger for retry.
+#[tauri::command]
+pub async fn connectors_attachment_delete(
+    cache_keys: Vec<String>,
+) -> Result<super::attachments::AttachmentCleanupReport, String> {
+    tokio::task::spawn_blocking(move || super::attachments::delete_attachments(cache_keys))
+        .await
+        .map_err(|e| format!("attachment delete task failed: {e}"))?
+}
+
+/// Drop every cached attachment belonging to one adapter instance — used when
+/// an instance is removed so its media does not outlive it.
+#[tauri::command]
+pub async fn connectors_attachment_evict_adapter(
+    adapter_id: String,
+) -> Result<super::attachments::AttachmentCleanupReport, String> {
+    tokio::task::spawn_blocking(move || super::attachments::evict_adapter_attachments(&adapter_id))
+        .await
+        .map_err(|e| format!("attachment evict task failed: {e}"))?
+}
+
+/// Reap expired entries and enforce the total-bytes ceiling, evicting the
+/// least recently used entries first. Sizes come from the envelopes, so the
+/// budget holds regardless of what the caller believed a file weighed.
+#[tauri::command]
+pub async fn connectors_attachment_enforce_budget(
+    max_total_bytes: u64,
+) -> Result<super::attachments::AttachmentCleanupReport, String> {
+    tokio::task::spawn_blocking(move || super::attachments::enforce_cache_budget(max_total_bytes))
+        .await
+        .map_err(|e| format!("attachment budget task failed: {e}"))?
 }
 
 /// Read a cached attachment's plaintext as base64 (None when uncached or

@@ -92,6 +92,7 @@ async function seedAdapter(): Promise<string> {
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: AUTO_TRIGGER,
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
   })
   getBus().registerAdapter(makeAdapter(row.id))
   return row.id

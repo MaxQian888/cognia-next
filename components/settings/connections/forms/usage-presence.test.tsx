@@ -29,6 +29,7 @@ const baseRow = (overrides: Partial<AdapterInstanceRow> = {}): AdapterInstanceRo
   credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
   trigger: { rules: [{ kind: "private-default" }], blockers: [], storeUnmatchedInDraftMode: false },
   defaultMode: "auto",
+  mediaModelPolicy: "local_extract_only",
   createdAt: 0,
   updatedAt: 0,
   ...overrides,

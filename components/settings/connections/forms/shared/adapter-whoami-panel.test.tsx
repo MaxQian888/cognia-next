@@ -68,6 +68,7 @@ function seed(
       storeUnmatchedInDraftMode: false,
     },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

@@ -48,7 +48,6 @@ export async function resolveInboundMatrixMedia(
           remoteRef: rawUrl,
           sourceUrl: seg.url,
           mimeType: mediaMimeType(seg),
-          sizeBytes: mediaSizeBytes(seg),
           headers,
         })
       }
@@ -88,10 +87,6 @@ function mediaMimeType(seg: MessageSegment): string | undefined {
     return seg.mimeType
   }
   return undefined
-}
-
-function mediaSizeBytes(seg: MessageSegment): number | undefined {
-  return seg.type === "file" ? seg.sizeBytes : undefined
 }
 
 async function inlineSmallImage(

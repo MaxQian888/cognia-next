@@ -36,8 +36,17 @@ const sweepConnectorHeartbeats = jest.fn()
 jest.mock("@/lib/connectors/health/heartbeat", () => ({
   sweepConnectorHeartbeats: (...args: unknown[]) => sweepConnectorHeartbeats(...args),
 }))
+const runCleanupLedger = jest.fn()
+const reconcileOrphanedAttachments = jest.fn()
+const enforceAttachmentBudget = jest.fn()
+jest.mock("@/lib/connectors/attachment-fetcher", () => ({
+  runCleanupLedger: (...args: unknown[]) => runCleanupLedger(...args),
+  reconcileOrphanedAttachments: (...args: unknown[]) => reconcileOrphanedAttachments(...args),
+  enforceAttachmentBudget: (...args: unknown[]) => enforceAttachmentBudget(...args),
+}))
 
 import {
+  ATTACHMENT_CACHE_TASK_TYPE,
   CALLBACK_BINDING_CLEANUP_TASK_TYPE,
   CONNECTOR_HOUSEKEEPING_EVENT,
   EXECUTION_RUN_RETENTION_TASK_TYPE,
@@ -62,6 +71,13 @@ beforeEach(() => {
   sweepTerminalConnectorInboundJobs.mockResolvedValue(6)
   sweepConnectorAuditRetention.mockResolvedValue(7)
   sweepConnectorHeartbeats.mockResolvedValue(8)
+  runCleanupLedger.mockResolvedValue({ resolved: 2, stillFailing: 1 })
+  reconcileOrphanedAttachments.mockResolvedValue({
+    deleted: ["k1", "k2", "k3"],
+    freedBytes: 300,
+    failed: [],
+  })
+  enforceAttachmentBudget.mockResolvedValue({ deleted: ["k4"], freedBytes: 100, failed: [] })
 })
 
 it("installs one durable clock plus bounded event-triggered housekeeping tasks", async () => {
@@ -72,9 +88,10 @@ it("installs one durable clock plus bounded event-triggered housekeeping tasks",
     OUTBOUND_RETENTION_TASK_TYPE,
     CALLBACK_BINDING_CLEANUP_TASK_TYPE,
     EXECUTION_RUN_RETENTION_TASK_TYPE,
+    ATTACHMENT_CACHE_TASK_TYPE,
     CONNECTOR_RETENTION_TASK_TYPE,
   ])
-  expect(createTask).toHaveBeenCalledTimes(5)
+  expect(createTask).toHaveBeenCalledTimes(6)
   expect(createTask).toHaveBeenCalledWith(
     expect.objectContaining({
       type: HOUSEKEEPING_CLOCK_TASK_TYPE,
@@ -86,6 +103,7 @@ it("installs one durable clock plus bounded event-triggered housekeeping tasks",
     CALLBACK_BINDING_CLEANUP_TASK_TYPE,
     EXECUTION_RUN_RETENTION_TASK_TYPE,
     CONNECTOR_RETENTION_TASK_TYPE,
+    ATTACHMENT_CACHE_TASK_TYPE,
   ]) {
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -108,6 +126,7 @@ it("does not duplicate durable tasks that already exist", async () => {
     { type: CALLBACK_BINDING_CLEANUP_TASK_TYPE },
     { type: EXECUTION_RUN_RETENTION_TASK_TYPE },
     { type: CONNECTOR_RETENTION_TASK_TYPE },
+    { type: ATTACHMENT_CACHE_TASK_TYPE },
   ])
 
   await installConnectorHousekeepingSchedule()
@@ -149,4 +168,42 @@ it("registers executors that emit the daily event and run each sweep", async () 
     success: true,
     output: { inboundDeleted: 6, auditDeleted: 7, heartbeatDeleted: 8 },
   })
+  await expect(executorFor(ATTACHMENT_CACHE_TASK_TYPE)(task, execution, signal)).resolves.toEqual({
+    success: true,
+    output: {
+      ledgerResolved: 2,
+      ledgerStillFailing: 1,
+      orphansDeleted: 3,
+      orphanBytesFreed: 300,
+      evicted: 1,
+      evictedBytesFreed: 100,
+    },
+  })
+})
+
+it("retries stuck blob deletes before reclaiming space", async () => {
+  // Order matters: a blob whose delete finally succeeds must be off the books
+  // before the budget is measured, or it is counted against the cap and a
+  // live attachment gets evicted in its place.
+  const order: string[] = []
+  runCleanupLedger.mockImplementation(async () => {
+    order.push("ledger")
+    return { resolved: 0, stillFailing: 0 }
+  })
+  reconcileOrphanedAttachments.mockImplementation(async () => {
+    order.push("orphans")
+    return { deleted: [], freedBytes: 0, failed: [] }
+  })
+  enforceAttachmentBudget.mockImplementation(async () => {
+    order.push("budget")
+    return { deleted: [], freedBytes: 0, failed: [] }
+  })
+
+  await installConnectorHousekeepingSchedule()
+  const executor = registerTaskExecutor.mock.calls.find(
+    ([type]) => type === ATTACHMENT_CACHE_TASK_TYPE
+  )?.[1] as (t: unknown, e: unknown, s: AbortSignal) => Promise<unknown>
+  await executor({ id: "t" }, { id: "e" }, new AbortController().signal)
+
+  expect(order).toEqual(["ledger", "orphans", "budget"])
 })
