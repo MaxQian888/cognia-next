@@ -501,6 +501,94 @@ describe("parseTelegramUpdate", () => {
     })
   })
 
+  describe("my_chat_member → membership system event", () => {
+    const chat = { id: -100, type: "supergroup" as const, title: "Team" }
+    const bot = { id: 999, first_name: "Bot", is_bot: true }
+    const actor = { id: 7, first_name: "Bob" }
+
+    function membership(
+      oldStatus: string,
+      newStatus: string,
+      extra: Record<string, unknown> = {}
+    ): TelegramUpdate {
+      return {
+        update_id: 1,
+        my_chat_member: {
+          chat,
+          from: actor,
+          date: 1700000000,
+          old_chat_member: { status: oldStatus, user: bot },
+          new_chat_member: { status: newStatus, user: bot, ...extra },
+        },
+      } as unknown as TelegramUpdate
+    }
+
+    it("reports member_added when the bot is added to a group", () => {
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("left", "member"))
+      expect(r!.kind).toBe("system")
+      expect(r!.systemKind).toBe("member_added")
+      // The actor is whoever added the bot, not the bot itself.
+      expect(r!.sender.remoteUserId).toBe("7")
+      expect(r!.channel.kind).toBe("group")
+    })
+
+    it("reports member_added when the bot is promoted straight to admin", () => {
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("kicked", "administrator"))
+      expect(r!.systemKind).toBe("member_added")
+    })
+
+    it("reports member_removed when the bot is kicked", () => {
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("administrator", "kicked"))
+      expect(r!.systemKind).toBe("member_removed")
+    })
+
+    it("reports member_removed when the bot leaves", () => {
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("member", "left"))
+      expect(r!.systemKind).toBe("member_removed")
+    })
+
+    it("treats restricted-but-still-a-member as present", () => {
+      // Tightening a restriction is not a leave — it must not fire the
+      // removal path, and it must not re-fire the welcome card either.
+      expect(
+        parseTelegramUpdate(
+          ADAPTER_ID,
+          SELF_ID,
+          membership("member", "restricted", { is_member: true })
+        )
+      ).toBeNull()
+    })
+
+    it("treats restricted-with-is_member-false as a removal", () => {
+      const r = parseTelegramUpdate(
+        ADAPTER_ID,
+        SELF_ID,
+        membership("member", "restricted", { is_member: false })
+      )
+      expect(r!.systemKind).toBe("member_removed")
+    })
+
+    it("drops a permission change that does not cross the membership boundary", () => {
+      // member → administrator would otherwise welcome the group a second time.
+      expect(
+        parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("member", "administrator"))
+      ).toBeNull()
+      expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("left", "kicked"))).toBeNull()
+    })
+
+    it("gives the same transition the same id so a redelivery cannot welcome twice", () => {
+      const first = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("left", "member"))
+      const again = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("left", "member"))
+      expect(first!.messageId).toBe(again!.messageId)
+    })
+
+    it("carries no message body — it is an audit event, not a turn", () => {
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, membership("left", "member"))
+      expect(r!.segments).toEqual([])
+      expect(r!.plainText).toBe("")
+    })
+  })
+
   describe("largest-photo selection (audited fix #10)", () => {
     const baseChat = { id: 1, type: "private" as const, first_name: "Q" }
     const baseFrom = { id: 1, first_name: "Q" }

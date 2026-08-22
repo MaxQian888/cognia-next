@@ -201,8 +201,26 @@ export interface TelegramMessageReactionUpdated {
   new_reaction: TelegramReactionType[]
 }
 
-// GAP: my_chat_member handling (bot added/removed/permission changes) is not
-// implemented — follow-up. Album aggregation now lives in `./album.ts`.
+/** Bot API membership status, ordered from "not in the chat" upward. */
+export type TelegramChatMemberStatus =
+  "creator" | "administrator" | "member" | "restricted" | "left" | "kicked"
+
+export interface TelegramChatMember {
+  status: TelegramChatMemberStatus
+  user: TelegramUser
+  /** `restricted` members are still IN the chat only while this is true. */
+  is_member?: boolean
+}
+
+/** `my_chat_member`: this bot's own membership in a chat changed. */
+export interface TelegramMyChatMemberUpdated {
+  chat: TelegramChat
+  from: TelegramUser
+  date: number
+  old_chat_member: TelegramChatMember
+  new_chat_member: TelegramChatMember
+}
+
 export interface TelegramUpdate {
   update_id: number
   message?: TelegramMessage
@@ -211,6 +229,7 @@ export interface TelegramUpdate {
   edited_channel_post?: TelegramMessage
   callback_query?: TelegramCallbackQuery
   message_reaction?: TelegramMessageReactionUpdated
+  my_chat_member?: TelegramMyChatMemberUpdated
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +587,80 @@ function reactionToEvent(
   }
 }
 
+/** Statuses that mean the bot is actually in the chat and can act. */
+function isPresentStatus(member: TelegramChatMember): boolean {
+  switch (member.status) {
+    case "creator":
+    case "administrator":
+    case "member":
+      return true
+    case "restricted":
+      // A restricted member is still in the chat only while `is_member` holds;
+      // Telegram uses `restricted` + `is_member: false` for a banned-but-known
+      // member, which is a LEAVE, not a permission change.
+      return member.is_member !== false
+    case "left":
+    case "kicked":
+      return false
+  }
+}
+
+/**
+ * Project `my_chat_member` — this bot being added to or removed from a chat.
+ *
+ * Only a crossing of the present/absent boundary produces an event. A change
+ * WITHIN the chat (member → administrator, or a restriction being tightened) is
+ * deliberately dropped: `systemKind` has no variant for it, and reporting it as
+ * `member_added` would re-fire the welcome card every time an admin adjusted a
+ * permission. The consequence of a permission change is already visible where
+ * it matters — the next send fails with a Telegram 403 that the outbound error
+ * mapper classifies.
+ */
+function myChatMemberToEvent(
+  adapterId: string,
+  selfId: string,
+  update: TelegramMyChatMemberUpdated,
+  rawUpdate: TelegramUpdate
+): NormalizedInboundEvent | null {
+  const was = isPresentStatus(update.old_chat_member)
+  const now = isPresentStatus(update.new_chat_member)
+  if (was === now) return null
+
+  const chat = update.chat
+  const chatId = chat.id
+  const conversationKey = buildConversationKey("telegram", adapterId, String(chatId))
+  const systemKind = now ? "member_added" : "member_removed"
+  return {
+    platform: "telegram",
+    adapterId,
+    selfId,
+    // Deterministic: Telegram sends no id for this update, and a duplicate
+    // delivery of the same transition must not welcome the group twice.
+    messageId: `tgmember:${chatId}:${update.new_chat_member.status}:${update.date}`,
+    conversationRef: {
+      platform: "telegram",
+      adapterId,
+      chatId: String(chatId),
+    },
+    conversationKey,
+    // The actor is whoever added or removed the bot, not the bot itself.
+    sender: buildPlatformIdentity(adapterId, chatId, update.from),
+    channel: {
+      id: conversationKey,
+      name: chat.title ?? chat.username ?? chat.first_name,
+      kind: chat.type === "private" ? "private" : chat.type === "channel" ? "channel" : "group",
+      platformChannelId: String(chatId),
+    },
+    segments: [],
+    plainText: "",
+    mentions: { selfMentioned: false, users: [] },
+    timestamp: update.date * 1000,
+    raw: rawUpdate,
+    kind: "system",
+    systemKind,
+  }
+}
+
 function sameReaction(a: TelegramReactionType, b: TelegramReactionType): boolean {
   if (a.type !== b.type) return false
   if (a.type === "emoji") return a.emoji === b.emoji
@@ -746,6 +839,11 @@ export function parseTelegramUpdate(
   // ── Reaction updates → system event ───────────────────────────────────
   if (update.message_reaction !== undefined) {
     return reactionToEvent(adapterId, selfId, update.message_reaction, update)
+  }
+
+  // ── This bot joined or left a chat → system event ─────────────────────
+  if (update.my_chat_member !== undefined) {
+    return myChatMemberToEvent(adapterId, selfId, update.my_chat_member, update)
   }
 
   // ── Inline button press: handled separately via the callback channel ──

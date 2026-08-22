@@ -114,7 +114,7 @@ describe("startLongPoll", () => {
     expect(mockInvoke).not.toHaveBeenCalled()
   })
 
-  it("sends allowed_updates including message_reaction (audited fix #3)", async () => {
+  it("sends allowed_updates including message_reaction and my_chat_member", async () => {
     jest.useRealTimers()
     mockInvoke.mockResolvedValue(makeOkResp([makeUpdate(1)]))
 
@@ -131,6 +131,8 @@ describe("startLongPoll", () => {
     const url = mockInvoke.mock.calls[0][1].req.url as string
     expect(url).toContain("allowed_updates=")
     const param = new URL(url).searchParams.get("allowed_updates")
+    // Naming ANY list opts out of Telegram's defaults, so every type the
+    // adapter parses has to appear here or it is never delivered at all.
     expect(JSON.parse(param!)).toEqual([
       "message",
       "edited_message",
@@ -138,6 +140,7 @@ describe("startLongPoll", () => {
       "edited_channel_post",
       "callback_query",
       "message_reaction",
+      "my_chat_member",
     ])
   })
 
