@@ -112,6 +112,9 @@
   --radius-xl: calc(var(--radius) + 4px);
   --color-effort-ultra: var(--effort-ultra);
   --color-effort-ultra-muted: var(--effort-ultra-muted);
+  --color-brand-action: var(--brand-action);
+  --color-brand-approval: var(--brand-approval);
+  --color-brand-wash: var(--brand-wash);
 }
 
 :root,
@@ -198,6 +201,31 @@
      accent would undo the neutral palette. */
   --effort-ultra: oklch(0.53 0.23 293);
   --effort-ultra-muted: oklch(0.53 0.23 293 / 22%);
+
+  /* Brand accents — copied VERBATIM from `web/app/globals.css` (`--action` and
+     `--approval` of the ADR-0092 V2 spec) so the two files can be diffed for
+     drift. Hex rather than oklch for exactly that reason: a rounded conversion
+     would make the site and the app "the same colour" only approximately.
+
+     The app's own palette is achromatic on purpose, so this is scoped the way
+     `--effort-ultra` above is: the first-run takeover uses it, nothing else
+     does yet. It exists because the brand already lived on the marketing site
+     and stopped at the app's door — a user who arrives from cognia's website
+     should recognise the first screen as the same product.
+
+     USAGE RULE, carried over from the site spec §8: `--brand-action` is
+     1.69:1 on a light substrate and `--brand-approval` is 2.15:1. They are
+     connection lines, state dots, and fills — NEVER a text colour, and never
+     the only carrier of a state. Labels stay on `--foreground` /
+     `--muted-foreground`. */
+  --brand-action: #35cedd;
+  --brand-approval: #d99a3d;
+  /* Mesh stops for the narrative panel's substrate. Alpha-only derivatives so
+     one declaration serves both themes' backgrounds without a second hue. */
+  --brand-mesh-from: color-mix(in oklab, var(--brand-action) 18%, transparent);
+  --brand-mesh-to: color-mix(in oklab, var(--brand-approval) 12%, transparent);
+  /* The tint a framed block sits on inside the panel. */
+  --brand-wash: color-mix(in oklab, var(--brand-action) 7%, var(--background));
 }
 
 .dark,
@@ -260,6 +288,12 @@
      paints is 1px wide. */
   --effort-ultra: oklch(0.72 0.19 296);
   --effort-ultra-muted: oklch(0.72 0.19 296 / 26%);
+
+  /* The site's own dark-mode values, again verbatim. Both are lifted: the
+     light-mode cyan loses too much against a near-black substrate. The mesh
+     and wash derivations above are alpha-only, so they follow automatically. */
+  --brand-action: #4fdcea;
+  --brand-approval: #e5ac57;
 }
 
 /* ---------------------------------------------------------------------------
@@ -3534,6 +3568,74 @@ select {
 
 .effort-glyph-pulse {
   animation: effort-glyph-pulse 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ---------------------------------------------------------------------------
+   First-run narrative scenes (components/onboarding/scenes/).
+
+   Three motions, all CSS rather than `motion/react`, and all for the same
+   reason: a JS-driven `initial={{ opacity: 0 }}` that never advances leaves
+   the element invisible, and a first-run screen that can render blank is not
+   worth a nicer easing curve. CSS animations that never run leave the element
+   at its own declared styles — which are the finished ones here, deliberately.
+
+   That is why every keyframe below carries its start state INSIDE the
+   keyframe rather than on the element: `onboarding-draw` sets the dash pattern
+   in `from` and `to`, so a connector whose animation never plays is drawn
+   solid rather than dashed into invisibility.
+
+   The reduce-motion guards above already govern all three — they clamp
+   `animation-duration` to 1ms and `animation-iteration-count` to 1, which
+   settles the draw instantly and stops the two loops after one pass.
+--------------------------------------------------------------------------- */
+
+/* Paths using this MUST set `pathLength="1"`, which normalises every curve to
+   a unit length so one keyframe serves connectors of any geometry. */
+@keyframes onboarding-draw {
+  from {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+  }
+}
+
+.onboarding-draw {
+  animation: onboarding-draw var(--tw-duration, 600ms) cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Marching ants along a dashed connector — "this one is in flight". Bounded to
+   the state that means it: the class is only applied while a plan line is
+   running or a runtime is unauthenticated. */
+@keyframes onboarding-flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+.onboarding-flow {
+  animation: onboarding-flow 900ms linear infinite;
+}
+
+/* One soft breath on the core's halo, so a settled scene is not a still life.
+   4s and a 6% opacity swing: perceptible as life, not as movement — the user
+   may sit on this screen for the length of an OAuth round trip. */
+@keyframes onboarding-breathe {
+  0%,
+  100% {
+    opacity: 0.1;
+    r: var(--onboarding-halo-r, 38);
+  }
+  50% {
+    opacity: 0.17;
+    r: calc(var(--onboarding-halo-r, 38) * 1.06);
+  }
+}
+
+.onboarding-breathe {
+  animation: onboarding-breathe 4s ease-in-out infinite;
 }
 
 /* Ultracode only. The dot lattice marches one cell to the right and loops
