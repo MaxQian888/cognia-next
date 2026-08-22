@@ -18,9 +18,14 @@ jest.mock("@/lib/platform/detect", () => ({
   detectPlatform: () => detectPlatform(),
 }))
 
+const EMPTY_SCAN_RESULT = {
+  runtimes: [] as { id: string; label: string; authenticated: boolean }[],
+  migratable: [] as { vendor: string; installed: boolean; configPath?: string }[],
+  capabilities: ["web"],
+}
 const scan = {
   phase: "empty",
-  result: { runtimes: [], migratable: [], capabilities: ["web"] },
+  result: { ...EMPTY_SCAN_RESULT },
   rescan: jest.fn(),
 }
 jest.mock("@/hooks/onboarding/use-machine-scan", () => ({ useMachineScan: () => scan }))
@@ -57,11 +62,28 @@ jest.mock("@/lib/chat/pending-prompt", () => ({
   queuePendingChatPrompt: (...a: unknown[]) => queuePendingChatPrompt(...a),
 }))
 
+const buildMigrationPreview = jest.fn().mockResolvedValue({ artifacts: {} })
+const applyMigration = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/agent-migration/run", () => ({
-  buildMigrationPreview: jest.fn(),
-  applyMigration: jest.fn(),
+  buildMigrationPreview: (...a: unknown[]) => buildMigrationPreview(...a),
+  applyMigration: (...a: unknown[]) => applyMigration(...a),
 }))
 jest.mock("@/lib/runtime/standalone-mode", () => ({ setMobileRuntimeMode: jest.fn() }))
+
+// The history walk is its own subsystem with its own suite; the flow only
+// needs a settled count to build a plan from.
+let historyTotal = 0
+jest.mock("@/hooks/onboarding/use-history-import", () => ({
+  useHistoryImport: () => ({
+    phase: historyTotal > 0 ? "found" : "empty",
+    total: historyTotal,
+    sources: [],
+    imported: 0,
+    progress: 0,
+    partial: false,
+    importAll: jest.fn().mockResolvedValue(undefined),
+  }),
+}))
 
 // The flow reads one verdict, not the credential stack behind it. Mocking the
 // hook keeps this suite about sequencing — `use-model-access.test.tsx` owns
@@ -78,6 +100,9 @@ jest.mock("@/components/onboarding/steps/provider-step", () => ({
       <button data-testid="stub-back-to-chooser" onClick={() => onViewChange?.("chooser")} />
     </div>
   ),
+}))
+jest.mock("@/components/onboarding/express-sign-in", () => ({
+  ExpressSignIn: () => <div data-testid="onboarding-express-sign-in" />,
 }))
 jest.mock("@/components/desktop/avatar-badge", () => ({ AvatarBadge: () => <span /> }))
 
@@ -104,9 +129,12 @@ beforeEach(() => {
   createSession.mockResolvedValue({ id: "s1" })
   detectPlatform.mockReturnValue("tauri")
   settings = { id: "singleton" } as AppSettings
+  scan.result = { ...EMPTY_SCAN_RESULT }
+  buildMigrationPreview.mockResolvedValue({ artifacts: {} })
   sessionCount = 0
   companionPaired = false
   companionLoading = false
+  historyTotal = 0
   modelAccess.value = false
   modelAccess.resolved = false
 })
@@ -130,11 +158,108 @@ describe("OnboardingFlow", () => {
     expect(replace).toHaveBeenCalledWith("/")
   })
 
-  it("advances through the desktop sequence and persists each step", async () => {
+  it("advances through the step-by-step sequence and persists each step", async () => {
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("onboarding-welcome-customise"))
+    // The path is persisted alongside the step, so a resumed setup does not
+    // re-ask which one the user chose.
+    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("scan", "custom"))
+    expect(screen.getByTestId("onboarding-scan")).toBeInTheDocument()
+  })
+
+  it("takes the primary CTA to the recommended screen, not to the first step", async () => {
     render(<OnboardingFlow />)
     fireEvent.click(screen.getByTestId("onboarding-welcome-cta"))
-    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("scan"))
+    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("express", "express"))
+    expect(screen.getByTestId("onboarding-express")).toBeInTheDocument()
+    // Two screens end to end: the scan and sign-in steps are folded into this
+    // one, not queued behind it.
+    expect(screen.queryByTestId("onboarding-scan")).toBeNull()
+  })
+
+  it("offers no path at all until the fork is answered", () => {
+    render(<OnboardingFlow />)
+    // Welcome is the whole sequence until then, so there is nowhere to go back
+    // to and nothing to continue to.
+    expect(screen.queryByTestId("onboarding-back")).toBeNull()
+    expect(screen.queryByTestId("onboarding-continue")).toBeNull()
+  })
+
+  it("resumes the recommended path from a persisted mode", () => {
+    settings = {
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "express",
+        mode: "express",
+      },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    expect(screen.getByTestId("onboarding-express")).toBeInTheDocument()
+  })
+
+  it("reads a pre-fork record as the step-by-step path", () => {
+    // v1 rows carry no `mode`; a `lastStep` past the intro is the only
+    // evidence of which path they were on, and only one path had those steps.
+    settings = {
+      id: "singleton",
+      onboardingProgress: { version: 1, path: "runtime_skipped", lastStep: "scan" },
+    } as AppSettings
+    render(<OnboardingFlow />)
     expect(screen.getByTestId("onboarding-scan")).toBeInTheDocument()
+  })
+
+  it("runs only the plan lines the user left checked", async () => {
+    scan.result = {
+      runtimes: [{ id: "claude-code", label: "Claude Code", authenticated: true }],
+      migratable: [{ vendor: "claude-code", installed: true, configPath: "~/.claude" }],
+      capabilities: ["fs", "web"],
+    } as typeof scan.result
+    modelAccess.value = true
+    modelAccess.resolved = true
+    settings = {
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "express",
+        mode: "express",
+      },
+    } as AppSettings
+    render(<OnboardingFlow />)
+
+    // Drop the migration, then run.
+    fireEvent.click(screen.getByTestId("onboarding-express-toggle-migrate-claude-code"))
+    fireEvent.click(screen.getByTestId("onboarding-express-apply"))
+
+    // Nothing was written: the only actionable line was unchecked, and the
+    // remaining lines are statements of fact rather than work.
+    await waitFor(() => expect(screen.getByTestId("onboarding-express-ready")).toBeInTheDocument())
+    expect(applyMigration).not.toHaveBeenCalled()
+    // And it hands over to the terminal step in place, rather than navigating.
+    expect(screen.getByTestId("onboarding-card-summarize-web")).toBeInTheDocument()
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it("blames the sign-in line when the recommended screen is abandoned", async () => {
+    // The recommended screen carries the sign-in line, so bailing out of it is
+    // the same omission the step-by-step path records as `provider_skipped` —
+    // reporting a missing runtime would make the finish bar name the wrong thing.
+    modelAccess.value = false
+    modelAccess.resolved = false
+    settings = {
+      id: "singleton",
+      onboardingProgress: {
+        version: 2,
+        path: "runtime_skipped",
+        lastStep: "express",
+        mode: "express",
+      },
+    } as AppSettings
+    render(<OnboardingFlow />)
+    fireEvent.click(screen.getByTestId("onboarding-skip"))
+    await waitFor(() => expect(skipOnboarding).toHaveBeenCalledWith("provider_skipped", "express"))
   })
 
   it("resumes a persisted step rather than restarting", () => {
@@ -150,11 +275,11 @@ describe("OnboardingFlow", () => {
     modelAccess.value = true
     modelAccess.resolved = true
     render(<OnboardingFlow />)
-    fireEvent.click(screen.getByTestId("onboarding-welcome-cta"))
-    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("scan"))
+    fireEvent.click(screen.getByTestId("onboarding-welcome-customise"))
+    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("scan", "custom"))
     fireEvent.click(screen.getByTestId("onboarding-continue"))
     // scan → first-run, skipping provider.
-    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run"))
+    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run", "custom"))
   })
 
   it("stands its action row down while the key panel owns the primary button", () => {
@@ -302,7 +427,7 @@ describe("OnboardingFlow", () => {
     render(<OnboardingFlow />)
     fireEvent.click(screen.getByRole("button", { name: "continue" }))
 
-    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run"))
+    await waitFor(() => expect(advanceOnboarding).toHaveBeenCalledWith("first-run", "custom"))
     expect(screen.getByRole("heading", { name: "firstRun.title" })).toBeInTheDocument()
   })
 })

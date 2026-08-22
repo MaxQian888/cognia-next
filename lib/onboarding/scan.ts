@@ -85,6 +85,46 @@ export function hasModelAccess(input: {
   return input.scan.runtimes.some((r) => r.authenticated)
 }
 
+/**
+ * Which external-agent preset each migration vendor corresponds to.
+ *
+ * The probe answers "is this vendor's config on disk"; the preset is what the
+ * flow would actually run the first output through, and where its display name
+ * comes from. Kept here rather than inside `useMachineScan` because the
+ * recommended path's plan needs the same mapping to label its migration lines
+ * — the alternative was a plan line reading "Bring over your claude-code
+ * setup", printing an internal id at the user.
+ */
+export const VENDOR_RUNTIME: Record<MigrationVendor, string> = {
+  "claude-code": "claude-code",
+  codex: "codex",
+  opencode: "opencode-server",
+  // Added with the vendor itself. Its absence was not merely cosmetic: an
+  // installed Pi resolved to `undefined`, so the runtime row rendered with an
+  // undefined id and `hasModelAccess` could not see it — an already
+  // authenticated Pi still got asked for credentials.
+  pi: "pi",
+}
+
+/**
+ * A vendor's display name, taken from the runtime the same probe produced.
+ *
+ * `useMachineScan` already resolved every installed vendor to its
+ * external-agent preset and carried that preset's name onto the runtime row,
+ * so the name is in the scan result and needs no second lookup — which also
+ * keeps this module free of the preset catalogue and testable in the fast node
+ * project. Falls back to the raw vendor id only if the two halves of the scan
+ * result disagree, which they cannot in practice.
+ *
+ * Both the scan step and the recommended plan call it: without it, a row reads
+ * "Import commands, settings and past sessions from claude-code", printing an
+ * internal slug at someone who has only ever seen the words "Claude Code".
+ */
+export function vendorLabel(scan: ScanResult, vendor: MigrationVendor): string {
+  const runtimeId = VENDOR_RUNTIME[vendor]
+  return scan.runtimes.find((runtime) => runtime.id === runtimeId)?.label ?? vendor
+}
+
 /** Vendors worth offering to import — installed, and not already imported. */
 export function migratableVendors(probes: readonly MigrationVendorProbe[]): MigrationVendor[] {
   return probes.filter((p) => p.installed).map((p) => p.vendor)

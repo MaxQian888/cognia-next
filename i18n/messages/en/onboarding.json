@@ -183,8 +183,8 @@
   "welcome": {
     "headline": "Your desktop, with an agent in it.",
     "lede": "Cognia runs agents against what is actually on this machine — your files, your screen, your browser — not just a chat box.",
-    "sub": "This takes about a minute, and ends with the agent finishing one real task.",
-    "cta": "Get started",
+    "sub": "About a minute either way. Both paths end with the agent finishing one real task.",
+    "cta": "Set up for me",
     "skipExisting": "I've done this before",
     "modeTitle": "How should this phone run?",
     "byokTitle": "On its own",
@@ -192,7 +192,88 @@
     "byokCta": "Use my own key",
     "pairTitle": "Paired with my desktop",
     "pairDescription": "Send work to a Cognia desktop over LAN or WAN. It does the heavy lifting.",
-    "pairCta": "Pair with a desktop"
+    "pairCta": "Pair with a desktop",
+    "customiseCta": "I'll configure it myself"
   },
-  "wordmark": "Cognia"
+  "wordmark": "Cognia",
+  "scene": {
+    "welcome": "An agent inside your machine, reaching your files, your screen and the web",
+    "scan": "What the scan found on this machine",
+    "express": "The setup plan, and how far it has got",
+    "provider": "A single credential completing the link to Cognia",
+    "firstRun": "Cognia writing its first output back out"
+  },
+  "narrative": {
+    "welcome": {
+      "headline": "It works on what is actually here.",
+      "body": "Files, screen, browser — the things a chat box cannot reach."
+    },
+    "express": {
+      "headline": "Nothing runs until you say so.",
+      "body": "Every line below is something the scan actually found. Drop any of them."
+    },
+    "scan": {
+      "headline": "Looking at what you already have.",
+      "body": "Agent CLIs, their settings, and the conversations on this disk. None of it leaves your computer."
+    },
+    "provider": {
+      "headline": "One credential, then you are done.",
+      "body": "Use the subscription you already pay for, or bring your own key."
+    },
+    "first-run": {
+      "headline": "Now watch it do one real thing.",
+      "body": "Pick a task and judge the result yourself."
+    },
+    "express-applying": {
+      "headline": "Doing it now.",
+      "body": "Each line lights up as it lands. Nothing here needs you."
+    }
+  },
+  "express": {
+    "title": "Here is what we will set up",
+    "freshTitle": "Two things and you are running",
+    "description": "Everything below was found on this machine. Uncheck anything you would rather skip — nothing runs until you press the button.",
+    "applyingTitle": "Setting things up",
+    "applyingDescription": "This takes a few seconds. You can watch it go.",
+    "apply": "Set it up",
+    "needsModel": "Connect a model above first — there is nothing to run a first task with yet.",
+    "item": {
+      "migrate": {
+        "title": "Bring over your {vendor} setup",
+        "description": "Commands, settings, skills, subagents and MCP servers. Existing entries are kept."
+      },
+      "history": {
+        "title": "{count, plural, one {Import # past conversation} other {Import # past conversations}}",
+        "description": "Every transcript we can read on this disk, across all agents — not just the ones with config installed."
+      },
+      "runtime": {
+        "title": "Reach models through {runtime}",
+        "description": "It is already signed in on this machine, so Cognia needs no credentials of its own."
+      },
+      "signIn": {
+        "title": "Connect a model",
+        "description": "The one step nobody can do for you. It takes about twenty seconds."
+      },
+      "capabilities": {
+        "title": "What your first task can use"
+      },
+      "pair": {
+        "title": "Pair with your desktop",
+        "description": "Your desktop does the work and holds the credentials. This phone becomes a remote for it."
+      }
+    },
+    "capability": {
+      "fs": "Read your files",
+      "ocr": "Pull text out of images",
+      "web": "Read web pages"
+    },
+    "needsPairing": "Pair with a desktop first — this phone has nothing of its own to run a task with.",
+    "signIn": {
+      "connected": "Connected as {account}",
+      "more": "More ways to connect",
+      "collapse": "Back to the quick option",
+      "save": "Connect"
+    },
+    "freshDescription": "Nothing to bring over from this machine, so setup is short: connect a model, and Cognia is ready to do something with it."
+  }
 }

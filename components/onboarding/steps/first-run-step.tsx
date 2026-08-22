@@ -1,12 +1,13 @@
 "use client"
 
-import { FolderTreeIcon, GlobeIcon, Loader2Icon, ScanTextIcon, type LucideIcon } from "lucide-react"
+import { FolderTreeIcon, GlobeIcon, ScanTextIcon, type LucideIcon } from "lucide-react"
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import type { Character, OnboardingShell } from "@cognia/agent-config-types"
 
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { StepHeading } from "../step-shell"
 import { cn } from "@/lib/utils"
 import { starterCardsWithFallback, type StarterCard } from "@/lib/onboarding/starter-cards"
@@ -143,7 +144,7 @@ export function FirstRunStep({
             >
               <span className="flex items-center gap-2">
                 {running === card.id ? (
-                  <Loader2Icon className="size-4 animate-spin text-primary" aria-hidden />
+                  <Spinner className="size-4 text-primary" />
                 ) : (
                   <Icon className="size-4 text-primary" aria-hidden />
                 )}

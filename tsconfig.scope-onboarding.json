@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "incremental": false },
+  "include": [
+    "components/onboarding/**/*.tsx",
+    "components/onboarding/**/*.ts",
+    "lib/onboarding/**/*.ts",
+    "hooks/onboarding/**/*.ts",
+    "app/onboarding/**/*.tsx"
+  ],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}

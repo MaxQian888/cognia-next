@@ -1,8 +1,10 @@
 import {
+  ONBOARDING_MODES,
   ONBOARDING_SHELLS,
   ONBOARDING_STATE_VERSION,
   initialOnboardingProgress,
   isOnboardingSettled,
+  resolveOnboardingMode,
   type OnboardingProgress,
 } from "./onboarding"
 
@@ -60,5 +62,58 @@ describe("isOnboardingSettled", () => {
         skippedAt: "2026-05-18T00:00:00.000Z",
       })
     ).toBe(true)
+  })
+})
+
+describe("ONBOARDING_MODES", () => {
+  it("enumerates the two paths exactly once each", () => {
+    expect(new Set(ONBOARDING_MODES).size).toBe(ONBOARDING_MODES.length)
+    expect(ONBOARDING_MODES).toEqual(["express", "custom"])
+  })
+})
+
+describe("resolveOnboardingMode", () => {
+  it("returns nothing for a device that has never been asked", () => {
+    // Defaulting either way would send a resuming user down a path they never
+    // picked, so the fork gets asked rather than guessed.
+    expect(resolveOnboardingMode(undefined)).toBeUndefined()
+    expect(resolveOnboardingMode(initialOnboardingProgress())).toBeUndefined()
+  })
+
+  it("takes the stored answer when there is one", () => {
+    expect(resolveOnboardingMode({ version: 2, path: "runtime_skipped", mode: "express" })).toBe(
+      "express"
+    )
+    expect(resolveOnboardingMode({ version: 2, path: "runtime_skipped", mode: "custom" })).toBe(
+      "custom"
+    )
+  })
+
+  it("prefers the stored answer over the step it stopped on", () => {
+    expect(
+      resolveOnboardingMode({
+        version: 2,
+        path: "runtime_skipped",
+        mode: "express",
+        lastStep: "scan",
+      })
+    ).toBe("express")
+  })
+
+  it("reads a pre-fork record from the step it stopped on", () => {
+    // v1 rows carry no `mode`. Any step past the intro belongs to the sequence
+    // that had those steps, and only one path had them.
+    for (const lastStep of ["scan", "provider", "first-run"] as const) {
+      expect(resolveOnboardingMode({ version: 1, path: "runtime_skipped", lastStep })).toBe(
+        "custom"
+      )
+    }
+  })
+
+  it("still asks a v1 record that never got past the intro", () => {
+    expect(
+      resolveOnboardingMode({ version: 1, path: "runtime_skipped", lastStep: "welcome" })
+    ).toBeUndefined()
+    expect(resolveOnboardingMode({ version: 1, path: "runtime_skipped" })).toBeUndefined()
   })
 })

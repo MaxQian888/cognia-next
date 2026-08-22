@@ -1,4 +1,4 @@
-import type { OnboardingShell, OnboardingStepId } from "@cognia/agent-config-types"
+import type { OnboardingMode, OnboardingShell, OnboardingStepId } from "@cognia/agent-config-types"
 
 /**
  * The canonical onboarding step order, plus which shells each step applies to.
@@ -14,6 +14,12 @@ import type { OnboardingShell, OnboardingStepId } from "@cognia/agent-config-typ
  * does not need: Multica forks its whole runtime step into a separate
  * component for web, whereas Cognia has four contexts and would need four.
  *
+ * Since the welcome screen forks, each step also declares the **paths** it
+ * belongs to. The two paths are not two orderings of the same screens: the
+ * recommended path's `express` screen *is* the scan, sign-in and first-run
+ * steps folded into one surface, so it replaces them rather than preceding
+ * them. That is why `mode` filters here rather than being a flag a step reads.
+ *
  * Two steps are conditional beyond `availableIn` and are filtered at runtime by
  * {@link resolveStepSequence}:
  *
@@ -25,6 +31,11 @@ import type { OnboardingShell, OnboardingStepId } from "@cognia/agent-config-typ
 export interface OnboardingStepDef {
   id: OnboardingStepId
   availableIn: readonly OnboardingShell[]
+  /**
+   * Which paths through setup include this step. `welcome` is in both — it is
+   * where the fork is asked.
+   */
+  modes: readonly OnboardingMode[]
   /**
    * Steps the rail renders as progress. `welcome` is excluded: reading a
    * product intro is not progress toward being set up, and showing "step 1 of
@@ -39,7 +50,20 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     // Every shell shows it. On mobile it additionally carries the
     // standalone/paired mode fork absorbed from the old `/welcome` route.
     availableIn: ["tauri", "web", "mobile-standalone", "mobile-paired"],
+    modes: ["express", "custom"],
     countsAsProgress: false,
+  },
+  {
+    id: "express",
+    // Every shell, including the two with nothing local to scan: a browser's
+    // recommended path is the sign-in line plus the capability line plus the
+    // starter cards, which still folds two screens into one. A paired phone's
+    // is the pairing line plus the cards.
+    availableIn: ["tauri", "web", "mobile-standalone", "mobile-paired"],
+    modes: ["express"],
+    // In the sequence for resume and back/next, but the panel hides the
+    // stepper in this mode: "1 of 1" is not progress information.
+    countsAsProgress: true,
   },
   {
     id: "scan",
@@ -47,6 +71,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     // reaches this step too, but its body is the pairing flow — the compute it
     // is "scanning for" lives on the desktop it is about to pair with.
     availableIn: ["tauri", "mobile-paired"],
+    modes: ["custom"],
     countsAsProgress: true,
   },
   {
@@ -54,11 +79,13 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
     // Not offered to a paired phone: it borrows the desktop's credentials, so
     // asking it to authenticate separately would configure the wrong machine.
     availableIn: ["tauri", "web", "mobile-standalone"],
+    modes: ["custom"],
     countsAsProgress: true,
   },
   {
     id: "first-run",
     availableIn: ["tauri", "web", "mobile-standalone", "mobile-paired"],
+    modes: ["custom"],
     countsAsProgress: true,
   },
 ] as const
@@ -66,6 +93,12 @@ export const ONBOARDING_STEPS: readonly OnboardingStepDef[] = [
 /** Runtime facts that decide the two conditional steps. */
 export interface StepSequenceInput {
   shell: OnboardingShell
+  /**
+   * Which path the user picked on the welcome screen. `undefined` before they
+   * have — which yields the intro alone, because every step after it belongs
+   * to one path or the other and picking for them would take the fork away.
+   */
+  mode: OnboardingMode | undefined
   /**
    * True once the user has model access from *any* source — a Cognia
    * subscription/API key, or a usable runtime the scan found. Suppresses the
@@ -83,9 +116,13 @@ export interface StepSequenceInput {
 export function resolveStepSequence({
   shell,
   hasModelAccess,
+  mode,
 }: StepSequenceInput): OnboardingStepDef[] {
   return ONBOARDING_STEPS.filter((step) => {
     if (!step.availableIn.includes(shell)) return false
+    // No fork answer yet: only the screen that asks it.
+    if (!mode) return step.id === "welcome"
+    if (!step.modes.includes(mode)) return false
     if (step.id === "provider" && hasModelAccess) return false
     return true
   })

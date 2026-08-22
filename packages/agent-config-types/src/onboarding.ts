@@ -31,7 +31,22 @@ export const ONBOARDING_SHELLS = [
  * it — resuming a mobile user mid-flow has to be able to land back on the
  * screen where they picked standalone vs paired.
  */
-export type OnboardingStepId = "welcome" | "scan" | "provider" | "first-run"
+export type OnboardingStepId = "welcome" | "express" | "scan" | "provider" | "first-run"
+
+/**
+ * Which path through setup the user chose on the welcome screen.
+ *
+ *  - `express` — one screen that lists everything setup will do, does it on
+ *    one press, and hands over the first task. Two screens end to end.
+ *  - `custom`  — the four-step sequence, every choice left open.
+ *
+ * Undefined until the fork is answered, which is why {@link resolveOnboardingMode}
+ * exists: a progress row written before this field did has to be readable, and
+ * its `lastStep` is the only evidence of which path it was on.
+ */
+export type OnboardingMode = "express" | "custom"
+
+export const ONBOARDING_MODES = ["express", "custom"] as const satisfies readonly OnboardingMode[]
 
 /**
  * How the user left the flow. Recorded so the post-onboarding "finish setup"
@@ -48,8 +63,14 @@ export type OnboardingStepId = "welcome" | "scan" | "provider" | "first-run"
 export type OnboardingPath =
   "completed" | "provider_skipped" | "runtime_skipped" | "task_failed" | "legacy_dismissed"
 
-/** Current schema version of {@link OnboardingProgress}. */
-export const ONBOARDING_STATE_VERSION = 1
+/**
+ * Current schema version of {@link OnboardingProgress}.
+ *
+ * v2 added `mode`. There is no upgrade callback and no Dexie bump: the field
+ * is optional and {@link resolveOnboardingMode} derives it from `lastStep` for
+ * rows written before it existed, so a v1 row stays readable in place.
+ */
+export const ONBOARDING_STATE_VERSION = 2
 
 /**
  * Completion bookkeeping. Classified `device-local`: every device legitimately
@@ -65,6 +86,13 @@ export interface OnboardingProgress {
   skippedAt?: string
   /** Where to resume. Absent once `completedAt` is set. */
   lastStep?: OnboardingStepId
+  /**
+   * Which path the user took. Device-local along with the rest of this record:
+   * a phone's setup is substantially the pairing flow, and "I wanted to
+   * configure my desktop by hand" says nothing about how it should ask on a
+   * phone whose recommended path is two taps.
+   */
+  mode?: OnboardingMode
   path: OnboardingPath
   /** True once the user closed the residual "finish setup" bar for good. */
   finishBarDismissed?: boolean
@@ -90,9 +118,30 @@ export interface OnboardingProfile {
   characterId?: string
 }
 
-/** Fresh-install progress: nothing done, entry step is `welcome`. */
+/** Fresh-install progress: nothing done, entry step is `welcome`, no path chosen. */
 export function initialOnboardingProgress(): OnboardingProgress {
   return { version: ONBOARDING_STATE_VERSION, path: "runtime_skipped", lastStep: "welcome" }
+}
+
+/**
+ * Which path a stored progress record was on.
+ *
+ * `mode` is authoritative when present. When it is absent the record predates
+ * the fork, and the only evidence is where it stopped: any step past the
+ * intro belongs to the sequence that had those steps, which is `custom`.
+ * A record sitting on `welcome` (or with no `lastStep` at all) has not chosen
+ * yet and must be asked, so this returns `undefined` rather than guessing —
+ * defaulting it either way would send a resuming user down a path they never
+ * picked.
+ */
+export function resolveOnboardingMode(
+  progress: OnboardingProgress | undefined
+): OnboardingMode | undefined {
+  if (!progress) return undefined
+  if (progress.mode) return progress.mode
+  if (progress.lastStep === "express") return "express"
+  if (progress.lastStep && progress.lastStep !== "welcome") return "custom"
+  return undefined
 }
 
 /**

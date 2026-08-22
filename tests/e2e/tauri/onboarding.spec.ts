@@ -1,14 +1,15 @@
 /**
- * First-run flow, Tauri desktop shell (ADR-0122).
+ * First-run flow, Tauri desktop shell (ADR-0122, revised by ADR-0141).
  *
- * The desktop runs the full sequence — welcome → scan → provider → first run —
- * and is the only shell that probes the machine. The scan step is where the
- * flow earns its existence: it is what turns "choose a sign-in method" into
- * "we found Claude Code, want your setup moved across?".
+ * The desktop is the only shell that probes the machine, so it is where both
+ * paths differ most. The step-by-step one runs the full sequence — welcome →
+ * scan → provider → first run — and the recommended one folds the same
+ * material into a single confirm-and-run screen.
  *
- * Two behaviours here have no unit-test equivalent: the scan's soft/hard
- * timeout policy resolving against a real probe, and the provider step
- * disappearing when that probe reports credentials that already work.
+ * Three behaviours here have no unit-test equivalent: the scan's soft/hard
+ * timeout policy resolving against a real probe, the provider step
+ * disappearing when that probe reports credentials that already work, and the
+ * recommended screen's plan being built from that same live probe.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -25,11 +26,10 @@ test.describe("tauri — first-run onboarding", () => {
     await expect(page).toHaveURL(/\/onboarding/, { timeout: 30_000 })
     await expect(page.getByTestId("onboarding-welcome")).toBeVisible({ timeout: 30_000 })
 
+    await page.getByTestId("onboarding-welcome-customise").click()
+    await expect(page.getByTestId("onboarding-scan")).toBeVisible({ timeout: 15_000 })
     // Desktop is the only shell that carries the scan step.
     await expect(page.getByTestId("onboarding-rail-scan")).toBeVisible()
-
-    await page.getByTestId("onboarding-welcome-cta").click()
-    await expect(page.getByTestId("onboarding-scan")).toBeVisible({ timeout: 15_000 })
 
     // The scan must resolve rather than spin: an empty result flips to the
     // "nothing found" state within the hard ceiling, and still offers a rescan
@@ -43,6 +43,8 @@ test.describe("tauri — first-run onboarding", () => {
     await setCogniaSettings(page, { apiKey: "sk-ant-e2e" })
     await page.goto("/onboarding", { waitUntil: "domcontentloaded" })
     await expect(page.getByTestId("onboarding-welcome")).toBeVisible({ timeout: 30_000 })
+    await page.getByTestId("onboarding-welcome-customise").click()
+    await expect(page.getByTestId("onboarding-scan")).toBeVisible({ timeout: 25_000 })
 
     // Asking someone with working credentials to authenticate again is the kind
     // of step that makes a first run feel like paperwork.
@@ -50,10 +52,39 @@ test.describe("tauri — first-run onboarding", () => {
     await expect(page.getByTestId("onboarding-rail-first-run")).toBeVisible()
   })
 
-  test("reaches a first real output and lands in that conversation", async ({ page }) => {
+  test("@critical the recommended path confirms before it writes anything", async ({ page }) => {
+    await setCogniaSettings(page, { apiKey: "sk-ant-e2e" })
+    await page.goto("/onboarding", { waitUntil: "domcontentloaded" })
+    await expect(page.getByTestId("onboarding-welcome")).toBeVisible({ timeout: 30_000 })
+    await page.getByTestId("onboarding-welcome-cta").click()
+
+    await expect(page.getByTestId("onboarding-express")).toBeVisible({ timeout: 30_000 })
+    // The plan is built from the same live probe the scan step renders, and it
+    // always ends by naming what the first task will actually be able to do.
+    await expect(page.getByTestId("onboarding-express-item-capabilities")).toBeVisible()
+    // Credentials already work, so nothing is outstanding and the run is armed.
+    await expect(page.getByTestId("onboarding-express-apply")).toBeEnabled()
+  })
+
+  test("the recommended path runs the plan and hands over in place", async ({ page }) => {
     await setCogniaSettings(page, { apiKey: "sk-ant-e2e" })
     await page.goto("/onboarding", { waitUntil: "domcontentloaded" })
     await page.getByTestId("onboarding-welcome-cta").click()
+    await expect(page.getByTestId("onboarding-express-apply")).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByTestId("onboarding-express-apply").click()
+
+    // The terminal step renders into the same screen rather than replacing it,
+    // which is what makes this path two screens end to end.
+    await expect(page.getByTestId("onboarding-express-ready")).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId("onboarding-card-summarize-web")).toBeVisible()
+    await expect(page).toHaveURL(/\/onboarding/)
+  })
+
+  test("reaches a first real output and lands in that conversation", async ({ page }) => {
+    await setCogniaSettings(page, { apiKey: "sk-ant-e2e" })
+    await page.goto("/onboarding", { waitUntil: "domcontentloaded" })
+    await page.getByTestId("onboarding-welcome-customise").click()
     await expect(page.getByTestId("onboarding-scan")).toBeVisible({ timeout: 25_000 })
     await page.getByTestId("onboarding-continue").click()
 

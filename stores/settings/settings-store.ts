@@ -8,6 +8,7 @@ import type {
   BuiltinToolsConfig,
   OnboardingPath,
   OnboardingProfile,
+  OnboardingMode,
   OnboardingStepId,
   UpdateSettings,
 } from "@cognia/agent-config-types"
@@ -391,7 +392,7 @@ interface SettingsState {
    * Record which onboarding step the user is on, so a relaunch mid-flow
    * resumes there instead of restarting. Never sets a terminal stamp.
    */
-  advanceOnboarding: (step: OnboardingStepId) => Promise<void>
+  advanceOnboarding: (step: OnboardingStepId, mode?: OnboardingMode) => Promise<void>
   /** Mark onboarding finished — the user reached a first real output. */
   completeOnboarding: () => Promise<void>
   /**
@@ -1693,9 +1694,19 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
-    advanceOnboarding: async (step) => {
+    advanceOnboarding: async (step, mode) => {
       const cur = get().settings?.onboardingProgress ?? initialOnboardingProgress()
-      const next = await saveSettings({ onboardingProgress: { ...cur, lastStep: step } })
+      const next = await saveSettings({
+        onboardingProgress: {
+          ...cur,
+          lastStep: step,
+          // Sticky once answered: a resumed setup must not re-ask which path
+          // the user chose, and every `advanceOnboarding` after the fork
+          // passes the same value anyway. Undefined here means "no new
+          // answer", not "forget the old one".
+          ...(mode ? { mode } : {}),
+        },
+      })
       set({ settings: next })
     },
 

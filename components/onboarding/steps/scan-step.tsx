@@ -3,7 +3,6 @@
 import {
   CheckCircle2Icon,
   DownloadIcon,
-  Loader2Icon,
   MessagesSquareIcon,
   RefreshCwIcon,
   SearchXIcon,
@@ -13,9 +12,11 @@ import { useTranslations } from "next-intl"
 import type { OnboardingShell } from "@cognia/agent-config-types"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { StepHeading } from "../step-shell"
 import type { HistoryImport } from "@/hooks/onboarding/use-history-import"
 import type { MachineScan } from "@/hooks/onboarding/use-machine-scan"
+import { vendorLabel } from "@/lib/onboarding/scan"
 import type { MigrationVendor } from "@/lib/agent-migration/types"
 
 interface ScanStepProps {
@@ -92,7 +93,7 @@ export function ScanStep({
           className="flex items-center gap-2 text-sm text-muted-foreground"
           data-testid="onboarding-scan-scanning"
         >
-          <Loader2Icon className="size-4 animate-spin" aria-hidden />
+          <Spinner className="size-4" />
           {t("scan.scanning")}
         </div>
       )}
@@ -159,7 +160,9 @@ export function ScanStep({
                       <span className="min-w-0 flex-1 text-sm text-muted-foreground">
                         {isFailed
                           ? t("scan.migrateFailed")
-                          : t("scan.migrateDescription", { vendor: probe.vendor })}
+                          : t("scan.migrateDescription", {
+                              vendor: vendorLabel(scan.result, probe.vendor),
+                            })}
                       </span>
                       {isDone ? (
                         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
@@ -177,7 +180,7 @@ export function ScanStep({
                         >
                           {importing === probe.vendor ? (
                             <>
-                              <Loader2Icon className="size-3.5 animate-spin" />
+                              <Spinner className="size-3.5" />
                               {t("scan.migrateRunning")}
                             </>
                           ) : (
@@ -231,7 +234,7 @@ function ChatHistoryBlock({
         className="flex items-center gap-2 text-sm text-muted-foreground"
         data-testid="onboarding-history-scanning"
       >
-        <Loader2Icon className="size-4 animate-spin" aria-hidden />
+        <Spinner className="size-4" />
         {t("scan.historyScanning")}
       </div>
     )
@@ -281,7 +284,7 @@ function ChatHistoryBlock({
           >
             {running ? (
               <>
-                <Loader2Icon className="size-3.5 animate-spin" />
+                <Spinner className="size-3.5" />
                 {t("scan.historyImporting", { percent: Math.round(history.progress * 100) })}
               </>
             ) : (

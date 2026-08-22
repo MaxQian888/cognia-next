@@ -3,8 +3,8 @@
 import type { ReactNode } from "react"
 import type { OnboardingStepId } from "@cognia/agent-config-types"
 
+import { NarrativePanel } from "./narrative-panel"
 import { OnboardingWindowBar } from "./window-bar"
-import { StepProgressBar, StepRail } from "./step-rail"
 import type { OnboardingStepDef } from "@/lib/onboarding/steps"
 
 interface StepShellProps {
@@ -14,6 +14,12 @@ interface StepShellProps {
   onBack?: () => void
   busy?: boolean
   children: ReactNode
+  /** The step's narrative scene, rendered into the panel. */
+  scene: ReactNode
+  /** Overrides which `onboarding.narrative.*` entry the panel reads. */
+  narrativeKey?: string
+  /** Hidden in recommended mode, whose sequence is two screens. */
+  showStepper?: boolean
   /** Sticky action row. Kept out of the scroll area so it never scrolls away. */
   footer?: ReactNode
 }
@@ -25,40 +31,42 @@ interface StepShellProps {
  * Hoisting it is load-bearing, not tidiness. If every step rendered its own
  * shell, React would tear the old one down and build a new one on each
  * transition — because each step is a different component type — remounting
- * the "persistent" rail and replaying its entrance animation. That full-window
- * re-fade is exactly the flash this arrangement avoids; only the step body
- * swaps. (Multica hit this and fixed it the same way.)
+ * the "persistent" panel and replaying its entrance animation. That full-window
+ * re-fade is exactly the flash this arrangement avoids; only the step body and
+ * the scene swap. (Multica hit this and fixed it the same way.)
  *
  * ## Geometry
  *
  * ```
- * ┌─────────────────────────────────────────────┐
- * │ ← Cognia                            – □ ×   │  window bar (h-10, transparent)
- * ├───────────────┬─────────────────────────────┤
- * │  step rail    │  step body (scrolls)        │
- * │  (flush,      │                             │
- * │   border-r)   ├─────────────────────────────┤
- * │               │  actions (flush, border-t)  │
- * └───────────────┴─────────────────────────────┘
+ * ┌──────────────────────────────────────────────┐
+ * │ ← Cognia                             – □ ×   │  window bar (h-10, transparent)
+ * ├────────────────────┬─────────────────────────┤
+ * │ narrative panel    │  step body (scrolls)    │
+ * │  mesh · scene      │                         │
+ * │  headline · line   ├─────────────────────────┤
+ * │  stepper           │  actions (flush)        │
+ * └────────────────────┴─────────────────────────┘
+ *      26rem / 30rem
  * ```
+ *
+ * Below `md` the panel becomes a band across the top and the two halves stack;
+ * one component serves both, so there is no second layout to keep in step.
  *
  * **The whole window, not a slot in one.** `/onboarding` suppresses the
  * desktop chrome (`isOnboardingRoute` in `DesktopAppShell`), so this element
- * *is* the window: `h-[100dvh]`, `overflow-hidden`, its own window bar. The
- * shell used to fill a slot between the title bar, guild rail and status bar,
- * which meant setup rendered inside a frame for the app it was still setting
- * up. On mobile the wrapper still hands it a definite `h-[100dvh]` flex
- * column, and `flex-1 min-h-0` wins over the height there — flex-basis
- * governs a column child's main size — so one class list serves both.
+ * *is* the window: `h-[100dvh]`, `overflow-hidden`, its own window bar. On
+ * mobile the wrapper still hands it a definite `h-[100dvh]` flex column, and
+ * `flex-1 min-h-0` wins over the height there — flex-basis governs a column
+ * child's main size — so one class list serves both.
  *
- * **Square at the window edges, rounded only inside.** Every panel here is
- * flush: the rail is a full-height column with a hairline on its trailing
- * edge, the action row is a hairline above it, and nothing floats. The two
- * radii in the flow both belong to the design system — `rounded-xl` for the
- * selectable cards (what `components/ui/card.tsx` uses) and the buttons' own
- * `rounded-md`. The version this replaces floated a `rounded-2xl` rail card in
- * a padded gutter beside flush, square content, so the same screen argued with
- * itself about whether it was a page or a dialog.
+ * **What replaced the rail.** The previous version put a `w-[15.5rem]` list of
+ * three labels-plus-descriptions on the left and centred a `max-w-[44rem]`
+ * column in the remaining space, which left most of a desktop window empty and
+ * made all four steps look identical. `NarrativePanel` takes that width and
+ * spends it on a picture drawn from live data; `StepStepper` keeps the one
+ * thing the rail was actually needed for. The separate below-`md` progress bar
+ * is gone with it — the panel exists at every width, so a narrow-width stand-in
+ * has nothing left to stand in for.
  */
 export function StepShell({
   sequence,
@@ -67,6 +75,9 @@ export function StepShell({
   onBack,
   busy = false,
   children,
+  scene,
+  narrativeKey,
+  showStepper = true,
   footer,
 }: StepShellProps) {
   return (
@@ -76,23 +87,27 @@ export function StepShell({
     >
       <OnboardingWindowBar onBack={onBack} busy={busy} />
 
-      <div className="flex min-h-0 flex-1">
-        <StepRail sequence={sequence} current={current} onStepChange={onStepChange} busy={busy} />
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <NarrativePanel
+          scene={scene}
+          sceneKey={current}
+          narrativeKey={narrativeKey}
+          sequence={sequence}
+          current={current}
+          onStepChange={onStepChange}
+          busy={busy}
+          showStepper={showStepper}
+        />
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          {/* The rail's job at widths where the rail does not fit. Outside the
-              scroll area so "which step" stays on screen while the body
-              scrolls. */}
-          <StepProgressBar sequence={sequence} current={current} />
-
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {/* Keyed on the step so only the body replays its entrance on each
-                transition — the shell, rail, window bar and actions stay put.
+                transition — the shell, panel, window bar and actions stay put.
                 Same motion recipe as the settings shell's section swap; the
                 global reduce-motion guards in globals.css collapse it to ~1ms. */}
             <div
               key={current}
-              className="mx-auto flex w-full max-w-[44rem] flex-1 flex-col justify-center px-6 py-10 sm:px-10 lg:py-14 animate-in fade-in slide-in-from-bottom-2 duration-200"
+              className="mx-auto flex w-full max-w-[38rem] flex-1 flex-col justify-center px-6 py-8 sm:px-10 lg:py-12 animate-in fade-in slide-in-from-bottom-2 duration-200"
               data-testid="onboarding-step-body"
             >
               {children}
@@ -104,7 +119,7 @@ export function StepShell({
               className="shrink-0 border-t border-border/60 px-6 py-4 sm:px-10"
               data-testid="onboarding-actions"
             >
-              <div className="mx-auto flex w-full max-w-[44rem] items-center justify-between gap-3">
+              <div className="mx-auto flex w-full max-w-[38rem] items-center justify-between gap-3">
                 {footer}
               </div>
             </footer>
@@ -118,7 +133,7 @@ export function StepShell({
 /** Shared heading block so every step's title/description align identically. */
 export function StepHeading({ title, description }: { title: string; description?: string }) {
   return (
-    <div className="mb-7 flex flex-col gap-2">
+    <div className="mb-6 flex flex-col gap-2">
       <h1 className="text-balance text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
         {title}
       </h1>

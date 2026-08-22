@@ -9,6 +9,7 @@ import {
   EMPTY_SCAN,
   SCAN_HARD_TIMEOUT_MS,
   SCAN_SOFT_TIMEOUT_MS,
+  VENDOR_RUNTIME,
   resolveScanPhase,
   shellRunsMachineScan,
   type ScanPhase,
@@ -17,29 +18,12 @@ import {
 } from "@/lib/onboarding/scan"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { loggers } from "@cognia/logging"
-import type { MigrationVendor } from "@/lib/agent-migration/types"
 import type { OnboardingShell } from "@cognia/agent-config-types"
 
 const log = loggers.ui.child("onboarding-scan")
 
 /** Poll cadence for the elapsed-time clock that drives the phase machine. */
 const TICK_MS = 500
-
-/**
- * Which external-agent preset each migration vendor corresponds to. The probe
- * answers "is this vendor's config on disk"; the preset is what the flow would
- * actually run the first output through.
- */
-const VENDOR_RUNTIME: Record<MigrationVendor, string> = {
-  "claude-code": "claude-code",
-  codex: "codex",
-  opencode: "opencode-server",
-  // Added with the vendor itself. Its absence was not merely cosmetic: an
-  // installed Pi resolved to `VENDOR_RUNTIME[p.vendor] === undefined`, so the
-  // runtime row rendered with an undefined id and `hasModelAccess` could not
-  // see it — an already-authenticated Pi still got asked for credentials.
-  pi: "pi",
-}
 
 export interface MachineScan {
   phase: ScanPhase

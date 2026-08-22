@@ -5,8 +5,21 @@ description: "Replaces the first-run dialog with a routed flow that ends in one 
 
 # ADR 0122 — First-Run Onboarding
 
-**Status:** Accepted
+**Status:** Superseded in part by [ADR-0141](./0141-onboarding-two-paths)
 **Date:** 2026-08-15
+
+> **What ADR-0141 changed.** The step sequence forks into a recommended path
+> (one confirm-and-run screen) and a step-by-step path (the four steps below,
+> unchanged); the rail described under *Chrome and layout* is replaced by a
+> narrative panel drawn from live probe data; and the "no questionnaire"
+> decision is kept but the starter card is no longer the only personalization
+> signal, since the recommended screen records which lines the user dropped.
+>
+> Everything else here still holds and is still the reference: the two-timer
+> scan policy, the latched `hasModelAccess` verdict and its three sources, what
+> connecting writes, the capability-gated starter cards, the state model and
+> its two `AppSettings` fields, the routing guard, the legacy migration, and the
+> anti-forgery argument for the built-in skill.
 
 ## Context
 

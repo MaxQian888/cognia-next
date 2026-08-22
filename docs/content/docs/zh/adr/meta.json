@@ -137,6 +137,7 @@
     "0137-delegation-runtime",
     "0138-reading-area-layout-stability",
     "0139-visual-output-routing",
-    "0140-squad-as-an-executor"
+    "0140-squad-as-an-executor",
+    "0141-onboarding-two-paths"
   ]
 }

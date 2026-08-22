@@ -20,17 +20,17 @@ import { OpencodeAddAccountDialog } from "@/components/settings/subscription/add
 import { ProviderPicker } from "../provider-picker"
 import { StepHeading } from "../step-shell"
 import { cn } from "@/lib/utils"
-import { describeConnectedAccount } from "@/lib/onboarding/connected-account"
+import {
+  connectSubscriptionAccount,
+  saveBuiltInProviderKey,
+} from "@/lib/onboarding/connect-provider"
 import {
   initialProviderDraft,
   onboardingProviderOption,
   type OnboardingProviderOption,
 } from "@/lib/onboarding/provider-catalog"
-import { getBuiltInProviderReadiness } from "@/components/settings/provider/provider-readiness"
 import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
 import { loggers } from "@cognia/logging"
-import { setActiveAccount } from "@/lib/subscription/core/transport"
-import { setProviderDefaultAccount } from "@/lib/subscription/core/account-lifecycle"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { Account } from "@/types/subscription"
 
@@ -73,6 +73,12 @@ interface ProviderStepProps {
   onConnected?: () => void
   /** Lets `OnboardingFlow` drop its Continue while the key panel owns it. */
   onViewChange?: (view: ProviderView) => void
+  /**
+   * Suppresses the step heading. The recommended screen hosts this component
+   * under its own "connect a model" plan line, where a second `<h1>` would
+   * both duplicate the line above it and break the heading order.
+   */
+  heading?: boolean
 }
 
 interface ConnectedState {
@@ -118,7 +124,7 @@ interface ConnectedState {
  * saving a key, one walking past it — and asked everyone to read a form that
  * three of the four sign-in methods never touch.
  */
-export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
+export function ProviderStep({ onConnected, onViewChange, heading = true }: ProviderStepProps) {
   const t = useTranslations("onboarding")
   const setApiKey = useSettingsStore((s) => s.setApiKey)
   const setProviderConfig = useSettingsStore((s) => s.setProviderConfig)
@@ -170,15 +176,10 @@ export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
   }
 
   const handleAccountAdded = async (card: Exclude<ProviderChoice, "apiKey">, account: Account) => {
-    const summary = describeConnectedAccount(account)
     try {
-      await setActiveAccount(summary.provider, account.id)
-      // ADR-0028's scoped default. The vault's active pointer alone is the
-      // lowest-priority link in that chain, so without this a later session or
-      // character override has nothing to fall back to.
-      await setProviderDefaultAccount(summary.provider, account.id)
-      // The one that decides which dispatcher the turn uses at all.
-      await setDefaultProvider(summary.provider)
+      // The three pointer writes live in `connect-provider` because the
+      // recommended screen's inline block performs exactly the same ones.
+      const summary = await connectSubscriptionAccount({ account, setDefaultProvider })
       log.info("onboarding subscription connected", {
         provider: summary.provider,
         accountId: account.id,
@@ -193,36 +194,28 @@ export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
   }
 
   const handleSaveKey = async () => {
-    const apiKey = keyInput.trim()
-    const baseURL = baseUrlInput.trim()
-    const patch = {
-      ...(option?.requiresCredential ? { apiKey } : {}),
-      ...(needsBaseUrl ? { baseURL } : {}),
-      enabled: true,
-    }
-    // Validated against the same completeness rules Settings uses, so a draft
-    // this step accepts is one that page would call configured — rather than a
-    // second, drifting opinion about what "enough" means per provider.
     if (!configurableHere) return
-    if (getBuiltInProviderReadiness(providerId, patch).readiness === "unconfigured") {
-      toast.error(option?.requiresCredential ? t("toastNeedKey") : t("provider.toastIncomplete"))
-      return
-    }
     setSaving(true)
     try {
-      // Order matters. `providerSettings[id]` is what the standalone resolver
-      // and the ai-sdk dispatch path read; writing it first means the
-      // `setDefaultProvider` call below picks up the real key when it pushes
-      // the sidecar env, instead of pushing a null and restarting twice.
-      await setProviderConfig(providerId, patch)
-      await setDefaultProvider(providerId)
-      // Legacy Anthropic-only slot: still read at boot to seed the Rust
-      // `ApiKeyState` (`stores/settings/settings-store.ts`), so keep it in
-      // step rather than leaving an older value behind to be restored on the
-      // next launch. Only meaningful for Anthropic itself — pushing another
-      // provider's key into an Anthropic env slot would be a silent mix-up.
-      if (providerId === DEFAULT_KEY_PROVIDER) await setApiKey(apiKey)
-      log.info("onboarding provider key saved", { providerId, length: apiKey.length })
+      // Persistence order, the readiness check and the legacy-slot rule all
+      // live in `connect-provider`, shared with the recommended screen.
+      const result = await saveBuiltInProviderKey({
+        draft: {
+          providerId,
+          apiKey: keyInput,
+          baseURL: baseUrlInput,
+          requiresCredential: Boolean(option?.requiresCredential),
+          requiresBaseUrl: needsBaseUrl,
+        },
+        setProviderConfig,
+        setDefaultProvider,
+        setApiKey,
+      })
+      if (!result.ok) {
+        toast.error(option?.requiresCredential ? t("toastNeedKey") : t("provider.toastIncomplete"))
+        return
+      }
+      log.info("onboarding provider key saved", { providerId, length: keyInput.trim().length })
       finish({ card: "apiKey", providerName: option?.name })
     } catch (err) {
       log.error("onboarding provider key save failed", err)
@@ -246,10 +239,12 @@ export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
   if (view === "connected" && connected) {
     return (
       <div className="flex flex-col gap-6" data-testid="onboarding-provider">
-        <StepHeading
-          title={t("provider.connected.title")}
-          description={t("provider.connected.description")}
-        />
+        {heading && (
+          <StepHeading
+            title={t("provider.connected.title")}
+            description={t("provider.connected.description")}
+          />
+        )}
 
         <div
           className="flex flex-col gap-3 rounded-xl border bg-card p-5"
@@ -295,10 +290,12 @@ export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
   if (view === "apiKey") {
     return (
       <div className="flex flex-col gap-6" data-testid="onboarding-provider">
-        <StepHeading
-          title={t("provider.apiKey.title")}
-          description={t("provider.apiKey.description")}
-        />
+        {heading && (
+          <StepHeading
+            title={t("provider.apiKey.title")}
+            description={t("provider.apiKey.description")}
+          />
+        )}
 
         <div className="flex flex-col gap-4 rounded-xl border bg-muted/30 p-5">
           <div className="flex flex-col gap-2">
@@ -410,10 +407,12 @@ export function ProviderStep({ onConnected, onViewChange }: ProviderStepProps) {
   return (
     <div className="flex flex-col gap-6" data-testid="onboarding-provider">
       {/* With one option, "How do you want to sign in?" is not a question. */}
-      <StepHeading
-        title={standalone ? t("provider.byokTitle") : t("provider.title")}
-        description={standalone ? t("provider.byokNote") : t("provider.description")}
-      />
+      {heading && (
+        <StepHeading
+          title={standalone ? t("provider.byokTitle") : t("provider.title")}
+          description={standalone ? t("provider.byokNote") : t("provider.description")}
+        />
+      )}
 
       <div
         className={cn(
