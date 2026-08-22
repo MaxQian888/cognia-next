@@ -32,8 +32,10 @@ import {
 } from "@/components/ui/select"
 import { getDb } from "@/lib/db/schema"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
-import { hasCapability } from "@/types/connectors/capability"
+import {
+  effectiveCapabilitiesForRow,
+  hasEffectiveCapability,
+} from "@/lib/connectors/effective-capabilities"
 import { syncUsagePresenceSchedule } from "@/lib/connectors/presence/usage-status-runner"
 import {
   DEFAULT_USAGE_PRESENCE_CONFIG,
@@ -69,7 +71,7 @@ export function UsagePresence({ adapterId }: UsagePresenceProps) {
 
   const config: UsagePresenceConfig = { ...DEFAULT_USAGE_PRESENCE_CONFIG, ...row?.presence }
   const supportsBadge = row
-    ? hasCapability(getPlatformCapabilities(row.type), "presence.status")
+    ? hasEffectiveCapability(effectiveCapabilitiesForRow(row), "presence.status")
     : false
 
   const [targetsText, setTargetsText] = useState("")

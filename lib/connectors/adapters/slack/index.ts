@@ -846,11 +846,13 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
   /**
    * Typing indicator. When `assistantAppEnabled` is false, this is a
    * documented no-op: Slack has NO typing API for regular bots — only
-   * Assistant Apps get `assistant.threads.setStatus`. The `typing`
-   * capability stays statically advertised (AdapterMeta.capabilities is a
-   * static list; there is no per-instance capability projection), so the
-   * honest minimal option is this logged fallback rather than a phantom
-   * API call that would 403 for every non-assistant install. When enabled
+   * Assistant Apps get `assistant.threads.setStatus`. `AdapterMeta.capabilities`
+   * still advertises `typing` because it is a static per-platform list; what
+   * callers must read is the per-instance projection in
+   * `lib/connectors/effective-capabilities.ts`, which suppresses `typing` for
+   * exactly this setting (and outside a thread scope). This logged fallback
+   * stays as the last line of defence rather than a phantom API call that
+   * would 403 for every non-assistant install. When enabled
    * and the conversationKey carries a thread, we issue
    * `assistant.threads.setStatus` with "is typing…" / "" depending on
    * `on`. Conversations without a thread_ts can't set assistant status —

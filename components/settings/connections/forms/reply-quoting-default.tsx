@@ -25,8 +25,10 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { getDb } from "@/lib/db/schema"
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
-import { hasCapability } from "@/types/connectors/capability"
+import {
+  effectiveCapabilitiesForRow,
+  hasEffectiveCapability,
+} from "@/lib/connectors/effective-capabilities"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 export interface ReplyQuotingDefaultProps {
@@ -45,7 +47,9 @@ export function ReplyQuotingDefault({ adapterId }: ReplyQuotingDefaultProps) {
   )
 
   if (!row) return null
-  if (!hasCapability(getPlatformCapabilities(row.type), "send.reply")) return null
+  // What THIS bot can do, not what the platform implements: a Slack grant
+  // without `chat:write` cannot reply at all, so there is nothing to configure.
+  if (!hasEffectiveCapability(effectiveCapabilitiesForRow(row), "send.reply")) return null
 
   const enabled = row.replyQuoting !== false
 

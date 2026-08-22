@@ -2,7 +2,7 @@ import type { Character } from "@cognia/agent-config-types"
 import Dexie from "dexie"
 
 import { COMPUTER_USE_PLUGIN_TOOL_NAMES } from "@/lib/claude/computer-use-tools"
-import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
+import { effectiveCapabilitiesForRow } from "@/lib/connectors/effective-capabilities"
 import { resolveImHostCapabilities } from "@/lib/connectors/permission-resolve"
 import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
 import type { BuiltInSkill } from "@/lib/skills/built-in/types"
@@ -84,7 +84,13 @@ export async function buildImPermissionCeiling(input: {
     },
     imOverrideRow: input.override ?? undefined,
     imAdapterRow: input.adapter,
-    channelCapabilities: getPlatformCapabilities(input.platform),
+    // The ceiling must be derived from what this BOT can do, not what the
+    // platform's adapter module implements: a Slack install whose grant lacks
+    // `files:write` would otherwise be handed an upload tool that answers
+    // `missing_scope`. No scene is passed — the ceiling is per-turn but not
+    // per-conversation-scene, and an instance-level projection is the honest
+    // answer at this granularity.
+    channelCapabilities: effectiveCapabilitiesForRow(input.adapter).capabilities,
   })
   return deriveImPermissionCeiling({
     ...input,

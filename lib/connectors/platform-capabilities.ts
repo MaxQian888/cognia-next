@@ -20,7 +20,14 @@
  *
  * A declared flag is platform-wide; a few are SCENE-LIMITED at the wire and
  * the adapter throws `unsupported` (or silently no-ops for `typing`) outside
- * the scene — callers must not infer "works everywhere" from the flag alone:
+ * the scene, and several more depend on what one INSTANCE was granted or
+ * probed. Callers deciding whether something will work must read
+ * `lib/connectors/effective-capabilities.ts` instead — this table is its
+ * input, not the answer.
+ *
+ * The first two limits below resolve at (instance × scene) and ARE encoded
+ * there. The last two do not: they are properties of an individual message or
+ * recipient, so only the adapter can evaluate them and only at call time.
  *   - qq-official `typing`        → C2C only (`msg_type: 6 input_notify`,
  *                                   a passive reply that consumes one of the
  *                                   inbound msg_id's 5 slots).

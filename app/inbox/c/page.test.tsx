@@ -94,11 +94,21 @@ jest.mock("@/hooks/chat", () => ({
 }))
 
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 let mockSession: ChatSession | null | undefined = undefined
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: jest.fn().mockImplementation(() => mockSession),
+}))
+
+// The bot row behind the conversation. Mocked separately from the session
+// live-query because "load earlier" is gated on what THIS instance can do:
+// `undefined` means the row has not resolved yet, which must still answer from
+// the platform table rather than hiding the control.
+let mockAdapterRow: AdapterInstanceRow | undefined = undefined
+jest.mock("@/hooks/connectors/use-adapter-instance", () => ({
+  useAdapterInstance: () => mockAdapterRow,
 }))
 
 // ---------------------------------------------------------------------------
@@ -137,6 +147,7 @@ describe("ConversationPage (/inbox/c?key=)", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockSession = undefined
+    mockAdapterRow = undefined
     mockKey = "ck1"
     mockMessageId = null
     lastChatPaneProps = null
@@ -245,7 +256,9 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     render(<ConversationPage />)
     await waitFor(() => expect(mockJump).toHaveBeenCalledWith("s1", "m-42", { align: "center" }))
     // Selection precedes the jump so the pane that owns the list is the target.
-    expect(mockSelect.mock.invocationCallOrder[0]).toBeLessThan(mockJump.mock.invocationCallOrder[0]!)
+    expect(mockSelect.mock.invocationCallOrder[0]).toBeLessThan(
+      mockJump.mock.invocationCallOrder[0]!
+    )
     expect(mockToastError).not.toHaveBeenCalled()
   })
 
@@ -258,7 +271,9 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     mockMessageId = "stale"
     mockJump.mockResolvedValueOnce(false)
     render(<ConversationPage />)
-    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("The linked message could not be opened."))
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("The linked message could not be opened.")
+    )
   })
 
   it("ignores a jump result that arrives after the route moved on", async () => {
@@ -284,6 +299,32 @@ describe("ConversationPage (/inbox/c?key=)", () => {
     const header = screen.getByTestId("conversation-header")
     expect(detail.contains(bar)).toBe(true)
     expect(header.nextElementSibling).toBe(bar)
+  })
+
+  it("hides HistoryLoadEarlier when THIS Slack install was never granted a history scope", () => {
+    // The platform declares `history.fetch`; this workspace's OAuth grant does
+    // not carry it, so the button would only ever produce `missing_scope`.
+    mockSession = makeSession("s1", "ck1", "slack")
+    mockAdapterRow = {
+      id: "a1",
+      type: "slack",
+      settings: { connectedScopes: { scopes: ["chat:write"], grantedAtMs: 1 } },
+    } as unknown as AdapterInstanceRow
+    render(<ConversationPage />)
+    expect(screen.queryByTestId("history-load-earlier")).toBeNull()
+  })
+
+  it("keeps HistoryLoadEarlier when the grant does carry a history scope", () => {
+    mockSession = makeSession("s1", "ck1", "slack")
+    mockAdapterRow = {
+      id: "a1",
+      type: "slack",
+      settings: {
+        connectedScopes: { scopes: ["chat:write", "channels:history"], grantedAtMs: 1 },
+      },
+    } as unknown as AdapterInstanceRow
+    render(<ConversationPage />)
+    expect(screen.getByTestId("history-load-earlier")).toBeTruthy()
   })
 
   it("does not mount HistoryLoadEarlier when the platform lacks history.fetch", () => {

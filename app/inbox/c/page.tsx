@@ -27,11 +27,15 @@ import { ChatPane } from "@/components/chat/chat-view"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useResolvedConnectorMode } from "@/components/chat/use-resolved-connector-mode"
+import { useAdapterInstance } from "@/hooks/connectors/use-adapter-instance"
 import { useActiveConversationStore } from "@/stores/inbox/active-conversation-store"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
-import { hasCapability } from "@/types/connectors/capability"
-import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
+import {
+  effectiveCapabilities,
+  effectiveCapabilitiesForRow,
+  hasEffectiveCapability,
+} from "@/lib/connectors/effective-capabilities"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 
 function ConversationInner() {
@@ -98,6 +102,12 @@ function ConversationDetail({
     }
   }, [session?.id, messageId, t])
 
+  // The bot row behind this conversation. "Load earlier" is gated on what THIS
+  // instance can do, not on what the platform's adapter implements — a Slack
+  // grant without a `*:history` scope has no history to fetch and the button
+  // would only produce a `missing_scope` toast.
+  const adapterRow = useAdapterInstance(session?.platformBinding?.adapterId)
+
   // Expose the viewed conversation so the connector inbound bridge can suppress
   // an OS notification for the conversation already on screen (focus-aware).
   useEffect(() => {
@@ -122,9 +132,12 @@ function ConversationDetail({
 
   const platform = session.platformBinding!.platform as PlatformKind
   const adapterId = session.platformBinding!.adapterId
-  // "Load earlier messages" only makes sense on channels whose adapter
-  // declares `history.fetch` (static per-platform capability table).
-  const canFetchHistory = hasCapability(getPlatformCapabilities(platform), "history.fetch")
+  // Until the row resolves, answer from the platform table — the same fallback
+  // the model's tool manifest uses, so the button never contradicts the tools.
+  const canFetchHistory = hasEffectiveCapability(
+    adapterRow ? effectiveCapabilitiesForRow(adapterRow) : effectiveCapabilities({ platform }),
+    "history.fetch"
+  )
   const isTeamSession = session.kind === "team" && Boolean(session.teamId)
   const currentMode = resolvedMode ?? "auto"
 

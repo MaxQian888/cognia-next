@@ -93,6 +93,24 @@ describe("ReplyQuotingDefault", () => {
     expect(mockUpdate).toHaveBeenCalledWith("a1", { replyQuoting: undefined })
   })
 
+  it("renders nothing when THIS Slack install's grant lacks chat:write", () => {
+    // The platform declares `send.reply`; this workspace cannot post at all,
+    // so a reply-quoting toggle would configure something that never happens.
+    setup({
+      type: "slack",
+      settings: { connectedScopes: { scopes: ["channels:history"], grantedAtMs: 1 } },
+    })
+    expect(screen.queryByTestId("reply-quoting-default")).toBeNull()
+  })
+
+  it("renders the control when the Slack grant does carry chat:write", () => {
+    setup({
+      type: "slack",
+      settings: { connectedScopes: { scopes: ["chat:write"], grantedAtMs: 1 } },
+    })
+    expect(screen.getByTestId("reply-quoting-default")).toBeInTheDocument()
+  })
+
   it("renders nothing for a platform whose adapter lacks send.reply (inert control avoided)", () => {
     setup({ type: "wechat-oa" })
     expect(screen.queryByTestId("reply-quoting-default")).not.toBeInTheDocument()

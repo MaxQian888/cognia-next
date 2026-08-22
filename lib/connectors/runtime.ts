@@ -102,8 +102,10 @@ import {
   canonicalEventFromCaptureEvent,
   createEnvelopeSequencer,
 } from "@/lib/ai/agent/execution/event-envelope"
-import { getPlatformCapabilities } from "@/lib/connectors/platform-capabilities"
-import { hasCapability } from "@/types/connectors/capability"
+import {
+  effectiveCapabilitiesForRow,
+  hasEffectiveCapability,
+} from "@/lib/connectors/effective-capabilities"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
 
 /**
@@ -1785,7 +1787,10 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         const quoteReply =
           streamsThroughReceiver &&
           event.channel.kind !== "private" &&
-          hasCapability(getPlatformCapabilities(event.platform), "send.reply") &&
+          hasEffectiveCapability(
+            effectiveCapabilitiesForRow(adapterRow, { scopeKind: event.channel.kind }),
+            "send.reply"
+          ) &&
           (override?.replyQuoting ?? adapterRow.replyQuoting ?? true)
         // ── The one place acceptance changes anything ──
         //

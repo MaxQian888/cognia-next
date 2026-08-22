@@ -2044,13 +2044,31 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   > = []
   if (builtInSkillsRequested) {
     try {
+      // Lazily loaded together — resolving the projection pulls in every
+      // adapter's capability const, and a desktop turn with no IM binding
+      // should not pay for that at module load.
+      const { capabilityFingerprint, effectiveCapabilities, effectiveCapabilitiesForRow } =
+        await import("@/lib/connectors/effective-capabilities")
       // Memo key: every input that shapes the manifest. Platform + isImSession
       // gate the platform/access/requires filters; the override's `updatedAt`
-      // bumps whenever its `allowedBuiltInSkillIds` change. Channel capabilities
-      // + registry are static, so they need no key component.
+      // bumps whenever its `allowedBuiltInSkillIds` change.
+      //
+      // Channel capabilities used to be static per platform and were left out
+      // of the key on that basis. They are per-INSTANCE now — a Slack grant
+      // without `files:write` hides the upload skills — so the key carries
+      // `capabilityFingerprint`, or two bots on the same platform would share
+      // one tool list and the second would inherit the first's permissions.
+      const capabilityKey =
+        session?.platformBinding?.adapterId && imAdapterRow
+          ? capabilityFingerprint({
+              platform: imAdapterRow.type,
+              settings: imAdapterRow.settings,
+              implMetadata: imAdapterRow.implMetadata,
+            })
+          : "none"
       const skillsCacheKey = `${session?.platformBinding?.platform ?? "none"}:${Boolean(
         session?.platformBinding?.adapterId
-      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}`
+      )}:${imOverrideRow?.id ?? "none"}:${imOverrideRow?.updatedAt ?? 0}:${capabilityKey}`
       const cachedManifest = builtInSkillsManifestCache.get(skillsCacheKey)
       if (cachedManifest !== undefined) {
         builtInSkillsManifest = cachedManifest
@@ -2059,16 +2077,20 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         // before the manifest builder walks the registry.
         await import("@/lib/skills/built-in")
         const { buildBuiltInSkillManifest } = await import("@/lib/skills/built-in/manifest")
-        // Resolve the bound channel's declared capabilities so the manifest's
-        // `requires` filter can hide skills the channel can't serve (e.g. a
-        // skill needing `rich-card.lark` for its HITL confirm card). Static
-        // per-platform — no live adapter build needed. Desktop (no binding)
-        // leaves this undefined; the filter no-ops there.
+        // Resolve what the bound channel can ACTUALLY serve, so the manifest's
+        // `requires` filter hides skills that would fail (a skill needing
+        // `rich-card.lark` for its HITL confirm card; an upload skill on a
+        // Slack grant without `files:write`). Instance-level, from the stored
+        // row — no live adapter build needed. Desktop (no binding) leaves this
+        // undefined; the filter no-ops there. Without the row (a lookup that
+        // failed) the projection falls back to the platform table, which is
+        // what this call site used unconditionally before.
         let channelCapabilities:
           readonly import("@/types/connectors/capability").Capability[] | undefined
         if (session?.platformBinding?.adapterId) {
-          const { getPlatformCapabilities } = await import("@/lib/connectors/platform-capabilities")
-          channelCapabilities = getPlatformCapabilities(session.platformBinding.platform)
+          channelCapabilities = imAdapterRow
+            ? effectiveCapabilitiesForRow(imAdapterRow).capabilities
+            : effectiveCapabilities({ platform: session.platformBinding.platform }).capabilities
         }
         builtInSkillsManifest = buildBuiltInSkillManifest({
           imBinding: session?.platformBinding?.adapterId

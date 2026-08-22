@@ -42,6 +42,19 @@ export const SLACK_BOT_SCOPES = [
   "channels:history",
   "im:history",
   "app_mentions:read",
+  // The adapter implements uploads, reactions and pins, and SLACK_CAPS
+  // advertises all three — but this list asked for none of their scopes, so
+  // every OAuth install advertised capabilities that answered `missing_scope`
+  // at delivery. `lib/connectors/effective-capabilities.ts` now hides them for
+  // a grant that lacks the scope; requesting the scope is the other half, so
+  // the capability is real rather than merely hidden.
+  "files:write",
+  "reactions:write",
+  "pins:write",
+  // Deliberately NOT requested: `groups:history` / `mpim:history`. They would
+  // extend history reads into private channels and group DMs — a widening of
+  // what the bot can read, not a fix for something it already claims. The
+  // capability projection accepts either if an operator grants it by hand.
 ] as const
 
 export interface BeginSlackOAuthInput {
