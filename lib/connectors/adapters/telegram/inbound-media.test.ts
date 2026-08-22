@@ -108,7 +108,8 @@ describe("enrichTelegramInboundMedia", () => {
     expect(d.fetchAttachment).toHaveBeenCalledWith(
       "tg-1",
       "telegram:STABLE",
-      "https://api.telegram.org/file/botTOKEN/photos/file_1.jpg"
+      "https://api.telegram.org/file/botTOKEN/photos/file_1.jpg",
+      undefined
     )
   })
 

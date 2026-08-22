@@ -27,12 +27,20 @@ function makeEvent(segments: MessageSegment[], messageId = "om_msg_1"): Normaliz
   }
 }
 
+/**
+ * Models the real cache: a read misses until that ref has been fetched. The
+ * pass reads before it resolves anything, so a stub that always returns bytes
+ * would hide every download.
+ */
 function baseDeps() {
-  const fetchAttachment = jest.fn(async (adapterId: string, remoteRef: string) => ({
-    localUrl: `/cache/${remoteRef}`,
-    remoteRef,
-  }))
-  const readAttachment = jest.fn(async () => "QUJD") // base64("ABC")
+  const cached = new Set<string>()
+  const fetchAttachment = jest.fn(async (adapterId: string, remoteRef: string) => {
+    cached.add(remoteRef)
+    return { localUrl: `/cache/${remoteRef}`, remoteRef }
+  })
+  const readAttachment = jest.fn(async (adapterId: string, remoteRef: string) =>
+    cached.has(remoteRef) ? "QUJD" : null
+  ) // base64("ABC")
   return {
     getAccessToken: jest.fn(async () => "tat_123"),
     fetchAttachment: fetchAttachment as never,
@@ -131,7 +139,7 @@ describe("enrichLarkInboundMedia — files", () => {
     expect(file.ocrText).toBe("extracted document text")
   })
 
-  it("downloads a non-document file but does not attempt text extraction", async () => {
+  it("does not download a file whose text can never be read back", async () => {
     const seg = {
       type: "file" as const,
       url: "file_key_z",
@@ -145,7 +153,9 @@ describe("enrichLarkInboundMedia — files", () => {
 
     await enrichLarkInboundMedia(event, { ...deps, extractDocText })
 
-    expect(deps.fetchAttachment).toHaveBeenCalledTimes(1) // still cached
+    // Nothing surfaces an inbound cached blob, so downloading an archive
+    // would fill the encrypted cache with bytes nothing can open again.
+    expect(deps.fetchAttachment).not.toHaveBeenCalled()
     expect(extractDocText).not.toHaveBeenCalled()
     const file = event.segments[0] as Extract<MessageSegment, { type: "file" }>
     expect(file.ocrText).toBeUndefined()
@@ -181,7 +191,7 @@ describe("enrichLarkInboundMedia — files", () => {
 
     await enrichLarkInboundMedia(event, { ...deps, extractDocText })
 
-    expect(deps.fetchAttachment).toHaveBeenCalledTimes(1) // still downloads to cache
+    expect(deps.fetchAttachment).not.toHaveBeenCalled()
     expect(extractDocText).not.toHaveBeenCalled()
     expect((event.segments[0] as Extract<MessageSegment, { type: "file" }>).ocrText).toBe(
       "already extracted"
@@ -287,7 +297,7 @@ describe("enrichLarkInboundMedia — guards & best-effort", () => {
     const deps = baseDeps()
     const extractDocText = jest.fn(async () => "x")
     await enrichLarkInboundMedia(event, { ...deps, extractDocText })
-    expect(deps.fetchAttachment).toHaveBeenCalledTimes(1) // still downloads
+    expect(deps.fetchAttachment).not.toHaveBeenCalled()
     expect(extractDocText).not.toHaveBeenCalled()
   })
 
