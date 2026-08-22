@@ -11,6 +11,13 @@ jest.mock("@/lib/ai/agent/external/agent-transport", () => ({
   supportsExternalAgents: () => supportsExternalAgents(),
 }))
 
+const activeSessionsForRuntime = jest.fn((_runtimeId: string) => 0)
+jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
+  getExternalAgentLifecycleService: async () => ({
+    activeSessionsForRuntime: (runtimeId: string) => activeSessionsForRuntime(runtimeId),
+  }),
+}))
+
 import { useDshRuntime } from "./use-dsh-runtime"
 
 const DIGESTS = { lockfileDigest: "1".repeat(64), compositionDigest: "2".repeat(64) }
@@ -38,6 +45,7 @@ const UNHEALTHY = facts({ compositionDigest: "9".repeat(64) })
 beforeEach(() => {
   agentInvoke.mockReset()
   supportsExternalAgents.mockReturnValue(true)
+  activeSessionsForRuntime.mockReturnValue(0)
 })
 
 describe("useDshRuntime", () => {
@@ -108,6 +116,24 @@ describe("useDshRuntime", () => {
     })
     expect(agentInvoke).toHaveBeenCalledWith("dsh_runtime_remove", { activeSessionCount: 0 })
     expect(result.current.installed).toBe(false)
+  })
+
+  it("sends the real live-session count, not a literal zero", async () => {
+    // The host refuses removal while sessions are live, but this caller used to
+    // hard-code 0 -- so the guard could never fire and a running agent's tree
+    // could be swapped out from under it.
+    activeSessionsForRuntime.mockReturnValue(2)
+    agentInvoke.mockResolvedValueOnce(HEALTHY)
+    const { result } = renderHook(() => useDshRuntime("cognia-sdk-readonly"))
+    await waitFor(() => expect(result.current.installed).toBe(true))
+
+    agentInvoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(NOT_INSTALLED)
+    await act(async () => {
+      await result.current.remove()
+    })
+
+    expect(activeSessionsForRuntime).toHaveBeenCalledWith("deepseek-harness")
+    expect(agentInvoke).toHaveBeenCalledWith("dsh_runtime_remove", { activeSessionCount: 2 })
   })
 
   it("surfaces a lifecycle failure instead of leaving the UI silent", async () => {

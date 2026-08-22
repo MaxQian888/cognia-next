@@ -891,3 +891,75 @@ describe("patchLifecycle", () => {
     expect(store().getAgent("missing")).toBeUndefined()
   })
 })
+
+describe("replaceAgentConfig", () => {
+  beforeEach(() => {
+    reset()
+    jest.clearAllMocks()
+  })
+
+  it("removes a field that updateAgent could only have merged", () => {
+    const store = () => useExternalAgentStore.getState()
+    const id = store().addAgent({
+      name: "Remote",
+      protocol: "acp",
+      transport: "http",
+      network: { endpoint: "https://a.test", apiKey: "sk-legacy" },
+    })
+
+    const before = store().getAgent(id)!
+    store().updateAgent(id, { network: { endpoint: "https://a.test" } })
+    // A merge cannot delete: this is why the credential migration needs a
+    // wholesale replace.
+    expect(store().getAgent(id)?.network?.apiKey).toBe("sk-legacy")
+
+    store().replaceAgentConfig(id, {
+      ...before,
+      network: { endpoint: "https://a.test" },
+      credentialRefs: { apiKey: `${id}:apiKey` },
+    })
+
+    expect(store().getAgent(id)?.network?.apiKey).toBeUndefined()
+    expect(store().getAgent(id)?.network?.endpoint).toBe("https://a.test")
+    expect(store().getAgent(id)?.credentialRefs).toEqual({ apiKey: `${id}:apiKey` })
+  })
+
+  it("preserves the creation time, which is not part of the rebuilt payload", () => {
+    const store = () => useExternalAgentStore.getState()
+    const id = store().addAgent({ name: "A", protocol: "acp", transport: "stdio" })
+    const createdAt = store().getAgent(id)!.createdAt
+
+    store().replaceAgentConfig(id, {
+      ...store().getAgent(id)!,
+      createdAt: new Date(0),
+      name: "B",
+    })
+
+    expect(store().getAgent(id)?.createdAt).toEqual(createdAt)
+    expect(store().getAgent(id)?.name).toBe("B")
+  })
+
+  it("keeps the agent's own id even if the payload disagrees", () => {
+    const store = () => useExternalAgentStore.getState()
+    const id = store().addAgent({ name: "A", protocol: "acp", transport: "stdio" })
+
+    store().replaceAgentConfig(id, { ...store().getAgent(id)!, id: "hijacked" })
+
+    expect(store().getAgent(id)?.id).toBe(id)
+    expect(store().getAgent("hijacked")).toBeUndefined()
+  })
+
+  it("ignores an unknown agent", () => {
+    const store = () => useExternalAgentStore.getState()
+    expect(() =>
+      store().replaceAgentConfig("missing", {
+        id: "missing",
+        name: "x",
+        protocol: "acp",
+        transport: "stdio",
+        enabled: true,
+      })
+    ).not.toThrow()
+    expect(store().getAgent("missing")).toBeUndefined()
+  })
+})

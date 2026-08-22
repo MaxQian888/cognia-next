@@ -18,6 +18,7 @@ const storeState = {
   addAgent: jest.fn(() => "agent-1"),
   updateAgent: jest.fn(),
   removeAgent: jest.fn(),
+  replaceAgentConfig: jest.fn(),
   patchLifecycle: jest.fn(),
   setConnectionStatus: jest.fn(),
 }
@@ -79,6 +80,7 @@ describe("createDefaultLifecycleDependencies", () => {
     deps.store.addAgent({ name: "n", protocol: "acp", transport: "stdio" })
     deps.store.updateAgent("a", { name: "x" })
     deps.store.removeAgent("a")
+    deps.store.replaceAgentConfig("a", { id: "a" } as never)
     deps.store.patchLifecycle("a", { lifecycleStatus: "ready" })
     deps.store.setConnectionStatus("a", "connected")
 
@@ -87,6 +89,7 @@ describe("createDefaultLifecycleDependencies", () => {
     expect(storeState.addAgent).toHaveBeenCalled()
     expect(storeState.updateAgent).toHaveBeenCalledWith("a", { name: "x" })
     expect(storeState.removeAgent).toHaveBeenCalledWith("a")
+    expect(storeState.replaceAgentConfig).toHaveBeenCalledWith("a", { id: "a" })
     // The port the store did not have before this change.
     expect(storeState.patchLifecycle).toHaveBeenCalledWith("a", { lifecycleStatus: "ready" })
     expect(storeState.setConnectionStatus).toHaveBeenCalledWith("a", "connected")

@@ -56,6 +56,7 @@ import {
   applyResolvedCredentials,
   clearCredentials,
   extractInlineCredentials,
+  migrateInlineCredentials,
   occupiedSlots,
   persistCredentials,
   resolveCredentials,
@@ -75,6 +76,8 @@ export interface LifecycleConfigStore {
   addAgent(input: CreateExternalAgentInput): string
   updateAgent(id: string, updates: UpdateExternalAgentInput): void
   removeAgent(id: string): void
+  /** Replace a stored config wholesale. The only way to REMOVE a field. */
+  replaceAgentConfig(id: string, config: LifecycleAgentConfig): void
   /** Persist lifecycle-plane fields that are not part of the edit surface. */
   patchLifecycle(id: string, fields: ExternalAgentLifecycleFields): void
   setConnectionStatus(id: string, status: ExternalAgentConnectionStatus): void
@@ -333,6 +336,28 @@ export class ExternalAgentLifecycleService {
    * structured reason rather than auto-connected into a failure.
    */
   async reconcile(): Promise<Map<string, ReadinessVerdict>> {
+    const verdicts = await this.reviewAll()
+
+    for (const config of this.deps.store.getAllAgents()) {
+      if (verdicts.get(config.id)?.status !== "ready") continue
+      if (config.enabled && !this.deps.manager.getAgent(config.id)) {
+        await this.register(config)
+      }
+    }
+
+    return verdicts
+  }
+
+  /**
+   * Judge every saved Agent and stop the ones that cannot run, without
+   * connecting anything.
+   *
+   * Split out of {@link reconcile} because startup rehydration already owns
+   * registration and connection (with its own timeout and adapter-registry
+   * subscription). It needs the verdicts as a gate in front of that work, not a
+   * second path that would register each Agent twice.
+   */
+  async reviewAll(): Promise<Map<string, ReadinessVerdict>> {
     const verdicts = new Map<string, ReadinessVerdict>()
 
     for (const config of this.deps.store.getAllAgents()) {
@@ -340,23 +365,63 @@ export class ExternalAgentLifecycleService {
       verdicts.set(config.id, verdict)
       this.markVerdict(config.id, verdict)
 
-      if (verdict.status !== "ready") {
-        // Stop anything that is somehow still live for a now-invalid config.
-        if (this.deps.manager.getAgent(config.id)) {
-          await this.unregister(config.id)
-        }
-        if (config.enabled) {
-          this.deps.store.updateAgent(config.id, { enabled: false })
-        }
-        continue
-      }
+      if (verdict.status === "ready") continue
 
-      if (config.enabled && !this.deps.manager.getAgent(config.id)) {
-        await this.register(config)
+      // Stop anything that is somehow still live for a now-invalid config.
+      if (this.deps.manager.getAgent(config.id)) {
+        await this.unregister(config.id)
+      }
+      if (config.enabled) {
+        this.deps.store.updateAgent(config.id, { enabled: false })
       }
     }
 
     return verdicts
+  }
+
+  /**
+   * Move every legacy inline secret into the keyring.
+   *
+   * Must run BEFORE any adapter is constructed, so no connection is ever built
+   * from a config still carrying plaintext. A keyring failure is contained to
+   * the one Agent: it is scrubbed and disabled, and boot continues — a browser
+   * shell with a locked vault must not be able to brick startup.
+   */
+  async migrateLegacyCredentials(): Promise<{
+    migrated: string[]
+    failed: { agentId: string; reason: string }[]
+  }> {
+    const migrated: string[] = []
+    const failed: { agentId: string; reason: string }[] = []
+
+    for (const config of this.deps.store.getAllAgents()) {
+      if (occupiedSlots(extractInlineCredentials(config)).length === 0) continue
+
+      try {
+        const result = await migrateInlineCredentials(config, this.deps.keyring)
+        this.deps.store.replaceAgentConfig(config.id, result.config)
+        if (result.failure) {
+          failed.push({ agentId: config.id, reason: result.failure.reason })
+        } else {
+          migrated.push(config.id)
+        }
+      } catch (error) {
+        // `migrateInlineCredentials` already contains keyring failures; this
+        // catches a store failure, where the plaintext is still persisted.
+        failed.push({
+          agentId: config.id,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+        this.deps.store.updateAgent(config.id, { enabled: false })
+        this.markVerdict(config.id, {
+          status: "needs-credentials",
+          reasonCode: "credential_missing",
+          reason: "inline credentials could not be migrated",
+        })
+      }
+    }
+
+    return { migrated, failed }
   }
 
   // --------------------------------------------------------------------
@@ -761,6 +826,7 @@ export async function createDefaultLifecycleDependencies(): Promise<LifecycleDep
       addAgent: (input) => state().addAgent(input),
       updateAgent: (id, updates) => state().updateAgent(id, updates),
       removeAgent: (id) => state().removeAgent(id),
+      replaceAgentConfig: (id, config) => state().replaceAgentConfig(id, config),
       patchLifecycle: (id, fields) => state().patchLifecycle(id, fields),
       setConnectionStatus: (id, status) => state().setConnectionStatus(id, status),
     },

@@ -24,6 +24,9 @@ import type { DshProfileId } from "@/types/agent/dsh-runtime-channel"
  * Until finalize succeeds the previously certified runtime is still live.
  */
 
+/** Catalog id for the managed DeepSeek Harness runtime. */
+const DSH_RUNTIME_ID = "deepseek-harness"
+
 /** Facts a host gathers from disk. Mirrored by `DshRuntimeFacts` in Rust. */
 interface DshHostFacts {
   manifestJson: string | null
@@ -122,7 +125,16 @@ export function useDshRuntime(profileId: DshProfileId): UseDshRuntimeResult {
   const remove = useCallback(async () => {
     if (!supported) return
     await run(async () => {
-      await agentInvoke("dsh_runtime_remove", { activeSessionCount: 0 })
+      // The host refuses to remove a runtime that still has live sessions, but
+      // the count has to be real for that guard to mean anything: this call
+      // passed a literal 0, so `remove_runtime`'s check could never fire and a
+      // running agent's tree could be swapped out from under it.
+      const { getExternalAgentLifecycleService } =
+        await import("@/lib/ai/agent/external/lifecycle/service")
+      const service = await getExternalAgentLifecycleService()
+      const activeSessionCount = service.activeSessionsForRuntime(DSH_RUNTIME_ID)
+
+      await agentInvoke("dsh_runtime_remove", { activeSessionCount })
       await check()
     })
   }, [supported, run, check])

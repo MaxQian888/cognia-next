@@ -44,6 +44,9 @@ function fakeStore(seed: LifecycleAgentConfig[] = []) {
     removeAgent: (id) => {
       agents.delete(id)
     },
+    replaceAgentConfig: (id, config) => {
+      if (agents.has(id)) agents.set(id, { ...config, id })
+    },
     patchLifecycle: (id, fields) => {
       const existing = agents.get(id)
       if (!existing) return
@@ -612,5 +615,95 @@ describe("error contract", () => {
     const error = await service.updateConfig("nope", {}).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ExternalAgentLifecycleError)
     expect((error as ExternalAgentLifecycleError).code).toBe("runtime_missing")
+  })
+})
+
+describe("migrateLegacyCredentials", () => {
+  const legacy = () =>
+    stdioConfig({
+      transport: "http",
+      network: { endpoint: "https://a.test", apiKey: "sk-legacy" },
+    })
+
+  it("scrubs the plaintext and records a reference", async () => {
+    const { service, store, keyring } = build({}, [legacy()])
+
+    const result = await service.migrateLegacyCredentials()
+
+    expect(result.migrated).toEqual(["agent-1"])
+    expect(JSON.stringify(store.getAgent("agent-1"))).not.toContain("sk-legacy")
+    expect(store.getAgent("agent-1")?.credentialRefs?.apiKey).toBe("agent-1:apiKey")
+    expect(keyring.entries.get("agent-1:apiKey")).toBe("sk-legacy")
+  })
+
+  it("uses a wholesale replace, because updateAgent could never remove a field", async () => {
+    const { service, store } = build({}, [legacy()])
+    await service.migrateLegacyCredentials()
+    // `updateAgent` merges `network`, so a merge-based migration would leave
+    // the apiKey exactly where it was.
+    expect(store.getAgent("agent-1")?.network?.apiKey).toBeUndefined()
+    expect(store.getAgent("agent-1")?.network?.endpoint).toBe("https://a.test")
+  })
+
+  it("skips agents that carry no inline secret", async () => {
+    const { service, keyring } = build({}, [stdioConfig()])
+    const result = await service.migrateLegacyCredentials()
+    expect(result.migrated).toEqual([])
+    expect(keyring.entries.size).toBe(0)
+  })
+
+  it("contains a keyring failure to one agent and still scrubs it", async () => {
+    const keyring = memoryKeyring()
+    keyring.save = async () => {
+      throw new Error("vault locked")
+    }
+    const { service, store } = build({ keyring }, [legacy(), stdioConfig({ id: "agent-2" })])
+
+    const result = await service.migrateLegacyCredentials()
+
+    expect(result.failed).toEqual([{ agentId: "agent-1", reason: "vault locked" }])
+    expect(JSON.stringify(store.getAgent("agent-1"))).not.toContain("sk-legacy")
+    expect(store.getAgent("agent-1")?.enabled).toBe(false)
+    // Boot continues: the healthy agent is untouched.
+    expect(store.getAgent("agent-2")?.enabled).toBe(true)
+  })
+
+  it("disables the agent when the store itself refuses the replacement", async () => {
+    const store = fakeStore([legacy()])
+    store.replaceAgentConfig = () => {
+      throw new Error("store write failed")
+    }
+    const { service } = build({ store })
+
+    const result = await service.migrateLegacyCredentials()
+
+    expect(result.failed[0]).toMatchObject({ agentId: "agent-1" })
+    expect(store.getAgent("agent-1")?.enabled).toBe(false)
+    expect(store.getAgent("agent-1")?.lifecycleStatus).toBe("needs-credentials")
+  })
+})
+
+describe("reviewAll", () => {
+  it("judges and disables without connecting anything", async () => {
+    const { service, manager, store } = build({ adapters: { isProtocolAvailable: () => false } }, [
+      stdioConfig(),
+    ])
+
+    const verdicts = await service.reviewAll()
+
+    expect(verdicts.get("agent-1")?.reasonCode).toBe("adapter_unavailable")
+    expect(store.getAgent("agent-1")?.enabled).toBe(false)
+    expect(manager.addAgent).not.toHaveBeenCalled()
+  })
+
+  it("leaves a ready agent unregistered, since rehydration owns that", async () => {
+    const { service, manager } = build({}, [stdioConfig()])
+
+    const verdicts = await service.reviewAll()
+
+    expect(verdicts.get("agent-1")?.status).toBe("ready")
+    // reconcile() registers; reviewAll() deliberately does not, so startup
+    // rehydration does not end up registering every agent twice.
+    expect(manager.addAgent).not.toHaveBeenCalled()
   })
 })

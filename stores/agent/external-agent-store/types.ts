@@ -115,6 +115,14 @@ export interface ExternalAgentActions {
   getAgent: (id: string) => LifecycleExternalAgentConfig | undefined
   getAllAgents: () => LifecycleExternalAgentConfig[]
   /**
+   * Replace a stored configuration wholesale, preserving only `createdAt`.
+   *
+   * `updateAgent` MERGES `process` and `network`, which means it can add a
+   * field but never remove one — so it cannot scrub a credential out of a
+   * legacy config. This can, and the credential migration is its only caller.
+   */
+  replaceAgentConfig: (id: string, config: LifecycleExternalAgentConfig) => void
+  /**
    * Persist lifecycle-plane fields that are not part of the user edit surface.
    *
    * An explicitly `undefined` field is DELETED rather than ignored, which is

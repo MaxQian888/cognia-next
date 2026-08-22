@@ -245,6 +245,25 @@ export const createExternalAgentActionsSlice = (
     })
   },
 
+  replaceAgentConfig: (id, config): void => {
+    set((state) => {
+      const existing = state.agents[id]
+      if (!existing) return state
+
+      const { createdAt: _ignoredCreatedAt, updatedAt: _ignoredUpdatedAt, ...rest } = config
+      const replaced: StoredExternalAgentConfig = {
+        ...rest,
+        id,
+        // Creation time is a fact about the agent, not part of the payload the
+        // caller rebuilt, so it survives a wholesale replacement.
+        createdAt: existing.createdAt,
+        updatedAt: new Date().toISOString(),
+      }
+
+      return { agents: { ...state.agents, [id]: replaced } }
+    })
+  },
+
   patchLifecycle: (id, fields): void => {
     set((state) => {
       const agent = state.agents[id]

@@ -19,6 +19,8 @@ import {
   isSupportedExternalAgentProtocol,
 } from "./config-normalizer"
 import { onProtocolAdapterRegistryChange, protocolAdapterRegistry } from "./protocol-adapter"
+import { getExternalAgentLifecycleService } from "./lifecycle/service"
+import type { ReadinessVerdict } from "./lifecycle/service"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
 /** Bound the per-agent startup connect so one hanging agent cannot leave the
@@ -67,9 +69,21 @@ export function isRehydratableProtocol(protocol: ExternalAgentConfig["protocol"]
 export async function rehydrateExternalAgent(
   config: ExternalAgentConfig,
   manager: ExternalAgentManager,
-  shouldContinue: () => boolean
+  shouldContinue: () => boolean,
+  verdict?: ReadinessVerdict
 ): Promise<void> {
   const store = useExternalAgentStore.getState()
+
+  // The lifecycle verdict gates everything below it. An agent whose adapter is
+  // gone, whose credentials cannot be resolved, or whose Windows consent no
+  // longer describes what would launch must not be registered at all — the
+  // reason is already recorded on the config, so this returns quietly rather
+  // than spawning a process that would fail for a reason nothing explained.
+  if (verdict && verdict.status !== "ready") {
+    store.setConnectionStatus(config.id, "disconnected")
+    return
+  }
+
   let runtimeInstance = manager.getAgent(config.id)
 
   if (!runtimeInstance && isRehydratableProtocol(config.protocol)) {
@@ -134,6 +148,40 @@ export async function rehydrateExternalAgent(
 }
 
 /**
+ * Everything that must happen before any adapter is constructed.
+ *
+ * Two steps, in this order and no other:
+ *
+ *  1. move legacy inline secrets into the keyring, so no connection is ever
+ *     built from a config that still carries plaintext;
+ *  2. judge every saved agent and disable the ones that cannot honestly start,
+ *     recording a structured reason on each.
+ *
+ * Returns the verdicts so rehydration can use them as a gate. Deliberately
+ * calls `reviewAll` rather than `reconcile`: registration and connection are
+ * this module's job (with its own timeout and adapter-registry subscription),
+ * and reconcile would do them a second time.
+ *
+ * A failure here must not brick boot — a browser shell with a locked vault
+ * would otherwise take the whole startup down — so it degrades to "no verdicts"
+ * and lets the existing rehydration path run as it did before.
+ */
+export async function prepareExternalAgentsForRehydration(): Promise<
+  Map<string, ReadinessVerdict>
+> {
+  try {
+    const service = await getExternalAgentLifecycleService()
+    await service.migrateLegacyCredentials()
+    return await service.reviewAll()
+  } catch (error) {
+    useExternalAgentStore.setState({
+      lastError: error instanceof Error ? error.message : String(error),
+    })
+    return new Map()
+  }
+}
+
+/**
  * Start external-agent rehydration for a host that runs it exactly once (the
  * headless brain — no React StrictMode double-invoke). Runs the one-time
  * startup rehydration and subscribes to protocol-adapter registry changes so a
@@ -149,13 +197,23 @@ export function startExternalAgentRehydration(): () => void {
   const shouldContinue = () => isActive
 
   void (async () => {
-    const persistedAgents = useExternalAgentStore.getState().getAllAgents()
-    if (persistedAgents.length === 0) {
+    if (useExternalAgentStore.getState().getAllAgents().length === 0) {
       return
     }
+
+    const verdicts = await prepareExternalAgentsForRehydration()
+    if (!isActive) {
+      return
+    }
+
+    // Re-read: the preparation step rewrites configs (scrubbing migrated
+    // secrets) and disables the ones it judged unrunnable.
+    const persistedAgents = useExternalAgentStore.getState().getAllAgents()
     const manager = getExternalAgentManager()
     await Promise.all(
-      persistedAgents.map((config) => rehydrateExternalAgent(config, manager, shouldContinue))
+      persistedAgents.map((config) =>
+        rehydrateExternalAgent(config, manager, shouldContinue, verdicts.get(config.id))
+      )
     )
   })()
 
