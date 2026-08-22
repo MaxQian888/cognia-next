@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "description": "External-agent security policy (ADR-0090 external SSOT / ADR-0059 D6). The launch-side twin of protocol/agent-capabilities.json: that file says what an agent CAN do, this one says what Cognia is willing to LAUNCH. TypeScript consumes it directly; Rust keeps its own literal arrays (a compiled-in allowlist must not depend on runtime JSON parsing) and `pnpm audit:agent-capabilities` enforces that the two agree.",
+  "sandbox": {
+    "note": "Cognia never runs an external agent unsandboxed. A platform with neither macOS Seatbelt nor Linux bubblewrap cannot host one at all, which is a refusal to surface BEFORE the user configures an agent -- not an error at spawn time.",
+    "supportedPlatforms": ["darwin", "linux"],
+    "reasonKey": "sandboxUnavailableOnPlatform"
+  },
+  "binaryAllowlist": {
+    "note": "Bare binary names an external-agent spawn may execute (no path separators). Every entry must be justified: either a shipped preset names it as `process.command`, or it appears under `manualOnly` WITH a reason. An entry that is neither is attack surface the headless spawn RPC exposes and no Cognia code path can ask for -- which is exactly what `cline` was.",
+    "commands": [
+      "claude",
+      "claude-agent-acp",
+      "claude-code-acp",
+      "codex",
+      "codex-acp",
+      "copilot",
+      "cursor-agent",
+      "droid",
+      "gemini",
+      "kiro-cli",
+      "opencode",
+      "pi"
+    ],
+    "manualOnly": {
+      "claude": "The Claude Code CLI itself. No preset spawns it (the `claude-code` preset uses the ACP adapter binary), but hand-configured agents and the container/kube backends do.",
+      "claude-code-acp": "Zed's ACP bridge, installed globally by users who prefer it over the first-party adapter. It is also the default command in `container_backend.rs` / `kube_backend.rs`.",
+      "codex-acp": "The Zed Codex ACP shim as a GLOBAL install; the shipped preset uses the `npx @zed-industries/codex-acp` form. `workspace_runtime_backend.rs` spawns the bare name.",
+      "gemini": "The Gemini CLI as a global install; the shipped preset uses the `npx @google/gemini-cli` form."
+    }
+  },
+  "npxPackageAllowlist": {
+    "note": "Packages `npx [-y|--yes] <package>` may execute.",
+    "packages": [
+      "@agentclientprotocol/claude-agent-acp",
+      "@anthropic-ai/claude-code",
+      "@google/gemini-cli",
+      "@qwen-code/qwen-code",
+      "@zed-industries/claude-code-acp",
+      "@zed-industries/codex-acp",
+      "opencode-ai",
+      "pi-acp"
+    ]
+  },
+  "agentStateWritableRoots": {
+    "note": "Home-relative paths each agent family must be able to write inside the sandbox. Matching runs against the RESOLVED target: for `npx <package>` that is the package, otherwise the base command with any Windows executable suffix stripped. `match` is either \"contains\" (substring of the target), \"target\" (target equals one of `values`) or \"base\" (the base command equals one of `values`) -- Pi needs the exact forms because \"copilot\" contains \"pi\". A missing root does not fail the launch; it silently breaks whatever the agent stores there, which is how OpenCode's absence went unnoticed while its session resume started over every time.",
+    "rules": [
+      {
+        "match": "contains",
+        "values": ["codex"],
+        "roots": [".codex"]
+      },
+      {
+        "match": "contains",
+        "values": ["claude"],
+        "roots": [".claude", ".claude.json", ".claude.json.backup"]
+      },
+      {
+        "match": "contains",
+        "values": ["gemini"],
+        "roots": [".gemini"]
+      },
+      {
+        "match": "contains",
+        "values": ["qwen"],
+        "roots": [".qwen"]
+      },
+      {
+        "match": "target",
+        "values": ["pi-acp"],
+        "roots": [".pi"]
+      },
+      {
+        "match": "base",
+        "values": ["pi"],
+        "roots": [".pi"]
+      },
+      {
+        "match": "contains",
+        "values": ["copilot"],
+        "roots": [".copilot", ".cache/copilot"]
+      },
+      {
+        "match": "contains",
+        "values": ["kiro"],
+        "roots": [".kiro"]
+      },
+      {
+        "match": "contains",
+        "values": ["droid", "factory"],
+        "roots": [".factory"]
+      },
+      {
+        "match": "contains",
+        "values": ["cursor"],
+        "roots": [".cursor"]
+      },
+      {
+        "match": "contains",
+        "values": ["opencode"],
+        "roots": [".config/opencode", ".local/share/opencode"]
+      },
+      {
+        "match": "base",
+        "values": ["npx"],
+        "roots": [".npm"]
+      }
+    ]
+  },
+  "fileRoots": {
+    "note": "Roots that are FILES rather than directories; a sandbox scope naming a path that does not exist is not the same as one naming an empty file.",
+    "prefixes": [".claude.json"]
+  }
+}
