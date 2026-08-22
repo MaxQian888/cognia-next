@@ -235,7 +235,18 @@ export function isBinaryDistribution(
 
 /** How a runtime reports its version, and how to read the answer. */
 export interface ExternalAgentVersionProbe {
-  /** Arguments appended to the launch command, e.g. `["--version"]`. */
+  /**
+   * The COMPLETE argument vector for the probe, not an addition to
+   * `launchArgs`.
+   *
+   * Appending to the launch arguments is what the first version of this field
+   * described, and it does not work: most runtimes launch with a mode argument
+   * (`--acp`, `acp`, `exec`, `--mode rpc`), so `<launchArgs> --version` starts
+   * the agent instead of printing a version. A package-runner probe still has
+   * to name the package, which is why these vectors are not simply
+   * `["--version"]` everywhere; the gate checks that the package probed is the
+   * package launched.
+   */
   args: string[]
   /**
    * Named parser applied to the probe's stdout. Named rather than inlined as a

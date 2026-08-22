@@ -7,6 +7,7 @@ import {
   checkLaunchParity,
   checkPinning,
   checkPlatforms,
+  checkProbes,
   checkSchema,
   checkWaivers,
   runChecks,
@@ -346,6 +347,91 @@ test("platforms reject a Windows-eligible runtime that does not support Windows"
     ])
   )
   assert.ok(errors.some((e) => e.includes("does not support win32")))
+})
+
+// --- probes ----------------------------------------------------------------
+
+test("probes reject a package runner that probes a different package than it launches", () => {
+  // The shape the catalog shipped with: `args: ["--version"]` alone, which
+  // resolves to `npx --version` — the runner's own version, not the runtime's.
+  const errors = checkProbes(
+    catalog([
+      runtime({
+        systemCommand: "npx",
+        launchArgs: ["-y", "@zed-industries/codex-acp"],
+        versionProbe: { args: ["--version"], parser: "semver-anywhere", timeoutMs: 20000 },
+      }),
+    ])
+  )
+  assert.ok(errors.some((e) => e.includes("would not be the version that runs")))
+})
+
+test("probes accept a package runner that names the launched package", () => {
+  assert.deepEqual(
+    checkProbes(
+      catalog([
+        runtime({
+          systemCommand: "npx",
+          launchArgs: ["-y", "@zed-industries/codex-acp", "--acp"],
+          versionProbe: {
+            args: ["-y", "@zed-industries/codex-acp", "--version"],
+            parser: "semver-anywhere",
+            timeoutMs: 20000,
+          },
+        }),
+      ])
+    ),
+    []
+  )
+})
+
+test("probes reject one that repeats a launch mode flag", () => {
+  const errors = checkProbes(
+    catalog([
+      runtime({
+        systemCommand: "copilot",
+        launchArgs: ["--acp"],
+        versionProbe: { args: ["--acp", "--version"], parser: "semver-anywhere", timeoutMs: 10000 },
+      }),
+    ])
+  )
+  assert.ok(errors.some((e) => e.includes('repeats the launch flag "--acp"')))
+})
+
+test("probes tolerate the runner's own -y, which is not a launch mode", () => {
+  assert.deepEqual(
+    checkProbes(
+      catalog([
+        runtime({
+          systemCommand: "npx",
+          launchArgs: ["-y", "pi-acp"],
+          versionProbe: {
+            args: ["-y", "pi-acp", "--version"],
+            parser: "semver-anywhere",
+            timeoutMs: 20000,
+          },
+        }),
+      ])
+    ),
+    []
+  )
+})
+
+test("probes reject an empty argument vector", () => {
+  const errors = checkProbes(
+    catalog([runtime({ versionProbe: { args: [], parser: "semver-anywhere", timeoutMs: 10000 } })])
+  )
+  assert.ok(errors.some((e) => e.includes("starts the agent")))
+})
+
+test("probes allow a managed runtime with no command, and reject a system one", () => {
+  const managed = checkProbes(
+    catalog([runtime({ ownership: "managed", systemCommand: undefined })])
+  )
+  assert.deepEqual(managed, [])
+
+  const system = checkProbes(catalog([runtime({ systemCommand: undefined })]))
+  assert.ok(system.some((e) => e.includes("names no command to run it against")))
 })
 
 // --- orchestration ---------------------------------------------------------

@@ -41,7 +41,11 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "npx",
       "launchArgs": ["-y", "@zed-industries/codex-acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 20000 },
+      "versionProbe": {
+        "args": ["-y", "@zed-industries/codex-acp", "--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 20000
+      },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": true },
       "docsUrl": "https://github.com/zed-industries/codex-acp"
@@ -71,7 +75,11 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "npx",
       "launchArgs": ["-y", "@google/gemini-cli", "--acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 20000 },
+      "versionProbe": {
+        "args": ["-y", "@google/gemini-cli", "--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 20000
+      },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": true },
       "docsUrl": "https://github.com/google-gemini/gemini-cli"
@@ -116,7 +124,11 @@
       "platforms": ["darwin", "linux", "win32"],
       "systemCommand": "npx",
       "launchArgs": ["-y", "@qwen-code/qwen-code", "--acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 20000 },
+      "versionProbe": {
+        "args": ["-y", "@qwen-code/qwen-code", "--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 20000
+      },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": true },
       "docsUrl": "https://github.com/QwenLM/qwen-code"
@@ -146,7 +158,11 @@
       "platforms": ["darwin", "linux"],
       "systemCommand": "npx",
       "launchArgs": ["-y", "pi-acp"],
-      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 20000 },
+      "versionProbe": {
+        "args": ["-y", "pi-acp", "--version"],
+        "parser": "semver-anywhere",
+        "timeoutMs": 20000
+      },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
       "docsUrl": "https://github.com/parallel-web/pi"

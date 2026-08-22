@@ -59,6 +59,8 @@ const OWNERSHIP_MODES = new Set(["managed", "system", "remote"])
 const JS_PROVIDERS = new Set(["npm", "pnpm", "bun"])
 const ALL_PROVIDERS = new Set([...JS_PROVIDERS, "uvx", "binary"])
 const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx", "uvx"])
+// Flags that belong to the runner itself, not to the runtime it runs.
+const RUNNER_FLAGS = new Set(["-y", "--yes"])
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 const SHA256 = /^[0-9a-f]{64}$/
 
@@ -302,6 +304,65 @@ export function checkLaunchParity(catalog, policy) {
   return errors
 }
 
+/**
+ * Is each probe an argument vector that would actually print a version?
+ *
+ * `versionProbe.args` is the complete vector, because appending `--version` to
+ * `launchArgs` starts the agent for most runtimes here — `--acp`, `acp`,
+ * `exec` and `--mode rpc` are all launch modes. Two ways to get that wrong are
+ * checkable: probing a different package than the one that launches (the
+ * version shown would not be the version that runs), and repeating a launch
+ * mode flag inside the probe (which starts the agent and hangs until the
+ * timeout).
+ */
+export function checkProbes(catalog) {
+  const errors = []
+
+  for (const entry of catalog.runtimes) {
+    const probe = entry.versionProbe
+    if (!probe) continue
+
+    const args = probe.args ?? []
+    if (args.length === 0) {
+      errors.push(
+        `${entry.runtimeId}: versionProbe.args is empty — running the bare command starts the agent`
+      )
+    }
+
+    const command = entry.systemCommand
+    if (!command) {
+      if (entry.ownership !== "managed") {
+        errors.push(
+          `${entry.runtimeId}: declares a version probe but names no command to run it against`
+        )
+      }
+      continue
+    }
+
+    if (isPackageRunner(command)) {
+      const launched = (entry.launchArgs ?? []).find((arg) => !arg.startsWith("-"))
+      const probed = args.find((arg) => !arg.startsWith("-"))
+      if (launched && probed !== launched) {
+        errors.push(
+          `${entry.runtimeId}: probes package "${probed ?? "(none)"}" but launches "${launched}" — ` +
+            "the version reported would not be the version that runs"
+        )
+      }
+    }
+
+    for (const arg of entry.launchArgs ?? []) {
+      if (!arg.startsWith("-") || RUNNER_FLAGS.has(arg)) continue
+      if (args.includes(arg)) {
+        errors.push(
+          `${entry.runtimeId}: versionProbe.args repeats the launch flag "${arg}", ` +
+            "which starts the agent instead of printing a version"
+        )
+      }
+    }
+  }
+  return errors
+}
+
 export function checkPlatforms(catalog) {
   const errors = []
   for (const entry of catalog.runtimes) {
@@ -340,6 +401,7 @@ export function runChecks(
     ...checkPinning(catalog),
     ...checkWaivers(catalog),
     ...checkLaunchParity(catalog, policy),
+    ...checkProbes(catalog),
     ...checkPlatforms(catalog),
   ]
 }
