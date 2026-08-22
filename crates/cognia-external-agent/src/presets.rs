@@ -40,14 +40,25 @@ pub const WORKSPACES_DIR_ENV: &str = "COGNIA_WORKSPACES_DIR";
 
 /// Bare binary names an external-agent spawn may execute (ADR-0048/0049
 /// ecosystem; resolution itself goes through `command_resolver`).
+///
+/// Mirrors `binaryAllowlist.commands` in
+/// `protocol/external-agent-security-policy.json`, which the TypeScript
+/// launcher consumes directly. The two are kept in step by
+/// `pnpm audit:agent-capabilities` rather than by a comment: a security
+/// allowlist must stay compiled in, so it cannot read the JSON at runtime, and
+/// the last time the two were only linked by a comment they drifted in both
+/// directions at once.
 const BINARY_ALLOWLIST: &[&str] = &[
     "claude",
+    // The `claude-code` preset spawns THIS bare binary
+    // (`ecosystem-adapters.ts`), not the npx package. Its absence meant every
+    // headless spawn of a shipped preset was refused by policy.
+    "claude-agent-acp",
     "claude-code-acp",
     "codex",
     "codex-acp",
     "opencode",
     "cursor-agent",
-    "cline",
     "gemini",
     "copilot",
     "kiro-cli",
@@ -58,6 +69,9 @@ const BINARY_ALLOWLIST: &[&str] = &[
 ];
 
 /// Packages `npx` may execute (`npx [-y|--yes] <package> …`).
+///
+/// Mirrors `npxPackageAllowlist.packages` in
+/// `protocol/external-agent-security-policy.json`; see [`BINARY_ALLOWLIST`].
 const NPX_PACKAGE_ALLOWLIST: &[&str] = &[
     "@agentclientprotocol/claude-agent-acp",
     "@zed-industries/claude-code-acp",
@@ -438,18 +452,37 @@ mod tests {
             "codex",
             "opencode",
             "cursor-agent",
-            "cline",
             "gemini",
+            "claude-agent-acp",
             "claude-code-acp",
             "copilot",
             "kiro-cli",
             "droid",
+            "pi",
         ] {
             assert!(p.validate(config(bin, &[])).is_ok(), "{bin} must pass");
         }
         // Windows shims normalize.
         assert!(p.validate(config("claude.CMD", &[])).is_ok());
         assert!(p.validate(config("codex.exe", &[])).is_ok());
+    }
+
+    #[test]
+    fn the_shipped_claude_code_preset_binary_is_allowed() {
+        // `ecosystem-adapters.ts` spawns the bare `claude-agent-acp` binary for
+        // the `claude-code` preset. Only the npx PACKAGE of the same name was
+        // allowlisted, so every headless spawn of a shipped preset was refused.
+        let (_tmp, p) = policy(false);
+        assert!(p.validate(config("claude-agent-acp", &[])).is_ok());
+    }
+
+    #[test]
+    fn binaries_no_preset_can_reach_are_denied() {
+        // `cline` sat in the allowlist with no preset, no adapter and no
+        // ecosystem surface — an executable the headless spawn RPC would run
+        // that no Cognia code path could ever ask for.
+        let (_tmp, p) = policy(false);
+        assert!(p.validate(config("cline", &[])).is_err());
     }
 
     #[test]

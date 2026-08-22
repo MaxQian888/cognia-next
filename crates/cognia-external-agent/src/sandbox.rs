@@ -117,8 +117,13 @@ fn base_command(command: &str) -> String {
 
 /// Home-relative state directories the agent must be able to write.
 ///
-/// Port of `agentStateWritableRoots` (cli/src/runtime/external/sandbox-launcher.ts).
-/// Keep the two in union.
+/// Mirrors `agentStateWritableRoots.rules` in
+/// `protocol/external-agent-security-policy.json`, which the TypeScript
+/// launcher (`cli/src/runtime/external/sandbox-launcher.ts`) now consumes
+/// directly. `pnpm audit:agent-capabilities` fails when the two disagree —
+/// while the only link was a "keep the two in union" comment, both sides
+/// silently lacked an OpenCode rule, so `opencode serve` ran with its session
+/// store outside the sandbox scope and resume started over every time.
 pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -> Vec<PathBuf> {
     let base = base_command(command);
     // `npx <package>` runs the package, so the state dir belongs to the
@@ -163,6 +168,14 @@ pub fn agent_state_writable_roots(command: &str, args: &[String], home: &Path) -
     }
     if target.contains("cursor") {
         roots.push(home.join(".cursor"));
+    }
+    if target.contains("opencode") {
+        // OpenCode is XDG-style on every platform (see
+        // `crates/cognia-agent-state/src/session_import.rs`): the config lives
+        // under `~/.config/opencode` and the session database under
+        // `~/.local/share/opencode`.
+        roots.push(home.join(".config").join("opencode"));
+        roots.push(home.join(".local").join("share").join("opencode"));
     }
     if base == "npx" {
         roots.push(home.join(".npm"));
@@ -497,6 +510,29 @@ mod tests {
     fn windows_suffix_is_stripped_before_matching() {
         let roots = agent_state_writable_roots("Codex.EXE", &[], Path::new("/home/dev"));
         assert_eq!(roots, vec![PathBuf::from("/home/dev/.codex")]);
+    }
+
+    #[test]
+    fn opencode_gets_its_config_and_session_store() {
+        // Neither launcher had an OpenCode rule, so `opencode serve` ran with
+        // its session database outside the sandbox scope: writes failed
+        // silently and `--session-id` resume started over every time.
+        let roots = agent_state_writable_roots("opencode", &[], Path::new("/home/dev"));
+        assert_eq!(
+            roots,
+            vec![
+                PathBuf::from("/home/dev/.config/opencode"),
+                PathBuf::from("/home/dev/.local/share/opencode"),
+            ]
+        );
+    }
+
+    #[test]
+    fn copilot_does_not_inherit_pis_state_directory() {
+        // "copilot" contains "pi", which is why the Pi rule matches the exact
+        // target rather than a substring.
+        let roots = agent_state_writable_roots("copilot", &[], Path::new("/home/dev"));
+        assert!(!roots.contains(&PathBuf::from("/home/dev/.pi")));
     }
 
     #[test]

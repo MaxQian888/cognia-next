@@ -1,0 +1,1553 @@
+{
+  "version": 1,
+  "description": "External-agent capability manifest (ADR-0090 external SSOT). Source of truth for layer 1 (protocol) and layer 2 (preset refinement) of the capability merge. Only the seven REGISTERED built-in protocols appear here: plugin protocols declare their own rows in the plugin manifest, and http/websocket/custom have no adapter and are read-only legacy. Every protocol carries a COMPLETE row -- an id with no evidence is written out as level \"unknown\", evidence \"none\", never omitted, so a missing measurement can never be mistaken for a measured yes.",
+  "capabilityIds": [
+    "streaming",
+    "session.multi-turn",
+    "session.resume",
+    "tools.ordinary",
+    "tools.parallel",
+    "tools.fragmented-json",
+    "tools.results",
+    "tools.errors",
+    "mcp",
+    "permissions.interrupt-resume",
+    "permissions.set-mode",
+    "prompt-caching",
+    "thinking",
+    "context-management",
+    "images",
+    "beta-features",
+    "rate-limit-handling",
+    "upstream-errors",
+    "stream-interruption",
+    "subagents.native",
+    "steer",
+    "set-model",
+    "checkpoint",
+    "compaction",
+    "output.structured",
+    "session.store",
+    "session.manage",
+    "permissions.update-rules",
+    "hooks.lifecycle",
+    "input.elicitation",
+    "input.dialog",
+    "plugins.native",
+    "skills.native",
+    "mcp.dynamic",
+    "subagents.manage",
+    "tasks.background",
+    "commands.dynamic",
+    "sandbox.native",
+    "observability.child",
+    "startup.prewarm",
+    "mcp.logs",
+    "rate-limit-reporting",
+    "subagents.model-selection",
+    "models.list"
+  ],
+  "adapterMethodCapabilities": {
+    "steer": "steerTurn",
+    "set-model": "setSessionModel",
+    "session.resume": "resumeSession",
+    "session.manage": "listSessions",
+    "permissions.set-mode": "setSessionMode",
+    "input.elicitation": "respondToElicitation"
+  },
+  "protocols": {
+    "acp": {
+      "label": "Agent Client Protocol (ACP v1)",
+      "note": "Rows follow the ACP v1 schema Cognia negotiates in `acp-client.ts`.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "unknown",
+          "evidence": "none",
+          "reasonKey": "notNegotiated"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.set-mode": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "codex-app-server": {
+      "label": "OpenAI Codex app-server (thread/turn/item JSON-RPC)",
+      "note": "Rows follow the 0.141 app-server schema driven by `codex-app-server-client.ts`.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "perThreadConfigOverride"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.set-mode": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "codexOptionsChannel"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        }
+      }
+    },
+    "dsh-sdk": {
+      "label": "DeepSeek Harness stdio JSON-RPC SDK runtime",
+      "note": "The SDK transport is observation-rich but cannot carry a mid-turn approval; see `dsh-sdk-client.ts`.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noMidTurnApproval"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "launchTimeAuthorityOnly"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "cancelKillsRuntime"
+        },
+        "subagents.native": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "launchTimeAuthorityOnly"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "pi-rpc": {
+      "label": "Pi native `pi --mode rpc` JSONL command/event protocol",
+      "note": "Rows follow `pi-rpc-client.ts` / `pi-rpc-events.ts` (ADR-0119).",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noPerSessionMcpServers"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.set-mode": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "input.dialog": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        }
+      }
+    },
+    "opencode": {
+      "label": "OpenCode server protocol (HTTP + SSE)",
+      "note": "Rows follow `opencode-client.ts` against the `@opencode-ai/sdk` server surface.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noPerSessionMcpServers"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "permissions.set-mode": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "nativeSummarizeRoute"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "opencode-v2": {
+      "label": "OpenCode V2 local-service preview protocol",
+      "note": "Preview surface; only what `opencode-v2-client.ts` actually drives is asserted.",
+      "capabilities": {
+        "streaming": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "tools.ordinary": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noPerSessionMcpServers"
+        },
+        "permissions.interrupt-resume": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.set-mode": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "equivalent",
+          "evidence": "adapter-code",
+          "reasonKey": "nativeSummarizeRoute"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "native",
+          "evidence": "adapter-code"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    },
+    "a2a": {
+      "label": "Agent-to-Agent Protocol (Google A2A)",
+      "note": "A2A is a task transport: almost everything depends on the remote Agent Card, which is a LIVE fact, so the static row asserts only what the spec fixes.",
+      "capabilities": {
+        "streaming": {
+          "level": "unknown",
+          "evidence": "none",
+          "reasonKey": "notNegotiated"
+        },
+        "session.multi-turn": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "session.resume": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tools.ordinary": {
+          "level": "unknown",
+          "evidence": "none",
+          "reasonKey": "notNegotiated"
+        },
+        "tools.parallel": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.fragmented-json": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "tools.results": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "tools.errors": {
+          "level": "unknown",
+          "evidence": "none",
+          "reasonKey": "notNegotiated"
+        },
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.interrupt-resume": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.set-mode": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "prompt-caching": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "context-management": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "images": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "beta-features": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "rate-limit-handling": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "upstream-errors": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "stream-interruption": {
+          "level": "native",
+          "evidence": "protocol-spec"
+        },
+        "subagents.native": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "steer": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "set-model": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "checkpoint": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "compaction": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "output.structured": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "session.store": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "session.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "permissions.update-rules": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "hooks.lifecycle": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "input.elicitation": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "input.dialog": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "plugins.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "skills.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "mcp.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "subagents.manage": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "tasks.background": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "commands.dynamic": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "sandbox.native": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        },
+        "observability.child": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "startup.prewarm": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "mcp.logs": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "agentOwned"
+        },
+        "rate-limit-reporting": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "sidecarOnly"
+        },
+        "subagents.model-selection": {
+          "level": "unknown",
+          "evidence": "none"
+        },
+        "models.list": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noProtocolSlot"
+        }
+      }
+    }
+  },
+  "presetRefinements": {
+    "deepseek-harness-acp": {
+      "protocol": "acp",
+      "note": "Upstream calls this server automation-only: committed assistant text is all that reaches the wire.",
+      "capabilities": {
+        "streaming": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "committedRepliesOnly"
+        },
+        "thinking": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "committedRepliesOnly"
+        },
+        "tools.errors": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "committedRepliesOnly"
+        },
+        "tools.ordinary": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "committedRepliesOnly"
+        },
+        "tools.results": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "committedRepliesOnly"
+        }
+      }
+    },
+    "opencode-remote": {
+      "protocol": "opencode",
+      "note": "Cognia never starts this server, so it cannot be sandboxed or torn down by us; capability-wise it is identical to the auto-spawn preset.",
+      "capabilities": {}
+    },
+    "opencode-v2-preview": {
+      "protocol": "opencode-v2",
+      "note": "Preview service Cognia never starts or stops.",
+      "capabilities": {}
+    }
+  },
+  "capabilityNotes": {
+    "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure.",
+    "mcp": "Whether Cognia can attach an MCP server for a session. ACP carries them on `session/new`; Codex has no per-session parameter and reaches the same outcome through a per-thread config override (`equivalent`); the rest have no channel.",
+    "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising `loadSession`, so the row is `unknown` and the handshake answers it.",
+    "compaction": "ACP has no compaction method: the only route is a `/compact` or `/compress` the agent chose to advertise, which is a per-session live fact. Pi and Codex have native methods.",
+    "hooks.lifecycle": "No external protocol models Cognia's lifecycle hooks, so every row is `unknown`. Whether the hooks run is a HOST fact: the renderer wraps every external turn, the CLI does not."
+  }
+}
