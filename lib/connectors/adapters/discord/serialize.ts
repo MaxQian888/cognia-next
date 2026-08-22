@@ -132,10 +132,104 @@ function buildMessageReference(
   }
 }
 
-// GAP: per-segment fragmentation — every text/markdown/code/mention segment
-// still becomes its own Discord message (and edits consolidate lossily to the
-// first text segment); merging consecutive segments into one message is a
-// separate follow-up.
+/**
+ * Segment kinds that all project to Discord's `content` field and can
+ * therefore share one message.
+ *
+ * `reply` is deliberately absent from both this set and the "breaks the run"
+ * side: it carries no content of its own (the reply is expressed through
+ * `message_reference`), so letting it split a run would fragment a message for
+ * nothing.
+ */
+const CONTENT_SEGMENT_TYPES = new Set(["text", "markdown", "code", "mention", "emoji"])
+
+/** One content-bearing segment as the markdown Discord will render. */
+function renderContentSegment(seg: MessageSegment): string {
+  switch (seg.type) {
+    case "text":
+      return seg.text
+    case "markdown":
+      return seg.md
+    case "mention":
+      return `<@${seg.userId}>`
+    case "emoji":
+      return seg.code
+    case "code": {
+      const lang = seg.language ?? ""
+      return lang ? `\`\`\`${lang}\n${seg.code}\n\`\`\`` : `\`\`\`\n${seg.code}\n\`\`\``
+    }
+    default:
+      return ""
+  }
+}
+
+/**
+ * Kinds that occupy their own block. Two of them in a row are two paragraphs,
+ * not one run-on line, so they are separated by a newline. `mention` and
+ * `emoji` are inline and carry their own surrounding spacing from whoever
+ * wrote them, so they are appended verbatim.
+ */
+const BLOCK_SEGMENT_TYPES = new Set(["text", "markdown", "code"])
+
+/**
+ * Render a run of content segments as ONE Discord message body.
+ *
+ * A newline goes between two consecutive BLOCK segments only. That keeps
+ * `["Here is the fix:", <code>]` as two lines while leaving
+ * `["Ping ", @user, " please"]` a single sentence — inserting a break around an
+ * inline segment would corrupt a sentence its author had already spaced.
+ * A fenced code block additionally forces a line of its own at both ends:
+ * Discord only renders a fence that starts a line, so an inlined one would
+ * print its backticks literally.
+ */
+export function renderDiscordContentRun(segments: readonly MessageSegment[]): string {
+  let out = ""
+  let previousWasBlock = false
+  for (const seg of segments) {
+    const piece = renderContentSegment(seg)
+    if (!piece) continue
+    const isBlock = BLOCK_SEGMENT_TYPES.has(seg.type)
+    if (out.length > 0 && isBlock && previousWasBlock && !out.endsWith("\n")) out += "\n"
+    out += seg.type === "code" ? `${piece}\n` : piece
+    previousWasBlock = isBlock
+  }
+  return out.replace(/\s+$/, "")
+}
+
+/**
+ * Collapse consecutive content-bearing segments into a single `markdown`
+ * segment.
+ *
+ * Every text / markdown / code / mention / emoji segment used to become its own
+ * Discord message, so an answer of "Here is the fix:" plus a code block arrived
+ * as two messages — and because each one carried `message_reference`, a reply
+ * pinged the user once per fragment instead of once. Segments that genuinely
+ * need their own message (a2ui surfaces, and anything the serializer does not
+ * recognise) still break the run and keep their position.
+ */
+export function mergeDiscordContentSegments(segments: readonly MessageSegment[]): MessageSegment[] {
+  const out: MessageSegment[] = []
+  let run: MessageSegment[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    const md = renderDiscordContentRun(run)
+    run = []
+    if (md.length > 0) out.push({ type: "markdown", md })
+  }
+  for (const seg of segments) {
+    if (CONTENT_SEGMENT_TYPES.has(seg.type)) {
+      run.push(seg)
+      continue
+    }
+    // A reply segment carries no content and must not split the run.
+    if (seg.type === "reply") continue
+    flush()
+    out.push(seg)
+  }
+  flush()
+  return out
+}
+
 function serializeSegment(
   seg: MessageSegment,
   channelId: string,
@@ -217,7 +311,7 @@ export function serializeOutbound(req: OutboundRequest): SerializedDiscordCall[]
   const messageReference = buildMessageReference(req, channelId)
   const calls: SerializedDiscordCall[] = []
 
-  for (const seg of req.segments) {
+  for (const seg of mergeDiscordContentSegments(req.segments)) {
     calls.push(...serializeSegment(seg, channelId, messageReference))
   }
 
@@ -239,7 +333,7 @@ export async function serializeOutboundAsync(
   const calls: SerializedDiscordCall[] = []
   const url = `${DISCORD_API_BASE}/channels/${channelId}/messages`
 
-  for (const seg of req.segments) {
+  for (const seg of mergeDiscordContentSegments(req.segments)) {
     if (seg.type === "a2ui") {
       const payload = await buildDiscordA2UIPayload({
         adapterId,

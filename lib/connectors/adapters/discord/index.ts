@@ -34,6 +34,7 @@ import {
   serializeReaction,
   serializeReactionRemoval,
   serializeFetchHistory,
+  renderDiscordContentRun,
 } from "./serialize"
 import { sendDiscordVoiceMessage } from "./voice-upload"
 import { startGatewayClient } from "./gateway-client"
@@ -563,9 +564,10 @@ export function createDiscordAdapter(opts: DiscordAdapterOptions): PlatformAdapt
     const ref = patch.conversationRef as Record<string, unknown>
     const channelId = String(ref["channelId"] ?? "")
 
-    // Build content from first text/markdown segment
-    const seg = patch.segments.find((s) => s.type === "text" || s.type === "markdown")
-    const content = seg?.type === "text" ? seg.text : seg?.type === "markdown" ? seg.md : ""
+    // Render EVERY content-bearing segment, not just the first text one: a
+    // patch that mixed text with a code block or a mention used to edit the
+    // message down to its opening sentence and silently drop the rest.
+    const content = renderDiscordContentRun(patch.segments)
 
     try {
       const call = serializeEdit(channelId, messageId, content)

@@ -8,6 +8,8 @@ import {
   chunkDiscordContent,
   discordNonce,
   serializeOutboundAsync,
+  mergeDiscordContentSegments,
+  renderDiscordContentRun,
   DISCORD_MAX_CONTENT_LENGTH,
   DISCORD_NONCE_MAX_LENGTH,
 } from "./serialize"
@@ -29,6 +31,142 @@ function makeReq(
     ...extra,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Content-run merging
+// ---------------------------------------------------------------------------
+
+describe("renderDiscordContentRun", () => {
+  it("separates two block segments with a newline, not a run-on line", () => {
+    expect(
+      renderDiscordContentRun([
+        { type: "text", text: "one" },
+        { type: "markdown", md: "two" },
+      ])
+    ).toBe("one\ntwo")
+  })
+
+  it("keeps an inline mention inside the sentence its author spaced", () => {
+    expect(
+      renderDiscordContentRun([
+        { type: "text", text: "Ping " },
+        { type: "mention", userId: "42" },
+        { type: "text", text: " please" },
+      ])
+    ).toBe("Ping <@42> please")
+  })
+
+  it("puts a fenced code block on its own line at both ends", () => {
+    expect(
+      renderDiscordContentRun([
+        { type: "text", text: "Here is the fix:" },
+        { type: "code", code: "x = 1", language: "py" },
+        { type: "text", text: "done" },
+      ])
+    ).toBe("Here is the fix:\n\`\`\`py\nx = 1\n\`\`\`\ndone")
+  })
+
+  it("renders a language-less fence", () => {
+    expect(renderDiscordContentRun([{ type: "code", code: "raw" }])).toBe("\`\`\`\nraw\n\`\`\`")
+  })
+
+  it("trims trailing whitespace and ignores empty pieces", () => {
+    expect(
+      renderDiscordContentRun([
+        { type: "text", text: "hi" },
+        { type: "text", text: "" },
+        { type: "text", text: "   " },
+      ])
+    ).toBe("hi")
+  })
+
+  it("returns an empty string for no content", () => {
+    expect(renderDiscordContentRun([])).toBe("")
+  })
+})
+
+describe("mergeDiscordContentSegments", () => {
+  it("collapses a run into one markdown segment", () => {
+    expect(
+      mergeDiscordContentSegments([
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+      ])
+    ).toEqual([{ type: "markdown", md: "a\nb" }])
+  })
+
+  it("lets an a2ui surface break the run and keeps the order", () => {
+    const a2ui = {
+      type: "a2ui" as const,
+      surfaceId: "s1",
+      content: { components: {}, dataModel: {}, rootId: "root" },
+      plainTextMirror: "mirror",
+    }
+    const merged = mergeDiscordContentSegments([
+      { type: "text", text: "before" },
+      a2ui,
+      { type: "text", text: "after" },
+    ])
+    expect(merged).toEqual([
+      { type: "markdown", md: "before" },
+      a2ui,
+      { type: "markdown", md: "after" },
+    ])
+  })
+
+  it("keeps media segments in place", () => {
+    const image = { type: "image" as const, url: "https://x/y.png" }
+    expect(mergeDiscordContentSegments([{ type: "text", text: "look" }, image])).toEqual([
+      { type: "markdown", md: "look" },
+      image,
+    ])
+  })
+
+  it("drops a reply segment without splitting the run", () => {
+    // The reply is expressed through message_reference; letting it split a run
+    // would fragment a message for no content at all.
+    expect(
+      mergeDiscordContentSegments([
+        { type: "text", text: "a" },
+        { type: "reply", messageId: "1", snippet: "q" },
+        { type: "text", text: "b" },
+      ])
+    ).toEqual([{ type: "markdown", md: "a\nb" }])
+  })
+
+  it("emits nothing for a run that renders empty", () => {
+    expect(mergeDiscordContentSegments([{ type: "text", text: "  " }])).toEqual([])
+  })
+})
+
+describe("serializeOutbound — fragmentation", () => {
+  it("sends a mixed text + code answer as ONE message", () => {
+    const calls = serializeOutbound(
+      makeReq([
+        { type: "text", text: "Here is the fix:" },
+        { type: "code", code: "x = 1", language: "py" },
+      ])
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].payload["content"]).toContain("Here is the fix:")
+    expect(calls[0].payload["content"]).toContain("x = 1")
+  })
+
+  it("pings a reply once, not once per segment", () => {
+    // Every segment used to carry message_reference, so a three-part answer
+    // notified the user three times.
+    const calls = serializeOutbound(
+      makeReq([
+        { type: "text", text: "one" },
+        { type: "text", text: "two" },
+        { type: "text", text: "three" },
+      ])
+    )
+    const withReference = calls.filter((c) => c.payload["message_reference"])
+    expect(calls).toHaveLength(1)
+    expect(withReference.length).toBeLessThanOrEqual(1)
+  })
+})
 
 // ---------------------------------------------------------------------------
 // discordNonce — platform idempotency (ADR-0009)
@@ -57,12 +195,10 @@ describe("discordNonce", () => {
 
 describe("serializeOutbound — nonce stamping", () => {
   it("stamps nonce + enforce_nonce on every message-create call, indexed per call", () => {
-    const calls = serializeOutbound(
-      makeReq([
-        { type: "text", text: "one" },
-        { type: "markdown", md: "two" },
-      ])
-    )
+    // Two calls because the content exceeds the 2000-char cap and chunks —
+    // consecutive content segments now share one message, so the old fixture
+    // (a text plus a markdown segment) produces a single call.
+    const calls = serializeOutbound(makeReq([{ type: "text", text: "a".repeat(2500) }]))
     expect(calls).toHaveLength(2)
     expect(calls[0].payload).toMatchObject({
       nonce: discordNonce("test-key", 0),

@@ -892,6 +892,29 @@ describe("createDiscordAdapter", () => {
     expect(editResult.error).toMatchObject({ code: "platform_5xx", retryable: true })
   })
 
+  it("edit() rewrites the whole patch, not just its first text segment", async () => {
+    // The old edit kept `segments.find(text|markdown)` and dropped everything
+    // after it, so editing a message that mixed prose with a code block
+    // silently truncated it to the opening sentence.
+    mockInvoke.mockResolvedValue({ status: 200, headers: {}, body: "{}" })
+
+    const adapter = makeAdapter()
+    await adapter.edit!("msg-1", {
+      conversationRef: { platform: "discord" as const, adapterId: "dc-1", channelId: "chan-1" },
+      segments: [
+        { type: "text" as const, text: "Here is the fix:" },
+        { type: "code" as const, code: "x = 1", language: "py" },
+      ],
+      metadata: { idempotencyKey: "k" },
+    })
+
+    const body = JSON.parse(
+      (mockInvoke.mock.calls.at(-1)?.[1] as { req: { body: string } }).req.body
+    ) as { content: string }
+    expect(body.content).toContain("Here is the fix:")
+    expect(body.content).toContain("x = 1")
+  })
+
   it("edit() maps auth failures too", async () => {
     mockInvoke.mockResolvedValue({ status: 401, headers: {}, body: '{"message":"Unauthorized"}' })
 
