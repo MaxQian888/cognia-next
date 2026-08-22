@@ -1333,6 +1333,15 @@ export interface PluginConnectorDef {
   /** Platform kind string (e.g. "telegram", "discord", or a custom string for 3rd-party platforms). */
   type: string
   /**
+   * Stable id of this contribution inside its plugin. Defaults to `type` for
+   * definitions written before the field existed, which is correct: a plugin
+   * could only ever contribute one connector per kind. Recorded on every
+   * instance so a row can be traced back to what produced it.
+   */
+  contributionId?: string
+  /** Human-readable name for the settings picker. Falls back to `type`. */
+  displayName?: string
+  /**
    * Name of the exported factory function from the plugin's `main` entrypoint.
    * Signature: `(ctx: AdapterContext) => PlatformAdapter | Promise<PlatformAdapter>`
    */

@@ -34,6 +34,7 @@ import { createDingTalkAdapter } from "./adapters/dingtalk"
 import { getDingTalkAccessToken } from "./adapters/dingtalk/auth"
 import { getTenantAccessToken } from "./adapters/lark/auth"
 import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
+import { buildPluginAdapter } from "@/lib/connectors/plugin-connector-registry"
 
 /**
  * Build and return a PlatformAdapter for the given row.
@@ -66,10 +67,22 @@ export async function buildAdapterFromRow(
       return buildWechatOaAdapter(row)
     case "dingtalk":
       return buildDingTalkAdapter(row)
-    default:
-      // Unsupported platform in Phase 1 — skip silently.
-      console.warn(`[adapter-registry] unsupported adapter type: ${row.type} (id=${row.id})`)
+    default: {
+      // Plugin-contributed kinds resolve through the registry, so a
+      // plugin-backed bot is an ordinary instance row and inherits the whole
+      // supervisor path — start, stop, hot reconcile, health, audit — instead
+      // of the bridge starting one unmanaged adapter per plugin.
+      const pluginAdapter = await buildPluginAdapter(row)
+      if (pluginAdapter) return pluginAdapter
+      // An instance whose plugin is disabled or uninstalled. The row survives
+      // on purpose (its settings and credentials are still the user's), so say
+      // why rather than pretending the type never existed.
+      console.warn(
+        `[adapter-registry] no implementation for adapter type "${row.type}" (id=${row.id}) — ` +
+          `either an unsupported platform, or a plugin connector whose plugin is not enabled`
+      )
       return null
+    }
   }
 }
 

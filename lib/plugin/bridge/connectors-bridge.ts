@@ -47,13 +47,28 @@ import {
 } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 import { canRunPythonBackedContribution } from "@/lib/plugin/python/experimental-flag"
 import type { PluginAdapterFactory } from "@/types/connectors/plugin-adapter"
-import { buildAdapterContext } from "@/lib/connectors/adapter-context"
-import {
-  getRunningAdapter,
-  registerRunningAdapter,
-  unregisterRunningAdapter,
-} from "@/lib/connectors/lifecycle"
+import { unregisterRunningAdapter } from "@/lib/connectors/lifecycle"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
+import {
+  __resetPluginConnectorRegistryForTesting,
+  listPluginConnectorsFor,
+  registerPluginConnector,
+  unregisterPluginConnectors,
+  type PluginConnectorRegistration,
+  type PluginConnectorRejection,
+} from "@/lib/connectors/plugin-connector-registry"
+import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import type { TransportMode, TriggerPolicy } from "@/types/connectors"
+
+/** Outcome of wiring one plugin's connector contributions. */
+export interface PluginConnectorRegistrationReport {
+  /** Connector kinds this plugin now owns. */
+  registered: string[]
+  /** Contributions refused, with the reason an author can act on. */
+  rejected: Array<{ type: string; reason: PluginConnectorRejection; message: string }>
+  /** Instance ids created because a contribution had none yet. */
+  seeded: string[]
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,50 +94,6 @@ export type PluginExports = Record<string, unknown>
 export type AdapterFactory = PluginAdapterFactory
 
 // ── Registry ─────────────────────────────────────────────────────────────────
-
-/** pluginId → list of adapter ids registered by that plugin */
-const pluginAdapterIds = new Map<string, string[]>()
-
-async function startPluginAdapter(
-  adapter: PlatformAdapter,
-  bus: ReturnType<typeof getBus>
-): Promise<void> {
-  if (getRunningAdapter(adapter.id)) {
-    throw new Error(`Adapter id is already running: ${adapter.id}`)
-  }
-  const supervisor = getConnectorRuntimeSupervisor()
-  supervisor.setDefinition({
-    id: adapter.id,
-    owner: "plugin",
-    desiredState: () => "enabled",
-    build: async () => adapter,
-    registerRust: async () => undefined,
-    unregisterRust: async () => undefined,
-    start: async (built, signal) => {
-      await built.start(buildAdapterContext({ adapterId: built.id, signal, bus }))
-    },
-    publish: (built) => {
-      bus.registerAdapter(built)
-      const active = supervisor.getRunningAdapter(built.id)
-      if (!active) throw new Error(`Supervisor did not fence plugin adapter: ${built.id}`)
-      registerRunningAdapter(built.id, {
-        adapter: built,
-        abortController: active.abortController,
-        owner: "plugin",
-        restart: () => supervisor.restartAdapter(built.id, "compatibility_restart"),
-      })
-    },
-    unpublish: (adapterId) => {
-      unregisterRunningAdapter(adapterId)
-      bus.unregisterAdapter(adapterId)
-    },
-  })
-  await supervisor.reconcileAdapter(adapter.id, "plugin_enabled")
-  const observed = supervisor.getSnapshot(adapter.id)?.observedState
-  if (observed !== "running" && observed !== "starting" && observed !== "degraded") {
-    throw new Error(`Plugin adapter failed to start: ${adapter.id}`)
-  }
-}
 
 /**
  * Build a `PlatformAdapter` whose behaviour lives in the plugin's Python
@@ -221,59 +192,111 @@ export async function registerPluginAdapters(
   pluginId: string,
   manifest: PluginManifest,
   exports: PluginExports
-): Promise<void> {
+): Promise<PluginConnectorRegistrationReport> {
+  const report: PluginConnectorRegistrationReport = { registered: [], rejected: [], seeded: [] }
   const defs = manifest.connectors
-  if (!defs || defs.length === 0) return
-
-  const bus = getBus()
-  const ids: string[] = []
+  if (!defs || defs.length === 0) return report
 
   for (const def of defs) {
     const pythonBacked = isPythonBackedContribution(def, manifest.type)
     if (pythonBacked && !canRunPythonBackedContribution("connectors")) {
-      console.warn(
-        `[connectors-bridge] plugin ${pluginId}: python-backed connector "${def.type}" is ` +
-          `experimental and the flag is off — skipping (enable via setExperimentalPythonBackedEnabled)`
-      )
-      continue
-    }
-    const factoryFn = pythonBacked ? undefined : exports[def.factory]
-    if (!pythonBacked && typeof factoryFn !== "function") {
-      console.warn(
-        `[connectors-bridge] plugin ${pluginId}: factory "${def.factory}" not found in exports — skipping`
-      )
+      report.rejected.push({
+        type: String(def.type),
+        reason: "factory_missing",
+        message:
+          `python-backed connector "${def.type}" is experimental and the flag is off — ` +
+          `enable it via setExperimentalPythonBackedEnabled`,
+      })
       continue
     }
 
-    let adapter: PlatformAdapter
-    try {
-      adapter = pythonBacked
-        ? await createPythonPlatformAdapter(pluginId, def)
-        : await (factoryFn as AdapterFactory)({ pluginId, connectorDef: def })
-    } catch (err) {
-      console.error(`[connectors-bridge] plugin ${pluginId}: factory "${def.factory}" threw —`, err)
+    // Python-backed contributions have no TS export to call; their factory is
+    // the IPC proxy, built lazily per instance so a restart of the subprocess
+    // does not strand a captured handle.
+    const factory: PluginAdapterFactory | unknown = pythonBacked
+      ? ((async () => createPythonPlatformAdapter(pluginId, def)) satisfies PluginAdapterFactory)
+      : exports[def.factory]
+
+    const result = registerPluginConnector({
+      pluginId,
+      pluginRelease: manifest.version ?? "0.0.0",
+      def,
+      factory,
+    })
+    if (!result.ok) {
+      console.warn(
+        `[connectors-bridge] plugin ${pluginId}: connector "${def.type}" refused — ${result.message}`
+      )
+      report.rejected.push({
+        type: String(def.type),
+        reason: result.reason,
+        message: result.message,
+      })
       continue
     }
 
-    try {
-      await startPluginAdapter(adapter, bus)
-    } catch (err) {
-      console.error(
-        `[connectors-bridge] plugin ${pluginId}: adapter "${adapter.id}" failed to start —`,
-        err
-      )
-      continue
-    }
-    ids.push(adapter.id)
+    report.registered.push(result.registration.type)
     // Character Packs may declare `requires.connectors` against a plugin-owned
     // kind, so the resolvable set has to learn about it.
-    registerPluginConnectorKind(pluginId, def.type)
+    registerPluginConnectorKind(pluginId, result.registration.type)
+
+    // Seed one instance the first time a contribution is seen, so enabling a
+    // plugin still produces a working bot rather than an empty settings page.
+    // Everything after that is the user's: they can add more instances, edit
+    // this one, or disable it. Previously there was exactly one unmanaged
+    // adapter per contribution and no way to have two.
+    const seededId = await seedInstanceForContribution(result.registration).catch((err) => {
+      console.error(
+        `[connectors-bridge] plugin ${pluginId}: could not seed an instance for "${def.type}" —`,
+        err
+      )
+      return undefined
+    })
+    if (seededId) report.seeded.push(seededId)
   }
 
-  if (ids.length > 0) {
-    pluginAdapterIds.set(pluginId, ids)
-    refreshAllPackWarnings()
-  }
+  if (report.registered.length > 0) refreshAllPackWarnings()
+  return report
+}
+
+/**
+ * Create the first instance for a freshly registered contribution.
+ *
+ * Idempotent by (type): a plugin that is disabled and re-enabled must not
+ * accumulate duplicate bots. Returns the new row id, or `undefined` when an
+ * instance already exists.
+ *
+ * The seeded row is ENABLED, which reproduces exactly what enabling a plugin
+ * used to do — start one adapter — while making it an ordinary row the
+ * supervisor owns. `install-connector-runtime`'s liveQuery over
+ * `listEnabledAdapterInstances` picks it up with no further wiring.
+ */
+async function seedInstanceForContribution(
+  registration: PluginConnectorRegistration
+): Promise<string | undefined> {
+  const { createAdapterInstance, listAdapterInstancesByType } =
+    await import("@/lib/db/adapter-instances")
+  const existing = await listAdapterInstancesByType(registration.type)
+  if (existing.length > 0) return undefined
+
+  const transportMode = (registration.def.transportModes?.[0] ?? "stub") as TransportMode
+  const row = await createAdapterInstance({
+    type: registration.type,
+    displayName: registration.def.displayName ?? registration.type,
+    enabled: true,
+    transportMode,
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+    trigger:
+      (registration.def.defaultTrigger as TriggerPolicy | undefined) ?? defaultPrivateChatPolicy(),
+    defaultMode: "auto",
+    plugin: {
+      pluginId: registration.pluginId,
+      contributionId: registration.contributionId,
+      pluginRelease: registration.pluginRelease,
+    },
+  })
+  return row.id
 }
 
 /**
@@ -281,30 +304,44 @@ export async function registerPluginAdapters(
  * Call on plugin disable or uninstall.
  */
 export function unregisterPluginAdapters(pluginId: string): void {
-  const ids = pluginAdapterIds.get(pluginId)
-  if (!ids) return
-  for (const id of ids) {
-    unregisterRunningAdapter(id)
-    getBus().unregisterAdapter(id)
-    void getConnectorRuntimeSupervisor().removeDefinition(id, "plugin_disabled")
-  }
-  pluginAdapterIds.delete(pluginId)
+  // Dropping the definitions is enough to stop the bots: every instance is an
+  // ordinary row, and `buildAdapterFromRow` now returns null for a kind with no
+  // owner, so the supervisor tears them down through its normal path. The rows
+  // themselves stay — a user's settings and credentials must not disappear
+  // because a plugin was toggled off.
+  const removedKinds = unregisterPluginConnectors(pluginId)
   unregisterPluginConnectorKindsByPlugin(pluginId)
+
+  // Stop every live instance of a kind this plugin owned. Reconciling is
+  // enough: `buildAdapterFromRow` now returns null for an unowned kind, so the
+  // supervisor tears the adapter down through its normal path and records why.
+  const supervisor = getConnectorRuntimeSupervisor()
+  const bus = getBus()
+  for (const runtime of supervisor.listRunningAdapters()) {
+    if (!removedKinds.includes(runtime.adapter.meta.type)) continue
+    unregisterRunningAdapter(runtime.adapter.id)
+    bus.unregisterAdapter(runtime.adapter.id)
+    void supervisor.reconcileAdapter(runtime.adapter.id, "plugin_disabled")
+  }
   // A pack that required one of this plugin's connector kinds must regain its
   // warning now that the kind is gone.
   refreshAllPackWarnings()
 }
 
 /**
- * Return the list of adapter ids currently owned by a plugin.
- * Primarily for tests and diagnostics.
+ * Connector kinds a plugin currently provides.
+ *
+ * Replaces `getPluginAdapterIds`, which listed the ids of adapters the bridge
+ * had started itself. It no longer starts any: instances are rows, so "which
+ * bots does this plugin run?" is a Dexie question
+ * (`listAdapterInstancesByType`), while "what can it provide?" is this one.
  */
-export function getPluginAdapterIds(pluginId: string): readonly string[] {
-  return pluginAdapterIds.get(pluginId) ?? []
+export function getPluginConnectorKinds(pluginId: string): readonly string[] {
+  return listPluginConnectorsFor(pluginId).map((r) => r.type)
 }
 
 /** Test-only: reset the internal registry. */
 export function __resetBridgeForTesting(): void {
-  pluginAdapterIds.clear()
   __resetKnownConnectorKindsForTesting()
+  __resetPluginConnectorRegistryForTesting()
 }

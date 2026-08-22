@@ -1,13 +1,21 @@
 /** @jest-environment jsdom */
 /**
- * Tests for lib/plugin/connectors-bridge.ts — Task 110.
+ * Tests for the plugin connectors bridge.
  *
- * Verifies register/unregister flow via a mock bus and mock plugin exports.
+ * The contract changed shape: enabling a plugin used to build and start one
+ * unmanaged adapter per contribution, under a synthetic id, with nothing
+ * persisted — so that bot had no settings, no credentials, no enable switch,
+ * and there could only ever be one of it. Enabling a plugin now REGISTERS a
+ * definition; the bots themselves are ordinary `AdapterInstanceRow`s owned by
+ * the supervisor.
+ *
+ * So the assertions worth making are: the factory is not called at
+ * registration, a first instance is seeded once and only once, conflicting
+ * kinds are refused with a reason the author can act on, and disabling the
+ * plugin takes the kind away without taking the user's rows with it.
  */
 
 import "fake-indexeddb/auto"
-
-// ── Mock bus ─────────────────────────────────────────────────────────────────
 
 const mockRegisterAdapter = jest.fn()
 const mockUnregisterAdapter = jest.fn()
@@ -22,16 +30,8 @@ jest.mock("@/lib/connectors/bus", () => ({
   __resetBusForTesting: jest.fn(),
 }))
 
-const mockRunningAdapters = new Map<string, unknown>()
-const mockRegisterRunningAdapter = jest.fn((id: string, entry: unknown) => {
-  mockRunningAdapters.set(id, entry)
-})
-const mockUnregisterRunningAdapter = jest.fn((id: string) => {
-  mockRunningAdapters.delete(id)
-})
+const mockUnregisterRunningAdapter = jest.fn()
 jest.mock("@/lib/connectors/lifecycle", () => ({
-  getRunningAdapter: (id: string) => mockRunningAdapters.get(id),
-  registerRunningAdapter: (id: string, entry: unknown) => mockRegisterRunningAdapter(id, entry),
   unregisterRunningAdapter: (id: string) => mockUnregisterRunningAdapter(id),
 }))
 
@@ -45,9 +45,12 @@ jest.mock("@/lib/plugin/bridge/_shared/python-backed-proxy", () => ({
 import {
   registerPluginAdapters,
   unregisterPluginAdapters,
-  getPluginAdapterIds,
+  getPluginConnectorKinds,
   __resetBridgeForTesting,
 } from "./connectors-bridge"
+import { buildPluginAdapter } from "@/lib/connectors/plugin-connector-registry"
+import { __resetDbForTesting, getDb } from "@/lib/db/schema"
+import { listAdapterInstancesByType } from "@/lib/db/adapter-instances"
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PlatformAdapter } from "@/types/connectors"
 import { createPythonBackedProxy } from "@/lib/plugin/bridge/_shared/python-backed-proxy"
@@ -66,11 +69,14 @@ const mockCreateProxy = createPythonBackedProxy as jest.MockedFunction<
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function makeManifest(factoryName: string): PluginManifest {
+function makeManifest(
+  factoryName: string,
+  connectorOverrides: Record<string, unknown> = {}
+): PluginManifest {
   return {
     id: "com.example.mastodon",
     name: "Mastodon Adapter",
-    version: "1.0.0",
+    version: "1.2.3",
     description: "Hypothetical Mastodon adapter",
     type: "frontend",
     capabilities: ["connectors"],
@@ -78,18 +84,19 @@ function makeManifest(factoryName: string): PluginManifest {
       {
         type: "mastodon",
         factory: factoryName,
-        configSchema: { type: "object" },
+        configSchema: { type: "object", properties: {} },
         transportModes: ["longpoll"],
+        ...connectorOverrides,
       },
     ],
-  }
+  } as unknown as PluginManifest
 }
 
 function makeAdapter(id: string): PlatformAdapter {
   return {
     id,
     meta: {
-      type: "telegram" as const, // re-use allowed type; real plugin would declare its own
+      type: "mastodon",
       displayName: "Mastodon",
       version: "1.0.0",
       capabilities: [],
@@ -103,7 +110,220 @@ function makeAdapter(id: string): PlatformAdapter {
   } as unknown as PlatformAdapter
 }
 
-// ── python-backed adapter ────────────────────────────────────────────────────
+beforeEach(async () => {
+  await getDb().delete()
+  __resetDbForTesting()
+  getDb()
+  mockRegisterAdapter.mockClear()
+  mockUnregisterAdapter.mockClear()
+  mockDispatchInboundFull.mockClear()
+  mockUnregisterRunningAdapter.mockClear()
+  __resetBridgeForTesting()
+  __resetPythonEventBusForTesting()
+  mockCreateProxy.mockReset()
+}, 30_000)
+
+// ── registration ─────────────────────────────────────────────────────────────
+
+describe("registerPluginAdapters", () => {
+  it("registers the kind without calling the factory or touching the bus", async () => {
+    const exports = { createMastodonAdapter: jest.fn() }
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter"),
+      exports
+    )
+
+    expect(report.registered).toEqual(["mastodon"])
+    expect(report.rejected).toEqual([])
+    // The whole point: nothing is built or started at enable time.
+    expect(exports.createMastodonAdapter).not.toHaveBeenCalled()
+    expect(mockRegisterAdapter).not.toHaveBeenCalled()
+    expect(getPluginConnectorKinds("com.example.mastodon")).toEqual(["mastodon"])
+  })
+
+  it("seeds one enabled instance carrying its plugin provenance", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter", { displayName: "Mastodon Bot" }),
+      { createMastodonAdapter: jest.fn() }
+    )
+
+    expect(report.seeded).toHaveLength(1)
+    const rows = await listAdapterInstancesByType("mastodon")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      type: "mastodon",
+      displayName: "Mastodon Bot",
+      enabled: true,
+      // Backfilled by the create helper — a plugin bot must not start life
+      // with permission to ship binaries to a cloud model.
+      mediaModelPolicy: "local_extract_only",
+      plugin: {
+        pluginId: "com.example.mastodon",
+        contributionId: "mastodon",
+        pluginRelease: "1.2.3",
+      },
+    })
+  })
+
+  it("does not seed a second instance when one already exists", async () => {
+    const manifest = makeManifest("createMastodonAdapter")
+    const exports = { createMastodonAdapter: jest.fn() }
+    await registerPluginAdapters("com.example.mastodon", manifest, exports)
+    __resetBridgeForTesting()
+    // Re-enabling (or a second app boot) must not accumulate duplicate bots.
+    const second = await registerPluginAdapters("com.example.mastodon", manifest, exports)
+
+    expect(second.seeded).toEqual([])
+    expect(await listAdapterInstancesByType("mastodon")).toHaveLength(1)
+  })
+
+  it("keeps a user's extra instances and never re-seeds over them", async () => {
+    const manifest = makeManifest("createMastodonAdapter")
+    const exports = { createMastodonAdapter: jest.fn() }
+    await registerPluginAdapters("com.example.mastodon", manifest, exports)
+    const { createAdapterInstance } = await import("@/lib/db/adapter-instances")
+    await createAdapterInstance({
+      type: "mastodon",
+      displayName: "Second bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+    })
+
+    __resetBridgeForTesting()
+    await registerPluginAdapters("com.example.mastodon", manifest, exports)
+    expect(await listAdapterInstancesByType("mastodon")).toHaveLength(2)
+  })
+
+  it("builds the adapter lazily, once an instance asks for it", async () => {
+    const adapter = makeAdapter("row-1")
+    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
+    await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter"),
+      exports
+    )
+
+    const built = await buildPluginAdapter({ id: "row-1", type: "mastodon" })
+    expect(built).toBe(adapter)
+    expect(exports.createMastodonAdapter).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns null for a kind no enabled plugin owns", async () => {
+    expect(await buildPluginAdapter({ id: "row-1", type: "mastodon" })).toBeNull()
+  })
+})
+
+// ── refusals ─────────────────────────────────────────────────────────────────
+
+describe("registerPluginAdapters — refusals", () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+  afterAll(() => warn.mockRestore())
+
+  it("refuses a built-in platform kind", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter", { type: "telegram" }),
+      { createMastodonAdapter: jest.fn() }
+    )
+    expect(report.registered).toEqual([])
+    expect(report.rejected[0]).toMatchObject({ type: "telegram", reason: "kind_conflict_builtin" })
+  })
+
+  it("refuses a kind the host has reserved but not shipped", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter", { type: "email" }),
+      { createMastodonAdapter: jest.fn() }
+    )
+    expect(report.rejected[0]).toMatchObject({ reason: "kind_conflict_reserved" })
+  })
+
+  it("refuses a kind another plugin already owns", async () => {
+    await registerPluginAdapters("com.example.mastodon", makeManifest("createMastodonAdapter"), {
+      createMastodonAdapter: jest.fn(),
+    })
+    const other = makeManifest("createOther")
+    ;(other as unknown as { id: string }).id = "com.example.other"
+    const report = await registerPluginAdapters("com.example.other", other, {
+      createOther: jest.fn(),
+    })
+    // Two owners for one kind would make which adapter you get depend on load
+    // order, which is not a thing a user could ever debug.
+    expect(report.rejected[0]).toMatchObject({ reason: "kind_conflict_plugin" })
+  })
+
+  it("refuses a kind that cannot be part of a webhook path", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter", { type: "My Connector/v2" }),
+      { createMastodonAdapter: jest.fn() }
+    )
+    expect(report.rejected[0]).toMatchObject({ reason: "kind_invalid" })
+  })
+
+  it("refuses a config schema no settings form can be generated from", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter", { configSchema: "not-a-schema" }),
+      { createMastodonAdapter: jest.fn() }
+    )
+    expect(report.rejected[0]).toMatchObject({ reason: "schema_unsupported" })
+  })
+
+  it("refuses a factory the plugin does not export", async () => {
+    const report = await registerPluginAdapters(
+      "com.example.mastodon",
+      makeManifest("createMastodonAdapter"),
+      {}
+    )
+    expect(report.rejected[0]).toMatchObject({ reason: "factory_missing" })
+  })
+
+  it("refusing one contribution does not stop the others", async () => {
+    const manifest = makeManifest("createMastodonAdapter")
+    ;(manifest as unknown as { connectors: unknown[] }).connectors = [
+      { type: "telegram", factory: "createMastodonAdapter", configSchema: {}, transportModes: [] },
+      {
+        type: "mastodon",
+        factory: "createMastodonAdapter",
+        configSchema: { type: "object" },
+        transportModes: ["longpoll"],
+      },
+    ]
+    const report = await registerPluginAdapters("com.example.mastodon", manifest, {
+      createMastodonAdapter: jest.fn(),
+    })
+    expect(report.registered).toEqual(["mastodon"])
+    expect(report.rejected).toHaveLength(1)
+  })
+})
+
+// ── unregistration ───────────────────────────────────────────────────────────
+
+describe("unregisterPluginAdapters", () => {
+  it("gives up the kind but leaves the user's instance rows alone", async () => {
+    await registerPluginAdapters("com.example.mastodon", makeManifest("createMastodonAdapter"), {
+      createMastodonAdapter: jest.fn().mockResolvedValue(makeAdapter("row-1")),
+    })
+    expect(await listAdapterInstancesByType("mastodon")).toHaveLength(1)
+
+    unregisterPluginAdapters("com.example.mastodon")
+
+    expect(getPluginConnectorKinds("com.example.mastodon")).toEqual([])
+    // The kind can no longer be built — that is what stops the bots.
+    expect(await buildPluginAdapter({ id: "row-1", type: "mastodon" })).toBeNull()
+    // …but the settings and credentials the user configured survive.
+    expect(await listAdapterInstancesByType("mastodon")).toHaveLength(1)
+  })
+})
+
+// ── python-backed adapters ───────────────────────────────────────────────────
 
 describe("connectors-bridge python backend", () => {
   const pythonManifest = (): PluginManifest =>
@@ -126,37 +346,12 @@ describe("connectors-bridge python backend", () => {
       ],
     }) as unknown as PluginManifest
 
-  beforeEach(() => {
-    mockRegisterAdapter.mockClear()
-    mockUnregisterAdapter.mockClear()
-    mockDispatchInboundFull.mockClear()
-    mockRegisterRunningAdapter.mockClear()
-    mockUnregisterRunningAdapter.mockClear()
-    mockRunningAdapters.clear()
-    __resetBridgeForTesting()
-    __resetPythonEventBusForTesting()
-    mockCreateProxy.mockReset()
-    // connectors is `pythonExecution: "experimental"` — open the gate explicitly.
-    setExperimentalPythonBackedEnabled(true)
-  })
-
-  afterEach(() => {
-    __resetExperimentalPythonFlagForTesting()
-  })
-
-  it("skips a python-backed connector while the experimental flag is off", async () => {
-    __resetExperimentalPythonFlagForTesting()
-    stubProxy()
-    await registerPluginAdapters("py.connector", pythonManifest(), {})
-    expect(mockRegisterAdapter).not.toHaveBeenCalled()
-  })
-
   function stubProxy(overrides: Record<string, unknown> = {}) {
     mockCreateProxy.mockReturnValue({
       describe: jest.fn().mockResolvedValue({
         a2uiCapability: { mode: "none" },
         meta: {
-          type: "telegram",
+          type: "mastodon",
           displayName: "Py Mail",
           version: "1.0.0",
           capabilities: [],
@@ -171,45 +366,64 @@ describe("connectors-bridge python backend", () => {
     } as never)
   }
 
-  it("builds a python-backed adapter without looking at plugin JS exports", async () => {
+  beforeEach(() => {
+    // connectors is `pythonExecution: "experimental"` — open the gate explicitly.
+    setExperimentalPythonBackedEnabled(true)
+  })
+
+  afterEach(() => {
+    __resetExperimentalPythonFlagForTesting()
+  })
+
+  it("refuses a python-backed connector while the experimental flag is off", async () => {
+    __resetExperimentalPythonFlagForTesting()
+    stubProxy()
+    const report = await registerPluginAdapters("py.connector", pythonManifest(), {})
+    expect(report.registered).toEqual([])
+    expect(report.rejected[0]).toMatchObject({ reason: "factory_missing" })
+  })
+
+  it("registers without a JS export and builds the proxy adapter lazily", async () => {
     stubProxy()
     // Empty exports: a pure-Python plugin ships no JS module at all.
-    await registerPluginAdapters("py.connector", pythonManifest(), {})
+    const report = await registerPluginAdapters("py.connector", pythonManifest(), {})
+    expect(report.registered).toEqual(["mastodon"])
+    // No subprocess is touched until an instance actually needs the adapter.
+    expect(mockCreateProxy).not.toHaveBeenCalled()
 
-    expect(mockRegisterAdapter).toHaveBeenCalledTimes(1)
-    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
-    expect(adapter.id).toBe("py.connector:mastodon")
-    expect(adapter.meta.displayName).toBe("Py Mail")
+    const adapter = await buildPluginAdapter({ id: "row-1", type: "mastodon" })
+    expect(adapter?.meta.displayName).toBe("Py Mail")
     // `health()` answers synchronously from wrapper-tracked state.
-    expect(adapter.health()).toEqual(expect.objectContaining({ state: "running" }))
+    expect(adapter?.health()).toEqual(expect.objectContaining({ state: "down" }))
     // Python connector v1 intentionally stays on the generic A2UI/plain-text
     // projection path; live TypeScript driver functions do not cross IPC.
-    expect(adapter.runPresentation).toBeUndefined()
-    expect(adapter.runtimeCapabilities).toBeUndefined()
+    expect(adapter?.runPresentation).toBeUndefined()
+    expect(adapter?.runtimeCapabilities).toBeUndefined()
   })
 
   it("forwards inbound python pushes into ctx.emit and tracks health", async () => {
     stubProxy()
     await registerPluginAdapters("py.connector", pythonManifest(), {})
-    const adapter = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
+    const adapter = (await buildPluginAdapter({ id: "row-1", type: "mastodon" }))!
 
+    const emit = jest.fn()
+    await adapter.start({ adapterId: "row-1", emit } as never)
     expect(adapter.health().state).toBe("running")
 
-    // A push from the Python subprocess must reach the shared bus context.
     dispatchPythonPluginEvent({
       pluginId: "py.connector",
       kind: "emit",
       data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-1" } },
     })
-    expect(mockDispatchInboundFull).toHaveBeenCalledWith({ id: "msg-1" })
+    expect(emit).toHaveBeenCalledWith({ id: "msg-1" })
 
-    // Non-inbound channels and other contributions are ignored.
+    // Non-inbound channels are ignored.
     dispatchPythonPluginEvent({
       pluginId: "py.connector",
       kind: "emit",
       data: { contributionId: "mastodon", channel: "telemetry", payload: { id: "nope" } },
     })
-    expect(mockDispatchInboundFull).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
 
     // stop() detaches the inbound subscription.
     await adapter.stop()
@@ -219,180 +433,19 @@ describe("connectors-bridge python backend", () => {
       kind: "emit",
       data: { contributionId: "mastodon", channel: "inbound", payload: { id: "msg-2" } },
     })
-    expect(mockDispatchInboundFull).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
   })
 
-  it("does not expose a python adapter whose automatic start fails", async () => {
+  it("surfaces a failed python start to the supervisor rather than swallowing it", async () => {
     stubProxy({ start: jest.fn().mockRejectedValue(new Error("python boom")) })
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined)
     await registerPluginAdapters("py.connector", pythonManifest(), {})
+    const adapter = (await buildPluginAdapter({ id: "row-1", type: "mastodon" }))!
 
-    expect(mockUnregisterAdapter).toHaveBeenCalledWith("py.connector:mastodon")
-    expect(mockRegisterRunningAdapter).not.toHaveBeenCalled()
-    expect(getPluginAdapterIds("py.connector")).toHaveLength(0)
-    errorSpy.mockRestore()
-  })
-})
-
-// ── tests ─────────────────────────────────────────────────────────────────────
-
-beforeEach(() => {
-  mockRegisterAdapter.mockClear()
-  mockUnregisterAdapter.mockClear()
-  mockDispatchInboundFull.mockClear()
-  mockRegisterRunningAdapter.mockClear()
-  mockUnregisterRunningAdapter.mockClear()
-  mockRunningAdapters.clear()
-  __resetBridgeForTesting()
-})
-
-describe("registerPluginAdapters", () => {
-  it("calls bus.registerAdapter for each declared connector", async () => {
-    const adapter = makeAdapter("mastodon_adp_1")
-    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
-    const manifest = makeManifest("createMastodonAdapter")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, exports)
-
-    expect(exports.createMastodonAdapter).toHaveBeenCalledTimes(1)
-    expect(mockRegisterAdapter).toHaveBeenCalledWith(adapter)
-  })
-
-  it("preserves TypeScript run presentation extensions on the registered adapter", async () => {
-    const runPresentation = {
-      capabilities: { interactiveControls: false },
-      open: jest.fn(),
-      update: jest.fn(),
-      finish: jest.fn(),
-    }
-    const runtimeCapabilities = {
-      topicIsolation: "native",
-      unmentionedDelivery: true,
-      historyPagination: true,
-      liveSteer: true,
-      textStreaming: true,
-      componentMutation: false,
-      fullReplacement: false,
-      messageEditing: true,
-      appendFallback: true,
-      interactiveControls: false,
-      followUpBubbles: false,
-      staticMenus: false,
-      suggestedPrompts: false,
-      ambiguousDelivery: "remote_idempotent",
-    } as const
-    const adapter = {
-      ...makeAdapter("mastodon_timeline"),
-      runPresentation,
-      runtimeCapabilities,
-    } as PlatformAdapter
-    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
-
-    await registerPluginAdapters(
-      "com.example.mastodon",
-      makeManifest("createMastodonAdapter"),
-      exports
+    // The supervisor owns retry/backoff now, so start() must reject rather than
+    // report a healthy adapter.
+    await expect(adapter.start({ adapterId: "row-1", emit: jest.fn() } as never)).rejects.toThrow(
+      "python boom"
     )
-
-    const registered = mockRegisterAdapter.mock.calls[0]![0] as PlatformAdapter
-    expect(registered.runPresentation).toBe(runPresentation)
-    expect(registered.runtimeCapabilities).toBe(runtimeCapabilities)
-    expect(adapter.start).toHaveBeenCalledTimes(1)
-    expect(mockRegisterRunningAdapter).toHaveBeenCalledWith(
-      adapter.id,
-      expect.objectContaining({ adapter, owner: "plugin", abortController: expect.anything() })
-    )
-  })
-
-  it("tracks adapter id under the plugin id", async () => {
-    const adapter = makeAdapter("mastodon_adp_2")
-    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
-    const manifest = makeManifest("createMastodonAdapter")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, exports)
-
-    expect(getPluginAdapterIds("com.example.mastodon")).toContain("mastodon_adp_2")
-  })
-
-  it("skips missing factory with a warning (no crash)", async () => {
-    const consoleSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
-    const manifest = makeManifest("nonExistentFactory")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, {})
-
-    expect(mockRegisterAdapter).not.toHaveBeenCalled()
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("nonExistentFactory"))
-    consoleSpy.mockRestore()
-  })
-
-  it("skips a factory that throws (no crash, continues to next)", async () => {
-    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {})
-    const exports = {
-      createBrokenAdapter: jest.fn().mockRejectedValue(new Error("factory boom")),
-    }
-    const manifest = makeManifest("createBrokenAdapter")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, exports)
-
-    expect(mockRegisterAdapter).not.toHaveBeenCalled()
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("factory"), expect.any(Error))
-    consoleSpy.mockRestore()
-  })
-
-  it("is a no-op when manifest.connectors is empty", async () => {
-    const manifest: PluginManifest = {
-      id: "com.example.empty",
-      name: "Empty",
-      version: "1.0.0",
-      description: "",
-      type: "frontend",
-      capabilities: [],
-      connectors: [],
-    }
-    await registerPluginAdapters("com.example.empty", manifest, {})
-    expect(mockRegisterAdapter).not.toHaveBeenCalled()
-  })
-
-  it("is a no-op when manifest.connectors is absent", async () => {
-    const manifest: PluginManifest = {
-      id: "com.example.noconn",
-      name: "No conn",
-      version: "1.0.0",
-      description: "",
-      type: "frontend",
-      capabilities: [],
-    }
-    await registerPluginAdapters("com.example.noconn", manifest, {})
-    expect(mockRegisterAdapter).not.toHaveBeenCalled()
-  })
-})
-
-describe("unregisterPluginAdapters", () => {
-  it("calls bus.unregisterAdapter for each registered adapter", async () => {
-    const adapter = makeAdapter("mastodon_adp_3")
-    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
-    const manifest = makeManifest("createMastodonAdapter")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, exports)
-    unregisterPluginAdapters("com.example.mastodon")
-
-    expect(mockUnregisterRunningAdapter).toHaveBeenCalledWith("mastodon_adp_3")
-    expect(mockUnregisterAdapter).toHaveBeenCalledWith("mastodon_adp_3")
-  })
-
-  it("clears the plugin's adapter id list", async () => {
-    const adapter = makeAdapter("mastodon_adp_4")
-    const exports = { createMastodonAdapter: jest.fn().mockResolvedValue(adapter) }
-    const manifest = makeManifest("createMastodonAdapter")
-
-    await registerPluginAdapters("com.example.mastodon", manifest, exports)
-    unregisterPluginAdapters("com.example.mastodon")
-
-    expect(getPluginAdapterIds("com.example.mastodon")).toHaveLength(0)
-  })
-
-  it("is a no-op for unknown plugin id", () => {
-    expect(() => unregisterPluginAdapters("unknown.plugin")).not.toThrow()
-    expect(mockUnregisterAdapter).not.toHaveBeenCalled()
+    expect(adapter.health()).toMatchObject({ state: "down" })
   })
 })
