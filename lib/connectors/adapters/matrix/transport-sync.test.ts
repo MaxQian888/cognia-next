@@ -291,6 +291,140 @@ describe("startMatrixSync", () => {
     expect(mockInvoke).toHaveBeenCalledTimes(1)
   })
 
+  it("refreshes once and retries the same request when the token expires", async () => {
+    const controller = new AbortController()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ errcode: "M_UNKNOWN_TOKEN", error: "Invalid token" }),
+      })
+      .mockResolvedValueOnce(syncResp("s1", {}))
+      .mockResolvedValueOnce(
+        syncResp("s2", { "!r:s": { timeline: { events: [textEvent("$ok")] } } })
+      )
+      .mockResolvedValue(syncResp("s3", {}))
+    const refreshAccessToken = jest.fn(async () => ({ ok: true as const, accessToken: "tok-2" }))
+
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      refreshAccessToken,
+      _backoffBaseMs: 1,
+    })
+    // No throw: the expired token was renewed and the loop carried on. Losing
+    // the device here would also lose every E2EE key it holds.
+    await expect(drain(gen, controller, 1)).resolves.toBeDefined()
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1)
+    // The retry reuses the same `since`, so no batch is skipped or duplicated:
+    // one rejected request, then the priming sync, then the batch with the event.
+    expect(mockInvoke).toHaveBeenCalledTimes(3)
+  })
+
+  it("gives up after one refresh when the homeserver still rejects the token", async () => {
+    const controller = new AbortController()
+    mockInvoke.mockResolvedValue({
+      status: 401,
+      headers: {},
+      body: JSON.stringify({ errcode: "M_UNKNOWN_TOKEN", error: "Invalid token" }),
+    })
+    const refreshAccessToken = jest.fn(async () => ({ ok: true as const, accessToken: "tok-2" }))
+
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      refreshAccessToken,
+      _backoffBaseMs: 1,
+    })
+    await expect(drain(gen, controller, 1)).rejects.toThrow(MatrixSyncAuthError)
+    // Exactly one refresh: a server that keeps answering 401 after a successful
+    // exchange will not be argued out of it, and looping would hammer /refresh.
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1)
+    expect(mockInvoke).toHaveBeenCalledTimes(2)
+  })
+
+  it("surfaces re-auth immediately when the refresh token itself is dead", async () => {
+    const controller = new AbortController()
+    mockInvoke.mockResolvedValue({
+      status: 401,
+      headers: {},
+      body: JSON.stringify({ errcode: "M_UNKNOWN_TOKEN" }),
+    })
+    const refreshAccessToken = jest.fn(async () => ({
+      ok: false as const,
+      needsReauth: true,
+      error: "refresh token rejected",
+    }))
+
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      refreshAccessToken,
+      _backoffBaseMs: 1,
+    })
+    await expect(drain(gen, controller, 1)).rejects.toThrow(/refresh token rejected/)
+  })
+
+  it("retries instead of demanding re-auth when the refresh fails transiently", async () => {
+    const controller = new AbortController()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ errcode: "M_UNKNOWN_TOKEN" }),
+      })
+      .mockResolvedValueOnce(syncResp("s1", {}))
+      .mockResolvedValueOnce(
+        syncResp("s2", { "!r:s": { timeline: { events: [textEvent("$ok")] } } })
+      )
+      .mockResolvedValue(syncResp("s3", {}))
+    const refreshAccessToken = jest.fn(async () => ({
+      ok: false as const,
+      needsReauth: false,
+      error: "connection reset",
+    }))
+
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      refreshAccessToken,
+      _backoffBaseMs: 1,
+    })
+    // A dropped connection must not cost the user their session.
+    await expect(drain(gen, controller, 1)).resolves.toBeDefined()
+  })
+
+  it("does not swallow a throwing refresh callback as a transport error", async () => {
+    const controller = new AbortController()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ errcode: "M_UNKNOWN_TOKEN" }),
+      })
+      .mockResolvedValueOnce(syncResp("s1", {}))
+      .mockResolvedValueOnce(
+        syncResp("s2", { "!r:s": { timeline: { events: [textEvent("$ok")] } } })
+      )
+      .mockResolvedValue(syncResp("s3", {}))
+    const refreshAccessToken = jest.fn(async () => {
+      throw new Error("boom")
+    })
+
+    const gen = startMatrixSync({
+      homeserver: "matrix.org",
+      accessToken: async () => "tok",
+      signal: controller.signal,
+      refreshAccessToken,
+      _backoffBaseMs: 1,
+    })
+    await expect(drain(gen, controller, 1)).resolves.toBeDefined()
+  })
+
   it("honors retry_after_ms on a 429 instead of exponential backoff", async () => {
     const controller = new AbortController()
     mockInvoke

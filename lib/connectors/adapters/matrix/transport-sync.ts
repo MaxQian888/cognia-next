@@ -36,8 +36,10 @@ const BACKFILL_PAGE_LIMIT = 50
  * `soft_logout`). Thrown out of the generator so the adapter can flip health
  * to degraded/auth_failed instead of retrying a dead token forever.
  *
- * // GAP: no refresh-token support yet — MSC3861/OIDC and refresh_token
- * // rotation would let us recover from soft_logout without user action.
+ * Recovery: one `refresh_token` exchange is attempted before the loop gives
+ * up, so an expiring access token no longer costs the device (and its E2EE
+ * keys). Only a rejected refresh token — or a bot configured with a bare
+ * pasted access token — is terminal.
  */
 export class MatrixSyncAuthError extends Error {
   constructor(message: string) {
@@ -62,6 +64,16 @@ export interface MatrixSyncOptions {
   onSyncResponse?: (body: MatrixSyncResponse, hasGap: boolean) => Promise<void>
   /** Fail-closed cursor gate used when the encrypted-event recovery queue is full. */
   canAdvanceCursor?: () => boolean
+  /**
+   * Exchange the stored refresh token for a fresh access token.
+   *
+   * Supplied by the adapter; absent in tests and for bots configured with a
+   * bare pasted token. When it is absent, or reports `needsReauth`, an expired
+   * token is terminal exactly as before.
+   */
+  refreshAccessToken?: () => Promise<
+    { ok: true; accessToken: string } | { ok: false; needsReauth: boolean; error: string }
+  >
   /** Sink for non-fatal transport warnings (failed invite joins, backfill). */
   logger?: { warn: (msg: string, fields?: Record<string, unknown>) => void }
   /** Long-poll timeout sent to the homeserver (ms). Default: 30000. */
@@ -200,6 +212,13 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
   /** Last delivered event id per room, for gap-backfill overlap detection. */
   const lastSeenByRoom = new Map<string, string>()
 
+  /**
+   * Whether this request has already spent its one refresh. Reset per
+   * iteration so a token that expires again hours later can still be renewed —
+   * the latch bounds retries within one request, not for the life of the loop.
+   */
+  let refreshedThisRequest = false
+
   while (!opts.signal.aborted) {
     const token = await opts.accessToken()
     const params = new URLSearchParams()
@@ -230,11 +249,38 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
         retry_after_ms?: number
       }
       if (resp.status === 401 || body.errcode === "M_UNKNOWN_TOKEN" || body.soft_logout === true) {
+        const detail = `${body.errcode ?? resp.status}${body.soft_logout ? " (soft_logout)" : ""}`
+        // An expired access token is recoverable without losing the device (and
+        // with it every E2EE key it holds), so try exactly one refresh before
+        // declaring the bot dead. Exactly one: a homeserver that keeps handing
+        // back 401 after a successful refresh is not going to be argued out of
+        // it, and looping would hammer the refresh endpoint.
+        if (opts.refreshAccessToken && !refreshedThisRequest) {
+          refreshedThisRequest = true
+          // Defensive: this is an injected callback inside a retry loop, so a
+          // throw must not be mistaken for a transport error and spun on.
+          const refreshed = await opts.refreshAccessToken().catch((err: unknown) => ({
+            ok: false as const,
+            needsReauth: false,
+            error: err instanceof Error ? err.message : String(err),
+          }))
+          if (refreshed.ok) {
+            // Retry the SAME request — `since` is untouched, so no batch is
+            // skipped and none is delivered twice.
+            continue
+          }
+          if (!refreshed.needsReauth) {
+            // Transient (network, keyring): back off and retry rather than
+            // pushing the user into re-authentication over a flaky connection.
+            attempts += 1
+            await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
+            continue
+          }
+          throw new MatrixSyncAuthError(`Matrix sync auth failed: ${detail} — ${refreshed.error}`)
+        }
         // Dead token — retrying forever would mask the auth failure while
         // health stays "running". Surface it and stop the loop.
-        throw new MatrixSyncAuthError(
-          `Matrix sync auth failed: ${body.errcode ?? resp.status}${body.soft_logout ? " (soft_logout)" : ""}`
-        )
+        throw new MatrixSyncAuthError(`Matrix sync auth failed: ${detail}`)
       }
       if (resp.status === 429) {
         const retryAfterMs = typeof body.retry_after_ms === "number" ? body.retry_after_ms : 5_000
@@ -244,6 +290,7 @@ export async function* startMatrixSync(opts: MatrixSyncOptions): AsyncGenerator<
       if (!body.next_batch) throw new Error(`Matrix sync: ${body.error ?? "missing next_batch"}`)
 
       attempts = 0
+      refreshedThisRequest = false
       const nextBatch = body.next_batch
       const hasGap = Object.values(body.rooms?.join ?? {}).some(
         (room) => room.timeline?.limited === true

@@ -647,9 +647,15 @@ describe("createMatrixAdapter", () => {
     await a.stop()
   })
 
-  it("flips health to degraded/auth_failed when the sync token is rejected", async () => {
-    mockInvoke.mockResolvedValue(
-      httpResp(401, { errcode: "M_UNKNOWN_TOKEN", error: "Invalid access token" })
+  it("flips health to degraded/auth_failed when the token is rejected and cannot be refreshed", async () => {
+    // No refresh token stored (the "paste an access token" setup path), so the
+    // one refresh attempt has nothing to exchange and re-auth is the honest
+    // outcome. `connectors_keyring_get` must answer null rather than the
+    // blanket HTTP stub, or the adapter would be told it holds a token.
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === "connectors_keyring_get"
+        ? null
+        : httpResp(401, { errcode: "M_UNKNOWN_TOKEN", error: "Invalid access token" })
     )
     const a = adapter()
     const { ctx } = makeCtx()

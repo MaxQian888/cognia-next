@@ -41,6 +41,7 @@ import {
   type MatrixSendContent,
 } from "./serialize"
 import { MatrixSyncAuthError, startMatrixSync } from "./transport-sync"
+import { rotateMatrixAccessToken } from "./token-rotation"
 import { MatrixE2EERuntime } from "./e2ee"
 
 export interface MatrixAdapterOptions {
@@ -447,6 +448,10 @@ export function createMatrixAdapter(opts: MatrixAdapterOptions): PlatformAdapter
         await crypto.receiveSync(body, hasGap)
       },
       canAdvanceCursor: () => runGeneration === generation && crypto.canAdvanceCursor(),
+      // An expiring access token is recoverable: refreshing keeps the device,
+      // and with it every E2EE key it holds. Without this the bot stops for
+      // good and a person has to sign in again from the settings panel.
+      refreshAccessToken: () => rotateMatrixAccessToken(opts.id, base),
       logger: ctx.logger,
     })
     syncTask = (async () => {

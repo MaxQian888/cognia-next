@@ -56,6 +56,9 @@ export function MatrixConfigDialog({
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [homeserver, setHomeserver] = useState(settings.homeserver ?? "")
   const [accessToken, setAccessToken] = useState("")
+  // Never rendered: a refresh token is as sensitive as a password, and the
+  // panel has no reason to show one. It only ever travels login -> keyring.
+  const [refreshToken, setRefreshToken] = useState("")
   const [deviceId, setDeviceId] = useState(settings.deviceId ?? "")
   const [loginUser, setLoginUser] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
@@ -91,9 +94,13 @@ export function MatrixConfigDialog({
         accessToken: token,
         userId,
         deviceId: loginDeviceId,
+        refreshToken: loginRefreshToken,
       } = await matrixLoginWithPassword(homeserver.trim(), loginUser.trim(), loginPassword)
       setAccessToken(token)
       setDeviceId(loginDeviceId ?? "")
+      // Kept so an expiring access token can be renewed without losing the
+      // device — and with it every end-to-end encryption key it holds.
+      setRefreshToken(loginRefreshToken ?? "")
       setLoginPassword("")
       toast.success(t("passwordLogin.success", { userId }))
     } catch (err) {
@@ -173,7 +180,7 @@ export function MatrixConfigDialog({
           settings: matrixSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["accessToken"],
+            accounts: refreshToken.trim() ? ["accessToken", "refreshToken"] : ["accessToken"],
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
@@ -194,6 +201,9 @@ export function MatrixConfigDialog({
 
       if (accessToken.trim()) {
         await connectorsKeyringSet(adapterId, "accessToken", accessToken.trim())
+      }
+      if (refreshToken.trim()) {
+        await connectorsKeyringSet(adapterId, "refreshToken", refreshToken.trim())
       }
 
       if (!isNew) emitCredentialsRotated(adapterId)
