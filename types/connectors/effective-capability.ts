@@ -9,6 +9,9 @@ import type { ConnectorRuntimeCapabilityMatrix } from "./runtime-capability"
  *
  * Each reason names a DIFFERENT kind of evidence, because the fix differs:
  *
+ * - `transport_unsupported` — the instance's chosen transport has no channel
+ *   for it (Discord presence is a gateway op, so a webhook-mode instance can
+ *   never send one). Fix: change the transport, if the platform allows.
  * - `missing_oauth_scope` — the recorded OAuth grant
  *   (`settings.connectedScopes`, written by `lib/connectors/oauth-scope-audit.ts`)
  *   does not include any scope this capability needs. Fix: re-authorize.
@@ -22,6 +25,7 @@ import type { ConnectorRuntimeCapabilityMatrix } from "./runtime-capability"
  *   it is a property of where the conversation lives.
  */
 export const CAPABILITY_SUPPRESSION_REASONS = [
+  "transport_unsupported",
   "missing_oauth_scope",
   "upstream_impl_unsupported",
   "instance_setting_off",

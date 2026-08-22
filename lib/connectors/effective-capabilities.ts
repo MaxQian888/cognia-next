@@ -50,6 +50,7 @@
  */
 
 import type { AdapterImplMetadata, AdapterInstanceRow } from "@/lib/db/connector-types"
+import type { TransportMode } from "@/types/connectors/adapter"
 import type { Capability } from "@/types/connectors/capability"
 import type { ChannelKind } from "@/types/connectors/event"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
@@ -61,6 +62,22 @@ import type { ConnectorRuntimeCapabilityMatrix } from "@/types/connectors/runtim
 import { connectorRuntimeCapabilitiesForScope } from "@/types/connectors/runtime-capability"
 import type { ConnectedScopes } from "./oauth-scope-audit"
 import { getPlatformCapabilities } from "./platform-capabilities"
+
+/**
+ * Transports that can carry a capability at all.
+ *
+ * Discord's presence update is gateway op 3: `setPresenceStatus` calls
+ * `_gatewayClient.updatePresence` and throws "Discord gateway not connected"
+ * when there is none, so a `webhook`-mode instance can never send one. Nothing
+ * else on Discord is transport-bound — `setTyping` and `fetchHistory` are both
+ * plain REST and work in either mode, contrary to what the capability list's
+ * own comment used to claim.
+ */
+const TRANSPORT_REQUIREMENTS: Partial<
+  Record<PlatformKind, Partial<Record<Capability, readonly TransportMode[]>>>
+> = {
+  discord: { "presence.status": ["gateway"] },
+}
 
 /**
  * OAuth scopes that satisfy a capability, as ANY-OF sets.
@@ -156,6 +173,8 @@ export interface EffectiveCapabilityInput {
   settings?: Record<string, unknown>
   /** `AdapterInstanceRow.implMetadata` — the OneBot upstream probe result. */
   implMetadata?: AdapterImplMetadata
+  /** `AdapterInstanceRow.transportMode` — how this instance talks to the platform. */
+  transportMode?: TransportMode
   adapterId?: string
   /** The conversation scene, when resolving for one conversation. */
   scopeKind?: ChannelKind
@@ -213,6 +232,20 @@ export function effectiveCapabilities(
   const suppressed: CapabilitySuppression[] = []
 
   for (const capability of declared) {
+    const allowedTransports = TRANSPORT_REQUIREMENTS[input.platform]?.[capability]
+    if (
+      input.transportMode &&
+      allowedTransports &&
+      !allowedTransports.includes(input.transportMode)
+    ) {
+      suppressed.push({
+        capability,
+        reason: "transport_unsupported",
+        detail: allowedTransports.join(" | "),
+      })
+      continue
+    }
+
     const requiredScopes = OAUTH_SCOPE_REQUIREMENTS[input.platform]?.[capability]
     if (grantedScopes && requiredScopes && !requiredScopes.some((s) => grantedScopes.includes(s))) {
       suppressed.push({
@@ -271,7 +304,8 @@ export function effectiveCapabilities(
 
 /** Convenience: project straight from a stored instance row. */
 export function effectiveCapabilitiesForRow(
-  row: Pick<AdapterInstanceRow, "id" | "type" | "settings" | "implMetadata">,
+  row: Pick<AdapterInstanceRow, "id" | "type" | "settings" | "implMetadata"> &
+    Partial<Pick<AdapterInstanceRow, "transportMode">>,
   options?: { declared?: readonly Capability[]; scopeKind?: ChannelKind }
 ): EffectiveCapabilitySnapshot {
   return effectiveCapabilities({
@@ -279,6 +313,7 @@ export function effectiveCapabilitiesForRow(
     adapterId: row.id,
     settings: row.settings,
     implMetadata: row.implMetadata,
+    transportMode: row.transportMode,
     declared: options?.declared,
     scopeKind: options?.scopeKind,
   })
@@ -311,5 +346,12 @@ export function capabilityFingerprint(input: EffectiveCapabilityInput): string {
   const scopes = readConnectedScopes(input.settings)?.join(",") ?? ""
   const features = input.implMetadata?.features?.join(",") ?? ""
   const assistant = input.settings?.["assistantAppEnabled"] === true ? "1" : "0"
-  return [input.platform, input.scopeKind ?? "", scopes, features, assistant].join("|")
+  return [
+    input.platform,
+    input.scopeKind ?? "",
+    input.transportMode ?? "",
+    scopes,
+    features,
+    assistant,
+  ].join("|")
 }

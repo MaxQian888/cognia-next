@@ -105,6 +105,34 @@ describe("UsagePresence", () => {
     expect(screen.queryByTestId("usage-presence-targets")).toBeNull()
   })
 
+  it("hides the badge tier for a webhook-mode Discord bot — presence is a gateway op", async () => {
+    // Discord declares presence.status, but `setPresenceStatus` needs the
+    // gateway client and throws without one, so a webhook-mode instance could
+    // only ever fail. The projection knows; the platform table could not.
+    await getDb().adapterInstances.put(
+      baseRow({
+        type: "discord",
+        transportMode: "webhook",
+        presence: { enabled: true, mode: "badge", intervalMinutes: 5, window: "today" },
+      })
+    )
+    render(<UsagePresence adapterId="ad-up" />)
+    await waitFor(() => screen.getByTestId("usage-presence-mode"))
+    expect(screen.queryByTestId("usage-presence-targets")).toBeNull()
+  })
+
+  it("shows it for the same bot on the gateway", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({
+        type: "discord",
+        transportMode: "gateway",
+        presence: { enabled: true, mode: "badge", intervalMinutes: 5, window: "today" },
+      })
+    )
+    render(<UsagePresence adapterId="ad-up" />)
+    expect(await screen.findByTestId("usage-presence-targets")).toBeTruthy()
+  })
+
   it("shows the card conversation field and persists it on blur", async () => {
     await getDb().adapterInstances.put(
       baseRow({

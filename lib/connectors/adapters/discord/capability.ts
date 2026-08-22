@@ -12,10 +12,12 @@ import {
  * A2UI projection. Native multipart upload still depends on a future Tauri
  * upload bridge.
  */
-// GAP: webhook-mode static capability drift — this list is declared once per
-// adapter type, but in `transportMode: "webhook"` the gateway-only features
-// (presence.status, typing, live message events feeding history consumers)
-// don't apply; splitting the matrix per transport is a separate follow-up.
+// This list is per adapter TYPE, so it cannot say that `presence.status` is a
+// gateway op (`setPresenceStatus` calls `_gatewayClient.updatePresence` and
+// throws without one) and therefore impossible in `transportMode: "webhook"`.
+// `lib/connectors/effective-capabilities.ts` encodes that per instance.
+// `typing` and `history.fetch` are NOT transport-bound — an earlier note here
+// claimed they were; both are plain REST and work in either mode.
 export const DISCORD_CAPS: readonly Capability[] = [
   "delete",
   "edit",

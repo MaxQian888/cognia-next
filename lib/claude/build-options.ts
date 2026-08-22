@@ -2064,6 +2064,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
               platform: imAdapterRow.type,
               settings: imAdapterRow.settings,
               implMetadata: imAdapterRow.implMetadata,
+              transportMode: imAdapterRow.transportMode,
             })
           : "none"
       const skillsCacheKey = `${session?.platformBinding?.platform ?? "none"}:${Boolean(

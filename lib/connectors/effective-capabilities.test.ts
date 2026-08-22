@@ -208,6 +208,33 @@ describe("effectiveCapabilities", () => {
     })
   })
 
+  describe("transport", () => {
+    it("drops Discord presence in webhook mode — the update is a gateway op", () => {
+      const snapshot = effectiveCapabilities({ platform: "discord", transportMode: "webhook" })
+      expect(hasEffectiveCapability(snapshot, "presence.status")).toBe(false)
+      expect(suppressionFor(snapshot, "presence.status")).toEqual({
+        capability: "presence.status",
+        reason: "transport_unsupported",
+        detail: "gateway",
+      })
+    })
+
+    it("keeps Discord presence on the gateway", () => {
+      const snapshot = effectiveCapabilities({ platform: "discord", transportMode: "gateway" })
+      expect(hasEffectiveCapability(snapshot, "presence.status")).toBe(true)
+    })
+
+    it("leaves typing and history alone — both are plain REST in either mode", () => {
+      const snapshot = effectiveCapabilities({ platform: "discord", transportMode: "webhook" })
+      expect(hasEffectiveCapability(snapshot, "typing")).toBe(true)
+      expect(hasEffectiveCapability(snapshot, "history.fetch")).toBe(true)
+    })
+
+    it("suppresses nothing when the transport is unknown", () => {
+      expect(effectiveCapabilities({ platform: "discord" }).suppressed).toEqual([])
+    })
+  })
+
   describe("suppression bookkeeping", () => {
     it("records a capability at most once and keeps the two lists complementary", () => {
       const snapshot = effectiveCapabilities({
@@ -312,7 +339,7 @@ describe("effectiveCapabilities", () => {
     // Every rule keys off a capability id and a platform kind. A rename in
     // either catalogue would otherwise leave a rule that silently never fires
     // — the failure mode is a capability that is never suppressed again.
-    const rulePlatforms = ["slack", "onebot", "qq-official", "lark"] as const
+    const rulePlatforms = ["slack", "onebot", "qq-official", "lark", "discord"] as const
 
     it("only names real platforms", () => {
       for (const platform of rulePlatforms) {
@@ -339,10 +366,11 @@ describe("effectiveCapabilities", () => {
           implMetadata: { impl: "lagrange", version: "0", features: [] },
         }),
         effectiveCapabilities({ platform: "qq-official", scopeKind: "group" }),
+        effectiveCapabilities({ platform: "discord", transportMode: "webhook" }),
       ]) {
         for (const entry of snapshot.suppressed) reasons.add(entry.reason)
       }
-      // All four reasons are reachable from these three projections.
+      // Every catalogued reason is reachable from these four projections.
       expect(reasons.size).toBe(CAPABILITY_SUPPRESSION_REASONS.length)
       for (const reason of reasons) {
         expect(CAPABILITY_SUPPRESSION_REASONS).toContain(reason)
