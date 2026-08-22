@@ -1,7 +1,12 @@
 /** @jest-environment jsdom */
 /**
- * Integration tests for the sibling-bot anti-loop guard in its home on the
- * bus (`bus.ts` step 9.6).
+ * Integration tests for the two inbound guards that run on the bus after the
+ * routing decision: the sibling-bot anti-loop guard (step 9.6) and the media
+ * model gate (step 9.7).
+ *
+ * Both live here rather than in the transport gate for the same reason — a
+ * decision about what a MODEL may see is only meaningful once a model is going
+ * to run at all, and taking it must not cost the message its place in history.
  *
  * The guard used to live in the transport gate (`at-gate.ts`), ahead of the
  * durable inbound insert and ahead of the routing decision. Two consequences,
@@ -100,6 +105,27 @@ function groupEvent(
     timestamp: Date.now(),
     raw: {},
     kind: "create",
+  }
+}
+
+function imageEvent(
+  adapterId: string,
+  messageId: string,
+  over: { dataBase64?: string; ocrText?: string } = {}
+): NormalizedInboundEvent {
+  const base = groupEvent(adapterId, messageId)
+  return {
+    ...base,
+    segments: [
+      {
+        type: "image",
+        url: "",
+        dataBase64: over.dataBase64 ?? "SECRETBYTES",
+        mimeType: "image/png",
+        ...(over.ocrText ? { ocrText: over.ocrText } : {}),
+      },
+    ] as NormalizedInboundEvent["segments"],
+    plainText: "",
   }
 }
 
@@ -275,5 +301,89 @@ describe("routing drops are auditable", () => {
     expect(dropped).toBeDefined()
     expect(dropped?.conversationKey).toBe(`telegram:${adapterId}:chatA`)
     expect(dropped?.fields).toMatchObject({ matched: false })
+  })
+})
+
+describe("media model gate — the bus stamps the decision", () => {
+  it("stamps local_extract_only by default and audits the withheld attachment", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    const seen: NormalizedInboundEvent[] = []
+    bus.routeHandler = async (event: NormalizedInboundEvent) => {
+      seen.push(event)
+    }
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    // The stamp is what `inboundEventToSendContent` reads; without it the
+    // gate would be dead code no matter how correct the gate itself is.
+    expect(seen[0]?.mediaModelPolicy).toBe("local_extract_only")
+    const rows = await listRecent(undefined, 50)
+    const blocked = rows.find((r) => r.kind === "inbound.media_model_blocked")
+    expect(blocked?.reason).toBe("no_local_text")
+    expect(blocked?.fields).toMatchObject({ segmentType: "image", policy: "local_extract_only" })
+  })
+
+  it("does not audit a withheld attachment when local text was extracted", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.routeHandler = jest.fn()
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1", { ocrText: "RECEIPT 9" }))
+    await bus.flushInboundTurns()
+
+    expect(await auditKinds()).not.toContain("inbound.media_model_blocked")
+  })
+
+  it("honours a live, provider-scoped grant on the conversation", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    const seen: NormalizedInboundEvent[] = []
+    bus.routeHandler = async (event: NormalizedInboundEvent) => {
+      seen.push(event)
+    }
+    await getDb().conversationOverrides.put({
+      id: "ov-1",
+      conversationKey: `telegram:${adapterId}:chatA`,
+      mediaModelGrant: {
+        policy: "allow_cloud_binary",
+        providers: ["anthropic"],
+        grantedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    expect(seen[0]?.mediaModelPolicy).toBe("allow_cloud_binary")
+    expect(await auditKinds()).not.toContain("inbound.media_model_blocked")
+  })
+
+  it("ignores a grant that names a different provider", async () => {
+    const adapterId = await seedAdapter({ defaultProvider: "anthropic" })
+    const bus = getBus()
+    const seen: NormalizedInboundEvent[] = []
+    bus.routeHandler = async (event: NormalizedInboundEvent) => {
+      seen.push(event)
+    }
+    await getDb().conversationOverrides.put({
+      id: "ov-1",
+      conversationKey: `telegram:${adapterId}:chatA`,
+      mediaModelGrant: {
+        policy: "allow_cloud_binary",
+        providers: ["ollama"],
+        grantedAt: 1,
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    } as never)
+
+    await bus.dispatchInboundFull(imageEvent(adapterId, "m1"))
+    await bus.flushInboundTurns()
+
+    expect(seen[0]?.mediaModelPolicy).toBe("local_extract_only")
   })
 })

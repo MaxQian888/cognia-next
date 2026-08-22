@@ -30,6 +30,7 @@ import type { AdapterInstanceRow, DispatchRule } from "@/lib/db/connector-types"
 import {
   installRuntime,
   inboundEventToSendContent,
+  WITHHELD_MEDIA_MARKER,
   insertInboundMessage,
   resolveRecoveryExecutionSpec,
   shouldEmbedInboundText,
@@ -2183,7 +2184,7 @@ describe("inboundEventToSendContent", () => {
     expect(inboundEventToSendContent(event)).toBe("[image: https://example.com/p.png]\nRECEIPT $9")
   })
 
-  it("preserves base64 image segments as image blocks (multimodal)", () => {
+  it("sends base64 image segments as image blocks ONLY under an explicit grant", () => {
     const event = makeEvent({
       segments: [
         { type: "text", text: "look:" },
@@ -2196,6 +2197,7 @@ describe("inboundEventToSendContent", () => {
       ],
       plainText: "look:",
     })
+    event.mediaModelPolicy = "allow_cloud_binary"
     const out = inboundEventToSendContent(event)
     expect(Array.isArray(out)).toBe(true)
     if (Array.isArray(out)) {
@@ -2205,6 +2207,51 @@ describe("inboundEventToSendContent", () => {
         source: { type: "base64", media_type: "image/jpeg", data: "AAA" },
       })
     }
+  })
+
+  it("withholds inline image bytes under the default policy", () => {
+    // The default is what an unconfigured bot in a group chat runs with, so it
+    // is the case that decides whether someone's photo reaches a third party.
+    const event = makeEvent({
+      segments: [
+        { type: "text", text: "look:" },
+        { type: "image", url: "", dataBase64: "AAA", mimeType: "image/jpeg" },
+      ],
+      plainText: "look:",
+    })
+    const out = inboundEventToSendContent(event)
+    // No image block at all, and the model is told an attachment exists.
+    expect(out).toBe(`look:\n${WITHHELD_MEDIA_MARKER}`)
+    expect(JSON.stringify(out)).not.toContain("AAA")
+  })
+
+  it("treats an unstamped event as withholding, never as permission", () => {
+    // A path that forgets to run the gate must fail safe.
+    const event = makeEvent({
+      segments: [{ type: "image", url: "", dataBase64: "SECRET", mimeType: "image/png" }],
+      plainText: "",
+    })
+    expect(event.mediaModelPolicy).toBeUndefined()
+    expect(JSON.stringify(inboundEventToSendContent(event))).not.toContain("SECRET")
+  })
+
+  it("still hands over locally-extracted text when the bytes are withheld", () => {
+    // This is what makes local_extract_only usable rather than merely safe.
+    const event = makeEvent({
+      segments: [{ type: "image", url: "", dataBase64: "AAA", ocrText: "RECEIPT $9" }],
+      plainText: "",
+    })
+    const out = inboundEventToSendContent(event)
+    expect(out).toBe("RECEIPT $9")
+    expect(JSON.stringify(out)).not.toContain("AAA")
+  })
+
+  it("tells the model when a voice note has no local transcript", () => {
+    const event = makeEvent({
+      segments: [{ type: "voice", url: "https://example.com/v.ogg" }],
+      plainText: "",
+    })
+    expect(inboundEventToSendContent(event)).toBe(`[voice message] ${WITHHELD_MEDIA_MARKER}`)
   })
 
   it("surfaces a file segment's name and extracted text (ADR-0009 rich media)", () => {
@@ -2249,11 +2296,13 @@ describe("inboundEventToSendContent", () => {
         })
       )
     ).toBe("hi there")
+    // Without a local transcript there is nothing the model may have — the
+    // audio itself is binary — so the marker now says so explicitly.
     expect(
       inboundEventToSendContent(
         makeEvent({ segments: [{ type: "voice", url: "v_k" }], plainText: "" })
       )
-    ).toBe("[voice message]")
+    ).toBe(`[voice message] ${WITHHELD_MEDIA_MARKER}`)
   })
 })
 

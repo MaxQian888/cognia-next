@@ -19,6 +19,7 @@ import type {
   EngagementMode,
 } from "@cognia/agent-config-types/agent-composition"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import type { MediaModelGrant } from "@/lib/connectors/media-model-gate"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type {
   ActiveRunDispatchMode,
@@ -756,6 +757,20 @@ export interface WorkflowFanoutSubscriptionRow {
 export interface ConversationOverrideRow {
   id: string
   conversationKey: string
+  /**
+   * Explicit, revocable permission to send this conversation's raw binary
+   * media to a model. Absent (the norm) means the adapter's
+   * `mediaModelPolicy` applies, which defaults to local-extract-only.
+   *
+   * Provider-scoped: allowing a local vision model to see an image is a
+   * different decision from uploading it to a third party, and the grant must
+   * not silently transfer when the conversation's provider changes. Revoked by
+   * deleting the field; expires on its own via `expiresAt`.
+   *
+   * Non-indexed additive — no Dexie bump. Resolved by
+   * `lib/connectors/media-model-gate.ts:resolveMediaModelPolicy`.
+   */
+  mediaModelGrant?: MediaModelGrant
   /**
    * Owning workspace id — Workspace isolation column (Dexie v86). Per-project
    * routing state; `conversationKey` stays the globally-unique primary key

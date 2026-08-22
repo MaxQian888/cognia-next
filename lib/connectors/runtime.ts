@@ -462,17 +462,35 @@ export interface RuntimeOptions {
 export { findSessionByConversationKey, createPlatformSession } from "./session-bindings"
 
 /**
+ * What the model is told in place of media it is not allowed to see. Phrased
+ * for the model, not the user: it has to understand that content exists and
+ * that asking is the right move.
+ */
+export const WITHHELD_MEDIA_MARKER =
+  "[attachment withheld: binary media is not shared with the model for this conversation]"
+
+/**
  * Map a NormalizedInboundEvent's `segments` into the Claude SDK's
  * `SendContent` shape. Text + markdown segments collapse into text blocks;
- * image segments become base64 image blocks when the adapter supplied
- * inline data, otherwise degrade to a `[image: <url>]` text marker so the
- * model still has SOMETHING to react to. Other segment kinds (file, voice,
- * video) degrade to a one-line text marker — Phase 2 attachment caching
- * (ADR 0009) will revisit this once the cache pipeline is wired.
+ * other segment kinds degrade to a one-line text marker.
+ *
+ * This is the ONLY place inbound bytes can become model input, which is why
+ * the media policy is enforced here. Under `local_extract_only` — the default,
+ * and what `undefined` means — an inline image is NOT sent as a base64 block;
+ * only text a local extractor produced (OCR, transcription) goes, and the model
+ * is told an attachment it cannot see arrived, so it asks instead of answering
+ * as though the message were empty. The bus decides the policy once
+ * (`bus.ts` step 9.7) and stamps it on the event.
+ *
+ * Note the bytes are still on the event: the Inbox renders the image locally,
+ * which was never the concern. See `media-model-gate.ts`.
  *
  * Exported so `runtime.test.ts` can exercise the mapping in isolation.
  */
 export function inboundEventToSendContent(event: NormalizedInboundEvent): SendContent {
+  // `undefined` is the safe value: an event that never passed the gate keeps
+  // its bytes to itself.
+  const allowBinary = event.mediaModelPolicy === "allow_cloud_binary"
   const blocks: Array<
     | { type: "text"; text: string }
     | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
@@ -490,19 +508,27 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
     if (seg.type === "image") {
       const inline = (seg as { dataBase64?: string; mimeType?: string }).dataBase64
       const mime = (seg as { mimeType?: string }).mimeType ?? "image/png"
-      if (typeof inline === "string" && inline.length > 0) {
+      const hasOcr = typeof seg.ocrText === "string" && seg.ocrText.length > 0
+      if (allowBinary && typeof inline === "string" && inline.length > 0) {
         blocks.push({
           type: "image",
           source: { type: "base64", media_type: mime, data: inline },
         })
       } else if (typeof seg.url === "string" && seg.url.length > 0) {
         blocks.push({ type: "text", text: `[image: ${seg.url}]` })
+      } else if (!hasOcr) {
+        // Neither bytes the model may see nor extracted words nor a URL: say
+        // so, rather than dropping the segment and leaving the model to answer
+        // a message that looks empty.
+        blocks.push({ type: "text", text: WITHHELD_MEDIA_MARKER })
       }
-      // ADR-0024 — when the inbound OCR step extracted text, hand it to the
-      // model as a text block too (alongside the image, so vision-capable
-      // models still see the picture). Lets non-vision models read the words.
-      if (typeof seg.ocrText === "string" && seg.ocrText.length > 0) {
-        blocks.push({ type: "text", text: seg.ocrText })
+      // ADR-0024 — when a LOCAL extractor produced text, hand it to the model
+      // (alongside the image where the policy allows the picture itself, so
+      // vision-capable models still see it). This is the whole reason
+      // `local_extract_only` is usable: non-vision models read the words, and
+      // the bytes never leave the device.
+      if (hasOcr) {
+        blocks.push({ type: "text", text: seg.ocrText as string })
       }
       continue
     }
@@ -516,9 +542,13 @@ export function inboundEventToSendContent(event: NormalizedInboundEvent): SendCo
       blocks.push({ type: "text", text })
       continue
     }
-    // voice — hand back the transcript when an adapter resolved one.
+    // voice — hand back the LOCAL transcript when one was resolved. Without
+    // one there is nothing the model may have: the audio itself is binary.
     if (seg.type === "voice") {
-      blocks.push({ type: "text", text: seg.transcript ? seg.transcript : "[voice message]" })
+      blocks.push({
+        type: "text",
+        text: seg.transcript ? seg.transcript : `[voice message] ${WITHHELD_MEDIA_MARKER}`,
+      })
       continue
     }
     // video / unknown — degrade to a text marker. We use `seg.type` so the

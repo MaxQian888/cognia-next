@@ -1,4 +1,5 @@
 import type { PlatformKind } from "./platform-kind"
+import type { MediaModelPolicy } from "@/lib/db/connector-types"
 import type { MessageSegment } from "./segment"
 
 /**
@@ -97,6 +98,17 @@ export interface MentionDescriptor {
 export type InboundEventKind = "create" | "edit" | "delete" | "system"
 
 export interface NormalizedInboundEvent {
+  /**
+   * What this turn's media may hand to a model, decided once by the bus
+   * (`bus.ts` step 9.7) and honoured by `inboundEventToSendContent`.
+   *
+   * Deliberately on the in-memory event and not persisted: it is a property of
+   * the turn about to run — of the adapter policy, the conversation's grant and
+   * the provider that turn resolves to — not of the message. `undefined` means
+   * the safe value, so a code path that forgets to stamp it withholds binary
+   * rather than leaking it.
+   */
+  mediaModelPolicy?: MediaModelPolicy
   platform: PlatformKind
   adapterId: string
   selfId: string

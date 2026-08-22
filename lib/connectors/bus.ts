@@ -83,6 +83,7 @@ import {
 } from "@/lib/db/connector-inbound-jobs"
 import { admitConversationEvent } from "./conversation-admission"
 import { classifySiblingSender, type SiblingClassification } from "./sibling-bots"
+import { applyMediaModelGate, resolveMediaModelPolicy } from "./media-model-gate"
 import { consumeSiblingInterplayBudget, DEFAULT_BOT_INTERPLAY_BUDGET } from "./at-gate"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
@@ -956,6 +957,37 @@ export class ConnectorBus {
             return
           }
         }
+      }
+    }
+
+    // ── Step 9.7: media model gate ───────────────────────────────────────────
+    // Decide ONCE what this turn's attachments may hand to a model, and stamp
+    // it on the event. `inboundEventToSendContent` is the only place inbound
+    // bytes can become model input, and it reads this stamp — so a photo, voice
+    // note or contract does not reach a third party because a bot happened to
+    // be in the chat.
+    //
+    // Runs after the routing decision for the same reason as the sibling guard:
+    // there is nothing to decide about a message no model will ever see. The
+    // PII re-gate on extracted text does mutate the event, so it has to happen
+    // before the prompt is built.
+    if (decision !== "drop" && !evalResult.blocked) {
+      const mediaPolicy = resolveMediaModelPolicy({
+        adapter: adapterRow,
+        override,
+        adapterDefaultProvider: adapterRow.defaultProvider,
+        now,
+      })
+      const mediaDecision = applyMediaModelGate(event, mediaPolicy)
+      for (const block of mediaDecision.blocked) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.media_model_blocked",
+          at: now,
+          conversationKey: event.conversationKey,
+          reason: block.reason,
+          fields: { segmentType: block.segmentType, policy: mediaDecision.policy },
+        }).catch(() => undefined)
       }
     }
 
