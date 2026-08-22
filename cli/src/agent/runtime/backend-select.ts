@@ -26,9 +26,13 @@
  * preset refinement and this host's ceilings.
  *
  * Selection is the STATIC half of a two-phase admission, so it refuses only
- * what is already definitely wrong. A capability nothing has measured yet
- * passes here and is re-checked against the negotiated profile after the
- * handshake — refusing an `unknown` at selection would reject agents that work.
+ * what is already definitely wrong: refusing an `unknown` here would reject
+ * agents that work. What happens to that `unknown` afterwards is narrower than
+ * the design's full shape — the execution resolver refuses to freeze a spec
+ * against a profile that never completed its handshake, but the hard-requirement
+ * re-check (`admitNegotiatedExternalAgent`) has no caller, because nothing in
+ * the product declares external hard requirements yet. `requires` below is
+ * reachable from the API and has no CLI flag behind it.
  */
 
 import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-execution"

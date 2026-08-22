@@ -15,7 +15,8 @@
  * "we don't know" has hardened into "we asked and it isn't there".
  *
  * The symmetry is the point: refuse early only for what cannot change, refuse
- * late for everything that could.
+ * late for everything that could. Phase 1 is the half that runs today — see
+ * {@link admitNegotiatedExternalAgent} for why phase 2 has no caller yet.
  */
 
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"
@@ -129,6 +130,24 @@ export interface NegotiatedAdmissionInput {
  * Refusing an un-negotiated profile outright is not pedantry — a spec frozen
  * from a pre-handshake profile is a promise nobody checked, and the whole
  * two-phase split exists so that promise is never made.
+ *
+ * DORMANT ON PURPOSE — no production caller, and `dormancy` in
+ * `./capability-preflight.test.ts` keeps it that way until one exists. Its two
+ * checks have different fates today:
+ *
+ *   - the un-negotiated refusal IS enforced, by `resolveAgentExecutionSpec`,
+ *     which drops a projection whose `negotiated` is false before it can
+ *     freeze anything. That is the check that had to be unskippable, so it
+ *     lives where every caller passes rather than where each must remember;
+ *   - the hard-requirement re-check has no input. Nothing in the product
+ *     declares external hard requirements: `selectBackend`'s `requires` has no
+ *     CLI flag behind it, and a teammate's capability bundle is CLAMPED to what
+ *     the frozen runtime serves rather than refused.
+ *
+ * Wiring it to an empty requirement list would look like a gate and check
+ * nothing, which is worse than an honest absence. The caller to add, when a
+ * surface finally declares requirements, is that surface — immediately after
+ * the handshake and before the first turn.
  */
 export function admitNegotiatedExternalAgent(
   input: NegotiatedAdmissionInput

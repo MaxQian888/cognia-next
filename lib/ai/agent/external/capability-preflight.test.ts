@@ -159,3 +159,57 @@ describe("admitNegotiatedExternalAgent", () => {
     expect(result.error.message).toContain("opencode-server")
   })
 })
+
+describe("dormancy", () => {
+  it("phase 2 has no production caller, and the resolver holds the check that matters", async () => {
+    // `admitNegotiatedExternalAgent` is fully built and fully tested above,
+    // which is exactly the condition under which this repo's dormant code
+    // starts reading as live. Its un-negotiated refusal IS enforced — by
+    // `resolveAgentExecutionSpec`, where no caller can skip it — but its
+    // hard-requirement re-check has no input yet, and wiring it to an empty
+    // requirement list would look like a gate while checking nothing.
+    //
+    // Delete this test the moment a surface declares external requirements.
+    const { readdirSync, readFileSync, statSync } = await import("node:fs")
+    const { join } = await import("node:path")
+
+    const roots = [
+      "lib/ai/agent",
+      "cli/src/agent",
+      "cli/src/runtime",
+      "components/agent",
+      "hooks/agent",
+    ]
+    const callers: string[] = []
+    let scanned = 0
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry)
+        if (statSync(full).isDirectory()) {
+          walk(full)
+          continue
+        }
+        if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue
+        if (full.endsWith("capability-preflight.ts")) continue
+        scanned += 1
+        if (readFileSync(full, "utf8").includes("admitNegotiatedExternalAgent(")) callers.push(full)
+      }
+    }
+    for (const root of roots) walk(join(process.cwd(), root))
+
+    // A mistyped root would make the sweep pass by looking at nothing.
+    expect(scanned).toBeGreaterThan(200)
+    expect(callers).toEqual([])
+  })
+
+  it("the un-negotiated refusal it duplicates is enforced where callers cannot skip it", async () => {
+    const { readFileSync } = await import("node:fs")
+    const { join } = await import("node:path")
+    const source = readFileSync(
+      join(process.cwd(), "lib/ai/agent/execution/resolve-agent-execution-spec.ts"),
+      "utf8"
+    )
+    // Not a string match on a comment: this is the guard itself.
+    expect(source).toMatch(/if \(!projection\?\.negotiated\) return undefined/)
+  })
+})
