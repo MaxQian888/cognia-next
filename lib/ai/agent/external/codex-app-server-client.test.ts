@@ -1077,8 +1077,13 @@ describe("CodexAppServerAdapter", () => {
       }
 
       feed("serverRequest/resolved", { threadId: "thr_1", requestId: 731 })
-      await Promise.resolve()
-      await Promise.resolve()
+      // Drain to the macrotask queue, not two microtask ticks. The peer writes
+      // a response only after the handler's promise settles and its own
+      // continuation runs, and under-waiting made this assert "nothing was
+      // written yet" rather than "only 731 was written" — which is also what
+      // makes the 732 check below mean something: a resolve-by-thread
+      // implementation has had every opportunity to answer it by now.
+      await new Promise((resolve) => setTimeout(resolve, 0))
 
       expect(lastWritten((message) => message.id === 731)?.result).toEqual({
         answers: { first: { answers: [] } },
