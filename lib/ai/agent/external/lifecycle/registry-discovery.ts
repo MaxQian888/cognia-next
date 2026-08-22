@@ -8,7 +8,14 @@
  * no installer produced one. Discovery was therefore a dormant capability
  * rather than an operating lifecycle.
  *
- * This is the bridge. A registry entry becomes one of exactly two things:
+ * This is the bridge — and it is still dormant on purpose: nothing calls
+ * `discoverRegistryRuntimes` yet, because a directory listing whose every row
+ * ends in "Cognia cannot install this for you" is worse than no listing, and
+ * the managed-install host that would change that does not exist. What is
+ * written here is the classification, so the surface that eventually lists
+ * these cannot present an unpinnable entry as installable.
+ *
+ * A registry entry becomes one of exactly two things:
  *
  *  - **managed** — a binary distribution with an https archive and a SHA-256,
  *    which the binary provider can stage, verify, health-check and activate

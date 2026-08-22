@@ -252,3 +252,20 @@ describe("partitionDiscoveries", () => {
     expect(partitionDiscoveries([])).toEqual({ managed: [], userManaged: [] })
   })
 })
+
+describe("dormancy", () => {
+  it("stays out of the boot graph", async () => {
+    // Startup rehydration imports the lifecycle service, and importing this
+    // module for real pulls the registry client, proxy-fetch and the settings
+    // store in with it. The service reaches it through a dynamic import for
+    // that reason; a static one would make every launch pay for a listing that
+    // nothing even opens yet.
+    const { readFileSync } = await import("node:fs")
+    const source = readFileSync(require.resolve("./service.ts").replace(/\.js$/, ""), "utf8")
+    // `import type` is erased and costs nothing; a value import is the one
+    // that would drag the module in.
+    const valueImport = /^import (?!type )[^\n]*from "\.\/registry-discovery"/m
+    expect(source).not.toMatch(valueImport)
+    expect(source).toMatch(/await import\("\.\/registry-discovery"\)/)
+  })
+})

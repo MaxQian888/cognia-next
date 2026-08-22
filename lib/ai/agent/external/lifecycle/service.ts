@@ -587,10 +587,13 @@ export class ExternalAgentLifecycleService {
    * List the ACP Registry, classified into what Cognia can install and what it
    * can only point the user at.
    *
-   * The registry client was written with real care — exact versions, https
-   * archives, mandatory checksums, traversal refusal — and then had no caller,
-   * which made it a dormant capability rather than a lifecycle. This is the
-   * production entry point.
+   * **Deliberately dormant: nothing in the app calls this yet.** Browsing a
+   * remote directory of installable agents needs a surface that does not
+   * exist, and there is no point building one while
+   * {@link installRuntime} still refuses on every host — a listing whose only
+   * outcome is "Cognia cannot install this for you" is worse than no listing.
+   * The classification is written and tested so that surface, when it is
+   * built, cannot quietly present an unpinnable entry as installable.
    *
    * Discovered runtimes are remembered for this session so
    * {@link installRuntime} can resolve one; they are NOT written to the shipped
