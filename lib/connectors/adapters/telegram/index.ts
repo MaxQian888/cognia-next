@@ -16,6 +16,8 @@ import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { TELEGRAM_A2UI_CAPABILITY, TELEGRAM_CAPS } from "./capability"
 import { createTelegramAlbumBuffer, type TelegramAlbumBuffer } from "./album"
+import { enrichTelegramInboundMedia } from "./inbound-media"
+import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import {
   albumGroupIdOf,
   parseTelegramUpdate,
@@ -418,10 +420,21 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
 
     // Rebuilt per start so a restart never inherits parts of an album whose
     // conversation may no longer be routed the same way.
+    /**
+     * Download media the parser could only reference, then emit. Runs on both
+     * paths (album and single) so a photo reaches the model as an image rather
+     * than as the text `tg://file/<id>`, and after the gate so a message that
+     * is going to be dropped costs no downloads.
+     */
+    const emitEnriched = async (event: NormalizedInboundEvent): Promise<void> => {
+      await enrichTelegramInboundMedia(event, { botToken: opts.botToken })
+      await ctx.emit(event)
+    }
+
     albums = createTelegramAlbumBuffer({
       onFlush: async (event) => {
         if (!(await gateInboundEvent(opts.id, event))) return
-        await ctx.emit(event)
+        await emitEnriched(event)
       },
       onError: (error) => {
         ctx.logger.warn("telegram:album flush failed", {
@@ -579,7 +592,7 @@ export function createTelegramAdapter(opts: TelegramAdapterOptions): PlatformAda
             if (albums.offer(event, albumGroupIdOf(update))) continue
             // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
             if (!(await gateInboundEvent(opts.id, event))) continue
-            await ctx.emit(event)
+            await emitEnriched(event)
           }
         }
         if (!stopCalled) {

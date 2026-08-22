@@ -23,6 +23,11 @@ jest.mock("@/lib/connectors/audit", () => ({
 
 import { setConnectorListen } from "@/lib/connectors/events"
 import { TELEGRAM_ALLOWED_UPDATES } from "./allowed-updates"
+const mockEnrich = jest.fn().mockResolvedValue(undefined)
+jest.mock("./inbound-media", () => ({
+  enrichTelegramInboundMedia: (...a: unknown[]) => mockEnrich(...a),
+}))
+
 import { createTelegramAdapter } from "./index"
 
 const mockInvoke = invoke as jest.Mock
@@ -90,6 +95,7 @@ function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
 
 describe("createTelegramAdapter", () => {
   beforeEach(() => {
+    mockEnrich.mockClear()
     mockInvoke.mockReset()
     mockDispatchConnectorCallback.mockClear()
     mockAppendAudit.mockClear()
@@ -156,6 +162,48 @@ describe("createTelegramAdapter", () => {
 
     expect(emitted.length).toBeGreaterThanOrEqual(1)
     expect(emitted[0].messageId).toBe("1")
+  })
+
+  it("resolves media before the event reaches the bus", async () => {
+    // Without this the model receives the literal text `tg://file/<id>` in
+    // place of the picture, and the inbound OCR pass never runs.
+    let pollCount = 0
+    mockInvoke.mockImplementation(async () => {
+      pollCount += 1
+      if (pollCount === 1) {
+        return makeOkUpdateResp([
+          {
+            update_id: 1,
+            message: {
+              message_id: 1,
+              from: { id: 111, first_name: "Alice" },
+              chat: { id: 111, type: "private" },
+              date: 1000000,
+              photo: [{ file_id: "f1", file_unique_id: "u1", width: 10, height: 10 }],
+            },
+          },
+        ])
+      }
+      await new Promise((r) => setTimeout(r, 50000))
+      return makeOkUpdateResp([])
+    })
+
+    const adapter = createTelegramAdapter({
+      id: "tg-media",
+      displayName: "Test Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "987654321",
+    })
+
+    const { ctx, emitted } = makeCtx()
+    await adapter.start(ctx)
+    await new Promise((r) => setTimeout(r, 30))
+    await adapter.stop()
+
+    expect(emitted).toHaveLength(1)
+    expect(mockEnrich).toHaveBeenCalledTimes(1)
+    expect(mockEnrich.mock.calls[0][0]).toBe(emitted[0])
   })
 
   it("emits ONE event for an album instead of one per photo", async () => {
