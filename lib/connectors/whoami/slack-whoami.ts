@@ -8,6 +8,8 @@
 
 import { connectorsHttpRequest, connectorsKeyringGet } from "@/lib/connectors/tauri/commands"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
+import { buildSelfIdentity } from "@/lib/connectors/self-identity"
+import type { AdapterSelfIdentitySnapshot } from "@/lib/db/connector-types"
 
 export interface SlackWhoamiResult {
   botName: string
@@ -50,6 +52,14 @@ const SLACK_AUTH_TEST = "https://slack.com/api/auth.test"
 
 export interface ProbeSlackOptions {
   now?: () => number
+  /**
+   * Which probe is asking. Defaults to `"whoami"` (the settings panel);
+   * the supervisor passes `"startup_probe"` when confirming identity as
+   * part of starting the adapter. Recorded on the identity snapshot so an
+   * operator can tell a confirmed-at-start bot from one that has only ever
+   * been probed by hand.
+   */
+  source?: AdapterSelfIdentitySnapshot["source"]
 }
 
 export async function probeSlackIdentity(
@@ -110,6 +120,15 @@ export async function probeSlackIdentity(
   }
 
   await updateAdapterInstance(adapterId, {
+    // The sibling-bot guard's authority — see `lib/connectors/self-identity.ts`.
+    selfIdentity: buildSelfIdentity(
+      {
+        platformAccountId: result.openId,
+        platformBotId: result.botId,
+        source: options.source ?? "whoami",
+      },
+      now
+    ),
     lastWhoamiResult: result,
     lastWhoamiAt: now(),
   })

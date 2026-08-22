@@ -82,6 +82,8 @@ import {
   updateConnectorInboundJobPayload,
 } from "@/lib/db/connector-inbound-jobs"
 import { admitConversationEvent } from "./conversation-admission"
+import { classifySiblingSender, type SiblingClassification } from "./sibling-bots"
+import { consumeSiblingInterplayBudget, DEFAULT_BOT_INTERPLAY_BUDGET } from "./at-gate"
 import { observeUnmentionedDeliveryProbe } from "./at-gate"
 import { deliveryTargetFromEvent } from "@/types/connectors/event"
 import {
@@ -873,6 +875,88 @@ export class ConnectorBus {
         evalResult.blocked ? "policy_blocked" : "routing_dropped",
         { now }
       )
+      // A policy block already has its own audit row above. A routing drop had
+      // none — it was recorded only as a generic history-only job, which left
+      // "the bot saw my message and said nothing" with no explanation anywhere
+      // an operator could read.
+      if (!evalResult.blocked) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.routing_dropped",
+          at: now,
+          conversationKey: event.conversationKey,
+          reason: evalResult.reason,
+          fields: { mode: resolved.mode, matched: evalResult.matched },
+        }).catch(() => undefined)
+      }
+    }
+
+    // ── Step 9.6: sibling-bot anti-loop guard ────────────────────────────────
+    // Deliberately here and not in the transport gate. Everything above has
+    // already run, so the message is durably stored and its route is known;
+    // that means a suppressed sibling message still appears in history, and the
+    // per-chat interplay budget is spent ONLY when a response is genuinely
+    // about to be enqueued. In the old placement a sibling posting into a
+    // blocked chat, or one whose trigger matched nothing, burned budget anyway.
+    if (decision !== "drop" && !evalResult.blocked && (!event.kind || event.kind === "create")) {
+      const classification = await classifySiblingSender(event).catch(
+        (): SiblingClassification => ({ kind: "identity_unknown", unverifiedAdapterIds: [] })
+      )
+      const policy = adapterRow.siblingBotPolicy ?? "ignore"
+
+      // There is no "guard off" setting: both policies suppress or meter a
+      // sibling, so neither can tolerate a sender it cannot classify. Note this
+      // only triggers when another enabled same-platform instance actually
+      // exists and lacks an identity — a lone bot never reaches here.
+      if (classification.kind === "identity_unknown") {
+        // We cannot prove the sender is a human, and the guard is switched on.
+        // Fail closed: keep the message, skip the turn, and name the instances
+        // whose identity probe has to succeed before this resolves itself.
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "sibling_identity_unknown", {
+          now,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.sibling_identity_unknown",
+          at: now,
+          conversationKey: event.conversationKey,
+          fields: { unverifiedAdapterIds: classification.unverifiedAdapterIds },
+        }).catch(() => undefined)
+        return
+      }
+
+      if (classification.kind === "sibling") {
+        if (policy === "ignore") {
+          await markConnectorInboundJobHistoryOnly(inboundJob.id, "sibling_bot_ignored", { now })
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "inbound.sibling_bot_ignored",
+            at: now,
+            conversationKey: event.conversationKey,
+            fields: { siblingAdapterId: classification.row.id },
+          }).catch(() => undefined)
+          return
+        }
+        if (policy === "respond") {
+          const budget = adapterRow.botInterplayBudget ?? DEFAULT_BOT_INTERPLAY_BUDGET
+          const chatId = event.channel.platformChannelId ?? event.channel.id
+          if (!consumeSiblingInterplayBudget(event.adapterId, chatId, budget, now)) {
+            await markConnectorInboundJobHistoryOnly(
+              inboundJob.id,
+              "sibling_bot_budget_exhausted",
+              { now }
+            )
+            await appendAudit({
+              adapterId: event.adapterId,
+              kind: "inbound.sibling_bot_budget_exhausted",
+              at: now,
+              conversationKey: event.conversationKey,
+              fields: { siblingAdapterId: classification.row.id, budget },
+            }).catch(() => undefined)
+            return
+          }
+        }
+      }
     }
 
     // ── Step 9.5: help / welcome short-circuit (cross-provider) ──────────────

@@ -8,6 +8,7 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 
 import { listAdapterInstancesByType } from "@/lib/db/adapter-instances"
 import {
+  classifySiblingSender,
   findSiblingBotSender,
   __resetSiblingBotCacheForTesting,
   SIBLING_LOOKUP_TTL_MS,
@@ -187,5 +188,154 @@ describe("findSiblingBotSender", () => {
       }),
     ])
     expect((await findSiblingBotSender(makeEvent()))?.id).toBe("lark-b")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// classifySiblingSender — the three-way answer
+// ---------------------------------------------------------------------------
+
+describe("classifySiblingSender", () => {
+  it("matches a sibling by its confirmed selfIdentity", async () => {
+    mockList.mockResolvedValue([
+      makeRow({
+        id: "lark-b",
+        selfIdentity: {
+          platformAccountId: "ou_bot_b",
+          source: "startup_probe",
+          confirmedAt: 1,
+        },
+      }),
+    ])
+    const result = await classifySiblingSender(makeEvent())
+    expect(result.kind).toBe("sibling")
+    expect(result.kind === "sibling" && result.row.id).toBe("lark-b")
+  })
+
+  it("matches on the bot-scoped id when the platform separates the two", async () => {
+    mockList.mockResolvedValue([
+      makeRow({
+        id: "slack-b",
+        type: "slack",
+        selfIdentity: {
+          platformAccountId: "U_APP",
+          platformBotId: "B_BOT",
+          source: "whoami",
+          confirmedAt: 1,
+        },
+      }),
+    ])
+    const result = await classifySiblingSender(
+      makeEvent({
+        platform: "slack",
+        adapterId: "slack-a",
+        sender: {
+          id: "B_BOT",
+          platform: "slack",
+          adapterId: "slack-a",
+          remoteUserId: "B_BOT",
+        },
+      })
+    )
+    expect(result.kind).toBe("sibling")
+  })
+
+  it("reports not_sibling when every peer has an identity and none matches", async () => {
+    mockList.mockResolvedValue([
+      makeRow({
+        id: "lark-b",
+        selfIdentity: { platformAccountId: "ou_someone_else", source: "whoami", confirmedAt: 1 },
+      }),
+    ])
+    expect((await classifySiblingSender(makeEvent())).kind).toBe("not_sibling")
+  })
+
+  it("rules out an unidentified peer on a platform that probes at startup", async () => {
+    // Lark confirms its identity on every successful start, so a Lark instance
+    // with none has never started — it cannot have authored this message, and
+    // muting the receiving bot over it would be pure loss.
+    mockList.mockResolvedValue([makeRow({ id: "lark-b", type: "lark" })])
+    expect((await classifySiblingSender(makeEvent())).kind).toBe("not_sibling")
+  })
+
+  it("fails closed on an unidentified peer whose platform has no startup probe", async () => {
+    // WeCom has no identity probe, so an instance without one may well be
+    // running and posting messages we cannot recognise. That is the genuinely
+    // unknowable case.
+    mockList.mockResolvedValue([makeRow({ id: "wecom-b", type: "wecom" })])
+    const result = await classifySiblingSender(
+      makeEvent({
+        platform: "wecom",
+        adapterId: "wecom-a",
+        sender: {
+          id: "wx_someone",
+          platform: "wecom",
+          adapterId: "wecom-a",
+          remoteUserId: "wx_someone",
+        },
+      })
+    )
+    expect(result.kind).toBe("identity_unknown")
+    expect(result.kind === "identity_unknown" && result.unverifiedAdapterIds).toEqual(["wecom-b"])
+  })
+
+  it("prefers a positive match over an unverifiable peer", async () => {
+    mockList.mockResolvedValue([
+      makeRow({ id: "wecom-x", type: "wecom" }),
+      makeRow({
+        id: "wecom-b",
+        type: "wecom",
+        selfIdentity: { platformAccountId: "wx_bot_b", source: "whoami", confirmedAt: 1 },
+      }),
+    ])
+    const result = await classifySiblingSender(
+      makeEvent({
+        platform: "wecom",
+        adapterId: "wecom-a",
+        sender: {
+          id: "wx_bot_b",
+          platform: "wecom",
+          adapterId: "wecom-a",
+          remoteUserId: "wx_bot_b",
+        },
+      })
+    )
+    expect(result.kind).toBe("sibling")
+  })
+
+  it("ignores disabled peers and the receiving instance itself", async () => {
+    mockList.mockResolvedValue([
+      makeRow({ id: "wecom-a", type: "wecom" }), // the receiver
+      makeRow({ id: "wecom-off", type: "wecom", enabled: false }),
+    ])
+    const result = await classifySiblingSender(
+      makeEvent({
+        platform: "wecom",
+        adapterId: "wecom-a",
+        sender: {
+          id: "wx_human",
+          platform: "wecom",
+          adapterId: "wecom-a",
+          remoteUserId: "wx_human",
+        },
+      })
+    )
+    expect(result.kind).toBe("not_sibling")
+  })
+
+  it("fails closed when the instance list cannot be read, and does not cache it", async () => {
+    mockList.mockRejectedValueOnce(new Error("dexie down"))
+    const first = await classifySiblingSender(makeEvent())
+    expect(first.kind).toBe("identity_unknown")
+
+    // A transient read failure must not poison the TTL cache — the very next
+    // message has to get a real answer.
+    mockList.mockResolvedValue([
+      makeRow({
+        id: "lark-b",
+        selfIdentity: { platformAccountId: "ou_other", source: "whoami", confirmedAt: 1 },
+      }),
+    ])
+    expect((await classifySiblingSender(makeEvent())).kind).toBe("not_sibling")
   })
 })

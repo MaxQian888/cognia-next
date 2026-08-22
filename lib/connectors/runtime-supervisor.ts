@@ -1,4 +1,5 @@
 import type { AdapterHealthState, PlatformAdapter } from "@/types/connectors"
+import { confirmSelfIdentityOnStart } from "@/lib/connectors/self-identity"
 import { appendAudit, type AuditEntryInput } from "./audit"
 
 export type ConnectorRuntimeOwner = "adapter-instance" | "plugin"
@@ -303,6 +304,22 @@ export class ConnectorRuntimeSupervisor {
         this.publishSnapshot(definition, generation, observed, reason)
         if (observed === "running") {
           await this.safeAudit({ adapterId: id, kind: "adapter.started", at: this.now() })
+          // Confirm the bot's own platform identity now that it is running.
+          // The sibling-bot guard fails closed on an instance it cannot
+          // identify, so this is what keeps a normal multi-bot setup working
+          // without anyone opening the settings panel. Deliberately not
+          // awaited: it is a network round-trip, and a slow or failing probe
+          // must not hold the start slot (`this.starts`) that every other
+          // adapter is queued behind.
+          try {
+            void confirmSelfIdentityOnStart(id, built.meta.type).catch(() => undefined)
+          } catch {
+            // Isolated on purpose: this block sits inside the start's try, so
+            // anything thrown while merely *dispatching* the probe would be
+            // caught below and mark a healthy, running adapter as failed.
+            // Confirming an identity is diagnostic; it cannot be allowed to
+            // decide whether the adapter started.
+          }
         }
       } catch (error) {
         abortController.abort()

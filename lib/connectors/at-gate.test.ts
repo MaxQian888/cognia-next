@@ -472,74 +472,34 @@ describe("gateInboundEvent", () => {
 // gateInboundEvent — sibling-bot anti-loop guard (W5 multi-bot same-group)
 // ---------------------------------------------------------------------------
 
-describe("gateInboundEvent — sibling-bot guard", () => {
-  const siblingRow = { id: "tg-2" } as AdapterInstanceRow
-
+describe("gateInboundEvent — no longer owns the sibling-bot guard", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     __resetSiblingInterplayBudgetForTesting()
-    mockFindSibling.mockResolvedValue(siblingRow)
+    mockFindSibling.mockResolvedValue({ id: "tg-2" } as AdapterInstanceRow)
   })
 
-  it("default policy ignores a sibling-bot message and audits it", async () => {
+  // The guard moved to `bus.ts` step 9.6 (see bus.sibling-guard.test.ts for its
+  // behaviour). It has to be genuinely gone from here, not merely reordered:
+  // running it in the transport gate suppressed the message BEFORE the durable
+  // inbound job existed, so a message the bot chose not to answer left no trace
+  // in history at all — and it spent a slot of the per-chat interplay budget
+  // before anything had decided the message would be answered.
+  it("does not consult the sibling lookup at all", async () => {
     mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
-    const event = makeEvent({ kind: "create" })
-    expect(await gateInboundEvent("tg-1", event)).toBe(false)
-    expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adapterId: "tg-1",
-        kind: "inbound.sibling_bot_ignored",
-        conversationKey: event.conversationKey,
-        fields: { siblingAdapterId: "tg-2" },
-      })
-    )
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
+    expect(mockFindSibling).not.toHaveBeenCalled()
   })
 
-  it('explicit "ignore" policy behaves like the default', async () => {
+  it("passes a sibling-authored message through so the bus can store it", async () => {
     mockGetAdapterInstance.mockResolvedValue(
       makeAdapter({ atResponseStrategy: "always", siblingBotPolicy: "ignore" })
-    )
-    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(false)
-  })
-
-  it('"respond" policy allows a sibling message under budget (normal gates still apply)', async () => {
-    mockGetAdapterInstance.mockResolvedValue(
-      makeAdapter({ atResponseStrategy: "always", siblingBotPolicy: "respond" })
     )
     expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
     expect(mockAppendAudit).not.toHaveBeenCalled()
   })
 
-  it('"respond" defers mention admission to the bus after the sibling check', async () => {
-    mockGetAdapterInstance.mockResolvedValue(
-      makeAdapter({ atResponseStrategy: "mention_only", siblingBotPolicy: "respond" })
-    )
-    const event = makeEvent({ kind: "create", mentions: { selfMentioned: false, users: [] } })
-    expect(await gateInboundEvent("tg-1", event)).toBe(true)
-    expect(mockAppendAudit).not.toHaveBeenCalled()
-  })
-
-  it("exhausts the per-chat budget and audits the drop", async () => {
-    mockGetAdapterInstance.mockResolvedValue(
-      makeAdapter({
-        atResponseStrategy: "always",
-        siblingBotPolicy: "respond",
-        botInterplayBudget: 2,
-      })
-    )
-    const event = makeEvent({ kind: "create" })
-    expect(await gateInboundEvent("tg-1", event)).toBe(true)
-    expect(await gateInboundEvent("tg-1", event)).toBe(true)
-    expect(await gateInboundEvent("tg-1", event)).toBe(false)
-    expect(mockAppendAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "inbound.sibling_bot_budget_exhausted",
-        fields: { siblingAdapterId: "tg-2", budget: 2 },
-      })
-    )
-  })
-
-  it("tracks the budget per chat — another chat is unaffected", async () => {
+  it("spends no interplay budget", async () => {
     mockGetAdapterInstance.mockResolvedValue(
       makeAdapter({
         atResponseStrategy: "always",
@@ -547,35 +507,24 @@ describe("gateInboundEvent — sibling-bot guard", () => {
         botInterplayBudget: 1,
       })
     )
-    const chatA = makeEvent({ kind: "create" })
-    const chatB = makeEvent({
-      kind: "create",
-      conversationKey: "telegram:tg-1:chat-200",
-      channel: { id: "chat-200", kind: "group", platformChannelId: "chat-200" },
-    })
-    expect(await gateInboundEvent("tg-1", chatA)).toBe(true)
-    expect(await gateInboundEvent("tg-1", chatA)).toBe(false)
-    expect(await gateInboundEvent("tg-1", chatB)).toBe(true)
+    const event = makeEvent({ kind: "create" })
+    // Far more calls than the budget allows; none of them may consume it.
+    for (let i = 0; i < 5; i += 1) {
+      expect(await gateInboundEvent("tg-1", event)).toBe(true)
+    }
+    expect(consumeSiblingInterplayBudget("tg-1", "chat-100", 1)).toBe(true)
   })
 
-  it("skips the sibling check for non-create kinds", async () => {
-    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
-    const event = makeEvent({ kind: "edit" })
-    expect(await gateInboundEvent("tg-1", event)).toBe(true)
-    expect(mockFindSibling).not.toHaveBeenCalled()
-  })
-
-  it("fails open when the sibling lookup rejects", async () => {
-    mockFindSibling.mockRejectedValue(new Error("dexie down"))
-    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
-    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
-  })
-
-  it("non-sibling messages are unaffected", async () => {
-    mockFindSibling.mockResolvedValue(null)
-    mockGetAdapterInstance.mockResolvedValue(makeAdapter({ atResponseStrategy: "always" }))
-    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(true)
-    expect(mockAppendAudit).not.toHaveBeenCalled()
+  // Chat allow/blocklists are the only guardrail left here, and they must stay
+  // ahead of everything: a blocked chat should never reach the bus at all.
+  it("still enforces the chat blocklist", async () => {
+    mockGetAdapterInstance.mockResolvedValue(
+      makeAdapter({ atResponseStrategy: "always", chatBlocklist: ["chat-100"] })
+    )
+    expect(await gateInboundEvent("tg-1", makeEvent({ kind: "create" }))).toBe(false)
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "inbound.policy_blocked", reason: "chat_blocklist" })
+    )
   })
 })
 

@@ -56,6 +56,26 @@ export type AuditKind =
   // `fields.siblingAdapterId`; the budget kind also carries `fields.budget`.
   | "inbound.sibling_bot_ignored"
   | "inbound.sibling_bot_budget_exhausted"
+  // The sibling guard could not establish whether the sender was one of our
+  // own bots, because at least one other enabled same-platform instance has
+  // no confirmed `selfIdentity`. Answering "not a sibling" there is what lets
+  // two bots @-mention each other forever, so the guard fails CLOSED: the
+  // message stays in history and no AI turn runs. Carries
+  // `fields.unverifiedAdapterIds` — the instances whose identity is missing,
+  // which is exactly the list an operator has to fix.
+  | "inbound.sibling_identity_unknown"
+  // The event was admitted and passed policy, but the resolved trigger matched
+  // no rule, so it became history-only. Previously indistinguishable from
+  // every other history-only outcome, which made "why did the bot not answer?"
+  // unanswerable from the audit trail. Carries `fields.mode` and
+  // `fields.evaluation`.
+  | "inbound.routing_dropped"
+  // Inbound binary media was withheld from the model. Either the instance's
+  // `mediaModelPolicy` is `local_extract_only` and no local extractor produced
+  // text, or extraction failed, or the locally-derived text did not clear the
+  // PII gate. The message is still stored in history — only the model input is
+  // blocked. Carries `fields.segmentType`, `fields.policy`, and `reason`.
+  | "inbound.media_model_blocked"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
   // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the

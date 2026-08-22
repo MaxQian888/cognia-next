@@ -28,7 +28,6 @@ import { isReplyToSelf, type NormalizedInboundEvent } from "@/types/connectors/e
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { getAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { appendAudit } from "@/lib/connectors/audit"
-import { findSiblingBotSender } from "@/lib/connectors/sibling-bots"
 import type { ConversationAdmissionReason } from "@/lib/connectors/conversation-admission"
 
 export type AtResponseStrategy = "always" | "mention_only" | "direct_only"
@@ -221,40 +220,16 @@ export async function gateInboundEvent(
   const row = await getAdapterInstance(adapterId).catch(() => undefined)
   if (!row) return true
 
-  // ── Sibling-bot anti-loop guard (W5) ─────────────────────────────────
-  // Only fresh messages can start a bot↔bot loop; edits / deletes / system
-  // events pass through like everywhere else in this gate. The check sits
-  // in this async wrapper (not the sync `shouldRespondToMessage`) so every
-  // adapter dispatcher inherits it without a signature ripple.
-  if (!event.kind || event.kind === "create") {
-    const sibling = await findSiblingBotSender(event).catch(() => null)
-    if (sibling) {
-      const policy = row.siblingBotPolicy ?? "ignore"
-      if (policy === "ignore") {
-        await appendAudit({
-          adapterId,
-          kind: "inbound.sibling_bot_ignored",
-          at: Date.now(),
-          conversationKey: event.conversationKey,
-          fields: { siblingAdapterId: sibling.id },
-        }).catch(() => undefined)
-        return false
-      }
-      const budget = row.botInterplayBudget ?? DEFAULT_BOT_INTERPLAY_BUDGET
-      const chatId = event.channel.platformChannelId ?? event.channel.id
-      if (!consumeSiblingInterplayBudget(adapterId, chatId, budget)) {
-        await appendAudit({
-          adapterId,
-          kind: "inbound.sibling_bot_budget_exhausted",
-          at: Date.now(),
-          conversationKey: event.conversationKey,
-          fields: { siblingAdapterId: sibling.id, budget },
-        }).catch(() => undefined)
-        return false
-      }
-      // Under budget — fall through to the normal mention/allowlist gates.
-    }
-  }
+  // The sibling-bot guard used to live here, ahead of the chat allow/blocklist
+  // below. That was wrong twice over. It ran before the durable inbound job
+  // existed, so a suppressed sibling message left no history at all; and it
+  // spent a slot of the per-chat interplay budget before anything had decided
+  // the message would even be answered — a sibling posting into a BLOCKED chat
+  // still burned budget, and so did one whose trigger matched no rule.
+  //
+  // It now runs in the bus (`bus.ts` step 9.6), after the job is persisted and
+  // after the route is decided, so the budget is only ever spent on a response
+  // that is actually about to be enqueued. See `sibling-bots.ts`.
 
   // Chat allow/block lists are transport guardrails and remain ahead of the
   // conversation-aware policy. Do not run the legacy mention branch here:
