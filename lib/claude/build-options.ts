@@ -2253,16 +2253,30 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       // servers from the keyring; web / CLI stay header-only (no keyring).
       const { isTauri } = await import("@/lib/tauri")
       if (isTauri()) {
-        // Inject the stored access token as a bearer header. Token *refresh* is
-        // a UI action (re-authenticate), not a per-send concern — there's no
-        // live SDK provider on the Anthropic path, so an expired token surfaces
-        // as a failed call that prompts re-auth.
-        const [{ buildMcpServerMapWithAuth }, { mcpOAuthLoadEntry }] = await Promise.all([
-          import("@/lib/db/mcp-servers"),
-          import("@/lib/mcp/oauth-tauri"),
-        ])
+        // Inject the endpoint/scope-partitioned token and refresh near-expiry
+        // credentials before handing a static header to the Anthropic/AI SDK
+        // relays. The governed renderer runtime additionally handles explicit
+        // 401s through its reconnect-once credential resolver.
+        const [{ buildMcpServerMapWithAuth }, { mcpOAuthLoadEntry, mcpOAuthRefresh }] =
+          await Promise.all([import("@/lib/db/mcp-servers"), import("@/lib/mcp/oauth-tauri")])
         opts.mcpServers = await buildMcpServerMapWithAuth(chosen, {
-          loadEntry: (serverId, legacyName) => mcpOAuthLoadEntry(serverId, legacyName),
+          loadEntry: (serverId, legacyName) => {
+            const server = chosen.find((candidate) => candidate.id === serverId)
+            return mcpOAuthLoadEntry(
+              serverId,
+              legacyName,
+              server ? { transport: server.transport, config: server.config } : undefined
+            )
+          },
+          refresh: (serverName) => {
+            const server = chosen.find((candidate) => candidate.name === serverName)
+            return server
+              ? mcpOAuthRefresh(server.id, {
+                  transport: server.transport,
+                  config: server.config,
+                })
+              : Promise.resolve(undefined)
+          },
         })
       } else {
         opts.mcpServers = await buildMcpServerMapResolved(chosen)

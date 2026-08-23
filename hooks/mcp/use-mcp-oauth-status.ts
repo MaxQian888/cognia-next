@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 
 import { isTauri } from "@/lib/tauri"
-import { mcpOAuthStatus } from "@/lib/mcp/oauth-tauri"
+import { mcpOAuthStatus, type McpServerDescriptor } from "@/lib/mcp/oauth-tauri"
 import type { McpTransport } from "@cognia/agent-config-types"
 
 export type McpOAuthUiStatus = "loading" | "none" | "authorized" | "expired" | "unsupported"
@@ -27,7 +27,8 @@ function initialStatus(transport: McpTransport): McpOAuthUiStatus {
 export function useMcpOAuthStatus(
   serverId: string,
   transport: McpTransport,
-  legacyName?: string
+  legacyName?: string,
+  server?: McpServerDescriptor
 ): UseMcpOAuthStatus {
   const [status, setStatus] = useState<McpOAuthUiStatus>(() => initialStatus(transport))
   const [expiresAtMs, setExpiresAtMs] = useState<number | undefined>(undefined)
@@ -36,7 +37,7 @@ export function useMcpOAuthStatus(
   // never fires synchronously inside the effect body.
   const probe = useCallback(async () => {
     try {
-      const s = await mcpOAuthStatus(serverId, legacyName)
+      const s = await mcpOAuthStatus(serverId, legacyName, server)
       setExpiresAtMs(s.expiresAtMs)
       if (!s.hasTokens) setStatus("none")
       else if (s.expiresAtMs && s.expiresAtMs < Date.now()) setStatus("expired")
@@ -44,7 +45,7 @@ export function useMcpOAuthStatus(
     } catch {
       setStatus("none")
     }
-  }, [serverId, legacyName])
+  }, [serverId, legacyName, server])
 
   useEffect(() => {
     // The synchronous states (stdio / web) are already set by the initializer.

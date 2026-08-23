@@ -106,6 +106,11 @@ describe("McpAuthButton", () => {
     clearMock.mockResolvedValue(undefined)
     wrap(<McpAuthButton server={server("http")} />)
     fireEvent.click(await screen.findByLabelText("Sign out"))
-    await waitFor(() => expect(clearMock).toHaveBeenCalledWith("s", "Remote"))
+    await waitFor(() =>
+      expect(clearMock).toHaveBeenCalledWith("s", "Remote", {
+        transport: "http",
+        config: { url: "https://x" },
+      })
+    )
   })
 })

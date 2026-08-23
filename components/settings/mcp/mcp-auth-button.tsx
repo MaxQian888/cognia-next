@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { KeyRoundIcon, Loader2Icon, LogOutIcon, ShieldCheckIcon } from "lucide-react"
@@ -26,7 +26,16 @@ export interface McpAuthButtonProps {
  */
 export function McpAuthButton({ server }: McpAuthButtonProps) {
   const t = useTranslations("mcp.auth")
-  const { status, refetch } = useMcpOAuthStatus(server.id, server.transport, server.name)
+  const descriptor = useMemo(
+    () => ({ transport: server.transport, config: server.config }),
+    [server.transport, server.config]
+  )
+  const { status, refetch } = useMcpOAuthStatus(
+    server.id,
+    server.transport,
+    server.name,
+    descriptor
+  )
   const [busy, setBusy] = useState(false)
 
   if (server.transport === "stdio") return null
@@ -39,10 +48,7 @@ export function McpAuthButton({ server }: McpAuthButtonProps) {
     }
     setBusy(true)
     try {
-      const res = await mcpOAuthAuthenticate(server.id, {
-        transport: server.transport,
-        config: server.config,
-      })
+      const res = await mcpOAuthAuthenticate(server.id, descriptor)
       if (res.ok) toast.success(t("success", { name: server.name }))
       else if (res.status === "denied") toast.error(t("denied", { name: server.name }))
       else toast.error(t("error", { name: server.name, message: res.message }))
@@ -60,7 +66,7 @@ export function McpAuthButton({ server }: McpAuthButtonProps) {
     if (busy) return
     setBusy(true)
     try {
-      await mcpOAuthClear(server.id, server.name)
+      await mcpOAuthClear(server.id, server.name, descriptor)
       await refetch()
     } finally {
       setBusy(false)

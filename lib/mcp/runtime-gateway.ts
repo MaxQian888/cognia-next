@@ -68,6 +68,8 @@ export interface RuntimeInvokeInput {
   interactive?: boolean
   grant?: McpExecutionGrant
   authProvider?: unknown
+  /** Refresh the exact endpoint/scope credential after an explicit 401. */
+  refreshAuth?: () => Promise<{ server?: McpServer; authProvider?: unknown } | void>
   clientInfo?: McpClientInfo
 }
 
@@ -180,14 +182,15 @@ export class McpRuntimeGateway {
     const startedAt = this.now()
     this.bumpMetric("toolCalls")
     try {
-      const lease = await this.getLease(input)
       const timeoutMs = Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs)
-      const result = await callToolWithTimeout(
-        lease.opened.client,
-        { name: input.toolName, arguments: input.args ?? {} },
-        timeoutMs,
-        input.signal,
-        "MCP tool call timed out"
+      const result = await this.withAuthRefreshRetry(input, (lease, activeInput) =>
+        callToolWithTimeout(
+          lease.opened.client,
+          { name: activeInput.toolName, arguments: activeInput.args ?? {} },
+          timeoutMs,
+          activeInput.signal,
+          "MCP tool call timed out"
+        )
       )
       void auditOutbound(input, startedAt, this.now(), result.isError ? "tool-error" : undefined)
       return {
@@ -213,12 +216,14 @@ export class McpRuntimeGateway {
   }> {
     const startedAt = this.now()
     try {
-      const lease = await this.getLease({ ...input, toolName: "resources/read" })
-      const result = await withTimeout(
-        lease.opened.client.readResource({ uri: input.uri }),
-        Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
-        input.signal,
-        "MCP resource read timed out"
+      const runtimeInput = { ...input, toolName: "resources/read" }
+      const result = await this.withAuthRefreshRetry(runtimeInput, (lease, activeInput) =>
+        withTimeout(
+          lease.opened.client.readResource({ uri: input.uri }),
+          Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
+          activeInput.signal,
+          "MCP resource read timed out"
+        )
       )
       void auditOutbound(input, startedAt, this.now(), undefined, "call", "resources/read")
       return { contents: result.contents ?? [] }
@@ -242,15 +247,17 @@ export class McpRuntimeGateway {
   }> {
     const startedAt = this.now()
     try {
-      const lease = await this.getLease({ ...input, toolName: "prompts/get" })
-      const result = await withTimeout(
-        lease.opened.client.getPrompt({
-          name: input.promptName,
-          arguments: input.arguments,
-        }),
-        Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
-        input.signal,
-        "MCP prompt retrieval timed out"
+      const runtimeInput = { ...input, toolName: "prompts/get" }
+      const result = await this.withAuthRefreshRetry(runtimeInput, (lease, activeInput) =>
+        withTimeout(
+          lease.opened.client.getPrompt({
+            name: input.promptName,
+            arguments: input.arguments,
+          }),
+          Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
+          activeInput.signal,
+          "MCP prompt retrieval timed out"
+        )
       )
       void auditOutbound(input, startedAt, this.now(), undefined, "call", "prompts/get")
       return { description: result.description, messages: result.messages ?? [] }
@@ -388,6 +395,28 @@ export class McpRuntimeGateway {
     }
   }
 
+  private async withAuthRefreshRetry<T>(
+    input: RuntimeInvokeInput,
+    operation: (lease: Lease, activeInput: RuntimeInvokeInput) => Promise<T>
+  ): Promise<T> {
+    try {
+      return await operation(await this.getLease(input), input)
+    } catch (error) {
+      if (!input.refreshAuth || !isExplicitUnauthorized(error)) throw error
+      await this.reconnect(input.scopeId, input.server.id)
+      const refreshed = await input.refreshAuth()
+      const retryInput: RuntimeInvokeInput = {
+        ...input,
+        ...(refreshed?.server ? { server: refreshed.server } : {}),
+        ...(refreshed && "authProvider" in refreshed
+          ? { authProvider: refreshed.authProvider }
+          : {}),
+      }
+      this.bumpMetric("retries")
+      return operation(await this.getLease(retryInput), retryInput)
+    }
+  }
+
   private async connect(
     input: RuntimeInvokeInput,
     key: string,
@@ -441,7 +470,7 @@ export class McpRuntimeGateway {
         return { key, scopeId: input.scopeId, serverId: input.server.id, fingerprint, opened }
       } catch (error) {
         lastError = error
-        if (input.signal?.aborted) break
+        if (input.signal?.aborted || isExplicitUnauthorized(error)) break
       }
     }
     const errorCode = classifyError(lastError)
@@ -570,6 +599,23 @@ function classifyError(error: unknown, fallback = "connect-failed"): string {
   if (/timeout/i.test(message)) return "timeout"
   if (/abort/i.test(message)) return "aborted"
   return fallback
+}
+
+function isExplicitUnauthorized(error: unknown): boolean {
+  if (!error || typeof error !== "object") return /(?:^|\D)401(?:\D|$)/.test(String(error))
+  const candidate = error as {
+    status?: unknown
+    statusCode?: unknown
+    code?: unknown
+    message?: unknown
+  }
+  return (
+    candidate.status === 401 ||
+    candidate.statusCode === 401 ||
+    candidate.code === 401 ||
+    candidate.code === "401" ||
+    /(?:^|\D)401(?:\D|$)/.test(String(candidate.message ?? ""))
+  )
 }
 
 async function optionalCapability<T>(operation: () => Promise<T>, fallback: T): Promise<T> {

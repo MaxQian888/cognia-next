@@ -29,7 +29,11 @@ describe("invokeMcpTool", () => {
       { serverId: "mcp_s", toolName: "do", args: { a: 1 } },
       { getServer: async () => srv("sse", { url: "https://x/sse" }), open }
     )
-    expect(callTool).toHaveBeenCalledWith({ name: "do", arguments: { a: 1 } })
+    expect(callTool).toHaveBeenCalledWith(
+      { name: "do", arguments: { a: 1 } },
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal), timeout: 60_000 })
+    )
     expect(res).toMatchObject({ serverId: "mcp_s", toolName: "do", isError: false })
     expect(res.content).toEqual([{ type: "text", text: "ok" }])
   })

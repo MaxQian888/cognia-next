@@ -89,6 +89,9 @@ export async function invokeMcpTool(
     deps.getServer ?? (async (id) => (await import("@/lib/db/mcp-servers")).getMcpServer(id))
   const server = await getServer(serverId)
   if (!server) throw new McpServerNotFoundError(serverId)
+  const runtimeCredential = input.authProvider
+    ? { server }
+    : await (await import("./credential-resolver")).resolveMcpRuntimeCredential(server)
 
   const args = (input.args && typeof input.args === "object" ? input.args : {}) as Record<
     string,
@@ -109,7 +112,7 @@ export async function invokeMcpTool(
   try {
     const gatewayInput: RuntimeInvokeInput = {
       scopeId,
-      server,
+      server: runtimeCredential.server,
       toolName,
       args,
       signal: input.signal,
@@ -117,6 +120,7 @@ export async function invokeMcpTool(
       interactive: input.interactive,
       grant: input.grant,
       authProvider: input.authProvider,
+      refreshAuth: runtimeCredential.refreshAuth,
       clientInfo: input.clientInfo,
       deadlineMs: input.deadlineMs,
     }

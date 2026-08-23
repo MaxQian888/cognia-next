@@ -156,6 +156,62 @@ describe("MCP Runtime Gateway", () => {
     expect(fixture.callTool).toHaveBeenCalledTimes(1)
   })
 
+  it("refreshes, reconnects, and retries once only after an explicit 401", async () => {
+    const first = fixtureOpen()
+    first.callTool.mockRejectedValueOnce(Object.assign(new Error("HTTP 401"), { status: 401 }))
+    const second = fixtureOpen()
+    const open = jest.fn().mockImplementationOnce(first.open).mockImplementationOnce(second.open)
+    const refreshAuth = jest.fn(async () => ({
+      server: { ...server(), credentialVersion: 1 },
+      authProvider: { token: "new" },
+    }))
+    const gateway = new McpRuntimeGateway({ open: open as never })
+
+    await expect(
+      gateway.invoke({
+        scopeId: "refresh",
+        server: server(),
+        surface: "workflow",
+        toolName: "write",
+        refreshAuth,
+      })
+    ).resolves.toEqual({ isError: false, content: [{ type: "text", text: "ok" }] })
+    expect(refreshAuth).toHaveBeenCalledTimes(1)
+    expect(first.callTool).toHaveBeenCalledTimes(1)
+    expect(first.close).toHaveBeenCalledTimes(1)
+    expect(second.callTool).toHaveBeenCalledTimes(1)
+    expect(open.mock.calls[1][1].authProvider).toEqual({ token: "new" })
+  })
+
+  it("never refreshes or retries an ambiguous timeout", async () => {
+    const fixture = fixtureOpen()
+    fixture.callTool.mockRejectedValueOnce(new Error("HTTP request timeout"))
+    const refreshAuth = jest.fn()
+    const gateway = new McpRuntimeGateway({ open: fixture.open })
+    await expect(
+      gateway.invoke({
+        scopeId: "timeout",
+        server: server(),
+        surface: "workflow",
+        toolName: "write",
+        refreshAuth,
+      })
+    ).rejects.toThrow("timeout")
+    expect(refreshAuth).not.toHaveBeenCalled()
+    expect(fixture.callTool).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not repeat a cold connection attempt after an explicit 401", async () => {
+    const open = jest.fn(async () => {
+      throw Object.assign(new Error("HTTP 401"), { status: 401 })
+    })
+    const gateway = new McpRuntimeGateway({ open: open as never, retryDelayMs: 0 })
+    await expect(
+      gateway.invoke({ scopeId: "auth", server: server(), surface: "chat", toolName: "do" })
+    ).rejects.toThrow("401")
+    expect(open).toHaveBeenCalledTimes(1)
+  })
+
   it("reads resources and resolves prompt templates through the shared lease", async () => {
     const fixture = fixtureOpen()
     const gateway = new McpRuntimeGateway({ open: fixture.open })

@@ -65,7 +65,7 @@ describe("oauth-tauri wrappers", () => {
       expiresAtMs: undefined,
     })
     expect(callMock).toHaveBeenCalledWith("mcp_oauth_refresh", {
-      serverName: "srv",
+      serverName: expect.stringMatching(/^srv:[a-f0-9]{32}:[a-f0-9]{16}$/),
       server: desc,
       helperPath: "/sc/mcp-oauth-helper.mjs",
     })
@@ -75,7 +75,7 @@ describe("oauth-tauri wrappers", () => {
     callMock.mockResolvedValue({ ok: true, status: "authorized", message: "ok" })
     const r = await mcpOAuthAuthenticate("srv", desc)
     expect(callMock).toHaveBeenCalledWith("mcp_oauth_authenticate", {
-      serverName: "srv",
+      serverName: expect.stringMatching(/^srv:[a-f0-9]{32}:[a-f0-9]{16}$/),
       server: desc,
       helperPath: "/sc/mcp-oauth-helper.mjs",
     })
@@ -86,5 +86,23 @@ describe("oauth-tauri wrappers", () => {
     callMock.mockResolvedValue(undefined)
     await mcpOAuthClear("srv")
     expect(callMock).toHaveBeenCalledWith("mcp_oauth_clear", { serverName: "srv" })
+  })
+
+  it("never falls back from an endpoint partition to an origin-unknown legacy token", async () => {
+    callMock.mockResolvedValueOnce({ has_tokens: false })
+    await expect(mcpOAuthStatus("srv", undefined, desc)).resolves.toEqual({
+      hasTokens: false,
+      expiresAtMs: undefined,
+    })
+    expect(callMock.mock.calls[0][1].serverName).toMatch(/^srv:[a-f0-9]{32}:[a-f0-9]{16}$/)
+    expect(callMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears the endpoint partition and migration keys", async () => {
+    callMock.mockResolvedValue(undefined)
+    await mcpOAuthClear("srv", "old-name", desc)
+    expect(callMock.mock.calls[0][1].serverName).toMatch(/^srv:[a-f0-9]{32}:[a-f0-9]{16}$/)
+    expect(callMock).toHaveBeenNthCalledWith(2, "mcp_oauth_clear", { serverName: "srv" })
+    expect(callMock).toHaveBeenNthCalledWith(3, "mcp_oauth_clear", { serverName: "old-name" })
   })
 })
