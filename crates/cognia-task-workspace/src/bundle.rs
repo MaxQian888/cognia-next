@@ -167,17 +167,16 @@ pub fn plan_bundle_composition(
         let workspace_id = Uuid::now_v7().to_string();
         group.workspace_id = Some(workspace_id.clone());
         for logical_root_id in &group.logical_root_ids {
-            let role = requests
+            let request = requests
                 .iter()
                 .find(|r| &r.logical_root_id == logical_root_id)
-                .map(|r| r.role)
                 .expect("logical id was seen during grouping");
             leases.push(WorkspaceRootLease {
                 bundle_id: bundle_id.clone(),
                 workspace_id: workspace_id.clone(),
                 logical_root_id: logical_root_id.clone(),
-                role,
-                alias_path: group.alias_path.clone(),
+                role: request.role,
+                alias_path: logical_alias_path(group, request),
             });
         }
     }
@@ -185,9 +184,13 @@ pub fn plan_bundle_composition(
     Ok((
         WorkspaceBundle {
             bundle_id,
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
             owner_type,
             owner_ref,
+            state: WorkspaceState::Provisioning,
             leases: leases.clone(),
+            last_used_at: now,
+            pinned: false,
             created_at: now,
         },
         groups,
@@ -246,6 +249,26 @@ fn compose_alias_path(bundle_id: &str, group_key: &str, request: &RootRequest) -
     // deterministic string is only the relative shape. Registry insertion
     // is what pins it to disk.
     format!("bundle/{bundle_id}/{slug}")
+}
+
+fn logical_alias_path(group: &PhysicalLeaseGroup, request: &RootRequest) -> String {
+    let Some(common_dir) = request.git_common_dir.as_deref() else {
+        return group.alias_path.clone();
+    };
+    let relative = std::path::Path::new(common_dir)
+        .parent()
+        .and_then(|repository_root| {
+            std::path::Path::new(&request.source_root)
+                .strip_prefix(repository_root)
+                .ok()
+        });
+    match relative {
+        Some(path) if !path.as_os_str().is_empty() => std::path::Path::new(&group.alias_path)
+            .join(path)
+            .to_string_lossy()
+            .into_owned(),
+        _ => group.alias_path.clone(),
+    }
 }
 
 /// One entry in a plan produced by [`plan_bundle_apply`].
@@ -617,6 +640,41 @@ mod tests {
         );
         assert_eq!(bundle.created_at, 42);
         assert_eq!(bundle.owner_type, WorkspaceOwnerType::Session);
+    }
+
+    #[test]
+    fn shared_repository_leases_preserve_each_logical_subdirectory() {
+        let requests = vec![
+            RootRequest {
+                logical_root_id: "root".into(),
+                role: WorkspaceRootRole::Primary,
+                source_root: "/repo".into(),
+                isolation: IsolationKind::GitWorktree,
+                git_common_dir: Some("/repo/.git".into()),
+            },
+            RootRequest {
+                logical_root_id: "package".into(),
+                role: WorkspaceRootRole::Additional,
+                source_root: "/repo/packages/app".into(),
+                isolation: IsolationKind::GitWorktree,
+                git_common_dir: Some("/repo/.git".into()),
+            },
+        ];
+        let (bundle, _) = plan_bundle_composition(
+            WorkspaceOwnerType::Session,
+            Some("session-1".into()),
+            &requests,
+            42,
+        )
+        .unwrap();
+        let root = bundle.leases.iter().find(|lease| lease.logical_root_id == "root").unwrap();
+        let package = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "package")
+            .unwrap();
+        assert_eq!(package.workspace_id, root.workspace_id);
+        assert_eq!(package.alias_path, format!("{}/packages/app", root.alias_path));
     }
 
     #[test]

@@ -51,6 +51,7 @@ pub use types::{
     ResourceEventEvidence, ResourceKind, ResourceTimelineCompleteness, ResourceTrackingPolicy,
     RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
     TaskWorkspaceState, WorkspaceBaseKind, WorkspaceBaseSpec, WorkspaceBundle,
+    WorkspaceEnvironmentKind,
     WorkspaceBundleOutcome, WorkspaceLifecyclePolicy, WorkspaceOwnerType, WorkspaceRecord,
     WorkspaceRootLease, WorkspaceRootRole, WorkspaceSourceBinding, WorkspaceState,
 };

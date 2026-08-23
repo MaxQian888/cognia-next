@@ -122,6 +122,11 @@ mod tests {
     fn record(isolation_kind: IsolationKind, owner_type: WorkspaceOwnerType) -> WorkspaceRecord {
         WorkspaceRecord {
             workspace_id: "ws-1".into(),
+            environment_kind: if owner_type == WorkspaceOwnerType::Imported {
+                crate::WorkspaceEnvironmentKind::Imported
+            } else {
+                crate::WorkspaceEnvironmentKind::Managed
+            },
             owner_type,
             owner_ref: Some("owner-1".into()),
             state: WorkspaceState::Active,

@@ -29,7 +29,7 @@ use crate::{
     sensitive::{SensitiveAuditEntry, SensitiveDecision, SensitiveGrant, SensitiveGrantStore},
     store::WorkspaceStore,
     IsolationKind, WorkspaceBaseSpec, WorkspaceLifecyclePolicy, WorkspaceOwnerType,
-    WorkspaceRecord, WorkspaceState,
+    WorkspaceEnvironmentKind, WorkspaceRecord, WorkspaceState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -312,6 +312,7 @@ impl WorkspaceRegistry {
         }
         let record = WorkspaceRecord {
             workspace_id: workspace_id.clone(),
+            environment_kind: WorkspaceEnvironmentKind::Managed,
             owner_type,
             owner_ref,
             state: WorkspaceState::Provisioning,
@@ -344,6 +345,7 @@ impl WorkspaceRegistry {
         let workspace_id = Uuid::now_v7().to_string();
         let record = WorkspaceRecord {
             workspace_id: workspace_id.clone(),
+            environment_kind: WorkspaceEnvironmentKind::Imported,
             owner_type: WorkspaceOwnerType::Imported,
             owner_ref: None,
             state: WorkspaceState::Active,
@@ -567,7 +569,8 @@ pub fn plan_directory_reclaim(
     let mut candidates: Vec<&WorkspaceRecord> = records
         .iter()
         .filter(|record| {
-            record.state.is_prunable()
+            record.environment_kind == WorkspaceEnvironmentKind::Managed
+                && record.state.is_prunable()
                 && !record.pinned
                 && record.owner_type != WorkspaceOwnerType::Imported
         })
@@ -606,7 +609,10 @@ pub fn plan_snapshot_expiration(
         let Some(ref task_id) = record.snapshot_task_id else {
             continue;
         };
-        if !record.state.is_prunable() || record.pinned {
+        if record.environment_kind != WorkspaceEnvironmentKind::Managed
+            || !record.state.is_prunable()
+            || record.pinned
+        {
             protected.insert(task_id.as_str());
             kept_bytes = kept_bytes.saturating_add(record.size_bytes.unwrap_or(0));
             continue;
@@ -637,6 +643,7 @@ pub fn plan_snapshot_expiration(
                     && !candidates
                         .iter()
                         .any(|candidate| &candidate.snapshot_task_id == task_id)
+                    && record.environment_kind == WorkspaceEnvironmentKind::Managed
                     && record.state.is_prunable()
                     && !record.pinned
             })
@@ -723,6 +730,11 @@ mod tests {
     fn record(id: &str, state: WorkspaceState, owner_type: WorkspaceOwnerType) -> WorkspaceRecord {
         WorkspaceRecord {
             workspace_id: id.into(),
+            environment_kind: if owner_type == WorkspaceOwnerType::Imported {
+                WorkspaceEnvironmentKind::Imported
+            } else {
+                WorkspaceEnvironmentKind::Managed
+            },
             owner_type,
             owner_ref: Some("owner".into()),
             state,

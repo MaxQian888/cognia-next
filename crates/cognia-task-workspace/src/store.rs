@@ -108,6 +108,7 @@ impl WorkspaceStore {
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS workspace_registry (
                    workspace_id TEXT PRIMARY KEY,
+                   environment_kind TEXT NOT NULL DEFAULT 'managed',
                    owner_type TEXT NOT NULL,
                    owner_ref TEXT,
                    state TEXT NOT NULL,
@@ -132,6 +133,20 @@ impl WorkspaceStore {
                    ON workspace_registry(owner_type, owner_ref);
                  CREATE INDEX IF NOT EXISTS idx_workspace_registry_source
                    ON workspace_registry(source_root);
+                 CREATE TABLE IF NOT EXISTS workspace_bundles (
+                   bundle_id TEXT PRIMARY KEY,
+                   environment_kind TEXT NOT NULL,
+                   owner_type TEXT NOT NULL,
+                   owner_ref TEXT,
+                   state TEXT NOT NULL,
+                   last_used_at INTEGER NOT NULL,
+                   pinned INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_bundles_owner
+                   ON workspace_bundles(owner_type, owner_ref);
+                 CREATE INDEX IF NOT EXISTS idx_workspace_bundles_state
+                   ON workspace_bundles(state, last_used_at);
                  CREATE TABLE IF NOT EXISTS workspace_root_leases (
                    bundle_id TEXT NOT NULL,
                    workspace_id TEXT NOT NULL,
@@ -178,7 +193,24 @@ impl WorkspaceStore {
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_source_binding_root
                    ON workspace_source_bindings(source_root);",
             )
-            .map_err(|error| format!("apply workspace registry migration: {error}"))
+            .map_err(|error| format!("apply workspace registry migration: {error}"))?;
+        let has_environment_kind: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('workspace_registry') WHERE name='environment_kind')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("inspect workspace registry migration: {error}"))?;
+        if !has_environment_kind {
+            self.connection
+                .execute(
+                    "ALTER TABLE workspace_registry ADD COLUMN environment_kind TEXT NOT NULL DEFAULT 'managed'",
+                    [],
+                )
+                .map_err(|error| format!("add workspace environment kind: {error}"))?;
+        }
+        Ok(())
     }
 
     pub fn put_blob(&mut self, hash: &str, bytes: &[u8], now: i64) -> Result<(), String> {
@@ -741,18 +773,20 @@ impl WorkspaceStore {
             .and_then(|value| serde_json::from_value::<String>(value))
             .map_err(|error| format!("encode base kind: {error}"))?;
         let owner_type = serialize_enum(&record.owner_type, "owner type")?;
+        let environment_kind = serialize_enum(&record.environment_kind, "environment kind")?;
         let state = serialize_enum(&record.state, "workspace state")?;
         let isolation_kind = serialize_enum(&record.isolation_kind, "isolation kind")?;
         self.connection
             .execute(
                 "INSERT OR REPLACE INTO workspace_registry (
-                   workspace_id, owner_type, owner_ref, state, source_root,
+                   workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
                    git_common_dir, base_kind, base_ref, head, branch,
                    isolation_kind, execution_root, snapshot_task_id, size_bytes,
                    last_used_at, locked_by, pinned, created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
                 params![
                     record.workspace_id,
+                    environment_kind,
                     owner_type,
                     record.owner_ref,
                     state,
@@ -783,7 +817,7 @@ impl WorkspaceStore {
     ) -> Result<Option<crate::WorkspaceRecord>, String> {
         self.connection
             .query_row(
-                "SELECT workspace_id, owner_type, owner_ref, state, source_root,
+                "SELECT workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
                         git_common_dir, base_kind, base_ref, head, branch,
                         isolation_kind, execution_root, snapshot_task_id, size_bytes,
                         last_used_at, locked_by, pinned, created_at
@@ -801,7 +835,7 @@ impl WorkspaceStore {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT workspace_id, owner_type, owner_ref, state, source_root,
+                "SELECT workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
                         git_common_dir, base_kind, base_ref, head, branch,
                         isolation_kind, execution_root, snapshot_task_id, size_bytes,
                         last_used_at, locked_by, pinned, created_at
@@ -827,6 +861,93 @@ impl WorkspaceStore {
             )
             .map(|_| ())
             .map_err(|error| format!("delete workspace {workspace_id}: {error}"))
+    }
+
+    pub fn put_workspace_bundle(&self, bundle: &crate::WorkspaceBundle) -> Result<(), String> {
+        let environment_kind = serialize_enum(&bundle.environment_kind, "environment kind")?;
+        let owner_type = serialize_enum(&bundle.owner_type, "owner type")?;
+        let state = serialize_enum(&bundle.state, "workspace state")?;
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO workspace_bundles (
+                   bundle_id, environment_kind, owner_type, owner_ref, state,
+                   last_used_at, pinned, created_at
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    bundle.bundle_id,
+                    environment_kind,
+                    owner_type,
+                    bundle.owner_ref,
+                    state,
+                    bundle.last_used_at,
+                    bundle.pinned as i64,
+                    bundle.created_at,
+                ],
+            )
+            .map_err(|error| format!("put workspace bundle {}: {error}", bundle.bundle_id))?;
+        for lease in &bundle.leases {
+            self.put_root_lease(lease, bundle.created_at)?;
+        }
+        Ok(())
+    }
+
+    pub fn get_workspace_bundle(
+        &self,
+        bundle_id: &str,
+    ) -> Result<Option<crate::WorkspaceBundle>, String> {
+        let row = self
+            .connection
+            .query_row(
+                "SELECT environment_kind, owner_type, owner_ref, state,
+                        last_used_at, pinned, created_at
+                   FROM workspace_bundles WHERE bundle_id=?1",
+                [bundle_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| format!("get workspace bundle {bundle_id}: {error}"))?;
+        let Some((environment_kind, owner_type, owner_ref, state, last_used_at, pinned, created_at)) = row else {
+            return Ok(None);
+        };
+        Ok(Some(crate::WorkspaceBundle {
+            bundle_id: bundle_id.to_string(),
+            environment_kind: deserialize_enum(&environment_kind, "environment kind")?,
+            owner_type: deserialize_enum(&owner_type, "owner type")?,
+            owner_ref,
+            state: deserialize_enum(&state, "workspace state")?,
+            leases: self.list_bundle_leases(bundle_id)?,
+            last_used_at,
+            pinned: pinned != 0,
+            created_at,
+        }))
+    }
+
+    pub fn list_workspace_bundles(&self) -> Result<Vec<crate::WorkspaceBundle>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT bundle_id FROM workspace_bundles ORDER BY last_used_at DESC")
+            .map_err(|error| format!("prepare list workspace bundles: {error}"))?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query workspace bundles: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read workspace bundles: {error}"))?;
+        ids.into_iter()
+            .map(|id| {
+                self.get_workspace_bundle(&id)?
+                    .ok_or_else(|| format!("workspace bundle disappeared: {id}"))
+            })
+            .collect()
     }
 
     pub fn put_workspace_source_binding(
@@ -1098,23 +1219,24 @@ fn map_workspace_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<Result<crate::WorkspaceRecord, String>> {
     let workspace_id: String = row.get(0)?;
-    let owner_type_raw: String = row.get(1)?;
-    let owner_ref: Option<String> = row.get(2)?;
-    let state_raw: String = row.get(3)?;
-    let source_root: String = row.get(4)?;
-    let git_common_dir: Option<String> = row.get(5)?;
-    let base_kind_raw: String = row.get(6)?;
-    let base_ref: Option<String> = row.get(7)?;
-    let head: Option<String> = row.get(8)?;
-    let branch: Option<String> = row.get(9)?;
-    let isolation_kind_raw: String = row.get(10)?;
-    let execution_root: String = row.get(11)?;
-    let snapshot_task_id: Option<String> = row.get(12)?;
-    let size_bytes: Option<i64> = row.get(13)?;
-    let last_used_at: i64 = row.get(14)?;
-    let locked_by: Option<String> = row.get(15)?;
-    let pinned: i64 = row.get(16)?;
-    let created_at: i64 = row.get(17)?;
+    let environment_kind_raw: String = row.get(1)?;
+    let owner_type_raw: String = row.get(2)?;
+    let owner_ref: Option<String> = row.get(3)?;
+    let state_raw: String = row.get(4)?;
+    let source_root: String = row.get(5)?;
+    let git_common_dir: Option<String> = row.get(6)?;
+    let base_kind_raw: String = row.get(7)?;
+    let base_ref: Option<String> = row.get(8)?;
+    let head: Option<String> = row.get(9)?;
+    let branch: Option<String> = row.get(10)?;
+    let isolation_kind_raw: String = row.get(11)?;
+    let execution_root: String = row.get(12)?;
+    let snapshot_task_id: Option<String> = row.get(13)?;
+    let size_bytes: Option<i64> = row.get(14)?;
+    let last_used_at: i64 = row.get(15)?;
+    let locked_by: Option<String> = row.get(16)?;
+    let pinned: i64 = row.get(17)?;
+    let created_at: i64 = row.get(18)?;
     Ok((|| -> Result<crate::WorkspaceRecord, String> {
         let owner_type = deserialize_enum(&owner_type_raw, "owner type")?;
         let state = deserialize_enum(&state_raw, "workspace state")?;
@@ -1123,6 +1245,7 @@ fn map_workspace_row(
         let base = crate::WorkspaceBaseSpec::from_storage(base_kind, base_ref.as_deref())?;
         Ok(crate::WorkspaceRecord {
             workspace_id,
+            environment_kind: deserialize_enum(&environment_kind_raw, "environment kind")?,
             owner_type,
             owner_ref,
             state,
@@ -1291,6 +1414,7 @@ mod tests {
     fn sample_record(id: &str) -> crate::WorkspaceRecord {
         crate::WorkspaceRecord {
             workspace_id: id.into(),
+            environment_kind: crate::WorkspaceEnvironmentKind::Managed,
             owner_type: crate::WorkspaceOwnerType::Session,
             owner_ref: Some("session-1".into()),
             state: crate::WorkspaceState::Provisioning,
@@ -1318,6 +1442,25 @@ mod tests {
         store.put_workspace(&record).unwrap();
         let loaded = store.get_workspace("ws-1").unwrap().expect("row present");
         assert_eq!(loaded, record);
+    }
+
+    #[test]
+    fn workspace_bundle_survives_a_put_get_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let bundle = crate::WorkspaceBundle {
+            bundle_id: "bundle-1".into(),
+            environment_kind: crate::WorkspaceEnvironmentKind::Permanent,
+            owner_type: crate::WorkspaceOwnerType::User,
+            owner_ref: Some("project-1".into()),
+            state: crate::WorkspaceState::Active,
+            leases: Vec::new(),
+            last_used_at: 200,
+            pinned: true,
+            created_at: 100,
+        };
+        store.put_workspace_bundle(&bundle).unwrap();
+        assert_eq!(store.get_workspace_bundle("bundle-1").unwrap(), Some(bundle));
     }
 
     #[test]

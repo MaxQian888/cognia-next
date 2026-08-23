@@ -403,6 +403,16 @@ pub enum WorkspaceOwnerType {
     Scheduled,
 }
 
+/// Product lifecycle of a physical execution environment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceEnvironmentKind {
+    #[default]
+    Managed,
+    Permanent,
+    Imported,
+}
+
 /// Managed workspace lifecycle state. Transitions outside the Registry's
 /// controlled paths are rejected fail-closed.
 ///
@@ -559,6 +569,8 @@ pub enum WorkspaceBaseKind {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRecord {
     pub workspace_id: String,
+    #[serde(default)]
+    pub environment_kind: WorkspaceEnvironmentKind,
     pub owner_type: WorkspaceOwnerType,
     pub owner_ref: Option<String>,
     pub state: WorkspaceState,
@@ -626,9 +638,14 @@ pub struct WorkspaceRootLease {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceBundle {
     pub bundle_id: String,
+    #[serde(default)]
+    pub environment_kind: WorkspaceEnvironmentKind,
     pub owner_type: WorkspaceOwnerType,
     pub owner_ref: Option<String>,
+    pub state: WorkspaceState,
     pub leases: Vec<WorkspaceRootLease>,
+    pub last_used_at: i64,
+    pub pinned: bool,
     pub created_at: i64,
 }
 
