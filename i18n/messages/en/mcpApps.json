@@ -1,5 +1,15 @@
 {
   "approvalRequired": "This MCP App requests capabilities that have not been approved.",
   "runtimeError": "The MCP App could not start safely.",
-  "frameTitle": "App from {server}"
+  "frameTitle": "App from {server}",
+  "resourceError": "The MCP App resource could not be loaded safely.",
+  "provenance": "App from {server} · {uri}",
+  "reviewTitle": "Review each requested app capability",
+  "confirmToolCall": "Allow {server} to call {tool}? Risk: {risk}.",
+  "confirmDestructiveToolCall": "This is destructive. Confirm {tool} again?",
+  "confirmOpenLink": "Open a link to {hostname}?",
+  "confirmDownload": "Place this download in quarantine for review?",
+  "quarantinedDownload": "Quarantined download ({count} items)",
+  "saveDownload": "Review and save",
+  "discardDownload": "Discard"
 }

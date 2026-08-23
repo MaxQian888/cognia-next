@@ -50,8 +50,22 @@ export function evaluateMcpAppSandbox(
   const denied: string[] = []
   const csp: McpUiResourceCsp = {}
   for (const key of CSP_KEYS) {
-    const approved = new Set((approvals.origins?.[key] ?? []).map(normalizeOrigin))
-    const requested = (requestedCsp[key] ?? []).map(normalizeOrigin)
+    const approved = new Set<string>()
+    for (const value of approvals.origins?.[key] ?? []) {
+      try {
+        approved.add(normalizeOrigin(value))
+      } catch {
+        denied.push(`${key}:invalid-approved-origin`)
+      }
+    }
+    const requested: string[] = []
+    for (const value of requestedCsp[key] ?? []) {
+      try {
+        requested.push(normalizeOrigin(value))
+      } catch {
+        denied.push(`${key}:invalid-requested-origin`)
+      }
+    }
     const missing = requested.filter((origin) => !approved.has(origin))
     if (missing.length) denied.push(`${key}:${missing.join(",")}`)
     if (requested.length) csp[key] = requested

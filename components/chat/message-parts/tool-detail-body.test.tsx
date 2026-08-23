@@ -56,6 +56,21 @@ jest.mock("@/components/a2ui/a2ui-tool-output", () => ({
     ReactForMocks.createElement("div", { "data-testid": "a2ui-output" }, toolName),
 }))
 
+jest.mock("@/components/mcp-apps/managed-mcp-app-card", () => ({
+  ManagedMcpAppCard: ({
+    namespacedToolName,
+    sessionId,
+  }: {
+    namespacedToolName: string
+    sessionId: string
+  }) =>
+    ReactForMocks.createElement(
+      "div",
+      { "data-testid": "managed-mcp-app", "data-session-id": sessionId },
+      namespacedToolName
+    ),
+}))
+
 // Real routing (`isStructuredMcpToolPart`, `toolNameOf`, the generic fallback);
 // only the card itself is stubbed, so `sessionId` pass-through is observable.
 jest.mock("@/components/chat/message-parts/mcp-tool-card", () => ({
@@ -114,6 +129,17 @@ describe("ToolDetailBody", () => {
       />
     )
     expect(getByTestId("mcp-card").getAttribute("data-session-id")).toBe("sess-9")
+  })
+
+  it("mounts the managed Apps resolver for arbitrary namespaced MCP tools", () => {
+    const { getByTestId } = render(
+      <ToolDetailBody
+        part={part({ type: "tool-mcp__figma__render", output: "ok" })}
+        sessionId="sess-app"
+      />
+    )
+    expect(getByTestId("managed-mcp-app").textContent).toBe("mcp__figma__render")
+    expect(getByTestId("managed-mcp-app").getAttribute("data-session-id")).toBe("sess-app")
   })
 
   it("routes an A2UI-carrying result to the interactive surface", () => {

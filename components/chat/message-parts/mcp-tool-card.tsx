@@ -45,6 +45,7 @@ import { WriteCard } from "./mcp-renderers/write-card"
 import { LsCard } from "./mcp-renderers/ls-card"
 import { SpawnTaskCard } from "./mcp-renderers/spawn-task-card"
 import { WorkflowProposalCard } from "@/components/workflow/editor/chat/workflow-proposal-card"
+import { ManagedMcpAppCard } from "@/components/mcp-apps/managed-mcp-app-card"
 
 type CardComponent = (props: { part: ToolUIPart; sessionId?: string }) => React.JSX.Element | null
 
@@ -163,13 +164,13 @@ export function MCPToolCard({ part, sessionId }: { part: ToolPart; sessionId?: s
   usePluginToolResultRenderers()
 
   const toolName = toolNameOf(part)
-  if (toolName === null) return <McpToolBodyOrContent part={part} />
+  if (toolName === null) return <McpToolBodyOrContent part={part} sessionId={sessionId} />
 
   const Card = REGISTRY[toolName]
   if (Card) {
     // A result with structured blocks outranks any card that can't read them.
     if (hasMcpContent(part) && !RICH_CONTENT_AWARE.has(toolName)) {
-      return <McpToolBodyOrContent part={part} />
+      return <McpToolBodyOrContent part={part} sessionId={sessionId} />
     }
     // The cards read `input` / `output` / `mcpContent`, which both part shapes
     // carry; only the name lives in a different field, resolved above.
@@ -202,7 +203,7 @@ export function MCPToolCard({ part, sessionId }: { part: ToolPart; sessionId?: s
     )
   }
 
-  return <McpToolBodyOrContent part={part} />
+  return <McpToolBodyOrContent part={part} sessionId={sessionId} />
 }
 
 /** Re-render this card whenever the plugin tool-result registry mutates. */
@@ -225,7 +226,7 @@ function McpCardWithFallback({
 }) {
   const rendered = Card({ part, sessionId })
   if (rendered) return rendered
-  return <McpToolBodyOrContent part={part} />
+  return <McpToolBodyOrContent part={part} sessionId={sessionId} />
 }
 
 /**
@@ -234,11 +235,27 @@ function McpCardWithFallback({
  * otherwise fall back to the stringified ToolBody. This is the fallback for
  * any tool with no dedicated card — including arbitrary third-party MCP tools.
  */
-export function McpToolBodyOrContent({ part }: { part: ToolPart }) {
-  if (hasMcpContent(part)) {
-    return <McpContentBlocksCard part={part as ToolUIPart} blocks={part.mcpContent} />
-  }
-  return <ToolBody part={part} />
+export function McpToolBodyOrContent({ part, sessionId }: { part: ToolPart; sessionId?: string }) {
+  const namespacedToolName = toolNameOf(part)
+  const app =
+    sessionId && namespacedToolName?.startsWith("mcp__") ? (
+      <ManagedMcpAppCard
+        part={part as ToolUIPart}
+        namespacedToolName={namespacedToolName}
+        sessionId={sessionId}
+        blocks={hasMcpContent(part) ? part.mcpContent : undefined}
+      />
+    ) : null
+  return (
+    <div className="space-y-3">
+      {hasMcpContent(part) ? (
+        <McpContentBlocksCard part={part as ToolUIPart} blocks={part.mcpContent} />
+      ) : (
+        <ToolBody part={part} />
+      )}
+      {app}
+    </div>
+  )
 }
 
 export default MCPToolCard

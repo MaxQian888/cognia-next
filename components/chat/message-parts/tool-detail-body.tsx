@@ -104,5 +104,5 @@ export function ToolDetailBody({ part, sessionId }: ToolDetailBodyProps) {
     )
   }
 
-  return <McpToolBodyOrContent part={part} />
+  return <McpToolBodyOrContent part={part} sessionId={sessionId} />
 }

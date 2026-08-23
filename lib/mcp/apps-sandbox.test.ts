@@ -35,19 +35,19 @@ describe("MCP Apps sandbox policy", () => {
     ).toMatchObject({ allowed: true, sandbox: "allow-scripts" })
   })
 
-  it("rejects unsafe, credential-bearing and non-origin CSP entries", () => {
+  it("fails closed for unsafe, credential-bearing and non-origin CSP entries", () => {
     for (const origin of [
       "http://example.com",
       "https://user:pass@example.com",
       "https://example.com/script.js",
     ]) {
-      expect(() =>
+      expect(
         evaluateMcpAppSandbox(
           { resourceDomains: [origin] },
           {},
           { origins: { resourceDomains: [origin] } }
         )
-      ).toThrow()
+      ).toEqual(expect.objectContaining({ allowed: false }))
     }
   })
 

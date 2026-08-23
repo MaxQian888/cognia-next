@@ -1,5 +1,15 @@
 {
   "approvalRequired": "此 MCP App 请求了尚未批准的能力。",
   "runtimeError": "MCP App 无法安全启动。",
-  "frameTitle": "来自 {server} 的应用"
+  "frameTitle": "来自 {server} 的应用",
+  "resourceError": "无法安全加载 MCP App 资源。",
+  "provenance": "来自 {server} 的应用 · {uri}",
+  "reviewTitle": "逐项审阅应用请求的能力",
+  "confirmToolCall": "允许 {server} 调用 {tool} 吗？风险：{risk}。",
+  "confirmDestructiveToolCall": "这是破坏性操作。再次确认 {tool}？",
+  "confirmOpenLink": "打开指向 {hostname} 的链接吗？",
+  "confirmDownload": "将此下载放入隔离区以供审阅吗？",
+  "quarantinedDownload": "隔离的下载（{count} 项）",
+  "saveDownload": "审阅并保存",
+  "discardDownload": "丢弃"
 }
