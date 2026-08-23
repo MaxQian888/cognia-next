@@ -113,6 +113,8 @@ const EN: ActivityI18n = {
       // a task, and the run carrying it out at any moment may be any of the
       // kinds above.
       delegation: "Delegated task",
+      job: "Background task",
+      "security-scan": "Security scan",
     })[kind],
   activityLabel: (activity) =>
     ({
@@ -128,6 +130,7 @@ const EN: ActivityI18n = {
       "Approval required": "Approval required",
       Approval: "Approval required",
       "Artifact created": "Artifact created",
+      Tests: "Tests",
       Step: "Step",
       Tool: "Tool",
       Activity: "Activity",
@@ -189,6 +192,8 @@ const ZH: ActivityI18n = {
       team: "团队",
       scheduled: "定时任务",
       delegation: "委派任务",
+      job: "后台任务",
+      "security-scan": "安全扫描",
     })[kind],
   activityLabel: (activity) =>
     ({
@@ -204,6 +209,7 @@ const ZH: ActivityI18n = {
       "Approval required": "需要审批",
       Approval: "需要审批",
       "Artifact created": "已创建产物",
+      Tests: "测试",
       Step: "步骤",
       Tool: "工具",
       Activity: "活动",

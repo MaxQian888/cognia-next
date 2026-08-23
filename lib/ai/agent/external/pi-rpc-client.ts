@@ -870,7 +870,16 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
         // `tokenUsage` off that event, so firing the query afterwards meant the
         // usage landed on a session object nobody was still reading: every Pi
         // turn reported zero tokens and zero cost.
-        record.deferredWhileSettling ??= []
+        if (record.deferredWhileSettling) {
+          // A settle is already in flight. This terminal event waits its turn
+          // like anything else and is settled in order when the buffer drains —
+          // starting a second settle here would race the first, and whichever
+          // finished sooner would clear the buffer for both, letting later
+          // events overtake a `done` still in flight.
+          record.deferredWhileSettling.push(canonical)
+          continue
+        }
+        record.deferredWhileSettling = []
         void this.emitSettledWithUsage(sessionId, record, canonical)
         continue
       }
@@ -922,7 +931,17 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
     // Release anything that arrived behind the held `done`, in arrival order.
     const deferred = record.deferredWhileSettling ?? []
     record.deferredWhileSettling = undefined
-    for (const event of deferred) {
+    for (let i = 0; i < deferred.length; i++) {
+      const event = deferred[i]
+      if (event.type === "done") {
+        // A second terminal event that arrived while this one was settling. It
+        // gets the same treatment — its own usage query, with the rest of the
+        // buffer still held behind it — rather than being pushed raw ahead of
+        // its own stats.
+        record.deferredWhileSettling = deferred.slice(i + 1)
+        void this.emitSettledWithUsage(sessionId, record, event)
+        return
+      }
       for (const queue of record.queues) queue.push(event)
     }
   }

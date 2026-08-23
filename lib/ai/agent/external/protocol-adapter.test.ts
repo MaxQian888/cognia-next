@@ -735,6 +735,39 @@ describe("turn usage folding", () => {
     })
   })
 
+  it("keeps the context window and cost a usage_update established", async () => {
+    // `message_end` carries a prompt/completion breakdown and nothing else on
+    // several adapters. Assigning it outright discarded the live window and the
+    // provider cost that only ever arrive on a `usage_update` — and
+    // `mergeTurnUsage` can only backfill FROM the streamed figure, never
+    // restore what the streamed figure itself lost.
+    const result = await runWith([
+      {
+        type: "usage_update",
+        sessionId: "s1",
+        timestamp: new Date(),
+        used: 120,
+        size: 200000,
+        cost: { amount: 0.42, currency: "USD" },
+      },
+      {
+        type: "message_end",
+        sessionId: "s1",
+        timestamp: new Date(),
+        messageId: "a1",
+        tokenUsage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 },
+      },
+      done(),
+    ])
+    expect(result.tokenUsage).toMatchObject({
+      promptTokens: 100,
+      completionTokens: 20,
+      totalTokens: 120,
+      modelContextWindow: 200000,
+      providerCost: { amount: 0.42, currency: "USD" },
+    })
+  })
+
   it("reports no usage when nothing did", async () => {
     expect((await runWith([done()])).tokenUsage).toBeUndefined()
   })

@@ -16,6 +16,7 @@ import {
   missingExternalAgentCapabilities,
   parsePluginExternalAgentProtocol,
   projectExternalAgentCapabilitiesToSpec,
+  sanitizePluginCapabilityMatrix,
   usableExternalAgentCapabilities,
   type ExternalAgentCapabilityCell,
   type ExternalAgentCapabilityId,
@@ -306,5 +307,86 @@ describe("projectExternalAgentCapabilitiesToSpec", () => {
       profileFrom({ streaming: cell("native") })
     )
     expect(projection.support.streaming).toEqual({ support: "native" })
+  })
+})
+
+describe("sanitizePluginCapabilityMatrix", () => {
+  it("keeps a well-formed declaration intact", () => {
+    expect(
+      sanitizePluginCapabilityMatrix({
+        streaming: { level: "native", evidence: "protocol-spec" },
+        mcp: {
+          level: "equivalent",
+          evidence: "adapter-code",
+          reasonKey: "perThreadConfigOverride",
+        },
+      })
+    ).toEqual({
+      streaming: { level: "native", evidence: "protocol-spec" },
+      mcp: { level: "equivalent", evidence: "adapter-code", reasonKey: "perThreadConfigOverride" },
+    })
+  })
+
+  it("drops a level outside the vocabulary", () => {
+    // The one that matters: `PERMISSIVENESS["yes"]` is `undefined`, so
+    // `stricter()` compares `undefined < n` (always false) and the ceiling
+    // layer silently stops clamping that cell.
+    expect(
+      sanitizePluginCapabilityMatrix({ mcp: { level: "yes", evidence: "adapter-code" } })
+    ).toEqual({})
+  })
+
+  it("refuses to let a plugin self-certify the strongest evidence grades", () => {
+    expect(
+      sanitizePluginCapabilityMatrix({
+        mcp: { level: "native", evidence: "cognia-verified" },
+        streaming: { level: "native", evidence: "vendor-certified" },
+        thinking: { level: "native", evidence: "handshake" },
+      })
+    ).toEqual({
+      mcp: { level: "native", evidence: "adapter-code" },
+      streaming: { level: "native", evidence: "adapter-code" },
+      thinking: { level: "native", evidence: "adapter-code" },
+    })
+  })
+
+  it("drops unknown ids, non-object cells and junk input", () => {
+    expect(
+      sanitizePluginCapabilityMatrix({
+        "not-a-capability": { level: "native", evidence: "adapter-code" },
+        mcp: "native",
+        streaming: null,
+      })
+    ).toEqual({})
+    expect(sanitizePluginCapabilityMatrix(undefined)).toEqual({})
+    expect(sanitizePluginCapabilityMatrix("nope")).toEqual({})
+  })
+
+  it("holds a declaration to the manifest's own reason and evidence discipline", () => {
+    // An unexplained refusal is indistinguishable from an unfinished adapter,
+    // and `none` admits nothing was measured so it cannot back a verdict.
+    expect(
+      sanitizePluginCapabilityMatrix({ mcp: { level: "unsupported", evidence: "adapter-code" } })
+    ).toEqual({})
+    expect(sanitizePluginCapabilityMatrix({ mcp: { level: "native", evidence: "none" } })).toEqual(
+      {}
+    )
+    expect(sanitizePluginCapabilityMatrix({ mcp: { level: "unknown", evidence: "none" } })).toEqual(
+      {
+        mcp: { level: "unknown", evidence: "none" },
+      }
+    )
+  })
+
+  it("a dropped cell reads as `unknown`, never as a granted capability", () => {
+    const { effective } = mergeExternalAgentCapabilities([
+      {
+        layer: "protocol",
+        cells: { mcp: { level: "unknown", evidence: "none", reasonKey: "noManifestRow" } },
+      },
+      { layer: "refinement", cells: sanitizePluginCapabilityMatrix({ mcp: { level: "yes" } }) },
+    ])
+    expect(effective.mcp?.level).toBe("unknown")
+    expect(isCapabilityUsable(effective.mcp!.level)).toBe(false)
   })
 })

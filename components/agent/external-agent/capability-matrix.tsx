@@ -38,6 +38,23 @@ const LEVEL_CLASS: Record<ExternalAgentCapabilityCell["level"], string> = {
   unsupported: "text-muted-foreground",
 }
 
+/**
+ * The sentence behind a cell's `reasonKey`.
+ *
+ * Two catalogues, because the keys come from two shapes. Most are flat names
+ * (`noProtocolSlot`, `notNegotiated`) and live under `reason.`. The
+ * adapter-methods layer stamps a DOTTED key — `adapterMethod.steerTurn` — and
+ * next-intl reads a dot as nesting, so `reason.adapterMethod.steerTurn` finds
+ * nothing: those sentences were authored one level up, under
+ * `capabilities.adapterMethod.*`. Looking only under `reason.` printed the raw
+ * identifier to the user in both locales while the translations sat unreachable.
+ */
+function reasonText(t: ReturnType<typeof useTranslations>, reasonKey: string): string {
+  if (t.has(`reason.${reasonKey}`)) return t(`reason.${reasonKey}`)
+  if (t.has(reasonKey)) return t(reasonKey)
+  return reasonKey
+}
+
 export interface ExternalAgentCapabilityMatrixProps {
   profile: ExternalAgentCapabilityProfileV1 | null | undefined
   /** Hide `unsupported` rows, which are the majority for most protocols. */
@@ -108,9 +125,7 @@ export function ExternalAgentCapabilityMatrix({
             <span className={LEVEL_CLASS[cell.level]}>{t(`level.${cell.level}`)}</span>
             <span className="text-muted-foreground">{t(`evidence.${cell.evidence}`)}</span>
             {cell.reasonKey && (
-              <span className="text-muted-foreground">
-                {t.has(`reason.${cell.reasonKey}`) ? t(`reason.${cell.reasonKey}`) : cell.reasonKey}
-              </span>
+              <span className="text-muted-foreground">{reasonText(t, cell.reasonKey)}</span>
             )}
           </li>
         ))}

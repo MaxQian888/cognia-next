@@ -60,12 +60,15 @@ describe("settingsSections — backend capability gating", () => {
     expect(rows.subagentModels.unavailable).toMatch(/Subagent models is unavailable on codex/)
   })
 
-  it("marks the model row unavailable on an agent that cannot list its models", () => {
-    // The ACP shim has no `model/list`; showing a live Model row there would
-    // offer the built-in provider's catalog, which that agent cannot run.
+  it("keeps the model row live on the ACP shim, which selects per session", () => {
+    // The shim has no `model/list`, but ACP does have `session/set_model`, so
+    // the picker has something real to drive. Blocking it here used to read as
+    // "this agent cannot choose a model" when the truth was "this agent cannot
+    // enumerate them without a session".
     const rows = rowsFor(externalCapabilities({ backend: "codex", presetId: "codex" }))
-    expect(rows.model.unavailable).toMatch(/Model selection is unavailable on codex/)
-    expect(rows.thinking.unavailable).toBeUndefined()
+    expect(rows.model.unavailable).toBeUndefined()
+    // Reasoning effort really is Codex-options-only, and the shim speaks ACP.
+    expect(rows.thinking.unavailable).toMatch(/Thinking level is unavailable on codex/)
   })
 
   it("keeps the row visible rather than hiding it", () => {

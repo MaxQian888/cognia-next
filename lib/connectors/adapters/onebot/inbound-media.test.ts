@@ -55,14 +55,30 @@ describe("operatorHostAllowance", () => {
     expect(operatorHostAllowance("not a url")).toBeUndefined()
   })
 
-  it("accepts only the host the operator typed", () => {
+  it("accepts only the address the operator typed, port included", () => {
     const allow = operatorHostAllowance("ws://192.168.1.9:3001")!
-    expect(allow("http://192.168.1.9:3000/file/a.jpg")).toBe(true)
+    expect(allow("http://192.168.1.9:3001/file/a.jpg")).toBe(true)
     // Same private range, different machine — an inbound message must not be
     // able to point the app at another host on the network.
     expect(allow("http://192.168.1.50/x.png")).toBe(false)
     expect(allow("http://127.0.0.1/x.png")).toBe(false)
     expect(allow("garbage")).toBe(false)
+  })
+
+  it("does not hand the rest of the machine over with the one address", () => {
+    // The common config is `ws://127.0.0.1:3001`. Matching on hostname alone
+    // would let any inbound message read any other loopback service.
+    const allow = operatorHostAllowance("ws://127.0.0.1:3001")!
+    expect(allow("http://127.0.0.1:3001/file/a.jpg")).toBe(true)
+    expect(allow("http://127.0.0.1:8080/admin/export")).toBe(false)
+    expect(allow("http://127.0.0.1/x.png")).toBe(false)
+  })
+
+  it("fills in the scheme's default port on both sides", () => {
+    const allow = operatorHostAllowance("ws://media.lan")!
+    expect(allow("http://media.lan/a.jpg")).toBe(true)
+    expect(allow("http://media.lan:80/a.jpg")).toBe(true)
+    expect(allow("http://media.lan:8080/a.jpg")).toBe(false)
   })
 })
 
@@ -80,7 +96,7 @@ describe("enrichOneBotInboundMedia", () => {
   it("downloads from the implementation's own LAN file server when configured", async () => {
     // NapCat / Lagrange routinely rewrite media URLs to their own HTTP server.
     const d = deps()
-    const e = event([image("http://192.168.1.9:3000/file/a.jpg")])
+    const e = event([image("http://192.168.1.9:3001/file/a.jpg")])
 
     await enrichOneBotInboundMedia(e, { ...d, forwardWsUrl: "ws://192.168.1.9:3001/onebot" })
 

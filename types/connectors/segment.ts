@@ -65,6 +65,14 @@ export type MessageSegment =
       mimeType: string
       sizeBytes: number
       matrixEncryptedFile?: MatrixEncryptedFile
+      /**
+       * Inline bytes for a file whose `mimeType` is an image — a picture sent
+       * as a document rather than as a photo, which is how Telegram sends an
+       * uncompressed screenshot. Attached by the inbound rich-media pass so the
+       * OCR pass can read it; the model still sees the result as `ocrText`
+       * under `[file: <name>]`, never as raw bytes.
+       */
+      dataBase64?: string
       /** OCR text extracted from an image/PDF file attachment (ADR-0024). */
       ocrText?: string
     }

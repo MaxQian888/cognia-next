@@ -1194,7 +1194,16 @@ export interface AcpElicitationPropertySchema {
   format?: string
   enum?: string[]
   oneOf?: Array<{ const: string; title?: string; group?: string }>
-  items?: { type: "string"; enum?: string[] }
+  /**
+   * Element schema for an `array` property (a multi-select). `oneOf` carries a
+   * label per choice; `enum` is the bare-values spelling. Both are accepted for
+   * the same reason the property level accepts both — an agent may send either.
+   */
+  items?: {
+    type: "string"
+    enum?: string[]
+    oneOf?: Array<{ const: string; title?: string }>
+  }
   default?: AcpElicitationValue
   writeOnly?: boolean
   [key: string]: unknown

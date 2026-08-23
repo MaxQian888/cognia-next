@@ -6,6 +6,7 @@ import {
   BaseProtocolAdapter,
   protocolAdapterRegistry,
   registerPluginProtocolAdapter,
+  getPluginProtocolAdapterMetadata,
   __resetPluginProtocolAdaptersForTesting,
   type SessionCreateOptions,
 } from "@/lib/ai/agent/external/protocol-adapter"
@@ -87,6 +88,43 @@ describe("external-agent-adapters-bridge python backend", () => {
     expect(adapter.isConnected()).toBe(false)
     expect(typeof adapter.prompt).toBe("function")
     expect(typeof adapter.execute).toBe("function")
+  })
+
+  it("sanitises a manifest's capability declaration before it becomes layer 2", async () => {
+    // Plugin manifests are third-party data. `mergeExternalAgentCapabilities`
+    // enforces the ladder but checks no shapes, so an unvalidated cell reaches
+    // `profile.effective`, the digest and the UI intact — and a `level` outside
+    // the vocabulary makes `PERMISSIVENESS[level]` undefined, which quietly
+    // stops the ceiling layer clamping that cell.
+    const manifest = {
+      ...MANIFEST,
+      externalAgentAdapters: [
+        {
+          id: "demo",
+          label: "Demo",
+          entry: "src/demo.js",
+          export: "createStubAdapter",
+          capabilities: {
+            streaming: { level: "native", evidence: "cognia-verified" },
+            mcp: { level: "yes", evidence: "adapter-code" },
+            "not-a-capability": { level: "native", evidence: "adapter-code" },
+          },
+        },
+      ],
+    } as unknown as PluginManifest
+
+    const result = await registerExternalAgentAdaptersForPlugin(manifest, "/p", {
+      importer: jest.fn().mockResolvedValue({ createStubAdapter }),
+    })
+    expect(result.registered).toBe(1)
+
+    const declared = getPluginProtocolAdapterMetadata("wire-plugin:demo")?.capabilities
+    // A plugin speaks for its own code, not for a conformance run.
+    expect(declared?.streaming).toEqual({ level: "native", evidence: "adapter-code" })
+    // Both the bogus level and the unknown id are dropped, so they fall back to
+    // `unknown` — which never satisfies a hard requirement.
+    expect(declared).not.toHaveProperty("mcp")
+    expect(declared).not.toHaveProperty("not-a-capability")
   })
 
   it("still requires entry/export for a JS-backed adapter", async () => {

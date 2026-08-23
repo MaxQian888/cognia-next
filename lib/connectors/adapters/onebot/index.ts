@@ -347,8 +347,14 @@ export function createOneBotAdapter(opts: OneBotAdapterOptions): PlatformAdapter
           // into the group reaches the model as an image rather than as the
           // text `[image: …]`. After the gate: a message that is going to be
           // dropped costs no downloads.
+          // Only the address the transport is ACTUALLY dialling widens the
+          // download floor — `useForwardWs`, the same condition the transport
+          // picked itself. A `forwardWsUrl` left on the config after a switch
+          // back to reverse-ws is not a host anything is talking to, and
+          // trusting it would keep the LAN exception open with no connection
+          // behind it.
           await enrichOneBotInboundMedia(result.parsed, {
-            forwardWsUrl: opts.forwardWsUrl,
+            ...(useForwardWs ? { forwardWsUrl: opts.forwardWsUrl } : {}),
           })
           await ctx.emit(result.parsed)
         }

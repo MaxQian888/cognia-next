@@ -60,6 +60,24 @@ describe("ExternalAgentCapabilityMatrix", () => {
     )
   })
 
+  it("resolves a dotted adapter-method reason instead of printing the key", () => {
+    // `adapterMethodCapabilityLayer` stamps `adapterMethod.<name>`, and
+    // next-intl reads the dot as nesting — so a lookup under `reason.` finds
+    // nothing and the raw identifier reached the user in both locales, while
+    // the sentences sat one level up under `capabilities.adapterMethod.*`.
+    const profile = negotiateCapabilityProfile({
+      protocol: "acp",
+      adapter: { resumeSession: () => undefined },
+      liveFacts: {},
+    })
+    expect(profile.effective["session.resume"].reasonKey).toBe("adapterMethod.resumeSession")
+
+    render(wrap(<ExternalAgentCapabilityMatrix profile={profile} />))
+    const resume = screen.getByTestId("capability-session.resume")
+    expect(resume).toHaveTextContent("Cognia's adapter implements resumeSession")
+    expect(resume).not.toHaveTextContent("adapterMethod.resumeSession")
+  })
+
   it("surfaces drift as a maintenance signal", () => {
     const profile = negotiateCapabilityProfile({
       protocol: "acp",

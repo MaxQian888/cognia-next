@@ -594,6 +594,12 @@ describe("capability profile (ADR-0090 external SSOT)", () => {
       level: "equivalent",
       evidence: "handshake",
     })
+
+    // The recompute lands ON the instance, which is what every renderer surface
+    // reads (`manager.tsx`, `useExternalAgentById`). If it only ever returned a
+    // fresh copy, those surfaces would keep showing the connect-time answer.
+    const instance = m.getAllAgents().find((a) => a.config.id === "agent-1")
+    expect(instance?.capabilityProfile?.effective.compaction.level).toBe("equivalent")
   })
 
   it("drops the profile when the contributing plugin is disabled", async () => {

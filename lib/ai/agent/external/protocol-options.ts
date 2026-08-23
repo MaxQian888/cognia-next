@@ -17,8 +17,6 @@
 
 import {
   BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS,
-  isLegacyExternalAgentProtocol,
-  isPluginExternalAgentProtocol,
   type BuiltinExecutableExternalAgentProtocol,
 } from "@cognia/agent-config-types/external-agent-capability"
 import { listPluginProtocolAdapters } from "./protocol-adapter"
@@ -81,24 +79,10 @@ export function externalProtocolOptions(current?: string): ExternalProtocolOptio
   if (!current) return options
   if (options.some((option) => option.value === current)) return options
 
-  if (isPluginExternalAgentProtocol(current)) {
-    // Namespaced like a plugin protocol, but no adapter is registered for it —
-    // the contributing plugin is disabled or gone. Keep the value, refuse it.
-    return [
-      { value: current, label: current, selectable: false, reasonKey: "legacyProtocolUnavailable" },
-      ...options,
-    ]
-  }
-
-  if (isLegacyExternalAgentProtocol(current)) {
-    return [
-      { value: current, label: current, selectable: false, reasonKey: "legacyProtocolUnavailable" },
-      ...options,
-    ]
-  }
-
-  // An id from a plugin that is no longer installed, or a hand-edited config.
-  // Shown so the value survives, refused so it cannot be re-picked.
+  // Everything that reaches here is unselectable for the same reason and gets
+  // the same row: a legacy `http`/`websocket`/`custom` value, a plugin protocol
+  // whose plugin is disabled or gone, or a hand-edited id. Shown so the stored
+  // value survives the dialog opening, refused so it cannot be re-picked.
   return [
     { value: current, label: current, selectable: false, reasonKey: "legacyProtocolUnavailable" },
     ...options,

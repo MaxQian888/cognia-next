@@ -21,6 +21,7 @@
 
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"
 import {
+  isExternalOnlyCapabilityId,
   isLegacyExternalAgentProtocol,
   isPluginExternalAgentProtocol,
   isSelectableExternalAgentProtocol,
@@ -184,8 +185,9 @@ function capabilityError(
       missing.map(({ capability, cell }) => `${capability} (${cell.level})`).join(", "),
     // `capability` is typed as the CLOSED v2 id. An external-only id has no v2
     // name, so it is reported in `detail` rather than smuggled into a field
-    // whose type says it cannot hold it.
-    ...(isSpecCapability(first.capability) ? { capability: first.capability } : {}),
+    // whose type says it cannot hold it. The contract owns the list — a
+    // hand-copied one here would keep letting a NEW external-only id through.
+    ...(isExternalOnlyCapabilityId(first.capability) ? {} : { capability: first.capability }),
     detail: {
       protocol,
       ...(presetId ? { presetId } : {}),
@@ -197,18 +199,4 @@ function capabilityError(
       })),
     },
   }
-}
-
-function isSpecCapability(
-  id: ExternalAgentCapabilityId
-): id is Exclude<
-  ExternalAgentCapabilityId,
-  "mcp.logs" | "rate-limit-reporting" | "subagents.model-selection" | "models.list"
-> {
-  return (
-    id !== "mcp.logs" &&
-    id !== "rate-limit-reporting" &&
-    id !== "subagents.model-selection" &&
-    id !== "models.list"
-  )
 }

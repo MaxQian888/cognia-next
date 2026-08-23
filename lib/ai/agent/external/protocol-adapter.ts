@@ -622,7 +622,15 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
             break
 
           case "message_end":
-            if (event.tokenUsage) streamedUsage = event.tokenUsage
+            // Folded, not assigned. `message_end` carries a prompt/completion
+            // breakdown and, on several adapters, nothing else — so replacing
+            // outright discards the live context window and the provider cost a
+            // preceding `usage_update` had already established. `mergeTurnUsage`
+            // is the same rule applied at the end of the turn: the newer
+            // accounting wins, the fields it structurally cannot carry survive.
+            if (event.tokenUsage) {
+              streamedUsage = mergeTurnUsage(event.tokenUsage, streamedUsage)
+            }
             break
 
           case "done":

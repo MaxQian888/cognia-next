@@ -181,3 +181,58 @@ describe("hasOcrableInboundImage", () => {
     ).toBe(true)
   })
 })
+describe("a picture sent as a document", () => {
+  it("is OCR'd like any other image", async () => {
+    // Telegram's "send as file" path. It reaches the model as
+    // `[file: <name>]`, so without OCR the model is told a file arrived and
+    // nothing about what is in it.
+    const segments: MessageSegment[] = [
+      {
+        type: "file",
+        url: "https://x/shot",
+        name: "screenshot.jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: 10,
+        dataBase64: "QUJD",
+      },
+    ]
+    expect(hasOcrableInboundImage(segments)).toBe(true)
+
+    const extract = jest.fn().mockResolvedValue({ combinedText: " invoice total 42 " })
+    await maybeOcrInboundSegments(segments, {
+      enabled: true,
+      extract,
+      ocrDeps: {} as never,
+    })
+
+    expect(extract).toHaveBeenCalledWith(
+      {
+        source: {
+          kind: "data-url",
+          dataUrl: "data:image/jpeg;base64,QUJD",
+          mimeType: "image/jpeg",
+        },
+      },
+      {}
+    )
+    expect((segments[0] as { ocrText?: string }).ocrText).toBe("invoice total 42")
+  })
+
+  it("leaves a non-image file alone", async () => {
+    const segments: MessageSegment[] = [
+      {
+        type: "file",
+        url: "https://x/doc",
+        name: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+        dataBase64: "QUJD",
+      },
+    ]
+    expect(hasOcrableInboundImage(segments)).toBe(false)
+
+    const extract = jest.fn()
+    await maybeOcrInboundSegments(segments, { enabled: true, extract, ocrDeps: {} as never })
+    expect(extract).not.toHaveBeenCalled()
+  })
+})

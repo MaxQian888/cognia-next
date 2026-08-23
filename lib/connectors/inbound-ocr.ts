@@ -32,6 +32,24 @@ type InboundImageSegment = Extract<MessageSegment, { type: "image" }> & {
   mimeType?: string
 }
 
+/**
+ * Segments this pass can read: an `image`, and a `file` whose declared type is
+ * an image.
+ *
+ * The second one is not a curiosity — a picture sent as a document is how
+ * Telegram sends an uncompressed screenshot, i.e. exactly the picture the
+ * sender wanted read accurately. It reaches `inboundEventToSendContent` as
+ * `[file: <name>]`, so without OCR the model is told a file arrived and nothing
+ * about what is in it. The inbound rich-media pass attaches the bytes for both.
+ */
+type OcrableSegment = InboundImageSegment | Extract<MessageSegment, { type: "file" }>
+
+function ocrable(seg: MessageSegment): OcrableSegment | undefined {
+  if (seg.type === "image") return seg as InboundImageSegment
+  if (seg.type === "file" && seg.mimeType.toLowerCase().startsWith("image/")) return seg
+  return undefined
+}
+
 export interface InboundOcrDeps {
   /** Master switch — `UserOcrSettings.ocrInboundImages !== false`. */
   enabled: boolean
@@ -53,8 +71,7 @@ export interface InboundOcrDeps {
  */
 export function hasOcrableInboundImage(segments: MessageSegment[]): boolean {
   return segments.some((seg) => {
-    if (seg.type !== "image") return false
-    const b64 = (seg as InboundImageSegment).dataBase64
+    const b64 = ocrable(seg)?.dataBase64
     return typeof b64 === "string" && b64.length > 0
   })
 }
@@ -70,8 +87,8 @@ export async function maybeOcrInboundSegments(
 ): Promise<void> {
   if (!deps.enabled) return
   for (const seg of segments) {
-    if (seg.type !== "image") continue
-    const img = seg as InboundImageSegment
+    const img = ocrable(seg)
+    if (!img) continue
     if (img.ocrText) continue
     const b64 = img.dataBase64
     if (typeof b64 !== "string" || b64.length === 0) continue

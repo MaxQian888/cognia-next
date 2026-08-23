@@ -17,6 +17,7 @@
 
 import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginExternalAgentAdapterDef } from "@/types/plugin/plugin-external-agent-adapter"
+import { sanitizePluginCapabilityMatrix } from "@cognia/agent-config-types/external-agent-capability"
 import { loggers } from "@/lib/plugin/core/logger"
 import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
@@ -156,11 +157,16 @@ export async function registerExternalAgentAdaptersForPlugin(
         pluginId,
         adapterId: def.id,
         ...(def.version ? { version: def.version } : {}),
-        // Forwarded verbatim. Validation of the CELLS is the capability
-        // contract's job (`mergeExternalAgentCapabilities` refuses to let a
-        // refinement widen a protocol refusal), not the bridge's — the bridge
-        // only decides whether the adapter loads.
-        ...(def.capabilities ? { capabilities: def.capabilities } : {}),
+        // Sanitised, NOT forwarded verbatim. `mergeExternalAgentCapabilities`
+        // enforces the ladder (a refinement cannot widen a protocol refusal)
+        // but checks no shapes, so an out-of-vocabulary `level` would reach
+        // `profile.effective` and silently disable the ceiling clamp for that
+        // cell, and a manifest could stamp `cognia-verified` on its own work.
+        // The contract owns both rules; the bridge only decides whether the
+        // adapter loads.
+        ...(def.capabilities
+          ? { capabilities: sanitizePluginCapabilityMatrix(def.capabilities) }
+          : {}),
       })
       if (!ok) {
         // Unreachable through the namespaced id, but keep the signal honest.

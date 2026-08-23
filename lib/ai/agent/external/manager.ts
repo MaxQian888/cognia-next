@@ -81,6 +81,7 @@ import {
 } from "./canonical-contract"
 import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
 import { isTauri } from "@/lib/tauri"
+import { hostPlatformId } from "@/lib/tauri/os"
 import { negotiateCapabilityProfile, withRegisteredPluginDeclaration } from "./capability-profile"
 import { liveCapabilityFacts } from "./capability-live-facts"
 import { externalAgentPresetIdOf } from "./preset-identity"
@@ -3083,10 +3084,19 @@ export class ExternalAgentManager {
    * unsandboxed, so a platform without Seatbelt or bubblewrap cannot run one
    * at all. Off-desktop there is no spawn path to sandbox in the first place,
    * so the clamp does not apply.
+   *
+   * The platform has to come from {@link hostPlatformId}, not from
+   * `process.platform`: this class runs in the Tauri WebView as well as in
+   * Node, and there `process.platform` is not the desktop's OS — the policy's
+   * own fallback would answer `darwin`, so a Windows desktop would report
+   * `sandboxAvailable: true` for an agent that can never be launched.
    */
   private resolveHostCeilings(): ExternalAgentHostCeilings {
-    if (!isTauri()) return { sandboxAvailable: true }
-    return { sandboxAvailable: externalAgentSandboxSupportsPlatform() }
+    const platform = hostPlatformId()
+    // A shell that cannot name its platform has no spawn path either — nothing
+    // to sandbox, and nothing to refuse.
+    if (!platform) return { sandboxAvailable: true }
+    return { sandboxAvailable: externalAgentSandboxSupportsPlatform(platform) }
   }
 
   /**

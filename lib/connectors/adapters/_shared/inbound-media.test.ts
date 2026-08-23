@@ -3,7 +3,9 @@ import {
   isExtractableDoc,
   isPublicHttpUrl,
   onceAsync,
+  sniffImageMediaType,
   stableMediaRef,
+  __resetInboundMediaOverCapMemo,
   type EnrichableSegment,
   type InboundMediaPlan,
 } from "./inbound-media"
@@ -212,10 +214,30 @@ describe("isPublicHttpUrl", () => {
     expect(isPublicHttpUrl("http://[fd00::1]/x")).toBe(false)
   })
 
+  it("refuses the IPv6 spellings of the same private addresses", () => {
+    // The URL parser re-serialises `::ffff:127.0.0.1` as `::ffff:7f00:1`, so a
+    // prefix match on the text sees nothing. Decoding the embedded v4 address
+    // is the only thing that closes it.
+    expect(isPublicHttpUrl("http://[::ffff:127.0.0.1]/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[::ffff:169.254.169.254]/latest/meta-data/")).toBe(false)
+    expect(isPublicHttpUrl("http://[::ffff:192.168.1.1]/x")).toBe(false)
+    // `::` is the unspecified address, which most stacks route to loopback.
+    expect(isPublicHttpUrl("http://[::]/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[0:0:0:0:0:0:0:1]/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[fe80::1]/x")).toBe(false)
+    // Site-local, which the old prefix list did not mention at all.
+    expect(isPublicHttpUrl("http://[fec0::1]/x")).toBe(false)
+    expect(isPublicHttpUrl("http://[fc00::1]/x")).toBe(false)
+    // An address we cannot decode is not one we can clear.
+    expect(isPublicHttpUrl("http://[::ffff:999.0.0.1]/x")).toBe(false)
+  })
+
   it("keeps public addresses next to the private ranges", () => {
     expect(isPublicHttpUrl("http://172.32.0.1/x")).toBe(true)
     expect(isPublicHttpUrl("http://172.15.0.1/x")).toBe(true)
     expect(isPublicHttpUrl("http://[2606:4700::1]/x")).toBe(true)
+    expect(isPublicHttpUrl("http://[2001:db8::1]/x")).toBe(true)
+    expect(isPublicHttpUrl("http://[::ffff:1.2.3.4]/x")).toBe(true)
   })
 
   it("refuses anything that is not http(s)", () => {
@@ -411,5 +433,149 @@ describe("enrichInboundMedia — best-effort guards", () => {
 
     expect(h.readAttachment).not.toHaveBeenCalled()
     expect((seg as { dataBase64?: string }).dataBase64).toBe("ALREADY")
+  })
+})
+
+// A 1x1 JPEG and a 1x1 PNG, base64 — only the magic number matters here.
+const JPEG_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBk"
+const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+
+describe("sniffImageMediaType", () => {
+  it("names the type from the bytes themselves", () => {
+    expect(sniffImageMediaType(JPEG_B64)).toBe("image/jpeg")
+    expect(sniffImageMediaType(PNG_B64)).toBe("image/png")
+    expect(sniffImageMediaType(btoa("GIF89a-and-more"))).toBe("image/gif")
+    expect(sniffImageMediaType(btoa("RIFF____WEBPVP8 "))).toBe("image/webp")
+  })
+
+  it("returns undefined for bytes it cannot name, and never throws", () => {
+    expect(sniffImageMediaType(btoa("not an image at all"))).toBeUndefined()
+    expect(sniffImageMediaType("")).toBeUndefined()
+    expect(sniffImageMediaType("!!!!not base64!!!!")).toBeUndefined()
+  })
+})
+
+describe("enrichInboundMedia — media type", () => {
+  beforeEach(() => __resetInboundMediaOverCapMemo())
+
+  it("declares what the bytes are, not what the plan guessed", () => {
+    // `inboundEventToSendContent` passes `mimeType` through as the model's
+    // `media_type`, and a provider rejects one that disagrees with the payload.
+    // OneBot names no type, so the guess used to be a hard-coded `image/png`.
+    const h = harness({ defaultImageMime: "image/png" })
+    h.readAttachment.mockResolvedValueOnce(null).mockResolvedValue(JPEG_B64)
+    const e = makeEvent([image()])
+
+    return enrichInboundMedia(e, h.plan, h.deps).then(() => {
+      expect(e.segments[0]).toMatchObject({ mimeType: "image/jpeg", dataBase64: JPEG_B64 })
+    })
+  })
+
+  it("gets the type right on a cache hit, where `source` never runs", async () => {
+    // The resolved type is only learned on the miss path, so a redelivery used
+    // to fall through to `defaultImageMime` however wrong it was.
+    const h = harness({ defaultImageMime: "image/jpeg" })
+    h.readAttachment.mockResolvedValue(PNG_B64)
+    const e = makeEvent([image()])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect(h.source).not.toHaveBeenCalled()
+    expect(e.segments[0]).toMatchObject({ mimeType: "image/png" })
+  })
+
+  it("falls back to the plan's default only when the bytes are unrecognisable", async () => {
+    const h = harness({ defaultImageMime: "image/jpeg" })
+    h.readAttachment.mockResolvedValue(btoa("mystery-format"))
+    const e = makeEvent([image()])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect(e.segments[0]).toMatchObject({ mimeType: "image/jpeg" })
+  })
+})
+
+describe("enrichInboundMedia — over-cap media", () => {
+  beforeEach(() => __resetInboundMediaOverCapMemo())
+
+  it("stops re-resolving a cached file that is bigger than the cap", async () => {
+    // `connectors_attachment_read` answers null both for "not cached" and for
+    // "cached but over the cap", so without the memo every later message
+    // naming this file pays `plan.source` again — a getFile round trip on
+    // Telegram, a keyring read on Lark and Slack.
+    const h = harness()
+    h.fetchAttachment.mockResolvedValue({ cacheKey: "k", remoteRef: "r", sizeBytes: 20_000_000 })
+    h.readAttachment.mockResolvedValue(null)
+
+    const first = makeEvent([image()])
+    await enrichInboundMedia(first, h.plan, h.deps)
+    expect(h.source).toHaveBeenCalledTimes(1)
+    // The read that would answer null again is skipped too.
+    expect(h.readAttachment).toHaveBeenCalledTimes(1)
+    expect((first.segments[0] as { dataBase64?: string }).dataBase64).toBeUndefined()
+
+    const second = makeEvent([image()])
+    await enrichInboundMedia(second, h.plan, h.deps)
+    expect(h.source).toHaveBeenCalledTimes(1)
+    expect(h.fetchAttachment).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps serving a file that fits", async () => {
+    const h = harness()
+    h.fetchAttachment.mockResolvedValue({ cacheKey: "k", remoteRef: "r", sizeBytes: 1024 })
+    h.readAttachment.mockResolvedValueOnce(null).mockResolvedValue(PNG_B64)
+    const e = makeEvent([image()])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect((e.segments[0] as { dataBase64?: string }).dataBase64).toBe(PNG_B64)
+  })
+})
+
+describe("enrichInboundMedia — a picture sent as a document", () => {
+  beforeEach(() => __resetInboundMediaOverCapMemo())
+
+  const imageFile = (): MessageSegment => ({
+    type: "file",
+    url: "https://cdn.example.com/shot",
+    name: "screenshot.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 10,
+  })
+
+  it("inlines the bytes for the OCR pass instead of skipping it", async () => {
+    // Telegram's "send as file" path — the standard way to send a screenshot
+    // you want read accurately. `jpg` is not an extractable document
+    // extension, so it used to be dropped before any download.
+    const h = harness()
+    h.readAttachment.mockResolvedValueOnce(null).mockResolvedValue(JPEG_B64)
+    const e = makeEvent([imageFile()])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect(e.segments[0]).toMatchObject({
+      type: "file",
+      dataBase64: JPEG_B64,
+      mimeType: "image/jpeg",
+    })
+    // Not the document extractor — there is no text in a JPEG.
+    expect(mockProcessDoc).not.toHaveBeenCalled()
+  })
+
+  it("still leaves a file nothing can read as its marker", async () => {
+    const h = harness()
+    const e = makeEvent([
+      {
+        type: "file",
+        url: "https://cdn.example.com/blob",
+        name: "archive.zip",
+        mimeType: "application/zip",
+        sizeBytes: 10,
+      },
+    ])
+
+    await enrichInboundMedia(e, h.plan, h.deps)
+
+    expect(h.readAttachment).not.toHaveBeenCalled()
   })
 })

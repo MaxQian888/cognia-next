@@ -93,8 +93,9 @@ import {
 } from "@/lib/connectors/adapters/lark/surface-schedule"
 import { startSlaEscalationSweep } from "@/lib/connectors/escalation/schedule"
 import { startWorkflowExecutionBridge } from "@/lib/execution/workflow-bridge"
+import { startJobExecutionBridge } from "@/lib/execution/job-bridge"
 import { startExecutionRunPresentationRunner } from "@/lib/connectors/run-presentation/runner"
-import { installExecutionRunControlHandlers } from "@/lib/execution/control-handlers"
+import { installExecutionControlPlane } from "@/lib/execution/install-execution-control"
 import { installDelegationBridge } from "@/lib/execution/delegation-bridge"
 import { recoverPendingRunInterrupts } from "@/lib/execution/run-control"
 import {
@@ -372,6 +373,7 @@ export function installConnectorRuntime(
   let heartbeatSweep: HeartbeatSweepHandle | null = null
   let resumeReconnect: ResumeReconnectHandle | null = null
   let stopWorkflowExecutionBridge: (() => void) | null = null
+  let stopJobExecutionBridge: (() => void) | null = null
   let stopDelegationBridge: (() => void) | null = null
   let stopExecutionRunPresentationRunner: (() => void) | null = null
   let disposeExecutionRunControlHandlers: (() => void) | null = null
@@ -495,6 +497,8 @@ export function installConnectorRuntime(
       resumeReconnect = null
       stopWorkflowExecutionBridge?.()
       stopWorkflowExecutionBridge = null
+      stopJobExecutionBridge?.()
+      stopJobExecutionBridge = null
       stopDelegationBridge?.()
       stopDelegationBridge = null
       stopExecutionRunPresentationRunner?.()
@@ -822,6 +826,11 @@ export function installConnectorRuntime(
     // runner owns native projection, coalescing, cursor commits, and fallback.
     if (!cancelled) {
       stopWorkflowExecutionBridge = startWorkflowExecutionBridge()
+      // Renderer background tasks (subagent / plugin-agent / team-delegation)
+      // project as `kind: "job"`. Lease-gated with the other source bridges on
+      // purpose: it WRITES to the journal, and the runtime's Web Lock is what
+      // keeps a second tab from duplicating every event.
+      stopJobExecutionBridge = startJobExecutionBridge()
       // A delegation's children report through the delegation, not beside it.
       // Installed here rather than lazily because the interesting case is the
       // one where the process that would have watched a child settle was not
@@ -830,7 +839,11 @@ export function installConnectorRuntime(
         onError: (error) => console.error("[delegation] reconciliation failed", error),
       })
       stopExecutionRunPresentationRunner = startExecutionRunPresentationRunner()
-      disposeExecutionRunControlHandlers = installExecutionRunControlHandlers().dispose
+      // Refcounted: the renderer's ExecutionControlInitializer holds its own
+      // reference, so losing this runtime's lease (or deferring to a remote
+      // host) no longer takes the run-control dispatch table with it. The
+      // headless brain has no React tree and installs it through this path.
+      disposeExecutionRunControlHandlers = installExecutionControlPlane()
       void recoverPendingRunInterrupts().catch((error) => {
         console.error("[execution-run] pending interrupt recovery failed", error)
       })

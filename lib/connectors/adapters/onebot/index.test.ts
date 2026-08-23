@@ -21,10 +21,19 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 }))
 import { updateAdapterInstance } from "@/lib/db/adapter-instances"
 
+// The inbound media pass is inert off-desktop anyway; mocked so the DEPS the
+// adapter hands it are observable — which address the download floor is
+// widened to is a security decision made here.
+jest.mock("./inbound-media", () => ({
+  enrichOneBotInboundMedia: jest.fn().mockResolvedValue(undefined),
+}))
+import { enrichOneBotInboundMedia } from "./inbound-media"
+
 const mockListen = listen as jest.Mock
 const mockOnebotSend = connectorsOnebotSend as jest.Mock
 const mockUpdateAdapter = updateAdapterInstance as jest.Mock
 const mockWsOpen = connectorsWsOpen as jest.Mock
+const mockEnrichMedia = enrichOneBotInboundMedia as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -294,6 +303,56 @@ describe("createOneBotAdapter — forward-ws transport", () => {
     })
 
     await adapter.stop()
+  })
+
+  it("only trusts the forward-ws address while the transport is dialling it", async () => {
+    // A `forwardWsUrl` left on the config after a switch back to reverse-ws is
+    // not an address anything is talking to. Handing it to the media pass would
+    // keep the LAN download exception open with no connection behind it.
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    mockEnrichMedia.mockClear()
+
+    const v11Msg = {
+      time: 1700000000,
+      self_id: 100000,
+      post_type: "message",
+      message_type: "private",
+      message_id: 1001,
+      user_id: 200001,
+      sender: { user_id: 200001, nickname: "Alice" },
+      message: [{ type: "text", data: { text: "hi" } }],
+    }
+
+    const stale = createOneBotAdapter({
+      id: "ob-stale-fwd",
+      displayName: "T",
+      selfBotUin: "100000",
+      transportMode: "reverse-ws",
+      forwardWsUrl: "ws://192.168.1.9:3001",
+    })
+    await stale.start(makeCtx().ctx)
+    bus.trigger("connectors://onebot/ob-stale-fwd/event", JSON.stringify(v11Msg))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(mockEnrichMedia).toHaveBeenCalledWith(expect.anything(), {})
+    await stale.stop()
+
+    mockEnrichMedia.mockClear()
+    const live = createOneBotAdapter({
+      id: "ob-live-fwd",
+      displayName: "T",
+      selfBotUin: "100000",
+      transportMode: "forward-ws",
+      forwardWsUrl: "ws://192.168.1.9:3001",
+    })
+    await live.start(makeCtx().ctx)
+    // Forward-ws reads from the WS connection id `connectorsWsOpen` returned.
+    bus.trigger("connectors://ws/fw-1/message", JSON.stringify(v11Msg))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(mockEnrichMedia).toHaveBeenCalledWith(expect.anything(), {
+      forwardWsUrl: "ws://192.168.1.9:3001",
+    })
+    await live.stop()
   })
 
   it("falls back to reverse-ws when forward-ws is selected without a URL", async () => {

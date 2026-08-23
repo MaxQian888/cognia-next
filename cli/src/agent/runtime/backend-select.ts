@@ -39,6 +39,7 @@ import type { AgentCapabilityId } from "@cognia/agent-config-types/agent-executi
 import type { AgentStructuredError } from "@cognia/agent-config-types/agent-run-result"
 import {
   isCapabilityUsable,
+  isExternalOnlyCapabilityId,
   type ExternalAgentCapabilityId,
 } from "@cognia/agent-config-types/external-agent-capability"
 
@@ -151,19 +152,12 @@ export function capabilitiesForProtocol(
   const capabilities: AgentCapabilityId[] = []
   for (const [id, cell] of Object.entries(preflight.profile.effective)) {
     if (!isCapabilityUsable(cell.level)) continue
-    if (isExternalOnly(id as ExternalAgentCapabilityId)) continue
+    // The contract owns the list; a copy here would silently admit a NEW
+    // external-only id into `hostCapabilities`, which speaks v2 and nothing else.
+    if (isExternalOnlyCapabilityId(id as ExternalAgentCapabilityId)) continue
     capabilities.push(id as AgentCapabilityId)
   }
   return capabilities
-}
-
-function isExternalOnly(id: ExternalAgentCapabilityId): boolean {
-  return (
-    id === "mcp.logs" ||
-    id === "rate-limit-reporting" ||
-    id === "subagents.model-selection" ||
-    id === "models.list"
-  )
 }
 
 /**

@@ -337,9 +337,15 @@ export function externalCapabilities(input: ExternalCapabilityInput): BackendCap
     // The launch path already refused an unsandboxable platform before this
     // point, so a connected agent is by construction on a supported one.
     ceilings: { sandboxAvailable: true },
-    liveFacts: liveCapabilityFacts({
-      ...(input.negotiated ? { negotiated: input.negotiated } : {}),
-    }),
+    // Only when a handshake actually happened. `liveCapabilityFacts` always
+    // returns an object, so passing its `{}` unconditionally would stamp
+    // `negotiated: true` on a profile describing a preset nobody has launched —
+    // and `negotiated` is the flag the whole two-phase admission turns on
+    // (`resolveExternalCapabilities` drops a projection without it, and
+    // `admitNegotiatedExternalAgent` refuses one).
+    ...(input.negotiated
+      ? { liveFacts: liveCapabilityFacts({ negotiated: input.negotiated }) }
+      : {}),
   })
 
   /** A Cognia-projected feature is available only when something real backs it. */

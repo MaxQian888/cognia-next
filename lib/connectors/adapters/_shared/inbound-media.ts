@@ -21,6 +21,13 @@
  *     model's vision path both consume automatically.
  *   - `file`  → text extracted with the shared `processDocumentAsync`, so the
  *     model reads the document's contents rather than only its name.
+ *   - `file` whose `mimeType` is an image → inline `dataBase64` too, for the
+ *     OCR pass. A picture sent as a document is not an edge case: it is how
+ *     Telegram sends an uncompressed screenshot, i.e. exactly the one the
+ *     sender wanted read accurately.
+ *
+ * Whichever route ran, the media type stamped on the segment is read from the
+ * BYTES (`sniffImageMediaType`), not from whoever guessed first.
  *
  * Adapters supply only what differs: how to name a segment's cache entry
  * (`ref`) and how to turn one into a download (`source`). Everything else —
@@ -190,6 +197,58 @@ export function stableMediaRef(prefix: string, url: string): string {
  */
 const PRIVATE_V4 = /^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/
 
+/**
+ * An IPv6 literal's 8 groups, or `null` when it cannot be read.
+ *
+ * Prefix matching on the text is not enough: the URL parser re-serialises
+ * `::ffff:127.0.0.1` as `::ffff:7f00:1`, so the loopback is invisible to any
+ * check that does not decode the address.
+ */
+function ipv6Groups(inner: string): number[] | null {
+  let text = inner
+  // A trailing dotted quad (`::ffff:127.0.0.1`) folds into the last two groups.
+  const dotted = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/)
+  if (dotted?.index !== undefined) {
+    const octets = dotted[1].split(".").map(Number)
+    if (octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return null
+    const hi = ((octets[0] << 8) | octets[1]).toString(16)
+    const lo = ((octets[2] << 8) | octets[3]).toString(16)
+    text = `${text.slice(0, dotted.index)}${hi}:${lo}`
+  }
+  // A zone id (`fe80::1%eth0`) is not part of the address.
+  text = text.split("%")[0]
+  const halves = text.split("::")
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(":") : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : []
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0
+  if (fill < 0) return null
+  const parts = [...head, ...Array<string>(fill).fill("0"), ...tail]
+  if (parts.length !== 8) return null
+  const groups = parts.map((part) => (/^[0-9a-f]{1,4}$/.test(part) ? parseInt(part, 16) : NaN))
+  return groups.some(Number.isNaN) ? null : groups
+}
+
+/** True for an IPv6 literal a download may be aimed at. */
+function isPublicIpv6(inner: string): boolean {
+  const groups = ipv6Groups(inner)
+  // A literal we cannot decode is not one we can clear.
+  if (!groups) return false
+  // `::1` loopback, and `::` (unspecified) which most stacks route to it.
+  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] <= 1) return false
+  // IPv4-mapped (`::ffff:a.b.c.d`) and IPv4-compatible (`::a.b.c.d`) literals
+  // reach the v4 internet, so they answer to the v4 rules. This is the hole
+  // that let `http://[::ffff:169.254.169.254]/` through the floor.
+  if (groups.slice(0, 5).every((g) => g === 0) && (groups[5] === 0 || groups[5] === 0xffff)) {
+    const v4 = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`
+    return !PRIVATE_V4.test(v4)
+  }
+  if ((groups[0] & 0xfe00) === 0xfc00) return false // fc00::/7 unique-local
+  if ((groups[0] & 0xffc0) === 0xfe80) return false // fe80::/10 link-local
+  if ((groups[0] & 0xffc0) === 0xfec0) return false // fec0::/10 site-local
+  return true
+}
+
 export function isPublicHttpUrl(raw: string): boolean {
   let url: URL
   try {
@@ -200,16 +259,8 @@ export function isPublicHttpUrl(raw: string): boolean {
   if (url.protocol !== "https:" && url.protocol !== "http:") return false
   const host = url.hostname.toLowerCase()
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false
-  // IPv6 literals arrive bracketed; `::1` and the unique-local `fc00::/7` block.
-  if (host.startsWith("[")) {
-    const inner = host.slice(1, -1)
-    return !(
-      inner === "::1" ||
-      inner.startsWith("fc") ||
-      inner.startsWith("fd") ||
-      inner.startsWith("fe80")
-    )
-  }
+  // IPv6 literals arrive bracketed.
+  if (host.startsWith("[")) return isPublicIpv6(host.slice(1, -1))
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return !PRIVATE_V4.test(host)
   return true
 }
@@ -256,14 +307,85 @@ function targetsOf(
     // Already enriched — an adapter that inlines bytes at parse time (WeCom,
     // WeChat) must not pay for a second download.
     if (seg.type === "image" && (seg as InlineImageSegment).dataBase64) continue
-    // A file is only worth downloading when its text can be read back: nothing
-    // surfaces an inbound cached blob, so caching one nobody can open is pure
-    // disk churn.
-    if (seg.type === "file" && (seg.ocrText || !isExtractableDoc(seg.name))) continue
+    if (seg.type === "file") {
+      if (seg.ocrText || seg.dataBase64) continue
+      // A file is only worth downloading when something can read it back:
+      // nothing surfaces an inbound cached blob, so caching one nobody can open
+      // is pure disk churn. Two things can — the document extractor, and (for a
+      // picture sent as a document, which is how Telegram sends an
+      // uncompressed screenshot) the inbound OCR pass.
+      if (!isExtractableDoc(seg.name) && !isImageMediaType(seg.mimeType)) continue
+    }
     const ref = plan.ref(seg, event)
     if (ref) targets.push({ seg, ref })
   }
   return targets
+}
+
+/**
+ * Refs whose cached entry is known to be over the inline cap.
+ *
+ * `connectors_attachment_read` answers `null` both for "not cached" and for
+ * "cached, but bigger than `maxBytes`" (`attachments.rs`), so the cache-first
+ * short circuit cannot fire for an over-cap file: every later message naming it
+ * would pay `plan.source` again — a `getFile` round trip on Telegram, a keyring
+ * read on Lark and Slack — to re-request a file whose bytes are already on disk
+ * and will be discarded again. Remembering the verdict is what closes that;
+ * `fetchAttachment` reports the real `sizeBytes`, so the entry is authoritative
+ * the first time.
+ *
+ * Bounded and process-local: it is an optimisation, and a cold start simply
+ * pays the round trip once more.
+ */
+const OVER_CAP_REFS = new Set<string>()
+const OVER_CAP_MEMO_LIMIT = 512
+
+function rememberOverCap(key: string): void {
+  if (OVER_CAP_REFS.size >= OVER_CAP_MEMO_LIMIT) {
+    // Insertion-ordered, so the oldest goes first.
+    OVER_CAP_REFS.delete(OVER_CAP_REFS.values().next().value as string)
+  }
+  OVER_CAP_REFS.add(key)
+}
+
+/** Test seam — the memo outlives a single pass by design. */
+export function __resetInboundMediaOverCapMemo(): void {
+  OVER_CAP_REFS.clear()
+}
+
+/** Media types the OCR pass and the model's vision path can read. */
+function isImageMediaType(mimeType: string | undefined): boolean {
+  return typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/")
+}
+
+/**
+ * The media type of these bytes, read from their own magic number.
+ *
+ * The declared type is the one thing that must not be guessed:
+ * `inboundEventToSendContent` passes `mimeType` straight through as the model's
+ * `media_type`, and a provider rejects a declared type that disagrees with the
+ * payload. Every other source is a guess — OneBot's `segments.ts` names no type
+ * at all, and a cache hit never runs `source`, so a redelivered picture would
+ * otherwise fall all the way through to a hard-coded default. The bytes are
+ * already in hand, so they get the last word.
+ */
+export function sniffImageMediaType(base64: string): string | undefined {
+  let head: string
+  try {
+    // 16 base64 chars is a whole number of groups and decodes to 12 bytes —
+    // enough for every signature below.
+    head = atob(base64.slice(0, 16))
+  } catch {
+    return undefined
+  }
+  const b = (i: number) => head.charCodeAt(i)
+  if (head.length < 3) return undefined
+  if (b(0) === 0xff && b(1) === 0xd8 && b(2) === 0xff) return "image/jpeg"
+  if (head.startsWith("\x89PNG\r\n\x1a\n")) return "image/png"
+  if (head.startsWith("GIF8")) return "image/gif"
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") return "image/webp"
+  if (head.startsWith("BM")) return "image/bmp"
+  return undefined
 }
 
 /**
@@ -288,6 +410,11 @@ export async function enrichInboundMedia(
 
   for (const { seg, ref } of targets) {
     try {
+      const memoKey = `${adapterId}:${ref}`
+      // Known over-cap: the bytes are cached and unusable, and `plan.source`
+      // would only pay a round trip to learn that again.
+      if (OVER_CAP_REFS.has(memoKey)) continue
+
       let bytes = await readAttachment(adapterId, ref, maxBytes)
       let resolvedMime: string | undefined
       if (!bytes) {
@@ -296,16 +423,41 @@ export async function enrichInboundMedia(
         // The floor every plan passes through — see `isPublicHttpUrl`.
         if (!isPublicHttpUrl(source.url) && !plan.allowPrivateHost?.(source.url)) continue
         resolvedMime = source.mimeType
-        await fetchAttachment(adapterId, ref, source.url, source.headers)
+        const stored = await fetchAttachment(adapterId, ref, source.url, source.headers)
+        // The fetch reports the real size, which is the only place the two
+        // meanings of a `null` read are distinguishable. Record it and skip the
+        // read that would answer `null` again.
+        if (stored && stored.sizeBytes > maxBytes) {
+          rememberOverCap(memoKey)
+          continue
+        }
         bytes = await readAttachment(adapterId, ref, maxBytes)
       }
-      // Over the cap, or the fetch stored nothing — keep the marker.
+      // The fetch stored nothing usable — keep the marker.
       if (!bytes) continue
+
+      // The bytes decide the media type; every other source is a guess. See
+      // `sniffImageMediaType`.
+      const mimeOf = (declared: string | undefined) =>
+        sniffImageMediaType(bytes) ??
+        declared ??
+        resolvedMime ??
+        plan.defaultImageMime ??
+        "image/png"
 
       if (seg.type === "image") {
         const img = seg as InlineImageSegment
         img.dataBase64 = bytes
-        img.mimeType = img.mimeType ?? resolvedMime ?? plan.defaultImageMime ?? "image/png"
+        img.mimeType = mimeOf(img.mimeType)
+        continue
+      }
+
+      // A picture sent as a document. It has no text to extract — its bytes go
+      // to the inbound OCR pass, which writes `ocrText`, the field
+      // `inboundEventToSendContent` already renders under `[file: <name>]`.
+      if (isImageMediaType(seg.mimeType)) {
+        seg.dataBase64 = bytes
+        seg.mimeType = mimeOf(seg.mimeType)
         continue
       }
 

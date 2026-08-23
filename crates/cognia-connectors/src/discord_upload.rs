@@ -278,10 +278,9 @@ mod tests {
 
     #[test]
     fn request_deserializes_camel_case_nonce() {
-        let req: ConnectorDiscordUploadRequest = serde_json::from_str(
-            r#"{"botToken":"T","channelId":"c1","files":[],"nonce":"abc"}"#,
-        )
-        .unwrap();
+        let req: ConnectorDiscordUploadRequest =
+            serde_json::from_str(r#"{"botToken":"T","channelId":"c1","files":[],"nonce":"abc"}"#)
+                .unwrap();
         assert_eq!(req.nonce.as_deref(), Some("abc"));
         let without: ConnectorDiscordUploadRequest =
             serde_json::from_str(r#"{"botToken":"T","channelId":"c1","files":[]}"#).unwrap();

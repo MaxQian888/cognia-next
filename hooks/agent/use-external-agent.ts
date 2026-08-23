@@ -438,6 +438,16 @@ export function useExternalAgent(): UseExternalAgentReturn {
       const mergedAgents: ExternalAgentInstance[] = storeAgents.map((config) => {
         const runtime = managerMap.get(config.id)
         if (runtime) {
+          // Through the getter, never off the instance: it recomputes when the
+          // agent's advertised command set has moved. `compaction` is genuinely
+          // per-session on ACP — a `/compact` the agent advertises mid-session
+          // is the only evidence there is — so a surface reading the
+          // connect-time profile reports a working `/compact` as unavailable
+          // for the rest of the session. This is the one place the instances
+          // every surface renders are assembled, so refreshing here keeps
+          // `instance.capabilityProfile` itself honest rather than asking each
+          // reader to remember the getter.
+          manager.getAgentCapabilityProfile(config.id)
           const currentStatus = storeGetConnectionStatus(config.id)
           const normalizedRuntimeValidity = runtime.validity
             ? stableNormalizeValidity(runtime.validity, {

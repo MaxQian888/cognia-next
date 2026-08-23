@@ -163,6 +163,13 @@ export function isExternalOnlyCapabilityId(
  */
 export type ExternalAgentCapabilityLevel = "native" | "equivalent" | "unsupported" | "unknown"
 
+export const EXTERNAL_AGENT_CAPABILITY_LEVELS: readonly ExternalAgentCapabilityLevel[] = [
+  "native",
+  "equivalent",
+  "unsupported",
+  "unknown",
+]
+
 /**
  * WHERE a verdict came from, strongest first.
  *
@@ -428,6 +435,74 @@ export const EXTERNAL_CAPABILITY_REASON_KEYS = {
 
 export type ExternalCapabilityReasonKey =
   (typeof EXTERNAL_CAPABILITY_REASON_KEYS)[keyof typeof EXTERNAL_CAPABILITY_REASON_KEYS]
+
+/**
+ * The strongest evidence grade a PLUGIN's own declaration may carry.
+ *
+ * A contributed adapter is merge layer 2: it speaks for its own code and for
+ * the protocol it implements, and for nothing else. `cognia-verified` means a
+ * conformance run measured it and `vendor-certified` means the vendor stands
+ * behind it — a manifest asserting either is exactly the overclaim the evidence
+ * vocabulary exists to prevent. `handshake` and `probe` are live grades and a
+ * static declaration has not made either observation.
+ */
+const PLUGIN_DECLARABLE_EVIDENCE: readonly ExternalAgentCapabilityEvidence[] = [
+  "adapter-code",
+  "protocol-spec",
+  "none",
+]
+
+/**
+ * Validate a plugin-supplied capability matrix before it becomes merge layer 2.
+ *
+ * Plugin manifests are third-party data. `mergeExternalAgentCapabilities`
+ * enforces the LADDER (a refinement cannot widen what the protocol refused) but
+ * performs no shape checking at all, so an unvalidated cell reaches
+ * `profile.effective`, the profile digest and every rendering surface intact —
+ * and a `level` outside the vocabulary makes `PERMISSIVENESS[level]`
+ * `undefined`, which quietly stops the ceiling layer from clamping that cell.
+ *
+ * Fails closed per cell: anything malformed is DROPPED rather than repaired, so
+ * the id falls back to `unknown` — the same state as a plugin that declared
+ * nothing, which never satisfies a hard requirement but still lets the
+ * handshake prove the adapter works. Over-claimed evidence is clamped rather
+ * than dropped: the level is a legitimate statement, only its provenance is not.
+ */
+export function sanitizePluginCapabilityMatrix(raw: unknown): ExternalAgentCapabilityMatrix {
+  if (!raw || typeof raw !== "object") return {}
+  const ids = EXTERNAL_AGENT_CAPABILITY_IDS as readonly string[]
+  const levels = EXTERNAL_AGENT_CAPABILITY_LEVELS as readonly string[]
+  const declarable = PLUGIN_DECLARABLE_EVIDENCE as readonly string[]
+
+  const out: ExternalAgentCapabilityMatrix = {}
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!ids.includes(id)) continue
+    if (!value || typeof value !== "object") continue
+    const cell = value as Record<string, unknown>
+
+    const level = cell.level
+    if (typeof level !== "string" || !levels.includes(level)) continue
+
+    const reasonKey = typeof cell.reasonKey === "string" ? cell.reasonKey : undefined
+    // Same rule the checked-in manifest answers to: an unexplained refusal is
+    // indistinguishable from an unfinished adapter.
+    if (level !== "native" && level !== "unknown" && !reasonKey) continue
+
+    const evidence: ExternalAgentCapabilityEvidence =
+      typeof cell.evidence === "string" && declarable.includes(cell.evidence)
+        ? (cell.evidence as ExternalAgentCapabilityEvidence)
+        : "adapter-code"
+    // `none` admits nothing was measured, so it may not back a verdict.
+    if (evidence === "none" && level !== "unknown") continue
+
+    out[id as ExternalAgentCapabilityId] = {
+      level: level as ExternalAgentCapabilityLevel,
+      evidence,
+      ...(reasonKey ? { reasonKey } : {}),
+    }
+  }
+  return out
+}
 
 /**
  * The `live`-layer contribution of the host's own facilities.
