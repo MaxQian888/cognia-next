@@ -44,6 +44,10 @@ const defaultDeps: ExternalServiceLifecycleDeps = {
   resumePluginServiceConnections,
 }
 
+function hasExternalServicePersistence(): boolean {
+  return typeof indexedDB !== "undefined"
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize)
   if (!value || typeof value !== "object") return value
@@ -184,11 +188,13 @@ export async function reconcilePluginExternalServiceConnections(
 }
 
 export async function suspendPluginExternalServices(pluginId: string): Promise<number> {
+  if (!hasExternalServicePersistence()) return 0
   return suspendPluginServiceConnections(pluginId)
 }
 
 /** Terminal lifecycle cleanup including provider-owned credentials and profiles. */
 export async function purgePluginExternalServices(pluginId: string): Promise<void> {
+  if (!hasExternalServicePersistence()) return
   const removed = await removePluginExternalServiceState(pluginId)
   for (const serverId of removed.mcpServerIds) {
     const server = await getMcpServer(serverId)

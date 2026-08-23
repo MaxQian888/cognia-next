@@ -171,7 +171,9 @@ describe("McpHealthTab", () => {
   it("summarizes outbound MCP-client log activity (distinct servers + errors)", async () => {
     render(<McpHealthTab />)
     const overview = await screen.findByTestId("mcp-health-overview")
-    await waitFor(() => expect(within(overview).getByText("1")).toBeInTheDocument()) // 1 error
+    const errorStat = within(overview).getByText("statErrors").parentElement
+    expect(errorStat).not.toBeNull()
+    await waitFor(() => expect(within(errorStat!).getByText("1")).toBeInTheDocument())
     // 2 distinct mcp servers (github, slack); the diagnostic entry is excluded.
     expect(within(overview).getAllByText("2").length).toBeGreaterThanOrEqual(1)
     expect(within(overview).getByText("statServers")).toBeInTheDocument()

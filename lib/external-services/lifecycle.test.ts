@@ -2,7 +2,12 @@ import type { McpServer } from "@cognia/agent-config-types"
 
 import type { ServiceConnection } from "@/types/external-service"
 import type { PluginManifest } from "@/types/plugin"
-import { managedMcpPresetFingerprint, reconcilePluginExternalServiceConnections } from "./lifecycle"
+import {
+  managedMcpPresetFingerprint,
+  purgePluginExternalServices,
+  reconcilePluginExternalServiceConnections,
+  suspendPluginExternalServices,
+} from "./lifecycle"
 
 const manifest = {
   id: "figma-plugin",
@@ -78,6 +83,12 @@ function deps(existingServers: McpServer[] = [], existingConnection?: ServiceCon
 }
 
 describe("external service managed lifecycle", () => {
+  it("does not require browser persistence in Node and CLI hosts", async () => {
+    expect(globalThis.indexedDB).toBeUndefined()
+    await expect(suspendPluginExternalServices("figma-plugin")).resolves.toBe(0)
+    await expect(purgePluginExternalServices("figma-plugin")).resolves.toBeUndefined()
+  })
+
   it("creates a pending server and connection without connecting", async () => {
     const fake = deps()
     expect(await reconcilePluginExternalServiceConnections("figma-plugin", manifest, fake)).toBe(1)

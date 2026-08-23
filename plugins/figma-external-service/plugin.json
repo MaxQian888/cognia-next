@@ -9,6 +9,20 @@
   "license": "MIT",
   "engines": { "cognia": ">=0.1.0" },
   "capabilities": ["mcp-server-preset"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "degraded",
+      "reason": "Figma service metadata remains discoverable, but MCP connections require a runtime gateway."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "reason": "Remote MCP requires a configured runtime gateway; the desktop-local provider is unavailable."
+    }
+  },
   "mcpServerPresets": [
     {
       "id": "figma-remote",
