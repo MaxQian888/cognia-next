@@ -30,7 +30,17 @@ export type ServiceConnectionProviderRef =
   | { kind: "mcp"; serverId: string }
   | { kind: "integration"; accountId: string }
   | { kind: "openapi"; accountId: string; importId: string }
-  | { kind: "browser"; profileId: string }
+  | {
+      kind: "browser"
+      profileId: string
+      workspaceId: string
+      allowedDomains: string[]
+      loginStartUrl?: string
+      allowUploads: boolean
+      allowDownloads: boolean
+      skillIds?: string[]
+      readinessFingerprint?: string
+    }
 
 export interface ServiceConnection {
   id: string
