@@ -916,7 +916,16 @@ impl WorkspaceStore {
             )
             .optional()
             .map_err(|error| format!("get workspace bundle {bundle_id}: {error}"))?;
-        let Some((environment_kind, owner_type, owner_ref, state, last_used_at, pinned, created_at)) = row else {
+        let Some((
+            environment_kind,
+            owner_type,
+            owner_ref,
+            state,
+            last_used_at,
+            pinned,
+            created_at,
+        )) = row
+        else {
             return Ok(None);
         };
         Ok(Some(crate::WorkspaceBundle {
@@ -1460,7 +1469,10 @@ mod tests {
             created_at: 100,
         };
         store.put_workspace_bundle(&bundle).unwrap();
-        assert_eq!(store.get_workspace_bundle("bundle-1").unwrap(), Some(bundle));
+        assert_eq!(
+            store.get_workspace_bundle("bundle-1").unwrap(),
+            Some(bundle)
+        );
     }
 
     #[test]

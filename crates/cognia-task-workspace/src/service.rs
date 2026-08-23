@@ -283,40 +283,56 @@ impl TaskWorkspaceService {
                     input.run_id
                 ));
             }
-            let (isolation_kind, isolation_ref) =
-                create_execution(&root, &execution_root, &input.base, &baseline, &blobs)?;
+            let isolation_kind = if is_git_root(&root) {
+                IsolationKind::GitWorktree
+            } else {
+                IsolationKind::Shadow
+            };
+            let (owner_type, owner_ref) = managed_owner(&input);
+            let workspace_id = Uuid::now_v7().to_string();
+            let record = self
+                .registry
+                .insert_reserved(
+                    workspace_id,
+                    owner_type,
+                    owner_ref.clone(),
+                    root.to_string_lossy().into_owned(),
+                    git_common_dir(&root),
+                    input.base.clone(),
+                    isolation_kind,
+                    execution_root.to_string_lossy().into_owned(),
+                    now,
+                )
+                .map_err(|error| error.to_string())?;
+            let created = create_execution(
+                &root,
+                &execution_root,
+                &input.base,
+                &baseline,
+                &blobs,
+                record.locked_by.as_deref(),
+            );
+            let (created_kind, isolation_ref) = match created {
+                Ok(created) => created,
+                Err(error) => {
+                    self.discard_managed_workspace(&record, now);
+                    return Err(error);
+                }
+            };
+            debug_assert_eq!(created_kind, isolation_kind);
             if input.base != WorkspaceBaseSpec::WorkingState {
                 match capture_with_policy(&execution_root, &tracking_policy) {
                     Ok(captured) => (baseline, blobs) = captured,
                     Err(error) => {
-                        cleanup_execution(&root, &execution_root, isolation_kind, None);
+                        self.rollback_managed_execution(
+                            Some(&record.workspace_id),
+                            &root,
+                            &execution_root,
+                            isolation_kind,
+                            now,
+                        );
                         return Err(error);
                     }
-                }
-            }
-            let (owner_type, owner_ref) = managed_owner(&input);
-            let record = match self.registry.insert(
-                owner_type,
-                owner_ref.clone(),
-                root.to_string_lossy().into_owned(),
-                git_common_dir(&root),
-                input.base.clone(),
-                isolation_kind,
-                execution_root.to_string_lossy().into_owned(),
-                now,
-            ) {
-                Ok(record) => record,
-                Err(error) => {
-                    cleanup_execution(&root, &execution_root, isolation_kind, None);
-                    return Err(error.to_string());
-                }
-            };
-            if isolation_kind == IsolationKind::GitWorktree {
-                if let Err(error) = lock_git_worktree(&root, &execution_root, &record.workspace_id)
-                {
-                    cleanup_execution(&root, &execution_root, isolation_kind, None);
-                    self.discard_managed_workspace(&record, now);
-                    return Err(error);
                 }
             }
             if let Err(error) = self.registry.transition(
@@ -1758,8 +1774,12 @@ fn create_execution(
     base: &WorkspaceBaseSpec,
     baseline: &WorkspaceSnapshot,
     blobs: &HashMap<String, Vec<u8>>,
+    lock_reason: Option<&str>,
 ) -> Result<(IsolationKind, Option<String>), String> {
     if is_git_root(workspace_root) {
+        let lock_reason = lock_reason
+            .filter(|reason| !reason.is_empty())
+            .ok_or_else(|| "managed Git worktree requires a Registry lock reason".to_string())?;
         let base_ref = resolve_git_base(workspace_root, base)?;
         if let Some(parent) = execution_root.parent() {
             fs::create_dir_all(parent)
@@ -1768,7 +1788,14 @@ fn create_execution(
         let output = Command::new("git")
             .args(["-C"])
             .arg(workspace_root)
-            .args(["worktree", "add", "--detach"])
+            .args([
+                "worktree",
+                "add",
+                "--detach",
+                "--lock",
+                "--reason",
+                lock_reason,
+            ])
             .arg(execution_root)
             .arg(&base_ref)
             .output()
@@ -1783,6 +1810,7 @@ fn create_execution(
             let result = clear_worktree_contents(execution_root)
                 .and_then(|_| materialize(execution_root, baseline, blobs));
             if let Err(error) = result {
+                unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
                 cleanup_git_worktree(workspace_root, execution_root, "");
                 return Err(error);
             }
@@ -2011,27 +2039,6 @@ fn validate_repository_binding_ref(binding_ref: &str) -> Result<(), String> {
         ));
     }
     Ok(())
-}
-
-fn lock_git_worktree(
-    workspace_root: &Path,
-    execution_root: &Path,
-    workspace_id: &str,
-) -> Result<(), String> {
-    let reason = crate::registry::compose_lock_reason(workspace_id);
-    let output = Command::new("git")
-        .args(["-C"])
-        .arg(workspace_root)
-        .args(["worktree", "lock", "--reason", &reason])
-        .arg(execution_root)
-        .output()
-        .map_err(|error| format!("start git worktree lock: {error}"))?;
-    output.status.success().then_some(()).ok_or_else(|| {
-        format!(
-            "git worktree lock failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )
-    })
 }
 
 fn unlock_git_worktree(
@@ -2811,6 +2818,15 @@ mod tests {
         assert_eq!(record.owner_type, WorkspaceOwnerType::Session);
         assert_eq!(record.owner_ref.as_deref(), Some("session-1"));
         let execution = PathBuf::from(run.execution_root);
+        let inventory = Command::new("git")
+            .args(["-C"])
+            .arg(workspace.path())
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .output()
+            .unwrap();
+        assert!(inventory.status.success());
+        let inventory = String::from_utf8(inventory.stdout).unwrap();
+        assert!(inventory.contains(&format!("locked cognia:{workspace_id}")));
         assert!(execution.join(".git").is_file());
         assert!(!Command::new("git")
             .args(["-C"])

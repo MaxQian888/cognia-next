@@ -667,14 +667,21 @@ mod tests {
             42,
         )
         .unwrap();
-        let root = bundle.leases.iter().find(|lease| lease.logical_root_id == "root").unwrap();
+        let root = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "root")
+            .unwrap();
         let package = bundle
             .leases
             .iter()
             .find(|lease| lease.logical_root_id == "package")
             .unwrap();
         assert_eq!(package.workspace_id, root.workspace_id);
-        assert_eq!(package.alias_path, format!("{}/packages/app", root.alias_path));
+        assert_eq!(
+            package.alias_path,
+            format!("{}/packages/app", root.alias_path)
+        );
     }
 
     #[test]

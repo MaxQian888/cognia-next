@@ -28,8 +28,8 @@
 use crate::{
     sensitive::{SensitiveAuditEntry, SensitiveDecision, SensitiveGrant, SensitiveGrantStore},
     store::WorkspaceStore,
-    IsolationKind, WorkspaceBaseSpec, WorkspaceLifecyclePolicy, WorkspaceOwnerType,
-    WorkspaceEnvironmentKind, WorkspaceRecord, WorkspaceState,
+    IsolationKind, WorkspaceBaseSpec, WorkspaceEnvironmentKind, WorkspaceLifecyclePolicy,
+    WorkspaceOwnerType, WorkspaceRecord, WorkspaceState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -300,6 +300,35 @@ impl WorkspaceRegistry {
         now: i64,
     ) -> Result<WorkspaceRecord, RegistryError> {
         let workspace_id = Uuid::now_v7().to_string();
+        self.insert_reserved(
+            workspace_id,
+            owner_type,
+            owner_ref,
+            source_root,
+            git_common_dir,
+            base,
+            isolation_kind,
+            execution_root,
+            now,
+        )
+    }
+
+    /// Reserve a caller-assigned workspace id before provisioning begins.
+    ///
+    /// Provisioners need the id to construct the signed Git lock reason in
+    /// the same `git worktree add` invocation that creates the directory.
+    pub fn insert_reserved(
+        &self,
+        workspace_id: String,
+        owner_type: WorkspaceOwnerType,
+        owner_ref: Option<String>,
+        source_root: String,
+        git_common_dir: Option<String>,
+        base: WorkspaceBaseSpec,
+        isolation_kind: IsolationKind,
+        execution_root: String,
+        now: i64,
+    ) -> Result<WorkspaceRecord, RegistryError> {
         // `Imported` may only be inserted via `insert_imported`.
         if owner_type == WorkspaceOwnerType::Imported {
             return Err(RegistryError::OwnershipMismatch {
@@ -820,6 +849,28 @@ mod tests {
         );
         let loaded = registry.get(&record.workspace_id).unwrap().unwrap();
         assert_eq!(loaded, record);
+    }
+
+    #[test]
+    fn insert_reserved_uses_the_id_for_the_signed_lock_reason() {
+        let (registry, _dir) = new_registry();
+        let record = registry
+            .insert_reserved(
+                "workspace-fixed".into(),
+                WorkspaceOwnerType::Session,
+                Some("session-1".into()),
+                "/workspace".into(),
+                Some("/workspace/.git".into()),
+                WorkspaceBaseSpec::WorkingState,
+                IsolationKind::GitWorktree,
+                "/tmp/workspace-fixed".into(),
+                42,
+            )
+            .unwrap();
+
+        assert_eq!(record.workspace_id, "workspace-fixed");
+        assert_eq!(record.locked_by.as_deref(), Some("cognia:workspace-fixed"));
+        assert_eq!(registry.get("workspace-fixed").unwrap(), Some(record));
     }
 
     #[test]
