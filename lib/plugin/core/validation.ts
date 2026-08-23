@@ -810,6 +810,268 @@ function validateIntegrations(
   })
 }
 
+const EXTERNAL_SERVICE_KINDS = new Set(["mcp", "integration", "openapi", "browser"])
+const EXTERNAL_SERVICE_SURFACES = new Set(["chat", "workflow", "inbox"])
+
+function validateExternalServices(
+  manifest: PluginManifest,
+  pushError: (field: string, code: string, message: string, hint?: string) => void
+): void {
+  const contributionIds = {
+    mcp: new Set((manifest.mcpServerPresets ?? []).map((entry) => entry.id)),
+    integration: new Set((manifest.integrations ?? []).map((entry) => entry.id)),
+    openapi: new Set((manifest.openApiProviders ?? []).map((entry) => entry.id)),
+    browser: new Set((manifest.browserSiteProviders ?? []).map((entry) => entry.id)),
+  }
+
+  for (const [collection, entries] of [
+    ["openApiProviders", manifest.openApiProviders],
+    ["browserSiteProviders", manifest.browserSiteProviders],
+  ] as const) {
+    if (entries !== undefined && !Array.isArray(entries)) {
+      pushError(
+        collection,
+        `manifest.${collection}.invalid_type`,
+        `"${collection}" must be an array if provided`
+      )
+    }
+  }
+
+  const openApiIds = new Set<string>()
+  for (const [index, provider] of (manifest.openApiProviders ?? []).entries()) {
+    const field = `openApiProviders[${index}]`
+    if (!isPlainObject(provider)) {
+      pushError(field, "manifest.openApiProviders.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+      pushError(`${field}.id`, "manifest.openApiProviders.id.invalid", `${field}.id is invalid`)
+    } else if (openApiIds.has(provider.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.openApiProviders.id.duplicate",
+        `${field}.id is duplicated`
+      )
+    } else {
+      openApiIds.add(provider.id)
+    }
+    if (typeof provider.label !== "string" || provider.label.length === 0) {
+      pushError(
+        `${field}.label`,
+        "manifest.openApiProviders.label.missing",
+        `${field}.label is required`
+      )
+    }
+    if (
+      !isPlainObject(provider.source) ||
+      !["bundled", "url"].includes(String(provider.source.type))
+    ) {
+      pushError(
+        `${field}.source`,
+        "manifest.openApiProviders.source.invalid",
+        `${field}.source is invalid`
+      )
+    } else if (provider.source.type === "bundled") {
+      const path = provider.source.path
+      if (typeof path !== "string" || getPluginPathViolations(path).length > 0) {
+        pushError(
+          `${field}.source.path`,
+          "manifest.openApiProviders.source.path.invalid",
+          `${field}.source.path must be a safe relative plugin path`
+        )
+      }
+    } else {
+      try {
+        const url = new URL(String(provider.source.url))
+        if (url.protocol !== "https:") throw new Error("unsupported protocol")
+      } catch {
+        pushError(
+          `${field}.source.url`,
+          "manifest.openApiProviders.source.url.invalid",
+          `${field}.source.url must be an HTTPS URL`
+        )
+      }
+    }
+  }
+
+  const browserIds = new Set<string>()
+  for (const [index, provider] of (manifest.browserSiteProviders ?? []).entries()) {
+    const field = `browserSiteProviders[${index}]`
+    if (!isPlainObject(provider)) {
+      pushError(field, "manifest.browserSiteProviders.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+      pushError(`${field}.id`, "manifest.browserSiteProviders.id.invalid", `${field}.id is invalid`)
+    } else if (browserIds.has(provider.id)) {
+      pushError(
+        `${field}.id`,
+        "manifest.browserSiteProviders.id.duplicate",
+        `${field}.id is duplicated`
+      )
+    } else {
+      browserIds.add(provider.id)
+    }
+    if (!Array.isArray(provider.allowedDomains) || provider.allowedDomains.length === 0) {
+      pushError(
+        `${field}.allowedDomains`,
+        "manifest.browserSiteProviders.allowed_domains.invalid",
+        `${field}.allowedDomains must contain at least one domain`
+      )
+    } else if (
+      provider.allowedDomains.some(
+        (domain) =>
+          typeof domain !== "string" ||
+          domain === "*" ||
+          domain.includes("://") ||
+          domain.includes("/") ||
+          domain.trim() !== domain
+      )
+    ) {
+      pushError(
+        `${field}.allowedDomains`,
+        "manifest.browserSiteProviders.allowed_domains.unsafe",
+        `${field}.allowedDomains must contain exact host names without schemes, paths, or wildcards`
+      )
+    }
+    const operationIds = new Set<string>()
+    for (const [operationIndex, operation] of (provider.operations ?? []).entries()) {
+      const operationField = `${field}.operations[${operationIndex}]`
+      if (!isPlainObject(operation) || typeof operation.operationId !== "string") {
+        pushError(
+          operationField,
+          "manifest.browserSiteProviders.operation.invalid",
+          `${operationField} must declare a stable operationId`
+        )
+      } else if (operationIds.has(operation.operationId)) {
+        pushError(
+          `${operationField}.operationId`,
+          "manifest.browserSiteProviders.operation.duplicate",
+          `${operationField}.operationId is duplicated`
+        )
+      } else {
+        operationIds.add(operation.operationId)
+      }
+    }
+  }
+
+  if (manifest.services === undefined) return
+  if (!Array.isArray(manifest.services)) {
+    pushError(
+      "services",
+      "manifest.services.invalid_type",
+      '"services" must be an array if provided'
+    )
+    return
+  }
+  const serviceIds = new Set<string>()
+  for (const [index, service] of manifest.services.entries()) {
+    const field = `services[${index}]`
+    if (!isPlainObject(service)) {
+      pushError(field, "manifest.services.invalid_item", `${field} must be an object`)
+      continue
+    }
+    if (typeof service.id !== "string" || !ID_PATTERN.test(service.id)) {
+      pushError(`${field}.id`, "manifest.services.id.invalid", `${field}.id is invalid`)
+    } else if (serviceIds.has(service.id)) {
+      pushError(`${field}.id`, "manifest.services.id.duplicate", `${field}.id is duplicated`)
+    } else {
+      serviceIds.add(service.id)
+    }
+    if (typeof service.label !== "string" || service.label.length === 0) {
+      pushError(`${field}.label`, "manifest.services.label.missing", `${field}.label is required`)
+    }
+    if (!["never", "confirm"].includes(String(service.fallbackPolicy))) {
+      pushError(
+        `${field}.fallbackPolicy`,
+        "manifest.services.fallback_policy.invalid",
+        `${field}.fallbackPolicy must be "never" or "confirm"`
+      )
+    }
+    if (!Array.isArray(service.providers) || service.providers.length === 0) {
+      pushError(
+        `${field}.providers`,
+        "manifest.services.providers.empty",
+        `${field}.providers must contain at least one provider`
+      )
+      continue
+    }
+    const providerIds = new Set<string>()
+    for (const [providerIndex, provider] of service.providers.entries()) {
+      const providerField = `${field}.providers[${providerIndex}]`
+      if (!isPlainObject(provider)) {
+        pushError(
+          providerField,
+          "manifest.services.provider.invalid_item",
+          `${providerField} must be an object`
+        )
+        continue
+      }
+      if (typeof provider.id !== "string" || !ID_PATTERN.test(provider.id)) {
+        pushError(
+          `${providerField}.id`,
+          "manifest.services.provider.id.invalid",
+          `${providerField}.id is invalid`
+        )
+      } else if (providerIds.has(provider.id)) {
+        pushError(
+          `${providerField}.id`,
+          "manifest.services.provider.id.duplicate",
+          `${providerField}.id is duplicated`
+        )
+      } else {
+        providerIds.add(provider.id)
+      }
+      const kind = String(provider.kind)
+      if (!EXTERNAL_SERVICE_KINDS.has(kind)) {
+        pushError(
+          `${providerField}.kind`,
+          "manifest.services.provider.kind.invalid",
+          `${providerField}.kind is invalid`
+        )
+      } else if (
+        typeof provider.contributionId !== "string" ||
+        !contributionIds[kind as keyof typeof contributionIds].has(provider.contributionId)
+      ) {
+        pushError(
+          `${providerField}.contributionId`,
+          "manifest.services.provider.contribution.missing",
+          `${providerField} references a missing ${kind} contribution`
+        )
+      }
+      if (!Number.isFinite(provider.priority)) {
+        pushError(
+          `${providerField}.priority`,
+          "manifest.services.provider.priority.invalid",
+          `${providerField}.priority must be a number`
+        )
+      }
+      if (
+        !Array.isArray(provider.surfaces) ||
+        provider.surfaces.length === 0 ||
+        provider.surfaces.some((surface) => !EXTERNAL_SERVICE_SURFACES.has(String(surface)))
+      ) {
+        pushError(
+          `${providerField}.surfaces`,
+          "manifest.services.provider.surfaces.invalid",
+          `${providerField}.surfaces is invalid`
+        )
+      }
+      if (
+        kind === "browser" &&
+        service.providers.length > 1 &&
+        service.fallbackPolicy !== "confirm"
+      ) {
+        pushError(
+          `${field}.fallbackPolicy`,
+          "manifest.services.browser_fallback.requires_confirmation",
+          `${field} must use fallbackPolicy "confirm" when Browser is a fallback provider`
+        )
+      }
+    }
+  }
+}
+
 function validateWorkflowKindAliases(
   manifest: PluginManifest,
   pushError: (field: string, code: string, message: string, hint?: string) => void
@@ -1923,6 +2185,7 @@ export function validatePluginManifest(
   validateDeclarativeExtensions(m as unknown as PluginManifest, pushError)
   validateDeclarativeTrayItems(m as unknown as PluginManifest, pushError)
   validateIntegrations(m as unknown as PluginManifest, pushError)
+  validateExternalServices(m as unknown as PluginManifest, pushError)
   validateWorkflowKindAliases(m as unknown as PluginManifest, pushError)
   validateNativeLucideIcons(m as unknown as PluginManifest, pushError, pushWarning)
   validateLazyFactoryArray(
