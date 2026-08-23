@@ -236,6 +236,9 @@ impl TaskWorkspaceService {
         } else {
             None
         };
+        if reusable.is_none() {
+            self.enforce_managed_workspace_capacity()?;
+        }
         let (
             baseline,
             blobs,
@@ -502,8 +505,34 @@ impl TaskWorkspaceService {
         if policy.blob_budget_bytes == 0 {
             return Err("blob budget must be greater than zero".into());
         }
-        self.registry.set_policy(policy);
+        self.registry
+            .set_policy(policy)
+            .map_err(|error| error.to_string())?;
         Ok(policy)
+    }
+
+    fn enforce_managed_workspace_capacity(&self) -> Result<(), String> {
+        let policy = self.registry.policy();
+        let active_managed = self
+            .registry
+            .list()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|record| {
+                record.environment_kind == crate::WorkspaceEnvironmentKind::Managed
+                    && matches!(
+                        record.state,
+                        WorkspaceState::Provisioning | WorkspaceState::Active
+                    )
+            })
+            .count() as u32;
+        if active_managed >= policy.active_directory_cap {
+            return Err(format!(
+                "managed workspace capacity reached ({active_managed}/{}); archive an environment or raise the limit in Workspace settings",
+                policy.active_directory_cap
+            ));
+        }
+        Ok(())
     }
 
     pub fn set_managed_workspace_pinned(
@@ -3400,5 +3429,35 @@ mod tests {
         second_input.workspace_key = Some("pipeline-main".into());
         let error = service.begin_run(second_input).unwrap_err();
         assert!(error.contains("pipeline workspace is already active"));
+    }
+
+    #[test]
+    fn lifecycle_policy_persists_and_blocks_creation_at_capacity() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let policy = crate::WorkspaceLifecyclePolicy {
+            active_directory_cap: 1,
+            snapshot_retention_days: 9,
+            blob_budget_bytes: 4096,
+        };
+        {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            assert_eq!(
+                service.set_workspace_lifecycle_policy(policy).unwrap(),
+                policy
+            );
+            service
+                .begin_run(input(&workspace, "task-capacity-1", "run-capacity-1"))
+                .unwrap();
+            let error = service
+                .begin_run(input(&workspace, "task-capacity-2", "run-capacity-2"))
+                .unwrap_err();
+            assert!(error.contains("managed workspace capacity reached (1/1)"));
+            assert!(error.contains("Workspace settings"));
+        }
+
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        assert_eq!(reopened.workspace_lifecycle_policy(), policy);
     }
 }

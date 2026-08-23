@@ -1,7 +1,7 @@
 use crate::{
     PatchState, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
     ResourceEventKind, ResourceTimelineCompleteness, RunState, TaskResourceSummary, TaskRun,
-    TaskWorkspace,
+    TaskWorkspace, WorkspaceLifecyclePolicy,
 };
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -191,7 +191,11 @@ impl WorkspaceStore {
                    updated_at INTEGER NOT NULL
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_source_binding_root
-                   ON workspace_source_bindings(source_root);",
+                   ON workspace_source_bindings(source_root);
+                 CREATE TABLE IF NOT EXISTS workspace_settings (
+                   key TEXT PRIMARY KEY,
+                   payload TEXT NOT NULL
+                 );",
             )
             .map_err(|error| format!("apply workspace registry migration: {error}"))?;
         let has_environment_kind: bool = self
@@ -210,6 +214,42 @@ impl WorkspaceStore {
                 )
                 .map_err(|error| format!("add workspace environment kind: {error}"))?;
         }
+        Ok(())
+    }
+
+    pub fn get_workspace_lifecycle_policy(
+        &self,
+    ) -> Result<Option<WorkspaceLifecyclePolicy>, String> {
+        let payload = self
+            .connection
+            .query_row(
+                "SELECT payload FROM workspace_settings WHERE key='lifecyclePolicy'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("get workspace lifecycle policy: {error}"))?;
+        payload
+            .map(|value| {
+                serde_json::from_str(&value)
+                    .map_err(|error| format!("decode workspace lifecycle policy: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn put_workspace_lifecycle_policy(
+        &self,
+        policy: &WorkspaceLifecyclePolicy,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(policy)
+            .map_err(|error| format!("encode workspace lifecycle policy: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_settings(key, payload) VALUES('lifecyclePolicy', ?1)
+                 ON CONFLICT(key) DO UPDATE SET payload=excluded.payload",
+                [payload],
+            )
+            .map_err(|error| format!("put workspace lifecycle policy: {error}"))?;
         Ok(())
     }
 
@@ -1580,5 +1620,22 @@ mod tests {
             reason: None,
         });
         assert!(dup.is_err(), "duplicate audit_id must be rejected");
+    }
+
+    #[test]
+    fn workspace_lifecycle_policy_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        assert_eq!(store.get_workspace_lifecycle_policy().unwrap(), None);
+        let policy = crate::WorkspaceLifecyclePolicy {
+            active_directory_cap: 7,
+            snapshot_retention_days: 14,
+            blob_budget_bytes: 512,
+        };
+        store.put_workspace_lifecycle_policy(&policy).unwrap();
+        assert_eq!(
+            store.get_workspace_lifecycle_policy().unwrap(),
+            Some(policy)
+        );
     }
 }

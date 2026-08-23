@@ -247,23 +247,27 @@ impl WorkspaceRegistry {
     pub fn new(
         store: std::sync::Arc<parking_lot::Mutex<WorkspaceStore>>,
     ) -> Result<Self, RegistryError> {
-        let grants = {
+        let (grants, policy) = {
             let guard = store.lock();
             let loaded = RegistryError::from_store(guard.list_sensitive_grants())?;
             let mut index = SensitiveGrantStore::new();
             index.seed(loaded);
-            index
+            let policy = RegistryError::from_store(guard.get_workspace_lifecycle_policy())?
+                .unwrap_or_default();
+            (index, policy)
         };
         Ok(Self {
             store,
             grants: parking_lot::Mutex::new(grants),
-            policy: parking_lot::RwLock::new(WorkspaceLifecyclePolicy::default()),
+            policy: parking_lot::RwLock::new(policy),
         })
     }
 
     /// Override the retention policy. Callers wire this from user settings.
-    pub fn set_policy(&self, policy: WorkspaceLifecyclePolicy) {
+    pub fn set_policy(&self, policy: WorkspaceLifecyclePolicy) -> Result<(), RegistryError> {
+        RegistryError::from_store(self.store.lock().put_workspace_lifecycle_policy(&policy))?;
         *self.policy.write() = policy;
+        Ok(())
     }
 
     /// Read the current retention policy.
