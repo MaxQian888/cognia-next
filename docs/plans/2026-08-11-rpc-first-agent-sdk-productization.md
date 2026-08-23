@@ -1,8 +1,28 @@
 # Make `@cognia/agent` a production RPC-first external SDK
 
+> **Superseded — 2026-08-23 by [ADR-0142](../content/docs/en/adr/0142-agent-sdk-two-layer-product.md).**
+>
+> This plan treated the SDK as one release. ADR-0142 splits it into a v0.1
+> runtime client and a v0.2 authoring SDK, and reverses several statements here
+> that the shipped code disproves. Read it for the historical gap analysis only;
+> the following claims in this document are **not** true of the implementation:
+>
+> - **Reconnection.** No reconnect exists. A host crash ends the client; there is
+>   no re-negotiation, no handler re-registration, and no cursor replay.
+> - **Filesystem undo.** `session/compact/undo` restores an in-memory message
+>   snapshot only, and `sandbox/snapshot` records a policy — neither is a
+>   filesystem checkpoint. ADR-0142 keeps the two names separate.
+> - **Attachments.** `AgentInput.attachments` is accepted by the client schema and
+>   read by no host code path. Until asset references land it is refused with
+>   `invalid_params`, not carried.
+> - **Event delivery.** Replay and live delivery race, and concurrent `events()`
+>   subscribers split one shared queue rather than each receiving the full stream.
+>
+> Protocol v2, the RPC-first boundary, and the host/client split stand unchanged.
+
 | Field              | Value                                                                                                                           |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Status             | Draft for review                                                                                                                |
+| Status             | Superseded by ADR-0142 (2026-08-23)                                                                                             |
 | Author · Date      | Codex · 2026-08-11                                                                                                              |
 | Scope              | `@cognia/agent`, `cognia-agent rpc`, agent runtime/session control, protocol, packaging, security, observability, documentation |
 | Source             | User-approved SDK gap research and product-direction review                                                                     |
