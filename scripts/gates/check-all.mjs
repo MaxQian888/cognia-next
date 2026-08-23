@@ -166,6 +166,7 @@ const REGISTRY = [
   { script: "audit:trusted-publishers", group: "audit" },
   { script: "audit:silent-flags", group: "audit" },
   { script: "audit:pii-boundaries", group: "audit" },
+  { script: "audit:network-egress", group: "audit" },
   { script: "audit:command-parity", group: "audit" },
   { script: "audit:companion-command-manifest", group: "audit" },
   // The manifest gate above compares NAME SETS only — its whole schema check is

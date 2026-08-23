@@ -11,6 +11,7 @@
  * id in an `aibot_respond_msg` / `aibot_send_msg` media frame.
  */
 
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import {
   buildMediaInitFrame,
   buildMediaChunkFrame,
@@ -67,7 +68,9 @@ export async function fetchAndDecryptMedia(
   url: string,
   aeskeyBase64?: string
 ): Promise<Uint8Array> {
-  const resp = await fetch(url)
+  // `proxyFetch`: WeCom's media CDN is not on the packaged shell's
+  // `connect-src` allowlist, so a renderer `fetch` never left the WebView.
+  const resp = await proxyFetch(url)
   if (!resp.ok) throw new Error(`wecom media fetch failed: ${resp.status}`)
   const buf = await resp.arrayBuffer()
   if (!aeskeyBase64) return new Uint8Array(buf)

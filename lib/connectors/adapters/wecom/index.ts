@@ -16,6 +16,7 @@
  */
 
 import { connectorListen } from "@/lib/connectors/events"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import type {
   PlatformAdapter,
@@ -558,7 +559,9 @@ export function createWeComAdapter(opts: WeComAdapterOptions): PlatformAdapter {
   // ── outbound: media upload ────────────────────────────────────────────────
   async function uploadMedia(seg: WeComMediaSegment): Promise<string | null> {
     try {
-      const resp = await fetch(seg.url)
+      // `proxyFetch`, as in `media.ts`: the segment URL is a remote CDN the
+      // packaged shell's `connect-src` does not list.
+      const resp = await proxyFetch(seg.url)
       if (!resp.ok) return null
       const bytes = new Uint8Array(await resp.arrayBuffer())
       const name = seg.name ?? `media.${seg.type === "image" ? "png" : "bin"}`

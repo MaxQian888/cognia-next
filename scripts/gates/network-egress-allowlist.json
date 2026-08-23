@@ -1,0 +1,232 @@
+{
+  "exceptions": [
+    {
+      "file": "components/ai-elements/prompt-input.tsx",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Vendored ai-elements: reads a blob: URL to turn a pasted image into a data URL. Never a network origin."
+    },
+    {
+      "file": "components/chat/composer.tsx",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads blob: URLs for staged attachments to convert them to data URLs before send."
+    },
+    {
+      "file": "components/chat/composer/staged-attachment-store.tsx",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads the blob: URL of a staged attachment to measure and encode it."
+    },
+    {
+      "file": "components/chat/message-parts/file-part-preview.tsx",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Reads a data:/blob: attachment body for the inline text preview."
+    },
+    {
+      "file": "components/mobile/chat/composer-plus-menu.tsx",
+      "kind": "fetch",
+      "reason": "capacitor",
+      "note": "Reads Capacitor file URIs (camera, gallery, voice recording) into blobs inside the mobile WebView."
+    },
+    {
+      "file": "crates/cognia-gateway/src/server.rs",
+      "kind": "reqwest-client-new",
+      "reason": "server-side",
+      "note": "Fallback client in the gateway server process, which reads the proxy from its environment."
+    },
+    {
+      "file": "crates/cognia-net/src/proxy_config/detect.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Probes candidate proxies on 127.0.0.1; routing a proxy probe through a proxy would test the wrong thing."
+    },
+    {
+      "file": "lib/browser/remote-stream.ts",
+      "kind": "websocket",
+      "reason": "companion-pinned",
+      "note": "The Remote Browser companion channel, which carries its own pairing and transport guarantees."
+    },
+    {
+      "file": "lib/canvas/collaboration/websocket-provider.ts",
+      "kind": "websocket",
+      "reason": "loopback",
+      "note": "Collaboration sessions target a loopback or LAN peer the user paired with directly."
+    },
+    {
+      "file": "lib/data/destinations/http.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "Non-Tauri leg only. The desktop path is connectors_http_request, which applies the proxy policy in Rust."
+    },
+    {
+      "file": "lib/docs-providers/providers/google/http.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "Non-Tauri leg only. The desktop path is connectors_http_request; the provider needs the Rust OAuth loopback anyway."
+    },
+    {
+      "file": "lib/file/file-operations.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Web fallback that resolves a bundled asset path against the dev server when @tauri-apps/plugin-fs is absent."
+    },
+    {
+      "file": "lib/files/download.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Turns an already-fetched blob:/data:/same-origin media URL into a saved file; the anchor path does no request."
+    },
+    {
+      "file": "lib/network/platform-fetch.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The browser arm of the platform transport itself \u2014 this is the call the other paths route around."
+    },
+    {
+      "file": "lib/network/platform-streaming-fetch.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The browser arm of the streaming transport, whose body already streams natively."
+    },
+    {
+      "file": "lib/network/platform-websocket.ts",
+      "kind": "websocket",
+      "reason": "transport-impl",
+      "note": "The browser arm of the platform WebSocket adapter itself."
+    },
+    {
+      "file": "lib/network/proxy-fetch.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The browser arm of the proxy transport; on Tauri every request crosses into Rust instead."
+    },
+    {
+      "file": "lib/plugin/core/context.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "Guarded by isPluginGatewayAvailable(): the desktop routes plugin egress through the Rust gateway, which applies the policy and the plugin allowlist."
+    },
+    {
+      "file": "lib/plugin/core/loader.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Loads a plugin module from a convertFileSrc asset URL or a local path, never a remote origin."
+    },
+    {
+      "file": "lib/plugin/devtools/dev-server.ts",
+      "kind": "websocket",
+      "reason": "loopback",
+      "note": "Connects to the plugin dev server on localhost during plugin authoring."
+    },
+    {
+      "file": "lib/signaling/client.ts",
+      "kind": "websocket",
+      "reason": "companion-pinned",
+      "note": "The WebRTC signaling channel, whose factory is injected by the caller and which negotiates its own transport."
+    },
+    {
+      "file": "lib/skills/marketplace-registry.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "Guarded by isTauri(): the desktop reads skills through the skills_fetch_remote_md Rust command."
+    },
+    {
+      "file": "lib/skills/skillssh-http.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "The web leg of a capability-routed GET; Tauri uses skills_fetch_remote_json and Capacitor uses CapacitorHttp."
+    },
+    {
+      "file": "lib/tauri/pinned-fetch.ts",
+      "kind": "fetch",
+      "reason": "companion-pinned",
+      "note": "The companion transport pins its own TLS fingerprint; re-routing it through the proxy would break the pin it exists to check."
+    },
+    {
+      "file": "lib/tauri/transport-companion.ts",
+      "kind": "websocket",
+      "reason": "companion-pinned",
+      "note": "The companion transport's own socket, paired with the TLS-pinned fetch in pinned-fetch.ts."
+    },
+    {
+      "file": "lib/terminal/host-connection.ts",
+      "kind": "websocket",
+      "reason": "companion-pinned",
+      "note": "Connects to a paired terminal host over the companion channel, with an injectable factory."
+    },
+    {
+      "file": "lib/terminal/transport-ws.ts",
+      "kind": "websocket",
+      "reason": "companion-pinned",
+      "note": "The remote-terminal socket, reached through the same paired-host channel."
+    },
+    {
+      "file": "packages/logging/src/transports/remote-transport.ts",
+      "kind": "fetch",
+      "reason": "server-side",
+      "note": "Log shipping runs in the Node hosts (headless brain, CLI, sidecar) where the process proxy environment applies."
+    },
+    {
+      "file": "packages/provider-core/src/providers/oauth.ts",
+      "kind": "fetch",
+      "reason": "resource-read",
+      "note": "Posts to the same-origin relative path /api/oauth/<id>/refresh, which CSP allows as 'self'."
+    },
+    {
+      "file": "packages/provider-core/src/providers/ollama-pull.ts",
+      "kind": "fetch",
+      "reason": "browser-fallback",
+      "note": "The browser arm of the NDJSON pull; Tauri uses the dedicated ollama_pull_model_stream command."
+    },
+    {
+      "file": "packages/provider-core/src/providers/runtime-adapters.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The package's inert default, replaced at boot by the host's proxyFetch."
+    },
+    {
+      "file": "packages/rag/src/runtime-adapters.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The package's inert default, replaced at boot by installDesktopNetworkRuntime."
+    },
+    {
+      "file": "packages/tts/src/proxy-fetch.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The TTS package's own transport seam; the desktop host installs the Rust-backed implementation."
+    },
+    {
+      "file": "packages/web-search/src/runtime-adapters.ts",
+      "kind": "fetch",
+      "reason": "transport-impl",
+      "note": "The package's inert default, replaced at boot by installDesktopNetworkRuntime."
+    },
+    {
+      "file": "src-tauri/src/codeserver/process.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Talks to the code-server process this app spawned on loopback."
+    },
+    {
+      "file": "src-tauri/src/codeserver/remote.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Talks to the loopback relay endpoint the IDE bridge owns."
+    },
+    {
+      "file": "src-tauri/src/companion_api/commands.rs",
+      "kind": "no-proxy",
+      "reason": "loopback",
+      "note": "Self-connectivity check against this host's own companion listener."
+    },
+    {
+      "file": "src-tauri/src/headless/backup.rs",
+      "kind": "no-proxy",
+      "reason": "server-side",
+      "note": "Runs in the headless brain, where the process proxy environment is the policy."
+    }
+  ]
+}

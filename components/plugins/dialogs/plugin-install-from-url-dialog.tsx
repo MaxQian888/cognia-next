@@ -9,6 +9,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { GlobeIcon, AlertTriangleIcon, Loader2Icon } from "lucide-react"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import {
   Dialog,
   DialogContent,
@@ -50,7 +51,10 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(trimmed, { credentials: "omit" })
+      // `proxyFetch`: the URL is whatever the user pasted, so it is never on
+      // the packaged shell's `connect-src` allowlist, and a plugin download is
+      // exactly the traffic a corporate proxy must carry.
+      const res = await proxyFetch(trimmed, { credentials: "omit" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const manifest = (await res.json()) as Record<string, unknown>
       // Host-side schema validation BEFORE staging — a raw URL can return any

@@ -18,6 +18,7 @@ import type { PluginContext, PluginDefinition } from "@/types/plugin"
 // `isTauri` retained as fallback when host doesn't expose
 // `ctx.capabilities` (ADR-0026 §5 §C migration path).
 import { isTauri } from "@/lib/tauri"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { defineContextProvider } from "@cognia/plugin-sdk"
 import { createPiiRedactionGate } from "@/packages/plugin-sdk/src/host"
 // web_search / web_fetch share one implementation with the promoted built-in
@@ -105,7 +106,10 @@ async function webDownload(args: DownloadArgs, ctx: PluginContext): Promise<unkn
   }
   const filename = args.filename ?? basenameFromUrl(args.url)
   try {
-    const res = await fetch(args.url)
+    // `proxyFetch`: an agent-supplied download URL is never on the packaged
+    // shell's `connect-src` allowlist. `web_fetch` already goes through the
+    // managed core; this leg was the one that did not.
+    const res = await proxyFetch(args.url)
     if (!res.ok) {
       return { ok: false as const, error: `HTTP ${res.status}` }
     }
