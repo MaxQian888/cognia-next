@@ -59,6 +59,11 @@ interface McpClientOptions {
 /** The slice of the SDK `Client` callers use. */
 export interface McpClientLike {
   connect(transport: unknown): Promise<void>
+  request?<T>(
+    request: { method: string; params?: Record<string, unknown> },
+    resultSchema: unknown,
+    options?: { signal?: AbortSignal; timeout?: number }
+  ): Promise<T>
   callTool(
     params: { name: string; arguments?: Record<string, unknown> },
     resultSchema?: unknown,
