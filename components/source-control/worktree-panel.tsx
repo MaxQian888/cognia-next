@@ -44,7 +44,9 @@ import {
 } from "@/lib/git/commands"
 import { isRemoteGitTarget } from "@/lib/git/target"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
+import { listManagedWorkspaces } from "@/lib/task-workspace/client"
 import { asGitError, type GitWorktree } from "@/types/git"
+import type { ManagedWorkspaceRecord, WorkspaceEnvironmentKind } from "@/lib/task-workspace/types"
 
 interface WorktreePanelProps {
   open: boolean
@@ -62,10 +64,32 @@ function errorDetail(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+function normalizeWorktreePath(path: string): string {
+  return path.replace(/[\\/]+$/, "")
+}
+
+async function loadUnifiedInventory(rootDir: string): Promise<{
+  worktrees: GitWorktree[]
+  registryRows: ManagedWorkspaceRecord[]
+  registryAvailable: boolean
+}> {
+  const [worktrees, registry] = await Promise.all([
+    gitWorktreeList(rootDir),
+    listManagedWorkspaces()
+      .then((registryRows) => ({ registryRows, registryAvailable: true }))
+      .catch(() => ({ registryRows: [], registryAvailable: false })),
+  ])
+  return { worktrees, ...registry }
+}
+
 export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: WorktreePanelProps) {
   const t = useTranslations("sourceControl")
   const tRef = useRef(t)
   const [worktrees, setWorktrees] = useState<GitWorktree[]>([])
+  const [registryOwners, setRegistryOwners] = useState<Map<string, WorkspaceEnvironmentKind>>(
+    new Map()
+  )
+  const [registryAvailable, setRegistryAvailable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [branch, setBranch] = useState("")
@@ -82,16 +106,35 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
   }, [t])
 
   const reload = useCallback(async () => {
-    setWorktrees(await gitWorktreeList(rootDir))
+    const inventory = await loadUnifiedInventory(rootDir)
+    setWorktrees(inventory.worktrees)
+    setRegistryOwners(
+      new Map(
+        inventory.registryRows.map((row) => [
+          normalizeWorktreePath(row.executionRoot),
+          row.environmentKind,
+        ])
+      )
+    )
+    setRegistryAvailable(inventory.registryAvailable)
   }, [rootDir])
 
   useEffect(() => {
     if (!open) return
     let alive = true
-    void gitWorktreeList(rootDir)
-      .then((next) => {
+    void loadUnifiedInventory(rootDir)
+      .then((inventory) => {
         if (!alive) return
-        setWorktrees(next)
+        setWorktrees(inventory.worktrees)
+        setRegistryOwners(
+          new Map(
+            inventory.registryRows.map((row) => [
+              normalizeWorktreePath(row.executionRoot),
+              row.environmentKind,
+            ])
+          )
+        )
+        setRegistryAvailable(inventory.registryAvailable)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -153,6 +196,7 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
   }
 
   const requestRemove = (worktree: GitWorktree) => {
+    if (!registryAvailable || registryOwners.has(normalizeWorktreePath(worktree.path))) return
     setForceRemove(false)
     setDeleteBranch(false)
     setRemoveTarget(worktree)
@@ -177,6 +221,17 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
 
   const pruneWorktrees = () =>
     runMutation("git_worktree_prune", () => gitWorktreePrune(rootDir), "worktrees.pruned")
+
+  const ownershipLabel = (kind: WorkspaceEnvironmentKind) => {
+    switch (kind) {
+      case "managed":
+        return t("worktrees.ownership.managed")
+      case "permanent":
+        return t("worktrees.ownership.permanent")
+      case "imported":
+        return t("worktrees.ownership.imported")
+    }
+  }
 
   return (
     <>
@@ -271,58 +326,75 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
               </div>
             ) : (
               <ul className="flex flex-col gap-1 p-2">
-                {worktrees.map((worktree) => (
-                  <li
-                    key={worktree.path}
-                    className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-accent"
-                    data-testid={`worktree-entry-${worktree.path}`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                        <span className="truncate">
-                          {worktree.branch ?? t("worktrees.detached")}
-                        </span>
-                        {worktree.isMain && (
-                          <Badge variant="secondary" className="shrink-0 text-[10px]">
-                            {t("worktrees.main")}
-                          </Badge>
+                {worktrees.map((worktree) => {
+                  const ownership = registryOwners.get(normalizeWorktreePath(worktree.path))
+                  return (
+                    <li
+                      key={worktree.path}
+                      className="flex items-center gap-2 rounded-md px-2 py-2 hover:bg-accent"
+                      data-testid={`worktree-entry-${worktree.path}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                          <span className="truncate">
+                            {worktree.branch ?? t("worktrees.detached")}
+                          </span>
+                          {worktree.isMain && (
+                            <Badge variant="secondary" className="shrink-0 text-[10px]">
+                              {t("worktrees.main")}
+                            </Badge>
+                          )}
+                          {ownership && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 text-[10px]"
+                              data-testid={`worktree-ownership-${worktree.path}`}
+                            >
+                              {ownershipLabel(ownership)}
+                            </Badge>
+                          )}
+                        </div>
+                        <div
+                          className="truncate text-xs text-muted-foreground"
+                          title={worktree.path}
+                        >
+                          {worktree.path}
+                        </div>
+                        {worktree.head && (
+                          <div className="font-mono text-[10px] text-muted-foreground">
+                            {worktree.head.slice(0, 7)}
+                          </div>
                         )}
                       </div>
-                      <div className="truncate text-xs text-muted-foreground" title={worktree.path}>
-                        {worktree.path}
-                      </div>
-                      {worktree.head && (
-                        <div className="font-mono text-[10px] text-muted-foreground">
-                          {worktree.head.slice(0, 7)}
-                        </div>
+                      {!remote && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={() => openPathAsWorkspace(worktree.path)}
+                          data-testid={`worktree-open-${worktree.path}`}
+                        >
+                          {t("worktrees.open")}
+                        </Button>
                       )}
-                    </div>
-                    {!remote && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs"
-                        onClick={() => openPathAsWorkspace(worktree.path)}
-                        data-testid={`worktree-open-${worktree.path}`}
-                      >
-                        {t("worktrees.open")}
-                      </Button>
-                    )}
-                    {!worktree.isMain && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-7 text-destructive"
-                        aria-label={t("worktrees.remove")}
-                        disabled={!can("git_worktree_remove")}
-                        onClick={() => requestRemove(worktree)}
-                        data-testid={`worktree-remove-${worktree.path}`}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
-                    )}
-                  </li>
-                ))}
+                      {!worktree.isMain && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-7 text-destructive"
+                          aria-label={t("worktrees.remove")}
+                          disabled={
+                            !can("git_worktree_remove") || !registryAvailable || Boolean(ownership)
+                          }
+                          onClick={() => requestRemove(worktree)}
+                          data-testid={`worktree-remove-${worktree.path}`}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
+                    </li>
+                  )
+                })}
                 {worktrees.length === 0 && (
                   <li className="px-2 py-6 text-center text-sm text-muted-foreground">
                     {t("worktrees.empty")}

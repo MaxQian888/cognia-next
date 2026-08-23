@@ -364,6 +364,11 @@
     "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
     "main": "Main",
     "open": "Open",
+    "ownership": {
+      "imported": "Imported environment",
+      "managed": "Managed environment",
+      "permanent": "Permanent environment"
+    },
     "pathLabel": "Empty directory",
     "pathPlaceholder": "Choose an empty directory",
     "prune": "Prune stale",

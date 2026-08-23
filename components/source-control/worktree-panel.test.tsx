@@ -12,6 +12,7 @@ const pickDirectory = jest.fn<Promise<string | null>, []>()
 const openPathAsWorkspace = jest.fn()
 const toastError = jest.fn()
 const toastSuccess = jest.fn()
+const listManagedWorkspaces = jest.fn()
 
 jest.mock("@/lib/git/commands", () => ({
   gitWorktreeAdd: (...args: [string, string, string, string?]) => gitWorktreeAdd(...args),
@@ -32,6 +33,9 @@ jest.mock("sonner", () => ({
     success: (...args: unknown[]) => toastSuccess(...args),
   },
 }))
+jest.mock("@/lib/task-workspace/client", () => ({
+  listManagedWorkspaces: () => listManagedWorkspaces(),
+}))
 
 const worktrees: GitWorktree[] = [
   { path: "/repo", branch: "main", head: "1111111", isMain: true },
@@ -45,6 +49,7 @@ beforeEach(() => {
   gitWorktreePrune.mockResolvedValue(undefined)
   gitWorktreeRemove.mockResolvedValue(undefined)
   pickDirectory.mockResolvedValue("/work/feature-b")
+  listManagedWorkspaces.mockResolvedValue([])
 })
 
 describe("WorktreePanel", () => {
@@ -56,6 +61,22 @@ describe("WorktreePanel", () => {
     expect(screen.getByTestId("worktree-entry-/work/feature-a")).toBeInTheDocument()
     expect(screen.queryByTestId("worktree-remove-/repo")).not.toBeInTheDocument()
     expect(screen.getByTestId("worktree-remove-/work/feature-a")).toBeInTheDocument()
+  })
+
+  it("refuses removal of worktrees owned by the Registry", async () => {
+    listManagedWorkspaces.mockResolvedValueOnce([
+      { executionRoot: "/work/feature-a", environmentKind: "managed" },
+    ])
+    const user = userEvent.setup()
+    render(<WorktreePanel open rootDir="/repo" onOpenChange={() => {}} />)
+
+    const remove = await screen.findByTestId("worktree-remove-/work/feature-a")
+    expect(remove).toBeDisabled()
+    expect(screen.getByTestId("worktree-ownership-/work/feature-a")).toHaveTextContent(
+      "Managed environment"
+    )
+    await user.click(remove)
+    expect(screen.queryByTestId("worktree-remove-dialog")).not.toBeInTheDocument()
   })
 
   it("opens a linked worktree as a workspace", async () => {

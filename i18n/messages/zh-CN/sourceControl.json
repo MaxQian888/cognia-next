@@ -364,6 +364,11 @@
     "forceRemoveDescription": "丢弃此工作树中未提交的更改。",
     "main": "主工作树",
     "open": "打开",
+    "ownership": {
+      "imported": "导入环境",
+      "managed": "托管环境",
+      "permanent": "永久环境"
+    },
     "pathLabel": "空目录",
     "pathPlaceholder": "选择一个空目录",
     "prune": "清理失效项",
