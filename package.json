@@ -341,6 +341,7 @@
     "@hookform/resolvers": "^5.9.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/core": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
     "@octokit/auth-app": "^8.3.0",

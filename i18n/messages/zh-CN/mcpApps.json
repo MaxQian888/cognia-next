@@ -1,0 +1,5 @@
+{
+  "approvalRequired": "此 MCP App 请求了尚未批准的能力。",
+  "runtimeError": "MCP App 无法安全启动。",
+  "frameTitle": "来自 {server} 的应用"
+}
