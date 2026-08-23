@@ -1,14 +1,18 @@
 // Client for the official MCP Registry (registry.modelcontextprotocol.io).
 //
 // Why this shape:
-//   - The registry serves `Access-Control-Allow-Origin: *`, so the renderer can
-//     call it directly. No Tauri/axum hop needed, and it still works in the
-//     browser shell and the static export.
+//   - The registry serves `Access-Control-Allow-Origin: *`, so CORS is a
+//     non-issue — but CORS is not what blocks the packaged desktop shell.
+//     `connect-src` is, and `registry.modelcontextprotocol.io` is not on it,
+//     so the call goes through `proxyFetch` (a passthrough off Tauri, which
+//     keeps the browser shell and the static export working unchanged).
 //   - Results are mapped onto `McpPreset`, the same type the curated catalog
 //     uses, so the gallery's configure step / handlePick work unchanged.
 //
 // API: GET /v0.1/servers?search=&limit=&cursor= → { servers, metadata.nextCursor }
 // Docs: https://github.com/modelcontextprotocol/registry
+
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 import type { McpTransport } from "@cognia/agent-config-types"
 import type { McpPreset, McpPresetField } from "@/lib/claude/mcp-presets"
@@ -192,7 +196,7 @@ export async function searchRegistry(opts: {
   if (opts.cursor) params.set("cursor", opts.cursor)
   params.set("limit", String(opts.limit ?? 30))
 
-  const res = await fetch(`${REGISTRY_BASE}/v0.1/servers?${params.toString()}`, {
+  const res = await proxyFetch(`${REGISTRY_BASE}/v0.1/servers?${params.toString()}`, {
     signal: opts.signal,
     headers: { Accept: "application/json" },
   })

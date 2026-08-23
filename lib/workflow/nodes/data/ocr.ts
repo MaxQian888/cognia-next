@@ -18,6 +18,7 @@
 import { extract } from "@/lib/ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import { registerNodeExecutor } from "../registry"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import type { StepExecutionContext } from "@/types/workflow/visual"
 import type { OcrInput, OcrOutputFormat, OcrResult } from "@/types/ocr"
 
@@ -53,7 +54,9 @@ export async function resolveOcrNodeSource(
 
   const url = strParam(params, "url")
   if (url) {
-    const blob = await (await fetch(url)).blob()
+    // `proxyFetch`, like every other workflow egress: the image lives on
+    // whatever host the author pointed at, which `connect-src` does not list.
+    const blob = await (await proxyFetch(url)).blob()
     return { kind: "blob", blob, mimeType: blob.type || "application/octet-stream" }
   }
 

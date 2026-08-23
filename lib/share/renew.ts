@@ -3,9 +3,11 @@
 // Kept in its own module rather than folded into `client.ts` so it composes
 // cleanly with the create/revoke flow without enlarging that file. The small
 // owner-action auth + error-read helpers mirror `client.ts` (X-Owner-Token,
-// falling back to the upload-secret bearer for legacy shares).
+// falling back to the upload-secret bearer for legacy shares) — including
+// `proxyFetch`, for the same reason `client.ts` uses it.
 
 import { getSharedLinkByCode, updateSharedLinkExpiry } from "@/lib/db/shared-links"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 import { ShareNotConfiguredError, ShareRequestError } from "./client"
 import { resolveShareEndpoint, type ShareEndpoint } from "./config"
@@ -41,7 +43,7 @@ export async function extendShareLink(
 ): Promise<number> {
   const ep = endpoint ?? (await resolveShareEndpoint())
   const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await fetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
+  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "PATCH",
     headers: ownerActionHeaders(ep, ownerToken),
     body: JSON.stringify({ ttlSeconds }),

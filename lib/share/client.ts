@@ -1,10 +1,16 @@
 // Owner-side share service: create / revoke / inspect public links.
 //
+// Every request goes through `proxyFetch`: the worker URL is whatever the user
+// typed in Settings, so it is never on the packaged shell's `connect-src`
+// allowlist, and a renderer `fetch` would also ignore the configured proxy.
+//
 // Create flow: generate a random key → encrypt the payload (key never uploaded)
 // → POST the opaque envelope to the worker with the bearer secret → mint the
 // shareable URL `${base}/share/view?c=<code>#k=<key>` → mirror it into Dexie.
 // The viewer is the app's own `/share/view` route (ADR-0037 Phase 4); reads are
 // public and handled there, not by this module.
+
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 import { generateShareKey, encodeShareKey } from "./keys"
 import { encryptSharePayload } from "./crypto"
@@ -132,7 +138,7 @@ export async function createShareLink(
   const serializedBody = JSON.stringify(body)
   assertShareRequestSize(serializedBody)
 
-  const res = await fetch(`${ep.baseUrl}/v1/share`, {
+  const res = await proxyFetch(`${ep.baseUrl}/v1/share`, {
     method: "POST",
     headers,
     body: serializedBody,
@@ -173,7 +179,7 @@ export async function createShareLink(
 export async function revokeShareLink(code: string, endpoint?: ShareEndpoint): Promise<void> {
   const ep = endpoint ?? (await resolveShareEndpoint())
   const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await fetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
+  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}`, {
     method: "DELETE",
     headers: ownerActionHeaders(ep, ownerToken),
   })
@@ -192,7 +198,7 @@ export async function getShareStats(
 ): Promise<ShareStats | null> {
   const ep = endpoint ?? (await resolveShareEndpoint())
   const ownerToken = (await getSharedLinkByCode(code))?.ownerToken
-  const res = await fetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}/stats`, {
+  const res = await proxyFetch(`${ep.baseUrl}/v1/share/${encodeURIComponent(code)}/stats`, {
     method: "GET",
     headers: ownerActionHeaders(ep, ownerToken),
   })

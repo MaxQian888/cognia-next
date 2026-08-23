@@ -2,6 +2,7 @@
 
 import { getSiteEnvironmentRevision, getSiteProject } from "@/lib/db/sites"
 import { readTextFile } from "@/lib/file/file-operations"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { killFromDock, spawnFromDock, type SpawnOutcome } from "@/lib/terminal/spawn-orchestrator"
 import { parseSiteHostingManifest } from "./manifest"
 import { resolveSiteManifestPath, resolveSiteSourceDir } from "./manifest-file"
@@ -30,7 +31,12 @@ async function defaultWaitUntilReady(url: string): Promise<void> {
   let lastError: unknown
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url, { method: "GET", cache: "no-store" })
+      // `proxyFetch`, even though the target is loopback: the packaged shell's
+      // `connect-src` does not list `http://localhost:<port>` any more than it
+      // lists a public host, so a renderer `fetch` here never reached the dev
+      // server it was polling. Loopback is in the default bypass list, so the
+      // native side still dials direct.
+      const response = await proxyFetch(url, { method: "GET", cache: "no-store" })
       if (response.ok || response.type === "opaque") return
       lastError = new Error(`HTTP ${response.status}`)
     } catch (error) {

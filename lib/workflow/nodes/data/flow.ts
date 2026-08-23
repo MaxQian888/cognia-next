@@ -19,6 +19,7 @@ import {
   resolveAggregateInput,
 } from "../shared/executor-support"
 import type { AggregateParams } from "../shared/executor-support"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 // ── flow.set ──────────────────────────────────────────────────────────────
 registerNodeExecutor({
@@ -589,7 +590,10 @@ registerNodeExecutor({
         headers["Content-Type"] = "application/json"
       }
     }
-    const response = await fetch(guarded.value.url, {
+    // `proxyFetch`: the URL comes from the workflow author, so it is never on
+    // the packaged shell's `connect-src` allowlist, and an HTTP node is the
+    // most literal case of traffic the configured proxy must carry.
+    const response = await proxyFetch(guarded.value.url, {
       method,
       headers,
       body,

@@ -7,8 +7,14 @@
 // The actual disk install is done by the Rust `plugin_install_from_github`
 // command (via `getPluginManager().installPluginFromGithub`); this module
 // only handles parsing + the read-only preview the UI shows before install.
+//
+// Every call uses `proxyFetch`: `api.github.com` is not on the packaged
+// shell's `connect-src` allowlist, so a renderer `fetch` never leaves the
+// WebView — and a user behind a corporate proxy reaches GitHub only through
+// it.
 
 import type { PluginManifest } from "@/types/plugin"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import {
   convertPluginBundle,
   type PluginConversionReport,
@@ -152,7 +158,7 @@ function refQuery(ref?: string): string {
 async function resolveGithubCommit(ref: GithubPluginRef): Promise<GithubPluginRef> {
   const requested = ref.ref ?? "HEAD"
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/commits/${encodeURIComponent(requested)}`
-  const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } })
+  const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
   if (!res.ok) throw new Error(`GitHub API ${res.status} while resolving ${requested}`)
   const json = (await res.json()) as { sha?: unknown }
   if (typeof json.sha !== "string" || !/^[0-9a-f]{40}$/i.test(json.sha)) {
@@ -176,7 +182,7 @@ function decodeBase64Utf8(b64: string): string {
  */
 export async function fetchGithubFile(ref: GithubPluginRef, path: string): Promise<string | null> {
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/contents/${path}${refQuery(ref.ref)}`
-  const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } })
+  const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`GitHub API ${res.status} for ${path}`)
   const json = (await res.json()) as
@@ -190,7 +196,7 @@ export async function fetchGithubFile(ref: GithubPluginRef, path: string): Promi
 /** List the immediate sub-directory paths of `path` (default: repo root). */
 async function listRepoDirs(ref: GithubPluginRef, path = ""): Promise<string[]> {
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/contents/${path}${refQuery(ref.ref)}`
-  const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } })
+  const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
   if (!res.ok) return []
   const json = (await res.json()) as unknown
   if (!Array.isArray(json)) return []
@@ -207,7 +213,7 @@ interface GithubRepoEntry {
 
 async function listRepoEntries(ref: GithubPluginRef, path = ""): Promise<GithubRepoEntry[]> {
   const url = `${GITHUB_API}/repos/${ref.owner}/${ref.repo}/contents/${path}${refQuery(ref.ref)}`
-  const res = await fetch(url, { headers: { Accept: "application/vnd.github+json" } })
+  const res = await proxyFetch(url, { headers: { Accept: "application/vnd.github+json" } })
   if (!res.ok) return []
   const json = (await res.json()) as unknown
   return Array.isArray(json) ? (json as GithubRepoEntry[]) : []

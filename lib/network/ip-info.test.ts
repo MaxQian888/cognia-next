@@ -2,16 +2,13 @@
  * @jest-environment node
  */
 
-jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
+const proxyFetch = jest.fn()
+jest.mock("@/lib/network/proxy-fetch", () => ({
+  proxyFetch: (...args: [RequestInfo | URL, Record<string, unknown>?]) => proxyFetch(...args),
+}))
 jest.mock("@cognia/logging", () => ({
   loggers: { network: { warn: jest.fn(), debug: jest.fn() } },
 }))
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { isTauri } = require("@/lib/tauri") as { isTauri: jest.Mock }
 
 import { fetchIpInfo, IP_INFO_URL } from "./ip-info"
 
@@ -27,29 +24,27 @@ const RAW = JSON.stringify({
   hostname: "host.example",
 })
 
-const encoded = (value: string) => Buffer.from(value, "utf8").toString("base64")
+function respond(status: number, body: string): void {
+  proxyFetch.mockResolvedValue({ status, text: () => Promise.resolve(body) })
+}
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  proxyFetch.mockReset()
 })
 
-describe("fetchIpInfo (Tauri path)", () => {
-  beforeEach(() => isTauri.mockReturnValue(true))
+describe("fetchIpInfo", () => {
+  it("goes through the shared proxy transport with the lookup timeout", async () => {
+    respond(200, RAW)
 
-  it("routes through proxy_http_request and normalizes the payload", async () => {
-    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded(RAW), headers: {} })
     const res = await fetchIpInfo()
-    expect(invoke).toHaveBeenCalledWith(
-      "proxy_http_request",
-      expect.objectContaining({
-        input: expect.objectContaining({
-          url: IP_INFO_URL,
-          method: "GET",
-          timeoutMs: 15_000,
-          redirect: "follow",
-        }),
-      })
-    )
+
+    // One transport, not a hand-rolled Tauri/browser fork: `proxyFetch` is the
+    // Rust bridge on the desktop (so the reported IP is the proxy's egress)
+    // and the platform `fetch` everywhere else.
+    expect(proxyFetch).toHaveBeenCalledWith(IP_INFO_URL, {
+      headers: { Accept: "application/json" },
+      timeout: 15_000,
+    })
     expect(res).toEqual({
       ok: true,
       info: {
@@ -67,66 +62,34 @@ describe("fetchIpInfo (Tauri path)", () => {
   })
 
   it("reports an error for a non-2xx status", async () => {
-    invoke.mockResolvedValue({ status: 429, bodyBase64: "", headers: {} })
+    respond(429, "")
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "HTTP 429" })
   })
 
   it("reports an error for invalid JSON", async () => {
-    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded("not json"), headers: {} })
+    respond(200, "not json")
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "invalid JSON response" })
   })
 
   it("reports an error when the payload has no ip", async () => {
-    invoke.mockResolvedValue({
-      status: 200,
-      bodyBase64: encoded(JSON.stringify({ city: "x" })),
-      headers: {},
-    })
+    respond(200, JSON.stringify({ city: "x" }))
+    expect(await fetchIpInfo()).toEqual({ ok: false, error: "no IP in response" })
+  })
+
+  it("returns an error when the response is not an object", async () => {
+    respond(200, "42")
     expect(await fetchIpInfo()).toEqual({ ok: false, error: "no IP in response" })
   })
 
   it("drops blank/non-string optional fields", async () => {
-    invoke.mockResolvedValue({
-      status: 200,
-      bodyBase64: encoded(JSON.stringify({ ip: "1.1.1.1", city: "  ", region: 5, org: "AS13335" })),
-      headers: {},
-    })
-    const res = await fetchIpInfo()
-    expect(res).toEqual({ ok: true, info: { ip: "1.1.1.1", org: "AS13335" } })
+    respond(200, JSON.stringify({ ip: "1.1.1.1", city: "  ", region: 5, org: "AS13335" }))
+    expect(await fetchIpInfo()).toEqual({ ok: true, info: { ip: "1.1.1.1", org: "AS13335" } })
   })
 
-  it("resolves to an error when invoke throws", async () => {
-    invoke.mockRejectedValue(new Error("boom"))
-    expect(await fetchIpInfo()).toEqual({ ok: false, error: "boom" })
-  })
-
-  it("returns an error when the response is not an object", async () => {
-    invoke.mockResolvedValue({ status: 200, bodyBase64: encoded("42"), headers: {} })
-    expect(await fetchIpInfo()).toEqual({ ok: false, error: "no IP in response" })
-  })
-})
-
-describe("fetchIpInfo (browser path)", () => {
-  beforeEach(() => isTauri.mockReturnValue(false))
-  const originalFetch = global.fetch
-
-  afterEach(() => {
-    global.fetch = originalFetch
-  })
-
-  it("uses fetch and returns normalized info", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      text: () => Promise.resolve(JSON.stringify({ ip: "8.8.8.8", country: "US" })),
-    }) as unknown as typeof fetch
-    const res = await fetchIpInfo()
-    expect(global.fetch).toHaveBeenCalledWith(IP_INFO_URL, expect.objectContaining({}))
-    expect(res).toEqual({ ok: true, info: { ip: "8.8.8.8", country: "US" } })
-    expect(invoke).not.toHaveBeenCalled()
-  })
-
-  it("surfaces a fetch rejection as an error result", async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error("network down")) as unknown as typeof fetch
-    expect(await fetchIpInfo()).toEqual({ ok: false, error: "network down" })
+  it("resolves to an error result when the transport rejects", async () => {
+    // Never throws: the caller renders this in a settings card, and a proxy
+    // that is down must not take the panel with it.
+    proxyFetch.mockRejectedValue(new Error("Proxy request failed: boom"))
+    expect(await fetchIpInfo()).toEqual({ ok: false, error: "Proxy request failed: boom" })
   })
 })

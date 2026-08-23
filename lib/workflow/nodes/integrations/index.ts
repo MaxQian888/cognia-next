@@ -9,6 +9,7 @@ import {
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
 import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { guardWorkflowEgress } from "@/lib/workflow/runtime/egress-guard"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { nonRetryable, sha256Hex } from "../shared/executor-support"
 
@@ -251,7 +252,8 @@ registerNodeExecutor({
     if (sourceMode === "fetch") {
       const url = params.url?.trim()
       if (!url) throw nonRetryable("twin.ingest fetch mode requires 'url'")
-      const res = await fetch(url, { signal: ctx.signal })
+      // `proxyFetch`: an author-supplied ingest URL is never on `connect-src`.
+      const res = await proxyFetch(url, { signal: ctx.signal })
       if (!res.ok) {
         const err = new Error(`twin.ingest fetch ${url} → ${res.status}`) as Error & {
           retryable?: boolean

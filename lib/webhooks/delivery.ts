@@ -4,7 +4,14 @@
  * The body is serialized ONCE and the exact same bytes are both signed and
  * sent — re-serializing per attempt would risk a signature/body mismatch. The
  * `webhook-id` is held constant across retries so receivers can dedupe.
+ *
+ * Delivery goes through `proxyFetch`. The endpoint is whatever URL the user
+ * configured, so it is never on the packaged shell's `connect-src` allowlist,
+ * and an outbound webhook is exactly the traffic a corporate proxy is there to
+ * see.
  */
+
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 import { buildSignedHeaders } from "./signing"
 import {
@@ -79,7 +86,7 @@ export async function deliverWebhook(
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const res = await fetch(endpoint.url, {
+      const res = await proxyFetch(endpoint.url, {
         method: "POST",
         headers: baseHeaders,
         body,

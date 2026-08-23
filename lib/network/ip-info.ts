@@ -12,9 +12,9 @@
  * module never fires unless the caller has checked that flag.
  */
 
-import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/tauri"
 import { loggers } from "@cognia/logging"
+
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 
 const log = loggers.network
 
@@ -40,19 +40,6 @@ export interface IpInfo {
 }
 
 export type IpInfoResult = { ok: true; info: IpInfo } | { ok: false; error: string }
-
-/** Shape of the `proxy_http_request` Tauri command output (subset). */
-interface ProxyHttpResponse {
-  status: number
-  bodyBase64: string
-  headers: Record<string, string>
-}
-
-function decodeBody(value: string): string {
-  const binary = atob(value)
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-  return new TextDecoder().decode(bytes)
-}
 
 /** Coerce an unknown JSON blob into `IpInfo`, keeping only string fields. */
 function normalizeIpInfo(raw: unknown): IpInfo | null {
@@ -84,35 +71,16 @@ function normalizeIpInfo(raw: unknown): IpInfo | null {
  */
 export async function fetchIpInfo(): Promise<IpInfoResult> {
   try {
-    let body: string
-    let status: number
-    if (isTauri()) {
-      const res = await invoke<ProxyHttpResponse>("proxy_http_request", {
-        input: {
-          requestId: globalThis.crypto?.randomUUID?.() ?? `ip-info-${Date.now()}`,
-          url: IP_INFO_URL,
-          method: "GET",
-          headers: { Accept: "application/json" },
-          timeoutMs: IP_INFO_TIMEOUT_SECS * 1000,
-          redirect: "follow",
-        },
-      })
-      body = decodeBody(res.bodyBase64)
-      status = res.status
-    } else {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), IP_INFO_TIMEOUT_SECS * 1000)
-      try {
-        const res = await fetch(IP_INFO_URL, {
-          headers: { Accept: "application/json" },
-          signal: controller.signal,
-        })
-        body = await res.text()
-        status = res.status
-      } finally {
-        clearTimeout(timer)
-      }
-    }
+    // One transport for both shells: `proxyFetch` is the Rust bridge on Tauri
+    // (so the reported IP is the proxy's egress) and the platform `fetch`
+    // everywhere else. This module used to hand-roll the same fork, including
+    // its own base64 decode of the native response.
+    const res = await proxyFetch(IP_INFO_URL, {
+      headers: { Accept: "application/json" },
+      timeout: IP_INFO_TIMEOUT_SECS * 1000,
+    })
+    const status = res.status
+    const body = await res.text()
 
     if (status < 200 || status >= 300) {
       return { ok: false, error: `HTTP ${status}` }

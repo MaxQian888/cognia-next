@@ -15,6 +15,7 @@ import {
   updateIntegrationActionJob,
 } from "@/lib/db/integrations"
 import { getProvider } from "@/lib/plugin/auth/auth-provider-registry"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 import { getIntegrationActionHandler, getRegisteredIntegration } from "@/lib/integrations/registry"
 import { runGithubIssueLoop } from "@/lib/integrations/github-issue-loop"
@@ -149,7 +150,7 @@ async function defaultAuthenticatedRequest<T>(
   } else {
     headers.set(requestAuth.name, `${requestAuth.prefix ?? ""}${credential.accessToken}`)
   }
-  const response = await fetch(url, {
+  const response = await proxyFetch(url, {
     method: init.method,
     headers,
     body: init.body,
