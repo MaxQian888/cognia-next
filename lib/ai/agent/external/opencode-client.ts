@@ -28,6 +28,7 @@ import type {
 
 import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/utils"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { isExternalAgentAlreadyRunningError } from "./spawn-reclaim"
 import {
@@ -297,7 +298,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       // the server is password-protected (OPENCODE_SERVER_PASSWORD) or a
       // bearer token / custom headers are configured.
       this.baseUrl = baseUrl
-      this.requestFetch = this.buildAuthFetch(config)
+      this.requestFetch = this.buildTransportFetch(config)
       this.client = createOpencodeClient({ baseUrl, fetch: this.requestFetch })
 
       // Probe reachability with a cheap, non-SSE call. When we auto-spawned the
@@ -384,23 +385,36 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   // ============================================================================
 
   /**
-   * Build a custom `fetch` that injects authentication headers when the server
-   * is protected. Supports custom `network.headers`, a bearer token, and HTTP
-   * Basic Auth (OpenCode's `OPENCODE_SERVER_PASSWORD`, default user "opencode").
-   * Returns `undefined` when no auth is configured so the SDK uses the default
-   * fetch. The same fetch is reused by the SDK for both REST and SSE requests.
+   * Build the `fetch` the SDK uses for every REST call and the event stream.
+   *
+   * Two jobs in one function, because the SDK takes exactly one hook:
+   *
+   *  1. Inject authentication when the server is protected — custom
+   *     `network.headers`, a bearer token, or HTTP Basic Auth (OpenCode's
+   *     `OPENCODE_SERVER_PASSWORD`, default user "opencode").
+   *  2. Put the request on the host transport.
+   *
+   * (2) is why this is no longer optional. It previously returned `undefined`
+   * for an unauthenticated server so the SDK fell back to a bare `fetch` — and
+   * a bare `fetch` reaches neither a remote OpenCode host (blocked by the
+   * packaged shell's `connect-src`, and invisible to the configured proxy) nor
+   * an auto-spawned local one (`http://127.0.0.1:4096` is not `'self'`
+   * either). The *streaming* transport specifically: the SDK uses this same
+   * hook for `/event`, whose SSE body never ends, so a buffered bridge would
+   * hang there forever.
    */
-  private buildAuthFetch(
+  private buildTransportFetch(
     config: ExternalAgentConfig
-  ): ((request: Request) => ReturnType<typeof fetch>) | undefined {
+  ): (request: Request) => ReturnType<typeof fetch> {
     const headers = this.buildAuthHeaders(config)
-    if (!headers) return undefined
 
     return (request: Request) => {
-      for (const [key, value] of Object.entries(headers)) {
-        request.headers.set(key, value)
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          request.headers.set(key, value)
+        }
       }
-      return fetch(request)
+      return platformStreamingFetch(request)
     }
   }
 
@@ -988,7 +1002,11 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
           }
         : {}),
     })
-    const response = await (this.requestFetch ? this.requestFetch(request) : fetch(request))
+    // `requestFetch` is set for the life of a connection; the fallback covers
+    // a reply that races `disconnect()` clearing it.
+    const response = await (this.requestFetch
+      ? this.requestFetch(request)
+      : platformStreamingFetch(request))
     if (!response.ok) {
       throw new Error(`OpenCode interaction reply failed with HTTP ${response.status}`)
     }

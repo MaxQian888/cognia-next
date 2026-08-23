@@ -25,6 +25,14 @@ jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
 }))
 
+jest.mock("@/lib/network/platform-streaming-fetch", () => ({
+  platformStreamingFetch: jest.fn(),
+}))
+
+jest.mock("@/lib/network/platform-websocket", () => ({
+  createPlatformWebSocket: jest.fn(),
+}))
+
 jest.mock("./agent-transport", () => ({
   ...jest.requireActual("./agent-transport"),
   agentReadTextFile: jest.fn(),
@@ -61,6 +69,9 @@ import {
 } from "@/lib/native/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
+import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
 import {
   AcpClientAdapter,
   buildSpawnArgs,
@@ -1402,7 +1413,7 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
   type TeardownInternals = {
     processId?: string
     networkSocket?: { close: jest.Mock }
-    networkEventSource?: { close: jest.Mock }
+    networkEventAbort?: AbortController
     pendingPermissions: Map<
       string,
       { resolve: (r: unknown) => void; timeout: ReturnType<typeof setTimeout> }
@@ -1410,7 +1421,7 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
   }
   const internals = (a: AcpClientAdapter) => a as unknown as TeardownInternals
 
-  it("closes the socket + event source, resolves pending permissions, and tolerates a kill failure", async () => {
+  it("closes the socket, aborts the event stream, resolves pending permissions, and tolerates a kill failure", async () => {
     mockIsTauri.mockReturnValue(true)
     mockInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "kill_external_agent") throw new Error("kill boom")
@@ -1420,10 +1431,10 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
     const a = new AcpClientAdapter()
     setStatus(a, "connected")
     internals(a).processId = "proc-1"
-    const socket = { close: jest.fn() }
-    const eventSource = { close: jest.fn() }
+    const socket = { close: jest.fn().mockResolvedValue(undefined) }
+    const eventAbort = new AbortController()
     internals(a).networkSocket = socket
-    internals(a).networkEventSource = eventSource
+    internals(a).networkEventAbort = eventAbort
 
     const resolved: unknown[] = []
     internals(a).pendingPermissions.set("p1", {
@@ -1436,10 +1447,25 @@ describe("AcpClientAdapter — teardownTransport (shared by disconnect + connect
 
     expect(mockInvoke).toHaveBeenCalledWith("kill_external_agent", { agentId: "proc-1" })
     expect(socket.close).toHaveBeenCalledTimes(1)
-    expect(eventSource.close).toHaveBeenCalledTimes(1)
+    // The SSE read loop is detached; aborting is what actually ends it and
+    // releases the native stream behind it.
+    expect(eventAbort.signal.aborted).toBe(true)
     expect(resolved).toEqual([{ outcome: { outcome: "cancelled" } }])
     expect(internals(a).networkSocket).toBeUndefined()
-    expect(internals(a).networkEventSource).toBeUndefined()
+    expect(internals(a).networkEventAbort).toBeUndefined()
+    expect(a.connectionStatus).toBe("disconnected")
+  })
+
+  it("does not let a failing socket close abort the rest of the teardown", async () => {
+    mockIsTauri.mockReturnValue(false)
+    const a = new AcpClientAdapter()
+    setStatus(a, "connected")
+    const socket = { close: jest.fn().mockRejectedValue(new Error("socket boom")) }
+    internals(a).networkSocket = socket
+
+    await expect(a.disconnect()).resolves.toBeUndefined()
+
+    expect(internals(a).networkSocket).toBeUndefined()
     expect(a.connectionStatus).toBe("disconnected")
   })
 })
@@ -2191,5 +2217,136 @@ describe("AcpClientAdapter — stderr forwarding", () => {
       debugSpy.mockRestore()
       warnSpy.mockRestore()
     }
+  })
+})
+
+describe("AcpClientAdapter — network transports", () => {
+  const mockedProxyFetch = proxyFetch as jest.Mock
+  const mockedStreamingFetch = platformStreamingFetch as jest.Mock
+  const mockedCreateSocket = createPlatformWebSocket as jest.Mock
+
+  function networkConfig(transport: "websocket" | "sse"): ExternalAgentConfig {
+    return {
+      id: "remote-agent",
+      name: "Remote agent",
+      protocol: "acp",
+      transport,
+      network: {
+        endpoint: "https://agent.example.com",
+        authMethod: "bearer",
+        bearerToken: "secret-token",
+      },
+    } as unknown as ExternalAgentConfig
+  }
+
+  function sseBody(...frames: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder()
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const frame of frames) controller.enqueue(encoder.encode(frame))
+        controller.close()
+      },
+    })
+  }
+
+  beforeEach(() => {
+    mockIsTauri.mockReturnValue(true)
+    // The advisory /health probe runs before either transport is set up.
+    mockedProxyFetch.mockReset().mockResolvedValue(new Response("", { status: 404 }))
+    mockedStreamingFetch.mockReset()
+    mockedCreateSocket.mockReset()
+  })
+
+  it("dials the WebSocket transport through the proxy-aware socket, carrying the bearer", async () => {
+    const socket = { id: "h1", kind: "native", send: jest.fn(), close: jest.fn() }
+    mockedCreateSocket.mockResolvedValue(socket)
+    const adapter = new AcpClientAdapter()
+
+    await (
+      adapter as unknown as {
+        connectViaNetwork: (c: ExternalAgentConfig) => Promise<void>
+      }
+    ).connectViaNetwork(networkConfig("websocket"))
+
+    const [url, options] = mockedCreateSocket.mock.calls[0] as [
+      string,
+      { headers: Record<string, string> },
+    ]
+    expect(url).toBe("https://agent.example.com/message")
+    // The bare `WebSocket` constructor cannot send this, which is why the
+    // transport had to change rather than just being wrapped.
+    expect(options.headers.Authorization).toBe("Bearer secret-token")
+  })
+
+  it("feeds WebSocket frames to the JSON-RPC peer", async () => {
+    let onMessage: ((data: string) => void) | undefined
+    mockedCreateSocket.mockImplementation(async (_url, options) => {
+      onMessage = options.onMessage
+      return { id: "h1", kind: "native", send: jest.fn(), close: jest.fn() }
+    })
+    const adapter = new AcpClientAdapter()
+    const ingest = jest.fn()
+    ;(adapter as unknown as { peer?: { ingest: jest.Mock } }).peer = { ingest }
+
+    await (
+      adapter as unknown as {
+        connectViaNetwork: (c: ExternalAgentConfig) => Promise<void>
+      }
+    ).connectViaNetwork(networkConfig("websocket"))
+    onMessage?.('{"jsonrpc":"2.0","id":1}')
+
+    expect(ingest).toHaveBeenCalledWith('{"jsonrpc":"2.0","id":1}')
+  })
+
+  it("subscribes to the SSE endpoint with an Accept header and streams frames to the peer", async () => {
+    mockedStreamingFetch.mockResolvedValue(
+      new Response(sseBody('data: {"a":1}\n\n', 'data: {"b":2}\n\n'), { status: 200 })
+    )
+    const adapter = new AcpClientAdapter()
+    const ingest = jest.fn()
+    ;(adapter as unknown as { peer?: { ingest: jest.Mock } }).peer = { ingest }
+
+    await (
+      adapter as unknown as {
+        connectViaNetwork: (c: ExternalAgentConfig) => Promise<void>
+      }
+    ).connectViaNetwork(networkConfig("sse"))
+    // The read loop is detached on purpose; let it drain.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const [url, init] = mockedStreamingFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("https://agent.example.com/events")
+    expect((init.headers as Record<string, string>).accept).toBe("text/event-stream")
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret-token")
+    expect(ingest).toHaveBeenNthCalledWith(1, '{"a":1}')
+    expect(ingest).toHaveBeenNthCalledWith(2, '{"b":2}')
+  })
+
+  it("fails the connect when the SSE endpoint answers non-2xx", async () => {
+    // `EventSource` reported this as an opaque onerror; the streaming
+    // transport can say which status came back.
+    mockedStreamingFetch.mockResolvedValue(new Response("nope", { status: 503 }))
+    const adapter = new AcpClientAdapter()
+
+    await expect(
+      (
+        adapter as unknown as {
+          connectViaNetwork: (c: ExternalAgentConfig) => Promise<void>
+        }
+      ).connectViaNetwork(networkConfig("sse"))
+    ).rejects.toThrow("SSE connection failed: HTTP 503")
+  })
+
+  it("fails the connect when the SSE transport itself throws", async () => {
+    mockedStreamingFetch.mockRejectedValue(new Error("Proxy stream failed: dns error"))
+    const adapter = new AcpClientAdapter()
+
+    await expect(
+      (
+        adapter as unknown as {
+          connectViaNetwork: (c: ExternalAgentConfig) => Promise<void>
+        }
+      ).connectViaNetwork(networkConfig("sse"))
+    ).rejects.toThrow("SSE connection failed: Proxy stream failed: dns error")
   })
 })

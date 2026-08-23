@@ -28,6 +28,8 @@ import type {
 } from "@/types/agent/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
+import { readServerSentEvents } from "@/lib/network/sse-reader"
 
 /** A2A TaskState string values (JSON-RPC binding). */
 export type A2aTaskState =
@@ -340,7 +342,15 @@ function normalizeTaskState(state: A2aWireTaskState | undefined): A2aTaskState {
 }
 
 export interface A2aClientDeps {
-  /** Injected for tests; defaults to global fetch. */
+  /**
+   * Injected for tests; defaults to the shell's streaming transport.
+   *
+   * A bare `fetch` was wrong on the desktop twice: `message/stream` answers
+   * with SSE, and a renderer `fetch` to an operator-supplied agent host is
+   * blocked by `connect-src` before it leaves the WebView — and would ignore
+   * the configured proxy if it got out. `platformStreamingFetch` fixes both
+   * and still serves the non-streaming calls, whose bodies simply end.
+   */
   fetchImpl?: typeof fetch
 }
 
@@ -359,7 +369,10 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
 
   constructor(deps: A2aClientDeps = {}) {
     super()
-    this.fetchImpl = deps.fetchImpl ?? globalThis.fetch.bind(globalThis)
+    // Wrapped rather than passed directly: the streaming transport's init type
+    // is narrower than `RequestInit`, so it is not assignable to `typeof fetch`
+    // under `strictFunctionTypes`.
+    this.fetchImpl = deps.fetchImpl ?? ((input, init) => platformStreamingFetch(input, init))
   }
 
   async connect(config: ExternalAgentConfig): Promise<void> {
@@ -563,7 +576,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     ctx: A2aSessionCtx,
     _signal?: AbortSignal
   ): AsyncGenerator<ExternalAgentEvent, boolean, undefined> {
-    for await (const data of readSse(response.body as ReadableStream<Uint8Array>)) {
+    for await (const data of readServerSentEvents(response.body as ReadableStream<Uint8Array>)) {
       let parsed: { result?: A2aWireResult; error?: A2aRpcErrorBody } | A2aWireResult
       try {
         parsed = JSON.parse(data)
@@ -764,41 +777,4 @@ function buildAuthHeaders(net: ExternalAgentConfig["network"]): Record<string, s
 function toAcpCapabilities(card: AgentCard | undefined): AcpCapabilities | undefined {
   if (!card) return undefined
   return { streaming: card.capabilities?.streaming ?? false } as AcpCapabilities
-}
-
-/**
- * Read a fetch ReadableStream body as Server-Sent Events, yielding each event's
- * concatenated `data:` payload. Minimal SSE framing (blank-line-delimited
- * blocks); ignores comments + other fields.
- */
-async function* readSse(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
-  const dataFromBlock = (block: string): string =>
-    block
-      .split(/\r\n|\r|\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trimStart())
-      .join("\n")
-  try {
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let separator = /(?:\r\n|\r|\n){2}/.exec(buffer)
-      while (separator) {
-        const block = buffer.slice(0, separator.index)
-        buffer = buffer.slice(separator.index + separator[0].length)
-        const data = dataFromBlock(block)
-        if (data) yield data
-        separator = /(?:\r\n|\r|\n){2}/.exec(buffer)
-      }
-    }
-    buffer += decoder.decode()
-    const trailingData = dataFromBlock(buffer)
-    if (trailingData) yield trailingData
-  } finally {
-    reader.releaseLock()
-  }
 }

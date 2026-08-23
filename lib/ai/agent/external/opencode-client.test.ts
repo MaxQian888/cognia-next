@@ -37,6 +37,16 @@ jest.mock("@/lib/native/external-agent", () => ({
   onExternalAgentExit: (...args: unknown[]) => mockOnExit(...args),
 }))
 
+type StreamingFetchArgs = [RequestInfo | URL, RequestInit?]
+const mockedStreamingFetch = jest.fn(
+  async (..._args: StreamingFetchArgs): Promise<Response> => new Response("ok")
+)
+jest.mock("@/lib/network/platform-streaming-fetch", () => ({
+  // Forwarded by rest so arity is preserved: `fetch(request)` and
+  // `fetch(request, undefined)` must stay distinguishable in the assertions.
+  platformStreamingFetch: (...args: StreamingFetchArgs) => mockedStreamingFetch(...args),
+}))
+
 import { OpenCodeClientAdapter } from "./opencode-client"
 
 // ---------------------------------------------------------------------------
@@ -333,9 +343,25 @@ describe("OpenCodeClientAdapter — auth fetch", () => {
     expect(setSpy).toHaveBeenCalledWith("X-Trace", "1")
   })
 
-  it("uses the default fetch (undefined) when no auth is configured", async () => {
+  it("still installs the host transport when no auth is configured", async () => {
+    // Previously `undefined`, which let the SDK fall back to a bare `fetch` —
+    // unreachable in the packaged shell for BOTH a remote host and the
+    // auto-spawned loopback one, and invisible to the configured proxy.
     const fetchFn = await captureFetch(buildConfig({ network: { endpoint: "http://x" } }))
-    expect(fetchFn).toBeUndefined()
+    expect(typeof fetchFn).toBe("function")
+  })
+
+  it("routes every request through the streaming transport, headers or not", async () => {
+    const fetchFn = await captureFetch(
+      buildConfig({ network: { endpoint: "http://x", bearerToken: "tok" } })
+    )
+    const request = { headers: { set: jest.fn() } } as unknown as Request
+
+    await fetchFn!(request)
+
+    // The SDK reuses this hook for `/event`, whose SSE body never ends, so it
+    // has to be the streaming transport rather than the buffered bridge.
+    expect(mockedStreamingFetch).toHaveBeenCalledWith(request)
   })
 })
 
@@ -656,7 +682,7 @@ describe("translateSdkEvent", () => {
   it("maps current permission.asked events and replies through the current endpoint", async () => {
     const client = makeFakeClient()
     mockCreateOpencodeClient.mockReturnValue(client)
-    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
     const connected = new OpenCodeClientAdapter()
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
@@ -687,7 +713,7 @@ describe("translateSdkEvent", () => {
       rememberChoice: true,
     })
 
-    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    const request = mockedStreamingFetch.mock.calls.at(-1)![0] as Request
     expect(request.url).toBe("http://opencode.test/permission/perm-current/reply")
     await expect(request.json()).resolves.toEqual({ reply: "always" })
     expect(client.postSessionIdPermissionsPermissionId).not.toHaveBeenCalled()
@@ -695,7 +721,7 @@ describe("translateSdkEvent", () => {
 
   it("maps permission.v2.asked and replies through the session-scoped v2 endpoint", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 204 })) as typeof fetch
+    mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 204 }))
     const connected = new OpenCodeClientAdapter()
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
@@ -722,7 +748,7 @@ describe("translateSdkEvent", () => {
     })
     await connected.respondToPermission("s1", { requestId: "perm-v2", granted: false })
 
-    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    const request = mockedStreamingFetch.mock.calls.at(-1)![0] as Request
     expect(request.url).toBe("http://opencode.test/api/session/s1/permission/perm-v2/reply")
     await expect(request.json()).resolves.toEqual({ reply: "reject" })
   })
@@ -732,7 +758,7 @@ describe("translateSdkEvent", () => {
     ["question.v2.asked", "/api/session/s1/question/question-1/reply"],
   ])("maps %s and returns ordered answers", async (eventType, expectedPath) => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
     const connected = new OpenCodeClientAdapter()
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
@@ -782,7 +808,7 @@ describe("translateSdkEvent", () => {
       },
     })
 
-    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    const request = mockedStreamingFetch.mock.calls.at(-1)![0] as Request
     expect(request.url).toBe(`http://opencode.test${expectedPath}`)
     await expect(request.json()).resolves.toEqual({
       answers: [["us-east", "eu-west"], ["ship tonight"]],
@@ -791,7 +817,7 @@ describe("translateSdkEvent", () => {
 
   it("rejects a partially malformed question payload instead of leaving the server blocked", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 200 })) as typeof fetch
+    mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 200 }))
     const connected = new OpenCodeClientAdapter()
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
@@ -809,13 +835,13 @@ describe("translateSdkEvent", () => {
 
     expect(events).toEqual([])
     await Promise.resolve()
-    const request = (global.fetch as jest.Mock).mock.calls.at(-1)?.[0] as Request
+    const request = mockedStreamingFetch.mock.calls.at(-1)![0] as Request
     expect(request.url).toBe("http://opencode.test/question/question-malformed/reject")
   })
 
   it("correlates pending v2 interactions by session and request id", async () => {
     mockCreateOpencodeClient.mockReturnValue(makeFakeClient())
-    global.fetch = jest.fn().mockResolvedValue(new Response(null, { status: 204 })) as typeof fetch
+    mockedStreamingFetch.mockResolvedValue(new Response(null, { status: 204 }))
     const connected = new OpenCodeClientAdapter()
     await connected.connect(buildConfig({ network: { endpoint: "http://opencode.test" } }))
 
@@ -840,7 +866,9 @@ describe("translateSdkEvent", () => {
       granted: false,
     })
 
-    const urls = (global.fetch as jest.Mock).mock.calls.slice(-2).map(([request]) => request.url)
+    const urls = mockedStreamingFetch.mock.calls
+      .slice(-2)
+      .map(([request]) => (request as Request).url)
     expect(urls).toEqual([
       "http://opencode.test/api/session/s1/permission/shared-request/reply",
       "http://opencode.test/api/session/s2/permission/shared-request/reply",

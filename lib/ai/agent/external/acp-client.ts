@@ -18,6 +18,9 @@ import {
   supportsExternalAgents,
 } from "./agent-transport"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
+import { createPlatformWebSocket, type PlatformWebSocket } from "@/lib/network/platform-websocket"
+import { readServerSentEvents } from "@/lib/network/sse-reader"
 import { loggers } from "@cognia/logging"
 import { truncateForLog } from "@cognia/logging/truncate"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -330,8 +333,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // inbound handlers are injected when the peer is built in `connect()`.
   private peer?: JsonRpcPeer
   private processId?: string
-  private networkSocket?: WebSocket
-  private networkEventSource?: EventSource
+  private networkSocket?: PlatformWebSocket
+  /** Aborts the SSE subscription; replaces the old `EventSource` handle. */
+  private networkEventAbort?: AbortController
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   // Autonomous post-disconnect reconnection parameters. Derived from the
   // agent's `config.retryConfig` in `applyRetryConfig()` so a user-tuned retry
@@ -508,12 +512,13 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     if (this.networkSocket) {
-      this.networkSocket.close()
+      const socket = this.networkSocket
       this.networkSocket = undefined
+      await socket.close().catch((error) => log.warn("Error closing ACP socket", { error }))
     }
-    if (this.networkEventSource) {
-      this.networkEventSource.close()
-      this.networkEventSource = undefined
+    if (this.networkEventAbort) {
+      this.networkEventAbort.abort()
+      this.networkEventAbort = undefined
     }
     this._rpcEndpoint = undefined
     this._eventsEndpoint = undefined
@@ -675,39 +680,87 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     if (config.transport === "websocket") {
       const socketUrl = this._rpcEndpoint || config.network.endpoint
-      await new Promise<void>((resolve, reject) => {
-        const socket = new WebSocket(socketUrl)
-        this.networkSocket = socket
-
-        socket.onopen = () => resolve()
-        socket.onerror = () => reject(new Error("WebSocket connection failed"))
-        socket.onmessage = (event) => {
-          if (typeof event.data === "string") {
-            this.peer?.ingest(event.data)
-          }
-        }
-        socket.onclose = () => {
+      // `createPlatformWebSocket`, not `new WebSocket`: the bare constructor
+      // cannot carry the bearer / API-key header this agent's config may
+      // require, is blocked by the packaged shell's `connect-src`, and dials
+      // straight past the configured proxy. It also *fails* rather than
+      // connecting direct when the user turned WebSocket proxying off.
+      this.networkSocket = await createPlatformWebSocket(socketUrl, {
+        headers: this.buildHeaders(config),
+        onMessage: (data) => this.peer?.ingest(data),
+        onClose: () => {
+          this.networkSocket = undefined
           this.handleProcessExit(0)
-        }
+        },
       })
     }
 
     if (config.transport === "sse" && this._eventsEndpoint) {
-      await new Promise<void>((resolve, reject) => {
-        const source = new EventSource(this._eventsEndpoint!)
-        this.networkEventSource = source
-        source.onopen = () => resolve()
-        source.onerror = () => reject(new Error("EventSource connection failed"))
-        source.onmessage = (event) => {
-          this.peer?.ingest(event.data)
-        }
-      })
+      await this.subscribeToEventStream(this._eventsEndpoint, config)
     }
 
     log.info("Connected to remote agent", {
       endpoint: config.network.endpoint,
       transport: config.transport,
     })
+  }
+
+  /**
+   * Subscribe to the agent's SSE event endpoint and feed every frame to the
+   * JSON-RPC peer.
+   *
+   * Replaces `new EventSource(...)`, which was broken in three separate ways
+   * on the desktop: it cannot set `Authorization` (so a bearer-protected agent
+   * was unreachable), the packaged shell's `connect-src` blocks it, and it
+   * never routed through the configured proxy. The streaming transport carries
+   * headers, crosses into Rust, and obeys the proxy policy.
+   *
+   * Resolves once the server has answered with a 2xx head — the same point
+   * `EventSource.onopen` fired — so a failing endpoint still surfaces during
+   * `connect()` rather than as silence afterwards. The read loop then runs
+   * detached; ending it is `disconnect()`'s job, via the abort controller.
+   */
+  private async subscribeToEventStream(
+    endpoint: string,
+    config: ExternalAgentConfig
+  ): Promise<void> {
+    const controller = new AbortController()
+    this.networkEventAbort = controller
+
+    let response: Response
+    try {
+      response = await platformStreamingFetch(endpoint, {
+        method: "GET",
+        headers: { ...this.buildHeaders(config), accept: "text/event-stream" },
+        signal: controller.signal,
+      })
+    } catch (error) {
+      this.networkEventAbort = undefined
+      throw new Error(
+        `SSE connection failed: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+    if (!response.ok || !response.body) {
+      this.networkEventAbort = undefined
+      controller.abort()
+      throw new Error(`SSE connection failed: HTTP ${response.status} ${response.statusText}`)
+    }
+
+    const body = response.body
+    void (async () => {
+      try {
+        for await (const data of readServerSentEvents(body)) {
+          if (controller.signal.aborted) return
+          this.peer?.ingest(data)
+        }
+      } catch (error) {
+        // An abort is `disconnect()` doing its job, not a fault.
+        if (controller.signal.aborted) return
+        log.warn("ACP SSE stream ended with an error", { error })
+      } finally {
+        if (this.networkEventAbort === controller) this.networkEventAbort = undefined
+      }
+    })()
   }
 
   /**
@@ -2188,7 +2241,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         message,
       })
     } else if (this._config?.transport === "websocket" && this.networkSocket) {
-      this.networkSocket.send(message)
+      await this.networkSocket.send(message)
     } else if (this._config?.transport === "http" && this._config.network?.endpoint) {
       const response = await proxyFetch(
         this._rpcEndpoint || `${this._config.network.endpoint}/message`,
