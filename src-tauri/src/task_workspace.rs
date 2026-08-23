@@ -5,7 +5,8 @@ use cognia_task_workspace::{
     PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
     ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
     TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
-    TaskWorkspaceService, TransferChunk, UploadHandle, WorktreeLifecycleEvent,
+    TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
+    WorkspaceLifecyclePolicy, WorkspaceRecord, WorktreeLifecycleEvent,
     WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
@@ -217,6 +218,48 @@ pub fn task_workspace_get(task_id: String) -> Result<Option<TaskWorkspace>, Stri
 #[tauri::command]
 pub fn task_workspace_list(session_id: Option<String>) -> Result<Vec<TaskWorkspace>, String> {
     service()?.list_tasks(session_id.as_deref())
+}
+
+#[tauri::command]
+pub fn task_workspace_managed_get(
+    workspace_id: String,
+) -> Result<Option<WorkspaceRecord>, String> {
+    service()?.get_managed_workspace(&workspace_id)
+}
+
+#[tauri::command]
+pub fn task_workspace_managed_list() -> Result<Vec<WorkspaceRecord>, String> {
+    service()?.list_managed_workspaces()
+}
+
+#[tauri::command]
+pub fn task_workspace_bundle_get(bundle_id: String) -> Result<Option<WorkspaceBundle>, String> {
+    service()?.get_workspace_bundle(&bundle_id)
+}
+
+#[tauri::command]
+pub fn task_workspace_bundle_list() -> Result<Vec<WorkspaceBundle>, String> {
+    service()?.list_workspace_bundles()
+}
+
+#[tauri::command]
+pub fn task_workspace_policy_get() -> Result<WorkspaceLifecyclePolicy, String> {
+    Ok(service()?.workspace_lifecycle_policy())
+}
+
+#[tauri::command]
+pub fn task_workspace_policy_set(
+    policy: WorkspaceLifecyclePolicy,
+) -> Result<WorkspaceLifecyclePolicy, String> {
+    service()?.set_workspace_lifecycle_policy(policy)
+}
+
+#[tauri::command]
+pub fn task_workspace_managed_pin(
+    workspace_id: String,
+    pinned: bool,
+) -> Result<WorkspaceRecord, String> {
+    service()?.set_managed_workspace_pinned(&workspace_id, pinned)
 }
 
 #[tauri::command]

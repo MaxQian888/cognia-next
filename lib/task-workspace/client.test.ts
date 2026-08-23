@@ -20,6 +20,11 @@ import {
   listTaskResourceEvents,
   recordTaskResourceToolEvent,
   listTaskWorkspaces,
+  listManagedWorkspaces,
+  listWorkspaceBundles,
+  getWorkspaceLifecyclePolicy,
+  setWorkspaceLifecyclePolicy,
+  pinManagedWorkspace,
   resolveTaskWorkspaceConflict,
   runIdForTurn,
   settleTaskWorkspaceTurn,
@@ -118,6 +123,30 @@ describe("task workspace client", () => {
       selection: [],
       allowIrreversible: false,
     })
+  })
+
+  it("exposes Registry inventory and lifecycle policy through the shared transport", async () => {
+    const policy = { activeDirectoryCap: 15, snapshotRetentionDays: 30, blobBudgetBytes: 1 << 30 }
+    call
+      .mockResolvedValueOnce([{ workspaceId: "ws-1" }])
+      .mockResolvedValueOnce([{ bundleId: "bundle-1" }])
+      .mockResolvedValueOnce(policy)
+      .mockResolvedValueOnce(policy)
+      .mockResolvedValueOnce({ workspaceId: "ws-1", pinned: true })
+
+    await listManagedWorkspaces()
+    await listWorkspaceBundles()
+    await getWorkspaceLifecyclePolicy()
+    await setWorkspaceLifecyclePolicy(policy)
+    await pinManagedWorkspace("ws-1", true)
+
+    expect(call.mock.calls).toEqual([
+      ["task_workspace_managed_list"],
+      ["task_workspace_bundle_list"],
+      ["task_workspace_policy_get"],
+      ["task_workspace_policy_set", { policy }],
+      ["task_workspace_managed_pin", { workspaceId: "ws-1", pinned: true }],
+    ])
   })
 
   it("restores a historical content-addressed snapshot", async () => {

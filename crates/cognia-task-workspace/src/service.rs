@@ -458,6 +458,48 @@ impl TaskWorkspaceService {
         self.registry.list().map_err(|error| error.to_string())
     }
 
+    pub fn get_workspace_bundle(
+        &self,
+        bundle_id: &str,
+    ) -> Result<Option<crate::WorkspaceBundle>, String> {
+        self.store.lock().get_workspace_bundle(bundle_id)
+    }
+
+    pub fn list_workspace_bundles(&self) -> Result<Vec<crate::WorkspaceBundle>, String> {
+        self.store.lock().list_workspace_bundles()
+    }
+
+    pub fn workspace_lifecycle_policy(&self) -> crate::WorkspaceLifecyclePolicy {
+        self.registry.policy()
+    }
+
+    pub fn set_workspace_lifecycle_policy(
+        &self,
+        policy: crate::WorkspaceLifecyclePolicy,
+    ) -> Result<crate::WorkspaceLifecyclePolicy, String> {
+        if policy.active_directory_cap == 0 {
+            return Err("active directory cap must be greater than zero".into());
+        }
+        if policy.snapshot_retention_days == 0 {
+            return Err("snapshot retention must be greater than zero".into());
+        }
+        if policy.blob_budget_bytes == 0 {
+            return Err("blob budget must be greater than zero".into());
+        }
+        self.registry.set_policy(policy);
+        Ok(policy)
+    }
+
+    pub fn set_managed_workspace_pinned(
+        &self,
+        workspace_id: &str,
+        pinned: bool,
+    ) -> Result<WorkspaceRecord, String> {
+        self.registry
+            .set_pinned(workspace_id, pinned)
+            .map_err(|error| error.to_string())
+    }
+
     fn reactivate_managed_workspace(&self, workspace_id: &str) -> Result<(), String> {
         let Some(record) = self
             .registry

@@ -18,6 +18,58 @@ export type WorkspaceBaseSpec =
   | { kind: "gitRef"; gitRef: string }
   | { kind: "pullRequest"; provider: string; repo: string; number: number }
 
+export type WorkspaceEnvironmentKind = "managed" | "permanent" | "imported"
+export type WorkspaceOwnerType = "user" | "imported" | "session" | "team" | "scheduled"
+export type ManagedWorkspaceState =
+  "provisioning" | "active" | "archived" | "conflict" | "restorable" | "removing" | "removed"
+
+export interface ManagedWorkspaceRecord {
+  workspaceId: string
+  environmentKind: WorkspaceEnvironmentKind
+  ownerType: WorkspaceOwnerType
+  ownerRef: string | null
+  state: ManagedWorkspaceState
+  sourceRoot: string
+  gitCommonDir: string | null
+  base: WorkspaceBaseSpec
+  head: string | null
+  branch: string | null
+  isolationKind: "gitWorktree" | "shadow"
+  executionRoot: string
+  snapshotTaskId: string | null
+  sizeBytes: number | null
+  lastUsedAt: number
+  lockedBy: string | null
+  pinned: boolean
+  createdAt: number
+}
+
+export interface WorkspaceRootLease {
+  bundleId: string
+  workspaceId: string
+  logicalRootId: string
+  role: "primary" | "additional"
+  aliasPath: string
+}
+
+export interface WorkspaceBundle {
+  bundleId: string
+  environmentKind: WorkspaceEnvironmentKind
+  ownerType: WorkspaceOwnerType
+  ownerRef: string | null
+  state: ManagedWorkspaceState
+  leases: WorkspaceRootLease[]
+  lastUsedAt: number
+  pinned: boolean
+  createdAt: number
+}
+
+export interface WorkspaceLifecyclePolicy {
+  activeDirectoryCap: number
+  snapshotRetentionDays: number
+  blobBudgetBytes: number
+}
+
 export interface TaskWorkspace {
   taskId: string
   sessionId: string

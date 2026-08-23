@@ -19,6 +19,9 @@ import type {
   TransferChunk,
   UploadHandle,
   WorkspaceBaseSpec,
+  ManagedWorkspaceRecord,
+  WorkspaceBundle,
+  WorkspaceLifecyclePolicy,
 } from "./types"
 
 export const TASK_WORKSPACE_RESOURCE_EVENT = "task-workspace://resources-changed"
@@ -164,6 +167,39 @@ export function getTaskWorkspace(taskId: string): Promise<TaskWorkspace | null> 
 
 export function listTaskWorkspaces(sessionId?: string): Promise<TaskWorkspace[]> {
   return transport.call("task_workspace_list", { sessionId })
+}
+
+export function getManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord | null> {
+  return transport.call("task_workspace_managed_get", { workspaceId })
+}
+
+export function listManagedWorkspaces(): Promise<ManagedWorkspaceRecord[]> {
+  return transport.call("task_workspace_managed_list")
+}
+
+export function getWorkspaceBundle(bundleId: string): Promise<WorkspaceBundle | null> {
+  return transport.call("task_workspace_bundle_get", { bundleId })
+}
+
+export function listWorkspaceBundles(): Promise<WorkspaceBundle[]> {
+  return transport.call("task_workspace_bundle_list")
+}
+
+export function getWorkspaceLifecyclePolicy(): Promise<WorkspaceLifecyclePolicy> {
+  return transport.call("task_workspace_policy_get")
+}
+
+export function setWorkspaceLifecyclePolicy(
+  policy: WorkspaceLifecyclePolicy
+): Promise<WorkspaceLifecyclePolicy> {
+  return transport.call("task_workspace_policy_set", { policy })
+}
+
+export function pinManagedWorkspace(
+  workspaceId: string,
+  pinned: boolean
+): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_managed_pin", { workspaceId, pinned })
 }
 
 export function listTaskRuns(taskId: string): Promise<TaskRun[]> {
