@@ -82,6 +82,17 @@ export interface WorkspaceLifecyclePolicy {
   blobBudgetBytes: number
 }
 
+export interface WorkspaceReconcileOutcome {
+  reclaimed: string[]
+  orphaned: string[]
+  imported: Array<{
+    sourceRoot: string
+    executionRoot: string
+    gitCommonDir: string | null
+    branch: string | null
+  }>
+}
+
 export interface TaskWorkspace {
   taskId: string
   sessionId: string

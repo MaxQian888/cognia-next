@@ -41,6 +41,7 @@ import {
   listManagedWorkspaces,
   makeManagedWorkspacePermanent,
   pinManagedWorkspace,
+  reconcileManagedWorkspaces,
   restoreManagedWorkspace,
 } from "@/lib/task-workspace/client"
 import type { ManagedWorkspaceRecord } from "@/lib/task-workspace/types"
@@ -55,6 +56,7 @@ export function WorkspaceEnvironmentList() {
   const load = useCallback(async () => {
     setError(null)
     try {
+      await reconcileManagedWorkspaces()
       setRows(await listManagedWorkspaces())
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -65,16 +67,18 @@ export function WorkspaceEnvironmentList() {
   useEffect(() => {
     let cancelled = false
 
-    void listManagedWorkspaces().then(
-      (workspaces) => {
-        if (!cancelled) setRows(workspaces)
-      },
-      (cause: unknown) => {
-        if (cancelled) return
-        setError(cause instanceof Error ? cause.message : String(cause))
-        setRows([])
-      }
-    )
+    void reconcileManagedWorkspaces()
+      .then(() => listManagedWorkspaces())
+      .then(
+        (workspaces) => {
+          if (!cancelled) setRows(workspaces)
+        },
+        (cause: unknown) => {
+          if (cancelled) return
+          setError(cause instanceof Error ? cause.message : String(cause))
+          setRows([])
+        }
+      )
 
     return () => {
       cancelled = true

@@ -3,7 +3,7 @@ use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveM
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Component, Path, PathBuf},
     process::Command,
     sync::{mpsc, Arc},
@@ -91,6 +91,7 @@ impl WatchManager {
             return Ok(());
         }
         let (sender, receiver) = mpsc::channel();
+        let initial_paths = existing_paths(&root)?;
         let callback_sender = sender.clone();
         let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let event = event.map_err(|error| error.to_string());
@@ -117,6 +118,7 @@ impl WatchManager {
                     &worker_generated_roots,
                     sink,
                     worker_echoes,
+                    initial_paths,
                 )
             })
             .map_err(|error| format!("start workspace watcher: {error}"))?;
@@ -192,6 +194,7 @@ fn watch_loop(
     generated_roots: &[String],
     sink: Arc<dyn TaskWorkspaceEventSink>,
     echoes: Arc<Mutex<HashMap<PathBuf, Instant>>>,
+    mut initial_paths: HashSet<PathBuf>,
 ) {
     let mut revision = 0_u64;
     while let Ok(message) = receiver.recv() {
@@ -251,6 +254,12 @@ fn watch_loop(
                         }
                         let kind = map_kind(&event.kind);
                         for path in event.paths {
+                            if kind != ResourceEventKind::Deleted && initial_paths.remove(&path) {
+                                continue;
+                            }
+                            if kind == ResourceEventKind::Deleted {
+                                initial_paths.remove(&path);
+                            }
                             if echoes
                                 .get(&path)
                                 .is_some_and(|written| now.duration_since(*written) <= ECHO_TTL)
@@ -297,6 +306,25 @@ fn watch_loop(
             resync_required: overflow,
         });
     }
+}
+
+fn existing_paths(root: &Path) -> Result<HashSet<PathBuf>, String> {
+    let mut paths = HashSet::new();
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false);
+    for entry in builder.build() {
+        let entry = entry.map_err(|error| format!("scan watch baseline: {error}"))?;
+        if entry.path() != root {
+            paths.insert(entry.into_path());
+        }
+    }
+    Ok(paths)
 }
 
 fn record_change(

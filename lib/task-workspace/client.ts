@@ -23,6 +23,7 @@ import type {
   ManagedWorkspaceRecord,
   WorkspaceBundle,
   WorkspaceLifecyclePolicy,
+  WorkspaceReconcileOutcome,
 } from "./types"
 
 export const TASK_WORKSPACE_RESOURCE_EVENT = "task-workspace://resources-changed"
@@ -184,6 +185,10 @@ export function getWorkspaceBundle(bundleId: string): Promise<WorkspaceBundle | 
 
 export function listWorkspaceBundles(): Promise<WorkspaceBundle[]> {
   return transport.call("task_workspace_bundle_list")
+}
+
+export function reconcileManagedWorkspaces(): Promise<WorkspaceReconcileOutcome> {
+  return transport.call("task_workspace_reconcile")
 }
 
 export function acquireWorkspaceBundle(input: AcquireWorkspaceBundle): Promise<WorkspaceBundle> {

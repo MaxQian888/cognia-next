@@ -104,6 +104,7 @@ impl TaskWorkspaceService {
             lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
         };
         service.recover_incomplete_runs()?;
+        service.reconcile_known_worktrees()?;
         Ok(service)
     }
 
@@ -490,6 +491,102 @@ impl TaskWorkspaceService {
 
     pub fn list_managed_workspaces(&self) -> Result<Vec<WorkspaceRecord>, String> {
         self.registry.list().map_err(|error| error.to_string())
+    }
+
+    pub fn reconcile_known_worktrees(&self) -> Result<crate::ReconcileOutcome, String> {
+        let records = self.registry.list().map_err(|error| error.to_string())?;
+        let mut source_roots = records
+            .iter()
+            .filter(|record| record.isolation_kind == IsolationKind::GitWorktree)
+            .map(|record| record.source_root.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        source_roots.extend(
+            self.store
+                .lock()
+                .list_workspace_source_bindings()?
+                .into_iter()
+                .map(|binding| binding.source_root),
+        );
+        let mut outcome = crate::ReconcileOutcome {
+            reclaimed: Vec::new(),
+            orphaned: Vec::new(),
+            imported: Vec::new(),
+        };
+        for source_root in source_roots {
+            self.reconcile_git_source(Path::new(&source_root), &records, &mut outcome)?;
+        }
+        Ok(outcome)
+    }
+
+    fn reconcile_git_source(
+        &self,
+        source_root: &Path,
+        records: &[WorkspaceRecord],
+        outcome: &mut crate::ReconcileOutcome,
+    ) -> Result<(), String> {
+        let source_root = source_root
+            .canonicalize()
+            .map_err(|error| format!("canonicalize reconcile source: {error}"))?;
+        let git_common_dir = git_common_dir(&source_root);
+        let inventory = read_git_worktree_inventory(&source_root)?;
+        let existing_paths = records
+            .iter()
+            .map(|record| normalized_path_key(Path::new(&record.execution_root)))
+            .collect::<std::collections::HashSet<_>>();
+        let inventory_by_path = inventory
+            .iter()
+            .map(|row| (normalized_path_key(&row.path), row))
+            .collect::<HashMap<_, _>>();
+
+        for record in records.iter().filter(|record| {
+            record.isolation_kind == IsolationKind::GitWorktree
+                && normalized_path_key(Path::new(&record.source_root))
+                    == normalized_path_key(&source_root)
+                && record.environment_kind != crate::WorkspaceEnvironmentKind::Imported
+                && matches!(
+                    record.state,
+                    WorkspaceState::Active | WorkspaceState::Provisioning
+                )
+        }) {
+            let path = normalized_path_key(Path::new(&record.execution_root));
+            let verified = inventory_by_path.get(&path).is_some_and(|row| {
+                row.lock_reason.as_deref() == record.locked_by.as_deref()
+                    && record.git_common_dir == git_common_dir
+            });
+            if verified {
+                outcome.reclaimed.push(record.workspace_id.clone());
+            } else {
+                outcome.orphaned.push(record.workspace_id.clone());
+                if record.state == WorkspaceState::Active {
+                    let _ = self.registry.transition(
+                        &record.workspace_id,
+                        record.owner_type,
+                        record.owner_ref.as_deref(),
+                        WorkspaceState::Conflict,
+                        now_ms(),
+                    );
+                }
+            }
+        }
+
+        let source_key = normalized_path_key(&source_root);
+        for row in inventory {
+            let path_key = normalized_path_key(&row.path);
+            if path_key == source_key || existing_paths.contains(&path_key) {
+                continue;
+            }
+            let hint = crate::ImportedWorkspaceHint {
+                source_root: source_root.to_string_lossy().into_owned(),
+                execution_root: row.path.to_string_lossy().into_owned(),
+                git_common_dir: git_common_dir.clone(),
+                branch: row.branch,
+            };
+            self.registry
+                .insert_imported(hint.clone(), now_ms())
+                .map_err(|error| error.to_string())?;
+            outcome.imported.push(hint);
+        }
+        Ok(())
     }
 
     pub fn get_workspace_bundle(
@@ -2456,6 +2553,75 @@ fn managed_git_lock_reason(
     Ok(None)
 }
 
+struct GitWorktreeInventoryRow {
+    path: PathBuf,
+    branch: Option<String>,
+    lock_reason: Option<String>,
+}
+
+fn read_git_worktree_inventory(source_root: &Path) -> Result<Vec<GitWorktreeInventoryRow>, String> {
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(source_root)
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .output()
+        .map_err(|error| format!("start git worktree list: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let porcelain = String::from_utf8(output.stdout)
+        .map_err(|error| format!("git worktree list returned invalid UTF-8: {error}"))?;
+    let mut rows = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut branch: Option<String> = None;
+    let mut lock_reason: Option<String> = None;
+    let flush = |rows: &mut Vec<GitWorktreeInventoryRow>,
+                 path: &mut Option<PathBuf>,
+                 branch: &mut Option<String>,
+                 lock_reason: &mut Option<String>| {
+        if let Some(path) = path.take() {
+            rows.push(GitWorktreeInventoryRow {
+                path,
+                branch: branch.take(),
+                lock_reason: lock_reason.take(),
+            });
+        } else {
+            *branch = None;
+            *lock_reason = None;
+        }
+    };
+    for raw in porcelain.split(if porcelain.contains('\0') { '\0' } else { '\n' }) {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+        } else if let Some(value) = line.strip_prefix("worktree ") {
+            flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+            path = Some(PathBuf::from(value));
+        } else if let Some(value) = line.strip_prefix("branch ") {
+            branch = Some(
+                value
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(value)
+                    .to_string(),
+            );
+        } else if let Some(value) = line.strip_prefix("locked ") {
+            lock_reason = Some(value.to_string());
+        }
+    }
+    flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+    Ok(rows)
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn git_common_dir(workspace_root: &Path) -> Option<String> {
     git2::Repository::discover(workspace_root)
         .ok()
@@ -4247,6 +4413,69 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some(expected_lock.as_str())
+        );
+    }
+
+    #[test]
+    fn startup_reconcile_imports_external_worktrees_without_mutating_them() {
+        let data = TempDir::new().unwrap();
+        let repository_parent = TempDir::new().unwrap();
+        let repository = repository_parent.path().join("main");
+        let external = repository_parent.path().join("external");
+        fs::create_dir_all(&repository).unwrap();
+        git2::Repository::init(&repository).unwrap();
+        seed_git_repository(&repository);
+        let add = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "add", "--detach"])
+            .arg(&external)
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+
+        {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            service
+                .bind_workspace_source("repository:project:root", &repository, 1)
+                .unwrap();
+        }
+
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let imported = reopened
+            .list_managed_workspaces()
+            .unwrap()
+            .into_iter()
+            .find(|record| record.environment_kind == crate::WorkspaceEnvironmentKind::Imported)
+            .expect("external worktree registered as imported");
+        assert_eq!(
+            normalized_path_key(Path::new(&imported.execution_root)),
+            normalized_path_key(&external)
+        );
+        assert!(external.is_dir());
+        assert_eq!(
+            managed_git_lock_reason(&repository, &external).unwrap(),
+            None
+        );
+        assert!(reopened
+            .archive_managed_workspace(&imported.workspace_id)
+            .unwrap_err()
+            .contains("before adoption"));
+
+        let second = reopened.reconcile_known_worktrees().unwrap();
+        assert!(second.imported.is_empty());
+        assert_eq!(
+            reopened
+                .list_managed_workspaces()
+                .unwrap()
+                .into_iter()
+                .filter(|record| {
+                    record.environment_kind == crate::WorkspaceEnvironmentKind::Imported
+                })
+                .count(),
+            1
         );
     }
 

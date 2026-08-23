@@ -2,9 +2,9 @@
 
 use cognia_task_workspace::{
     AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, ConflictResolution, DownloadHandle,
-    PatchSelection, PatchSet, PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind,
-    ResourceRead, ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest,
-    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
+    PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome, ResourceChange, ResourceEvent,
+    ResourceEventKind, ResourceRead, ResourceTrackingPolicy, RunState, ServiceConfig,
+    TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
     TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
     WorkspaceLifecyclePolicy, WorkspaceRecord, WorktreeLifecycleEvent, WorktreeLifecycleKind,
     WorktreeLifecycleSink,
@@ -245,6 +245,11 @@ pub async fn task_workspace_bundle_acquire(
     input: AcquireWorkspaceBundle,
 ) -> Result<WorkspaceBundle, String> {
     blocking(move |service| service.acquire_workspace_bundle(input)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_reconcile() -> Result<ReconcileOutcome, String> {
+    blocking(move |service| service.reconcile_known_worktrees()).await
 }
 
 #[tauri::command]

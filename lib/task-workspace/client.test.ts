@@ -21,6 +21,7 @@ import {
   getTaskResourceSummary,
   listTaskResourceEvents,
   recordTaskResourceToolEvent,
+  reconcileManagedWorkspaces,
   listTaskWorkspaces,
   listManagedWorkspaces,
   listWorkspaceBundles,
@@ -190,6 +191,14 @@ describe("task workspace client", () => {
       ["task_workspace_managed_restore", { workspaceId: "ws-2" }],
       ["task_workspace_managed_delete", { workspaceId: "ws-2" }],
     ])
+  })
+
+  it("reconciles signed and imported worktrees through the host", async () => {
+    call.mockResolvedValueOnce({ reclaimed: ["ws-1"], orphaned: [], imported: [] })
+
+    await reconcileManagedWorkspaces()
+
+    expect(call).toHaveBeenCalledWith("task_workspace_reconcile")
   })
 
   it("restores a historical content-addressed snapshot", async () => {

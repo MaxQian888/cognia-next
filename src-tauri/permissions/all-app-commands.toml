@@ -866,6 +866,7 @@ commands.allow = [
   "task_workspace_policy_set",
   "task_workspace_prune",
   "task_workspace_record_tool_event",
+  "task_workspace_reconcile",
   "task_workspace_resolve_conflict",
   "task_workspace_restore_snapshot",
   "task_workspace_settle",

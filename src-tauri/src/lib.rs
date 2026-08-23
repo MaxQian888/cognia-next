@@ -903,6 +903,7 @@ pub fn run() {
             task_workspace::task_workspace_bundle_get,
             task_workspace::task_workspace_bundle_list,
             task_workspace::task_workspace_bundle_acquire,
+            task_workspace::task_workspace_reconcile,
             task_workspace::task_workspace_policy_get,
             task_workspace::task_workspace_policy_set,
             task_workspace::task_workspace_managed_pin,

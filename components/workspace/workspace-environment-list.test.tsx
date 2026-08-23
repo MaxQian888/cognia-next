@@ -11,6 +11,7 @@ const archiveMock = jest.fn()
 const restoreMock = jest.fn()
 const permanentMock = jest.fn()
 const deleteMock = jest.fn()
+const reconcileMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
   listManagedWorkspaces: (...args: unknown[]) => listMock(...args),
   pinManagedWorkspace: (...args: unknown[]) => pinMock(...args),
@@ -18,6 +19,7 @@ jest.mock("@/lib/task-workspace/client", () => ({
   restoreManagedWorkspace: (...args: unknown[]) => restoreMock(...args),
   makeManagedWorkspacePermanent: (...args: unknown[]) => permanentMock(...args),
   deleteManagedWorkspace: (...args: unknown[]) => deleteMock(...args),
+  reconcileManagedWorkspaces: (...args: unknown[]) => reconcileMock(...args),
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -51,6 +53,7 @@ beforeEach(() => {
   restoreMock.mockReset().mockResolvedValue({ ...managed, state: "active" })
   permanentMock.mockReset().mockResolvedValue({ ...managed, environmentKind: "permanent" })
   deleteMock.mockReset().mockResolvedValue(undefined)
+  reconcileMock.mockReset().mockResolvedValue({ reclaimed: [], orphaned: [], imported: [] })
 })
 
 it("lists Registry environments and pins a managed row", async () => {
