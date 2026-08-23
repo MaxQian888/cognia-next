@@ -7,11 +7,24 @@
     "unavailable": "仅限本地 Tauri"
   },
   "baseRef": "基础引用",
+  "baseRefFor": "{root} 的基准引用",
   "comment": "{path} 第 {line} 行的反馈",
   "commentPlaceholder": "添加锚定的审查评论",
   "commitSection": "提交所选工作",
   "commitSha": "提交 SHA",
+  "commitShaFor": "{root} 的提交 SHA",
   "create": "创建拉取请求",
+  "delivery": {
+    "title": "发布结果",
+    "nothingToSend": "没有任何评论落在某个仓库上。",
+    "succeeded": "已发布",
+    "failed": "失败",
+    "skipped": "缺少 PR",
+    "pending": "待发布",
+    "comments": "{count, plural, other {# 条评论}}",
+    "retryFailed": "{count, plural, other {重试 # 个仓库}}",
+    "uncertain": "{count, plural, other {有 # 个仓库没有返回结果——重试可能会重复发布同一份评审}}"
+  },
   "description": "审查最后一轮、工作区、提交或分支，并发布一份可编辑的反馈草稿。",
   "draft": "可编辑反馈草稿",
   "draftPr": "创建为草稿",
@@ -24,12 +37,16 @@
   "load": "加载审查",
   "loading": "正在加载审查…",
   "lookup": "查找当前分支的拉取请求",
+  "lookupAll": "查找各仓库的 PR",
   "noHunks": "此文件没有可评论的文本 hunk。",
+  "noPullRequest": "没有找到该仓库当前分支对应的 PR。",
   "open": "打开统一审查",
+  "perRootRefs": "每个仓库都按自己的引用来取——一个仓库的提交或分支，在另一个仓库里没有意义。",
   "prBody": "拉取请求描述",
   "prTitle": "拉取请求标题",
   "publish": "发布反馈审查",
   "push": "推送分支",
+  "repositories": "仓库",
   "retry": "重试",
   "roots": "仓库根目录",
   "scope": "审查范围",
@@ -43,5 +60,11 @@
   "success": "GitHub 操作已完成。",
   "summary": "审查摘要",
   "targetRef": "目标引用",
-  "title": "审查与拉取请求"
+  "targetRefFor": "{root} 的目标引用",
+  "title": "审查与拉取请求",
+  "unavailable": {
+    "missing-run": "{root} 没有可供评审的智能体运行——只有上一轮实际写入的那个仓库才有。",
+    "missing-commit": "{root} 需要填写自己的提交 SHA。",
+    "missing-refs": "{root} 需要填写自己的基准与目标引用。"
+  }
 }

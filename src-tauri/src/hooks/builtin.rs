@@ -227,7 +227,10 @@ mod tests {
             assert_eq!(def.id, want["id"].as_str().unwrap());
             assert_eq!(def.event, want["event"].as_str().unwrap());
             assert_eq!(def.script, want["script"].as_str().unwrap());
-            assert_eq!(def.default_enabled, want["defaultEnabled"].as_bool().unwrap());
+            assert_eq!(
+                def.default_enabled,
+                want["defaultEnabled"].as_bool().unwrap()
+            );
             assert_eq!(def.matcher, want["matcher"].as_str());
         }
     }

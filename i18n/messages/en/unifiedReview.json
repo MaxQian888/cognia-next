@@ -7,11 +7,24 @@
     "unavailable": "local Tauri only"
   },
   "baseRef": "Base reference",
+  "baseRefFor": "Base reference for {root}",
   "comment": "Feedback for {path} at line {line}",
   "commentPlaceholder": "Add an anchored review comment",
   "commitSection": "Commit selected work",
   "commitSha": "Commit SHA",
+  "commitShaFor": "Commit SHA for {root}",
   "create": "Create pull request",
+  "delivery": {
+    "title": "Delivery",
+    "nothingToSend": "No comments were anchored to a repository.",
+    "succeeded": "Published",
+    "failed": "Failed",
+    "skipped": "No pull request",
+    "pending": "Pending",
+    "comments": "{count, plural, one {# comment} other {# comments}}",
+    "retryFailed": "{count, plural, one {Retry # repository} other {Retry # repositories}}",
+    "uncertain": "{count, plural, one {# repository never answered — retrying may post the review twice} other {# repositories never answered — retrying may post the review twice}}"
+  },
   "description": "Review the last turn, working tree, commit, or branch and publish one editable feedback draft.",
   "draft": "Editable feedback draft",
   "draftPr": "Create as draft",
@@ -24,12 +37,16 @@
   "load": "Load review",
   "loading": "Loading review…",
   "lookup": "Find branch pull request",
+  "lookupAll": "Find pull requests",
   "noHunks": "This file has no text hunks to comment on.",
+  "noPullRequest": "No pull request found for this repository's branch.",
   "open": "Open unified review",
+  "perRootRefs": "Each repository is asked about its own refs — a commit or branch from one is meaningless in another.",
   "prBody": "Pull request description",
   "prTitle": "Pull request title",
   "publish": "Publish feedback review",
   "push": "Push branch",
+  "repositories": "Repositories",
   "retry": "Retry",
   "roots": "Repository roots",
   "scope": "Review scope",
@@ -43,5 +60,11 @@
   "success": "GitHub operation completed.",
   "summary": "Review summary",
   "targetRef": "Target reference",
-  "title": "Review and pull request"
+  "targetRefFor": "Target reference for {root}",
+  "title": "Review and pull request",
+  "unavailable": {
+    "missing-run": "{root} has no agent run to review — only the repository the last turn wrote in does.",
+    "missing-commit": "{root} needs its own commit SHA.",
+    "missing-refs": "{root} needs its own base and target references."
+  }
 }

@@ -583,7 +583,7 @@
         "title": "Cognia 托管项目",
         "unavailable": "当前构建未提供托管 PostHog 地址与项目 Token；BYO 仍可使用。"
       },
-      "privacyDescription": "允许发送：事件名、运行时/版本、模型/提供商、用量、延迟、成本、工具名、状态以及 trace/session 标识。绝不发送 prompt、回复、工具参数/结果、文件、URL 或异常正文。自动采集、会话回放、问卷、功能开关、用户画像和自动异常采集始终关闭。",
+      "privacyDescription": "允许发送：事件名、运行时/版本、模型/提供商、用量、延迟、成本、工具名、状态以及 trace/session 标识。绝不发送 prompt、回复、工具参数/结果、文件、URL 或异常正文。产品事件和 AI trace 使用同一个稳定、按安装隔离的 pseudonymous installation ID；产品事件关闭用户画像和 GeoIP enrichment，AI 则用它关联 renderer 与 sidecar span。源 IP 是否丢弃由各 PostHog 项目的隐私设置决定，BYO 项目由其 operator 负责。自动采集、会话回放、问卷、功能开关和自动异常采集始终关闭。",
       "privacyTitle": "远程隐私白名单",
       "productAnalytics": "产品分析",
       "productAnalyticsDesc": "仅在行为遥测也已开启时发送经过采样的注册事件。",

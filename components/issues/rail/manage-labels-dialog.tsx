@@ -56,6 +56,7 @@ export function ManageLabelsDialog({ open, onOpenChange, labels }: ManageLabelsD
             rowColorAria: (name) => t("rowColorAria", { name }),
             deleteAria: (name) => t("deleteAria", { name }),
             reorderAria: (name) => t("reorderAria", { name }),
+            swatchAria: (index) => t(`colors.${index}`),
           }}
         />
       </DialogContent>

@@ -162,6 +162,18 @@ const NODE_ONLY_MODULES = [
   "node:os",
   "path",
   "node:path",
+  // Same shape, second offender: `@cognia/agent`'s host launcher
+  // (`packages/agent/src/host.ts`) calls `createRequire` to locate the bundled
+  // platform host binary. It is a value import — `WorkerRuntimeInitializer` →
+  // `tauri-worker-runtime` → `worker-rpc-pool` → `@cognia/agent` — so the
+  // browser chunking context has to resolve it even though `resolveBundledHost`
+  // returns `null` in the WebView (no matching `process.platform`/`arch` entry,
+  // and the `createRequire` call sits inside a `try/catch` besides). Its
+  // sibling imports (`node:child_process` / `node:fs` / `node:path`) are
+  // already listed above; `node:module` was the one gap, and Turbopack's
+  // `resolveAlias` panics on an unstubbed external instead of degrading.
+  "module",
+  "node:module",
 ]
 
 // Enable static export for Tauri production builds.

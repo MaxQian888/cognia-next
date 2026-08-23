@@ -169,11 +169,18 @@ one team is the existing `teamIds` facet's job.
 The list is a live query ordered by activity, so a background conversation slides
 rows under the cursor — and under date bucketing, out of the section entirely.
 `lib/chat/conversation-order-freeze.ts` + `hooks/chat/use-conversation-order-freeze.ts`
-hold the *order* (and section membership) while the pointer is over the list or
-it is scrolled, releasing on the conjunction. Additions and removals are never
-held: freezing insertions would fight the new-conversation reveal, and holding a
-deleted row would leave one that opens nothing. A pill reports how many rows are
-waiting and applies them at once.
+hold the *order* (and section membership) while the pointer is over the list.
+Additions and removals are never held: freezing insertions would fight the
+new-conversation reveal, and holding a deleted row would leave one that opens
+nothing.
+
+Hover is the whole signal, and the hold is silent. A first cut also froze on
+scroll position, which let a hold outlive its reason (scroll down, walk away)
+and therefore needed a "N updates" pill to escape it. The pill was the tell — a
+mechanism that needs an exit is holding on too long — and it fired for the
+conversation the user was *typing into*, whose own new message re-sorts the list
+like any other. Scrolled-but-not-hovered means reading, not aiming; a row moving
+then is the list doing its job.
 
 `@tanstack/react-virtual` windows only long **flat, un-draggable** sections
 (search results, `title` / `unread` sorts, past 200 rows) — the only place with

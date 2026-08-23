@@ -1605,8 +1605,14 @@
         "options": {
           "direct": "Single agent",
           "subagent": "Delegate to subagents",
+          "team": "Agent team",
           "verified-fresh-agent": "Independent reviewer",
           "workflow": "Workflow"
+        },
+        "unavailable": {
+          "notImplemented": "Not built yet",
+          "viaMention": "Reach it with @mention",
+          "viaSlashCommand": "Reach it with /workflow"
         }
       },
       "toolPresentation": {
@@ -1625,6 +1631,14 @@
     "chip": {
       "ariaLabel": "Mode: {preset}",
       "narrowed": "This mode was narrowed for this turn"
+    },
+    "executor": {
+      "label": "Executor",
+      "needsSession": "Choosable once this conversation has started.",
+      "noSquads": "No Squads yet — create one in Settings.",
+      "runsOnSquad": "Model and thinking level come from the Squad's members.",
+      "singleAgent": "Single agent",
+      "squadMissing": "Squad unavailable"
     },
     "inherit": "Preset default · {preset}",
     "inheritGeneric": "Preset default",
@@ -1813,43 +1827,149 @@
   },
   "agentRuns": {
     "actions": {
-      "abort": "Abort",
+      "approve": "Approve",
+      "deny": "Deny",
       "pause": "Pause",
-      "resume": "Resume"
+      "resume": "Resume",
+      "retry": "Retry",
+      "steer": "Steer",
+      "steerPlaceholder": "Redirect this run without stopping it…",
+      "stop": "Stop"
     },
-    "description": "Every live and recent goal, team, plan, and scheduled agent run in one place.",
+    "activityCategory": {
+      "approval": "Approval",
+      "artifact": "Artifact",
+      "command": "Command",
+      "integration": "Integration",
+      "read": "Read",
+      "search": "Search",
+      "skill": "Skill",
+      "status": "Status",
+      "write": "Write"
+    },
+    "activityStatus": {
+      "blocked": "Blocked",
+      "completed": "Done",
+      "failed": "Failed",
+      "pending": "Pending",
+      "running": "Running",
+      "skipped": "Skipped"
+    },
+    "approvals": {
+      "approved": "Approved",
+      "denied": "Denied",
+      "expired": "Expired",
+      "pending": "Pending"
+    },
+    "changeKind": {
+      "any": "Changed",
+      "created": "Created",
+      "deleted": "Deleted",
+      "gap": "Gap",
+      "modified": "Modified",
+      "other": "Changed",
+      "renamed": "Renamed",
+      "resync": "Resynced"
+    },
+    "degraded": {
+      "no_active_run": "no live run to steer",
+      "not_admitted": "the run has not been admitted yet",
+      "pii_blocked": "blocked by the redaction gate",
+      "provider_unsupported": "this provider cannot steer",
+      "store_failed": "the receipt could not be stored"
+    },
+    "description": "Every run — chat turns, workflows, goals, teams, delegations and background jobs — in one place.",
     "detail": {
+      "activityOmitted": "{count, plural, one {# earlier step is not shown} other {# earlier steps are not shown}}",
+      "changesIncomplete": "This change list is incomplete — some file events were not captured.",
       "error": "Error",
       "finished": "Finished",
+      "journalUnavailable": "The run journal is not on this device.",
       "kind": "Kind",
+      "loading": "Loading…",
+      "noActivity": "No activity recorded.",
+      "noApprovals": "No approvals were requested.",
+      "noArtifacts": "No artifacts.",
+      "noChanges": "No files were changed.",
+      "noTests": "No test runs were recorded.",
+      "notJournalled": "This run predates the execution journal, so it cannot be controlled from here.",
       "progress": "Progress",
-      "result": "Result",
       "selectPrompt": "Select a run to see its details.",
+      "sensitive": "Sensitive",
       "started": "Started",
       "status": "Status",
-      "tokens": "Tokens used"
+      "waitingReason": "Waiting on"
     },
-    "empty": "No agent runs yet.",
+    "empty": "No runs yet.",
+    "emptyFiltered": "No runs match these filters.",
     "filters": {
       "all": "All",
-      "goal": "Goals",
-      "plan": "Plans",
-      "scheduledTask": "Scheduled",
-      "team": "Teams"
+      "allKinds": "All kinds",
+      "failed": "Failed",
+      "finished": "Finished",
+      "kindLabel": "Filter by kind",
+      "kindOption": "{label} ({count})",
+      "running": "Running",
+      "statusLabel": "Filter by status",
+      "waiting": "Waiting"
     },
     "kind": {
+      "agentTurn": "Chat",
+      "chat": "Chat",
+      "connector": "Connector",
+      "delegation": "Delegation",
       "goal": "Goal",
+      "job": "Background task",
+      "other": "Other",
       "plan": "Plan",
-      "scheduledTask": "Scheduled task",
-      "team": "Team"
+      "scheduled": "Scheduled",
+      "securityScan": "Security scan",
+      "subagent": "Sub-agent",
+      "team": "Team",
+      "workflow": "Workflow",
+      "workflowStep": "Workflow step"
     },
     "live": "Live",
+    "loadMore": "Load more",
+    "outcome": {
+      "action_unavailable": "That action is no longer available — the run has moved on.",
+      "already_retried": "This run has already been retried.",
+      "forbidden": "You are not authorized to control this run.",
+      "interrupt_expired": "The approval expired before it was answered.",
+      "interrupt_not_found": "That approval no longer exists.",
+      "interrupt_resolved": "That approval was already answered.",
+      "invalid_command": "The command was incomplete.",
+      "not_controllable": "This run has no execution journal, so it cannot be controlled from here.",
+      "retried": "A replacement run has taken over.",
+      "revision_conflict": "The run changed while you were looking — try again.",
+      "run_not_found": "That run no longer exists.",
+      "source_rejected": "The engine refused the command.",
+      "steer_degraded": "The message was not delivered and is still yours to send.",
+      "unsupported": "Nothing is registered to control this kind of run.",
+      "unsupported_for_kind": "This kind of run cannot take that action."
+    },
     "status": {
       "cancelled": "Cancelled",
-      "failed": "Failed",
-      "paused": "Paused",
+      "done": "Done",
+      "error": "Failed",
+      "queued": "Queued",
       "running": "Running",
-      "succeeded": "Succeeded"
+      "waiting": "Waiting"
+    },
+    "tabs": {
+      "activity": "Activity",
+      "approvals": "Approvals",
+      "artifacts": "Artifacts",
+      "changes": "Changes",
+      "overview": "Overview",
+      "tests": "Tests"
+    },
+    "tests": {
+      "counts": "{passed} passed · {failed} failed · {skipped} skipped",
+      "failed": "Failed",
+      "inconclusive": "Inconclusive",
+      "inconclusiveHint": "The output could not be parsed — this is not a pass.",
+      "passed": "Passed"
     },
     "title": "Agent Runs"
   },
@@ -2010,13 +2130,15 @@
       "startedAt": "Started"
     },
     "status": {
+      "awaiting_approval": "Awaiting approval",
       "cancelled": "Cancelled",
       "completed": "Completed",
       "executing": "Executing",
       "failed": "Failed",
       "idle": "Idle",
       "paused": "Paused",
-      "planning": "Planning"
+      "planning": "Planning",
+      "shutdown": "Shut down"
     },
     "taskStatus": {
       "blocked": "Blocked",
@@ -3458,6 +3580,7 @@
       "fleet-permission": "Agent waiting for permission",
       "fleet-waiting": "Agent waiting for input",
       "hitl-gate": "Team gate awaiting decision",
+      "run-approval": "Run awaiting approval",
       "tool-approval": "Tool call awaiting approval"
     },
     "openOwner": "Open",
@@ -3465,6 +3588,7 @@
     "source": {
       "chat": "Chat",
       "fleet": "Fleet",
+      "run": "Run",
       "team": "Team"
     },
     "title": "Attention"
@@ -5042,7 +5166,6 @@
         "capTools": "Tool use",
         "capVision": "Vision",
         "contextWindowLabel": "Context window",
-        "effortSuffix": "· {effort}",
         "liveSwitchFailed": "Couldn't switch the live model",
         "liveSwitched": "Switched to {model}",
         "noProviders": "No providers configured",
@@ -6352,6 +6475,7 @@
       "dismiss": "Dismiss",
       "inputLabel": "Input",
       "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
+      "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
       "titleFallback": "Allow {tool}?",
       "toolLabel": "Tool"
     },
@@ -6608,26 +6732,6 @@
       "workspace": "Workspace"
     },
     "activityRailLabel": "Context Workbench activities",
-    "agentStatusPanel": {
-      "active": "{count, plural, one {# active} other {# active}}",
-      "emptyDescription": "Add teammates to the team to see their status here.",
-      "emptyTitle": "No teammates",
-      "noTeam": "No agent team",
-      "noTeamDescription": "Start an agent team session to see status here.",
-      "openFullPage": "Open agent workspace",
-      "statuses": {
-        "awaiting_approval": "Awaiting approval",
-        "cancelled": "Cancelled",
-        "completed": "Completed",
-        "executing": "Executing",
-        "failed": "Failed",
-        "idle": "Idle",
-        "paused": "Paused",
-        "planning": "Planning",
-        "shutdown": "Shutdown"
-      },
-      "title": "Agent Status"
-    },
     "aiActions": "AI actions",
     "aiLoading": "Preparing the resource conversation…",
     "artifactSelectionComment": {
@@ -6915,6 +7019,17 @@
       "staged": "{count, plural, one {# staged} other {# staged}}",
       "title": "Source Control",
       "unstaged": "{count, plural, one {# change} other {# changes}}"
+    },
+    "squadPanel": {
+      "awaitingYou": "{count, plural, =1 {Waiting on your decision} other {Waiting on # decisions}}",
+      "missingDescription": "This conversation is bound to a Squad that no longer exists. Pick another one in the composer, or go back to a single agent.",
+      "missingTitle": "Squad unavailable",
+      "noMembersDescription": "This Squad has no teammates configured.",
+      "noMembersTitle": "No members yet",
+      "title": "Squad",
+      "unboundDescription": "Pick a Squad from the executor control in the composer to hand this conversation to a team.",
+      "unboundTitle": "Runs on a single agent",
+      "working": "{count, plural, =0 {Idle} =1 {1 working} other {# working}}"
     },
     "teamMembersPanel": {
       "title": "Team members"
@@ -7462,7 +7577,6 @@
       "newFolder": "New folder",
       "newFolderName": "New folder",
       "openSessions": "Open sessions",
-      "orderPending": "{count, plural, one {# update} other {# updates}}",
       "renameFolder": "Rename folder",
       "resizeHandle": "Resize sidebar",
       "searchAria": "Search conversations",
@@ -7526,7 +7640,6 @@
     "guildRail": {
       "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
-      "agentTeams": "Agent teams",
       "aliases": {
         "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
       },
@@ -7580,6 +7693,7 @@
       "sites": "Sites",
       "skills": "Skills",
       "sourceControl": "Source Control",
+      "squads": "Squads",
       "templates": "Templates",
       "twin": "Digital twin",
       "unreadCount": "{count, plural, one {# unread} other {# unread}}",
@@ -7595,6 +7709,7 @@
         "collect": "Collect",
         "collectAria": "Collect background run {runId}",
         "logTail": "Log",
+        "openInRuns": "Open in Agent Runs",
         "reDispatched": "re-dispatched",
         "rerun": "Re-run",
         "stop": "Stop"
@@ -7742,7 +7857,6 @@
       },
       "go": {
         "a2ui": "Mini-Apps",
-        "agentTeams": "Agent Teams",
         "canvas": "Canvas",
         "discover": "Discover",
         "dms": "Chats",
@@ -7754,6 +7868,7 @@
         "settings": "Settings",
         "sites": "Sites",
         "skills": "Skills",
+        "squads": "Squads",
         "twin": "Twin Workbench",
         "workflows": "Workflows"
       },
@@ -7767,11 +7882,11 @@
         "label": "Help"
       },
       "run": {
-        "agentTeams": "Agent Teams",
         "killSwitch": "Automation Kill-Switch",
         "label": "Run",
         "newWorkflowRun": "New Workflow Run",
-        "openScheduler": "Open Scheduler"
+        "openScheduler": "Open Scheduler",
+        "squads": "Squads"
       },
       "shortcut": {
         "cmdOrCtrl0": "Ctrl+0",
@@ -8351,6 +8466,14 @@
       "sidecarUnreachable": {
         "hint": "The local agent backend isn't running — restart it to send messages again.",
         "label": "Backend not running"
+      },
+      "squadDispatchFailed": {
+        "hint": "The Squad exists but its run could not be started — try again, or check the Squad's members.",
+        "label": "Squad could not start"
+      },
+      "squadNotFound": {
+        "hint": "This conversation is bound to a Squad that no longer exists — pick another one, or unbind it.",
+        "label": "Squad not found"
       },
       "strictFailure": {
         "hint": "The external agent failed and this session is set to strict mode, so nothing was retried elsewhere.",
@@ -9669,10 +9792,15 @@
     "empty": "Nothing is running right now.",
     "filteredEmpty": "No executions match your filters.",
     "kind": {
+      "agentTurn": "Chat",
       "chat": "Chat",
       "connector": "Connector",
+      "delegation": "Delegation",
       "goal": "Goal",
+      "job": "Background task",
+      "plan": "Plan",
       "scheduled": "Scheduled",
+      "securityScan": "Security scan",
       "subagent": "Sub-agent",
       "team": "Team",
       "workflow": "Workflow",
@@ -11973,24 +12101,62 @@
       "addIssue": "Add issue to {status}",
       "agentsWorking": "{count, plural, =0 {0 agents working} one {# agent working} other {# agents working}}",
       "awaitingReview": "{count, plural, =0 {} one {# awaiting review} other {# awaiting review}}",
+      "collapseColumn": "Collapse {status}",
       "columnActions": "Column actions",
       "denied": {
         "federated-read-only": "This issue lives in {source} and cannot be moved from here.",
         "illegal-transition": "That move isn't allowed.",
         "runtime-owned": "An agent is working on this issue — wait for the run to finish."
       },
-      "empty": "No issues"
+      "dnd": {
+        "cancelled": "Drag cancelled. {identifier} stayed in {column}.",
+        "denied": "{column} will not accept {identifier}.",
+        "dropped": "{identifier} landed in {column}, position {position} of {total}.",
+        "instructions": "Press Space to pick up an issue. Use the arrow keys to move it between columns, Space to drop it, and Escape to cancel. Press Enter to open an issue instead.",
+        "over": "{identifier} will land in {column}, position {position} of {total}.",
+        "pickedUp": "Picked up {identifier} from {column}."
+      },
+      "empty": "No issues",
+      "expandColumn": "Expand {status}",
+      "runningCard": "An agent is working on this issue"
+    },
+    "bulk": {
+      "addLabel": "Add label",
+      "applied": "{count, plural, one {# issue updated} other {# issues updated}}",
+      "clear": "Clear",
+      "failed": "{count, plural, one {# issue failed} other {# issues failed}}",
+      "label": "Bulk actions",
+      "nothing": "Nothing to change",
+      "removeLabel": "Remove label",
+      "selectAll": "Select all {count}",
+      "selected": "{count, plural, one {# selected} other {# selected}}",
+      "skipped": "{count, plural, one {# issue updated} other {# issues updated}}, {skipped} skipped"
+    },
+    "context": {
+      "delete": "Delete",
+      "open": "Open issue"
     },
     "create": {
       "cancel": "Cancel",
       "descriptionLabel": "Description",
+      "newProject": "New project…",
       "noProject": "Create a project first — issues need somewhere to live.",
+      "pickExistingProject": "← Pick an existing project",
       "projectLabel": "Project",
       "submit": "Create issue",
       "title": "New issue",
       "titleLabel": "Title",
       "titlePlaceholder": "Issue title",
       "trigger": "New issue"
+    },
+    "delete": {
+      "bodyMany": "Their activity trails and run histories go with them. This cannot be undone.",
+      "bodyOne": "“{title}”, its whole activity trail and its run history go with it. This cannot be undone.",
+      "cancel": "Keep",
+      "confirm": "Delete",
+      "titleMany": "Delete {count} issues?",
+      "titleOne": "Delete {identifier}?",
+      "working": "Deleting…"
     },
     "detail": {
       "activity": "Activity",
@@ -12001,22 +12167,51 @@
       "created": "Created",
       "description": "Description",
       "descriptionPlaceholder": "Add description…",
+      "editLabels": "Edit labels",
       "empty": "Select an issue to see its details",
       "labels": "Labels",
+      "mobileReadOnly": "Read-only on mobile",
       "openInGithub": "Open in GitHub",
       "openInProIde": "Open {path} in Pro IDE",
       "priority": "Priority",
       "project": "Project",
       "properties": "Properties",
       "status": "Status",
+      "title": "Title",
       "updated": "Updated"
     },
     "labels": {
       "add": "Add label",
+      "addButton": "Add label",
+      "builtinBadge": "Built-in",
+      "colorLabel": "Colour",
+      "colors": {
+        "0": "Red",
+        "1": "Amber",
+        "2": "Green",
+        "3": "Teal",
+        "4": "Blue",
+        "5": "Purple",
+        "6": "Pink",
+        "7": "Slate"
+      },
+      "deleteAria": "Delete {name}",
       "manage": "Manage labels",
+      "manageDescription": "Labels apply to issues in this workspace. Drag to reorder; the five starter labels cannot be deleted.",
+      "manageTitle": "Issue labels",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. regression",
+      "nameRequired": "Give the label a name",
       "none": "No labels",
       "remove": "Remove {name}",
+      "reorderAria": "Reorder {name}",
+      "rowColorAria": "Colour for {name}",
+      "rowNameAria": "Rename {name}",
       "title": "Labels"
+    },
+    "list": {
+      "moreLabels": "+{count}",
+      "select": "Select {identifier}"
     },
     "notify": {
       "actor": {
@@ -12067,14 +12262,21 @@
       "addResource": "Add resource",
       "addResourceHint": "Reference a GitHub repository to mirror its issues onto the board, or a directory this workspace has already mounted.",
       "create": "New project",
+      "createHint": "A project groups issues and gives them their identifier prefix.",
       "delete": "Delete project",
+      "deleteBody": "{count, plural, =0 {The project has no issues.} one {Its # issue goes too, with its activity trail and run history.} other {Its # issues go too, with their activity trails and run histories.}} Identifiers starting {key}- will not be reused. This cannot be undone.",
       "deleteConfirm": "Delete “{name}” and all {count} of its issues? This cannot be undone.",
+      "deleteTitle": "Delete {name}?",
+      "deleted": "Deleted {name}",
       "description": "Description",
       "descriptionHint": "Shared with agents as context for every task in this project.",
       "directoryHint": "Only directories already mounted on this workspace can be referenced.",
       "empty": "No projects yet",
       "emptyHint": "A project groups issues for one deliverable and carries the context every agent run sees.",
+      "icon": "Icon",
+      "issueCount": "Issues",
       "keyHint": "2–5 letters. Issues read {example}. Cannot be changed later.",
+      "keyImmutable": "Cannot be changed",
       "keyInvalid": "2–5 characters, starting with a letter.",
       "keyLabel": "Key",
       "keyTaken": "That key is already in use.",
@@ -12083,6 +12285,7 @@
       "namePlaceholder": "Project name",
       "noResources": "No resources bound yet.",
       "noRootsAvailable": "No unbound directories are mounted on this workspace.",
+      "openIssues": "View these issues",
       "progress": "Progress",
       "progressCount": "{completed}/{total}",
       "removeResource": "Remove resource",
@@ -12106,6 +12309,19 @@
       "summary": "{count, plural, =0 {No projects} one {# project} other {# projects}}",
       "targetDate": "Due date",
       "title": "Projects"
+    },
+    "rail": {
+      "hide": "Hide the sidebar",
+      "label": "Issue navigation",
+      "labels": "Labels",
+      "manageLabels": "Manage labels",
+      "manageProjects": "Open the projects console",
+      "noLabels": "No labels yet",
+      "noProjects": "No projects yet",
+      "openProject": "Open {name} in the projects console",
+      "projects": "Projects",
+      "show": "Show the sidebar",
+      "views": "Views"
     },
     "run": {
       "activeHint": "A run is in progress — the issue stays in In progress until the engine finishes or you cancel.",
@@ -12188,12 +12404,18 @@
       "activeFilters": "{count, plural, one {# filter} other {# filters}}",
       "board": "Board",
       "clearFilters": "Clear filters",
+      "density": {
+        "comfortable": "Comfortable",
+        "compact": "Compact",
+        "label": "Density"
+      },
       "display": "Display",
       "facet": {
         "assignee": "Assignee",
         "labels": "Labels",
         "priority": "Priority",
         "project": "Project",
+        "query": "Search",
         "source": "Source"
       },
       "filter": "Filter",
@@ -12206,6 +12428,8 @@
         "status": "Status"
       },
       "list": "List",
+      "removeFilter": "Remove filter {facet}: {value}",
+      "resetView": "Reset this view",
       "search": "Search issues",
       "sort": {
         "created": "Created",
@@ -12256,6 +12480,12 @@
       "labelsHint": "Comma-separated. Labels must already exist on the repository.",
       "labelsLabel": "Labels",
       "labelsPlaceholder": "bug, needs-triage",
+      "linkHint": "Binds this issue to an existing GitHub issue, which is what the GitHub loop needs before it can run.",
+      "linkNumber": "Issue number",
+      "linkRepo": "Repository",
+      "linkSubmit": "Link",
+      "linkTitle": "Link to a GitHub issue",
+      "linkTrigger": "Link to GitHub…",
       "reason": {
         "completed": "Completed",
         "not_planned": "Not planned"
@@ -12946,7 +13176,7 @@
           "title": "Cognia managed project",
           "unavailable": "This build does not include a managed PostHog host and project token. BYO remains available."
         },
-        "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Autocapture, replay, surveys, feature flags, profiles, and automatic exceptions stay disabled.",
+        "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Product events and AI traces use the same stable, pseudonymous per-install ID; product events disable person profiles and GeoIP enrichment, while AI uses it to correlate renderer and sidecar spans. Source-IP discard is controlled by each PostHog project's privacy setting, which BYO operators own. Autocapture, replay, surveys, feature flags, and automatic exceptions stay disabled.",
         "privacyTitle": "Remote privacy allowlist",
         "productAnalytics": "Product analytics",
         "productAnalyticsDesc": "Send sampled registered events only when behavior telemetry is also enabled.",
@@ -13914,6 +14144,13 @@
       "typeLabel": "Type"
     },
     "bulk": {
+      "archive": "Archive",
+      "archiveConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Archive",
+        "description": "This removes {count} memories from recall. They stay in the archive and can be restored.",
+        "title": "Archive selected memories?"
+      },
       "clear": "Clear selection",
       "delete": "Delete",
       "deleteConfirm": {
@@ -13944,6 +14181,33 @@
       "title": "Resolve conflicting memories"
     },
     "detail": {
+      "activity": {
+        "actions": {
+          "conflict": "Marked conflicting",
+          "created": "Created",
+          "deleted": "Deleted",
+          "invalidated": "Archived",
+          "learn-allowed": "Learning allowed",
+          "learn-denied": "Learning denied",
+          "pinned": "Pinned",
+          "promoted": "Marked verified",
+          "recall-allowed": "Recall allowed",
+          "recall-denied": "Recall denied",
+          "revised": "Revised",
+          "unpinned": "Unpinned"
+        },
+        "audit": "Audit",
+        "empty": "Nothing recorded yet.",
+        "evidence": "Evidence",
+        "kinds": {
+          "agent-finding": "Agent finding",
+          "checkpoint": "Checkpoint",
+          "external": "External source",
+          "file": "File",
+          "manual": "Entered by hand",
+          "message": "Chat message"
+        }
+      },
       "auditTitle": "Audit history",
       "cancel": "Cancel",
       "close": "Close",
@@ -13979,6 +14243,14 @@
       "replacedBy": "Replaced by",
       "replacedByGone": "The replacement was deleted.",
       "save": "Save",
+      "sections": {
+        "activity": "Activity",
+        "content": "Memory",
+        "metrics": "Metrics",
+        "origin": "Origin",
+        "status": "Status",
+        "tags": "Tags"
+      },
       "source": "Source",
       "tagsLabel": "Tags",
       "tagsPlaceholder": "comma, separated, tags",
@@ -13990,7 +14262,57 @@
       "mutation_failed": "The memory operation failed — please try again",
       "not_found": "This memory no longer exists",
       "pii_blocked": "Blocked: the text contains personal information",
+      "policy_denied": "A memory policy blocked this change",
+      "scope_denied": "That scope isn't allowed for this memory",
       "temporary": "Memory is in temporary mode"
+    },
+    "external": {
+      "agents": {
+        "claude-code": "Claude Code",
+        "codex": "Codex",
+        "opencode": "OpenCode",
+        "pi": "Pi"
+      },
+      "cancel": "Cancel",
+      "confirm": {
+        "action": "Overwrite",
+        "description": "This rewrites {path} on disk. The previous version is kept alongside it as a .bak file.",
+        "title": "Overwrite this file?"
+      },
+      "desktopOnly": {
+        "description": "External agent memory lives on disk, so it can only be read from the desktop app.",
+        "title": "Desktop only"
+      },
+      "edit": "Edit",
+      "editorLabel": "File contents",
+      "empty": {
+        "description": "Nothing was discovered for Claude Code, Codex, OpenCode, or Pi on this machine.",
+        "title": "No external agent memory found"
+      },
+      "loadError": "Could not read this file.",
+      "loading": "Loading…",
+      "notCreated": "Not created yet",
+      "readOnly": "Read-only",
+      "refresh": "Rescan",
+      "save": "Save",
+      "scopes": {
+        "auto": "Auto memory",
+        "global": "Global",
+        "managed": "Managed policy",
+        "memories": "Agent-managed",
+        "project": "Project",
+        "user": "User"
+      },
+      "stats": {
+        "editable": "Editable",
+        "total": "Files found"
+      },
+      "subtitle": "Memory and instruction files that external coding agents keep on this machine. Editing these changes what those agents remember.",
+      "toast": {
+        "saveFailed": "Could not save this file",
+        "saved": "Saved",
+        "savedWithBackup": "Saved — previous version kept as {backup}"
+      }
     },
     "governance": {
       "clean": "Clean",
@@ -13999,6 +14321,7 @@
       "legacy": "Legacy / no evidence",
       "markConflict": "Mark conflict",
       "markVerified": "Mark verified",
+      "pending_instruction": "Awaiting review",
       "supported": "Evidence-backed",
       "unknown": "Unknown",
       "unreviewed": "Unreviewed",
@@ -14008,24 +14331,72 @@
       "accessedRelative": "used {time}",
       "add": "Add",
       "addFirst": "Add your first memory",
+      "archive": "Archive",
+      "archiveConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Archive",
+        "description": "It stops being recalled but stays in the archive, and you can restore it later.",
+        "title": "Archive this memory?"
+      },
       "cancelEdit": "Cancel",
+      "clearFiltered": "Delete everything in this view…",
+      "clearFilteredConfirm": {
+        "cancel": "Cancel",
+        "confirm": "Delete permanently",
+        "description": "This permanently removes every memory currently listed. This can't be undone.",
+        "title": "Delete {count, plural, one {# memory} other {# memories}}?"
+      },
       "clearFilters": "Clear filters",
       "clearTags": "Clear tags",
+      "clearedToast": "{count, plural, one {# memory deleted} other {# memories deleted}}",
+      "copied": "Copied",
+      "copyText": "Copy text",
       "delete": "Delete",
+      "deleteForever": "Delete permanently",
       "detailTitle": "Memory details",
+      "display": {
+        "comfortable": "Comfortable",
+        "compact": "Compact",
+        "density": "Density",
+        "label": "Display",
+        "sort": "Sort by"
+      },
       "edit": "Edit",
       "editLabel": "Edit memory text",
       "empty": {
         "description": "As you chat, durable facts about you are saved here. You can also use /remember.",
         "title": "No memories yet"
       },
+      "filter": {
+        "clear": "Clear filters",
+        "label": "Filter",
+        "none": "Nothing to filter in this view",
+        "provenances": "Source",
+        "scopes": "Scope",
+        "tags": "Tags",
+        "types": "Type"
+      },
+      "importanceValue": "Importance {value}",
       "invalidated": "archived",
+      "moreActions": "More actions",
+      "moreTags": "+{count}",
       "noResults": {
         "description": "No memory matches the current filters.",
         "title": "No matching memories"
       },
+      "openSettings": "Memory settings",
+      "piiRedacted": "Saved — personal details were redacted first.",
       "pin": "Pin",
       "provenanceLabel": "Source type",
+      "retrieval": {
+        "activeJobs": "{count, plural, =0 {no jobs} one {# job} other {# jobs}}",
+        "disabled": "Recall paused",
+        "hybrid": "Hybrid recall",
+        "keyword": "Keyword recall",
+        "label": "Retrieval",
+        "openPanel": "Retrieval controls",
+        "probing": "Checking recall…"
+      },
       "saveEdit": "Save",
       "scopeLabel": "Scope",
       "searchLabel": "Search memories",
@@ -14043,6 +14414,7 @@
         "active": "Active"
       },
       "subtitle": "What the assistant remembers about you.",
+      "summary": "{active} active · {pinned} pinned · {conflicts} in conflict · {coverage}% indexed",
       "tabs": {
         "app": "App memory",
         "external": "External agent memory"
@@ -14050,7 +14422,14 @@
       "tagFilterLabel": "Tags:",
       "title": "Memory",
       "unpin": "Unpin",
-      "viewSource": "View source"
+      "viewSource": "View source",
+      "views": {
+        "all": "All",
+        "archived": "Archived",
+        "conflicts": "Conflicts",
+        "needsReview": "Needs review",
+        "pinned": "Pinned"
+      }
     },
     "provenance": {
       "all": "All sources",
@@ -15503,6 +15882,7 @@
       "notifBody": "{count} messages waiting. Will retry when online.",
       "notifChannel": "cognia",
       "notifTitle": "cognia outbound queue",
+      "queueNeedsAttention": "{count, plural, one {# action needs your attention} other {# actions need your attention}}",
       "queuePending": "{count} queued",
       "staleWarning": "{count} messages waiting > 30 min."
     },
@@ -15571,6 +15951,51 @@
         "viaProbe": "LAN probe"
       },
       "errorTitle": "Pairing failed",
+      "failure": {
+        "body": {
+          "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one.",
+          "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
+          "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help."
+        },
+        "copyDiagnostics": "Copy diagnostics",
+        "diagnosticsCopied": "Diagnostics copied",
+        "invitationSpent": "This invitation is now spent — the Host consumed it. Issue a fresh one before trying again; re-submitting the same string cannot work.",
+        "remedy": {
+          "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
+          "checkHostLogs": "Check the Host's logs for the matching error.",
+          "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
+          "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
+          "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
+          "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation.",
+          "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
+          "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
+          "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
+          "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
+          "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin."
+        },
+        "retry": "Try again",
+        "startOver": "Paste a new invitation",
+        "technicalDetail": "Technical detail",
+        "title": {
+          "activate_failed": "Paired, but the Host didn't come online",
+          "clipboard_unavailable": "Clipboard unavailable",
+          "http": "The Host rejected the pairing request",
+          "insecure_transport": "Connection would be unencrypted",
+          "offline": "This device is offline",
+          "origin_blocked": "The Host refused this browser",
+          "payload_expired": "Invitation expired",
+          "payload_invalid": "Invitation couldn't be read",
+          "payload_version": "Invitation version not supported",
+          "payload_wrong_format": "That isn't a pairing invitation",
+          "persist_failed": "The device key couldn't be stored",
+          "scan_failed": "Couldn't scan the QR code",
+          "tls_untrusted": "This browser can't verify the Host's certificate",
+          "unknown": "Pairing failed",
+          "unreachable": "Couldn't reach the Host",
+          "vault_locked": "Your local account is locked"
+        },
+        "whatToDo": "What to do"
+      },
       "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
       "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). The pair code was already consumed — generate a fresh QR/code on the desktop and pair again.",
       "fingerprintPinned": "Desktop identity pinned",
@@ -15625,7 +16050,7 @@
           "title": "Local network access required"
         }
       },
-      "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again.",
+      "persistenceError": "The device was registered on the Host, but this client couldn't store its key: {message}",
       "recovery": {
         "incompatible": {
           "description": "This Host's protocol or feature manifest is incompatible. Switch Hosts or pair again with an updated Host.",
@@ -15756,6 +16181,42 @@
       },
       "back": "Back to sessions",
       "detail": {
+        "attachAria": "Attach files",
+        "attachmentRemoveAria": "Remove attachment",
+        "attachmentTooLarge": "Some files were skipped — the limit is {max} MB each.",
+        "attachmentTooMany": "Only {max} attachments can ride one message.",
+        "attachmentUnsupported": "Some files were skipped — that type cannot be attached.",
+        "attachmentUploading": "Uploading {name}",
+        "attachmentsNeedHost": "This desktop cannot receive attachments — the message was sent without them.",
+        "changes": {
+          "collapseDiff": "Hide the diff for {path}",
+          "diffEmpty": "The desktop returned no diff body for this file.",
+          "diffError": "Couldn't load this diff ({reason}).",
+          "empty": "This turn changed no files.",
+          "error": "Couldn't load changes ({reason}).",
+          "expandDiff": "Show the diff for {path}",
+          "kinds": {
+            "created": "Added",
+            "deleted": "Deleted",
+            "modified": "Modified",
+            "renamed": "Renamed"
+          },
+          "loading": "Loading changes…",
+          "loadingDiff": "Loading diff…",
+          "pending": "This turn is still running — its changes aren't recorded yet.",
+          "renamedFrom": "Renamed from {path}",
+          "runAria": "Choose which turn to inspect",
+          "runOption": "Turn {index} · {time}",
+          "totals": "{files, plural, one {# file} other {# files}} · +{additions} −{deletions}",
+          "unavailable": {
+            "binary": "Binary file — no line diff was recorded.",
+            "noTextDiff": "The desktop keeps no line diff for this kind of change.",
+            "sensitive": "Withheld — this path holds credentials.",
+            "symlink": "Symbolic link — no line diff was recorded."
+          },
+          "untracked": "The desktop tracked no workspace for this session, so there are no file changes to show.",
+          "withheld": "{count, plural, one {# file has no viewable diff} other {# files have no viewable diff}}"
+        },
         "collapseTurn": "Collapse turn details",
         "composerAria": "Follow-up message",
         "composerPlaceholder": "Send a follow-up…",
@@ -15768,10 +16229,32 @@
         "loadingTranscript": "Loading transcript…",
         "notFound": "Session not found or no longer available.",
         "observeOnly": "Observe only",
+        "observeOnlyMissingGrant": "Observe only — remote control is off for this device",
+        "observeOnlyReconnecting": "Observe only — reconnecting to the session",
         "offlineHint": "Desktop is offline — reconnect to resume following this session.",
         "retryTranscript": "Retry transcript",
         "sendAria": "Send",
         "streaming": "Streaming",
+        "tabs": {
+          "changes": "Changes",
+          "tests": "Tests",
+          "transcript": "Transcript"
+        },
+        "tests": {
+          "conclusions": {
+            "failed": "Failed",
+            "inconclusive": "Inconclusive",
+            "passed": "Passed"
+          },
+          "failed": "{count} failed",
+          "inconclusiveNote": "The test output could not be parsed, so no pass or fail count is claimed.",
+          "loading": "Loading test results…",
+          "noRuns": "No runs for this session have reached this device yet.",
+          "none": "No turn in this session recorded a test run.",
+          "passed": "{count} passed",
+          "progress": "{passed}/{total} tests passed",
+          "skipped": "{count} skipped"
+        },
         "title": "Live session"
       },
       "list": {
@@ -17172,30 +17655,77 @@
     "apiKeyPlaceholder": "sk-…",
     "back": "Back",
     "cards": {
-      "readFolder": {
-        "title": "Read a folder",
-        "description": "Point it at a directory and get a plain summary of what's inside.",
-        "prompt": "Read a folder on this machine and tell me what's in it."
-      },
       "extractText": {
-        "title": "Pull text out of an image",
         "description": "Take a screenshot and get the words back out of it.",
-        "prompt": "Take a screenshot and extract the text from it."
+        "prompt": "Take a screenshot and extract the text from it.",
+        "title": "Pull text out of an image"
+      },
+      "readFolder": {
+        "description": "Point it at a directory and get a plain summary of what's inside.",
+        "prompt": "Read a folder on this machine and tell me what's in it.",
+        "title": "Read a folder"
       },
       "summarizeWeb": {
-        "title": "Summarize a web page",
         "description": "Give it a link and get the gist, without leaving the app.",
-        "prompt": "Summarize a web page for me."
+        "prompt": "Summarize a web page for me.",
+        "title": "Summarize a web page"
       }
     },
     "continue": "Continue",
     "done": "Done",
+    "express": {
+      "apply": "Set it up",
+      "applyingDescription": "This takes a few seconds. You can watch it go.",
+      "applyingTitle": "Setting things up",
+      "capability": {
+        "fs": "Read your files",
+        "ocr": "Pull text out of images",
+        "web": "Read web pages"
+      },
+      "description": "Everything below was found on this machine. Uncheck anything you would rather skip — nothing runs until you press the button.",
+      "freshDescription": "Nothing to bring over from this machine, so setup is short: connect a model, and Cognia is ready to do something with it.",
+      "freshTitle": "Two things and you are running",
+      "item": {
+        "capabilities": {
+          "title": "What your first task can use"
+        },
+        "history": {
+          "description": "Every transcript we can read on this disk, across all agents — not just the ones with config installed.",
+          "title": "{count, plural, one {Import # past conversation} other {Import # past conversations}}"
+        },
+        "migrate": {
+          "description": "Commands, settings, skills, subagents and MCP servers. Existing entries are kept.",
+          "title": "Bring over your {vendor} setup"
+        },
+        "pair": {
+          "description": "Your desktop does the work and holds the credentials. This phone becomes a remote for it.",
+          "title": "Pair with your desktop"
+        },
+        "runtime": {
+          "description": "It is already signed in on this machine, so Cognia needs no credentials of its own.",
+          "title": "Reach models through {runtime}"
+        },
+        "signIn": {
+          "description": "The one step nobody can do for you. It takes about twenty seconds.",
+          "title": "Connect a model"
+        }
+      },
+      "needsModel": "Connect a model above first — there is nothing to run a first task with yet.",
+      "needsPairing": "Pair with a desktop first — this phone has nothing of its own to run a task with.",
+      "signIn": {
+        "collapse": "Back to the quick option",
+        "connected": "Connected as {account}",
+        "more": "More ways to connect",
+        "save": "Connect"
+      },
+      "title": "Here is what we will set up"
+    },
     "finishBar": {
+      "cta": "Finish setup",
+      "dismiss": "Dismiss",
       "provider_skipped": "Cognia can't reach a model yet — finish signing in.",
       "runtime_skipped": "No agent runtime is set up on this machine yet.",
-      "task_failed": "Your first run didn't finish. Want to try again?",
-      "cta": "Finish setup",
-      "dismiss": "Dismiss"
+      "task_failed": "Your first run didn't finish. Want to try again?"
     },
     "firstRun": {
       "changeCharacter": "Change",
@@ -17207,6 +17737,32 @@
       "runtimeLine": "Using {runtime}",
       "starting": "Starting…",
       "title": "Let's do one real thing"
+    },
+    "narrative": {
+      "express": {
+        "body": "Every line below is something the scan actually found. Drop any of them.",
+        "headline": "Nothing runs until you say so."
+      },
+      "express-applying": {
+        "body": "Each line lights up as it lands. Nothing here needs you.",
+        "headline": "Doing it now."
+      },
+      "first-run": {
+        "body": "Pick a task and judge the result yourself.",
+        "headline": "Now watch it do one real thing."
+      },
+      "provider": {
+        "body": "Use the subscription you already pay for, or bring your own key.",
+        "headline": "One credential, then you are done."
+      },
+      "scan": {
+        "body": "Agent CLIs, their settings, and the conversations on this disk. None of it leaves your computer.",
+        "headline": "Looking at what you already have."
+      },
+      "welcome": {
+        "body": "Files, screen, browser — the things a chat box cannot reach.",
+        "headline": "It works on what is actually here."
+      }
     },
     "provider": {
       "apiKey": {
@@ -17258,23 +17814,23 @@
       "toastIncomplete": "Fill in what this provider needs before continuing."
     },
     "rail": {
-      "label": "Setup progress",
-      "scan": {
-        "label": "This machine",
-        "description": "What we found, and what to bring over."
-      },
-      "provider": {
-        "label": "Sign in",
-        "description": "How Cognia reaches a model."
-      },
       "first-run": {
-        "label": "First run",
-        "description": "Watch it do one real thing."
+        "description": "Watch it do one real thing.",
+        "label": "First run"
+      },
+      "label": "Setup progress",
+      "provider": {
+        "description": "How Cognia reaches a model.",
+        "label": "Sign in"
+      },
+      "scan": {
+        "description": "What we found, and what to bring over.",
+        "label": "This machine"
       }
     },
     "restart": {
-      "label": "Run setup again",
-      "description": "Walk through the first-run flow from the beginning."
+      "description": "Walk through the first-run flow from the beginning.",
+      "label": "Run setup again"
     },
     "saving": "Saving…",
     "scan": {
@@ -17303,6 +17859,13 @@
       "runtimesFound": "{count, plural, one {# agent runtime} other {# agent runtimes}}",
       "scanning": "Looking around…",
       "title": "What's already on this machine"
+    },
+    "scene": {
+      "express": "The setup plan, and how far it has got",
+      "firstRun": "Cognia writing its first output back out",
+      "provider": "A single credential completing the link to Cognia",
+      "scan": "What the scan found on this machine",
+      "welcome": "An agent inside your machine, reaching your files, your screen and the web"
     },
     "skip": "Skip for now",
     "toastNeedKey": "Paste your API key to continue.",
@@ -17347,101 +17910,21 @@
       }
     },
     "welcome": {
+      "byokCta": "Use my own key",
+      "byokDescription": "Bring your own API key and run inference in this app.",
+      "byokTitle": "On its own",
+      "cta": "Set up for me",
+      "customiseCta": "I'll configure it myself",
       "headline": "Your desktop, with an agent in it.",
       "lede": "Cognia runs agents against what is actually on this machine — your files, your screen, your browser — not just a chat box.",
-      "sub": "About a minute either way. Both paths end with the agent finishing one real task.",
-      "cta": "Set up for me",
-      "skipExisting": "I've done this before",
       "modeTitle": "How should this phone run?",
-      "byokTitle": "On its own",
-      "byokDescription": "Bring your own API key and run inference in this app.",
-      "byokCta": "Use my own key",
-      "pairTitle": "Paired with my desktop",
-      "pairDescription": "Send work to a Cognia desktop over LAN or WAN. It does the heavy lifting.",
       "pairCta": "Pair with a desktop",
-      "customiseCta": "I'll configure it myself"
+      "pairDescription": "Send work to a Cognia desktop over LAN or WAN. It does the heavy lifting.",
+      "pairTitle": "Paired with my desktop",
+      "skipExisting": "I've done this before",
+      "sub": "About a minute either way. Both paths end with the agent finishing one real task."
     },
-    "wordmark": "Cognia",
-    "scene": {
-      "welcome": "An agent inside your machine, reaching your files, your screen and the web",
-      "scan": "What the scan found on this machine",
-      "express": "The setup plan, and how far it has got",
-      "provider": "A single credential completing the link to Cognia",
-      "firstRun": "Cognia writing its first output back out"
-    },
-    "narrative": {
-      "welcome": {
-        "headline": "It works on what is actually here.",
-        "body": "Files, screen, browser — the things a chat box cannot reach."
-      },
-      "express": {
-        "headline": "Nothing runs until you say so.",
-        "body": "Every line below is something the scan actually found. Drop any of them."
-      },
-      "scan": {
-        "headline": "Looking at what you already have.",
-        "body": "Agent CLIs, their settings, and the conversations on this disk. None of it leaves your computer."
-      },
-      "provider": {
-        "headline": "One credential, then you are done.",
-        "body": "Use the subscription you already pay for, or bring your own key."
-      },
-      "first-run": {
-        "headline": "Now watch it do one real thing.",
-        "body": "Pick a task and judge the result yourself."
-      },
-      "express-applying": {
-        "headline": "Doing it now.",
-        "body": "Each line lights up as it lands. Nothing here needs you."
-      }
-    },
-    "express": {
-      "title": "Here is what we will set up",
-      "freshTitle": "Two things and you are running",
-      "description": "Everything below was found on this machine. Uncheck anything you would rather skip — nothing runs until you press the button.",
-      "applyingTitle": "Setting things up",
-      "applyingDescription": "This takes a few seconds. You can watch it go.",
-      "apply": "Set it up",
-      "needsModel": "Connect a model above first — there is nothing to run a first task with yet.",
-      "item": {
-        "migrate": {
-          "title": "Bring over your {vendor} setup",
-          "description": "Commands, settings, skills, subagents and MCP servers. Existing entries are kept."
-        },
-        "history": {
-          "title": "{count, plural, one {Import # past conversation} other {Import # past conversations}}",
-          "description": "Every transcript we can read on this disk, across all agents — not just the ones with config installed."
-        },
-        "runtime": {
-          "title": "Reach models through {runtime}",
-          "description": "It is already signed in on this machine, so Cognia needs no credentials of its own."
-        },
-        "signIn": {
-          "title": "Connect a model",
-          "description": "The one step nobody can do for you. It takes about twenty seconds."
-        },
-        "capabilities": {
-          "title": "What your first task can use"
-        },
-        "pair": {
-          "title": "Pair with your desktop",
-          "description": "Your desktop does the work and holds the credentials. This phone becomes a remote for it."
-        }
-      },
-      "capability": {
-        "fs": "Read your files",
-        "ocr": "Pull text out of images",
-        "web": "Read web pages"
-      },
-      "needsPairing": "Pair with a desktop first — this phone has nothing of its own to run a task with.",
-      "signIn": {
-        "connected": "Connected as {account}",
-        "more": "More ways to connect",
-        "collapse": "Back to the quick option",
-        "save": "Connect"
-      },
-      "freshDescription": "Nothing to bring over from this machine, so setup is short: connect a model, and Cognia is ready to do something with it."
-    }
+    "wordmark": "Cognia"
   },
   "page": {
     "deployNow": "Deploy now",
@@ -27520,12 +28003,23 @@
         "addButton": "Add label",
         "builtinBadge": "Built-in",
         "colorLabel": "Color",
+        "colors": {
+          "0": "Red",
+          "1": "Amber",
+          "2": "Green",
+          "3": "Teal",
+          "4": "Blue",
+          "5": "Purple",
+          "6": "Pink",
+          "7": "Slate"
+        },
         "deleteAria": "Delete label {name}",
         "description": "Reusable labels for organizing inbox conversations. Built-in labels can't be deleted.",
         "empty": "No labels yet — add one above.",
         "nameLabel": "Name",
         "namePlaceholder": "e.g. follow-up",
         "nameRequired": "Label name is required.",
+        "reorderAria": "Reorder {name}",
         "rowColorAria": "Color for {name}",
         "rowNameAria": "Name for {name}",
         "title": "Conversation labels"
@@ -29331,7 +29825,6 @@
       "account": "Your identity, plan usage, profile, subscription and paired devices in one place.",
       "agentModes": "Built-in and custom agent modes — system prompt, tool list, output format and live preview presets.",
       "agentRuntime": "Built-in Anthropic SDK sidecar — defaults, permission mode, always-allow tools, built-in tool categories, sidecar diagnostics, and the A2UI bridge.",
-      "agentTeams": "Multi-agent team templates — manager-worker, parallel specialists, research squad. Browse built-ins, duplicate to fork, or create new templates.",
       "agents": "External agents — Claude Code CLI, Codex, Gemini CLI, Cursor and any custom command speaking ACP / OpenCode / HTTP.",
       "aiConnections": "Configure AI accounts, endpoints, credentials, deployments, verification, health, and import or export.",
       "apiKey": "Anthropic API key (used by the local sidecar).",
@@ -29381,6 +29874,7 @@
       "slashCommands": "Built-in, custom, and plugin-contributed slash commands — browse, search, and copy a command into the composer.",
       "sourceControl": "AI commit-message generation and other Git panel preferences.",
       "speech": "Voice input (STT) language and microphone, plus read-aloud (TTS) provider, voice and auto-play.",
+      "squads": "Squads are teams of agents you can hand a conversation to. Manage the ones you have, and start new ones from a template.",
       "subagents": "Sub-agent templates and live runtime — spawn focused workers from a parent agent for research, code review, content, or analysis sub-tasks.",
       "subscription": "Sign in with your Claude, Codex (ChatGPT), or OpenCode subscription, monitor rate-limit windows and balances, and manage OAuth credentials in your OS keychain.",
       "teams": "Multi-character coordination — round-robin, supervisor, manual.",
@@ -32363,6 +32857,37 @@
         "webCloudWarning": "Web playback sends text to the configured cloud provider."
       }
     },
+    "squads": {
+      "detail": {
+        "dangerDescription": "Conversations bound to it fall back to a single agent. Past runs are kept.",
+        "dangerTitle": "Delete this Squad",
+        "deleteAction": "Delete Squad",
+        "deleteBody": "This removes the Squad and its members. Runs it has already produced stay in the run history.",
+        "deleteTitle": "Delete {name}?",
+        "descriptionLabel": "Description",
+        "descriptionPlaceholder": "What is this Squad for?",
+        "memberCount": "{count, plural, =0 {none} =1 {1 member} other {# members}}",
+        "missingDescription": "It was deleted, perhaps in another window. Pick another from the list.",
+        "missingTitle": "Squad unavailable",
+        "nameLabel": "Name",
+        "noMembersDescription": "Add teammates from a template, or from the Squad's own run surface.",
+        "noMembersTitle": "No members yet",
+        "rosterLabel": "Members"
+      },
+      "nav": {
+        "create": "New Squad",
+        "defaultLeadName": "Squad Lead",
+        "newSquadName": "New Squad",
+        "noMatches": "No Squad matches that.",
+        "noSquads": "No Squads yet. Start from a template, or create one.",
+        "openList": "Show Squad list",
+        "searchPlaceholder": "Search Squads",
+        "squadsLabel": "Your Squads",
+        "static": {
+          "templates": "Templates"
+        }
+      }
+    },
     "subagents": {
       "backgroundTasks": {
         "autoResume": "Auto-resume interrupted runs on boot",
@@ -32626,7 +33151,6 @@
       "account": "Account",
       "agentModes": "Agent modes",
       "agentRuntime": "Built-in agent runtime",
-      "agentTeams": "Agent teams",
       "agents": "Agents",
       "aiConnections": "AI Connections",
       "apiKey": "API key",
@@ -32676,6 +33200,7 @@
       "slashCommands": "Slash commands",
       "sourceControl": "Source Control",
       "speech": "Speech",
+      "squads": "Squads",
       "subagents": "Sub-agents",
       "subscription": "Subscription",
       "teams": "Teams",
@@ -35213,6 +35738,49 @@
     "trustedDomains": "Trusted",
     "verificationMode": "Mode"
   },
+  "squadRun": {
+    "gate": {
+      "decision": {
+        "approved": "Approved",
+        "dismissed": "Dismissed",
+        "rejected": "Rejected"
+      },
+      "openRun": "Run"
+    },
+    "memberActivity": "{count, plural, =1 {1 step} other {# steps}}",
+    "openRun": "Open run",
+    "runStatus": {
+      "cancelled": "Cancelled",
+      "completed": "Done",
+      "failed": "Failed",
+      "paused": "Paused",
+      "queued": "Queued",
+      "recovery_required": "Needs recovery",
+      "running": "Running",
+      "waiting": "Waiting"
+    },
+    "runUnavailable": "Run not on this device",
+    "stepStatus": {
+      "completed": "Done",
+      "failed": "Failed",
+      "running": "Running",
+      "skipped": "Skipped"
+    }
+  },
+  "squads": {
+    "fleet": {
+      "configure": "Configure this Squad",
+      "description": "What every Squad is doing right now.",
+      "emptyDescription": "Create one in Settings, then hand a conversation to it from the composer.",
+      "emptyTitle": "No Squads yet",
+      "inspectorLabel": "Squad detail",
+      "manageAction": "Manage Squads",
+      "memberCount": "{count, plural, =0 {no members} =1 {1 member} other {# members}}",
+      "railLabel": "Squad list",
+      "summary": "{live, plural, =0 {none working} other {# working}} of {total, plural, =1 {1 Squad} other {# Squads}}",
+      "title": "Squads"
+    }
+  },
   "structuredConfig": {
     "apply": "Apply",
     "download": "Download",
@@ -37498,11 +38066,24 @@
       "unavailable": "local Tauri only"
     },
     "baseRef": "Base reference",
+    "baseRefFor": "Base reference for {root}",
     "comment": "Feedback for {path} at line {line}",
     "commentPlaceholder": "Add an anchored review comment",
     "commitSection": "Commit selected work",
     "commitSha": "Commit SHA",
+    "commitShaFor": "Commit SHA for {root}",
     "create": "Create pull request",
+    "delivery": {
+      "comments": "{count, plural, one {# comment} other {# comments}}",
+      "failed": "Failed",
+      "nothingToSend": "No comments were anchored to a repository.",
+      "pending": "Pending",
+      "retryFailed": "{count, plural, one {Retry # repository} other {Retry # repositories}}",
+      "skipped": "No pull request",
+      "succeeded": "Published",
+      "title": "Delivery",
+      "uncertain": "{count, plural, one {# repository never answered — retrying may post the review twice} other {# repositories never answered — retrying may post the review twice}}"
+    },
     "description": "Review the last turn, working tree, commit, or branch and publish one editable feedback draft.",
     "draft": "Editable feedback draft",
     "draftPr": "Create as draft",
@@ -37515,12 +38096,16 @@
     "load": "Load review",
     "loading": "Loading review…",
     "lookup": "Find branch pull request",
+    "lookupAll": "Find pull requests",
     "noHunks": "This file has no text hunks to comment on.",
+    "noPullRequest": "No pull request found for this repository's branch.",
     "open": "Open unified review",
+    "perRootRefs": "Each repository is asked about its own refs — a commit or branch from one is meaningless in another.",
     "prBody": "Pull request description",
     "prTitle": "Pull request title",
     "publish": "Publish feedback review",
     "push": "Push branch",
+    "repositories": "Repositories",
     "retry": "Retry",
     "roots": "Repository roots",
     "scope": "Review scope",
@@ -37534,7 +38119,13 @@
     "success": "GitHub operation completed.",
     "summary": "Review summary",
     "targetRef": "Target reference",
-    "title": "Review and pull request"
+    "targetRefFor": "Target reference for {root}",
+    "title": "Review and pull request",
+    "unavailable": {
+      "missing-commit": "{root} needs its own commit SHA.",
+      "missing-refs": "{root} needs its own base and target references.",
+      "missing-run": "{root} has no agent run to review — only the repository the last turn wrote in does."
+    }
   },
   "webSearchToggle": {
     "searchFailed": "Web search failed: {message}",

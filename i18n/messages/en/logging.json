@@ -583,7 +583,7 @@
         "title": "Cognia managed project",
         "unavailable": "This build does not include a managed PostHog host and project token. BYO remains available."
       },
-      "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Autocapture, replay, surveys, feature flags, profiles, and automatic exceptions stay disabled.",
+      "privacyDescription": "Allowed: event names, runtime/version, model/provider, usage, latency, cost, tool names, status, and trace/session identifiers. Prompts, responses, tool arguments/results, files, URLs, and exception text are never sent. Product events and AI traces use the same stable, pseudonymous per-install ID; product events disable person profiles and GeoIP enrichment, while AI uses it to correlate renderer and sidecar spans. Source-IP discard is controlled by each PostHog project's privacy setting, which BYO operators own. Autocapture, replay, surveys, feature flags, and automatic exceptions stay disabled.",
       "privacyTitle": "Remote privacy allowlist",
       "productAnalytics": "Product analytics",
       "productAnalyticsDesc": "Send sampled registered events only when behavior telemetry is also enabled.",
