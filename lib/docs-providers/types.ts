@@ -31,7 +31,7 @@ import type { Platform } from "@/lib/platform/detect"
  * fetch time, kept distinct because the picker shows it differently and the
  * token namespaces differ.
  */
-export type RemoteDocKind = "doc" | "wiki" | "sheet" | "bitable"
+export type RemoteDocKind = "doc" | "wiki" | "sheet" | "bitable" | "resource"
 
 /** Body formats a provider may return. Drives the staged attachment's extension. */
 export type RemoteDocFormat = "markdown" | "text" | "csv"

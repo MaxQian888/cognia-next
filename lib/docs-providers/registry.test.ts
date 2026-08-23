@@ -12,6 +12,7 @@ import {
   listAvailableDocsProviders,
   listDocsProviders,
   registerDocsProvider,
+  unregisterDocsProvider,
 } from "./registry"
 import type { DocsProvider } from "./types"
 
@@ -51,6 +52,13 @@ describe("docs provider registry", () => {
 
   it("returns undefined for an unknown id", () => {
     expect(getDocsProvider("nope")).toBeUndefined()
+  })
+
+  it("unregisters a dynamically contributed provider", () => {
+    registerDocsProvider(stubProvider())
+    expect(unregisterDocsProvider("stub")).toBe(true)
+    expect(unregisterDocsProvider("stub")).toBe(false)
+    expect(listDocsProviders()).toEqual([])
   })
 
   it("throws on a duplicate id", () => {

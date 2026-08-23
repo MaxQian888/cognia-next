@@ -6,8 +6,12 @@ import {
   registerExternalServices,
 } from "../catalog"
 import { projectManagedMcpCapabilities } from "./mcp"
+import { __resetManagedMcpChatSurfacesForTesting } from "./mcp-chat"
 
-beforeEach(() => __resetExternalServiceCatalogForTesting())
+beforeEach(() => {
+  __resetExternalServiceCatalogForTesting()
+  __resetManagedMcpChatSurfacesForTesting()
+})
 
 describe("managed MCP capability projection", () => {
   it("projects tools, resources, and prompts with fail-closed unknown tool risk", () => {

@@ -37,6 +37,11 @@ export function registerDocsProvider(provider: DocsProvider): void {
   providers.set(provider.id, provider)
 }
 
+/** Remove one dynamically contributed provider. Built-ins are never removed in production. */
+export function unregisterDocsProvider(id: string): boolean {
+  return providers.delete(id)
+}
+
 export function getDocsProvider(id: string): DocsProvider | undefined {
   return providers.get(id)
 }

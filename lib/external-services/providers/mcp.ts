@@ -2,6 +2,7 @@ import type { McpCapabilityCacheRow, McpServer } from "@cognia/agent-config-type
 
 import { matchesToolPattern } from "@/lib/mcp/tool-rules"
 import { getExternalService, registerExternalCapabilities } from "../catalog"
+import { syncManagedMcpChatSurfaces } from "./mcp-chat"
 
 export function projectManagedMcpCapabilities(
   server: McpServer,
@@ -114,5 +115,6 @@ export function projectManagedMcpCapabilities(
     managed.providerId,
     capabilities
   )
+  syncManagedMcpChatSurfaces(server, discovery)
   return true
 }

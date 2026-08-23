@@ -7,6 +7,7 @@ import {
   registerExternalServices,
   unregisterExternalServicesByPlugin,
 } from "@/lib/external-services/catalog"
+import { unregisterManagedMcpChatSurfacesByPlugin } from "@/lib/external-services/providers/mcp-chat"
 
 function assertContribution(
   manifest: PluginManifest,
@@ -103,6 +104,7 @@ export function registerExternalServicesForPlugin(
 ): void {
   const services = manifest.services ?? []
   if (services.length === 0) return
+  unregisterManagedMcpChatSurfacesByPlugin(pluginId)
   unregisterExternalServicesByPlugin(pluginId)
   try {
     for (const service of services) {
@@ -127,5 +129,6 @@ export function registerExternalServicesForPlugin(
 }
 
 export function unregisterExternalServicesForPlugin(pluginId: string): number {
+  unregisterManagedMcpChatSurfacesByPlugin(pluginId)
   return unregisterExternalServicesByPlugin(pluginId)
 }
