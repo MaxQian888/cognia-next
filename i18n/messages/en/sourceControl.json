@@ -374,6 +374,8 @@
     "prune": "Prune stale",
     "pruned": "Stale worktree records pruned",
     "relativePathPlaceholder": "worktrees/feature-name",
+    "registryProtected": "This worktree is now protected by the Workspace Registry.",
+    "registryUnavailable": "Workspace ownership could not be verified. Removal was blocked.",
     "remove": "Remove Worktree",
     "removeDescription": "Remove the linked worktree at {path}?",
     "removeTitle": "Remove worktree?",

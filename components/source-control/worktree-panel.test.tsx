@@ -13,6 +13,7 @@ const openPathAsWorkspace = jest.fn()
 const toastError = jest.fn()
 const toastSuccess = jest.fn()
 const listManagedWorkspaces = jest.fn()
+const reconcileManagedWorkspaces = jest.fn()
 
 jest.mock("@/lib/git/commands", () => ({
   gitWorktreeAdd: (...args: [string, string, string, string?]) => gitWorktreeAdd(...args),
@@ -35,6 +36,7 @@ jest.mock("sonner", () => ({
 }))
 jest.mock("@/lib/task-workspace/client", () => ({
   listManagedWorkspaces: () => listManagedWorkspaces(),
+  reconcileManagedWorkspaces: () => reconcileManagedWorkspaces(),
 }))
 
 const worktrees: GitWorktree[] = [
@@ -50,6 +52,7 @@ beforeEach(() => {
   gitWorktreeRemove.mockResolvedValue(undefined)
   pickDirectory.mockResolvedValue("/work/feature-b")
   listManagedWorkspaces.mockResolvedValue([])
+  reconcileManagedWorkspaces.mockResolvedValue({ imported: [], conflicts: [], missing: [] })
 })
 
 describe("WorktreePanel", () => {
@@ -63,19 +66,40 @@ describe("WorktreePanel", () => {
     expect(screen.getByTestId("worktree-remove-/work/feature-a")).toBeInTheDocument()
   })
 
-  it("refuses removal of worktrees owned by the Registry", async () => {
+  it.each([
+    ["managed", "Managed environment"],
+    ["permanent", "Permanent environment"],
+    ["imported", "Imported environment"],
+  ])("refuses removal of %s worktrees owned by the Registry", async (environmentKind, label) => {
     listManagedWorkspaces.mockResolvedValueOnce([
-      { executionRoot: "/work/feature-a", environmentKind: "managed" },
+      { executionRoot: "/work/feature-a", environmentKind },
     ])
     const user = userEvent.setup()
     render(<WorktreePanel open rootDir="/repo" onOpenChange={() => {}} />)
 
     const remove = await screen.findByTestId("worktree-remove-/work/feature-a")
     expect(remove).toBeDisabled()
-    expect(screen.getByTestId("worktree-ownership-/work/feature-a")).toHaveTextContent(
-      "Managed environment"
-    )
+    expect(screen.getByTestId("worktree-ownership-/work/feature-a")).toHaveTextContent(label)
     await user.click(remove)
+    expect(screen.queryByTestId("worktree-remove-dialog")).not.toBeInTheDocument()
+  })
+
+  it("revalidates Registry ownership before confirmed removal", async () => {
+    const user = userEvent.setup()
+    render(<WorktreePanel open rootDir="/repo" onOpenChange={() => {}} />)
+
+    const remove = await screen.findByTestId("worktree-remove-/work/feature-a")
+    await waitFor(() => expect(remove).toBeEnabled())
+    await user.click(remove)
+    listManagedWorkspaces.mockResolvedValueOnce([
+      { executionRoot: "/work/feature-a", environmentKind: "imported" },
+    ])
+    await user.click(screen.getByTestId("worktree-remove-confirm"))
+
+    await waitFor(() => expect(gitWorktreeRemove).not.toHaveBeenCalled())
+    expect(toastError).toHaveBeenCalledWith(
+      "This worktree is now protected by the Workspace Registry."
+    )
     expect(screen.queryByTestId("worktree-remove-dialog")).not.toBeInTheDocument()
   })
 

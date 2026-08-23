@@ -44,7 +44,7 @@ import {
 } from "@/lib/git/commands"
 import { isRemoteGitTarget } from "@/lib/git/target"
 import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
-import { listManagedWorkspaces } from "@/lib/task-workspace/client"
+import { listManagedWorkspaces, reconcileManagedWorkspaces } from "@/lib/task-workspace/client"
 import { asGitError, type GitWorktree } from "@/types/git"
 import type { ManagedWorkspaceRecord, WorkspaceEnvironmentKind } from "@/lib/task-workspace/types"
 
@@ -75,7 +75,8 @@ async function loadUnifiedInventory(rootDir: string): Promise<{
 }> {
   const [worktrees, registry] = await Promise.all([
     gitWorktreeList(rootDir),
-    listManagedWorkspaces()
+    reconcileManagedWorkspaces()
+      .then(() => listManagedWorkspaces())
       .then((registryRows) => ({ registryRows, registryAvailable: true }))
       .catch(() => ({ registryRows: [], registryAvailable: false })),
   ])
@@ -204,6 +205,33 @@ export function WorktreePanel({ open, onOpenChange, rootDir, canMutate }: Worktr
 
   const removeWorktree = async () => {
     if (!removeTarget || removeTarget.isMain) return
+    const inventory = await reconcileManagedWorkspaces()
+      .then(() => listManagedWorkspaces())
+      .then((registryRows) => ({ registryRows, registryAvailable: true }))
+      .catch(() => ({ registryRows: [], registryAvailable: false }))
+    setRegistryAvailable(inventory.registryAvailable)
+    setRegistryOwners(
+      new Map(
+        inventory.registryRows.map((row) => [
+          normalizeWorktreePath(row.executionRoot),
+          row.environmentKind,
+        ])
+      )
+    )
+    if (!inventory.registryAvailable) {
+      toast.error(t("worktrees.registryUnavailable"))
+      return
+    }
+    if (
+      inventory.registryRows.some(
+        (row) =>
+          normalizeWorktreePath(row.executionRoot) === normalizeWorktreePath(removeTarget.path)
+      )
+    ) {
+      toast.error(t("worktrees.registryProtected"))
+      setRemoveTarget(null)
+      return
+    }
     const removed = await runMutation(
       "git_worktree_remove",
       () =>

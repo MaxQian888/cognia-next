@@ -47,7 +47,7 @@ import {
   openTaskWorkspaceBundleRunLease,
   openTaskWorkspaceRunLease,
 } from "@/lib/task-workspace/run-lease"
-import type { BeginTaskWorkspaceTurn } from "@/lib/task-workspace/client"
+import { getWorkspaceBundle, type BeginTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
@@ -441,13 +441,37 @@ async function runChatPrompt(
   // worktree while each execution still gets its own versioned TaskRun.
   const executionContext = payload.executionContext
   const canonicalExecution = executionContext?.execution
-  const canonicalPrimary = canonicalExecution?.roots.find((root) => root.role === "primary")
-  const canonicalAdditionalAliases = canonicalExecution?.roots
-    .filter((root) => root.role === "additional")
-    .map((root) => root.aliasPath)
   const canonicalManaged = canonicalExecution && canonicalExecution.mode !== "local"
-  if (canonicalManaged && (!canonicalExecution.bundleId || !canonicalPrimary)) {
+  const canonicalBundle = canonicalManaged
+    ? canonicalExecution.bundleId
+      ? await getWorkspaceBundle(canonicalExecution.bundleId).catch(() => null)
+      : null
+    : null
+  if (
+    canonicalManaged &&
+    (!canonicalBundle ||
+      canonicalBundle.state !== "active" ||
+      canonicalBundle.environmentKind === "imported")
+  ) {
     return { success: false, error: "Scheduled workspace canonical bundle is unavailable" }
+  }
+  const canonicalPrimary = canonicalBundle?.leases.find((lease) => lease.role === "primary")
+  const canonicalAdditionalAliases = canonicalBundle?.leases
+    .filter((lease) => lease.role === "additional")
+    .map((lease) => lease.aliasPath)
+  const requestedRootIds = new Set(
+    canonicalExecution?.roots.map((root) => root.logicalRootId) ?? []
+  )
+  const canonicalRootIds = new Set(
+    canonicalBundle?.leases.map((lease) => lease.logicalRootId) ?? []
+  )
+  if (
+    canonicalManaged &&
+    (!canonicalPrimary ||
+      requestedRootIds.size !== canonicalRootIds.size ||
+      [...requestedRootIds].some((rootId) => !canonicalRootIds.has(rootId)))
+  ) {
+    return { success: false, error: "Scheduled workspace root leases are stale" }
   }
   const boundWorkspaceRoot = canonicalManaged
     ? canonicalPrimary!.aliasPath
@@ -479,7 +503,7 @@ async function runChatPrompt(
   const taskLease = taskLeaseInput
     ? canonicalManaged
       ? await openTaskWorkspaceBundleRunLease(
-          canonicalExecution.bundleId!,
+          canonicalBundle!.bundleId,
           canonicalPrimary!.logicalRootId,
           taskLeaseInput
         )

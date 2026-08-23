@@ -80,6 +80,10 @@ jest.mock("@/lib/task-workspace/run-lease", () => ({
     openTaskWorkspaceBundleRunLeaseMock(...args),
   openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
 }))
+const getWorkspaceBundleMock = jest.fn()
+jest.mock("@/lib/task-workspace/client", () => ({
+  getWorkspaceBundle: (bundleId: string) => getWorkspaceBundleMock(bundleId),
+}))
 
 const getProjectEnvironmentMock = jest.fn()
 jest.mock("@/lib/db/project-environments", () => ({
@@ -237,6 +241,27 @@ beforeEach(() => {
   beginAgentTaskAttemptMock.mockReset().mockResolvedValue({ id: "attempt-1" })
   linkAgentTaskAttemptExecutionMock.mockReset().mockResolvedValue(undefined)
   settleAgentTaskAttemptMock.mockReset().mockResolvedValue(undefined)
+  getWorkspaceBundleMock.mockReset().mockResolvedValue({
+    bundleId: "bundle-1",
+    environmentKind: "managed",
+    ownerType: "session",
+    ownerRef: "session-created",
+    state: "active",
+    leases: [
+      {
+        logicalRootId: "root-primary",
+        role: "primary",
+        aliasPath: "/bundle/primary",
+        workspaceId: "workspace-primary",
+      },
+      {
+        logicalRootId: "root-docs",
+        role: "additional",
+        aliasPath: "/bundle/docs",
+        workspaceId: "workspace-docs",
+      },
+    ],
+  })
   openTaskWorkspaceBundleRunLeaseMock.mockReset().mockResolvedValue({
     run: { runId: "task-run-bundle-1", executionRoot: "/bundle/primary" },
     settle: settleTaskWorkspaceMock,
@@ -659,13 +684,13 @@ describe("executeChatTask", () => {
           {
             logicalRootId: "root-primary",
             role: "primary" as const,
-            aliasPath: "/bundle/primary",
+            aliasPath: "/live/repo",
             workspaceId: "workspace-primary",
           },
           {
             logicalRootId: "root-docs",
             role: "additional" as const,
-            aliasPath: "/bundle/docs",
+            aliasPath: "/live/docs",
             workspaceId: "workspace-docs",
           },
         ],
@@ -694,6 +719,7 @@ describe("executeChatTask", () => {
         surface: "scheduler",
       })
     )
+    expect(getWorkspaceBundleMock).toHaveBeenCalledWith("bundle-1")
     expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalledWith(
       "session-created",

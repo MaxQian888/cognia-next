@@ -374,6 +374,8 @@
     "prune": "清理失效项",
     "pruned": "已清理失效的工作树记录",
     "relativePathPlaceholder": "worktrees/feature-name",
+    "registryProtected": "此工作树现已受 Workspace Registry 保护。",
+    "registryUnavailable": "无法验证工作区所有权，已阻止移除。",
     "remove": "移除工作树",
     "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
     "removeTitle": "移除工作树？",
