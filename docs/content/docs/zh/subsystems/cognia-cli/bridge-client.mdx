@@ -281,3 +281,39 @@ sequenceDiagram
 
 状态文本写入 stderr，因此 stdout 始终保持为干净的 ACP JSON-RPC 流；`--quiet`
 会压制这条状态线，方便把 stderr 当信号处理的编辑器集成。
+
+该 bridge 提供采用 v1.21 schema 的稳定 ACP v1。只有对应 Cognia 服务端开关和当前 host
+runtime 同时支持时才会出现预览能力；不会通告 ACP v2。
+
+### 可选的真实 agent smoke
+
+`pnpm smoke:acp-live` 使用官方 TypeScript SDK client 检查本机已安装的 agent command；没有
+配置目标时会安全跳过。用 JSON argv array 提供一个或多个命令，避免 shell 解析：
+
+```bash
+ACP_GEMINI_COMMAND='["gemini", "<ACP args>"]' pnpm smoke:acp-live
+ACP_CODEX_COMMAND='["codex", "<ACP args>"]' pnpm smoke:acp-live
+ACP_CLAUDE_COMMAND='["claude", "<ACP args>"]' pnpm smoke:acp-live
+```
+
+请填写本机 agent 版本实际支持的 ACP invocation。Smoke 会完成 initialize、创建受限 session、
+发送禁止使用工具的 prompt、记录 update 与权威 stop reason、拒绝意外 permission request，最后
+终止子进程。
+子进程只接收最小化的 process environment。如认证依赖环境变量，请通过对应的
+`ACP_GEMINI_ENV`、`ACP_CODEX_ENV` 或 `ACP_CLAUDE_ENV` JSON object 显式选择；不会转发无关的
+环境密钥。
+
+### 编辑器手工互操作检查
+
+每个发布候选版本都应在两个编辑器中使用同一套受限 workspace fixture：
+
+1. 启动 Cognia desktop，确认 Companion endpoint 正常，并把编辑器 agent command 配置为
+   `cognia acp --quiet`。
+2. 在 Zed 中新建 session、发送文本 prompt、分别允许和拒绝一次 tool call、取消一个活动
+   turn，然后依次 close、resume、load、delete。确认 load 会回放历史，而 resume 不会。
+3. 在支持 ACP 的 JetBrains IDE 中重复生命周期，并验证带名称的 resource link、base64 image、
+   additional root、model config 变更、usage 与 session title/activity update。
+4. 在两个编辑器中验证 stdio MCP 透传；当 Cognia 未通告 HTTP/SSE MCP 时应明确拒绝。
+   provider、dynamic MCP、compaction、NES 的预览开关关闭时，对应控制项必须完全不可见。
+5. 检查 stderr/log：provider header、MCP environment value、transport ticket 和 terminal-auth
+   environment value 都不得输出。

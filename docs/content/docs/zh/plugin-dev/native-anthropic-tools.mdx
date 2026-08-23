@@ -14,7 +14,7 @@ ADR-0020（"Computer Use Completeness"）发布了 **原生 Anthropic 工具** �
 | 面                                | 何时用                                                                                                       | 代价                                                                  |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
 | **原生 Anthropic 工具**           | Anthropic 已为你的领域发布预训练 shape（当前的 computer / bash / text_editor；未来还会增加），且希望拿到 API 层的提示加成。 | 需要为工具类型携带 `anthropic-beta` 头；只有 Anthropic 供应商支持。     |
-| **Plugin MCP 工具**（更常见）       | 你要发布一个没有供应商认识的自定义工具，或者需要跨供应商兼容（Claude Code SDK 把同一个 `cognia-plugin-tools` MCP server 暴露给每个聊天）。 | 标准 MCP 工具 —— 模型看到的是 `mcp__cognia-plugin-tools__<name>`。       |
+| **Plugin MCP 工具**（更常见）       | 你要发布一个没有供应商认识的自定义工具，或者需要跨供应商兼容（Claude Agent SDK 把同一个 `cognia-plugin-tools` MCP server 暴露给每个聊天）。 | 标准 MCP 工具 —— 模型看到的是 `mcp__cognia-plugin-tools__<name>`。       |
 
 拿不准时先发 Plugin MCP 工具。等 Anthropic 给你的领域发布预训练 shape 再升格为原生工具。
 
@@ -193,7 +193,7 @@ export default definition
 ## 常见错误
 
 - **`executeIpc.invoke` 指向不存在的 Tauri 命令。** 症状：每次工具调用失败 `Command not found`。修复：确保 `tauri::generate_handler![...]` 数组包含该命令名。
-- **Tauri 命令返回 String 而非 JSON 对象。** Claude Code SDK 逐字转发返回值；裸字符串会落到 `tool_result.content` 文本而无结构。永远返回形似 Anthropic `{ ok, output, error, … }` 的 `serde_json::Value`，让宿主的 `<ComputerUseCard />` 类渲染器能解码。
+- **Tauri 命令返回 String 而非 JSON 对象。** Claude Agent SDK 逐字转发返回值；裸字符串会落到 `tool_result.content` 文本而无结构。永远返回形似 Anthropic `{ ok, output, error, … }` 的 `serde_json::Value`，让宿主的 `<ComputerUseCard />` 类渲染器能解码。
 - **忘了 `betaHeader`。** 没有正确的 `anthropic-beta` token，Anthropic 会拒绝 "unknown tool type"。注册表的 `computeAnthropicBetaHeaders` 在你的 `type` 字段使用已知 Anthropic shape 之一时会做正确的事；只有发布全新 type 时才需要覆盖 `betaHeader`。
 
 ## 参考

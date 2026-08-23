@@ -1,6 +1,6 @@
 ---
 title: OpenCode 适配器
-description: OpenCodeClientAdapter（opencode-client.ts，1659 行）走官方 @opencode-ai/sdk + SSE，外加 ProtocolAdapter 契约（protocol-adapter.ts，523 行）—— 每个客户端实现的接口、BaseProtocolAdapter.execute 事件折叠，以及选择 ACP vs OpenCode 而 Manager 从不按协议分叉的注册表。
+description: OpenCodeClientAdapter 通过官方 @opencode-ai/sdk + SSE 工作，并共享 ProtocolAdapter 契约、BaseProtocolAdapter.execute 事件折叠，以及无需 Manager 按协议分叉的适配器注册表。
 ---
 
 # OpenCode 适配器
@@ -19,8 +19,8 @@ description: OpenCodeClientAdapter（opencode-client.ts，1659 行）走官方 @
 </TLDR>
 
 <StatGrid>
-  <Stat label="opencode-client.ts" value="1659 行" hint="OpenCodeClientAdapter —— 唯一导出" />
-  <Stat label="protocol-adapter.ts" value="523 行" hint="ProtocolAdapter + BaseProtocolAdapter + 注册表" />
+  <Stat label="稳定适配器" value="opencode" hint="通过 @opencode-ai/sdk/client 使用 HTTP + SSE" />
+  <Stat label="预览适配器" value="opencode-v2" hint="发现本地 OpenCode 2.x 服务" />
   <Stat label="服务端" value="端点 / 自动拉起 / 4096" hint="resolveBaseUrl —— 桌面端自动拉起 opencode serve" />
   <Stat label="传输" value="HTTP + SSE" hint="对比 ACP 的 JSON-RPC / stdio" />
   <Stat label="提交模型" value="subscribe → promptAsync" hint="先开 SSE，再非阻塞提交" />
@@ -95,11 +95,34 @@ sequenceDiagram
   C-->>M: finally → abort signal（关闭 SSE）+ yield done
 ```
 
-`prompt` 解析 system/model/agent 覆盖、把一个 `AbortController` 接到 `options.signal`，然后在调用
-`session.promptAsync` **之前先打开 `event.subscribe({ signal })`**。先订阅是关键：SSE 流没有回放，若在提交
-之后才打开就会漏掉早到的 `message.part.updated` parts。若异步提交抛错且本轮未被 abort，它**回退到同步
-`session.prompt`**，并经 `emitEventsFromMessage` 从返回的消息发射事件。`finally` 会 abort 控制器，从而拆掉
-SSE fetch。
+`prompt` 解析 system/model/agent 覆盖，并在文件内容为传输而编码之前执行 Cognia 出站 PII 检查：UTF-8
+文件直接扫描，base64 的文本类文件先解码再扫描，最终 wire payload 还会再检查一次。随后它把一个
+`AbortController` 接到 `options.signal`，并在调用 `session.promptAsync` **之前先打开
+`event.subscribe({ signal })`**。先订阅是关键：
+SSE 流没有回放，若在提交之后才打开就会漏掉早到的 `message.part.updated` parts。若服务端接受请求之前异步
+提交失败，适配器会回退到同步 `session.prompt`；一旦 `promptAsync` 已接受请求，后续 SSE 故障只会上报为
+可恢复错误，**绝不会再次提交**，否则同一用户轮次会执行两遍。`finally` 会 abort 控制器并拆掉 SSE fetch。
+
+OpenCode 会话时间戳本来就是 Unix 毫秒（`Date.now()`）；适配器在映射 `createdAt` 与 `updatedAt` 时保持该单位。
+
+## 当前支持与有意保留的缺口
+
+对当前 OpenCode 版本，标准化入口是 `OpenCode (ACP)` 预设，它通过 Cognia 通用 ACP 适配器启动
+`opencode acp`。原生 HTTP/SSE 仍是使用 OpenCode 专属服务端 API 与 question 事件的高保真路径。
+
+稳定适配器支持多轮会话、列表/分叉/恢复、模型与 Agent 选择、reasoning 事件、URL/base64 图片和文件输入、
+工具结果/错误、权限回复、OpenCode 问题事件、命令发现/执行、压缩，以及 OpenCode 专属 MCP/file/VCS/PTY/TUI
+封装。通用能力清单仍保持保守：OpenCode 的全局 MCP 管理不等同于逐会话 MCP 注入；经权限 UI 映射的问题
+事件也不等同于专用的 `respondToElicitation` 契约。
+
+不透明二进制与图片附件只能检查元数据，文本 PII 检测器无法检查其内容；它们沿用 Cognia 现有多模态附件
+策略。若要宣称像素级 PII 检测，还需要 OCR/内容分类能力。
+
+`OpenCodeV2ClientAdapter` 是通过本地 sidecar 发现的独立旧版预览路径，只绑定精确的
+`2.0.0-beta.1` 契约，目前已降为**仅文档**支持。当前 OpenCode V2 的版本标识、扁平 prompt body、持久会话
+日志、完成语义和 MCP 表面均与其不兼容。适配器在旧契约内支持会话生命周期、reasoning/工具事件、权限回复、
+模型/命令发现、压缩和 `PromptInput.files`，对其他 V2 服务全部 fail closed。当前可执行入口应使用稳定
+HTTP/SSE 或 ACP。
 
 > **为什么 `event.subscribe()` 没有 `.payload`。** `client.event.subscribe()` 直接产出 `Event` 对象
 > （`{ type, properties }` 判别联合）。只有 `client.global.event()` 才把每个事件包进 `{ directory, payload }`

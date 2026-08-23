@@ -210,6 +210,32 @@ status. Any future convenience that pulls runtime source into `packages/agent`
 would silently relicense it, so the Apache boundary is a constraint on what the
 client is allowed to contain, not just a field in `package.json`.
 
+## Delivery state
+
+Everything above is implemented except the release matrix. Recorded here because
+the gap is a process one, not a decision one:
+
+- **v0.1 correctness, v0.2 authoring, and the Phase 4 capabilities** are in the
+  tree with tests on both sides of the boundary.
+- **The three-platform publish matrix is not.** `release.yml`, the CLI binary
+  build and the bundled-host smoke were being rewritten concurrently (bun,
+  code-signing, per-target smoke), so this work stopped at the packaging edge
+  rather than editing files another change was mid-flight in. What landed
+  instead is the part that belongs to the package: `pack:test` installs the
+  default way, boots a real host through a bare `createCogniaClient()`, and
+  fails if a host artifact or copyleft text reaches the Apache-2.0 tarball.
+- **The packaged platform hosts are stale** against this protocol revision and
+  must be rebuilt before publish. That is expected — the method catalog changed
+  — and `pack:test` detects it, because the client refuses a host that
+  advertises methods it does not know.
+- **Nothing is published.** `0.1.0-next.N` and `0.1.0` remain to be cut.
+
+Two capabilities are deliberately defined and deliberately undeclared, each
+pinned by a test that reads the host's capability list:
+`workspace-checkpoint-v1`, because no backend checkpoints files, and
+`assets-in-turn-v1`, because the unified runtime has nowhere to put an asset
+reference. Both refuse rather than degrade.
+
 ## Non-goals
 
 A Pi-compatible API or wire protocol. Browser or Edge embedding of the runtime.

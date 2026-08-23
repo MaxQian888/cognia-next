@@ -1,6 +1,6 @@
 ---
 title: OpenCode Adapter
-description: OpenCodeClientAdapter (opencode-client.ts, 1659 lines) over the official @opencode-ai/sdk + SSE, plus the ProtocolAdapter contract (protocol-adapter.ts, 523 lines) — the interface every client implements, the BaseProtocolAdapter.execute event fold, and the registry that selects ACP vs OpenCode without the manager ever branching on protocol.
+description: OpenCodeClientAdapter over the official @opencode-ai/sdk + SSE, plus the ProtocolAdapter contract, the BaseProtocolAdapter.execute event fold, and the registry that selects ACP vs OpenCode without the manager branching on protocol.
 ---
 
 # OpenCode Adapter
@@ -21,8 +21,8 @@ description: OpenCodeClientAdapter (opencode-client.ts, 1659 lines) over the off
 </TLDR>
 
 <StatGrid>
-  <Stat label="opencode-client.ts" value="1659 lines" hint="OpenCodeClientAdapter — the only export" />
-  <Stat label="protocol-adapter.ts" value="523 lines" hint="ProtocolAdapter + BaseProtocolAdapter + registry" />
+  <Stat label="Stable adapter" value="opencode" hint="HTTP + SSE through @opencode-ai/sdk/client" />
+  <Stat label="Preview adapter" value="opencode-v2" hint="Discovered local OpenCode 2.x service" />
   <Stat label="Server" value="endpoint / auto-spawn / 4096" hint="resolveBaseUrl — desktop auto-spawns opencode serve" />
   <Stat label="Transport" value="HTTP + SSE" hint="vs ACP's JSON-RPC / stdio" />
   <Stat label="Submit model" value="subscribe → promptAsync" hint="open SSE first, then non-blocking submit" />
@@ -102,12 +102,43 @@ sequenceDiagram
   C-->>M: finally → abort signal (closes SSE) + yield done
 ```
 
-`prompt` resolves system/model/agent overrides, wires an `AbortController` to `options.signal`, then
-**opens `event.subscribe({ signal })` before** calling `session.promptAsync`. Subscribing first is
-load-bearing: the SSE stream has no replay, so opening it after the submit would drop the early
-`message.part.updated` parts. If the async submit throws and the turn wasn't aborted, it **falls back
-to the synchronous `session.prompt`** and emits events from the returned message via
-`emitEventsFromMessage`. The `finally` aborts the controller, which tears down the SSE fetch.
+`prompt` resolves system/model/agent overrides and applies Cognia's outbound PII gate before file
+content is encoded for transport. UTF-8 files are scanned directly, and base64 text-like files are
+decoded and scanned; the final wire payload is checked again. It then wires an `AbortController` to
+`options.signal` and **opens `event.subscribe({ signal })` before** calling
+`session.promptAsync`. Subscribing first is load-bearing: the SSE stream has no replay, so opening it
+after the submit would drop early `message.part.updated` parts. If the async submission fails before
+the server accepts it, the adapter falls back to synchronous `session.prompt`. Once `promptAsync` is
+accepted, an SSE failure is reported as recoverable and is **never resubmitted**, because doing so
+would execute the same user turn twice. The `finally` aborts the controller and tears down the SSE
+fetch.
+
+OpenCode session timestamps are already Unix milliseconds (`Date.now()`); the adapter preserves
+that unit when mapping `createdAt` and `updatedAt`.
+
+## Current support and intentional gaps
+
+For current OpenCode releases, the standardized route is the `OpenCode (ACP)` preset, which launches
+`opencode acp` through Cognia's generic ACP adapter. Native HTTP/SSE remains the full-fidelity route
+for OpenCode-specific server APIs and question events.
+
+The stable adapter supports multi-turn sessions, list/fork/resume, model and agent selection,
+reasoning events, URL/base64 image and file prompt parts, tool results/errors, permission replies,
+OpenCode question events, command discovery/execution, compaction, and OpenCode-specific MCP/file/
+VCS/PTY/TUI wrappers. The generic capability manifest remains conservative: OpenCode's global MCP
+management is not advertised as per-session MCP injection, and question events mapped through the
+permission UI are not advertised as the dedicated `respondToElicitation` contract.
+
+Opaque binary and image attachments are metadata-checked but cannot be content-inspected by the text
+PII detector. They follow Cognia's existing multimodal attachment policy; OCR/content classification
+would be required before claiming pixel-level PII detection.
+
+`OpenCodeV2ClientAdapter` is a separate legacy preview path discovered through the local sidecar.
+It is pinned to the exact `2.0.0-beta.1` contract and is now **documented-only**: current OpenCode V2
+builds use incompatible version identity, flattened prompt bodies, durable session logs, completion,
+and MCP surfaces. Within the pinned contract the adapter handles session lifecycle, reasoning/tool
+events, permission replies, model/command discovery, compaction, and `PromptInput.files`; it fails
+closed for every other V2 service. Use stable HTTP/SSE or ACP for current supported execution.
 
 > **Why `event.subscribe()` has no `.payload`.** `client.event.subscribe()` yields `Event` objects
 > directly (the `{ type, properties }` discriminated union). Only `client.global.event()` wraps each

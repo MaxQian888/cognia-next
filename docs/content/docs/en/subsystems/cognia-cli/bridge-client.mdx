@@ -286,3 +286,42 @@ Target resolution (`cmd_acp.rs`) is intentionally strict:
 
 Status text goes to stderr so stdout remains a clean ACP JSON-RPC stream, and `--quiet`
 suppresses that status line for editor integrations that treat stderr as a signal.
+
+The bridge serves stable ACP v1 with the v1.21 schema. Preview capabilities are absent unless the
+matching Cognia server setting and host runtime support are both active; ACP v2 is not advertised.
+
+### Opt-in live agent smoke
+
+`pnpm smoke:acp-live` uses the official TypeScript SDK client against installed agent commands.
+The command skips safely when no target is configured. Supply one or more commands as JSON argv
+arrays so no shell parsing is involved:
+
+```bash
+ACP_GEMINI_COMMAND='["gemini", "<ACP args>"]' pnpm smoke:acp-live
+ACP_CODEX_COMMAND='["codex", "<ACP args>"]' pnpm smoke:acp-live
+ACP_CLAUDE_COMMAND='["claude", "<ACP args>"]' pnpm smoke:acp-live
+```
+
+Use the ACP invocation supported by the locally installed agent version. The smoke initializes,
+creates a confined session, sends a no-tool prompt, records updates and the authoritative stop
+reason, rejects any unexpected permission request, and terminates the child process.
+The child receives only a minimal process environment. If authentication requires environment
+credentials, select them explicitly with the matching `ACP_GEMINI_ENV`, `ACP_CODEX_ENV`, or
+`ACP_CLAUDE_ENV` JSON object; unrelated ambient secrets are never forwarded.
+
+### Manual editor interoperability
+
+For a release candidate, run the same bounded workspace fixture in both editors:
+
+1. Start Cognia desktop, confirm the Companion endpoint is healthy, and configure the editor agent
+   command as `cognia acp --quiet`.
+2. In Zed, create a session, send a text prompt, approve and reject one tool call, cancel one active
+   turn, then close, resume, load, and delete the session. Confirm load replays history and resume
+   does not.
+3. In a JetBrains IDE with ACP support, repeat the lifecycle and verify a named resource link,
+   base64 image, additional root, model config change, usage, and session title/activity updates.
+4. In both editors, verify stdio MCP propagation and confirm HTTP/SSE MCP is rejected when Cognia
+   does not advertise it. Preview provider, dynamic MCP, compaction, and NES controls must remain
+   absent with their flags off.
+5. Inspect stderr/logs for secrets: provider headers, MCP environment values, transport tickets,
+   and terminal-auth environment values must never be printed.

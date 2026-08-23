@@ -1,12 +1,12 @@
 # AgentTeam Remote Dispatch Rollout Runbook
 
-Date: 2026-08-12
+Date: 2026-08-23
 
 ## Preconditions
 
 - The brain and every worker run a build containing `worker-dispatch-v1`.
 - Companion pairing is enabled and the owner can create and revoke `agent.worker` grants.
-- `developer.taskWorkspace` and `agentExecutionResolverV2` are enabled before `agentTeamRemoteDispatch`.
+- The unified execution resolver and Task Workspace runtime are present. They are no longer rollout flags; remote placement still fails closed when a worker manifest reports that Task Workspace isolation is unavailable.
 - Every worker has a trusted, pre-bound repository and a locally resolvable credential profile.
 - Fleet reports the worker online, its capacity, canonical profile readiness, runtime, and workspace binding readiness.
 
@@ -32,15 +32,13 @@ Date: 2026-08-12
 
 ### Phase A — dark launch
 
-- Keep `agentTeamRemoteDispatch` off.
+- Keep Settings → Fleet → Execution Workers → Remote AgentTeam dispatch off.
 - Enroll workers and verify reconnect, heartbeat, revocation, and Fleet projection.
 - Confirm local AgentTeam behavior and old snapshots are unchanged.
 
 ### Phase B — single pinned canary
 
-- Enable `NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH` only on the canary brain deployment for the
-  opt-in tenant. P0 flag scope is process/deployment-wide; do not share that brain process with
-  non-opt-in tenants during the canary.
+- Enable Settings → Fleet → Execution Workers → Remote AgentTeam dispatch on the canary host. The setting is local to that host and defaults off. `NEXT_PUBLIC_AGENT_TEAM_REMOTE_DISPATCH` remains available as a deployment default, but the Fleet switch is the operator control and its explicit value wins.
 - Pin one teammate to one worker.
 - Verify session creation, event progression, usage/evidence settlement, steer, cooperative idle pause/checkpoint, rescheduled resume, and abort/idle/close termination.
 - Stop if any task falls back to local execution, if one `commandId` creates more than one session, or if a repository path appears over the wire.
@@ -62,7 +60,7 @@ Date: 2026-08-12
 
 ### Stop new remote work
 
-Disable `agentTeamRemoteDispatch`. This blocks new remote dispatch but does not discard events from existing sessions. Continue accepting controls and terminal receipts until every active lease is settled or explicitly recovered.
+Turn off Settings → Fleet → Execution Workers → Remote AgentTeam dispatch. This blocks new remote dispatch but does not discard events from existing sessions. Continue accepting controls and terminal receipts until every active lease is settled or explicitly recovered.
 
 ### Revoke a worker
 
@@ -78,7 +76,7 @@ Do not manually edit Dexie. Inspect the child `dispatchLeaseId`, remote `command
 
 ### Full rollback
 
-1. Disable `agentTeamRemoteDispatch`.
+1. Turn off Settings → Fleet → Execution Workers → Remote AgentTeam dispatch.
 2. Let active sessions settle or move them through checkpoint-gated recovery.
 3. Revoke worker grants if an emergency stop is required.
 4. Roll back application binaries. Do not delete child remote fields, Task Workspace bindings, or device records; older builds ignore optional fields and preserving them keeps audit and recovery evidence intact.

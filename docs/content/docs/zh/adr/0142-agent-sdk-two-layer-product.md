@@ -182,6 +182,24 @@ replay 页数上的 TTL 与上限 —— 并且这些上限会变成可观测的
 `packages/agent` 的便利做法都会悄悄改变它的许可证，所以 Apache 边界是对客户端**允许包含
 什么**的约束，而不只是 `package.json` 里的一个字段。
 
+## 落地状态
+
+上面的决策除发布矩阵外都已实现。记在这里是因为这个缺口属于流程，不属于决策：
+
+- **v0.1 正确性、v0.2 编排层、以及 Phase 4 的几项能力**都已在代码树中，边界两侧都有测试。
+- **三平台发布矩阵没有。** `release.yml`、CLI 二进制构建和 bundled-host smoke 当时正在被
+  并行改写（bun、代码签名、按平台 smoke），所以这项工作停在打包边界前，而不是去改另一个
+  变更正在进行中的文件。真正落地的是属于这个包自己的那部分：`pack:test` 按默认方式安装、
+  用一个裸 `createCogniaClient()` 拉起真实 Host，并在任何 Host 产物或 copyleft 文本进入
+  Apache-2.0 tarball 时失败。
+- **已打包的平台 Host 相对本次协议修订是过期的**，发布前必须重建。这是预期内的 —— 方法目录
+  变了 —— 而且 `pack:test` 能检测到，因为客户端会拒绝一个宣告了它不认识的方法的 Host。
+- **没有发布任何东西。** `0.1.0-next.N` 与 `0.1.0` 尚待切出。
+
+有两个 capability 是刻意定义、刻意不声明的，各自由一个读取 Host capability 列表的测试钉住：
+`workspace-checkpoint-v1`，因为没有任何 backend 真的做文件 checkpoint；`assets-in-turn-v1`，
+因为统一 runtime 没有地方放 asset reference。两者都是拒绝，而不是降级。
+
 ## 非目标
 
 Pi 兼容的 API 或 wire protocol。浏览器或 Edge 内嵌 runtime。新的 DAG / workflow engine。

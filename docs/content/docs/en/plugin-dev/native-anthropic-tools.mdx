@@ -21,7 +21,7 @@ This page is the practical reference. For background, see
 | Surface                                      | Use when…                                                                                                                                                                                  | Cost                                                                                             |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
 | **Native Anthropic tool**                    | Anthropic ships a pretrained shape for your domain (computer / bash / text_editor today; more in future model releases) and you want the API-level prompt boost the native shape triggers. | Requires the `anthropic-beta` header for the tool type; only the Anthropic provider supports it. |
-| **Plugin MCP tool** (the more common choice) | You're shipping a custom tool no provider knows about, or you need cross-provider compatibility (the Claude Code SDK exposes the same `cognia-plugin-tools` MCP server to every chat).     | Standard MCP tool — the model sees it as `mcp__cognia-plugin-tools__<name>`.                     |
+| **Plugin MCP tool** (the more common choice) | You're shipping a custom tool no provider knows about, or you need cross-provider compatibility (the Claude Agent SDK exposes the same `cognia-plugin-tools` MCP server to every chat).    | Standard MCP tool — the model sees it as `mcp__cognia-plugin-tools__<name>`.                     |
 
 If you're unsure, ship a Plugin MCP tool first. Promote to a native
 tool only when Anthropic publishes a pretrained shape that matches
@@ -254,7 +254,7 @@ status depends on the manifest carrying the capability name.
   ensure your `tauri::generate_handler![...]` array includes the
   command name.
 - **Returning a String instead of a JSON object from the Tauri
-  command.** The Claude Code SDK forwards the return value verbatim;
+  command.** The Claude Agent SDK forwards the return value verbatim;
   a bare string lands as `tool_result.content` text without structure.
   Always return `serde_json::Value` shaped like Anthropic's
   `{ ok, output, error, … }` so the host's

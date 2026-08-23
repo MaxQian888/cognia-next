@@ -1,6 +1,6 @@
 {
-  "readAt": "2026-08-23T01:33:29.492Z",
-  "lastGoodReadAt": "2026-08-23T01:33:29.492Z",
+  "readAt": "2026-08-23T01:46:24.685Z",
+  "lastGoodReadAt": "2026-08-23T01:46:24.685Z",
   "errors": [],
   "repo": {
     "stars": 53,
@@ -1351,8 +1351,8 @@
     {
       "id": "host-state-intent-and-confirmation",
       "bump": "minor",
-      "summary": "Remote sessions: a run's state now says what actually happened, not what was asked for.\n\n**Stopping a run no longer looks stopped until it stops.** Pressing stop marked the turn finished immediately. If the request never reached the agent — a dropped connection, a busy host — the session read as stopped while the run kept going, and the composer came back for a turn that was still producing. A stop now shows as *stopping* until the agent confirms it, and if the request never lands the session goes back to running and says the stop failed.\n\n**Answering a prompt from a phone that drops out no longer loses the prompt.** Approving or declining a tool used to remove the request the moment you tapped, so an answer that never reached the desktop took the prompt with it — the run stayed blocked with nothing left to answer, recoverable only by reloading. The request now stays visible and marked as being answered, and returns to the queue if the answer does not arrive. If two devices answer at once, the second is told the first got there and refreshes, instead of overwriting it.\n\n**A run waiting on several things shows all of them.** Approvals and questions were tracked in separate slots that could overwrite each other, so a second request could hide the first and strand the run on a prompt nothing displayed. They are now one list in the order the run raised them.\n\n**A turn ending is not the conversation ending.** The end of one turn — and an agent restart — used to shut the composer for good. Both are now separate from whether the conversation exists: after a turn finishes or the agent restarts you can keep going, and only a deleted conversation locks it. A restart marks the interrupted work as interrupted and retryable rather than silently leaving it \"running\".\n\n**A queued message that fails to send says so.** Sends, follow-ups, steers, stops and answers each carry their own status now — accepted, on its way, confirmed, or failed — so the app can tell a message that is still going from one that never left, and offer retry only where retrying makes sense. Queuing a message also no longer reports the transcript as changed before anything is written.\n\n**Restarting the desktop picks up work left in flight.** Requests interrupted mid-send used to sit in the host's ledger forever after a restart, with the device that submitted them waiting on a reply that was never coming. They are now retried on startup, turns left running by the previous session are closed out, and if that recovery itself fails the host reports itself as degraded rather than presenting stale state as current.\n\n**On upgrade:** cached remote-session coordination state is discarded and rebuilt on the next connection — conversations, messages and drafts are untouched. Messages still queued for sending that were written in the old format are dropped, because they can no longer be delivered.",
-      "date": null
+      "summary": "Remote sessions: a run's state now says what actually happened, not what was asked for.\n\n**Stopping a run no longer looks stopped until it stops.** Pressing stop marked the turn finished immediately. If the request never reached the agent — a dropped connection, a busy host — the session read as stopped while the run kept going, and the composer came back for a turn that was still producing. A stop now shows as _stopping_ until the agent confirms it, and if the request never lands the session goes back to running and says the stop failed.\n\n**Answering a prompt from a phone that drops out no longer loses the prompt.** Approving or declining a tool used to remove the request the moment you tapped, so an answer that never reached the desktop took the prompt with it — the run stayed blocked with nothing left to answer, recoverable only by reloading. The request now stays visible and marked as being answered, and returns to the queue if the answer does not arrive. If two devices answer at once, the second is told the first got there and refreshes, instead of overwriting it.\n\n**A run waiting on several things shows all of them.** Approvals and questions were tracked in separate slots that could overwrite each other, so a second request could hide the first and strand the run on a prompt nothing displayed. They are now one list in the order the run raised them.\n\n**A turn ending is not the conversation ending.** The end of one turn — and an agent restart — used to shut the composer for good. Both are now separate from whether the conversation exists: after a turn finishes or the agent restarts you can keep going, and only a deleted conversation locks it. A restart marks the interrupted work as interrupted and retryable rather than silently leaving it \"running\".\n\n**A queued message that fails to send says so.** Sends, follow-ups, steers, stops and answers each carry their own status now — accepted, on its way, confirmed, or failed — so the app can tell a message that is still going from one that never left, and offer retry only where retrying makes sense. Queuing a message also no longer reports the transcript as changed before anything is written.\n\n**Restarting the desktop picks up work left in flight.** Requests interrupted mid-send used to sit in the host's ledger forever after a restart, with the device that submitted them waiting on a reply that was never coming. They are now retried on startup, turns left running by the previous session are closed out, and if that recovery itself fails the host reports itself as degraded rather than presenting stale state as current.\n\n**On upgrade:** cached remote-session coordination state is discarded and rebuilt on the next connection — conversations, messages and drafts are untouched. Messages still queued for sending that were written in the old format are dropped, because they can no longer be delivered.",
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "i18n-icu-escape-literal-braces",
@@ -1412,7 +1412,7 @@
       "id": "inbound-media-and-capability-review-fixes",
       "bump": "patch",
       "summary": "Closed a set of gaps in inbound attachment handling and in the external-agent capability answer.\n\nThe attachment download floor now reads IPv6 addresses instead of pattern-matching their text. The loopback and cloud-metadata addresses have an IPv6 spelling — `[::ffff:127.0.0.1]`, `[::ffff:169.254.169.254]` — that the previous check let through, and a message could name one. The OneBot exception for a self-hosted implementation is now the exact address you entered, port included, rather than every port on that machine, and it only applies while the connector is actually dialling that address.\n\nPictures now arrive as pictures more often. A file whose type is an image — how Telegram sends an uncompressed screenshot — is read by the OCR pass instead of reaching the model as a bare file name. The media type reported to the model is now read from the bytes themselves, so a QQ photo is no longer announced as a PNG and a redelivered picture no longer loses the type it had the first time. An attachment too large to inline is remembered as such, instead of being looked up again on every message that mentions it.\n\nFor external agents: on Windows the app now correctly reports that it cannot run one, rather than claiming every capability for an agent that could never start. The capability table resolves the sentences behind adapter-method verdicts instead of printing their internal key, and keeps showing an accurate `/compact` answer for the whole session. A plugin's capability declaration is validated before it is believed, and cannot certify itself as verified by Cognia. Pi turns report their context window and cost even when the final tally omits them, and a turn that settles twice can no longer deliver its events out of order.",
-      "date": null
+      "date": "2026-08-23T09:33:45+08:00"
     },
     {
       "id": "inbound-media-download-floor",
@@ -1592,7 +1592,7 @@
       "id": "lease-backed-remote-attach",
       "bump": "minor",
       "summary": "Remote sessions: attaching a phone to a desktop session is now a lease bound to a real event stream. A device is handed control only when it holds the Remote Control grant **and** its event stream has finished replaying, so a half-connected phone can no longer be given a decision it never received the frame for — it attaches as an observer instead, and the badge now says whether that is a missing grant or a reconnect in progress. While one device is driving a session, another can no longer steer, interrupt, or answer a prompt behind its back; drafts, messages and follow-ups still queue from anywhere. Attaching also reports which actions this device may actually take, so a read-only view no longer offers a composer whose every button would be refused. WebRTC peers finally count as present, so a phone on WebRTC stops getting a push notification for a prompt already on its screen, and a suspended or revoked device stops counting the moment its authority ends.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "limits-429-and-find-bar-resilience",
@@ -1754,7 +1754,7 @@
       "id": "mcp-toggle-protocol-contract",
       "bump": "patch",
       "summary": "The MCP server enable/disable and tool-rule commands a paired client sends now carry a published request contract. Without one the generated API artifacts could not be rebuilt at all, which had quietly frozen the companion command catalog five commands behind the app — so a remote client asking for any of them was answered \"unknown command\".",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "memory-console-rebuild",
@@ -1826,7 +1826,7 @@
       "id": "mobile-session-changes-and-tests",
       "bump": "minor",
       "summary": "Show a remote session's file changes and test results on mobile.\n\nFollowing an agent session from a phone previously showed only the transcript — what was said, never what happened to the code. The session view now has three tabs. Changes lists the files the selected turn touched and opens each one's diff on demand; Tests shows what the turn's verification runs reported. Both are read-only, and the approval prompt and follow-up composer stay available on every tab, so an approval can never end up hidden behind a tab while the run waits on it.\n\nDiffs render with the same plain renderer the chat transcript uses rather than the desktop code editor, which is not something a phone should be asked to load.\n\nEvery file that will not show a diff says why instead of showing an empty pane. A credential-shaped file such as `.env` is reported as withheld and its contents are never requested from the desktop at all. Binary files, symbolic links, and added, deleted or renamed files are each named as such, because the desktop keeps no line-by-line diff for them and an empty pane would otherwise read as \"this file is unchanged\". Line counts are shown only where they were actually recorded, so an added file is never reported as adding nothing.\n\nA turn with more than one attempt can be switched between, and switching collapses any open file so a diff from the previous attempt is never left on screen under the new one's file list.\n\nTest results distinguish the three outcomes honestly: a run whose output could not be parsed is shown as inconclusive in amber, never as a green zero. The empty states are likewise kept apart — \"no run for this session has reached this device yet\" is a different answer from \"no turn in this session ran any tests\", and they are no longer reported as the same thing.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "model-evaluation-lab",
@@ -1928,7 +1928,7 @@
       "id": "olive-pugs-repeat",
       "bump": "minor",
       "summary": "Rebuild the `/pair` screen and make every pairing failure actionable. The browser flow now lays out in two columns at desktop width instead of a phone-width column that grew a scrollbar as soon as an invitation was pasted, and each failure is classified into a named cause with numbered remedies that quote this Host's URL and this tab's own origin — replacing the single line \"Pairing failed / Failed to fetch\" that stood for fourteen different problems. A `no-cors` probe now separates \"the Host refused this browser origin\" from \"nothing is listening there\", a locked local account is reported as such instead of as a storage failure, and the panel says when an invitation has already been spent so retrying cannot work.",
-      "date": null
+      "date": "2026-08-23T09:35:32+08:00"
     },
     {
       "id": "onboarding-actually-connects-a-model",
@@ -2390,7 +2390,7 @@
       "id": "quiet-signaling-retry",
       "bump": "patch",
       "summary": "Stop the signaling client's reconnect storm. Its jitter had no floor, so however many times the relay refused, the next attempt could still fire a millisecond later and the retry interval never actually grew; the schedule now keeps at least half the backoff window between attempts. A relay that answers with a 4xx — an unreachable or mis-set `signalingUrl`, the common case being an endpoint that does not serve `/signaling` — is a configuration fault rather than an outage, so it now backs off to five minutes and logs once instead of repeating the same two lines forever.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "relativetime-now-anchor",
@@ -2408,7 +2408,7 @@
       "id": "remote-attach-and-queue-review-fixes",
       "bump": "patch",
       "summary": "Fix remote session control never granting an attachment, and stop the outbound queue losing or stranding work\n\n- `session_attach` never conferred control: the Host serialized each event-plane lease as `id` while the renderer read `leaseId`, so every stream was discarded and remote approval prompts were auto-denied. A device without Remote Control now also falls back to a read-only observe attachment instead of being refused outright and re-refused every 30s.\n- A suspended or revoked device now loses its attachments immediately rather than keeping them for the full lease TTL, and lapsed leases are pruned instead of accumulating.\n- Session state no longer grows without bound: settled operations and decisions are trimmed, so a long-running session's snapshot can never cross the size ceiling and lock the client out of syncing.\n- An interrupted turn is reported as aborted instead of completed, and a message the runtime drops now leaves the queue instead of showing as pending forever.\n- Upgrading no longer deletes queued-but-unsent messages, drafts and decision answers; they are migrated to the new shape.\n- The needs-input notification's deep link now opens the session it is about.\n- The offline banner counts rows actually being dispatched instead of a status the queue could never reach.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "remote-computer-use-supervision",
@@ -2420,7 +2420,7 @@
       "id": "remote-control-identity-and-attach-leases",
       "bump": "patch",
       "summary": "Remote session control: prompts reach the device that is actually watching, and attachments expire.\n\n**A decision prompt only wakes the device that can answer it.** When a run on your desktop needed a tool-use approval, every paired device got a push — including ones that were never watching that session, and ones without permission to answer. The alert also carried the name of the tool, so a command a run wanted to execute could appear on a lock screen. Notifications now go only to devices holding a live control attachment on that session, they are skipped entirely for a device already looking at the prompt, and the payload carries ids and a deep link, nothing about the tool.\n\n**A phone that drops off stops holding your run hostage.** Watching a session used to register the device forever, so one that lost its connection without closing the view kept collecting approval prompts nobody would ever see — each one stalling the run until it timed out and auto-denied. Attachments are now leases: the viewer renews while it is open, and one that stops renewing is released within 90 seconds. A device whose event stream is down attaches as an observer instead of silently claiming control it cannot exercise.\n\n**Remote actions are authorized one at a time.** Sending a message, answering an approval, creating a session and rewriting a transcript were all covered by the single \"remote control\" grant. They are now checked individually: steering a run needs Remote Control, creating one needs Agent Control, and editing or truncating a transcript needs owner permission. A batch reports the outcome of each action, so the allowed ones still apply.\n\n**Devices can no longer act as each other.** The device identity behind attach, detach and every remote state change now comes from the verified connection instead of the request body, which previously let a paired device claim another's identity and receive its approval prompts.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "remote-development-remote-host",
@@ -2450,7 +2450,7 @@
       "id": "remote-session-attachment-upload",
       "bump": "minor",
       "summary": "Send attachments from a remote session. A file staged on a phone now reaches the desktop through a resumable chunked upload and rides the message as a host-minted reference, instead of the text going through and the file being dropped on the floor.",
-      "date": null
+      "date": "2026-08-23T09:36:47+08:00"
     },
     {
       "id": "remove-builtin-github-delivery",
@@ -2726,7 +2726,7 @@
       "id": "shared-decision-surface-and-ordered-queue",
       "bump": "minor",
       "summary": "Approvals and questions now look and behave the same wherever they are answered. The phone used to show a raw dump of a tool's arguments where the desktop showed a diff or a shell command, with no truncation, no note of which subagent asked, and no honest handling of a decision the run had already given up on — all three are fixed by sharing one decision surface. A watcher without remote control now sees that a decision exists without its arguments, and has nothing to press. Multi-select questions render as checkboxes instead of a box to type the options into by hand, and a question's free-text box keeps its label.\n\nQueued actions for one session are now sent strictly in order: a message whose first attempt hit a flaky link no longer gets overtaken by the follow-up typed after it, while other sessions keep draining independently. Actions the host refused, or that ran out of retries, are finally counted somewhere the user can see — until now a refused action looked exactly like one that had gone through.",
-      "date": null
+      "date": "2026-08-23T09:34:22+08:00"
     },
     {
       "id": "shell-de-crowding",
@@ -2942,7 +2942,7 @@
       "id": "task-cockpit",
       "bump": "minor",
       "summary": "Rebuild `/agent-runs` as a task cockpit that covers every kind of run.\n\nThe console previously listed four kinds — goals, teams, plans and scheduled tasks — because the view model behind it had no member for anything else. Chat turns, workflows, delegations and background jobs, which are most of what actually runs, could not appear there at all. It now reads the execution journal directly, so a run shows up as soon as it has a bridge, and it keeps finished work: you can filter by Running, Waiting, Failed or Finished as well as by kind, and page back through history.\n\nSelecting a run opens Overview, Activity, Changes, Tests, Artifacts and Approvals for it. Tests report a run that could not be parsed as inconclusive rather than as zero failures, Changes says out loud when its file list is incomplete, and on a device that received a run summary without its journal the affected sections say so instead of showing a confident empty list.\n\nRun controls — stop, pause, resume, retry, approve, deny and steer — now go through the shared execution control plane instead of calling each engine directly. That gives every press an idempotency key, a revision check, an authorization check and a journalled record, and it means a refusal is explained: a conflicting edit, a stale action, a message that could not be steered and is still yours to send, each say which one it was. Buttons are drawn from what the run itself reports it can do, so a control that would always fail is no longer offered.\n\nDeep links from IM cards now land on the right run. Every card's \"open details\" link carries the execution run id, which the old console could not resolve — those links opened an empty pane.\n\nThe Control Center gains durable run approvals as a fourth source, so an approval that outlived the tab that asked for it — one raised from a chat platform, a delegation held for sign-off, a workflow gate — finally appears somewhere, and links to the run it is blocking. A chat approval and its durable twin are shown once, not twice. The Job Center's background tasks link into the cockpit rather than growing a second detail view of their own.",
-      "date": null
+      "date": "2026-08-23T09:35:06+08:00"
     },
     {
       "id": "tauri-app-command-acl-grant",
@@ -3332,7 +3332,7 @@
       "id": "unified-run-control-and-audit",
       "bump": "minor",
       "summary": "Run control, verification results, and approval auditing now work everywhere they claim to.\n\nStop / Pause / Resume / Steer previously stopped working whenever a remote host was active or a second window held the connector runtime's lease, because the run-control dispatch table was installed inside that runtime and torn down with it — every control silently reported \"unsupported\". It is now installed independently and refcounted, so no owner can disarm it for another.\n\nTest runs a chat turn performs are projected onto the run as a verification result (passed / failed / skipped / total / duration). Output that cannot be parsed is reported as inconclusive and never as a green run; the raw output and the command line stay out of the run journal.\n\nBackground subagent and plugin-agent tasks now appear in the unified execution monitor as background tasks, with a working Stop, instead of being invisible to it.\n\nTool approvals now write a durable action-review receipt and park the owning run on a pending interrupt, so a blocked run is visible and its decision is auditable. Each receipt records who authorized it — a person, a rule, a policy deny, or the system — and \"always allow\" is recorded as the standing rule it creates.",
-      "date": null
+      "date": "2026-08-23T09:35:06+08:00"
     },
     {
       "id": "unified-shell-dock-collapse-motion",
