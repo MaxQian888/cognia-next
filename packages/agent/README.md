@@ -142,6 +142,18 @@ Compaction returns a boundary only when the live runtime captured a real
 pre-compaction snapshot. Undo is intentionally live-host-only and single-use;
 it is never simulated after a host restart.
 
+## Licensing
+
+`@cognia/agent` is **Apache-2.0**. The host — `cognia-agent`, shipped in the
+`@cognia/agent-host-*` platform packages — is **AGPL-3.0-only**, and so is the
+runtime it contains.
+
+The split works because the boundary is a process boundary. This package is
+transport-only: it holds no runtime source, links none, and talks to the host
+solely over the RPC transport described above. `pnpm --dir packages/agent
+pack:test` fails the build if a host artifact ever appears inside the client
+tarball, because that would relicense it.
+
 ## Security
 
 The SDK accepts no provider API key. Configure credentials in the host. Stdout
