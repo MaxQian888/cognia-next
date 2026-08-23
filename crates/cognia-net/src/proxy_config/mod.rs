@@ -493,6 +493,39 @@ pub fn apply_reqwest_policy(
     current()?.apply_reqwest_policy(builder, target_url)
 }
 
+/// Build a client bound to the live policy for `target_url`.
+///
+/// The one-line form of "apply the policy, then build", named so that every
+/// outbound Rust call site reads the same and so `audit:network-egress` has a
+/// single symbol to look for.
+///
+/// Call it **per request target**, not once at startup. Two reasons:
+///
+///   - the policy is per-URL — the bypass list can route one host direct and
+///     the next through the proxy, and a client built for one is wrong for the
+///     other;
+///   - the policy is mutable — the user can switch Off/Manual/Auto at any
+///     time, and a client cached in a struct field keeps whatever was true
+///     when it was constructed. Worse, a client built during the renderer
+///     hydration window inherits `install_uninitialized_proxy_environment`'s
+///     deliberate black hole (`http://127.0.0.1:9`) and never recovers.
+///
+/// reqwest clients share a connection pool per client, so rebuilding costs a
+/// fresh pool; for the call sites here (auth discovery, workspace control
+/// plane) that is far cheaper than being wrong.
+pub fn managed_client(
+    builder: reqwest::ClientBuilder,
+    target_url: &str,
+) -> Result<reqwest::Client, ProxyError> {
+    let (builder, _route) = apply_reqwest_policy(builder, target_url)?;
+    builder.build().map_err(|error| {
+        ProxyError::new(
+            ProxyErrorCode::ProxyInvalidConfig,
+            format!("managed HTTP client build failed: {error}"),
+        )
+    })
+}
+
 /// Remove ambient proxy routing before desktop services or plugins create
 /// clients. Cognia's initialized runtime policy is the sole routing authority;
 /// active clients receive an explicit connector and direct clients call
@@ -735,6 +768,71 @@ mod tests {
         );
         apply_current(manual("10.0.0.1", 1080)).unwrap();
         assert_eq!(current().unwrap().host, "10.0.0.1");
+        reset_uninitialized();
+    }
+
+    #[tokio::test]
+    async fn managed_client_is_fail_closed_before_the_policy_is_installed() {
+        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        reset_uninitialized();
+
+        // Not "direct by default": a client built during the hydration window
+        // must refuse rather than quietly leak the request around a proxy the
+        // user is about to configure.
+        let error = managed_client(reqwest::Client::builder(), "https://api.example.com")
+            .expect_err("uninitialized policy must not produce a client");
+        assert_eq!(error.code, ProxyErrorCode::ProxyNotInitialized);
+
+        reset_uninitialized();
+    }
+
+    #[tokio::test]
+    async fn managed_client_sends_through_the_proxy_and_follows_a_later_policy_change() {
+        let _guard = NETWORK_ENV_TEST.lock().unwrap();
+        let (proxy_port, proxy_request) = serve_captured_request("proxy").await;
+        let (origin_port, origin_request) = serve_captured_request("origin").await;
+
+        apply_current(manual("127.0.0.1", proxy_port)).unwrap();
+        let proxied = managed_client(reqwest::Client::builder(), "http://service.example/data")
+            .unwrap()
+            .get("http://service.example/data")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(proxied, "proxy");
+        // Proof it really traversed the proxy rather than resolving the host:
+        // a forward proxy receives an absolute-form request line.
+        assert!(proxy_request
+            .await
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("http://service.example/data"));
+
+        // The user switches the proxy off. A client cached in a struct field
+        // would keep tunnelling; the next `managed_client` must go direct.
+        apply_current(ProxyConfig::default()).unwrap();
+        let direct = managed_client(
+            reqwest::Client::builder(),
+            &format!("http://127.0.0.1:{origin_port}/after-change"),
+        )
+        .unwrap()
+        .get(format!("http://127.0.0.1:{origin_port}/after-change"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+        assert_eq!(direct, "origin");
+        assert!(origin_request
+            .await
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("/after-change"));
+
         reset_uninitialized();
     }
 

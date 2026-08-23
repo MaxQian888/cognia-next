@@ -129,17 +129,29 @@ impl WorkspaceRuntimeLocator for EnvironmentWorkspaceRuntimeLocator {
     }
 }
 
+/// HTTP client for the workspace runtime's control plane.
+///
+/// Stateless on purpose. It used to hold a single `reqwest::Client::new()`
+/// built at construction, which is wrong here twice over: that client captures
+/// the ambient proxy environment at the instant it is built — during the
+/// renderer hydration window that is
+/// `install_uninitialized_proxy_environment`'s deliberate black hole
+/// (`http://127.0.0.1:9`) — and it never sees a later Off/Manual/Auto change.
+/// Each call now builds a client bound to the live policy for its own target,
+/// which also lets the bypass list route a loopback runtime direct while a
+/// remote one goes through the proxy.
 #[cfg(feature = "workspace-runtime-exec")]
-pub struct HttpWorkspaceRuntimeClient {
-    client: reqwest::Client,
-}
+pub struct HttpWorkspaceRuntimeClient;
 
 #[cfg(feature = "workspace-runtime-exec")]
 impl HttpWorkspaceRuntimeClient {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            client: reqwest::Client::new(),
-        })
+        Arc::new(Self)
+    }
+
+    fn client_for(target: &str) -> Result<reqwest::Client, String> {
+        cognia_net::proxy_config::managed_client(reqwest::Client::builder(), target)
+            .map_err(|error| format!("runtime proxy policy: {error}"))
     }
 }
 
@@ -152,12 +164,9 @@ impl WorkspaceRuntimeClient for HttpWorkspaceRuntimeClient {
         operation: &str,
         payload: Value,
     ) -> Result<Value, String> {
-        let response = self
-            .client
-            .post(format!(
-                "{}/v1/control",
-                endpoint.base_url.trim_end_matches('/')
-            ))
+        let url = format!("{}/v1/control", endpoint.base_url.trim_end_matches('/'));
+        let response = Self::client_for(&url)?
+            .post(&url)
             .bearer_auth(&endpoint.secret)
             .json(&json!({
                 "version": 1,
@@ -190,12 +199,12 @@ impl WorkspaceRuntimeClient for HttpWorkspaceRuntimeClient {
         endpoint: &WorkspaceRuntimeEndpoint,
         after: u64,
     ) -> Result<Vec<WorkspaceRuntimeEvent>, String> {
-        let response = self
-            .client
-            .get(format!(
-                "{}/v1/events?after={after}",
-                endpoint.base_url.trim_end_matches('/')
-            ))
+        let url = format!(
+            "{}/v1/events?after={after}",
+            endpoint.base_url.trim_end_matches('/')
+        );
+        let response = Self::client_for(&url)?
+            .get(&url)
             .bearer_auth(&endpoint.secret)
             .send()
             .await
@@ -220,13 +229,13 @@ impl WorkspaceRuntimeClient for HttpWorkspaceRuntimeClient {
         session_id: &str,
         after: u64,
     ) -> Result<Option<(u64, Vec<u8>)>, String> {
-        let response = self
-            .client
-            .get(format!(
-                "{}/v1/media/{}?after={after}",
-                endpoint.base_url.trim_end_matches('/'),
-                session_id
-            ))
+        let url = format!(
+            "{}/v1/media/{}?after={after}",
+            endpoint.base_url.trim_end_matches('/'),
+            session_id
+        );
+        let response = Self::client_for(&url)?
+            .get(&url)
             .bearer_auth(&endpoint.secret)
             .send()
             .await
@@ -254,12 +263,9 @@ impl WorkspaceRuntimeClient for HttpWorkspaceRuntimeClient {
     }
 
     async fn healthy(&self, endpoint: &WorkspaceRuntimeEndpoint) -> Result<bool, String> {
-        let response = self
-            .client
-            .get(format!(
-                "{}/v1/health",
-                endpoint.base_url.trim_end_matches('/')
-            ))
+        let url = format!("{}/v1/health", endpoint.base_url.trim_end_matches('/'));
+        let response = Self::client_for(&url)?
+            .get(&url)
             .bearer_auth(&endpoint.secret)
             .send()
             .await
@@ -727,6 +733,38 @@ mod tests {
     use parking_lot::Mutex;
     use serde_json::{json, Value};
     use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
+    /// The HTTP client is stateless by design (see `HttpWorkspaceRuntimeClient`).
+    /// This pins the reason, because the obvious "cache one client in a field"
+    /// refactor silently reintroduces the bug.
+    ///
+    /// One test, not two: the proxy policy is process-wide, so separate tests
+    /// in the same binary would race each other's `apply`/`block`.
+    #[cfg(feature = "workspace-runtime-exec")]
+    #[test]
+    fn builds_a_client_per_target_and_fails_closed_without_a_policy() {
+        use cognia_net::proxy_config::{
+            apply_current, block_current, ProxyConfig, ProxyError, ProxyErrorCode,
+        };
+
+        use super::HttpWorkspaceRuntimeClient;
+
+        // Fail-closed: a blocked policy must not yield a client that quietly
+        // goes direct around the proxy the user configured.
+        block_current(ProxyError::new(
+            ProxyErrorCode::ProxyCredentialUnavailable,
+            "test",
+        ));
+        let error = HttpWorkspaceRuntimeClient::client_for("http://runtime-a:27910/v1/health")
+            .expect_err("a blocked policy must not yield a client");
+        assert!(error.contains("runtime proxy policy"), "got: {error}");
+
+        apply_current(ProxyConfig::default()).unwrap();
+        assert!(HttpWorkspaceRuntimeClient::client_for("http://runtime-a:27910/v1/health").is_ok());
+        // A different workspace is a different target, and the bypass list is
+        // evaluated per host — which is exactly why this is not cached.
+        assert!(HttpWorkspaceRuntimeClient::client_for("http://runtime-b:27910/v1/health").is_ok());
+    }
 
     #[derive(Default)]
     struct FakeLocator {

@@ -326,12 +326,11 @@ impl PushDispatcher for ApnsDispatcher {
     }
 }
 
+/// Thin adapter over the shared helper — the dispatchers report failures as
+/// `String`, and this keeps the conversion in one place rather than at each of
+/// the three call sites.
 fn managed_client(builder: reqwest::ClientBuilder, target: &str) -> Result<Client, String> {
-    let (builder, _) = crate::proxy_config::apply_reqwest_policy(builder, target)
-        .map_err(|error| error.to_string())?;
-    builder
-        .build()
-        .map_err(|error| format!("managed HTTP client build failed: {error}"))
+    crate::proxy_config::managed_client(builder, target).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

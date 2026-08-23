@@ -237,28 +237,26 @@ pub struct JwksCache {
     /// discovery document lives at `<issuer>/.well-known/openid-configuration`.
     issuer: String,
     ttl: Duration,
-    client: reqwest::Client,
     cached: RwLock<Option<CachedJwks>>,
+}
+
+/// Bound the discovery + JWKS round-trip.
+///
+/// `jwks()` is reachable from the request hot path (OIDC is tried before the
+/// HS256 fall-through), so an issuer that connects but never responds must not
+/// stall every companion request for the OS TCP timeout.
+fn jwks_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
 }
 
 impl JwksCache {
     /// Build a cache for `issuer`, keeping fetched keys for `ttl`.
     pub fn new(issuer: impl Into<String>, ttl: Duration) -> Self {
-        // Bound the discovery + JWKS round-trip. `jwks()` is reachable from the
-        // request hot path (OIDC is tried before the HS256 fall-through), so an
-        // issuer that connects but never responds must not stall every companion
-        // request for the OS TCP timeout. Fall back to a default client if the
-        // builder ever fails (it does not for a static config).
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
-            .no_proxy()
-            .build()
-            .expect("static OIDC HTTP client configuration must build");
         Self {
             issuer: issuer.into(),
             ttl,
-            client,
             cached: RwLock::new(None),
         }
     }
@@ -290,8 +288,19 @@ impl JwksCache {
             "{}/.well-known/openid-configuration",
             self.issuer.trim_end_matches('/')
         );
-        let discovery: DiscoveryDoc = self
-            .client
+        // A managed client per target, rebuilt on every (cache-missing) fetch.
+        // This used to be one long-lived `.no_proxy()` client held in a struct
+        // field, which meant an operator behind a corporate proxy could not
+        // reach their own Logto tenant at all — and, being built once, would
+        // not have picked up a proxy change afterwards either. The discovery
+        // document and the JWKS may live on different hosts, so each gets its
+        // own policy decision; the bypass list is per-host.
+        let discovery_client = crate::proxy_config::managed_client(
+            jwks_client_builder(),
+            &discovery_url,
+        )
+        .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
+        let discovery: DiscoveryDoc = discovery_client
             .get(&discovery_url)
             .send()
             .await
@@ -301,8 +310,12 @@ impl JwksCache {
             .await
             .map_err(|e| OidcError::Discovery(format!("parse discovery document: {e}")))?;
 
-        let jwks: JwkSet = self
-            .client
+        let jwks_client = crate::proxy_config::managed_client(
+            jwks_client_builder(),
+            &discovery.jwks_uri,
+        )
+        .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
+        let jwks: JwkSet = jwks_client
             .get(&discovery.jwks_uri)
             .send()
             .await
@@ -670,8 +683,21 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// Install a direct proxy policy before any test that actually dials.
+    ///
+    /// `JwksCache::fetch` builds a *managed* client, and the managed builder is
+    /// fail-closed: with no policy installed it refuses rather than defaulting
+    /// to direct. That is the intended production behaviour during the renderer
+    /// hydration window, so the tests opt in explicitly instead of the module
+    /// weakening its own guarantee.
+    fn install_direct_proxy_policy() {
+        crate::proxy_config::apply_current(crate::proxy_config::ProxyConfig::default())
+            .expect("a default (off) policy always validates");
+    }
+
     #[tokio::test]
     async fn cache_fetches_jwks_via_discovery() {
+        install_direct_proxy_policy();
         let server = MockServer::start().await;
         test_support::mount(&server, 1, 1).await;
         let cache = JwksCache::new(server.uri(), Duration::from_secs(300));
@@ -681,6 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_hit_avoids_refetch() {
+        install_direct_proxy_policy();
         let server = MockServer::start().await;
         // Exactly ONE call to each endpoint across two jwks() reads.
         test_support::mount(&server, 1, 1).await;
@@ -693,6 +720,7 @@ mod tests {
 
     #[tokio::test]
     async fn stale_cache_refetches() {
+        install_direct_proxy_policy();
         let server = MockServer::start().await;
         // ttl=0 ⇒ every read is stale ⇒ two fetches for two reads.
         test_support::mount(&server, 2, 2).await;
@@ -718,6 +746,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticator_verifies_valid_token() {
+        install_direct_proxy_policy();
         let server = MockServer::start().await;
         test_support::mount(&server, 1, 1).await;
         let authn = OidcAuthenticator::new(
@@ -754,6 +783,7 @@ mod tests {
 
     #[tokio::test]
     async fn authenticator_rejects_expired_token() {
+        install_direct_proxy_policy();
         let server = MockServer::start().await;
         test_support::mount(&server, 1, 1).await;
         let authn = OidcAuthenticator::new(

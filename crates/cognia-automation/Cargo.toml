@@ -25,6 +25,9 @@ cc = "1"
 [dependencies]
 cognia-instrument = { path = "../cognia-instrument" }
 cognia-core = { path = "../cognia-core" }
+# Shared outbound proxy policy — the sandbox filtering proxy chains through the
+# Host's configured proxy rather than dialling the internet directly.
+cognia-net = { path = "../cognia-net" }
 tauri = { version = "=2.11.5", features = ["image-png"] }
 # `desktop_paste` writes to the clipboard via ClipboardExt before pasting.
 tauri-plugin-clipboard-manager = "2"
