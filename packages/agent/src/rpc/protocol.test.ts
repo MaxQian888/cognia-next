@@ -128,6 +128,7 @@ describe("RPC protocol", () => {
         "session/fork",
         "session/clone",
         "session/tree",
+        "session/forest",
         "session/close",
         "turn/run",
         "turn/steer",
@@ -157,6 +158,7 @@ describe("RPC protocol", () => {
         "sandbox/snapshot",
         "sandbox/restore",
         "trace/subscribe",
+        "trace/unsubscribe",
         "trace/export",
         "audit/query",
       ])

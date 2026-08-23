@@ -6,14 +6,8 @@
  * into any bundle that merely wants to `instanceof`-check the error — including
  * the browser bundle, which reaches the runtime over injected streams and never
  * spawns anything.
+ *
+ * The class itself lives in `errors.ts` so there is exactly one identity for
+ * `instanceof` to match, and so it inherits the shared `CogniaError` contract.
  */
-export class HostNotFoundError extends Error {
-  readonly code = "host_not_found"
-  readonly searchedLocations: readonly string[]
-
-  constructor(searchedLocations: readonly string[]) {
-    super(`Cognia agent host not found; searched: ${searchedLocations.join(", ")}`)
-    this.name = "HostNotFoundError"
-    this.searchedLocations = searchedLocations
-  }
-}
+export { HostNotFoundError } from "./errors"

@@ -58,6 +58,12 @@ export const RPC_ERROR_CODES = {
   backpressureExceeded: -32011,
   recoveryRequired: -32012,
   callbackFailed: -32013,
+  limitExceeded: -32014,
+  versionConflict: -32015,
+  schemaMismatch: -32016,
+  handlerUnavailable: -32017,
+  outputInvalid: -32018,
+  assetNotFound: -32019,
 } as const
 
 export const RPC_PROTOCOL_VERSION = 2 as const
@@ -85,6 +91,7 @@ export const RPC_METHODS = [
   "session/fork",
   "session/clone",
   "session/tree",
+  "session/forest",
   "session/close",
   "turn/run",
   "turn/steer",
@@ -114,11 +121,66 @@ export const RPC_METHODS = [
   "sandbox/snapshot",
   "sandbox/restore",
   "trace/subscribe",
+  "trace/unsubscribe",
   "trace/export",
   "audit/query",
 ] as const
 
 export type RpcMethod = (typeof RPC_METHODS)[number]
+
+/**
+ * Methods the SDK must never re-send on its own after a transport drop.
+ *
+ * The list is explicit rather than inferred from the presence of a
+ * `commandId`, because several mutating methods carry no command id at all
+ * (`tool/register`, `mcp/configure`, `trace/subscribe`) and inferring would
+ * have quietly made them auto-retryable. Everything absent from this set is a
+ * read whose repetition changes nothing.
+ */
+export const SIDE_EFFECTING_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
+  "initialize",
+  "initialized",
+  "shutdown",
+  "model/refresh",
+  "session/create",
+  "session/rename",
+  "session/tag",
+  "session/delete",
+  "session/import",
+  "session/fork",
+  "session/clone",
+  "session/close",
+  "turn/run",
+  "turn/steer",
+  "turn/followUp",
+  "turn/abort",
+  "session/model/set",
+  "session/thinking/set",
+  "session/permissionMode/set",
+  "session/compact",
+  "session/compact/undo",
+  "permission/respond",
+  "elicitation/respond",
+  "externalTool/respond",
+  "tool/register",
+  "tool/unregister",
+  "hook/register",
+  "hook/unregister",
+  "mcp/configure",
+  "plugin/reload",
+  "skill/reload",
+  "task/stop",
+  "task/background",
+  "sandbox/snapshot",
+  "sandbox/restore",
+  "trace/subscribe",
+  "trace/unsubscribe",
+])
+
+/** A read whose repetition after a reconnect changes nothing host-side. */
+export function isRetryableMethod(method: RpcMethod): boolean {
+  return !SIDE_EFFECTING_METHODS.has(method)
+}
 
 export const HOST_REQUEST_METHODS = ["client/tool/invoke", "client/hook/invoke"] as const
 export type HostRequestMethod = (typeof HOST_REQUEST_METHODS)[number]
@@ -232,7 +294,17 @@ export const rpcMethodSchemas = {
       afterEventId: v.optional(nonEmptyString),
       limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(10_000))),
     }),
-    result: v.looseObject({ entries: arrayResult, nextEventId: v.optional(nonEmptyString) }),
+    result: v.looseObject({
+      entries: arrayResult,
+      nextEventId: v.optional(nonEmptyString),
+      /**
+       * Newest persisted event at the time of the call. Replay pages up to
+       * exactly this cursor, so live events buffered from the moment the
+       * subscription opened can be flushed afterwards with no gap and no
+       * interleaving.
+       */
+      headEventId: v.optional(nonEmptyString),
+    }),
   },
   "session/rename": {
     params: v.looseObject({
@@ -271,6 +343,7 @@ export const rpcMethodSchemas = {
     result: v.looseObject({ sessionId: nonEmptyString, spec: objectResult }),
   },
   "session/tree": { params: sessionParams, result: objectResult },
+  "session/forest": { params: emptyParams, result: objectResult },
   "session/close": { params: sessionCommandParams, result: objectResult },
   "turn/run": {
     params: v.looseObject({
@@ -300,7 +373,15 @@ export const rpcMethodSchemas = {
     }),
     result: objectResult,
   },
-  "turn/abort": { params: sessionCommandParams, result: objectResult },
+  "turn/abort": {
+    params: v.looseObject({
+      sessionId: nonEmptyString,
+      commandId: optionalCommandId,
+      /** Recorded on the abort receipt and in the audit log. */
+      reason: v.optional(v.string()),
+    }),
+    result: objectResult,
+  },
   "turn/wait": {
     params: v.looseObject({
       sessionId: nonEmptyString,
@@ -414,6 +495,10 @@ export const rpcMethodSchemas = {
   "trace/subscribe": {
     params: v.looseObject({ sessionId: v.optional(nonEmptyString) }),
     result: objectResult,
+  },
+  "trace/unsubscribe": {
+    params: v.object({ subscriptionId: nonEmptyString }),
+    result: okResult,
   },
   "trace/export": {
     params: v.looseObject({

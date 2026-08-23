@@ -9,14 +9,16 @@ describe("RpcPeer", () => {
     const peer = new RpcPeer({ readable, writable })
 
     await expect(peer.call("runtime/status", {}, { timeoutMs: 5 })).rejects.toMatchObject({
-      code: -32008,
+      code: "timeout",
+      rpcCode: -32008,
     })
     const controller = new AbortController()
     controller.abort()
     await expect(
       peer.call("runtime/status", {}, { signal: controller.signal })
     ).rejects.toMatchObject({
-      code: -32007,
+      code: "cancelled",
+      rpcCode: -32007,
     })
 
     peer.close()

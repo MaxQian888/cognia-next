@@ -1,11 +1,18 @@
 export {
   createCogniaClient,
+  BackpressureError,
+  ConnectionLostError,
   HostNotFoundError,
   IncompatibleHostError,
+  IndeterminateCommandError,
+  ProtocolLimitError,
+  ReconnectFailedError,
   RpcError,
   type CogniaClient,
   type CogniaClientOptions,
   type CogniaSession,
+  type SessionEventOptions,
+  type TraceSubscription,
   type AuditApi,
   type AuthApi,
   type HookApi,
@@ -19,7 +26,24 @@ export {
   type TraceApi,
   type ToolApi,
 } from "./client"
-export type { CogniaHostOption } from "./host"
+export { CogniaError, type CogniaErrorCode } from "./errors"
+export {
+  DEFAULT_SUBSCRIBER_CAPACITY,
+  type EventSubscriptionOptions,
+  type ReplayPage,
+  type ReplayReader,
+} from "./event-stream"
+export { DEFAULT_RECONNECT_POLICY, type ReconnectPolicy } from "./connection"
+export { createRunHandle, type AgentRunHandle, type RunEventOptions } from "./run-handle"
+export {
+  CLIENT_CAPABILITIES,
+  hasCapability,
+  isVersionedCapability,
+  parseCapability,
+  type ClientCapability,
+} from "./capabilities"
+export { SDK_PACKAGE_NAME, SDK_VERSION } from "./version"
+export type { CogniaHostOption, HostStreams } from "./host"
 export {
   createLineReader,
   RpcFrameSink,
@@ -48,6 +72,7 @@ export type {
   AgentInput,
   AgentPermissionMode,
   AgentRunResultV1,
+  AgentRunStatus,
   AgentTurnOutcome,
   CanonicalSession,
   CanonicalSessionHeader,

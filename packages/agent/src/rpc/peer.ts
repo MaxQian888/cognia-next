@@ -1,3 +1,4 @@
+import { ConnectionLostError, RpcError } from "../errors"
 import {
   createLineReader,
   utf8ByteLength,
@@ -36,17 +37,13 @@ export interface RpcPeerOptions {
   onClose?: (error?: Error) => void
 }
 
-export class RpcError extends Error {
-  readonly code: number
-  readonly data?: unknown
-
-  constructor(code: number, message: string, data?: unknown) {
-    super(message)
-    this.name = "RpcError"
-    this.code = code
-    this.data = data
-  }
-}
+/**
+ * Re-exported so `rpc/peer` stays the import site callers already use. The
+ * class itself lives in `errors.ts` with the rest of the taxonomy, because its
+ * stable string `code` has to be minted from the same table every other SDK
+ * error uses.
+ */
+export { RpcError }
 
 type PendingRequest = {
   method: RpcMethod
@@ -63,8 +60,8 @@ type RequestHandler<Method extends HostRequestMethod> = (
 export class RpcPeer {
   private readonly writable: RpcWritable
   private readonly lines: LineReader
-  private readonly maxFrameBytes: number
-  private readonly maxOutboundBufferBytes: number
+  private maxFrameBytes: number
+  private maxOutboundBufferBytes: number
   private readonly pending = new Map<JsonRpcId, PendingRequest>()
   private readonly requestHandlers = new Map<HostRequestMethod, RequestHandler<HostRequestMethod>>()
   private readonly notificationHandlers = new Map<
@@ -81,7 +78,7 @@ export class RpcPeer {
     this.maxOutboundBufferBytes = options.maxOutboundBufferBytes ?? 32 * 1024 * 1024
     this.lines = createLineReader(options.readable, {
       onLine: (line) => void this.consumeLine(line),
-      onClose: () => this.close(new RpcError(-1, "connection closed")),
+      onClose: () => this.close(new ConnectionLostError()),
     })
     options.readable.on("error", (error: Error) => this.close(error))
     options.writable.on("error", (error: Error) => this.close(error))
@@ -92,12 +89,29 @@ export class RpcPeer {
     }
   }
 
+  /**
+   * Adopt the frame ceilings the host announced during `initialize`.
+   *
+   * The peer has to exist before the handshake can run, so it starts on
+   * conservative defaults and tightens (or loosens) to the negotiated values
+   * once the host has answered. Without this the negotiated `limits` were
+   * received, stored on `runtime.info`, and never enforced by anything.
+   */
+  applyLimits(limits: { maxFrameBytes?: number; maxOutboundBufferBytes?: number }): void {
+    if (typeof limits.maxFrameBytes === "number" && limits.maxFrameBytes > 0) {
+      this.maxFrameBytes = limits.maxFrameBytes
+    }
+    if (typeof limits.maxOutboundBufferBytes === "number" && limits.maxOutboundBufferBytes > 0) {
+      this.maxOutboundBufferBytes = limits.maxOutboundBufferBytes
+    }
+  }
+
   async call<Method extends RpcMethod>(
     method: Method,
     params: RpcMethodMap[Method]["params"],
     options: RpcCallOptions = {}
   ): Promise<RpcMethodMap[Method]["result"]> {
-    if (this.closed) throw new RpcError(-1, "connection closed")
+    if (this.closed) throw new ConnectionLostError()
     if (options.signal?.aborted) throw new RpcError(RPC_ERROR_CODES.cancelled, "cancelled")
 
     const validated = parseRpcMethodParams(method, params)
@@ -161,7 +175,7 @@ export class RpcPeer {
     return () => handlers.delete(handler)
   }
 
-  close(error: Error = new RpcError(-1, "connection closed")): void {
+  close(error: Error = new ConnectionLostError()): void {
     if (this.closed) return
     this.closed = true
     this.lines.close()
@@ -268,7 +282,7 @@ export class RpcPeer {
         jsonrpc: "2.0",
         id,
         error: {
-          code: rpcError?.code ?? RPC_ERROR_CODES.callbackFailed,
+          code: rpcError?.rpcCode ?? RPC_ERROR_CODES.callbackFailed,
           message: error instanceof Error ? error.message : String(error),
           ...(rpcError?.data !== undefined ? { data: rpcError.data } : {}),
         },
@@ -277,7 +291,7 @@ export class RpcPeer {
   }
 
   private async write(message: Record<string, unknown>): Promise<void> {
-    if (this.closed) throw new RpcError(-1, "connection closed")
+    if (this.closed) throw new ConnectionLostError()
     const frame = `${JSON.stringify(message)}\n`
     const bytes = utf8ByteLength(frame)
     if (bytes > this.maxFrameBytes) {

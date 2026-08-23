@@ -1241,7 +1241,11 @@ export async function dispatchTeammate(
               }
             },
           })
-          if (outcome.status === "requires_action") {
+          // The worker finished its turn but is still holding an unresolved
+          // permission or elicitation. That is `needs_input`, not a failure, and
+          // it now travels as an explicit flag rather than as the unreachable
+          // `requires_action` turn status this used to branch on (ADR-0142).
+          if (outcome.recoveryRequired === true) {
             await projectFleet("waiting-input")
             await updateAgentTeamChildRun(durableDispatch.childRunId, {
               status: "needs_input",

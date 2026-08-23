@@ -48,11 +48,36 @@ import { subscribePluginToolDispatch } from "../../plugin/plugin-tool-dispatch"
 import { makeCliPluginToolHandle } from "../subagent-dispatch"
 import type { AgentRpcService, AgentRpcServiceContext } from "./server"
 import { AgentRpcHostError } from "./server"
+import { currentTurnContext, runInTurnContext, type RpcTurnContext } from "./session-context"
 import {
   createDurableRpcStateStore,
   type DurableRpcStateStore,
   type DurableRpcSuspendedTurn,
 } from "./durable-state"
+import {
+  CAP_AUDIT_DURABLE_V1,
+  CAP_CALLBACK_ATTRIBUTION_V1,
+  CAP_CLIENT_HOOKS_V1,
+  CAP_CLIENT_TOOLS_V1,
+  CAP_COMMAND_RECEIPTS_V1,
+  CAP_COMPACTION_UNDO_LIVE_V1,
+  CAP_CONCURRENT_SESSIONS_V1,
+  CAP_DURABLE_PROVIDER_SESSION_V1,
+  CAP_ELICITATION_V1,
+  CAP_EVENT_REPLAY_V2,
+  CAP_EXTERNAL_TOOLS_V1,
+  CAP_MCP_V1,
+  CAP_PERMISSIONS_V1,
+  CAP_PLUGINS_V1,
+  CAP_SANDBOX_POLICY_V1,
+  CAP_SESSION_FOREST_V1,
+  CAP_SESSIONS_V1,
+  CAP_SKILLS_V1,
+  CAP_TASKS_V1,
+  CAP_TRACE_UNSUBSCRIBE_V1,
+  CAP_TRACES_REDACTED_V1,
+  CAP_WORKER_DISPATCH_V1,
+} from "@/packages/agent/src/capabilities"
 import {
   RPC_ERROR_CODES,
   type HostRequestMethodMap,
@@ -83,6 +108,7 @@ const SUPPORTED_METHODS = [
   "session/fork",
   "session/clone",
   "session/tree",
+  "session/forest",
   "session/close",
   "turn/run",
   "turn/steer",
@@ -112,28 +138,56 @@ const SUPPORTED_METHODS = [
   "sandbox/snapshot",
   "sandbox/restore",
   "trace/subscribe",
+  "trace/unsubscribe",
   "trace/export",
   "audit/query",
 ] as const satisfies readonly RpcMethod[]
 
+/**
+ * What this host actually implements, at the version it implements it.
+ *
+ * Every entry is a claim a client is entitled to act on, so each one has to be
+ * true of *this* build. `worker-dispatch-v1` is appended only when worker
+ * dispatch is configured, and `sandbox-policy-v1` deliberately does not promise
+ * the filesystem checkpointing that `workspace-checkpoint-v1` would.
+ */
 const SERVICE_CAPABILITIES = [
-  "canonical-sessions",
-  "event-replay",
-  "command-deduplication",
-  "concurrent-sessions",
-  "durable-provider-session",
-  "permissions",
-  "client-tools",
-  "client-hooks",
-  "mcp",
-  "plugins",
-  "skills",
-  "tasks",
-  "sandbox-policy-snapshots",
-  "redacted-traces",
-  "durable-audit",
-  "live-compaction-undo",
+  CAP_SESSIONS_V1,
+  CAP_EVENT_REPLAY_V2,
+  CAP_COMMAND_RECEIPTS_V1,
+  CAP_CONCURRENT_SESSIONS_V1,
+  CAP_DURABLE_PROVIDER_SESSION_V1,
+  CAP_PERMISSIONS_V1,
+  CAP_ELICITATION_V1,
+  CAP_EXTERNAL_TOOLS_V1,
+  CAP_CLIENT_TOOLS_V1,
+  CAP_CLIENT_HOOKS_V1,
+  CAP_CALLBACK_ATTRIBUTION_V1,
+  CAP_MCP_V1,
+  CAP_PLUGINS_V1,
+  CAP_SKILLS_V1,
+  CAP_TASKS_V1,
+  CAP_SANDBOX_POLICY_V1,
+  CAP_TRACES_REDACTED_V1,
+  CAP_TRACE_UNSUBSCRIBE_V1,
+  CAP_AUDIT_DURABLE_V1,
+  CAP_COMPACTION_UNDO_LIVE_V1,
+  CAP_SESSION_FOREST_V1,
 ] as const
+
+/**
+ * Host-side ceilings.
+ *
+ * Every one of these guarded a map that previously only ever grew: a client
+ * that subscribed to traces in a loop, or resolved a few million commands over
+ * a long-lived process, had no bound at all. They are announced in `initialize`
+ * so a client can see them, and enforced here so an over-eager client is
+ * rejected rather than tolerated until the host runs out of memory.
+ */
+const MAX_REPLAY_EVENTS = 10_000
+const MAX_TRACE_SUBSCRIPTIONS = 64
+const TRACE_SUBSCRIPTION_TTL_MS = 60 * 60_000
+const MAX_RETAINED_COMMAND_RESULTS = 1_024
 
 interface CompactionSnapshot {
   sessionId: string
@@ -216,21 +270,21 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const createCommands = new Map<string, Promise<Record<string, unknown>>>()
   const traceSubscriptions = new Map<
     string,
-    { sessionId?: string; context: AgentRpcServiceContext }
+    { sessionId?: string; context: AgentRpcServiceContext; createdAt: number }
   >()
   const compactionSnapshots = new Map<string, CompactionSnapshot>()
   let configuredMcpServers: McpServer[] | null = null
   let closing = false
-  const serviceCapabilities = options.workerDispatch
-    ? [...SERVICE_CAPABILITIES, "worker-dispatch-v1"]
+  const serviceCapabilities: readonly string[] = options.workerDispatch
+    ? [...SERVICE_CAPABILITIES, CAP_WORKER_DISPATCH_V1]
     : SERVICE_CAPABILITIES
 
   function readEntries(params: Record<string, unknown>): Record<string, unknown> {
     const sessionId = requireString(params, "sessionId")
     const envelopes = store.readEnvelopes(sessionId)
     const afterEventId = typeof params.afterEventId === "string" ? params.afterEventId : undefined
-    const requestedLimit = typeof params.limit === "number" ? params.limit : 10_000
-    const limit = Math.min(10_000, Math.max(1, requestedLimit))
+    const requestedLimit = typeof params.limit === "number" ? params.limit : MAX_REPLAY_EVENTS
+    const limit = Math.min(MAX_REPLAY_EVENTS, Math.max(1, requestedLimit))
     const cursorIndex = afterEventId
       ? envelopes.findIndex((envelope) => envelope.eventId === afterEventId)
       : -1
@@ -239,9 +293,14 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
     const page = envelopes.slice(cursorIndex + 1, cursorIndex + 1 + limit)
     const hasMore = cursorIndex + 1 + page.length < envelopes.length
+    // The newest persisted event at the instant of this call. A subscriber pages
+    // up to exactly this id and then flushes what it buffered live, which is what
+    // makes replay and live delivery a single ordered stream rather than a race.
+    const headEventId = envelopes.at(-1)?.eventId
     return {
       entries: page.map((envelope) => ({ envelope })),
       ...(hasMore && page.length > 0 ? { nextEventId: page.at(-1)!.eventId } : {}),
+      ...(headEventId !== undefined ? { headEventId } : {}),
     }
   }
 
@@ -433,7 +492,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           })
         )
       }
-      case "session/tree":
+      case "session/tree": {
+        const sessionId = requireString(params, "sessionId")
+        const subtree = findSubtree(store.tree(), sessionId)
+        if (!subtree) throw structured("session_not_found", `unknown session ${sessionId}`)
+        return result({ roots: [subtree] })
+      }
+      case "session/forest":
         return result({ roots: store.tree() })
       case "session/close": {
         const session = materialize(requireString(params, "sessionId"))
@@ -455,8 +520,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         requireStore(store.delete(sessionId))
         const deleted = { ...receipt(commandId), deleted: true }
         deletedCommands.set(key, deleted)
-        if (deletedCommands.size > 1_000)
-          deletedCommands.delete(deletedCommands.keys().next().value!)
+        evictOldest(deletedCommands)
         return result(deleted)
       }
       case "turn/run": {
@@ -732,8 +796,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             retryable: sideEffect === "idempotent",
           },
           execute: async (input, toolContext) => {
+            const contextualId = toolContext.sessionId ?? currentTurnContext()?.sessionId
             const session =
-              (toolContext.sessionId ? sessions.get(toolContext.sessionId) : undefined) ??
+              (contextualId ? sessions.get(contextualId) : undefined) ??
               requireSingleLiveSession(sessions)
             const toolCallId = toolContext.messageId ?? randomUUID()
             const idempotencyKey = `${session.id}:${toolName}:${toolCallId}`
@@ -880,7 +945,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         const event = requireString(params, "event")
         const timeoutPolicy = requireString(params, "timeoutPolicy")
         const callback = async (...args: unknown[]) => {
-          const session = [...sessions.values()].find((candidate) => candidate.busy)
+          // The turn that actually fired this hook, from the async context the
+          // turn established — not whichever session happens to be busy.
+          const active = currentTurnContext()
           const invocationId = randomUUID()
           try {
             const response = await context.requestClient(
@@ -888,9 +955,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
               {
                 handlerId,
                 invocationId,
-                sessionId: session?.id ?? "runtime",
-                runId: session?.currentRunId ?? `run-${invocationId}`,
-                attemptId: session?.currentAttemptId ?? `attempt-${invocationId}`,
+                sessionId: active?.sessionId ?? "runtime",
+                runId: active?.runId ?? `run-${invocationId}`,
+                attemptId: active?.attemptId ?? `attempt-${invocationId}`,
                 payload: { event, args },
               },
               typeof params.timeoutMs === "number" ? { timeoutMs: params.timeoutMs } : undefined
@@ -1040,12 +1107,25 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         )
       }
       case "trace/subscribe": {
+        reapTraceSubscriptions()
+        if (traceSubscriptions.size >= MAX_TRACE_SUBSCRIPTIONS) {
+          throw structured(
+            "usage_error",
+            `trace subscription limit reached (${MAX_TRACE_SUBSCRIPTIONS}); unsubscribe first`
+          )
+        }
         const subscriptionId = randomUUID()
         traceSubscriptions.set(subscriptionId, {
           ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
           context,
+          createdAt: now(),
         })
         return result({ subscriptionId, redacted: true })
+      }
+      case "trace/unsubscribe": {
+        const subscriptionId = requireString(params, "subscriptionId")
+        traceSubscriptions.delete(subscriptionId)
+        return result({ ok: true })
       }
       case "trace/export": {
         const format = typeof params.format === "string" ? params.format : "json"
@@ -1085,11 +1165,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     if (persisted) {
       const replay = Promise.resolve(persisted)
       createCommands.set(commandKey, replay)
+      evictOldest(createCommands)
       return replay
     }
 
     const pending = createSessionOnce(params, commandId, commandKey)
     createCommands.set(commandKey, pending)
+    evictOldest(createCommands)
     try {
       return await pending
     } catch (error) {
@@ -1105,7 +1187,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   ): Promise<Record<string, unknown>> {
     const handoff = params.handoff as HandoffEnvelope | undefined
     if (handoff && !options.workerDispatch) {
-      throw structured("unsupported_capability", "host does not support worker-dispatch-v1")
+      throw structured("unsupported_capability", `host does not support ${CAP_WORKER_DISPATCH_V1}`)
     }
     if (handoff && typeof params.cwd === "string") {
       throw structured("usage_error", "remote handoff session creation does not accept cwd")
@@ -1218,6 +1300,14 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     const controller = new AbortController()
     session.abortController = controller
     const gate = createRpcPermissionGate(session, recovery)
+    // Mutable on purpose: the real run and attempt ids only exist once the
+    // runtime emits its first envelope, and the async context holds a reference
+    // to this object rather than a copy of its fields.
+    const turnContext: RpcTurnContext = {
+      sessionId: session.id,
+      runId: recovery?.runId ?? `run-pending:${session.id}`,
+      attemptId: `attempt-pending:${session.id}`,
+    }
     const turn = (async () => {
       try {
         const turnParams: UnifiedTurnParams = {
@@ -1251,6 +1341,8 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             const attemptChanged = session.currentAttemptId !== envelope.attemptId
             session.currentRunId = envelope.runId
             session.currentAttemptId = envelope.attemptId
+            turnContext.runId = envelope.runId
+            turnContext.attemptId = envelope.attemptId
             if (attemptChanged) {
               session.durableState.update(session.id, (state) => {
                 if (!state.suspendedTurn) return
@@ -1269,7 +1361,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           ...(typeof params.maxSteps === "number" ? { maxSteps: params.maxSteps } : {}),
           ...(params.includeDiagnostics === true ? { includeDiagnostics: true } : {}),
         }
-        const { result: runResult } = await runTurn(turnParams)
+        const { result: runResult } = await runInTurnContext(turnContext, () => runTurn(turnParams))
         session.durableState.update(session.id, (state) => {
           if (hasPendingRequests(state)) {
             state.recoveryRequired = true
@@ -1533,6 +1625,14 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   }
 
+  /** Drop subscriptions past their TTL so an abandoned client cannot pin them. */
+  function reapTraceSubscriptions(): void {
+    const cutoff = now() - TRACE_SUBSCRIPTION_TTL_MS
+    for (const [subscriptionId, subscription] of traceSubscriptions) {
+      if (subscription.createdAt <= cutoff) traceSubscriptions.delete(subscriptionId)
+    }
+  }
+
   function publishAudit(entry: RpcAuditEntry): void {
     try {
       auditStore.append(entry)
@@ -1613,6 +1713,43 @@ function readState(session: HostedSession): Record<string, unknown> {
   }
 }
 
+/**
+ * The node for `sessionId` anywhere in the lineage forest, with its children.
+ *
+ * `session/tree` used to ignore its argument and hand back every root, so a
+ * caller asking about one session received the whole forest — including the
+ * names and shapes of sessions it never asked about.
+ */
+function findSubtree<T extends { sessionId: string; children: T[] }>(
+  roots: readonly T[],
+  sessionId: string
+): T | undefined {
+  const stack = [...roots]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (!node) continue
+    if (node.sessionId === sessionId) return node
+    stack.push(...node.children)
+  }
+  return undefined
+}
+
+/**
+ * Insertion-ordered eviction for the receipt maps.
+ *
+ * Deduplication only has to survive a client retrying a command it believes may
+ * not have landed, which happens near in time. Retaining every receipt for the
+ * life of the process bought nothing and had no ceiling; `session/create` and
+ * the per-session command map had none at all.
+ */
+function evictOldest(map: Map<string, unknown>): void {
+  while (map.size > MAX_RETAINED_COMMAND_RESULTS) {
+    const oldest = map.keys().next()
+    if (oldest.done) return
+    map.delete(oldest.value)
+  }
+}
+
 function outcomeFrom(runResult: AgentRunResultV1): Record<string, unknown> {
   return { status: runResult.status, result: runResult }
 }
@@ -1624,6 +1761,16 @@ function lowerInput(input: unknown): string {
     typeof input === "object" &&
     typeof (input as { prompt?: unknown }).prompt === "string"
   ) {
+    const attachments = (input as { attachments?: unknown }).attachments
+    // This host reads no attachment field. Accepting one and running the turn
+    // without it is a silent data loss the caller cannot detect, so refuse.
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      throw structured(
+        "usage_error",
+        `input carries ${attachments.length} attachment(s); this host accepts none. ` +
+          "Use asset references once the host declares the assets-v1 capability."
+      )
+    }
     const prompt = (input as { prompt: string }).prompt
     if (prompt.trim()) return prompt
   }
@@ -1661,6 +1808,7 @@ async function runCommand<T>(
   }
   const pending = operation(commandId)
   session.commandResults.set(key, pending)
+  evictOldest(session.commandResults)
   try {
     const value = await pending
     session.durableState.update(session.id, (state) => {

@@ -25,13 +25,13 @@ describe("public SDK types", () => {
       sideEffect: "none",
     }
     const outcome: AgentTurnOutcome = {
-      status: "requires_action",
-      suspended: { sessionId: "s", runId: "r", turnId: "t" },
+      status: "completed",
+      result: { status: "completed", text: "done" },
     }
     const state: SessionState = { sessionId: "s", status: "idle" }
 
     expect(JSON.parse(JSON.stringify({ registration, outcome, state }))).toMatchObject({
-      outcome: { status: "requires_action" },
+      outcome: { status: "completed", result: { status: "completed", text: "done" } },
       state: { status: "idle" },
     })
   })

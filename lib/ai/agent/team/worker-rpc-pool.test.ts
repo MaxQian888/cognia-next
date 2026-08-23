@@ -169,6 +169,7 @@ describe("WorkerRpcPool", () => {
       run,
       steer,
       abort: jest.fn(),
+      state: jest.fn(async () => ({ sessionId: "session-1", status: "idle" })),
       waitForIdle: jest.fn(),
       snapshot: jest.fn(),
       close: jest.fn(),
@@ -226,6 +227,7 @@ describe("WorkerRpcPool", () => {
         ),
         steer: jest.fn(),
         abort: jest.fn(),
+        state: jest.fn(async () => ({ sessionId: "session-1", status: "idle" })),
         waitForIdle: jest.fn(),
         snapshot: jest.fn(),
         close: jest.fn(),
@@ -329,6 +331,7 @@ describe("WorkerRpcPool", () => {
       run,
       steer,
       abort,
+      state: jest.fn(async () => ({ sessionId: "session-1", status: "idle" })),
       waitForIdle,
       snapshot: jest.fn(),
       close,
@@ -431,6 +434,7 @@ describe("WorkerRpcPool", () => {
       run: jest.fn(async () => ({ status: "completed", result: {} })),
       steer: jest.fn(),
       abort,
+      state: jest.fn(async () => ({ sessionId: "session-1", status: "idle" })),
       waitForIdle,
       snapshot,
       close: jest.fn(),
@@ -469,5 +473,80 @@ describe("WorkerRpcPool", () => {
     expect(abort).not.toHaveBeenCalled()
     expect(snapshot).not.toHaveBeenCalled()
     expect(open).not.toHaveBeenCalled()
+  })
+  it("reports a worker still holding an unresolved request as recovery-required", async () => {
+    const session = {
+      id: "session-recovery",
+      events: async function* () {},
+      run: jest.fn(async () => ({ status: "completed", result: { status: "completed" } })),
+      steer: jest.fn(),
+      state: jest.fn(async () => ({
+        sessionId: "session-recovery",
+        status: "recovery_required" as const,
+      })),
+      abort: jest.fn(),
+      waitForIdle: jest.fn(),
+      snapshot: jest.fn(),
+      close: jest.fn(),
+    }
+    const pool = new WorkerRpcPool({
+      sendFrame: jest.fn(),
+      createClient: (async () => ({
+        sessions: {
+          create: jest.fn(async () => session),
+          open: jest.fn(async () => session),
+        },
+        close: jest.fn(),
+      })) as never,
+    })
+    pool.attach({ connectionId: "connection-recovery-2", hostRef: "device:recovery", manifest })
+
+    const outcome = await pool.run({
+      hostRef: "device:recovery",
+      commandId: "lease-recovery",
+      prompt: "do the thing",
+      onSession: jest.fn(),
+      onEvent: jest.fn(),
+      onControl: jest.fn(),
+    })
+
+    // The turn itself completed; the worker is still waiting on an operator.
+    expect(outcome.status).toBe("completed")
+    expect(outcome.recoveryRequired).toBe(true)
+  })
+
+  it("leaves the recovery flag off an ordinary completed turn", async () => {
+    const session = {
+      id: "session-clean",
+      events: async function* () {},
+      run: jest.fn(async () => ({ status: "completed", result: { status: "completed" } })),
+      steer: jest.fn(),
+      state: jest.fn(async () => ({ sessionId: "session-clean", status: "idle" as const })),
+      abort: jest.fn(),
+      waitForIdle: jest.fn(),
+      snapshot: jest.fn(),
+      close: jest.fn(),
+    }
+    const pool = new WorkerRpcPool({
+      sendFrame: jest.fn(),
+      createClient: (async () => ({
+        sessions: {
+          create: jest.fn(async () => session),
+          open: jest.fn(async () => session),
+        },
+        close: jest.fn(),
+      })) as never,
+    })
+    pool.attach({ connectionId: "connection-clean", hostRef: "device:clean", manifest })
+
+    const outcome = await pool.run({
+      hostRef: "device:clean",
+      commandId: "lease-clean",
+      prompt: "do the thing",
+      onSession: jest.fn(),
+      onEvent: jest.fn(),
+      onControl: jest.fn(),
+    })
+    expect(outcome.recoveryRequired).toBeUndefined()
   })
 })

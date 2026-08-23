@@ -94,6 +94,13 @@ export type AgentInput =
   | string
   | {
       prompt: string
+      /**
+       * @deprecated Not carried by any host build. Attachments were accepted by
+       * the schema and read by no host code path, so the turn ran without them
+       * and the caller was told nothing. They are now rejected with
+       * `invalid_params`. Use asset references once the host declares the
+       * `assets-v1` capability.
+       */
       attachments?: {
         name?: string
         mediaType?: string
@@ -102,19 +109,38 @@ export type AgentInput =
       }[]
     }
 
+/**
+ * The four statuses a turn can actually end in.
+ *
+ * Mirrors `AgentRunStatus` in `@cognia/agent-config-types`, which the host
+ * validates every run result against.
+ */
+export type AgentRunStatus = "completed" | "failed" | "cancelled" | "timeout"
+
 export interface AgentRunResultV1 {
-  status: string
+  status: AgentRunStatus
   text?: string
   [key: string]: unknown
 }
 
-export type AgentTurnOutcome =
-  | {
-      status: "completed" | "failed" | "cancelled" | "timeout"
-      result: AgentRunResultV1
-    }
-  | { status: "requires_action"; suspended: SuspendedRunState }
+/**
+ * A turn outcome is always terminal.
+ *
+ * There is deliberately no "waiting" variant. A turn blocked on a permission or
+ * an elicitation has not ended, and reporting that as an outcome forced every
+ * caller to re-enter a loop the SDK should own. Waiting is observable on the
+ * run's event stream, and a session that needs governed operator action reports
+ * `recovery_required` from `session.state()`.
+ */
+export interface AgentTurnOutcome {
+  status: AgentRunStatus
+  result: AgentRunResultV1
+}
 
+/**
+ * Work the host is holding for a session. Reachable through `session.state()`
+ * and the recovery events, never as a turn outcome.
+ */
 export interface SuspendedRunState {
   sessionId: string
   runId: string

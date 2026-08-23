@@ -125,7 +125,7 @@ describe("createCogniaClient", () => {
     const oldClient = await createCogniaClient({ host: { kind: "streams", ...oldHost.streams } })
     await expect(
       oldClient.sessions.create({ commandId: "lease-1", handoff })
-    ).rejects.toMatchObject({ code: RPC_ERROR_CODES.capabilityError })
+    ).rejects.toMatchObject({ code: "capability_error", rpcCode: RPC_ERROR_CODES.capabilityError })
     await oldClient.close()
     oldHost.close()
 
@@ -133,7 +133,7 @@ describe("createCogniaClient", () => {
     const client = await createCogniaClient({ host: { kind: "streams", ...worker.streams } })
     await expect(
       client.sessions.create({ commandId: "lease-2", cwd: "/tmp/repo", handoff })
-    ).rejects.toMatchObject({ code: RPC_ERROR_CODES.invalidParams })
+    ).rejects.toMatchObject({ code: "invalid_params", rpcCode: RPC_ERROR_CODES.invalidParams })
 
     await client.sessions.create({ commandId: "lease-3", handoff })
     expect(worker.requests.find((request) => request.method === "session/create")).toMatchObject({
@@ -207,7 +207,8 @@ describe("createCogniaClient", () => {
     controller.abort()
 
     await expect(session.run("cancel", { signal: controller.signal })).rejects.toMatchObject({
-      code: -32007,
+      code: "cancelled",
+      rpcCode: -32007,
     })
     expect(host.requests.some((request) => request.method === "turn/abort")).toBe(true)
 

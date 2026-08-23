@@ -27,7 +27,21 @@ export type CogniaHostOption =
       kind: "streams"
       readable: RpcReadable
       writable: RpcWritable
+      /**
+       * Rebuilds the transport after a drop, enabling reconnection for an
+       * injected-stream host.
+       *
+       * Without it the SDK cannot reconnect a `streams` host at all: it was
+       * handed one pair of pipes and has no way to make another. `bundled` and
+       * `path` hosts need no factory — the SDK can respawn the binary itself.
+       */
+      factory?: () => Promise<HostStreams> | HostStreams
     }
+
+export interface HostStreams {
+  readable: RpcReadable
+  writable: RpcWritable
+}
 
 export interface OpenHostResult {
   readable: RpcReadable

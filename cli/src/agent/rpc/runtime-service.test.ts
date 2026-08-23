@@ -21,6 +21,14 @@ const mockRegisterTool = jest.fn((_pluginId: string, tool: PluginTool) => {
   mockRegisteredPluginTools.set(tool.name, tool)
 })
 const mockUnregisterTool = jest.fn((toolName: string) => mockRegisteredPluginTools.delete(toolName))
+/** Captured so a test can fire a hook from inside a turn and check attribution. */
+const mockRegisteredHooks = new Map<string, Record<string, (...args: unknown[]) => unknown>>()
+const mockRegisterHooks = jest.fn(
+  (pluginId: string, hooks: Record<string, (...args: unknown[]) => unknown>) => {
+    mockRegisteredHooks.set(pluginId, hooks)
+  }
+)
+const mockUnregisterHooks = jest.fn((pluginId: string) => mockRegisteredHooks.delete(pluginId))
 
 jest.mock("../../plugin/plugin-runtime", () => ({
   ensurePluginRuntime: jest.fn(async () => ({ ok: true })),
@@ -33,8 +41,8 @@ jest.mock("@/lib/plugin/core/manager", () => ({
       unregisterTool: mockUnregisterTool,
     }),
     getHooksManager: () => ({
-      registerHooks: jest.fn(),
-      unregisterHooks: jest.fn(),
+      registerHooks: mockRegisterHooks,
+      unregisterHooks: mockUnregisterHooks,
     }),
   }),
 }))
@@ -63,6 +71,9 @@ describe("createAgentRuntimeService", () => {
     mockRegisteredPluginTools.clear()
     mockRegisterTool.mockClear()
     mockUnregisterTool.mockClear()
+    mockRegisteredHooks.clear()
+    mockRegisterHooks.mockClear()
+    mockUnregisterHooks.mockClear()
   })
 
   afterEach(() => {
@@ -1057,5 +1068,328 @@ describe("createAgentRuntimeService", () => {
       await restarted.handle("session/state", { sessionId: "session-1" }, context as never)
     ).toMatchObject({ status: "idle", recoveryRequired: false, pendingElicitations: [] })
     await restarted.close()
+  })
+  // ---- ADR-0142 Phase 1: replay bounds, subtree scoping, releasable traces ----
+
+  /** Minimal turn that emits `count` envelopes and completes. */
+  function emittingTurn(count: number, sessionId = "session-1") {
+    return jest.fn(async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => {
+      const envelopes: AgentEventEnvelope[] = []
+      for (let index = 0; index < count; index += 1) {
+        const envelope = {
+          schemaVersion: 1 as const,
+          eventId: `${sessionId}:turn-1:attempt-1:${index}`,
+          sequence: index,
+          sessionId,
+          runId: "run-1",
+          attemptId: "attempt-1",
+          turnId: "turn-1",
+          timestamp: new Date(index).toISOString(),
+          hostRef: "test",
+          runtime: "builtin",
+          event: { kind: "lifecycle", phase: "started" },
+        } satisfies AgentEventEnvelope
+        envelopes.push(envelope)
+        params.onEnvelope?.(envelope)
+      }
+      // The real runtime persists as it emits; the mock has to do the same or
+      // there is no event log for `session/entries` to page.
+      if (envelopes.length > 0 && params.store) {
+        const handle = params.store.open(sessionId, { writable: true })
+        if (handle.ok) {
+          handle.value.append(envelopes)
+          handle.value.close()
+        }
+      }
+      return {
+        result: {
+          schemaVersion: 1 as const,
+          type: "result" as const,
+          status: "completed" as const,
+          sessionId: params.sessionId ?? sessionId,
+          runId: "run-1",
+          turnId: "turn-1",
+          attemptId: "attempt-1",
+          text: "done",
+          backend: "builtin",
+          model: "test-model",
+          capabilities: [],
+          session: { persisted: true, turnCount: 1 },
+        },
+        envelopes,
+      }
+    })
+  }
+
+  function makeService(runTurn: ReturnType<typeof emittingTurn>, mintSessionId?: () => string) {
+    return createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      runTurn,
+      ...(mintSessionId ? { mintSessionId } : {}),
+    })
+  }
+
+  it("reports the head cursor on every entries page so replay can be bounded", async () => {
+    const service = makeService(emittingTurn(3), () => "session-1")
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "go", commandId: "run-1" },
+      context as never
+    )
+
+    const firstPage = (await service.handle(
+      "session/entries",
+      { sessionId: "session-1", limit: 1 },
+      context as never
+    )) as { entries: unknown[]; nextEventId?: string; headEventId?: string }
+
+    expect(firstPage.entries).toHaveLength(1)
+    // The head is the newest persisted event, not the end of this page.
+    expect(firstPage.headEventId).toBe("session-1:turn-1:attempt-1:2")
+    expect(firstPage.nextEventId).toBe("session-1:turn-1:attempt-1:0")
+
+    const full = (await service.handle(
+      "session/entries",
+      { sessionId: "session-1" },
+      context as never
+    )) as { entries: unknown[]; headEventId?: string; nextEventId?: string }
+    expect(full.entries).toHaveLength(3)
+    expect(full.headEventId).toBe("session-1:turn-1:attempt-1:2")
+    expect(full.nextEventId).toBeUndefined()
+    await service.close()
+  })
+
+  it("omits the head cursor for a session that has no events yet", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("session/create", {}, context as never)
+    const page = (await service.handle(
+      "session/entries",
+      { sessionId: "session-1" },
+      context as never
+    )) as { entries: unknown[]; headEventId?: string }
+    expect(page.entries).toEqual([])
+    expect(page.headEventId).toBeUndefined()
+    await service.close()
+  })
+
+  it("clamps an oversized entries limit to the announced replay ceiling", async () => {
+    const service = makeService(emittingTurn(2), () => "session-1")
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "go", commandId: "run-1" },
+      context as never
+    )
+    const page = (await service.handle(
+      "session/entries",
+      { sessionId: "session-1", limit: 10_000 },
+      context as never
+    )) as { entries: unknown[] }
+    expect(page.entries).toHaveLength(2)
+    await service.close()
+  })
+
+  it("scopes session/tree to one subtree and keeps the forest on session/forest", async () => {
+    let next = 0
+    const ids = ["session-a", "session-b"]
+    const service = makeService(emittingTurn(0), () => ids[next++] ?? `session-${next}`)
+    await service.handle("session/create", { name: "a" }, context as never)
+    await service.handle("session/create", { name: "b" }, context as never)
+    const forked = (await service.handle(
+      "session/fork",
+      { sessionId: "session-a", name: "a-fork", commandId: "fork-1" },
+      context as never
+    )) as { sessionId: string }
+
+    const subtree = (await service.handle(
+      "session/tree",
+      { sessionId: "session-a" },
+      context as never
+    )) as { roots: { sessionId: string; children: { sessionId: string }[] }[] }
+    expect(subtree.roots).toHaveLength(1)
+    expect(subtree.roots[0]!.sessionId).toBe("session-a")
+    expect(subtree.roots[0]!.children.map((child) => child.sessionId)).toEqual([forked.sessionId])
+
+    const forest = (await service.handle("session/forest", {}, context as never)) as {
+      roots: { sessionId: string }[]
+    }
+    expect(forest.roots.map((root) => root.sessionId).sort()).toEqual(["session-a", "session-b"])
+    await service.close()
+  })
+
+  it("refuses a tree request for a session it does not have", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await expect(
+      service.handle("session/tree", { sessionId: "nope" }, context as never)
+    ).rejects.toMatchObject({ structuredError: { code: "session_not_found" } })
+    await service.close()
+  })
+
+  it("stops delivering spans once a trace subscription is released", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const subscribed = (await service.handle("trace/subscribe", {}, context as never)) as {
+      subscriptionId: string
+    }
+    await service.handle("session/create", {}, context as never)
+    const beforeRelease = context.emit.mock.calls.filter(([method]) => method === "trace/event")
+    expect(beforeRelease.length).toBeGreaterThan(0)
+
+    await expect(
+      service.handle(
+        "trace/unsubscribe",
+        { subscriptionId: subscribed.subscriptionId },
+        context as never
+      )
+    ).resolves.toEqual({ ok: true })
+
+    context.emit.mockClear()
+    await service.handle("session/list", {}, context as never)
+    expect(context.emit.mock.calls.filter(([method]) => method === "trace/event")).toHaveLength(0)
+    await service.close()
+  })
+
+  it("refuses a new trace subscription past the ceiling instead of growing without bound", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    for (let index = 0; index < 64; index += 1) {
+      await service.handle("trace/subscribe", {}, context as never)
+    }
+    await expect(service.handle("trace/subscribe", {}, context as never)).rejects.toMatchObject({
+      structuredError: { code: "usage_error" },
+    })
+    await service.close()
+  })
+
+  it("refuses a turn that carries attachments instead of dropping them", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    await service.handle("session/create", {}, context as never)
+    await expect(
+      service.handle(
+        "turn/run",
+        {
+          sessionId: "session-1",
+          input: { prompt: "review this", attachments: [{ path: "/tmp/a.png" }] },
+          commandId: "run-1",
+        },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "usage_error" } })
+    expect(runTurn).not.toHaveBeenCalled()
+    await service.close()
+  })
+
+  it("declares only versioned capabilities, and worker dispatch only when configured", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const unversioned = service.capabilities.filter(
+      (capability) => !/^[a-z][a-z0-9-]*-v\d+$/.test(capability)
+    )
+    expect(unversioned).toEqual([])
+    expect(service.capabilities).toContain("event-replay-v2")
+    expect(service.capabilities).toContain("trace-unsubscribe-v1")
+    expect(service.capabilities).toContain("session-forest-v1")
+    expect(service.capabilities).toContain("callback-attribution-v1")
+    // The old flat names are gone, and the misleading one in particular.
+    expect(service.capabilities).not.toContain("sandbox-policy-snapshots")
+    expect(service.capabilities).not.toContain("worker-dispatch-v1")
+    await service.close()
+  })
+
+  it("attributes a client hook to the turn that fired it, not the first busy session", async () => {
+    const fired: Array<Record<string, unknown>> = []
+    context.requestClient.mockImplementation(async (_method: string, params: unknown) => {
+      fired.push(params as Record<string, unknown>)
+      return { ok: true, output: undefined }
+    })
+
+    let releaseSlow!: () => void
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve
+    })
+
+    const runTurn = jest.fn(async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => {
+      const sessionId = params.sessionId ?? "session-1"
+      const envelope = {
+        schemaVersion: 1 as const,
+        eventId: `${sessionId}:turn-1:attempt-1:0`,
+        sequence: 0,
+        sessionId,
+        runId: `run-${sessionId}`,
+        attemptId: `attempt-${sessionId}`,
+        turnId: "turn-1",
+        timestamp: new Date(0).toISOString(),
+        hostRef: "test",
+        runtime: "builtin",
+        event: { kind: "lifecycle", phase: "started" },
+      } satisfies AgentEventEnvelope
+      params.onEnvelope?.(envelope)
+      // The slow session stays inside its turn while the fast one fires a hook,
+      // which is exactly the window the "first busy session" heuristic got wrong.
+      if (sessionId === "session-slow") await slowGate
+      const hooks = mockRegisteredHooks.get("rpc-client-hook:handler-1")
+      await hooks?.PreToolUse?.({ toolName: "read_file" })
+      return {
+        result: {
+          schemaVersion: 1 as const,
+          type: "result" as const,
+          status: "completed" as const,
+          sessionId,
+          runId: `run-${sessionId}`,
+          turnId: "turn-1",
+          attemptId: `attempt-${sessionId}`,
+          text: "done",
+          backend: "builtin",
+          model: "test-model",
+          capabilities: [],
+          session: { persisted: true, turnCount: 1 },
+        },
+        envelopes: [envelope],
+      }
+    })
+
+    let next = 0
+    const ids = ["session-slow", "session-fast"]
+    const service = makeService(
+      runTurn as unknown as ReturnType<typeof emittingTurn>,
+      () => ids[next++] ?? `session-${next}`
+    )
+    await service.handle("session/create", {}, context as never)
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "hook/register",
+      {
+        handlerId: "handler-1",
+        name: "pre-tool",
+        event: "PreToolUse",
+        timeoutPolicy: "continue",
+      },
+      context as never
+    )
+
+    const slow = service.handle(
+      "turn/run",
+      { sessionId: "session-slow", input: "slow", commandId: "run-slow" },
+      context as never
+    )
+    // Let the slow turn get inside runTurn and mark itself busy first.
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-fast", input: "fast", commandId: "run-fast" },
+      context as never
+    )
+    releaseSlow()
+    await slow
+
+    expect(fired).toHaveLength(2)
+    const fast = fired.find((entry) => entry.sessionId === "session-fast")
+    const slowFired = fired.find((entry) => entry.sessionId === "session-slow")
+    expect(fast).toMatchObject({ runId: "run-session-fast", attemptId: "attempt-session-fast" })
+    expect(slowFired).toMatchObject({
+      runId: "run-session-slow",
+      attemptId: "attempt-session-slow",
+    })
+    await service.close()
   })
 })

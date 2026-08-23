@@ -9,6 +9,7 @@ import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import type {
   RemoteWorkerDescriptor,
+  RemoteWorkerOutcome,
   RemoteWorkerRunInput,
   RemoteWorkerRuntime,
 } from "./remote-worker-runtime"
@@ -144,11 +145,22 @@ export class WorkerRpcPool implements RemoteWorkerRuntime {
         }
       })()
       try {
-        return await session.run(input.prompt, {
+        const outcome = await session.run(input.prompt, {
           commandId: input.commandId,
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.signal ? { signal: input.signal } : {}),
         })
+        // The turn is over, but the worker may still be holding an unresolved
+        // permission or elicitation. That is a session property, not a turn
+        // status, so it has to be read from the session.
+        const recoveryRequired = await session
+          .state()
+          .then((state) => state.status === "recovery_required")
+          .catch(() => false)
+        return {
+          ...outcome,
+          ...(recoveryRequired ? { recoveryRequired: true } : {}),
+        } satisfies RemoteWorkerOutcome
       } finally {
         eventAbort.abort()
         await consumeEvents.catch(() => undefined)

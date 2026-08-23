@@ -203,6 +203,6 @@ describe("RpcPeer over the neutral duplex", () => {
     const pending = peer.call("runtime/status", {}, { timeoutMs: 1_000 })
     inbound.end()
 
-    await expect(pending).rejects.toThrow("connection closed")
+    await expect(pending).rejects.toMatchObject({ code: "connection_lost" })
   })
 })

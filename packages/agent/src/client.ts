@@ -1,9 +1,22 @@
-import { HostNotFoundError } from "./host-errors"
-import type { CogniaHostOption, OpenHostResult } from "./host"
+import { assertSupportedInput } from "./agent-input"
+import { CAP_TRACE_UNSUBSCRIBE_V1, hasCapability } from "./capabilities"
+import { HostConnection, type ReconnectPolicy } from "./connection"
+import {
+  BackpressureError,
+  ConnectionLostError,
+  HostNotFoundError,
+  IncompatibleHostError,
+  IndeterminateCommandError,
+  ProtocolLimitError,
+  ReconnectFailedError,
+  RpcError,
+} from "./errors"
+import { DEFAULT_SUBSCRIBER_CAPACITY, SessionEventHub } from "./event-stream"
+import type { CogniaHostOption } from "./host"
 import { randomUUID } from "./ids"
-import type { RpcReadable, RpcWritable } from "./rpc/duplex"
-import { RpcError, RpcPeer } from "./rpc/peer"
-import { RPC_ERROR_CODES, RPC_PROTOCOL_VERSION, type RpcMethodMap } from "./rpc/protocol"
+import { ReceiptCache } from "./receipt-cache"
+import { createRunHandle, type AgentRunHandle, type RunEventOptions } from "./run-handle"
+import { RPC_ERROR_CODES, type RpcMethodMap } from "./rpc/protocol"
 import type {
   AgentEventEnvelope,
   AgentInput,
@@ -24,12 +37,13 @@ import type {
   CompactOptions,
   CompactionResult,
   ElicitationResponse,
-  ExternalToolResponse,
   EntryPage,
   EntryPageOptions,
+  ExternalToolResponse,
   ForkOptions,
   InitializeResult,
   PermissionDecision,
+  ProtocolLimits,
   ResolvedAgentExecutionSpec,
   RunOptions,
   SandboxSnapshot,
@@ -41,33 +55,44 @@ import type {
   WaitOptions,
 } from "./types"
 
-export { HostNotFoundError, RpcError }
+export {
+  BackpressureError,
+  ConnectionLostError,
+  HostNotFoundError,
+  IncompatibleHostError,
+  IndeterminateCommandError,
+  ProtocolLimitError,
+  ReconnectFailedError,
+  RpcError,
+}
+
+/** How long a client-side callback memo absorbs a host redelivery. */
+const CALLBACK_RECEIPT_TTL_MS = 10 * 60_000
+const CALLBACK_RECEIPT_CEILING = 512
 
 export interface CogniaClientOptions {
   host?: CogniaHostOption
   requestTimeoutMs?: number
   onDiagnostic?: (diagnostic: CogniaDiagnostic) => void
   client?: { name?: string; version?: string }
-}
-
-export class IncompatibleHostError extends Error {
-  readonly code = "incompatible_host"
-  readonly hostProtocolVersion: number
-  readonly supportedProtocolVersions = [RPC_PROTOCOL_VERSION] as const
-
-  constructor(hostProtocolVersion: number) {
-    super(
-      `host selected protocol v${hostProtocolVersion}; this SDK supports v${RPC_PROTOCOL_VERSION}`
-    )
-    this.name = "IncompatibleHostError"
-    this.hostProtocolVersion = hostProtocolVersion
-  }
+  /**
+   * Reconnection is on by default for `bundled` and `path` hosts. A `streams`
+   * host needs a `factory` on the host option before it can be reconnected at
+   * all; without one this is forced off.
+   */
+  reconnect?: Partial<ReconnectPolicy>
+  /** Default bounded queue capacity for event subscribers. */
+  eventQueueCapacity?: number
 }
 
 export interface RuntimeApi {
   readonly info: InitializeResult
+  /** Limits the host announced, after normalisation, as actually enforced. */
+  readonly limits: ProtocolLimits
   status(): Promise<Record<string, unknown>>
   capabilities(): Promise<{ methods: readonly string[]; capabilities: readonly string[] }>
+  /** True when the host declared this exact versioned capability. */
+  supports(capability: string): boolean
 }
 
 export interface ModelApi {
@@ -80,7 +105,10 @@ export interface SessionApi {
   open(sessionId: string): Promise<CogniaSession>
   list(): Promise<readonly SessionSummary[]>
   import(session: CanonicalSession): Promise<CogniaSession>
+  /** The subtree rooted at `sessionId`. For every root, use `forest()`. */
   tree(sessionId: string): Promise<readonly unknown[]>
+  /** Every root the host knows about. */
+  forest(): Promise<readonly unknown[]>
 }
 
 export interface AuthApi {
@@ -106,8 +134,20 @@ export interface TaskApi {
   background(taskId: string, options?: CommandOptions): Promise<CommandReceipt>
 }
 
+/**
+ * A live trace subscription.
+ *
+ * Releasing it matters: the host holds a record per subscription, and before
+ * `trace/unsubscribe` existed the only way one was ever dropped was an emit
+ * that happened to throw.
+ */
+export interface TraceSubscription extends AsyncIterable<Record<string, unknown>>, AsyncDisposable {
+  readonly subscriptionId: string
+  unsubscribe(): Promise<void>
+}
+
 export interface TraceApi {
-  subscribe(sessionId?: string): Promise<AsyncIterable<Record<string, unknown>>>
+  subscribe(sessionId?: string): Promise<TraceSubscription>
   export(options?: { sessionId?: string; format?: string }): Promise<Record<string, unknown>>
 }
 
@@ -141,17 +181,25 @@ export interface CogniaClient extends AsyncDisposable {
   close(): Promise<void>
 }
 
+export interface SessionEventOptions extends RunEventOptions {
+  afterEventId?: string
+}
+
 export interface CogniaSession extends AsyncDisposable {
   readonly id: string
   readonly spec: ResolvedAgentExecutionSpec
+  /**
+   * Run a turn and wait for its terminal outcome, settling any interaction the
+   * client registered a handler for along the way. Use `start()` when the
+   * caller has to observe the turn while it runs.
+   */
   run(input: AgentInput, options?: RunOptions): Promise<AgentTurnOutcome>
-  events(options?: {
-    afterEventId?: string
-    signal?: AbortSignal
-  }): AsyncIterable<AgentEventEnvelope>
+  /** Begin a turn and get a handle to its events, result and cancellation. */
+  start(input: AgentInput, options?: RunOptions): Promise<AgentRunHandle>
+  events(options?: SessionEventOptions): AsyncIterable<AgentEventEnvelope>
   steer(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt>
   followUp(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt>
-  abort(options?: CommandOptions): Promise<CommandReceipt>
+  abort(options?: CommandOptions & { reason?: string }): Promise<CommandReceipt>
   waitForIdle(options?: WaitOptions): Promise<SessionState>
   resolvePermission(
     requestId: string,
@@ -182,14 +230,13 @@ export interface CogniaSession extends AsyncDisposable {
   messages(): Promise<CanonicalTurn[]>
   entries(options?: EntryPageOptions): Promise<EntryPage>
   export(): Promise<CanonicalSession>
+  /** The subtree rooted at this session. */
   tree(): Promise<readonly unknown[]>
   sandboxStatus(): Promise<SandboxStatus>
   snapshot(options?: CommandOptions): Promise<SandboxSnapshot>
   restoreSnapshot(snapshotId: string, options?: CommandOptions): Promise<CommandReceipt>
   close(): Promise<void>
 }
-
-type EventWaiter = (result: IteratorResult<AgentEventEnvelope>) => void
 
 type SessionCommandMethod =
   | "turn/steer"
@@ -216,69 +263,7 @@ type SessionCommandResult<Method extends SessionCommandMethod> = Method extends 
     ? SandboxSnapshot
     : CommandReceipt
 
-class SessionEventChannel {
-  private readonly queue: AgentEventEnvelope[] = []
-  private readonly waiters: EventWaiter[] = []
-  private readonly seenEventIds = new Set<string>()
-  private closed = false
-
-  push(envelope: AgentEventEnvelope): void {
-    if (this.closed || this.seenEventIds.has(envelope.eventId)) return
-    this.seenEventIds.add(envelope.eventId)
-    const waiter = this.waiters.shift()
-    if (waiter) waiter({ done: false, value: envelope })
-    else this.queue.push(envelope)
-  }
-
-  iterate(signal?: AbortSignal): AsyncIterable<AgentEventEnvelope> {
-    const queue = this.queue
-    const waiters = this.waiters
-    const isClosed = () => this.closed
-    return {
-      [Symbol.asyncIterator]() {
-        let done = signal?.aborted ?? false
-        let pendingWaiter: EventWaiter | undefined
-        const onAbort = () => {
-          done = true
-          if (pendingWaiter) {
-            const index = waiters.indexOf(pendingWaiter)
-            if (index >= 0) waiters.splice(index, 1)
-            pendingWaiter({ done: true, value: undefined })
-            pendingWaiter = undefined
-          }
-        }
-        signal?.addEventListener("abort", onAbort, { once: true })
-
-        return {
-          async next(): Promise<IteratorResult<AgentEventEnvelope>> {
-            if (done || isClosed()) return { done: true, value: undefined }
-            const next = queue.shift()
-            if (next) return { done: false, value: next }
-            return new Promise<IteratorResult<AgentEventEnvelope>>((resolve) => {
-              pendingWaiter = (result) => {
-                pendingWaiter = undefined
-                resolve(result)
-              }
-              waiters.push(pendingWaiter)
-            })
-          },
-          async return(): Promise<IteratorResult<AgentEventEnvelope>> {
-            onAbort()
-            signal?.removeEventListener("abort", onAbort)
-            return { done: true, value: undefined }
-          },
-        }
-      },
-    }
-  }
-
-  close(): void {
-    this.closed = true
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined })
-  }
-}
-
-class TraceEventChannel {
+class TraceChannel {
   private readonly queue: Record<string, unknown>[] = []
   private readonly waiters: Array<(result: IteratorResult<Record<string, unknown>>) => void> = []
   private closed = false
@@ -290,19 +275,17 @@ class TraceEventChannel {
     else this.queue.push(span)
   }
 
-  iterate(): AsyncIterable<Record<string, unknown>> {
+  iterate(): AsyncIterator<Record<string, unknown>> {
     return {
-      [Symbol.asyncIterator]: () => ({
-        next: async () => {
-          if (this.closed) return { done: true, value: undefined }
-          const next = this.queue.shift()
-          if (next) return { done: false, value: next }
-          return new Promise<IteratorResult<Record<string, unknown>>>((resolve) => {
-            this.waiters.push(resolve)
-          })
-        },
-        return: async () => ({ done: true, value: undefined }),
-      }),
+      next: async () => {
+        const next = this.queue.shift()
+        if (next) return { done: false, value: next }
+        if (this.closed) return { done: true, value: undefined }
+        return new Promise<IteratorResult<Record<string, unknown>>>((resolve) => {
+          this.waiters.push(resolve)
+        })
+      },
+      return: async () => ({ done: true, value: undefined }),
     }
   }
 
@@ -312,78 +295,120 @@ class TraceEventChannel {
   }
 }
 
+interface SessionRuntime {
+  connection: HostConnection
+  hub: SessionEventHub
+  requestTimeoutMs: number
+  defaultCapacity: number
+  onClosed: (sessionId: string) => void
+  materialize: (sessionId: string, spec: ResolvedAgentExecutionSpec) => CogniaSession
+  /** Claims a turn slot, or throws `ProtocolLimitError` when the host is full. */
+  beginTurn: () => void
+  endTurn: () => void
+}
+
 class CogniaSessionImpl implements CogniaSession {
   private closed = false
 
   constructor(
     readonly id: string,
     readonly spec: ResolvedAgentExecutionSpec,
-    private readonly peer: RpcPeer,
-    private readonly eventChannel: SessionEventChannel,
-    private readonly removeFromClient: () => void,
-    private readonly requestTimeoutMs: number,
-    private readonly materialize: (
-      sessionId: string,
-      spec: ResolvedAgentExecutionSpec
-    ) => CogniaSession
+    private readonly runtime: SessionRuntime
   ) {}
 
   async run(input: AgentInput, options: RunOptions = {}): Promise<AgentTurnOutcome> {
-    this.assertOpen()
-    if (options.signal?.aborted) {
-      await this.abort({ commandId: options.commandId }).catch(() => undefined)
-      throw new RpcError(RPC_ERROR_CODES.cancelled, "cancelled")
-    }
-    const onAbort = () => void this.abort({ commandId: options.commandId }).catch(() => undefined)
-    options.signal?.addEventListener("abort", onAbort, { once: true })
-    try {
-      return (await this.peer.call(
-        "turn/run",
-        {
-          sessionId: this.id,
-          input,
-          commandId: options.commandId ?? randomUUID(),
-          ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
-          ...(options.idleTimeoutMs !== undefined ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
-          ...(options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
-          ...(options.includeDiagnostics !== undefined
-            ? { includeDiagnostics: options.includeDiagnostics }
-            : {}),
-        },
-        { signal: options.signal }
-      )) as unknown as AgentTurnOutcome
-    } finally {
-      options.signal?.removeEventListener("abort", onAbort)
-    }
+    const handle = await this.start(input, options)
+    return handle.result
   }
 
-  events(
-    options: { afterEventId?: string; signal?: AbortSignal } = {}
-  ): AsyncIterable<AgentEventEnvelope> {
+  async start(input: AgentInput, options: RunOptions = {}): Promise<AgentRunHandle> {
     this.assertOpen()
-    if (options.afterEventId) {
-      void this.entries({ afterEventId: options.afterEventId }).then((page) => {
-        for (const entry of page.entries) this.eventChannel.push(entry.envelope)
-      })
+    assertSupportedInput(input)
+    const commandId = options.commandId ?? randomUUID()
+
+    if (options.signal?.aborted) {
+      await this.abort({ commandId }).catch(() => undefined)
+      throw new RpcError(RPC_ERROR_CODES.cancelled, "cancelled")
     }
-    return this.eventChannel.iterate(options.signal)
+
+    // The head before the turn is written is the exact replay point for this
+    // run's events, and it costs one small read rather than a guess.
+    const head = await this.headEventId()
+
+    this.runtime.beginTurn()
+    const onAbort = () => void this.abort({ commandId }).catch(() => undefined)
+    options.signal?.addEventListener("abort", onAbort, { once: true })
+
+    const result = (async () => {
+      try {
+        return (await this.runtime.connection.call(
+          "turn/run",
+          {
+            sessionId: this.id,
+            input,
+            commandId,
+            ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+            ...(options.idleTimeoutMs !== undefined
+              ? { idleTimeoutMs: options.idleTimeoutMs }
+              : {}),
+            ...(options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
+            ...(options.includeDiagnostics !== undefined
+              ? { includeDiagnostics: options.includeDiagnostics }
+              : {}),
+          },
+          { signal: options.signal }
+        )) as unknown as AgentTurnOutcome
+      } finally {
+        options.signal?.removeEventListener("abort", onAbort)
+        this.runtime.endTurn()
+      }
+    })()
+
+    return createRunHandle({
+      sessionId: this.id,
+      commandId,
+      startCursor: head,
+      subscribe: (afterEventId, subscribeOptions) =>
+        this.runtime.hub.subscribe({
+          ...(afterEventId !== undefined ? { afterEventId } : {}),
+          ...(subscribeOptions.signal ? { signal: subscribeOptions.signal } : {}),
+          capacity: subscribeOptions.capacity ?? this.runtime.defaultCapacity,
+        }),
+      result,
+      abort: (reason) => this.abort(reason !== undefined ? { reason } : {}),
+    })
+  }
+
+  events(options: SessionEventOptions = {}): AsyncIterable<AgentEventEnvelope> {
+    this.assertOpen()
+    return this.runtime.hub.subscribe({
+      ...(options.afterEventId !== undefined ? { afterEventId: options.afterEventId } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      capacity: options.capacity ?? this.runtime.defaultCapacity,
+    })
   }
 
   steer(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt> {
+    assertSupportedInput(input)
     return this.command("turn/steer", { input }, options)
   }
 
   followUp(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt> {
+    assertSupportedInput(input)
     return this.command("turn/followUp", { input }, options)
   }
 
-  abort(options?: CommandOptions): Promise<CommandReceipt> {
-    return this.command("turn/abort", {}, options)
+  abort(options: CommandOptions & { reason?: string } = {}): Promise<CommandReceipt> {
+    return this.command(
+      "turn/abort",
+      options.reason !== undefined ? { reason: options.reason } : {},
+      options
+    )
   }
 
   async waitForIdle(options: WaitOptions = {}): Promise<SessionState> {
     this.assertOpen()
-    return (await this.peer.call(
+    return (await this.runtime.connection.call(
       "turn/wait",
       { sessionId: this.id, ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) },
       { signal: options.signal, timeoutMs: options.timeoutMs }
@@ -424,9 +449,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async delete(options?: CommandOptions): Promise<CommandReceipt> {
     const response = await this.command("session/delete", {}, options)
-    this.closed = true
-    this.eventChannel.close()
-    this.removeFromClient()
+    this.markClosed()
     return response
   }
 
@@ -452,7 +475,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async fork(options: ForkOptions = {}): Promise<CogniaSession> {
     this.assertOpen()
-    const result = await this.peer.call(
+    const result = await this.runtime.connection.call(
       "session/fork",
       {
         sessionId: this.id,
@@ -462,12 +485,15 @@ class CogniaSessionImpl implements CogniaSession {
       },
       this.callOptions(options)
     )
-    return this.materialize(result.sessionId, result.spec as unknown as ResolvedAgentExecutionSpec)
+    return this.runtime.materialize(
+      result.sessionId,
+      result.spec as unknown as ResolvedAgentExecutionSpec
+    )
   }
 
   async clone(options: CloneOptions = {}): Promise<CogniaSession> {
     this.assertOpen()
-    const result = await this.peer.call(
+    const result = await this.runtime.connection.call(
       "session/clone",
       {
         sessionId: this.id,
@@ -476,12 +502,15 @@ class CogniaSessionImpl implements CogniaSession {
       },
       this.callOptions(options)
     )
-    return this.materialize(result.sessionId, result.spec as unknown as ResolvedAgentExecutionSpec)
+    return this.runtime.materialize(
+      result.sessionId,
+      result.spec as unknown as ResolvedAgentExecutionSpec
+    )
   }
 
   async state(): Promise<SessionState> {
     this.assertOpen()
-    return (await this.peer.call(
+    return (await this.runtime.connection.call(
       "session/state",
       { sessionId: this.id },
       this.callOptions()
@@ -490,7 +519,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async messages(): Promise<CanonicalTurn[]> {
     this.assertOpen()
-    const result = await this.peer.call(
+    const result = await this.runtime.connection.call(
       "session/messages",
       { sessionId: this.id },
       this.callOptions()
@@ -500,16 +529,12 @@ class CogniaSessionImpl implements CogniaSession {
 
   async entries(options: EntryPageOptions = {}): Promise<EntryPage> {
     this.assertOpen()
-    return (await this.peer.call(
-      "session/entries",
-      { sessionId: this.id, ...options },
-      this.callOptions()
-    )) as EntryPage
+    return (await this.readEntries(options)) as EntryPage
   }
 
   async export(): Promise<CanonicalSession> {
     this.assertOpen()
-    return (await this.peer.call(
+    return (await this.runtime.connection.call(
       "session/export",
       { sessionId: this.id },
       this.callOptions()
@@ -518,7 +543,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async tree(): Promise<readonly unknown[]> {
     this.assertOpen()
-    const response = await this.peer.call(
+    const response = await this.runtime.connection.call(
       "session/tree",
       { sessionId: this.id },
       this.callOptions()
@@ -528,7 +553,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async sandboxStatus(): Promise<SandboxStatus> {
     this.assertOpen()
-    return this.peer.call(
+    return this.runtime.connection.call(
       "sandbox/status",
       { sessionId: this.id },
       this.callOptions()
@@ -546,13 +571,42 @@ class CogniaSessionImpl implements CogniaSession {
   async close(): Promise<void> {
     if (this.closed) return
     await this.command("session/close", {}).catch(() => undefined)
-    this.closed = true
-    this.eventChannel.close()
-    this.removeFromClient()
+    this.markClosed()
   }
 
   [Symbol.asyncDispose](): Promise<void> {
     return this.close()
+  }
+
+  /** Newest persisted event, used as a replay anchor. */
+  private async headEventId(): Promise<string | undefined> {
+    const page = await this.readEntries({ limit: 1 })
+    const head = (page as { headEventId?: unknown }).headEventId
+    return typeof head === "string" ? head : undefined
+  }
+
+  private readEntries(
+    options: EntryPageOptions
+  ): Promise<RpcMethodMap["session/entries"]["result"]> {
+    const limit =
+      options.limit !== undefined
+        ? Math.min(options.limit, this.runtime.connection.negotiatedLimits.maxReplayEvents)
+        : undefined
+    return this.runtime.connection.call(
+      "session/entries",
+      {
+        sessionId: this.id,
+        ...(options.afterEventId !== undefined ? { afterEventId: options.afterEventId } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      },
+      this.callOptions()
+    )
+  }
+
+  private markClosed(): void {
+    this.closed = true
+    this.runtime.hub.close()
+    this.runtime.onClosed(this.id)
   }
 
   private async command<Method extends SessionCommandMethod>(
@@ -561,7 +615,7 @@ class CogniaSessionImpl implements CogniaSession {
     options: CommandOptions = {}
   ): Promise<SessionCommandResult<Method>> {
     this.assertOpen()
-    return this.peer.call(
+    return this.runtime.connection.call(
       method,
       {
         sessionId: this.id,
@@ -575,7 +629,7 @@ class CogniaSessionImpl implements CogniaSession {
   private callOptions(options: CommandOptions = {}) {
     return {
       signal: options.signal,
-      timeoutMs: options.timeoutMs ?? this.requestTimeoutMs,
+      timeoutMs: options.timeoutMs ?? this.runtime.requestTimeoutMs,
     }
   }
 
@@ -584,123 +638,124 @@ class CogniaSessionImpl implements CogniaSession {
   }
 }
 
-/**
- * Attach to a host that the caller already has a transport for.
- *
- * Kept out of `openHost` so that a caller supplying its own streams never
- * reaches `host.ts` — that module spawns the agent binary and its Node imports
- * would otherwise land in every bundle, including the WebView's. The shape
- * mirrors `openHost`'s own `kind: "streams"` branch exactly.
- */
-function attachInjectedStreams(host: Extract<CogniaHostOption, { kind: "streams" }>) {
-  return {
-    readable: host.readable,
-    writable: host.writable,
-    startupTimeoutMs: 15_000,
-    searchedLocations: ["injected streams"] as readonly string[],
-    async close() {},
-  }
-}
-
 export async function createCogniaClient(options: CogniaClientOptions = {}): Promise<CogniaClient> {
-  let host: OpenHostResult | ReturnType<typeof attachInjectedStreams>
-  if (options.host?.kind === "streams") {
-    host = attachInjectedStreams(options.host)
-  } else {
-    const { openHost } = await import("./host")
-    host = openHost(options.host, options.onDiagnostic)
-  }
-
-  const peer = new RpcPeer({
-    readable: host.readable as unknown as RpcReadable,
-    writable: host.writable as unknown as RpcWritable,
-  })
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000
+  const defaultCapacity = options.eventQueueCapacity ?? DEFAULT_SUBSCRIBER_CAPACITY
+
   const sessions = new Map<string, CogniaSessionImpl>()
-  const channels = new Map<string, SessionEventChannel>()
-  const toolHandlers = new Map<string, ClientToolHandler>()
-  const hookHandlers = new Map<string, ClientHookHandler>()
-  const traceChannels = new Map<string, TraceEventChannel>()
-  const callbackReceipts = new Map<
+  const specs = new Map<string, ResolvedAgentExecutionSpec>()
+  const hubs = new Map<string, SessionEventHub>()
+  const toolHandlers = new Map<
     string,
-    Promise<{ ok: boolean; output?: unknown; error?: Record<string, unknown> }>
+    { registration: ClientToolRegistration; handler: ClientToolHandler }
   >()
+  const hookHandlers = new Map<
+    string,
+    { registration: ClientHookRegistration; handler: ClientHookHandler }
+  >()
+  const traceChannels = new Map<
+    string,
+    { channel: TraceChannel; sessionId?: string; localId: string }
+  >()
+  const traceByLocalId = new Map<string, string>()
+  const callbackReceipts = new ReceiptCache<
+    Promise<{ ok: boolean; output?: unknown; error?: Record<string, unknown> }>
+  >({ maxEntries: CALLBACK_RECEIPT_CEILING, ttlMs: CALLBACK_RECEIPT_TTL_MS })
+
+  let activeTurns = 0
   let closed = false
+  let fatal: Error | undefined
 
-  peer.onNotification("agent/event", (params) => {
-    const sessionId = params.sessionId
-    const envelope = params.envelope
-    if (typeof sessionId !== "string" || !envelope || typeof envelope !== "object") return
-    channels.get(sessionId)?.push(envelope as AgentEventEnvelope)
-  })
-  peer.onNotification("runtime/diagnostic", (params) => {
-    options.onDiagnostic?.(params as unknown as CogniaDiagnostic)
-  })
-  peer.onNotification("trace/event", (params) => {
-    if (typeof params.subscriptionId !== "string") return
-    if (!params.span || typeof params.span !== "object") return
-    traceChannels.get(params.subscriptionId)?.push(params.span as Record<string, unknown>)
-  })
-
-  peer.handle("client/tool/invoke", async (params) => {
-    const cacheKey = `tool:${params.toolCallId}:${params.idempotencyKey}`
-    const existing = callbackReceipts.get(cacheKey)
-    if (existing) return existing
-    const invocation = invokeHandler(toolHandlers.get(params.handlerId), params.input, {
-      sessionId: params.sessionId,
-      runId: params.runId,
-      attemptId: params.attemptId,
-      invocationId: params.toolCallId,
-      idempotencyKey: params.idempotencyKey,
-    })
-    callbackReceipts.set(cacheKey, invocation)
-    return invocation
-  })
-  peer.handle("client/hook/invoke", async (params) => {
-    const cacheKey = `hook:${params.invocationId}`
-    const existing = callbackReceipts.get(cacheKey)
-    if (existing) return existing
-    const invocation = invokeHandler(hookHandlers.get(params.handlerId), params.payload, {
-      sessionId: params.sessionId,
-      runId: params.runId,
-      attemptId: params.attemptId,
-      invocationId: params.invocationId,
-    })
-    callbackReceipts.set(cacheKey, invocation)
-    return invocation
-  })
-
-  let initialized: InitializeResult
-  try {
-    const initializeCall = peer.call(
-      "initialize",
-      {
-        client: {
-          name: options.client?.name ?? "@cognia/agent",
-          version: options.client?.version ?? "0.1.0",
-        },
-        protocolVersions: [RPC_PROTOCOL_VERSION],
-        capabilities: ["tools", "hooks", "event-replay"],
-        limits: {},
+  const connection = await HostConnection.open({
+    ...(options.host !== undefined ? { host: options.host } : {}),
+    requestTimeoutMs,
+    ...(options.client !== undefined ? { client: options.client } : {}),
+    ...(options.reconnect !== undefined ? { reconnect: options.reconnect } : {}),
+    hooks: {
+      onAgentEvent(sessionId, envelope) {
+        hubs.get(sessionId)?.publish(envelope)
       },
-      { timeoutMs: host.startupTimeoutMs }
-    )
-    const startupFailure = "startupFailure" in host ? host.startupFailure : undefined
-    const result = await (startupFailure
-      ? Promise.race([initializeCall, startupFailure])
-      : initializeCall)
-    if (result.protocolVersion !== RPC_PROTOCOL_VERSION) {
-      throw new IncompatibleHostError(result.protocolVersion)
-    }
-    initialized = result as unknown as InitializeResult
-    await peer.notify("initialized", {})
-  } catch (error) {
-    peer.close(error instanceof Error ? error : new Error(String(error)))
-    await host.close()
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new HostNotFoundError(host.searchedLocations)
-    }
-    throw error
+      onTraceEvent(subscriptionId, span) {
+        traceChannels.get(subscriptionId)?.channel.push(span)
+      },
+      onDiagnostic(diagnostic) {
+        options.onDiagnostic?.(diagnostic)
+      },
+      invokeTool(params) {
+        const key = `tool:${String(params.toolCallId)}:${String(params.idempotencyKey)}`
+        return callbackReceipts.remember(key, () =>
+          invokeHandler(toolHandlers.get(String(params.handlerId))?.handler, params.input, {
+            sessionId: String(params.sessionId),
+            runId: String(params.runId),
+            attemptId: String(params.attemptId),
+            invocationId: String(params.toolCallId),
+            idempotencyKey: String(params.idempotencyKey),
+          })
+        )
+      },
+      invokeHook(params) {
+        const key = `hook:${String(params.invocationId)}`
+        return callbackReceipts.remember(key, () =>
+          invokeHandler(hookHandlers.get(String(params.handlerId))?.handler, params.payload, {
+            sessionId: String(params.sessionId),
+            runId: String(params.runId),
+            attemptId: String(params.attemptId),
+            invocationId: String(params.invocationId),
+          })
+        )
+      },
+      async onReattach() {
+        // The host that died forgot every registration, handle and
+        // subscription. Rebuild them before any caller is released onto the
+        // new peer, so nothing observes a half-restored client.
+        callbackReceipts.clear()
+        for (const { registration } of toolHandlers.values()) {
+          await connection.call(
+            "tool/register",
+            { ...registration },
+            { timeoutMs: requestTimeoutMs }
+          )
+        }
+        for (const { registration } of hookHandlers.values()) {
+          await connection.call(
+            "hook/register",
+            { ...registration },
+            { timeoutMs: requestTimeoutMs }
+          )
+        }
+        for (const sessionId of sessions.keys()) {
+          await connection.call("session/open", { sessionId }, { timeoutMs: requestTimeoutMs })
+        }
+        for (const [hostId, entry] of [...traceChannels]) {
+          traceChannels.delete(hostId)
+          const response = await connection.call(
+            "trace/subscribe",
+            { ...(entry.sessionId ? { sessionId: entry.sessionId } : {}) },
+            { timeoutMs: requestTimeoutMs }
+          )
+          const nextId = response.subscriptionId
+          if (typeof nextId !== "string") continue
+          traceChannels.set(nextId, entry)
+          traceByLocalId.set(entry.localId, nextId)
+        }
+      },
+      onGiveUp(error) {
+        fatal = error
+        closed = true
+        for (const hub of hubs.values()) hub.close()
+        for (const entry of traceChannels.values()) entry.channel.close()
+        options.onDiagnostic?.({
+          level: "error",
+          code: error instanceof ReconnectFailedError ? "reconnect_failed" : "connection_lost",
+          message: error.message,
+        })
+      },
+    },
+  })
+
+  function assertUsable(): void {
+    if (fatal) throw fatal
+    if (closed) throw new ConnectionLostError("the Cognia client is closed")
   }
 
   function materializeSession(
@@ -709,67 +764,105 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
   ): CogniaSessionImpl {
     const existing = sessions.get(sessionId)
     if (existing) return existing
-    const channel = new SessionEventChannel()
-    channels.set(sessionId, channel)
-    const session = new CogniaSessionImpl(
-      sessionId,
-      spec,
-      peer,
-      channel,
-      () => {
-        sessions.delete(sessionId)
-        channels.delete(sessionId)
-      },
+    specs.set(sessionId, spec)
+    const hub = new SessionEventHub(async ({ afterEventId, limit }) => {
+      const page = await connection.call(
+        "session/entries",
+        {
+          sessionId,
+          ...(afterEventId !== undefined ? { afterEventId } : {}),
+          limit: Math.min(limit, connection.negotiatedLimits.maxReplayEvents),
+        },
+        { timeoutMs: requestTimeoutMs }
+      )
+      return page as unknown as {
+        entries: readonly { envelope: AgentEventEnvelope }[]
+        nextEventId?: string
+        headEventId?: string
+      }
+    })
+    hubs.set(sessionId, hub)
+    const session = new CogniaSessionImpl(sessionId, spec, {
+      connection,
+      hub,
       requestTimeoutMs,
-      materializeSession
-    )
+      defaultCapacity,
+      onClosed: (id) => {
+        sessions.delete(id)
+        hubs.delete(id)
+        specs.delete(id)
+      },
+      materialize: materializeSession,
+      beginTurn: () => {
+        const ceiling = connection.negotiatedLimits.maxActiveTurns
+        if (activeTurns >= ceiling) {
+          throw new ProtocolLimitError("maxActiveTurns", ceiling, activeTurns + 1)
+        }
+        activeTurns += 1
+      },
+      endTurn: () => {
+        activeTurns = Math.max(0, activeTurns - 1)
+      },
+    })
     sessions.set(sessionId, session)
     return session
   }
 
   const client: CogniaClient = {
     runtime: {
-      info: initialized,
+      info: connection.info,
+      limits: connection.negotiatedLimits,
       async status() {
-        return peer.call("runtime/status", {}, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        return connection.call("runtime/status", {}, { timeoutMs: requestTimeoutMs })
       },
       async capabilities() {
-        return peer.call("runtime/capabilities", {}, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        return connection.call("runtime/capabilities", {}, { timeoutMs: requestTimeoutMs })
+      },
+      supports(capability) {
+        return hasCapability(connection.info.capabilities, capability)
       },
     },
     models: {
       async list() {
-        return (await peer.call("model/list", {}, { timeoutMs: requestTimeoutMs })).models
+        assertUsable()
+        return (await connection.call("model/list", {}, { timeoutMs: requestTimeoutMs })).models
       },
       async refresh() {
-        return (await peer.call("model/refresh", {}, { timeoutMs: requestTimeoutMs })).models
+        assertUsable()
+        return (await connection.call("model/refresh", {}, { timeoutMs: requestTimeoutMs })).models
       },
     },
     auth: {
       status() {
-        return peer.call("auth/status", {}, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        return connection.call("auth/status", {}, { timeoutMs: requestTimeoutMs })
       },
     },
     sessions: {
       async create(createOptions = {}) {
+        assertUsable()
         if (createOptions.handoff && createOptions.cwd) {
           throw new RpcError(
             RPC_ERROR_CODES.invalidParams,
             "remote handoff session creation does not accept cwd"
           )
         }
-        if (createOptions.handoff && !initialized.capabilities.includes("worker-dispatch-v1")) {
+        if (createOptions.handoff && !client.runtime.supports("worker-dispatch-v1")) {
           throw new RpcError(
             RPC_ERROR_CODES.capabilityError,
             "host does not support worker-dispatch-v1"
           )
         }
-        const result = await peer.call(
+        const ceiling = connection.negotiatedLimits.maxOpenSessions
+        if (sessions.size >= ceiling) {
+          throw new ProtocolLimitError("maxOpenSessions", ceiling, sessions.size + 1)
+        }
+        const result = await connection.call(
           "session/create",
           { ...createOptions, commandId: createOptions.commandId ?? randomUUID() },
-          {
-            timeoutMs: requestTimeoutMs,
-          }
+          { timeoutMs: requestTimeoutMs }
         )
         return materializeSession(
           result.sessionId,
@@ -777,7 +870,8 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
         )
       },
       async open(sessionId) {
-        const result = await peer.call(
+        assertUsable()
+        const result = await connection.call(
           "session/open",
           { sessionId },
           { timeoutMs: requestTimeoutMs }
@@ -788,11 +882,13 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
         )
       },
       async list() {
-        return (await peer.call("session/list", {}, { timeoutMs: requestTimeoutMs }))
+        assertUsable()
+        return (await connection.call("session/list", {}, { timeoutMs: requestTimeoutMs }))
           .sessions as SessionSummary[]
       },
       async import(session) {
-        const result = await peer.call(
+        assertUsable()
+        const result = await connection.call(
           "session/import",
           { session },
           { timeoutMs: requestTimeoutMs }
@@ -803,9 +899,19 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
         )
       },
       async tree(sessionId) {
-        const response = await peer.call(
+        assertUsable()
+        const response = await connection.call(
           "session/tree",
           { sessionId },
+          { timeoutMs: requestTimeoutMs }
+        )
+        return response.roots as readonly unknown[]
+      },
+      async forest() {
+        assertUsable()
+        const response = await connection.call(
+          "session/forest",
+          {},
           { timeoutMs: requestTimeoutMs }
         )
         return response.roots as readonly unknown[]
@@ -813,49 +919,64 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     },
     tools: {
       async register(registration, handler) {
-        toolHandlers.set(registration.handlerId, handler)
+        assertUsable()
+        toolHandlers.set(registration.handlerId, { registration, handler })
         try {
-          await peer.call("tool/register", { ...registration }, { timeoutMs: requestTimeoutMs })
+          await connection.call(
+            "tool/register",
+            { ...registration },
+            { timeoutMs: requestTimeoutMs }
+          )
         } catch (error) {
           toolHandlers.delete(registration.handlerId)
           throw error
         }
       },
       async unregister(handlerId) {
-        await peer.call("tool/unregister", { handlerId }, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        await connection.call("tool/unregister", { handlerId }, { timeoutMs: requestTimeoutMs })
         toolHandlers.delete(handlerId)
       },
     },
     hooks: {
       async register(registration, handler) {
-        hookHandlers.set(registration.handlerId, handler)
+        assertUsable()
+        hookHandlers.set(registration.handlerId, { registration, handler })
         try {
-          await peer.call("hook/register", { ...registration }, { timeoutMs: requestTimeoutMs })
+          await connection.call(
+            "hook/register",
+            { ...registration },
+            { timeoutMs: requestTimeoutMs }
+          )
         } catch (error) {
           hookHandlers.delete(registration.handlerId)
           throw error
         }
       },
       async unregister(handlerId) {
-        await peer.call("hook/unregister", { handlerId }, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        await connection.call("hook/unregister", { handlerId }, { timeoutMs: requestTimeoutMs })
         hookHandlers.delete(handlerId)
       },
     },
     mcp: {
       configure(servers) {
-        return peer.call(
+        assertUsable()
+        return connection.call(
           "mcp/configure",
           { servers: [...servers] },
           { timeoutMs: requestTimeoutMs }
         )
       },
       status() {
-        return peer.call("mcp/status", {}, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        return connection.call("mcp/status", {}, { timeoutMs: requestTimeoutMs })
       },
     },
     plugins: {
       reload(pluginId) {
-        return peer.call(
+        assertUsable()
+        return connection.call(
           "plugin/reload",
           { ...(pluginId ? { pluginId } : {}) },
           { timeoutMs: requestTimeoutMs }
@@ -864,7 +985,8 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     },
     skills: {
       reload(skillId) {
-        return peer.call(
+        assertUsable()
+        return connection.call(
           "skill/reload",
           { ...(skillId ? { skillId } : {}) },
           { timeoutMs: requestTimeoutMs }
@@ -873,7 +995,8 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     },
     tasks: {
       async list(sessionId) {
-        const response = await peer.call(
+        assertUsable()
+        const response = await connection.call(
           "task/list",
           { ...(sessionId ? { sessionId } : {}) },
           { timeoutMs: requestTimeoutMs }
@@ -881,14 +1004,16 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
         return response.tasks
       },
       stop(taskId, commandOptions = {}) {
-        return peer.call(
+        assertUsable()
+        return connection.call(
           "task/stop",
           { taskId, commandId: commandOptions.commandId ?? randomUUID() },
           { signal: commandOptions.signal, timeoutMs: commandOptions.timeoutMs ?? requestTimeoutMs }
         ) as Promise<CommandReceipt>
       },
       background(taskId, commandOptions = {}) {
-        return peer.call(
+        assertUsable()
+        return connection.call(
           "task/background",
           { taskId, commandId: commandOptions.commandId ?? randomUUID() },
           { signal: commandOptions.signal, timeoutMs: commandOptions.timeoutMs ?? requestTimeoutMs }
@@ -897,7 +1022,8 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     },
     traces: {
       async subscribe(sessionId) {
-        const response = await peer.call(
+        assertUsable()
+        const response = await connection.call(
           "trace/subscribe",
           { ...(sessionId ? { sessionId } : {}) },
           { timeoutMs: requestTimeoutMs }
@@ -909,17 +1035,51 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
             "host returned no trace subscription id"
           )
         }
-        const channel = new TraceEventChannel()
-        traceChannels.set(subscriptionId, channel)
-        return channel.iterate()
+        const localId = randomUUID()
+        const channel = new TraceChannel()
+        traceChannels.set(subscriptionId, {
+          channel,
+          localId,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+        })
+        traceByLocalId.set(localId, subscriptionId)
+
+        const release = async () => {
+          const hostId = traceByLocalId.get(localId)
+          traceByLocalId.delete(localId)
+          if (hostId === undefined) return
+          traceChannels.delete(hostId)
+          channel.close()
+          if (!closed && client.runtime.supports(CAP_TRACE_UNSUBSCRIBE_V1)) {
+            await connection
+              .call(
+                "trace/unsubscribe",
+                { subscriptionId: hostId },
+                { timeoutMs: requestTimeoutMs }
+              )
+              .catch(() => undefined)
+          }
+        }
+
+        const subscription: TraceSubscription = {
+          get subscriptionId() {
+            return traceByLocalId.get(localId) ?? subscriptionId
+          },
+          [Symbol.asyncIterator]: () => channel.iterate(),
+          unsubscribe: release,
+          [Symbol.asyncDispose]: release,
+        }
+        return subscription
       },
       export(traceOptions = {}) {
-        return peer.call("trace/export", traceOptions, { timeoutMs: requestTimeoutMs })
+        assertUsable()
+        return connection.call("trace/export", traceOptions, { timeoutMs: requestTimeoutMs })
       },
     },
     audit: {
       query(queryOptions = {}) {
-        return peer.call("audit/query", queryOptions, {
+        assertUsable()
+        return connection.call("audit/query", queryOptions, {
           timeoutMs: requestTimeoutMs,
         }) as unknown as Promise<AuditPage>
       },
@@ -927,12 +1087,15 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     async close() {
       if (closed) return
       closed = true
-      for (const session of [...sessions.values()]) await session.close()
-      for (const channel of traceChannels.values()) channel.close()
+      for (const session of [...sessions.values()]) await session.close().catch(() => undefined)
+      for (const hub of hubs.values()) hub.close()
+      hubs.clear()
+      for (const entry of traceChannels.values()) entry.channel.close()
       traceChannels.clear()
-      await peer.call("shutdown", {}, { timeoutMs: requestTimeoutMs }).catch(() => undefined)
-      peer.close()
-      await host.close()
+      traceByLocalId.clear()
+      callbackReceipts.clear()
+      await connection.call("shutdown", {}, { timeoutMs: requestTimeoutMs }).catch(() => undefined)
+      await connection.close()
     },
     [Symbol.asyncDispose]() {
       return this.close()

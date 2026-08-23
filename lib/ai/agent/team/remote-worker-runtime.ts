@@ -208,9 +208,23 @@ export interface RemoteWorkerTurnControl {
   terminate(commandId: string): Promise<void>
 }
 
+/**
+ * A terminal turn outcome plus whether the worker still needs operator action.
+ *
+ * A turn outcome is always terminal (ADR-0142): the SDK deliberately has no
+ * "waiting" status, because a turn blocked on a permission has not ended. But a
+ * remote worker *can* finish a turn and still be holding unresolved permissions
+ * or elicitations, and the dispatcher has to project that as `needs_input`
+ * rather than as a plain failure. The host reports it on the session, so the
+ * pool reads it there and reports it here.
+ */
+export interface RemoteWorkerOutcome extends AgentTurnOutcome {
+  recoveryRequired?: boolean
+}
+
 export interface RemoteWorkerRuntime {
   listWorkers(): readonly RemoteWorkerDescriptor[]
-  run(input: RemoteWorkerRunInput): Promise<AgentTurnOutcome>
+  run(input: RemoteWorkerRunInput): Promise<RemoteWorkerOutcome>
 }
 
 let runtime: RemoteWorkerRuntime | undefined
