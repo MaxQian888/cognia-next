@@ -964,7 +964,8 @@ export function LoopConfigV2({ params, onChange }: { params: Params; onChange: C
   const iterationConcurrency = readNumber(params, "iterationConcurrency", 1)
   const batchSize = readNumber(params, "batchSize", 0)
   const maxIterations = readNumber(params, "maxIterations", 0)
-  const onItemError = readString(params, "onItemError", "fail")
+  const authoredOnItemError = readString(params, "onItemError", "fail")
+  const onItemError = authoredOnItemError === "skip" ? "remove-failed" : authoredOnItemError
   return (
     <FieldGroup>
       <p className="text-xs text-muted-foreground">{t("intro")}</p>
@@ -1151,7 +1152,10 @@ export function LoopConfigV2({ params, onChange }: { params: Params; onChange: C
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="fail">{t("onItemError.fail")}</SelectItem>
-            <SelectItem value="skip">{t("onItemError.skip")}</SelectItem>
+            <SelectItem value="continue-with-null">
+              {t("onItemError.continueWithNull")}
+            </SelectItem>
+            <SelectItem value="remove-failed">{t("onItemError.removeFailed")}</SelectItem>
             <SelectItem value="break">{t("onItemError.break")}</SelectItem>
           </SelectContent>
         </Select>

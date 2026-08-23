@@ -1425,7 +1425,9 @@ const LoopParamsV2 = z
     iterationConcurrency: numberRange(1, 64).optional(),
     batchSize: numberRange(1, 100_000).optional(),
     maxIterations: numberRange(1, 100_000).optional(),
-    onItemError: z.enum(["fail", "skip", "break"]).optional(),
+    onItemError: z
+      .enum(["fail", "continue-with-null", "remove-failed", "break", "skip"])
+      .optional(),
   })
   .refine(
     (v) => {

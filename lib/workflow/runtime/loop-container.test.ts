@@ -917,6 +917,50 @@ describe("loop-level error handling (onItemError)", () => {
     expect(out.errors?.[0]?.error).toMatch(/victim boom/)
   })
 
+  it("continue-with-null: preserves the failed source position and records the error", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        onItemError: "continue-with-null",
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.victimfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as {
+      items: unknown[]
+      errors?: Array<{ index: number; item?: unknown; error: string }>
+    }
+
+    expect(out.items).toEqual(["a", null, "c"])
+    expect(out.errors).toEqual([
+      expect.objectContaining({ index: 1, item: "b", error: "victim boom" }),
+    ])
+  })
+
+  it("remove-failed: compacts failed items exactly like the legacy skip value", async () => {
+    const makeWorkflow = (onItemError: "remove-failed" | "skip") =>
+      loopWorkflow(
+        {
+          mode: "forEach",
+          source: "{{ $trigger.payload.items }}",
+          onItemError,
+          output: "{{ $node['bad'].ok }}",
+        },
+        [node("bad", "testplugin.victimfail" as never, { victim: "{{ $item }}" }, "loop1")]
+      )
+
+    const current = makeWorkflow("remove-failed")
+    const legacy = makeWorkflow("skip")
+    await expect(run(current.workflow, current.loopNode)).resolves.toMatchObject({
+      output: { items: ["a", "c"], count: 3 },
+    })
+    await expect(run(legacy.workflow, legacy.loopNode)).resolves.toMatchObject({
+      output: { items: ["a", "c"], count: 3 },
+    })
+  })
+
   it("break: stops the loop with partial items and the error recorded", async () => {
     const { workflow, loopNode } = loopWorkflow(
       {

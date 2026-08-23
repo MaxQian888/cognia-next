@@ -1345,13 +1345,15 @@ export interface LoopNodeParams {
    * Container-level backstop for iteration errors that the child's own
    * error handling (errorBranch / continue / defaultValue) did NOT absorb:
    * `"fail"` (default) rejects the container — today's behavior;
-   * `"skip"` records the failure in `output.errors[]` and keeps looping;
+   * `"continue-with-null"` preserves source alignment with a `null` item;
+   * `"remove-failed"` records the failure and compacts it from `items[]`;
    * `"break"` records it and stops the loop with partial output.
+   * `"skip"` is the legacy serialized alias for `"remove-failed"`.
    */
-  onItemError?: "fail" | "skip" | "break"
+  onItemError?: "fail" | "continue-with-null" | "remove-failed" | "break" | "skip"
 }
 
-/** One failed iteration collected by `onItemError: "skip" | "break"`. */
+/** One failed iteration collected by any non-failing `onItemError` policy. */
 export interface LoopItemError {
   /** Global iteration index (source order). */
   index: number

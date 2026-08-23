@@ -234,14 +234,14 @@ describe("LoopConfig", () => {
     expect(next2.batchSize).toBeUndefined()
   })
 
-  it("patches onItemError via the select and stores the default as undefined", async () => {
+  it("authors the new error policies and normalizes legacy skip to remove-failed", async () => {
     const onChange = jest.fn()
     const { rerender } = render(
       <LoopConfig params={{ mode: "times", times: 2 }} onChange={onChange} typeVersion={2} />
     )
     await userEvent.click(screen.getByTestId("loop-v2-on-item-error"))
-    await userEvent.click(screen.getByRole("option", { name: "Skip & collect error" }))
-    expect(lastParams(onChange).onItemError).toBe("skip")
+    await userEvent.click(screen.getByRole("option", { name: "Continue with null" }))
+    expect(lastParams(onChange).onItemError).toBe("continue-with-null")
     rerender(
       <LoopConfig
         params={{ mode: "times", times: 2, onItemError: "skip" }}
@@ -249,6 +249,7 @@ describe("LoopConfig", () => {
         typeVersion={2}
       />
     )
+    expect(screen.getByTestId("loop-v2-on-item-error")).toHaveTextContent("Remove failed item")
     await userEvent.click(screen.getByTestId("loop-v2-on-item-error"))
     await userEvent.click(screen.getByRole("option", { name: "Fail the loop" }))
     expect(lastParams(onChange).onItemError).toBeUndefined()

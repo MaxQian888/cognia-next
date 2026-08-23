@@ -40378,10 +40378,11 @@
         },
         "onItemError": {
           "break": "中止并保留部分输出",
+          "continueWithNull": "以 null 继续并保留位置",
           "fail": "整个循环失败",
-          "hint": "节点自身错误处理之后的兜底策略。被跳过的失败会收集到 errors[]。",
+          "hint": "节点自身错误处理之后的兜底策略。非失败策略会将错误收集到 errors[]。",
           "label": "迭代出错时",
-          "skip": "跳过并收集错误"
+          "removeFailed": "移除失败项"
         },
         "output": {
           "hint": "每轮结束后求值，结果推入 items[]。缺省收集迭代序号。",

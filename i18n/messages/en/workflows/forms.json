@@ -1570,10 +1570,11 @@
     },
     "onItemError": {
       "break": "Stop & keep partial output",
+      "continueWithNull": "Continue with null",
       "fail": "Fail the loop",
-      "hint": "Backstop when an iteration errors out (after the node's own error handling). Skipped failures are collected into errors[].",
+      "hint": "Backstop after node-level error handling. Non-failing policies collect failures into errors[].",
       "label": "On iteration error",
-      "skip": "Skip & collect error"
+      "removeFailed": "Remove failed item"
     },
     "output": {
       "hint": "Evaluated after each iteration; the result is pushed into items[]. Defaults to the iteration index.",

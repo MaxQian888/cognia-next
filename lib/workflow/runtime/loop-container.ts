@@ -90,7 +90,7 @@ export interface LoopContainerExecution {
     items: unknown[]
     count: number
     staticData: Record<string, unknown>
-    /** Present ONLY when `onItemError: "skip" | "break"` collected failures. */
+    /** Present when a non-failing item-error policy collected failures. */
     errors?: LoopItemError[]
   }
   fromCache: boolean
@@ -157,7 +157,8 @@ export async function runLoopContainer(
       ? Math.floor(rawParams.batchSize)
       : 0
   // Container-level backstop for errors the child's own handling didn't absorb.
-  const onItemError = rawParams.onItemError ?? "fail"
+  const onItemError =
+    rawParams.onItemError === "skip" ? "remove-failed" : (rawParams.onItemError ?? "fail")
   const errorsByIndex = new Map<number, LoopItemError>()
 
   await logger.stepStarted(loopId, { mode, iterationConcurrency })
@@ -244,8 +245,8 @@ export async function runLoopContainer(
         ...(err instanceof Error && err.name !== "Error" ? { errorType: err.name } : {}),
       })
       return {
-        item: undefined,
-        contributed: false,
+        item: onItemError === "continue-with-null" ? null : undefined,
+        contributed: onItemError === "continue-with-null",
         brokeLoop: false,
         brokeByPolicy: onItemError === "break",
       }
