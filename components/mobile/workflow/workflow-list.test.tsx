@@ -101,6 +101,12 @@ jest.mock("./pinned-section", () => ({
 jest.mock("./recent-runs-feed", () => ({
   RecentRunsFeed: () => <div data-testid="recent-runs-stub" />,
 }))
+jest.mock("./pending-human-input-card", () => ({
+  PendingHumanInputCard: () => <div data-testid="pending-human-input-stub" />,
+}))
+jest.mock("./pending-approvals-card", () => ({
+  PendingApprovalsCard: () => <div data-testid="pending-approvals-stub" />,
+}))
 jest.mock("@/components/interactions/long-press", () => ({
   LongPress: ({ children, onLongPress }: { children: React.ReactNode; onLongPress: () => void }) => (
     <span data-testid="long-press-stub" onContextMenu={() => onLongPress()}>
@@ -183,6 +189,8 @@ describe("<WorkflowList />", () => {
     expect(screen.getByTestId("workflow-pinned-a")).toBeInTheDocument()
     expect(screen.queryByTestId("workflow-pinned-b")).not.toBeInTheDocument()
     expect(screen.getByTestId("recent-runs-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("pending-human-input-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("pending-approvals-stub")).toBeInTheDocument()
   })
 
   it("shows the Active badge for a running workflow", () => {
@@ -227,6 +235,8 @@ describe("<WorkflowList />", () => {
     expect(screen.getByTestId("breadcrumb-stub")).toHaveTextContent("1")
     expect(screen.queryByTestId("pinned-section-stub")).not.toBeInTheDocument()
     expect(screen.queryByTestId("recent-runs-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("pending-human-input-stub")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("pending-approvals-stub")).not.toBeInTheDocument()
   })
 
   it("opens the create dialog from the toolbar", () => {

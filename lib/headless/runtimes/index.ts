@@ -8,6 +8,9 @@
  *
  * ## Registered (extraction slices T-A2..A9 add entries here)
  *
+ * - `host-event-publisher` — installs the authenticated bridge publisher
+ *   before any authoritative runtime can emit sync, workflow, or connector
+ *   events, and keeps it installed until reverse teardown completes.
  * - `desktop-sync-source` — answers `companion://sync-pull-request` from the
  *   brain's Dexie (T-A2).
  * - `desktop-message-source` — the five message/session RPCs plus the
@@ -15,6 +18,7 @@
  * - `a2ui-dispatch` — feeds sidecar `a2ui://dispatch` envelopes into the
  *   A2UI store (T-A4).
  * - `scheduler`, `workflow-runtime`, `agent-team-runtime`,
+ *   `workflow-exit-lease-release`,
  *   `automation-policy`, `audit-retention`, `storage-retention`,
  *   `desktop-network-runtime`, `provider-core-runtime`, `routing-runtime`,
  *   `ocr-runtime`,
@@ -58,6 +62,9 @@
  * - `window-title`, `context-keys`, `appearance` — WebView chrome/UI state.
  * - `window-liveness-initializers` — reveals and heartbeats the Tauri main
  *   window; a headless/cloud runtime has no native window to manage.
+ * - `recovery Agent Host bootstrap` — starts the bundled Node sidecar through
+ *   the Tauri `agent_start` command before desktop initializers mount. Headless
+ *   hosts own their agent process lifecycle outside the renderer recovery gate.
  * - `transformers-runtime` — its Web Worker/WebGPU/WASM execution is an
  *   explicitly enabled browser feature; headless callers must use a server runtime.
  * - `desktop-only-initializers` / `mobile-only-initializers` — shell-specific
@@ -77,8 +84,15 @@
  *   `notification://remote` frames into the local notification center; the
  *   brain is the publisher (`lib/notifications/runtime.ts` →
  *   `remote_notification_publish`) and must not subscribe to itself.
+ * - `session-import-watch-initializer` — owns a Tauri filesystem watcher over
+ *   desktop external-agent history paths; its commands are client-local and
+ *   internal-only in the canonical protocol manifest.
+ * - `worker-runtime-initializer` — attaches the WebView through a Tauri IPC
+ *   `Channel`; the brain-side bridge-owned worker pool is installed and torn
+ *   down by `serveCommand` after its authenticated bridge connects.
  */
 
+import "./host-event-publisher"
 import "./desktop-sync-source"
 import "./desktop-message-source"
 import "./a2ui-dispatch"

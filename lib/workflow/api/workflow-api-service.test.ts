@@ -8,6 +8,7 @@ import {
   listWorkflowApiEvents,
   cancelWorkflowApiRun,
   dispatchWorkflowApiBridgeCommand,
+  probeWorkflowPlacement,
   WorkflowApiServiceError,
 } from "./workflow-api-service"
 
@@ -15,6 +16,7 @@ const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(dbFixture.restore)
+afterEach(() => new Promise((resolve) => setTimeout(resolve, 10)))
 afterAll(dbFixture.dispose)
 
 async function publishedWorkflow(name = "HTTP workflow") {
@@ -66,6 +68,155 @@ describe("workflow HTTP API service", () => {
       entrypoint: "mcp",
       caller: "mcp:client-1",
       deploymentId: deployment.id,
+    })
+  })
+
+  it("locks a successful Host handoff to the selected immutable deployment", async () => {
+    const { publication } = await publishedWorkflow("Exact handoff")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    const version = (await getDb().workflowVersions.get(publication.versionId))!
+
+    const started = await createWorkflowApiRun({
+      accountId: deployment.accountId,
+      deploymentId: deployment.id,
+      expectedVersionDigest: version.digest,
+      entrypoint: "trigger",
+      caller: "host:cloud-a",
+      scopes: ["workflow:admin"],
+      idempotencyKey: "handoff-1",
+      trigger: {
+        workflowId: deployment.workflowId,
+        kind: "trigger.manual",
+        originAt: 100,
+        payload: { value: 1 },
+      },
+      triggeredBy: { source: "api" },
+      input: {},
+    })
+
+    expect((await getDb().workflowRuns.get(started.runId))?.executionBinding).toMatchObject({
+      deploymentId: deployment.id,
+      versionId: version.id,
+      entrypoint: "trigger",
+    })
+  })
+
+  it("probes exact deployment compatibility and rejects a mismatched handoff digest", async () => {
+    const { publication } = await publishedWorkflow("Placed workflow")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    const version = (await getDb().workflowVersions.get(publication.versionId))!
+
+    await expect(
+      probeWorkflowPlacement({
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        expectedVersionDigest: version.digest,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({
+      compatible: true,
+      workflowId: deployment.workflowId,
+      deploymentDigest: version.digest,
+      activeUnits: 0,
+      maxUnits: 1,
+    })
+
+    await expect(
+      createWorkflowApiRun({
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        expectedVersionDigest: "wfv1:different",
+        caller: "host:source",
+        scopes: ["workflow:run"],
+        input: {},
+      })
+    ).rejects.toMatchObject({ code: "deployment_digest_mismatch", status: 409 })
+  })
+
+  it("reports placement incompatibility without leaking deployments across accounts", async () => {
+    const { publication } = await publishedWorkflow("Placement compatibility")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    const version = (await getDb().workflowVersions.get(publication.versionId))!
+
+    await expect(
+      probeWorkflowPlacement({
+        accountId: "acct_other",
+        deploymentId: deployment.id,
+        expectedVersionDigest: version.digest,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toEqual({
+      compatible: false,
+      reason: "deployment_not_found",
+      activeUnits: 0,
+      maxUnits: 0,
+    })
+
+    await getDb().workflowDeployments.update(deployment.id, { status: "disabled" })
+    await expect(
+      probeWorkflowPlacement({
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        expectedVersionDigest: version.digest,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({ compatible: false, reason: "deployment_not_found" })
+
+    await getDb().workflowDeployments.update(deployment.id, {
+      status: "active",
+      versionId: "missing-version",
+    })
+    await expect(
+      probeWorkflowPlacement({
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        expectedVersionDigest: version.digest,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({ compatible: false, reason: "deployment_not_found" })
+
+    await getDb().workflowDeployments.update(deployment.id, {
+      status: "active",
+      versionId: version.id,
+    })
+    await expect(
+      probeWorkflowPlacement({
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        expectedVersionDigest: "wfv1:different",
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({
+      compatible: false,
+      reason: "deployment_digest_mismatch",
+      deploymentDigest: version.digest,
+    })
+  })
+
+  it("rejects inactive deployments and deployments with a missing immutable version", async () => {
+    const { publication } = await publishedWorkflow("Inactive deployment")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    const request = {
+      accountId: deployment.accountId,
+      deploymentId: deployment.id,
+      caller: "oidc:user-1",
+      scopes: ["workflow:run"],
+      input: {},
+    }
+
+    await getDb().workflowDeployments.update(deployment.id, { status: "disabled" })
+    await expect(createWorkflowApiRun(request)).rejects.toMatchObject({
+      code: "deployment_not_found",
+      status: 404,
+    })
+
+    await getDb().workflowDeployments.update(deployment.id, {
+      status: "active",
+      versionId: "missing-version",
+    })
+    await expect(createWorkflowApiRun(request)).rejects.toMatchObject({
+      code: "deployment_not_found",
+      status: 404,
     })
   })
 
@@ -150,6 +301,55 @@ describe("workflow HTTP API service", () => {
     ).rejects.toBeInstanceOf(WorkflowApiServiceError)
   })
 
+  it("fails closed for runs without an owned deployment and projects every optional field", async () => {
+    const { publication } = await publishedWorkflow("Run projection")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    const started = await createWorkflowApiRun({
+      accountId: deployment.accountId,
+      deploymentId: deployment.id,
+      caller: "oidc:user-1",
+      scopes: ["workflow:run"],
+      input: {},
+    })
+    const run = (await getDb().workflowRuns.get(started.runId))!
+
+    await getDb().workflowRuns.update(run.id, {
+      completedAt: 500,
+      output: [null, 7, "alice@example.com"],
+      error: { message: "failed", nodeId: "node-1", code: "node_failed" },
+    })
+    await expect(
+      getWorkflowApiRun({
+        accountId: deployment.accountId,
+        runId: run.id,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({
+      completedAt: 500,
+      output: [null, 7, expect.not.stringContaining("alice@example.com")],
+      error: { nodeId: "node-1", code: "node_failed" },
+    })
+
+    await getDb().workflowRuns.update(run.id, { deploymentId: undefined })
+    await expect(
+      getWorkflowApiRun({
+        accountId: deployment.accountId,
+        runId: run.id,
+        scopes: ["workflow:read"],
+      })
+    ).rejects.toMatchObject({ code: "run_not_found" })
+
+    await getDb().workflowRuns.update(run.id, { deploymentId: deployment.id })
+    await getDb().workflowDeployments.delete(deployment.id)
+    await expect(
+      getWorkflowApiRun({
+        accountId: deployment.accountId,
+        runId: run.id,
+        scopes: ["workflow:read"],
+      })
+    ).rejects.toMatchObject({ code: "run_not_found" })
+  })
+
   it("uses durable event sequences as monotonic cursors and redacts sensitive payload fields", async () => {
     const { publication } = await publishedWorkflow()
     const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
@@ -177,6 +377,7 @@ describe("workflow HTTP API service", () => {
         ts: 101,
         type: "step_completed",
         stepId: "node-1",
+        level: "info",
         payload: { output: { ok: true } },
       },
     ])
@@ -194,6 +395,7 @@ describe("workflow HTTP API service", () => {
         sequence: 2,
         type: "step_completed",
         stepId: "node-1",
+        level: "info",
       }),
     ])
 
@@ -277,5 +479,71 @@ describe("workflow HTTP API service", () => {
       ok: false,
       error: { code: "scope_denied", status: 403 },
     })
+  })
+
+  it("serves get, events, and cancel through the stable bridge", async () => {
+    const { publication } = await publishedWorkflow("Bridge workflow")
+    const deployment = (await getDb().workflowDeployments.get(publication.deploymentId))!
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_run_create", {
+        accountId: deployment.accountId,
+        deploymentId: deployment.id,
+        caller: "oidc:user-1",
+        scopes: ["workflow:run"],
+        idempotencyKey: "bridge-create-1",
+        input: { via: "bridge" },
+      })
+    ).resolves.toMatchObject({ ok: true, data: { runId: expect.any(String) } })
+    const started = await createWorkflowApiRun({
+      accountId: deployment.accountId,
+      deploymentId: deployment.id,
+      caller: "oidc:user-1",
+      scopes: ["workflow:run"],
+      input: {},
+    })
+    await getDb().workflowRuns.update(started.runId, { status: "waiting" })
+
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_run_get", {
+        accountId: deployment.accountId,
+        runId: started.runId,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({ ok: true, data: { runId: started.runId } })
+
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_events_list", {
+        accountId: deployment.accountId,
+        runId: started.runId,
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({ ok: true, data: { events: expect.any(Array) } })
+
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_run_cancel", {
+        accountId: deployment.accountId,
+        runId: started.runId,
+        caller: "oidc:user-1",
+        scopes: ["workflow:run"],
+      })
+    ).resolves.toMatchObject({ ok: true, data: { runId: started.runId } })
+  })
+
+  it("validates required bridge strings and scope arrays", async () => {
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_run_get", {
+        accountId: "",
+        runId: "run-1",
+        scopes: ["workflow:read"],
+      })
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalid_request" } })
+
+    await expect(
+      dispatchWorkflowApiBridgeCommand("workflow_api_run_get", {
+        accountId: "local_acct_a",
+        runId: "run-1",
+        scopes: ["workflow:read", 7],
+      })
+    ).resolves.toMatchObject({ ok: false, error: { code: "invalid_request" } })
   })
 })

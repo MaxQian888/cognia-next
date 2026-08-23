@@ -549,6 +549,46 @@ describe("action: goal schemas", () => {
 })
 
 describe("action: twin / connector / mcp / plugin", () => {
+  it("action.humanInput.request validates typed forms, routing actions, assignees, and quorum", () => {
+    const schema = PARAMS_SCHEMAS["action.humanInput.request"]
+    const valid = {
+      title: "Review",
+      fields: [
+        {
+          id: "priority",
+          type: "single-select",
+          label: "Priority",
+          options: [{ value: "high", label: "High" }],
+        },
+      ],
+      actions: [{ id: "submit", label: "Submit" }],
+      assignees: [
+        { kind: "member", id: "member_1" },
+        { kind: "group", id: "group_1" },
+      ],
+      completionPolicy: { mode: "quorum", count: 2 },
+      timeoutMs: 60_000,
+      sensitiveRetentionDays: 7,
+    }
+
+    expect(schema.safeParse(valid).success).toBe(true)
+    expect(schema.safeParse({ ...valid, fields: [] }).success).toBe(true)
+    expect(
+      schema.safeParse({ ...valid, actions: [{ id: "timeout", label: "Reserved" }] }).success
+    ).toBe(false)
+    expect(
+      schema.safeParse({
+        ...valid,
+        fields: [{ id: "choice", type: "single-select", label: "Choice" }],
+      }).success
+    ).toBe(false)
+    expect(
+      schema.safeParse({ ...valid, completionPolicy: { mode: "quorum", count: 3 } }).success
+    ).toBe(false)
+    expect(schema.safeParse({ ...valid, timeoutMs: 59_999 }).success).toBe(false)
+    expect(schema.safeParse({ ...valid, sensitiveRetentionDays: 31 }).success).toBe(false)
+  })
+
   it("action.twin.rag requires twinId + query", () => {
     expect(PARAMS_SCHEMAS["action.twin.rag"].safeParse({ twinId: "t" }).success).toBe(false)
     expect(PARAMS_SCHEMAS["action.twin.rag"].safeParse({ twinId: "t", query: "q" }).success).toBe(

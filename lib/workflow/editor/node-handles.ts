@@ -27,7 +27,7 @@ export interface OutputHandleSpec {
    * the executor's `decision`. */
   id: string
   /** Render intent: fixed kinds translate via i18n; `case` uses `label`. */
-  kind: "true" | "false" | "case" | "default" | "approved" | "rejected"
+  kind: "true" | "false" | "case" | "default" | "approved" | "rejected" | "timeout"
   /** Author-supplied display label (case handles only). */
   label?: string
 }
@@ -55,6 +55,26 @@ export function outputHandlesFor(node: NodeShapeForHandles): OutputHandleSpec[] 
     return [
       { id: "approved", kind: "approved" },
       { id: "rejected", kind: "rejected" },
+    ]
+  }
+  if (node.kind === "action.humanInput.request") {
+    const raw = node.params.actions
+    const actions = Array.isArray(raw) ? raw : []
+    return [
+      ...actions.flatMap((action) => {
+        if (!action || typeof action !== "object") return []
+        const record = action as Record<string, unknown>
+        const id = typeof record.id === "string" ? record.id.trim() : ""
+        if (!id) return []
+        return [
+          {
+            id,
+            kind: "case" as const,
+            label: typeof record.label === "string" ? record.label : id,
+          },
+        ]
+      }),
+      { id: "timeout", kind: "timeout" as const },
     ]
   }
   if (node.typeVersion < 2) return null

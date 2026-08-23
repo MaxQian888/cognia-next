@@ -27,6 +27,8 @@ export interface WorkflowTargetSpec {
   kind: "workflow"
   label: string
   workflowId: string
+  /** Immutable workflow version used by deployment-quality evidence. */
+  versionId?: string
   timeoutMs?: number
 }
 
@@ -60,6 +62,8 @@ export interface EvalRunConfig {
 /** Compact echo of the variant stored on a produced report. */
 export interface EvalRunConfigSummary {
   targetKind: TargetKind
+  targetId?: string
+  targetVersionId?: string
   scorerIds: string[]
   k: number
   subset?: CaseSubset

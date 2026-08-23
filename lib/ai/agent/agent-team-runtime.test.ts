@@ -70,6 +70,8 @@ import { approve, reject, __resetForTesting as resetApprovalBus } from "@/lib/ru
 import { getTeamRunContext } from "./team/team-run-context"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 
+type PlanApprovalRequest = Parameters<NonNullable<RunTeamLifecycleDeps["planApprovalDelegate"]>>[0]
+
 const lead: AgentTeammate = {
   id: "lead-1",
   teamId: "team-1",
@@ -647,7 +649,9 @@ describe("runTeamLifecycle — an attended headless run asks instead of failing"
       text: "ok",
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
-    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const planApprovalDelegate = jest.fn(async (_request: PlanApprovalRequest) => ({
+      outcome: "approve" as const,
+    }))
     const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
 
     const result = await runTeamLifecycle("team-1", {
@@ -668,7 +672,9 @@ describe("runTeamLifecycle — an attended headless run asks instead of failing"
       text: "ok",
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
-    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const planApprovalDelegate = jest.fn(async (_request: PlanApprovalRequest) => ({
+      outcome: "approve" as const,
+    }))
     const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
 
     await runTeamLifecycle("team-1", {
@@ -684,9 +690,10 @@ describe("runTeamLifecycle — an attended headless run asks instead of failing"
   })
 
   it("feeds a rejection back into the lead's re-planning loop", async () => {
-    const planApprovalDelegate = jest
-      .fn()
-      .mockResolvedValue({ outcome: "reject", feedback: "split it up" })
+    const planApprovalDelegate = jest.fn(async (_request: PlanApprovalRequest) => ({
+      outcome: "reject" as const,
+      feedback: "split it up",
+    }))
     const deps = buildDeps(
       { ...baseTeam, config: { ...baseTeam.config, maxPlanRevisions: 2 } },
       [task("t1")],
@@ -721,7 +728,9 @@ describe("runTeamLifecycle — an attended headless run asks instead of failing"
       text: "ok",
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
     })
-    const planApprovalDelegate = jest.fn(async () => ({ outcome: "approve" as const }))
+    const planApprovalDelegate = jest.fn(async (_request: PlanApprovalRequest) => ({
+      outcome: "approve" as const,
+    }))
     const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
 
     await runTeamLifecycle("team-1", {

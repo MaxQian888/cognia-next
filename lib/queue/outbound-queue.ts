@@ -24,6 +24,7 @@
 
 import {
   claimNext,
+  deleteRow,
   listByStatus,
   markHostStateResult,
   markSent,
@@ -32,6 +33,7 @@ import {
   releaseStaleClaims,
   vacuumSent,
 } from "@/lib/db/mobile-outbound-queue"
+import { acknowledgeMobileStepResultChunk } from "@/lib/db/mobile-step-receipts"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
 import { isHostStateSubmitResponse } from "@cognia/agent-config-types/host-state"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
@@ -175,6 +177,24 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         if (!receipt) throw new Error("host_state_malformed_response")
         await markHostStateResult(row.id, receipt)
         await reconcileTerminalHostState(receipt.outcome)
+      } else if (row.command === "workflow_step_result") {
+        const response = result as { ok?: unknown; reason?: unknown } | null
+        if (!response || response.ok !== true) {
+          throw new Error(
+            typeof response?.reason === "string"
+              ? `workflow_step_result rejected: ${response.reason}`
+              : "workflow_step_result malformed acknowledgement"
+          )
+        }
+        const requestId = row.payload.requestId
+        const seq = row.payload.seq
+        if (typeof requestId !== "string" || !Number.isInteger(seq)) {
+          throw new Error("workflow_step_result queue payload is malformed")
+        }
+        await acknowledgeMobileStepResultChunk(requestId, seq as number, now())
+        // Result chunks may contain camera data. Unlike ordinary sent rows,
+        // never retain these for the 24-hour queue history after Host ACK.
+        await deleteRow(row.id)
       } else {
         await markSent(row.id)
       }

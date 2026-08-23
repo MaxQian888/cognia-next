@@ -38,6 +38,7 @@ import {
   installForegroundSync,
   installNetworkSync,
   installResumeSync,
+  installWorkflowRunStatusSync,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -392,6 +393,7 @@ export function CompanionBootProvider({ children }: { children: React.ReactNode 
       if (isStale()) return
       addHostCleanup(installForegroundSync())
       addHostCleanup(installEventDrivenSync())
+      addHostCleanup(installWorkflowRunStatusSync())
       addHostCleanup(await installNetworkSync())
       addHostCleanup(await installResumeSync())
 

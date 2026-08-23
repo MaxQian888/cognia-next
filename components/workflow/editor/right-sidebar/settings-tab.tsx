@@ -10,12 +10,15 @@
 
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -31,6 +34,8 @@ import { WorkflowCredentialsList } from "./settings/workflow-credentials-list"
 import { WorkflowPublishSection } from "./settings/workflow-publish-section"
 import { PluginCapabilitiesSection } from "./settings/plugin-capabilities-section"
 import { FanoutSubscriptionsPanel } from "@/components/workflow/library/fanout-subscriptions-panel"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+import { getDb } from "@/lib/db/schema"
 
 function num(value: string, fallback: number): number {
   const n = Number(value)
@@ -46,6 +51,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
     workflowId,
     published,
     syncPublication,
+    loadWorkflow,
     setSettings,
     setVariables,
     setCredentials,
@@ -57,6 +63,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
       workflowId: s.baseWorkflow.id,
       published: s.baseWorkflow.published,
       syncPublication: s.syncPublication,
+      loadWorkflow: s.loadWorkflow,
       setSettings: s.setSettings,
       setVariables: s.setVariables,
       setCredentials: s.setCredentials,
@@ -65,6 +72,47 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
 
   const retry = settings.retryDefaults
   const onFailure = settings.onFailure ?? { runCatchNodes: true, notify: false }
+  const remoteHosts = useRemoteHostStore(
+    useShallow((state) =>
+      state.hosts.filter((host) => {
+        const manifest = host.featureManifest
+        return (
+          manifest?.schemaVersion === 2 &&
+          Boolean(manifest.features["workflow.execution"]) &&
+          host.connectionState !== "revoked" &&
+          host.connectionState !== "versionMismatch"
+        )
+      })
+    )
+  )
+  const runOn = settings.runOn ?? { mode: "colocate" as const }
+  const runOnValue = runOn.mode === "pinned" ? `pinned:${runOn.ref}` : runOn.mode
+  const handoffSummary = useLiveQuery(
+    async () => {
+      const rows = await getDb()
+        .hostDispatchQueue.filter(
+          (row) => row.domain === "schedule-handoff" && row.label === workflowId
+        )
+        .toArray()
+      return {
+        active: rows.filter((row) => row.status === "pending" || row.status === "inflight").length,
+        failed: rows.filter((row) => row.status === "failed" || row.status === "deadletter").length,
+      }
+    },
+    [workflowId],
+    { active: 0, failed: 0 }
+  )
+
+  const setRunOn = (value: string) => {
+    if (value === "colocate" || value === "auto") {
+      setSettings({ runOn: { mode: value } })
+      return
+    }
+    if (value.startsWith("pinned:")) {
+      const ref = value.slice("pinned:".length)
+      if (ref) setSettings({ runOn: { mode: "pinned", ref } })
+    }
+  }
 
   return (
     <ScrollArea className="h-full" data-testid="workflow-settings-tab">
@@ -74,6 +122,47 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
             {t("runPolicy.title")}
           </h4>
           <FieldGroup>
+            <Field label={t("runOn.label")} htmlFor="wf-run-on" hint={t("runOn.hint")}>
+              <Select value={runOnValue} onValueChange={setRunOn} disabled={!published}>
+                <SelectTrigger id="wf-run-on" className="w-full" data-testid="wf-run-on">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="colocate">{t("runOn.colocate")}</SelectItem>
+                    <SelectItem value="auto">{t("runOn.auto")}</SelectItem>
+                  </SelectGroup>
+                  {remoteHosts.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>{t("runOn.pinnedGroup")}</SelectLabel>
+                      {remoteHosts.map((host) => (
+                        <SelectItem
+                          key={host.id}
+                          value={`pinned:${host.featureManifest!.hostIdentity.id}`}
+                        >
+                          {host.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                </SelectContent>
+              </Select>
+              {!published ? (
+                <p className="text-[11px] text-muted-foreground">{t("runOn.publishRequired")}</p>
+              ) : remoteHosts.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">{t("runOn.noCompatibleHosts")}</p>
+              ) : null}
+              {handoffSummary.active > 0 ? (
+                <p className="text-[11px] text-muted-foreground" data-testid="wf-handoff-active">
+                  {t("runOn.handoffActive", { count: handoffSummary.active })}
+                </p>
+              ) : null}
+              {handoffSummary.failed > 0 ? (
+                <p className="text-[11px] text-destructive" data-testid="wf-handoff-failed">
+                  {t("runOn.handoffFailed", { count: handoffSummary.failed })}
+                </p>
+              ) : null}
+            </Field>
             <Field label={t("errorPolicy.label")} htmlFor="wf-error-policy">
               <Select
                 value={settings.errorPolicy}
@@ -295,6 +384,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
             workflowId={workflowId}
             published={published}
             onPublicationChange={syncPublication}
+            onDraftRestored={(workflow) => loadWorkflow(workflow, { dirty: false })}
           />
         </section>
 

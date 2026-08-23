@@ -1,0 +1,45 @@
+version: 0.7.0
+kind: app
+app:
+  name: Dify Knowledge Import
+  description: Golden Knowledge Retrieval fixture for the dify-1.16 profile
+  mode: workflow
+dependencies: []
+workflow:
+  graph:
+    nodes:
+      - id: start
+        position: { x: 0, y: 0 }
+        data:
+          type: start
+          title: Start
+          variables:
+            - variable: query
+              label: Query
+              type: text-input
+              required: true
+      - id: retrieve
+        position: { x: 250, y: 0 }
+        data:
+          type: knowledge-retrieval
+          title: Retrieve docs
+          query_variable_selector: [start, query]
+          query_attachment_selector: []
+          dataset_ids: [dataset-product, dataset-support]
+          retrieval_mode: multiple
+          multiple_retrieval_config:
+            top_k: 6
+            score_threshold: 0.72
+            reranking_enable: false
+          metadata_filtering_mode: disabled
+      - id: end
+        position: { x: 500, y: 0 }
+        data:
+          type: end
+          title: End
+          outputs:
+            - variable: result
+              value_selector: [retrieve, results]
+    edges:
+      - { id: e1, source: start, sourceHandle: source, target: retrieve }
+      - { id: e2, source: retrieve, sourceHandle: source, target: end }

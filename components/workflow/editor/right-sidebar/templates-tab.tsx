@@ -47,6 +47,11 @@ import { templateToProposalOps } from "@/plugins/workflow-ai/src/tools/template-
 import { templateCatalog } from "@/lib/templates/catalog"
 import { isWorkflowNodeGroupDefinition } from "@/lib/workflow/node-groups/materialize"
 import type { WorkflowNodeGroupDefinition } from "@cognia/plugin-sdk/templates"
+import {
+  planNodeGroupUpgrade,
+  readNodeGroupInstance,
+  type NodeGroupUpgradePlan,
+} from "@/lib/workflow/node-groups/upgrade"
 
 interface Props {
   useStore: EditorStore
@@ -67,6 +72,21 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
     [templateSnapshot]
   )
   const [activeId, setActiveId] = useState<string | null>(null)
+  const selectedGroup = useStore(
+    useShallow((state: EditorState) => {
+      if (state.selectedNodeIds.length !== 1) return null
+      const groupId = state.selectedNodeIds[0]
+      const instance = readNodeGroupInstance(state.nodes.find((node) => node.id === groupId))
+      return instance
+        ? {
+            groupId,
+            definitionId: instance.definitionId,
+            version: instance.version,
+            contentHash: instance.contentHash,
+          }
+        : null
+    })
+  )
 
   const activeTemplate = useMemo(
     () => (activeId ? templates.find((tpl) => tpl.id === activeId) : null) ?? null,
@@ -119,6 +139,24 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
     }
   }
 
+  const upgradeNodeGroup = (definition: WorkflowNodeGroupDefinition): void => {
+    if (!selectedGroup) return
+    try {
+      const plan = useStore.getState().upgradeNodeGroup(selectedGroup.groupId, definition)
+      toast.success(
+        t("nodeGroups.upgraded", {
+          version: plan.toVersion ?? t("nodeGroups.draftVersion"),
+        })
+      )
+    } catch (error) {
+      toast.error(
+        t("nodeGroups.upgradeFailed", {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+  }
+
   return (
     <div
       className="flex h-full w-full min-w-0 max-w-full flex-col gap-2 overflow-x-hidden overflow-y-auto p-3"
@@ -131,14 +169,35 @@ export function TemplatesTab({ useStore, workflowId }: Props) {
             <h3 className="text-xs font-medium">{t("nodeGroups.heading")}</h3>
             <p className="text-[11px] text-muted-foreground">{t("nodeGroups.help")}</p>
           </div>
-          {nodeGroups.map((definition) => (
-            <NodeGroupRow
-              key={`${definition.id}@${definition.version ?? definition.revision}`}
-              definition={definition}
-              locale={locale}
-              onInsert={insertNodeGroup}
-            />
-          ))}
+          {nodeGroups.map((definition) => {
+            let upgradePlan: NodeGroupUpgradePlan | undefined
+            if (
+              selectedGroup?.definitionId === definition.id &&
+              selectedGroup.contentHash !== definition.contentHash
+            ) {
+              try {
+                const state = useStore.getState()
+                upgradePlan = planNodeGroupUpgrade(
+                  state.nodes,
+                  state.edges,
+                  selectedGroup.groupId,
+                  definition
+                )
+              } catch {
+                upgradePlan = undefined
+              }
+            }
+            return (
+              <NodeGroupRow
+                key={`${definition.id}@${definition.version ?? definition.revision}`}
+                definition={definition}
+                locale={locale}
+                onInsert={insertNodeGroup}
+                upgradePlan={upgradePlan}
+                onUpgrade={upgradeNodeGroup}
+              />
+            )
+          })}
         </section>
       ) : null}
       {templates.length === 0 && nodeGroups.length === 0 ? (
@@ -183,37 +242,71 @@ function NodeGroupRow({
   definition,
   locale,
   onInsert,
+  upgradePlan,
+  onUpgrade,
 }: {
   definition: WorkflowNodeGroupDefinition
   locale: string
   onInsert: (definition: WorkflowNodeGroupDefinition) => void
+  upgradePlan?: NodeGroupUpgradePlan
+  onUpgrade: (definition: WorkflowNodeGroupDefinition) => void
 }) {
+  const t = useTranslations("workflowEditor.templates.nodeGroups")
   const localized =
     definition.metadata.localized?.[locale] ?? definition.metadata.localized?.[locale.split("-")[0]]
   const name = localized?.name ?? definition.metadata.name
   const description = localized?.description ?? definition.metadata.description
 
   return (
-    <button
-      type="button"
-      className={cn(
-        "flex w-full items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-xs",
-        "hover:bg-accent/40 transition-colors"
-      )}
-      onClick={() => onInsert(definition)}
-      data-testid={`workflow-node-group-row-${definition.id}`}
-    >
-      <BoxesIcon className="mt-0.5 size-4 shrink-0 text-sky-500" aria-hidden="true" />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-medium">{name}</span>
-          <Badge variant="outline" className="text-[10px]">
-            {definition.payload.nodes.length}
-          </Badge>
+    <div className="rounded-md border bg-card">
+      <button
+        type="button"
+        className={cn(
+          "flex w-full items-start gap-2 px-3 py-2 text-left text-xs",
+          "hover:bg-accent/40 transition-colors"
+        )}
+        onClick={() => onInsert(definition)}
+        data-testid={`workflow-node-group-row-${definition.id}`}
+      >
+        <BoxesIcon className="mt-0.5 size-4 shrink-0 text-sky-500" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">{name}</span>
+            <Badge variant="outline" className="text-[10px]">
+              {definition.payload.nodes.length}
+            </Badge>
+          </div>
+          {description ? <p className="text-muted-foreground">{description}</p> : null}
         </div>
-        {description ? <p className="text-muted-foreground">{description}</p> : null}
-      </div>
-    </button>
+      </button>
+      {upgradePlan ? (
+        <div
+          className="space-y-1 border-t px-3 py-2 text-[11px]"
+          data-testid="node-group-upgrade-diff"
+        >
+          <p>
+            {t("upgradeDiff", {
+              from: upgradePlan.fromVersion ?? t("draftVersion"),
+              to: upgradePlan.toVersion ?? t("draftVersion"),
+              added: upgradePlan.addedNodeIds.length,
+              removed: upgradePlan.removedNodeIds.length,
+              changed: upgradePlan.changedNodeIds.length,
+            })}
+          </p>
+          {upgradePlan.blockers.length ? (
+            <p className="text-destructive">{upgradePlan.blockers.join("; ")}</p>
+          ) : null}
+          <Button
+            size="sm"
+            className="h-7 text-[11px]"
+            disabled={!upgradePlan.compatible}
+            onClick={() => onUpgrade(definition)}
+          >
+            {t("upgrade")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

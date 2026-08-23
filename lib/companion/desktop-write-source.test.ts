@@ -29,16 +29,21 @@ const mockHostStateService = {
   status: jest.fn().mockReturnValue({ protocolVersion: 1, hostSeq: 0 }),
   projectRuntimeEnvelope: jest.fn().mockResolvedValue(undefined),
 }
-const mockCreateHostStateService = jest.fn(() => mockHostStateService)
+const mockCreateHostStateService = jest.fn((_options: unknown) => mockHostStateService)
 jest.mock("@/lib/sync/host-state-service", () => ({
   createAgentRpcHostStateDispatcher: () => jest.fn(),
-  createHostStateService: (...args: unknown[]) => mockCreateHostStateService(...args),
+  createHostStateService: (options: unknown) => mockCreateHostStateService(options),
 }))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
   invoke: jest.fn(),
   transport: { subscribe: jest.fn(() => jest.fn()) },
+}))
+
+jest.mock("@/lib/ai/eval/artifact-crypto", () => ({
+  ...jest.requireActual("@/lib/ai/eval/artifact-crypto"),
+  loadOrCreateAccountArtifactKey: jest.fn(async () => new Uint8Array(32).fill(29)),
 }))
 
 import { dispatchCommand } from "./desktop-write-source"
@@ -199,7 +204,7 @@ beforeEach(async () => {
   await db.adapterInstances.clear().catch(() => undefined)
   await db.twinProfile.clear().catch(() => undefined)
   mockActiveRuntimeTarget.mockReturnValue({ accountId: "local-default", targetId: "target-a" })
-})
+}, 15_000)
 
 describe("dispatchCommand: HostState authority", () => {
   it("validates the caller scope and reuses the authoritative service", async () => {
@@ -643,6 +648,162 @@ describe("dispatchCommand: workflow approvals", () => {
   })
 })
 
+describe("dispatchCommand: workflow Human Input", () => {
+  afterEach(async () => {
+    await getDb().workflowHumanInputFiles.clear()
+    await getDb().workflowHumanInputSubmissions.clear()
+    await getDb().workflowHumanInputRequests.clear()
+    await getDb().workflowWaitpoints.clear()
+  })
+
+  async function registerDeviceRequest(
+    id: string,
+    initiatorId: string,
+    overrides: Partial<import("@/types/workflow/human-input").WorkflowHumanInputRequest> = {}
+  ) {
+    const { registerHumanInputRequest } = await import("@/lib/db/workflow-human-input")
+    const now = Date.now()
+    await registerHumanInputRequest({
+      id,
+      accountId: "account_1",
+      waitpointId: id,
+      status: "pending",
+      runId: `run_${id}`,
+      workflowId: "wf_1",
+      stepId: "ask",
+      initiatorId,
+      title: "Review",
+      fields: [{ id: "note", type: "short-text", label: "Note", required: true }],
+      actions: [{ id: "submit", label: "Submit" }],
+      assignees: [{ kind: "initiator" }],
+      completionPolicy: { mode: "any" },
+      createdAt: now,
+      expiresAt: now + 60_000,
+      updatedAt: now,
+      ...overrides,
+    })
+  }
+
+  it("lists only requests assigned to the verified device", async () => {
+    await registerDeviceRequest("hir_visible", "device:dev-9")
+    await registerDeviceRequest("hir_hidden", "device:dev-other")
+
+    const result = (await dispatchCommand("workflow_human_input_list", {
+      callerDeviceId: "dev-9",
+    })) as { requests: Array<Record<string, unknown>> }
+
+    expect(result.requests.map((request) => request.id)).toEqual(["hir_visible"])
+    expect(result.requests[0]).toEqual(
+      expect.objectContaining({
+        id: "hir_visible",
+        status: "pending",
+        runId: "run_hir_visible",
+        workflowId: "wf_1",
+        stepId: "ask",
+        title: "Review",
+        fields: expect.any(Array),
+        actions: expect.any(Array),
+        completionPolicy: { mode: "any" },
+      })
+    )
+    expect(result.requests[0]).not.toHaveProperty("accountId")
+    expect(result.requests[0]).not.toHaveProperty("assignees")
+    expect(result.requests[0]).not.toHaveProperty("initiatorId")
+    expect(result.requests[0]).not.toHaveProperty("waitpointId")
+  })
+
+  it("submits as the verified device and ignores spoofed actor data", async () => {
+    await registerDeviceRequest("hir_submit", "device:dev-9")
+
+    await expect(
+      dispatchCommand("workflow_human_input_submit", {
+        requestId: "hir_submit",
+        actionId: "submit",
+        values: { note: "Ready" },
+        actor: { id: "admin" },
+        callerDeviceId: "dev-9",
+      })
+    ).resolves.toEqual({ ok: true, completed: true })
+
+    const stored = await getDb().workflowHumanInputSubmissions.get("hir_submit:device:dev-9")
+    expect(stored?.responderId).toBe("device:dev-9")
+  })
+
+  it("rejects an unassigned device and malformed values", async () => {
+    await registerDeviceRequest("hir_denied", "device:dev-owner")
+    await expect(
+      dispatchCommand("workflow_human_input_submit", {
+        requestId: "hir_denied",
+        actionId: "submit",
+        values: { note: "No" },
+        callerDeviceId: "dev-attacker",
+      })
+    ).resolves.toEqual({ ok: false, reason: "not-assigned" })
+    await expect(
+      dispatchCommand("workflow_human_input_submit", {
+        requestId: "hir_denied",
+        actionId: "submit",
+        values: "not-an-object",
+        callerDeviceId: "dev-owner",
+      })
+    ).rejects.toThrow(/values must be an object/)
+  })
+
+  it("promotes quarantined file refs into encrypted request-scoped files", async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const { sha256Bytes } = await import("@/lib/ocr/hash")
+    const hash = await sha256Bytes(png)
+    await registerDeviceRequest("hir_file", "device:dev-9", {
+      fields: [{ id: "evidence", type: "file", label: "Evidence", required: true }],
+    })
+
+    const init = (await dispatchCommand("session_attachment_upload_init", {
+      sessionId: "human-input:hir_file",
+      callerDeviceId: "dev-9",
+      name: "proof.png",
+      mediaType: "image/png",
+      size: png.byteLength,
+      hash,
+    })) as { uploadId: string }
+    await dispatchCommand("session_attachment_upload_chunk", {
+      uploadId: init.uploadId,
+      callerDeviceId: "dev-9",
+      offset: 0,
+      dataBase64: Buffer.from(png).toString("base64"),
+    })
+    const upload = (await dispatchCommand("session_attachment_upload_commit", {
+      uploadId: init.uploadId,
+      callerDeviceId: "dev-9",
+    })) as { ref: string }
+
+    await expect(
+      dispatchCommand("workflow_human_input_submit", {
+        requestId: "hir_file",
+        actionId: "submit",
+        values: { evidence: upload.ref },
+        callerDeviceId: "dev-9",
+      })
+    ).resolves.toEqual({ ok: true, completed: true })
+
+    const submission = await getDb().workflowHumanInputSubmissions.get("hir_file:device:dev-9")
+    expect(submission?.values.evidence).toMatch(/^cognia-human-input-file:hif_/)
+    const storedFile = await getDb().workflowHumanInputFiles.toCollection().first()
+    expect(storedFile).toEqual(
+      expect.objectContaining({
+        requestId: "hir_file",
+        responderId: "device:dev-9",
+        fieldId: "evidence",
+        name: "proof.png",
+        mediaType: "image/png",
+        hash,
+      })
+    )
+    expect(storedFile?.envelope.ciphertext).toBeDefined()
+    expect(storedFile?.envelope.ciphertext).not.toEqual(png)
+    expect((await getDb().sessionAttachmentUploads.get(init.uploadId))?.bytes).toBeUndefined()
+  })
+})
+
 describe("dispatchCommand: workflow_step_result", () => {
   afterEach(async () => {
     const { __resetRemoteStepBrokerForTesting } =
@@ -670,7 +831,9 @@ describe("dispatchCommand: workflow_step_result", () => {
       },
       { emit, isTauriFn: () => true }
     )
-    await new Promise((r) => setTimeout(r, 0))
+    for (let index = 0; index < 100 && !requestId; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
     const [chunk] = chunkRemoteStepResult(requestId, { ok: true, output: { latitude: 1 } })
     const outcome = await dispatchCommand("workflow_step_result", {
       ...chunk,

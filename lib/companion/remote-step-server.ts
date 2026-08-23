@@ -26,6 +26,12 @@ import {
 } from "@/lib/workflow/runtime/remote-step-broker"
 import { STEP_EXECUTE_CHANNEL } from "@/lib/workflow/runtime/remote-step-broker"
 import { loggers } from "@cognia/logging"
+import {
+  beginMobileStepReceipt,
+  persistMobileStepResult,
+  recoverInterruptedMobileSteps,
+  vacuumMobileStepTombstones,
+} from "@/lib/db/mobile-step-receipts"
 
 const log = loggers.sync
 
@@ -126,10 +132,13 @@ export interface RemoteStepServerDeps {
   getDeviceId: () => string | undefined
   executors?: Record<string, MobileStepExecutor>
   now?: () => number
+  receipts?: {
+    begin: typeof beginMobileStepReceipt
+    persistResult: typeof persistMobileStepResult
+    recoverInterrupted: typeof recoverInterruptedMobileSteps
+    vacuum: typeof vacuumMobileStepTombstones
+  }
 }
-
-/** Replay guard capacity — WS reconnects replay up to 200 ring frames. */
-const SEEN_CAP = 256
 
 /**
  * Install the server. Returns a teardown function (boot-provider shape).
@@ -137,27 +146,66 @@ const SEEN_CAP = 256
 export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void {
   const executors = deps.executors ?? MOBILE_STEP_EXECUTORS
   const now = deps.now ?? Date.now
-  const seen = new Set<string>()
+  const receipts = deps.receipts ?? {
+    begin: beginMobileStepReceipt,
+    persistResult: persistMobileStepResult,
+    recoverInterrupted: recoverInterruptedMobileSteps,
+    vacuum: vacuumMobileStepTombstones,
+  }
+  const recoveredDevices = new Set<string>()
+  const recoveryByDevice = new Map<string, Promise<void>>()
   let inFlight = false
 
+  const recoverDevice = async (deviceId: string): Promise<void> => {
+    if (recoveredDevices.has(deviceId)) return
+    const active = recoveryByDevice.get(deviceId)
+    if (active) return active
+    const recovery = (async () => {
+      await receipts.recoverInterrupted(deviceId, chunkRemoteStepResult, now())
+      await receipts.vacuum(now()).catch(() => 0)
+      recoveredDevices.add(deviceId)
+    })().finally(() => recoveryByDevice.delete(deviceId))
+    recoveryByDevice.set(deviceId, recovery)
+    return recovery
+  }
+
+  const logHandlerFailure = (stage: string, error: unknown): void => {
+    log.warn(`remote step: ${stage} failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  // Boot recovery must not depend on the Host replaying another step. An idle
+  // restart still converts abandoned native UI work into an interrupted result
+  // and vacuums the 24-hour receipt tombstones.
+  queueMicrotask(() => {
+    const ownId = deps.getDeviceId()
+    if (ownId) void recoverDevice(ownId).catch((error) => logHandlerFailure("recovery", error))
+  })
+
   const respond = async (requestId: string, result: RemoteStepResult): Promise<void> => {
-    for (const chunk of chunkRemoteStepResult(requestId, result)) {
-      await deps.transport.call("workflow_step_result", { ...chunk })
-    }
+    await receipts.persistResult(requestId, chunkRemoteStepResult(requestId, result), now())
   }
 
   const handle = async (frame: RemoteStepRequest): Promise<void> => {
     const ownId = deps.getDeviceId()
     if (!ownId || frame.targetDeviceId !== ownId) return
     if (typeof frame.requestId !== "string" || !frame.requestId) return
-    if (seen.has(frame.requestId)) return
-    seen.add(frame.requestId)
-    if (seen.size > SEEN_CAP) {
-      const first = seen.values().next().value
-      if (first !== undefined) seen.delete(first)
-    }
     // Stale replay from the WS ring buffer — the desktop gave up already.
     if (typeof frame.timeoutAt === "number" && now() > frame.timeoutAt) return
+
+    // A receipt left `executing` belongs to an earlier process. Turn it into
+    // a terminal interrupted result before looking at the replayed frame; the
+    // native camera/share UI must never be opened a second time automatically.
+    await recoverDevice(ownId)
+    const begin = await receipts.begin({
+      requestId: frame.requestId,
+      deviceId: ownId,
+      kind: frame.kind,
+      timeoutAt: frame.timeoutAt,
+      now: now(),
+    })
+    if (!begin.execute) return
 
     if (inFlight) {
       await respond(
@@ -186,8 +234,9 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
       }
       await respond(frame.requestId, result)
     } catch (err) {
-      // Delivery failed — the desktop's timeout owns the failure mode.
-      log.warn("remote step: result delivery failed", {
+      // Persistence failed — do not erase the executing guard and risk a
+      // second prompt. Startup recovery will convert it to interrupted.
+      log.warn("remote step: result queue persistence failed", {
         requestId: frame.requestId,
         error: err instanceof Error ? err.message : String(err),
       })
@@ -197,6 +246,6 @@ export function installRemoteStepServer(deps: RemoteStepServerDeps): () => void 
   }
 
   return deps.transport.subscribe<RemoteStepRequest>(STEP_EXECUTE_CHANNEL, (frame) => {
-    void handle(frame)
+    void handle(frame).catch((error) => logHandlerFailure("request", error))
   })
 }

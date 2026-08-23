@@ -19,7 +19,7 @@ describe("DataTableCatalog", () => {
     const catalog = DATA_TABLE_CATALOG.map((entry) => entry.name).sort()
 
     expect(catalog).toEqual(actual)
-    expect(new Set(CORE_TABLE_NAMES).size).toBe(278)
+    expect(new Set(CORE_TABLE_NAMES).size).toBe(303)
     db.close()
   })
 
@@ -79,12 +79,18 @@ describe("DataTableCatalog", () => {
       "evalArtifacts",
       "workSubmissions",
       "ocrResults",
+      "workflowAppData",
     ])
     expect(policyForTable("ocrResults")?.retentionPolicy).toMatchObject({
       mode: "ttl",
       days: 30,
       enforcement: "central",
       executorId: "ocrResults",
+    })
+    expect(policyForTable("hostDispatchQueue")?.retentionPolicy).toMatchObject({
+      mode: "ttl",
+      days: 7,
+      enforcement: "domain",
     })
     expect(policyForTable("terminalHistory")?.retentionPolicy).toMatchObject({
       mode: "cap",

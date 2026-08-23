@@ -2,8 +2,18 @@ import { recordSquadGateAnswer, type RecordGateAnswerDeps } from "./record-gate-
 import type { ExecutionRun } from "@/types/execution/run"
 
 function deps(over: Partial<RecordGateAnswerDeps> = {}) {
-  const commit = jest.fn(async () => undefined)
-  const appendToStore = jest.fn()
+  const commit = jest.fn(
+    async (
+      _sessionId: string,
+      _delta: Parameters<NonNullable<RecordGateAnswerDeps["commit"]>>[1]
+    ) => undefined
+  )
+  const appendToStore = jest.fn(
+    (
+      _sessionId: string,
+      _message: Parameters<NonNullable<RecordGateAnswerDeps["appendToStore"]>>[1]
+    ) => undefined
+  )
   return {
     commit,
     appendToStore,
@@ -56,7 +66,7 @@ describe("recordSquadGateAnswer", () => {
     // would race whatever turn is in flight.
     const d = deps()
     await recordSquadGateAnswer(INPUT, d.all)
-    const [, delta] = d.commit.mock.calls[0]! as [string, { upserts: unknown[] }]
+    const [, delta] = d.commit.mock.calls[0]!
     expect(delta.upserts).toHaveLength(1)
   })
 
@@ -103,11 +113,10 @@ describe("recordSquadGateAnswer", () => {
     for (const decision of ["rejected", "dismissed"] as const) {
       const d = deps()
       await recordSquadGateAnswer({ ...INPUT, decision }, d.all)
-      const [, delta] = d.commit.mock.calls[0]! as [
-        string,
-        { upserts: Array<{ parts: Array<{ decision?: string }> }> },
-      ]
-      expect(delta.upserts[0]!.parts[0]!.decision).toBe(decision)
+      const [, delta] = d.commit.mock.calls[0]!
+      expect(delta.upserts?.[0]).toMatchObject({
+        parts: [expect.objectContaining({ decision })],
+      })
     }
   })
 })

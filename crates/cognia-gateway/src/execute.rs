@@ -448,28 +448,48 @@ pub fn expand_for_ticket(
 /// about carries a `type` discriminator in the JSON itself.
 #[derive(Default)]
 pub struct SseDeframer {
-    buf: String,
+    buf: Vec<u8>,
 }
 
 impl SseDeframer {
     pub fn push(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.buf.push_str(&String::from_utf8_lossy(bytes));
+        self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
-        while let Some(idx) = self.buf.find('\n') {
-            let line: String = self.buf.drain(..=idx).collect();
-            let line = line.trim_end_matches(['\n', '\r']);
-            if let Some(data) = line.strip_prefix("data:") {
-                out.push(data.trim().to_string());
+        let mut consumed = 0;
+        while let Some(relative) = self.buf[consumed..].iter().position(|byte| *byte == b'\n') {
+            let newline = consumed + relative;
+            let mut line = &self.buf[consumed..newline];
+            if line.last() == Some(&b'\r') {
+                line = &line[..line.len() - 1];
             }
+            if let Some(data) = Self::data_payload(line, false) {
+                out.push(data);
+            }
+            consumed = newline + 1;
+        }
+        if consumed > 0 {
+            let remaining = self.buf.len() - consumed;
+            self.buf.copy_within(consumed.., 0);
+            self.buf.truncate(remaining);
         }
         out
     }
 
     pub fn finish(&mut self) -> Option<String> {
-        let tail = self.buf.trim();
-        let data = tail.strip_prefix("data:").map(|d| d.trim().to_string());
+        let data = Self::data_payload(&self.buf, true);
         self.buf.clear();
         data
+    }
+
+    fn data_payload(line: &[u8], trim_line: bool) -> Option<String> {
+        let line = String::from_utf8_lossy(line);
+        let line = if trim_line {
+            line.trim()
+        } else {
+            line.as_ref()
+        };
+        line.strip_prefix("data:")
+            .map(|data| data.trim().to_string())
     }
 }
 
@@ -633,6 +653,31 @@ mod tests {
         let mut d2 = SseDeframer::default();
         d2.push(b"data: tail-no-newline");
         assert_eq!(d2.finish(), Some("tail-no-newline".to_string()));
+    }
+
+    #[test]
+    fn sse_deframer_preserves_unicode_across_arbitrary_byte_splits() {
+        let wire = "data: {\"text\":\"你好🙂\"}\r\ndata: [DONE]\r\n";
+        let mut deframer = SseDeframer::default();
+        let mut payloads = Vec::new();
+        for byte in wire.as_bytes() {
+            payloads.extend(deframer.push(std::slice::from_ref(byte)));
+        }
+
+        assert_eq!(
+            payloads,
+            vec!["{\"text\":\"你好🙂\"}".to_string(), "[DONE]".to_string()]
+        );
+        assert_eq!(deframer.finish(), None);
+    }
+
+    #[test]
+    fn sse_deframer_handles_multiple_frames_and_malformed_utf8() {
+        let mut deframer = SseDeframer::default();
+        let payloads = deframer.push(b"event: ping\ndata: one\n\ndata: two\r\ndata: \xff\n");
+
+        assert_eq!(payloads, vec!["one", "two", "�"]);
+        assert_eq!(deframer.finish(), None);
     }
 
     #[test]

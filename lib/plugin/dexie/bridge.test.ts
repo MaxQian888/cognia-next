@@ -485,6 +485,76 @@ describe("restorePluginTables", () => {
     await second.delete()
   })
 
+  it("bumps past dynamic versions when a newly declared core store is still missing", async () => {
+    const dbName = `core-collision-${Math.random().toString(36).slice(2)}`
+
+    // Two prior plugin mutations leave the physical database at v3 while the
+    // next application build only advances its static core schema to v2.
+    const first = new Dexie(dbName)
+    first.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    __setTestDb(first)
+    await applyPluginTables(first, "plugin-a", {
+      tables: [{ name: "rows", schema: "++id" }],
+    })
+    await applyPluginTables(first, "plugin-b", {
+      tables: [{ name: "rows", schema: "++id" }],
+    })
+    const nativeBeforeRestart = first.backendDB().version
+    expect(nativeBeforeRestart).toBe(30)
+    await first.close()
+
+    // The fresh process knows about the new core store, but IndexedDB already
+    // passed that declared version while plugin schemas were being bumped.
+    const second = new Dexie(dbName)
+    second.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+    second.version(2).stores({ lateCore: "++id" })
+    __setTestDb(second)
+    await second.open()
+    const nativeBeforeRestore = second.backendDB().version
+    const backend = second.backendDB()
+    const incompletePhysicalStores = Array.from(backend.objectStoreNames).filter(
+      (name) => name !== "lateCore"
+    )
+    const backendSpy = jest.spyOn(second, "backendDB").mockReturnValue({
+      version: backend.version,
+      objectStoreNames: incompletePhysicalStores,
+    } as unknown as IDBDatabase)
+    const liveTablesSpy = jest
+      .spyOn(second, "tables", "get")
+      .mockReturnValue(second.tables.filter((table) => table.name !== "lateCore"))
+    let repaired: Dexie | undefined
+
+    const restored = await restorePluginTables(
+      second,
+      new Map([
+        ["plugin-a", { tables: [{ name: "rows", schema: "++id" }] }],
+        ["plugin-b", { tables: [{ name: "rows", schema: "++id" }] }],
+      ]),
+      {
+        requiredStoreNames: ["lateCore"],
+        recreateDatabase: () => {
+          repaired = new Dexie(dbName)
+          repaired.version(1).stores({ pluginDexieMeta: "&pluginId, appliedAt" })
+          repaired.version(2).stores({ lateCore: "++id" })
+          __setTestDb(repaired)
+          return repaired
+        },
+      }
+    )
+
+    backendSpy.mockRestore()
+    liveTablesSpy.mockRestore()
+
+    expect(repaired).toBeDefined()
+    expect(restored.sort()).toEqual(["plugin-a:rows", "plugin-b:rows"])
+    expect(Array.from(repaired!.backendDB().objectStoreNames)).toContain("lateCore")
+    // A deliberate next-version upgrade is required. Dexie's same-version
+    // SchemaDiff workaround leaves the logical/native version unchanged here.
+    expect(repaired!.backendDB().version).toBe((Math.round(nativeBeforeRestore / 10) + 1) * 10)
+
+    await repaired!.delete()
+  })
+
   it("skips a lingering meta whose plugin is gone (no manifest)", async () => {
     await seedMeta(db, {
       pluginId: "uninstalled",

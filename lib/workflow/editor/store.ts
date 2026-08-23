@@ -67,6 +67,10 @@ import {
   materializeWorkflowNodeGroup,
   type MaterializedWorkflowNodeGroup,
 } from "@/lib/workflow/node-groups/materialize"
+import {
+  applyNodeGroupUpgrade,
+  type NodeGroupUpgradePlan,
+} from "@/lib/workflow/node-groups/upgrade"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -427,6 +431,8 @@ export interface EditorState extends EditorStateSnapshot {
    * current workflow id.
    */
   loadWorkflow: (wf: VisualWorkflow, options?: { dirty?: boolean }) => void
+  /** Apply a same-workflow external merge in one undoable editor transaction. */
+  applyWorkflowTransaction: (wf: VisualWorkflow) => boolean
   /** Snapshot back into a `VisualWorkflow` for `replaceWorkflow(wf)`. */
   toWorkflow: () => VisualWorkflow
   /**
@@ -475,6 +481,11 @@ export interface EditorState extends EditorStateSnapshot {
     definition: WorkflowNodeGroupDefinition,
     position: { x: number; y: number }
   ) => Pick<MaterializedWorkflowNodeGroup, "groupId" | "nodeIds">
+  /** Replace one pinned instance after the caller has shown its compatibility diff. */
+  upgradeNodeGroup: (
+    groupId: string,
+    definition: WorkflowNodeGroupDefinition
+  ) => NodeGroupUpgradePlan
   /** Select every node + edge in the workflow. */
   selectAll: () => void
 
@@ -514,7 +525,7 @@ export interface EditorState extends EditorStateSnapshot {
 }
 
 export type EditorStore = UseBoundStore<StoreApi<EditorState>> & {
-  temporal: StoreApi<TemporalState<Pick<EditorState, "nodes" | "edges">>>
+  temporal: StoreApi<TemporalState<Pick<EditorState, "baseWorkflow" | "nodes" | "edges">>>
 }
 
 const labelByKind: Partial<Record<WorkflowNodeKind, string>> = {
@@ -597,7 +608,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
   const converted = workflowToReactFlow(initial)
   // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
   // store state) so it never triggers a re-render and stays per-editor.
-  let dragHistorySnapshot: { nodes: RFWorkflowNode[]; edges: RFWorkflowEdge[] } | null = null
+  let dragHistorySnapshot: Pick<EditorState, "baseWorkflow" | "nodes" | "edges"> | null = null
   // Debounce timer for the diagnostics recompute driver — closure-local so it
   // never re-renders and is isolated per editor instance.
   let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
@@ -716,8 +727,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           // re-snapshot or re-pause mid-drag.
           if (dragHistorySnapshot) return
           ;(useStore as EditorStore).temporal.getState().pause()
-          const { nodes, edges } = get()
-          dragHistorySnapshot = { nodes, edges }
+          const { baseWorkflow, nodes, edges } = get()
+          dragHistorySnapshot = { baseWorkflow, nodes, edges }
         },
         commitDragHistory: () => {
           const snap = dragHistorySnapshot
@@ -731,6 +742,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           // temporal `equality` guard below.
           if (snap.nodes === cur.nodes && snap.edges === cur.edges) return
           const past = temporalStore.getState().pastStates.concat({
+            baseWorkflow: snap.baseWorkflow,
             nodes: snap.nodes,
             edges: snap.edges,
           })
@@ -1175,12 +1187,30 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           ;(useStore as EditorStore).temporal.getState().clear()
         },
 
+        applyWorkflowTransaction: (wf) => {
+          const current = get()
+          if (wf.id !== current.baseWorkflow.id) return false
+          const nextWorkflow = { ...structuredClone(wf), viewport: current.viewport }
+          const convertedWorkflow = workflowToReactFlow(nextWorkflow)
+          set({
+            baseWorkflow: nextWorkflow,
+            nodes: convertedWorkflow.nodes,
+            edges: convertedWorkflow.edges,
+            selectedNodeIds: [],
+            selectedEdgeIds: [],
+            dirty: true,
+          })
+          return true
+        },
+
         toWorkflow: () => {
           const s = get()
           return reactFlowToWorkflow(s.baseWorkflow, s.nodes, s.edges, s.viewport)
         },
 
-        markSaved: (workflow) =>
+        markSaved: (workflow) => {
+          const temporalState = (useStore as EditorStore).temporal.getState()
+          temporalState.pause()
           set((state) => ({
             baseWorkflow: workflow
               ? {
@@ -1193,15 +1223,21 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               : state.baseWorkflow,
             dirty: false,
             savedAt: workflow?.updatedAt ?? Date.now(),
-          })),
-        syncPublication: (published, workflowInterface) =>
+          }))
+          temporalState.resume()
+        },
+        syncPublication: (published, workflowInterface) => {
+          const temporalState = (useStore as EditorStore).temporal.getState()
+          temporalState.pause()
           set((state) => ({
             baseWorkflow: {
               ...state.baseWorkflow,
               published,
               interface: workflowInterface,
             },
-          })),
+          }))
+          temporalState.resume()
+        },
         resetDirty: () => set({ dirty: false }),
 
         duplicateNodes: (ids) => {
@@ -1501,6 +1537,19 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           }
         },
 
+        upgradeNodeGroup: (groupId, definition) => {
+          const state = get()
+          const upgraded = applyNodeGroupUpgrade(state.nodes, state.edges, groupId, definition)
+          set({
+            nodes: upgraded.nodes,
+            edges: upgraded.edges,
+            selectedNodeIds: [groupId],
+            selectedEdgeIds: [],
+            dirty: true,
+          })
+          return upgraded.plan
+        },
+
         selectAll: () => {
           const { nodes, edges } = get()
           set({
@@ -1623,12 +1672,17 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         // Track only nodes + edges in the temporal slice. Viewport and
         // selection should not be undoable: panning and clicking should not
         // pollute the history stack.
-        partialize: (state) => ({ nodes: state.nodes, edges: state.edges }),
+        partialize: (state) => ({
+          baseWorkflow: state.baseWorkflow,
+          nodes: state.nodes,
+          edges: state.edges,
+        }),
         // Equality skips no-op pushes (e.g., when a re-render produces the
         // same array reference). Drag-coalescing (so undo rolls back to the
         // pre-drag position, not each intermediate frame) is deferred to
         // Phase 9 polish.
-        equality: (a, b) => a.nodes === b.nodes && a.edges === b.edges,
+        equality: (a, b) =>
+          a.baseWorkflow === b.baseWorkflow && a.nodes === b.nodes && a.edges === b.edges,
         limit: EDITOR_HISTORY_LIMIT,
       }
     )

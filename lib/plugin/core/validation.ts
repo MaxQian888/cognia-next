@@ -1632,6 +1632,33 @@ export function validatePluginManifest(
                 `${field}.paths must contain absolute pathname globs`
               )
             }
+            if (
+              rule.protocols !== undefined &&
+              (!Array.isArray(rule.protocols) ||
+                rule.protocols.length === 0 ||
+                rule.protocols.some((protocol) => protocol !== "http" && protocol !== "https"))
+            ) {
+              pushError(
+                `${field}.protocols`,
+                "manifest.networkAccess.rules.protocols.invalid",
+                `${field}.protocols must contain http and/or https`
+              )
+            }
+            if (
+              rule.ports !== undefined &&
+              (!Array.isArray(rule.ports) ||
+                rule.ports.length === 0 ||
+                rule.ports.some(
+                  (port) =>
+                    !Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535
+                ))
+            ) {
+              pushError(
+                `${field}.ports`,
+                "manifest.networkAccess.rules.ports.invalid",
+                `${field}.ports must contain integer ports between 1 and 65535`
+              )
+            }
           })
         }
       }

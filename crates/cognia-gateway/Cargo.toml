@@ -15,6 +15,10 @@ publish = false
 name = "cognia_gateway"
 path = "src/lib.rs"
 
+[[bench]]
+name = "gateway_e2e"
+harness = false
+
 [features]
 # The Tauri host adapter + #[tauri::command] surface. On by default so the
 # desktop build is unchanged; `cognia-server` paths and the crate's own

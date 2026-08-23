@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { RecoveryBoot, RecoveryStateV1, RecoverySubsystem } from "@cognia/logging"
+import { ensureSidecarReady } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
+import { applyProxyToRust } from "@/stores/network-proxy"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import {
   getRecoveryBoot,
   getRecoveryState,
@@ -39,6 +42,44 @@ export interface UseRecoveryGateOptions {
   /** Injected in tests; production builds the real read-only probe set. */
   createProbes?: () => Promise<RecoveryProbeSet>
   heartbeatIntervalMs?: number
+}
+
+async function waitForSettingsHydration(): Promise<void> {
+  if (useSettingsStore.getState().loaded) return
+
+  await new Promise<void>((resolve) => {
+    let settled = false
+    let unsubscribe = () => {}
+    const finish = () => {
+      if (settled) return
+      settled = true
+      unsubscribe()
+      resolve()
+    }
+    unsubscribe = useSettingsStore.subscribe((next) => {
+      if (next.loaded) finish()
+    })
+    // Close the getState/subscribe race: hydration may have completed between
+    // the first snapshot and installing the listener.
+    if (useSettingsStore.getState().loaded) finish()
+  })
+}
+
+async function startSidecarForRecovery(): Promise<void> {
+  try {
+    // The native network policy is deliberately fail-closed until the
+    // account-scoped settings row is hydrated. Recovery runs before ordinary
+    // initializers, so explicitly establish that policy before Node inherits
+    // the process proxy environment.
+    await waitForSettingsHydration()
+    await applyProxyToRust()
+    await ensureSidecarReady()
+  } catch (error) {
+    // The following read-only probe records the stable `sidecar.not_ready` or
+    // `sidecar.probe_threw` checkpoint. Recovery persistence deliberately does
+    // not store the raw IPC error because it may contain a local path.
+    console.warn("[recovery] sidecar startup failed", error)
+  }
 }
 
 /**
@@ -114,15 +155,30 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
       if (!decision) {
         // The controller is unreachable. Safe mode is unavailable, which is a
         // reason to boot normally — not a reason to refuse to boot.
-        setStatus("normal")
+        await startSidecarForRecovery()
+        if (!cancelled) setStatus("normal")
         return
       }
       setBoot(decision)
-      setStatus(decision.requiresSafeShell ? "safe" : "normal")
+      if (decision.requiresSafeShell) setStatus("safe")
 
       const current = await getRecoveryState()
       if (cancelled) return
       if (current) setState(current)
+      if (!decision.requiresSafeShell) {
+        if (current?.disabledSubsystems.includes("sidecar") ?? false) {
+          // Settings hydration is mounted above this gate. Do not expose
+          // plugin/background initializers until its account-scoped database
+          // read has completed; dynamic plugin schema adoption may otherwise
+          // close the active Dexie connection underneath that read.
+          await waitForSettingsHydration()
+        } else {
+          await startSidecarForRecovery()
+        }
+        if (cancelled) return
+        setStatus("normal")
+      }
+      if (cancelled) return
       void runSequence(current)
     })()
 
@@ -156,6 +212,9 @@ export function useRecoveryGate(options: UseRecoveryGateOptions = {}): RecoveryG
       const next = await retryRecoverySubsystem(subsystem, action)
       if (!next) return
       setState(next)
+      if (subsystem === "sidecar" && action === "retry") {
+        await startSidecarForRecovery()
+      }
       // Re-run from the reopened point so the operator sees the outcome of
       // their decision rather than a stale board.
       void runSequence(next)

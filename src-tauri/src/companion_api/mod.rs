@@ -77,6 +77,8 @@ pub mod tunnel;
 pub mod tunnel_config;
 pub mod web_origin;
 pub mod workflow_api;
+pub mod workflow_app_api;
+pub mod workflow_app_challenge;
 pub mod ws;
 pub mod ws_bridge;
 pub mod ws_terminal;

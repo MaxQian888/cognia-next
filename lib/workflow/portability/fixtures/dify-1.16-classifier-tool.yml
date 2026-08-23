@@ -1,0 +1,53 @@
+version: 0.7.0
+kind: app
+app:
+  name: Classifier Tool Import
+  mode: workflow
+dependencies: []
+workflow:
+  environment_variables: []
+  graph:
+    nodes:
+      - id: start
+        position: { x: 0, y: 0 }
+        data:
+          type: start
+          title: Start
+          variables:
+            - variable: query
+              label: Query
+              type: text-input
+              required: true
+      - id: classifier
+        position: { x: 250, y: 0 }
+        data:
+          type: question-classifier
+          title: Route intent
+          model: { provider: openai, name: gpt-4.1, mode: chat }
+          query_variable_selector: [start, query]
+          classes:
+            - { id: billing, name: Billing }
+            - { id: support, name: Support }
+      - id: tool
+        position: { x: 750, y: -100 }
+        data:
+          type: tool
+          title: Billing tool
+          provider_id: acme/review-tools
+          tool_name: lookup_invoice
+          tool_parameters:
+            query: "{{#start.query#}}"
+      - id: end
+        position: { x: 1000, y: 0 }
+        data:
+          type: end
+          title: End
+          outputs:
+            - variable: result
+              value_selector: [tool, data]
+              value_type: object
+    edges:
+      - { id: e1, source: start, sourceHandle: source, target: classifier }
+      - { id: e2, source: classifier, sourceHandle: billing, target: tool }
+      - { id: e3, source: classifier, sourceHandle: support, target: end }
+      - { id: e4, source: tool, sourceHandle: source, target: end }

@@ -35,6 +35,7 @@ import { WorkflowCreateDialog } from "@/components/workflow/library/workflow-cre
 import { WorkflowCreateFolderDialog } from "@/components/workflow/library/workflow-create-folder-dialog"
 import { WorkflowFolderBreadcrumb } from "@/components/workflow/library/workflow-folder-breadcrumb"
 import { PendingApprovalsCard } from "./pending-approvals-card"
+import { PendingHumanInputCard } from "./pending-human-input-card"
 import { PinnedSection } from "./pinned-section"
 import { RecentRunsFeed } from "./recent-runs-feed"
 import { TriggerButton } from "./trigger-button"
@@ -174,6 +175,7 @@ export function WorkflowList({ className }: WorkflowListProps) {
 
       {/* HITL gates blocked on a human decision (ADR 0061 P2) — surfaced
           above everything else because a run is actively waiting. */}
+      {atRoot ? <PendingHumanInputCard className="mx-4" /> : null}
       {atRoot ? <PendingApprovalsCard className="mx-4" /> : null}
 
       {atRoot ? <PinnedSection workflows={rows} pinnedIds={pinnedIds} /> : null}

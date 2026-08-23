@@ -84,6 +84,7 @@ export const CORE_TABLE_NAMES = [
   "canvasDocuments",
   "canvasSessions",
   "canvasVersions",
+  "capabilityGrants",
   "capturedItems",
   "cdpAuditEvents",
   "cdpGrants",
@@ -100,6 +101,7 @@ export const CORE_TABLE_NAMES = [
   "connectorAttachments",
   "connectorAudit",
   "connectorCallbackBindings",
+  "connectorCleanupJobs",
   "connectorConversationStates",
   "connectorDrafts",
   "connectorHeartbeats",
@@ -143,6 +145,7 @@ export const CORE_TABLE_NAMES = [
   "governanceLineage",
   "governanceProvenance",
   "goalTemplates",
+  "hostDispatchQueue",
   "hostStateActions",
   "hostStateChannels",
   "hostStateMeta",
@@ -187,9 +190,11 @@ export const CORE_TABLE_NAMES = [
   "messageMediaRefs",
   "messages",
   "mobileOutboundQueue",
+  "mobileStepReceipts",
   "modelsDevCatalog",
   "notifications",
   "ocrResults",
+  "openApiImports",
   "openVsxCache",
   "openrouterCatalog",
   "opticalArchives",
@@ -253,6 +258,8 @@ export const CORE_TABLE_NAMES = [
   "runRecords",
   "runRetrospectives",
   "sandboxConnections",
+  "serviceConnections",
+  "sessionAttachmentUploads",
   "sessionFolders",
   "sessionPeerMessages",
   "sessionState",
@@ -307,12 +314,30 @@ export const CORE_TABLE_NAMES = [
   "wikiSections",
   "wikiSectionsStaging",
   "workflowDeployments",
+  "workflowAnnotationSetRevisions",
+  "workflowAnnotationSets",
+  "workflowAppApiKeys",
+  "workflowAppReleases",
+  "workflowApps",
+  "workflowBatchJobs",
+  "workflowBatchRows",
+  "workflowConversationMessages",
+  "workflowConversationReleaseEvents",
+  "workflowConversationSummaries",
+  "workflowConversations",
   "workflowFanoutSubscriptions",
+  "workflowFeedbackCandidates",
   "workInputBatches",
   "workSubmissions",
   "workflowFolders",
+  "workflowHumanInputFiles",
+  "workflowHumanInputRequests",
+  "workflowHumanInputSubmissions",
   "workflowInvocations",
+  "workflowKnowledgeArtifacts",
   "workflowProposalHistory",
+  "workflowReviewSuggestions",
+  "workflowReviews",
   "workflowRunEvents",
   "workflowRuns",
   "workflowTriggers",
@@ -574,6 +599,7 @@ const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 /** Stores whose rows hold encrypted user content rather than ids and metadata. */
 const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "githubIssueMirror",
+  "hostDispatchQueue",
   "issueEvents",
   "issueRuns",
   "issues",
@@ -702,6 +728,15 @@ function backupFor(
   }
 }
 
+const WORKFLOW_APP_ROW_EXPIRY: DataRetentionPolicy = {
+  mode: "ttl",
+  days: 30,
+  enforcement: "central",
+  executorId: "workflowAppData",
+  reason:
+    "Rows carry a release-frozen expiry and are removed by the central Workflow App data sweep.",
+}
+
 const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> = {
   connectorAudit: {
     mode: "ttl",
@@ -769,6 +804,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     executorId: "ocrResults",
     reason: "The storage retention sweeper prunes cached OCR output through the createdAt index.",
   },
+  hostDispatchQueue: {
+    mode: "ttl",
+    days: 7,
+    enforcement: "domain",
+    reason:
+      "The Host dispatch runtime deletes terminal payloads after the bounded recovery and diagnostics window.",
+  },
   workInputBatches: {
     mode: "ttl",
     days: 30,
@@ -785,6 +827,13 @@ const RETENTION_OVERRIDES: Partial<Record<CoreTableName, DataRetentionPolicy>> =
     reason:
       "Frozen execution context carries expiresAt and is removed by the central work-submission sweep alongside its input batch.",
   },
+  sharedLinks: WORKFLOW_APP_ROW_EXPIRY,
+  workflowBatchJobs: WORKFLOW_APP_ROW_EXPIRY,
+  workflowConversations: WORKFLOW_APP_ROW_EXPIRY,
+  workflowFeedbackCandidates: WORKFLOW_APP_ROW_EXPIRY,
+  workflowHumanInputFiles: WORKFLOW_APP_ROW_EXPIRY,
+  workflowKnowledgeArtifacts: WORKFLOW_APP_ROW_EXPIRY,
+  workflowWaitEvents: WORKFLOW_APP_ROW_EXPIRY,
   terminalHistory: {
     mode: "cap",
     maxRows: 5_000,

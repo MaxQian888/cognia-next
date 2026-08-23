@@ -3433,6 +3433,25 @@ fn workflow_step_result_is_known_mutating_and_identity_injected() {
 }
 
 #[test]
+fn workflow_placement_commands_are_classified_and_handoff_identity_is_bound() {
+    assert!(KNOWN_COMMANDS.contains(&"workflow_placement_probe"));
+    assert!(KNOWN_COMMANDS.contains(&"workflow_handoff_create"));
+    assert!(READ_ONLY_COMMANDS.contains(&"workflow_placement_probe"));
+    assert!(!READ_ONLY_COMMANDS.contains(&"workflow_handoff_create"));
+    assert!(!CONTROL_COMMANDS.contains(&"workflow_placement_probe"));
+    assert!(!CONTROL_COMMANDS.contains(&"workflow_handoff_create"));
+    assert!(!CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_placement_probe"));
+    assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_handoff_create"));
+
+    let bound = inject_caller_device_id(
+        "workflow_handoff_create",
+        json!({ "callerDeviceId": "spoofed", "workflowId": "workflow-1" }),
+        "verified-device",
+    );
+    assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+}
+
+#[test]
 fn workflow_approval_commands_are_classified() {
     assert!(KNOWN_COMMANDS.contains(&"workflow_approval_list"));
     assert!(KNOWN_COMMANDS.contains(&"workflow_approval_respond"));
@@ -3443,6 +3462,27 @@ fn workflow_approval_commands_are_classified() {
     assert!(CONTROL_COMMANDS.contains(&"workflow_approval_respond"));
     assert!(!CONTROL_COMMANDS.contains(&"workflow_approval_list"));
     assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_approval_respond"));
+}
+
+#[test]
+fn workflow_human_input_commands_are_classified_and_identity_bound() {
+    assert!(KNOWN_COMMANDS.contains(&"workflow_human_input_list"));
+    assert!(KNOWN_COMMANDS.contains(&"workflow_human_input_submit"));
+    assert!(READ_ONLY_COMMANDS.contains(&"workflow_human_input_list"));
+    assert!(!READ_ONLY_COMMANDS.contains(&"workflow_human_input_submit"));
+    assert!(!CONTROL_COMMANDS.contains(&"workflow_human_input_list"));
+    assert!(CONTROL_COMMANDS.contains(&"workflow_human_input_submit"));
+    assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_human_input_list"));
+    assert!(CALLER_DEVICE_ID_COMMANDS.contains(&"workflow_human_input_submit"));
+
+    for command in ["workflow_human_input_list", "workflow_human_input_submit"] {
+        let bound = inject_caller_device_id(
+            command,
+            json!({ "callerDeviceId": "spoofed" }),
+            "verified-device",
+        );
+        assert_eq!(bound["callerDeviceId"], json!("verified-device"));
+    }
 }
 
 #[test]

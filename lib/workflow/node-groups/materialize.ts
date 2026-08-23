@@ -257,7 +257,19 @@ export function materializeWorkflowNodeGroup(
       label: definition.metadata.name,
       kind: "annotation.group",
       typeVersion: 2,
-      params: { title: definition.metadata.name, width, height },
+      params: {
+        title: definition.metadata.name,
+        width,
+        height,
+        nodeGroupInstance: {
+          definitionId: definition.id,
+          version: definition.version,
+          revision: definition.revision,
+          contentHash: definition.contentHash,
+          sourceNodeIds: Object.fromEntries(idMap),
+          interface: definition.payload.interface,
+        },
+      },
     },
   }
   const nodes: RFWorkflowNode[] = converted.nodes.map((node) => {

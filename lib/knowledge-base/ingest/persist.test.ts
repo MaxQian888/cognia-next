@@ -4,6 +4,7 @@ import {
   createKnowledgeBase,
   createKnowledgeBaseSource,
   listKnowledgeBaseChunks,
+  listKnowledgeBaseRevisionChunks,
 } from "@/lib/db/knowledge-bases"
 import { knowledgeBaseVectorCollectionName } from "@/lib/knowledge-base/runtime/retrieve"
 import { persistKnowledgeBaseChunks } from "./persist"
@@ -79,7 +80,7 @@ describe("persistKnowledgeBaseChunks", () => {
       embeddings: [[0.1, 0.2]],
     })
 
-    const collection = knowledgeBaseVectorCollectionName("kb-1")
+    const collection = `${knowledgeBaseVectorCollectionName("kb-1")}__${result.generationId}`
     expect(store.createCollection).toHaveBeenCalledWith(collection, { dimension: 2 })
     expect(store.addDocuments).toHaveBeenCalledWith(collection, [
       expect.objectContaining({
@@ -103,7 +104,7 @@ describe("persistKnowledgeBaseChunks", () => {
     ])
   })
 
-  it("idempotently replaces a source's previous local and remote chunks", async () => {
+  it("atomically advances current while retaining immutable prior chunks and vectors", async () => {
     await seedSource()
     const store = createStore()
     const base = {
@@ -113,9 +114,13 @@ describe("persistKnowledgeBaseChunks", () => {
       store,
       contentHash: "sha256:guide",
     }
-    await persistKnowledgeBaseChunks({ ...base, chunks: [chunk], embeddings: [[0.1, 0.2]] })
+    const first = await persistKnowledgeBaseChunks({
+      ...base,
+      chunks: [chunk],
+      embeddings: [[0.1, 0.2]],
+    })
 
-    await persistKnowledgeBaseChunks({
+    const second = await persistKnowledgeBaseChunks({
       ...base,
       chunks: [chunk, { ...chunk, content: "Second", contentRedacted: "Second" }],
       embeddings: [
@@ -124,13 +129,13 @@ describe("persistKnowledgeBaseChunks", () => {
       ],
     })
 
-    expect(store.deleteDocuments).toHaveBeenCalledWith(knowledgeBaseVectorCollectionName("kb-1"), [
-      expect.stringMatching(/^kb-1__source-1__kbgen_.+__0$/),
+    expect(store.deleteDocuments).not.toHaveBeenCalled()
+    expect(await listKnowledgeBaseChunks("kb-1")).toHaveLength(3)
+    expect((await listKnowledgeBaseRevisionChunks("kb-1")).map((row) => row.generationId)).toEqual([
+      second.generationId,
+      second.generationId,
     ])
-    expect((await listKnowledgeBaseChunks("kb-1")).map((row) => row.vectorDocId)).toEqual([
-      expect.stringMatching(/^kb-1__source-1__kbgen_.+__0$/),
-      expect.stringMatching(/^kb-1__source-1__kbgen_.+__1$/),
-    ])
+    expect(await listKnowledgeBaseRevisionChunks("kb-1", [first.generationId!])).toHaveLength(1)
   })
 
   it("rejects malformed batches and incompatible embedding dimensions before writing", async () => {
@@ -154,7 +159,7 @@ describe("persistKnowledgeBaseChunks", () => {
     expect(store.addDocuments).not.toHaveBeenCalled()
   })
 
-  it("replaces stale chunks with an empty derived index", async () => {
+  it("activates an empty revision without deleting immutable history", async () => {
     await seedSource()
     const store = createStore()
     const base = {
@@ -171,7 +176,8 @@ describe("persistKnowledgeBaseChunks", () => {
     expect(result).toEqual(
       expect.objectContaining({ rows: [], vectorDocIds: [], generationId: expect.any(String) })
     )
-    expect(await listKnowledgeBaseChunks("kb-1")).toEqual([])
+    expect(await listKnowledgeBaseChunks("kb-1")).toHaveLength(1)
+    expect(await listKnowledgeBaseRevisionChunks("kb-1")).toEqual([])
   })
 
   it("validates source ownership before writing remote vectors", async () => {
@@ -191,7 +197,7 @@ describe("persistKnowledgeBaseChunks", () => {
     expect(store.addDocuments).not.toHaveBeenCalled()
   })
 
-  it("continues an idempotent replace when collection creation or remote cleanup reports an error", async () => {
+  it("continues publication when generation collection creation reports already exists", async () => {
     await seedSource()
     const store = createStore()
     await persistKnowledgeBaseChunks({
@@ -204,7 +210,6 @@ describe("persistKnowledgeBaseChunks", () => {
       embeddings: [[0.1, 0.2]],
     })
     jest.mocked(store.createCollection).mockRejectedValueOnce(new Error("already exists"))
-    jest.mocked(store.deleteDocuments).mockRejectedValueOnce(new Error("cleanup unavailable"))
 
     const result = await persistKnowledgeBaseChunks({
       knowledgeBaseId: "kb-1",
@@ -215,7 +220,7 @@ describe("persistKnowledgeBaseChunks", () => {
       chunks: [{ ...chunk, content: "updated", contentRedacted: "updated" }],
       embeddings: [[0.3, 0.4]],
     })
-    expect(result.cleanupPending).toBe(true)
+    expect(result.cleanupPending).toBe(false)
     expect(result.vectorDocIds[0]).toMatch(/^kb-1__source-1__kbgen_.+__0$/)
   })
 

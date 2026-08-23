@@ -418,6 +418,9 @@ registerNodeExecutor({
     const { getPlugin } = await import("@/lib/db/plugins")
     const plugin = await getPlugin(pluginId)
     if (!plugin) throw nonRetryable(`plugin ${pluginId} not found`)
+    const { assertWorkflowPluginDependencyLock } =
+      await import("@/lib/workflow/runtime/plugin-dependency-lock")
+    assertWorkflowPluginDependencyLock(ctx.executionBinding, plugin)
     const permissions = Array.isArray(plugin.manifest.permissions)
       ? plugin.manifest.permissions.filter(
           (permission): permission is string => typeof permission === "string"

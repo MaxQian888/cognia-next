@@ -1,4 +1,6 @@
-import { recordPlacementDegraded } from "./degraded-audit"
+import { recordPlacementDegraded, type DegradedAuditDeps } from "./degraded-audit"
+
+type NotifyInput = Parameters<NonNullable<DegradedAuditDeps["notify"]>>[0]
 
 const event = {
   reason: "authority_unreachable" as const,
@@ -9,7 +11,7 @@ const event = {
 
 describe("recordPlacementDegraded", () => {
   it("tells the user which host was skipped and why", () => {
-    const notify = jest.fn(async () => "n1")
+    const notify = jest.fn(async (_input: NotifyInput) => "n1")
     return recordPlacementDegraded(event, { notify }).then(() => {
       expect(notify).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -25,7 +27,7 @@ describe("recordPlacementDegraded", () => {
 
   it("coalesces one episode instead of one notice per cron tick", async () => {
     // An authority that is down for a day would otherwise bury the center.
-    const notify = jest.fn(async () => "n1")
+    const notify = jest.fn(async (_input: NotifyInput) => "n1")
     await recordPlacementDegraded(event, { notify })
     await recordPlacementDegraded({ ...event, at: event.at + 60_000 }, { notify })
 
@@ -37,7 +39,7 @@ describe("recordPlacementDegraded", () => {
     const appendRunEvent = jest.fn(async () => undefined)
     await recordPlacementDegraded(
       { ...event, runId: "run_1" },
-      { notify: jest.fn(async () => "n"), appendRunEvent }
+      { notify: jest.fn(async (_input: NotifyInput) => "n"), appendRunEvent }
     )
 
     expect(appendRunEvent).toHaveBeenCalledWith(
@@ -52,7 +54,7 @@ describe("recordPlacementDegraded", () => {
   })
 
   it("distinguishes an authority that was never reachable from one that went away", async () => {
-    const notify = jest.fn(async () => "n")
+    const notify = jest.fn(async (_input: NotifyInput) => "n")
     await recordPlacementDegraded({ ...event, reason: "authority_unknown" }, { notify })
     expect(notify.mock.calls[0]![0].body).toContain("never connected")
   })
@@ -60,7 +62,7 @@ describe("recordPlacementDegraded", () => {
   it("never fails the work it is auditing", async () => {
     // The run already degraded once; failing it because the audit could not be
     // written would turn a visible degradation into an outage.
-    const notify = jest.fn(async () => {
+    const notify = jest.fn(async (_input: NotifyInput) => {
       throw new Error("notification store unavailable")
     })
     const appendRunEvent = jest.fn(async () => {
@@ -74,7 +76,10 @@ describe("recordPlacementDegraded", () => {
 
   it("skips the run log when the degrade happened outside a run", async () => {
     const appendRunEvent = jest.fn(async () => undefined)
-    await recordPlacementDegraded(event, { notify: jest.fn(async () => "n"), appendRunEvent })
+    await recordPlacementDegraded(event, {
+      notify: jest.fn(async (_input: NotifyInput) => "n"),
+      appendRunEvent,
+    })
     expect(appendRunEvent).not.toHaveBeenCalled()
   })
 })

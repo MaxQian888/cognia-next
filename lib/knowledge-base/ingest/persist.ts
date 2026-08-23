@@ -1,7 +1,4 @@
-import {
-  getKnowledgeBaseSourcesByIds,
-  listKnowledgeBaseChunksBySource,
-} from "@/lib/db/knowledge-bases"
+import { getKnowledgeBaseSourcesByIds } from "@/lib/db/knowledge-bases"
 import { getDb } from "@/lib/db/schema"
 import { runGenerationSwap } from "@/lib/rag/generation-ingest"
 import { knowledgeBaseVectorCollectionName } from "@/lib/knowledge-base/runtime/retrieve"
@@ -60,24 +57,10 @@ export async function persistKnowledgeBaseChunks(
     throw new Error("Knowledge Base source ownership does not match")
   }
 
-  const collection =
+  const collectionBase =
     input.vectorCollection ?? knowledgeBaseVectorCollectionName(input.knowledgeBaseId)
   const dimension = input.embeddings[0]?.length
-  await ensureCollectionDimensionCompatible(input.store, collection, dimension)
-
-  if (dimension !== undefined) {
-    try {
-      await input.store.createCollection(collection, { dimension })
-    } catch {
-      // Existing collections are valid after the dimension guard above.
-    }
-  }
-
-  const existing = await listKnowledgeBaseChunksBySource(input.sourceId)
-  const oldVectors = existing.map((row) => ({
-    collection: row.vectorCollection,
-    id: row.vectorDocId,
-  }))
+  const collectionForGeneration = (generationId: string) => `${collectionBase}__${generationId}`
 
   const now = Date.now()
   const result = await runGenerationSwap({
@@ -86,12 +69,23 @@ export async function persistKnowledgeBaseChunks(
     domain: "kb",
     profileFingerprint:
       input.profileFingerprint ?? `legacy:${input.vectorBackend}:${dimension ?? "none"}`,
-    collection,
+    collection: collectionForGeneration,
+    prepare: async (collection) => {
+      await ensureCollectionDimensionCompatible(input.store, collection, dimension)
+      if (dimension !== undefined) {
+        try {
+          await input.store.createCollection(collection, { dimension })
+        } catch {
+          // Existing collections are valid after the dimension guard above.
+        }
+      }
+    },
     store: input.store,
     contentHash: input.contentHash,
     expectedCount: input.chunks.length,
     expectedDimension: dimension,
-    oldVectors,
+    // Immutable revisions retain their vectors; deletion is governed by retention/tombstones.
+    oldVectors: [],
     now,
     build: (generationId) => {
       const rows: KnowledgeBaseChunk[] = input.chunks.map((chunk, index) => ({
@@ -103,7 +97,7 @@ export async function persistKnowledgeBaseChunks(
         charStart: chunk.charStart,
         charEnd: chunk.charEnd,
         vectorBackend: input.vectorBackend,
-        vectorCollection: collection,
+        vectorCollection: collectionForGeneration(generationId),
         vectorDocId: vectorDocId(input.knowledgeBaseId, input.sourceId, generationId, index),
         generationId,
         strategy: chunk.strategy,
@@ -134,7 +128,6 @@ export async function persistKnowledgeBaseChunks(
         "rw",
         [db.knowledgeBaseChunks, db.retrievalGenerations, db.retrievalActivePointers],
         async () => {
-          await db.knowledgeBaseChunks.where("sourceId").equals(input.sourceId).delete()
           if (rows.length > 0) await db.knowledgeBaseChunks.bulkPut(rows)
           await activate()
         }

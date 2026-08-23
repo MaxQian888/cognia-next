@@ -53,6 +53,7 @@ use super::{lark_entry, middleware, SharedState};
 /// 64 KiB — pair request bodies are tiny; the generous limit leaves room for
 /// future endpoints (e.g., push-token registration in M4.6).
 const BODY_LIMIT_BYTES: usize = 64 * 1024;
+const WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES: usize = 11 * 1024 * 1024;
 
 async fn harden_internal_response(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
@@ -422,6 +423,158 @@ fn build_router_for_mode(
         )
         .layer(from_fn(middleware::require_loopback_operator));
 
+    // Public Workflow App / Chatflow surface. Browser sessions are separately
+    // signed and application-scoped; these routes never accept a Companion
+    // device or service principal as an application identity.
+    let workflow_app_routes = Router::new()
+        .route(
+            "/api/portal/bootstrap",
+            get(super::workflow_app_api::domain_bootstrap_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/bootstrap",
+            get(super::workflow_app_api::bootstrap_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/embed-token",
+            get(super::workflow_app_api::embed_token_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/runs",
+            post(super::workflow_app_api::create_run_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/runs/{run_id}",
+            get(super::workflow_app_api::get_run_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/runs/{run_id}/events",
+            get(super::workflow_app_api::events_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/runs/{run_id}/cancel",
+            post(super::workflow_app_api::cancel_run_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/chat-messages",
+            post(super::workflow_app_api::chat_message_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/feedback",
+            post(super::workflow_app_api::feedback_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/runs/{run_id}/shares",
+            post(super::workflow_app_api::create_result_share_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/result-shares/{code}",
+            delete(super::workflow_app_api::revoke_result_share_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/mcp",
+            post(super::workflow_app_api::mcp_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batch-template",
+            get(super::workflow_app_api::batch_template_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batches/{job_id}",
+            get(super::workflow_app_api::batch_get_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batches/{job_id}/pause",
+            post(super::workflow_app_api::batch_pause_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batches/{job_id}/resume",
+            post(super::workflow_app_api::batch_resume_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batches/{job_id}/cancel",
+            post(super::workflow_app_api::batch_cancel_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/batches/{job_id}/export",
+            get(super::workflow_app_api::batch_export_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/human-input",
+            get(super::workflow_app_api::human_input_list_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/human-input/{request_id}/submit",
+            post(super::workflow_app_api::human_input_submit_handler),
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+
+    // Dify 1.16 core Service API profile. The Bearer token is a hashed,
+    // scoped Workflow App key resolved by the TypeScript control plane; the
+    // Dify `user` field remains only an app-local subject key.
+    let dify_compat_routes = Router::new()
+        .route(
+            "/v1/workflows/run",
+            post(super::workflow_app_api::dify_workflow_run_handler),
+        )
+        .route(
+            "/v1/workflows/run/{run_id}",
+            get(super::workflow_app_api::dify_workflow_status_handler),
+        )
+        .route(
+            "/v1/workflows/tasks/{task_id}/stop",
+            post(super::workflow_app_api::dify_task_stop_handler),
+        )
+        .route(
+            "/v1/chat-messages",
+            post(super::workflow_app_api::dify_chat_message_handler),
+        )
+        .route(
+            "/v1/chat-messages/{task_id}/stop",
+            post(super::workflow_app_api::dify_task_stop_handler),
+        )
+        .route(
+            "/v1/conversations",
+            get(super::workflow_app_api::dify_conversations_handler),
+        )
+        .route(
+            "/v1/messages",
+            get(super::workflow_app_api::dify_messages_handler),
+        )
+        .route(
+            "/v1/conversations/{conversation_id}/name",
+            post(super::workflow_app_api::dify_conversation_rename_handler),
+        )
+        .route(
+            "/v1/conversations/{conversation_id}",
+            delete(super::workflow_app_api::dify_conversation_delete_handler),
+        )
+        .route(
+            "/v1/conversations/{conversation_id}/variables",
+            post(super::workflow_app_api::dify_conversation_variables_handler),
+        )
+        .route(
+            "/v1/messages/{message_id}/feedbacks",
+            post(super::workflow_app_api::dify_message_feedback_handler),
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+    let dify_upload_routes = Router::new()
+        .route(
+            "/v1/files/upload",
+            post(super::workflow_app_api::dify_file_upload_handler),
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+    let workflow_app_large_routes = Router::new()
+        .route(
+            "/api/apps/{app_slug}/batches",
+            post(super::workflow_app_api::batch_create_handler),
+        )
+        .route(
+            "/api/apps/{app_slug}/human-input/{request_id}/files",
+            post(super::workflow_app_api::human_input_file_upload_handler),
+        )
+        .layer(from_fn(middleware::pre_auth_rate_limit));
+
     // Canonical device routes — short-lived key-bound token + DPoP.
     //
     // The WS upgrade route uses `any()` rather than `get()` so it handles both
@@ -546,6 +699,8 @@ fn build_router_for_mode(
     let mut router = Router::new()
         .merge(unmetered_public_routes)
         .merge(operator_routes)
+        .merge(workflow_app_routes)
+        .merge(dify_compat_routes)
         .merge(operator_admin_routes)
         .merge(super::api::router())
         .route("/ws/events", any(ws::ws_handler))
@@ -619,6 +774,22 @@ fn build_router_for_mode(
     let router = router
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .layer(from_fn(reject_mutations_while_draining));
+    let router = router.merge(
+        dify_upload_routes
+            .layer(RequestBodyLimitLayer::new(
+                WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES,
+            ))
+            .layer(from_fn(reject_mutations_while_draining))
+            .with_state(state.clone()),
+    );
+    let router = router.merge(
+        workflow_app_large_routes
+            .layer(RequestBodyLimitLayer::new(
+                WORKFLOW_APP_UPLOAD_BODY_LIMIT_BYTES,
+            ))
+            .layer(from_fn(reject_mutations_while_draining))
+            .with_state(state.clone()),
+    );
     if crate::headless::headless_services().is_none() {
         return router.layer(from_fn_with_state(
             origin_policy,
@@ -1151,6 +1322,97 @@ mod tests {
             )
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn workflow_app_mcp_route_requires_an_application_key() {
+        use tower::ServiceExt as _;
+
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/apps/review/mcp")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            ))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34567,
+            ))));
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn dify_file_upload_route_requires_an_application_key() {
+        use tower::ServiceExt as _;
+
+        let boundary = "cognia-test-boundary";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\ncustomer\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"photo.png\"\r\nContent-Type: image/png\r\n\r\nPNG\r\n--{boundary}--\r\n"
+        );
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/files/upload")
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(axum::body::Body::from(body))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34568,
+            ))));
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn workflow_batch_create_has_large_body_lane_but_still_requires_session() {
+        use tower::ServiceExt as _;
+
+        let csv = format!("topic\r\n{}", "a".repeat(70 * 1024));
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/apps/review/batches")
+            .header("content-type", "application/json")
+            .header("idempotency-key", "batch-1")
+            .body(axum::body::Body::from(
+                serde_json::json!({ "csv": csv }).to_string(),
+            ))
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34569,
+            ))));
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn workflow_human_input_routes_require_an_application_session() {
+        use tower::ServiceExt as _;
+
+        let mut request = axum::http::Request::builder()
+            .uri("/api/apps/review/human-input")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                34570,
+            ))));
+        let response = build_router(test_state()).oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 

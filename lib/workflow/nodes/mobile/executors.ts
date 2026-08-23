@@ -12,6 +12,13 @@ registerNodeExecutor({
   execute: async (ctx) => (await import("../actions/approval")).runApprovalRequest(ctx),
 })
 
+registerNodeExecutor({
+  kind: "action.humanInput.request",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("../actions/human-input")).runHumanInputRequest(ctx),
+})
+
 // ── action.mobile.* (ADR 0061 P3) ─────────────────────────────────────────
 // Hub-side proxies: pick a capable paired device and dispatch through the
 // remote-step broker. Not retryable — most open interactive native UI on

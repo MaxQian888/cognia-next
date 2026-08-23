@@ -46,6 +46,16 @@ const E2E_SPEC = path.join(REPO_ROOT, "tests", "e2e", "mobile", "outbound-queue.
  */
 const E2E_GENERIC_DRAIN_EXCLUSIONS: ReadonlyMap<string, string> = new Map([
   [
+    "workflow_step_result",
+    // The result path requires a receipt-shaped payload with requestId,
+    // sequence metadata and a Host acknowledgement. The generic E2E row
+    // deliberately sends only `{ e2e: true }` and mocks `{}`, so exercising
+    // this command there would test malformed input rather than queue drain.
+    // Chunking, replay and acknowledgement are covered by the remote-step,
+    // mobile receipt and outbound queue unit suites.
+    "requires chunk metadata + Host acknowledgement; covered by remote-step and queue tests",
+  ],
+  [
     "host_state_submit",
     // HostStateProtocol rows are `protocol: "host-state"`, not legacy
     // RPC. Their drain path (`lib/queue/outbound-queue.ts:dispatchOne`) is

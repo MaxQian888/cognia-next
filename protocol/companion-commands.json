@@ -13551,6 +13551,30 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "workflow_human_input_list",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "workflow_human_input_submit",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workflow.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "workflow_cancel_run",
       "target": "execution",
       "operation": "side-effect",
@@ -13587,6 +13611,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "workflow_handoff_create",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "workflow_get_webhook_url",
       "target": "client",
       "operation": "side-effect",
@@ -13607,6 +13643,18 @@
       "approval": "none",
       "idempotency": "required",
       "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "workflow_placement_probe",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["http", "websocket", "webrtc"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },

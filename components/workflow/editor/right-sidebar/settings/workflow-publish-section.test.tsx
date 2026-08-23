@@ -35,6 +35,10 @@ const unpublishWorkflow = jest.fn()
 const rollbackWorkflow = jest.fn()
 const getWorkflowDeployment = jest.fn()
 const listWorkflowVersions = jest.fn()
+const getWorkflowVersionDetails = jest.fn()
+const restoreWorkflowVersionToDraft = jest.fn()
+const exportWorkflowVersion = jest.fn()
+const deleteWorkflowVersion = jest.fn()
 jest.mock("@/lib/workflow/publish/publish-workflow", () => ({
   publishWorkflow: (...a: unknown[]) => publishWorkflow(...a),
   unpublishWorkflow: (...a: unknown[]) => unpublishWorkflow(...a),
@@ -43,6 +47,12 @@ jest.mock("@/lib/workflow/publish/publish-workflow", () => ({
 jest.mock("@/lib/db/workflow-deployments", () => ({
   getWorkflowDeployment: (...a: unknown[]) => getWorkflowDeployment(...a),
   listWorkflowVersions: (...a: unknown[]) => listWorkflowVersions(...a),
+}))
+jest.mock("@/lib/workflow/versioning/version-workbench", () => ({
+  getWorkflowVersionDetails: (...a: unknown[]) => getWorkflowVersionDetails(...a),
+  restoreWorkflowVersionToDraft: (...a: unknown[]) => restoreWorkflowVersionToDraft(...a),
+  exportWorkflowVersion: (...a: unknown[]) => exportWorkflowVersion(...a),
+  deleteWorkflowVersion: (...a: unknown[]) => deleteWorkflowVersion(...a),
 }))
 
 import { WorkflowPublishSection } from "./workflow-publish-section"
@@ -76,6 +86,10 @@ beforeEach(() => {
   rollbackWorkflow.mockReset()
   getWorkflowDeployment.mockResolvedValue(undefined)
   listWorkflowVersions.mockResolvedValue([])
+  getWorkflowVersionDetails.mockReset()
+  restoreWorkflowVersionToDraft.mockReset()
+  exportWorkflowVersion.mockReset()
+  deleteWorkflowVersion.mockReset()
 })
 
 describe("WorkflowPublishSection", () => {
@@ -89,7 +103,7 @@ describe("WorkflowPublishSection", () => {
     wrap(<ControlledPublishSection />)
     fireEvent.click(screen.getByTestId("workflow-publish-button"))
     await waitFor(() => expect(screen.getByText("wf_demo")).toBeInTheDocument())
-    expect(publishWorkflow).toHaveBeenCalledWith("wf1", expect.any(Number))
+    expect(publishWorkflow).toHaveBeenCalledWith("wf1", expect.any(Number), {})
   })
 
   it("shows the published state up front and can unpublish", async () => {
@@ -131,6 +145,30 @@ describe("WorkflowPublishSection", () => {
     wrap(<ControlledPublishSection initialPublished={{ at: 1, toolName: "wf_demo" }} />)
     fireEvent.click(screen.getByText("Re-publish"))
     await waitFor(() => expect(screen.getByText("wf_demo2")).toBeInTheDocument())
+  })
+
+  it("publishes immutable version metadata", async () => {
+    publishWorkflow.mockResolvedValue({
+      toolName: "wf_demo",
+      workflowInterface: {},
+      created: true,
+      skillId: "s1",
+    })
+    wrap(<ControlledPublishSection />)
+    fireEvent.change(screen.getByLabelText("Version name"), {
+      target: { value: "August baseline" },
+    })
+    fireEvent.change(screen.getByLabelText("Release notes"), {
+      target: { value: "Reviewed answer path" },
+    })
+    fireEvent.click(screen.getByTestId("workflow-publish-button"))
+
+    await waitFor(() =>
+      expect(publishWorkflow).toHaveBeenCalledWith("wf1", expect.any(Number), {
+        versionName: "August baseline",
+        releaseNotes: "Reviewed answer path",
+      })
+    )
   })
 
   it("follows publication prop changes instead of retaining stale local state", () => {
@@ -181,5 +219,71 @@ describe("WorkflowPublishSection", () => {
     await waitFor(() =>
       expect(rollbackWorkflow).toHaveBeenCalledWith("wf1", "version_1", expect.any(Number))
     )
+  })
+
+  it("filters versions, shows immutable details, and restores the selected draft", async () => {
+    const restored = {
+      id: "wf1",
+      name: "Restored",
+      nodes: [],
+      edges: [],
+      settings: {},
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    listWorkflowVersions.mockResolvedValue([
+      {
+        id: "version_1",
+        workflowId: "wf1",
+        sequence: 1,
+        createdAt: 1,
+        versionName: "Stable baseline",
+      },
+      {
+        id: "version_2",
+        workflowId: "wf1",
+        sequence: 2,
+        createdAt: 2,
+        versionName: "Experiment",
+      },
+    ])
+    getWorkflowVersionDetails.mockResolvedValue({
+      version: {
+        id: "version_1",
+        workflowId: "wf1",
+        sequence: 1,
+        createdAt: 1,
+        versionName: "Stable baseline",
+        releaseNotes: "Approved",
+        digest: "wfv1:abc",
+        definition: { nodes: [] },
+        dependencyManifest: { workflows: [] },
+        configDefinition: { secretRefs: [] },
+      },
+      references: {},
+      currentEnvironments: [],
+      deletable: true,
+      deleteBlockers: [],
+    })
+    restoreWorkflowVersionToDraft.mockResolvedValue(restored)
+    const onDraftRestored = jest.fn()
+    wrap(
+      <WorkflowPublishSection
+        workflowId="wf1"
+        published={{ at: 1, toolName: "wf_demo" }}
+        onPublicationChange={() => undefined}
+        onDraftRestored={onDraftRestored}
+      />
+    )
+
+    expect(await screen.findByText("Stable baseline")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Filter versions"), {
+      target: { value: "stable" },
+    })
+    expect(screen.queryByText("Experiment")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText("Details"))
+    expect(await screen.findByTestId("version-details")).toHaveTextContent("Approved")
+    fireEvent.click(screen.getByText("Restore to draft"))
+    await waitFor(() => expect(onDraftRestored).toHaveBeenCalledWith(restored))
   })
 })

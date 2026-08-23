@@ -582,6 +582,121 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     iconName: "Brain",
     keywords: ["twin", "ingest", "import", "embed"],
   },
+  "knowledge.source": {
+    label: "Knowledge source",
+    description: "Create or incrementally update a stable Knowledge Base source.",
+    iconName: "Database",
+    keywords: ["knowledge", "source", "sync", "web", "text"],
+    paramsSchema: {
+      type: "object",
+      required: ["knowledgeBaseId", "sourceMode"],
+      properties: {
+        knowledgeBaseId: { type: "string", title: "Knowledge Base ID" },
+        sourceMode: { type: "string", title: "Source mode", enum: ["text", "web", "existing"] },
+        sourceId: { type: "string", title: "Existing source ID" },
+        sourceKey: { type: "string", title: "Stable source key" },
+        title: { type: "string", title: "Title" },
+        format: { type: "string", title: "Format", default: "markdown" },
+        content: { type: "string", title: "Content", format: "textarea" },
+        url: { type: "string", title: "Web URL", format: "uri" },
+      },
+    },
+  },
+  "knowledge.parse": {
+    label: "Parse knowledge",
+    description: "Parse one persisted source into a protected run-scoped artifact.",
+    iconName: "FileSearch",
+    keywords: ["knowledge", "parse", "document", "extract"],
+    paramsSchema: {
+      type: "object",
+      required: ["sourceId"],
+      properties: { sourceId: { type: "string", title: "Source ID" } },
+    },
+  },
+  "knowledge.transform": {
+    label: "Transform knowledge",
+    description: "Normalize and PII-redact parsed content before chunking.",
+    iconName: "WandSparkles",
+    keywords: ["knowledge", "transform", "redact", "pii"],
+    paramsSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string", title: "Parsed artifact ID" } },
+    },
+  },
+  "knowledge.chunk": {
+    label: "Chunk knowledge",
+    description: "Create format-aware chunks with stable position metadata.",
+    iconName: "ListTree",
+    keywords: ["knowledge", "chunk", "split", "position"],
+    paramsSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string", title: "Transformed artifact ID" } },
+    },
+  },
+  "knowledge.embed": {
+    label: "Embed knowledge",
+    description: "Embed chunks through Cognia's mandatory safe embedding gateway.",
+    iconName: "BrainCircuit",
+    keywords: ["knowledge", "embedding", "pii", "vector"],
+    paramsSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string", title: "Chunk artifact ID" } },
+    },
+  },
+  "knowledge.index": {
+    label: "Validate knowledge index",
+    description: "Validate vector counts and dimensions before publication.",
+    iconName: "BadgeCheck",
+    keywords: ["knowledge", "index", "validate", "revision"],
+    paramsSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string", title: "Embedded artifact ID" } },
+    },
+  },
+  "knowledge.publish": {
+    label: "Publish knowledge revision",
+    description: "Atomically publish a validated immutable index generation.",
+    iconName: "UploadCloud",
+    keywords: ["knowledge", "publish", "revision", "rollback", "atomic"],
+    paramsSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string", title: "Validated index artifact ID" } },
+    },
+  },
+  "knowledge.retrieve": {
+    label: "Retrieve knowledge",
+    description: "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
+    iconName: "SearchCheck",
+    keywords: ["knowledge", "retrieve", "rag", "acl", "citation"],
+    paramsSchema: {
+      type: "object",
+      required: ["knowledgeBaseIds", "query"],
+      properties: {
+        knowledgeBaseIds: {
+          type: "array",
+          title: "Knowledge Base IDs",
+          items: { type: "string" },
+          minItems: 1,
+        },
+        query: { type: "string", title: "Query" },
+        topKPerBase: { type: "number", title: "Top K per Knowledge Base", default: 4 },
+        scoreThreshold: { type: "number", title: "Minimum score", minimum: 0, maximum: 1 },
+        tokenBudget: { type: "number", title: "Token budget", default: 4000 },
+        revisionBindings: {
+          type: "object",
+          title: "Frozen revision bindings",
+          additionalProperties: {
+            oneOf: [{ type: "string" }, { type: "array", items: { type: "string" }, minItems: 1 }],
+          },
+        },
+      },
+    },
+  },
   "action.memory.recall": {
     label: "Recall memory",
     description: "Hybrid-search the long-term memory store (BM25 + vectors when configured).",
@@ -639,6 +754,13 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
       "Pause until a human approves or rejects — from the desktop notification center or a paired phone. Routes downstream via Approved / Rejected handles.",
     iconName: "UserCheck",
     keywords: ["approval", "approve", "reject", "human", "hitl", "gate", "review", "phone"],
+  },
+  "action.humanInput.request": {
+    label: "Request human input",
+    description:
+      "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
+    iconName: "ClipboardPenLine",
+    keywords: ["human", "input", "form", "hitl", "wait", "quorum", "portal", "phone"],
   },
   // ── Remote device steps (ADR 0061 P3) — hub proxies to a paired device ────
   "action.mobile.camera": {
@@ -1089,6 +1211,12 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     description: "Declare the workflow's typed terminal output (the published interface).",
     iconName: "FileOutput",
     keywords: ["output", "result", "return", "interface", "publish", "end"],
+  },
+  "io.answer": {
+    label: "Answer",
+    description: "Return a Chatflow answer with structured content, citations, and files.",
+    iconName: "MessageSquareReply",
+    keywords: ["answer", "chatflow", "reply", "citation", "suggestion", "file"],
   },
   "io.webClone": {
     label: "Web clone",

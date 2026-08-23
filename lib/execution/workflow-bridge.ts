@@ -136,8 +136,28 @@ export async function syncWorkflowExecutionRun(
     })
   }
 
+  // The `runId` index groups rows but does not preserve their append order;
+  // IndexedDB breaks equal index keys by primary key, and workflow event ids
+  // are random. Always replay the durable cursor (or the legacy timestamp
+  // order) so a terminal event cannot close the shared journal before its
+  // preceding step events are projected.
+  const orderedSourceEvents = [...sourceEvents]
+  const hasCompleteSequence = orderedSourceEvents.every(
+    (event) => typeof event.sequence === "number"
+  )
+  orderedSourceEvents.sort((left, right) =>
+    hasCompleteSequence
+      ? left.sequence! - right.sequence!
+      : left.ts - right.ts || left.id.localeCompare(right.id)
+  )
+
+  // A terminal shared journal is immutable. Normal redelivery is already
+  // idempotent, but no newly discovered source event may be appended after the
+  // terminal boundary. Bindings above still reconcile for late subscriptions.
+  if (["completed", "failed", "cancelled"].includes(run.status)) return
+
   const labels = new Map(sourceRun.workflowSnapshot.nodes.map((node) => [node.id, node.data.label]))
-  const mapped = sourceEvents
+  const mapped = orderedSourceEvents
     .map((event) =>
       mapWorkflowRunEvent(event, { stepTitle: event.stepId ? labels.get(event.stepId) : undefined })
     )

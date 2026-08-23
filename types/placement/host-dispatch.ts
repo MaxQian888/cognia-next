@@ -33,10 +33,20 @@ export type HostDispatchDomain =
 export type HostDispatchStatus =
   | "pending"
   | "inflight"
+  /** Delivery was acknowledged; the target still owes the durable result. */
+  | "awaiting-result"
   | "succeeded"
   | "failed"
+  | "cancelled"
   /** Exhausted its attempts; needs a human, never retried automatically. */
   | "deadletter"
+
+/** Shared transport/storage limits for durable result assembly. */
+export const HOST_DISPATCH_RESULT_CHUNK_CHARS = 32_768
+export const HOST_DISPATCH_MAX_RESULT_CHARS = 8 * 1024 * 1024
+export const HOST_DISPATCH_MAX_RESULT_CHUNKS = Math.ceil(
+  HOST_DISPATCH_MAX_RESULT_CHARS / HOST_DISPATCH_RESULT_CHUNK_CHARS
+)
 
 export interface HostDispatchJobRow {
   /** UUIDv4 primary key. */
@@ -61,6 +71,11 @@ export interface HostDispatchJobRow {
   updatedAt: number
   /** Epoch ms the runner may next attempt this row. */
   nextAttemptAt: number
+  /** Overall deadline minted at enqueue; retries and restarts never extend it. */
+  expiresAt: number
+  /** Atomic claim lease. An expired lease is recoverable after a process crash. */
+  leaseOwner?: string
+  leaseExpiresAt?: number
   /**
    * Minted once at enqueue and replayed on every retry.
    *
@@ -74,4 +89,9 @@ export interface HostDispatchJobRow {
   stepId?: string
   /** Free-form label for the queue UI. */
   label?: string
+  /** Persisted chunk assembly survives a Host process restart. */
+  resultTotal?: number
+  resultChunks?: Record<string, string>
+  resultJson?: string
+  terminalCode?: string
 }

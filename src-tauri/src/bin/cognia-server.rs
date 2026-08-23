@@ -500,6 +500,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("local account binding failed: {error}").into());
     }
 
+    // One tenant owns one Headless data volume and exactly one live server
+    // process. The OS releases this advisory lock after a crash, while the
+    // retained metadata file explains the previous owner during recovery.
+    // Acquire before TLS generation, supervisors, or public listeners mutate
+    // state; administrative offline commands remain intentionally lock-free.
+    let _tenant_lease = matches!(&cli.command, CliCommand::Serve { .. })
+        .then(|| {
+            app_lib::headless::tenant_lease::acquire(
+                &dir,
+                &app_lib::companion_api::host_identity::current_tenant_or_unbound(),
+            )
+        })
+        .transpose()?;
+
     let tls_material = tls::ensure_certificate(&dir)?;
 
     match cli.command {

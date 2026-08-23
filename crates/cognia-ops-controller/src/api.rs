@@ -76,7 +76,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/servers/{id}/upgrade", post(create_upgrade))
         .route("/v1/servers/{id}/rollback", post(create_rollback))
         .route("/v1/servers/{id}/rotate-key", post(create_rotate_key))
-        .route("/v1/servers/{id}/collect-status", post(create_collect_status))
+        .route(
+            "/v1/servers/{id}/collect-status",
+            post(create_collect_status),
+        )
         .route("/v1/servers/{id}/collect-logs", post(create_collect_logs))
         .route("/v1/operations", get(list_operations))
         .route("/v1/operations/{id}", get(get_operation))
@@ -552,7 +555,11 @@ async fn list_operation_events(
         }
         Err(error) => return store_error(error),
     }
-    match state.store.list_operation_events(&claims.tenant_id, id).await {
+    match state
+        .store
+        .list_operation_events(&claims.tenant_id, id)
+        .await
+    {
         Ok(items) => Json(json!({ "items": items })).into_response(),
         Err(error) => store_error(error),
     }

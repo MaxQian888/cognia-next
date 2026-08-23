@@ -1,4 +1,4 @@
-export type WorkflowWaitpointKind = "approval" | "risk_gate" | "event_wait"
+export type WorkflowWaitpointKind = "approval" | "risk_gate" | "event_wait" | "human_input"
 
 export type WorkflowWaitpointStatus =
   "pending" | "resolved" | "rejected" | "timed_out" | "cancelled"

@@ -7,7 +7,7 @@ import {
 import type { IVectorStore } from "@cognia/vector/store"
 import {
   getKnowledgeBaseChunksByVectorDocIds,
-  listKnowledgeBaseVectorCollections,
+  listKnowledgeBaseRevisionChunks,
 } from "@/lib/db/knowledge-bases"
 import type { VectorBackend } from "@/types/twin"
 import type { AgentKnowledgeLibraryResult } from "./apply-agent-knowledge-context"
@@ -34,6 +34,7 @@ export interface RetrieveKnowledgeBaseChunksInput {
   userMessage: string
   topK: number
   precomputedQueryEmbedding?: number[]
+  generationIds?: readonly string[]
   deps: KnowledgeBaseRuntimeDeps
 }
 
@@ -62,11 +63,13 @@ export async function retrieveKnowledgeBaseChunks(
           vectorBackend: input.deps.vectorBackend,
         })
       ).embedding
-    const storedCollections = await listKnowledgeBaseVectorCollections(input.knowledgeBaseId)
-    const collections =
-      storedCollections.length > 0
-        ? storedCollections
-        : [knowledgeBaseVectorCollectionName(input.knowledgeBaseId)]
+    const revisionRows = await listKnowledgeBaseRevisionChunks(
+      input.knowledgeBaseId,
+      input.generationIds
+    )
+    const collections = [...new Set(revisionRows.map((row) => row.vectorCollection))]
+    if (collections.length === 0) return { chunks: [], degraded: false }
+    const allowedVectorIds = new Set(revisionRows.map((row) => row.vectorDocId))
     const hits: Array<{ id: string; content: string; score: number }> = []
     let incompatibleCollections = 0
     for (const collection of collections) {
@@ -103,7 +106,9 @@ export async function retrieveKnowledgeBaseChunks(
       chunks: limitedHits
         .map((hit) => {
           const chunk = rowByVectorId.get(hit.id)
-          return chunk ? { chunk, score: hit.score } : null
+          return chunk && allowedVectorIds.has(chunk.vectorDocId)
+            ? { chunk, score: hit.score }
+            : null
         })
         .filter((value): value is AgentKnowledgeLibraryResult["chunks"][number] => value !== null),
       degraded: incompatibleCollections > 0,

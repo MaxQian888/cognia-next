@@ -33,8 +33,12 @@ export type PublishResult = PublishWorkflowResult
  * Publish (or re-publish) the workflow. Idempotent: re-publishing refreshes the
  * derived interface, the publication timestamp, and the skill entry.
  */
-export async function publishWorkflow(workflowId: string, at: number): Promise<PublishResult> {
-  const result = await publishWorkflowLifecycle(workflowId, at)
+export async function publishWorkflow(
+  workflowId: string,
+  at: number,
+  metadata: { versionName?: string; releaseNotes?: string; createdBy?: string } = {}
+): Promise<PublishResult> {
+  const result = await publishWorkflowLifecycle(workflowId, at, metadata)
   const { resolveWorkflowDeployment } = await import("@/lib/db/workflow-deployments")
   const deployed = await resolveWorkflowDeployment(workflowId)
   if (deployed) {

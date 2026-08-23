@@ -73,6 +73,7 @@ import {
 } from "@/lib/companion/agent-task-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import type { AppSettings, StoredMessage } from "@cognia/agent-config-types"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
@@ -80,7 +81,7 @@ import { enqueueIngestJob, registerTwinSource } from "@/lib/twin/ingest"
 import { stageFile } from "@/lib/twin/ingest/stage"
 import { reviewTwinDraft } from "@/lib/twin/review-draft"
 import { removeTwin, removeTwinSource } from "@/lib/twin/lifecycle"
-import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import { dispatchTrigger, isTriggerEvent } from "@/lib/workflow/runtime/trigger-bridge"
 import { isCapabilityId } from "@/lib/platform/capabilities"
 import { recordDeviceCapabilities } from "@/lib/db/paired-devices"
 import {
@@ -263,6 +264,47 @@ export async function dispatchCommand(
       await import("@/lib/workflow/api/workflow-api-service")
     return dispatchWorkflowApiBridgeCommand(command, payload)
   }
+  if (
+    command === "workflow_app_bootstrap" ||
+    command === "workflow_app_run_create" ||
+    command === "workflow_app_run_get" ||
+    command === "workflow_app_events_list" ||
+    command === "workflow_app_run_cancel" ||
+    command === "workflow_app_chat_message" ||
+    command === "workflow_app_feedback_submit" ||
+    command === "workflow_app_mcp" ||
+    command === "workflow_app_batch_template" ||
+    command === "workflow_app_batch_create" ||
+    command === "workflow_app_batch_get" ||
+    command === "workflow_app_batch_pause" ||
+    command === "workflow_app_batch_resume" ||
+    command === "workflow_app_batch_cancel" ||
+    command === "workflow_app_batch_export" ||
+    command === "workflow_app_human_input_list" ||
+    command === "workflow_app_human_input_submit" ||
+    command === "workflow_app_human_input_file_upload"
+  ) {
+    const { dispatchPublicWorkflowAppBridgeCommand } =
+      await import("@/lib/workflow/apps/public-app-service")
+    return dispatchPublicWorkflowAppBridgeCommand(command, payload)
+  }
+  if (
+    command === "dify_workflow_run" ||
+    command === "dify_workflow_status" ||
+    command === "dify_events_list" ||
+    command === "dify_task_stop" ||
+    command === "dify_chat_message" ||
+    command === "dify_conversations_list" ||
+    command === "dify_messages_list" ||
+    command === "dify_conversation_rename" ||
+    command === "dify_conversation_delete" ||
+    command === "dify_conversation_variables" ||
+    command === "dify_message_feedback" ||
+    command === "dify_file_upload"
+  ) {
+    const { dispatchDifyBridgeCommand } = await import("@/lib/workflow/apps/dify-bridge-service")
+    return dispatchDifyBridgeCommand(command, payload)
+  }
   if (isScheduledTaskRpc(command)) {
     return dispatchScheduledTaskRpc(command, payload)
   }
@@ -338,6 +380,10 @@ export async function dispatchCommand(
       return connectorApproveDraft(payload)
     case "connector_reject_draft":
       return connectorRejectDraft(payload)
+    case "workflow_placement_probe":
+      return workflowPlacementProbe(payload)
+    case "workflow_handoff_create":
+      return workflowHandoffCreate(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
     // Durable workflow approval gates (ADR-0061 P2). Host-split by design:
@@ -351,6 +397,10 @@ export async function dispatchCommand(
       return workflowApprovalList()
     case "workflow_approval_respond":
       return workflowApprovalRespond(payload)
+    case "workflow_human_input_list":
+      return workflowHumanInputList(payload)
+    case "workflow_human_input_submit":
+      return workflowHumanInputSubmit(payload)
     case "workflow_step_result":
       return workflowStepResult(payload)
     case "device_capabilities_report":
@@ -1579,6 +1629,51 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
   return null
 }
 
+async function workflowPlacementProbe(payload: Record<string, unknown>): Promise<unknown> {
+  const deploymentId = payload.deploymentId as string | undefined
+  const expectedVersionDigest = payload.expectedVersionDigest as string | undefined
+  if (!deploymentId) throw new Error("workflow_placement_probe.deploymentId is required")
+  if (!expectedVersionDigest) {
+    throw new Error("workflow_placement_probe.expectedVersionDigest is required")
+  }
+  const { probeWorkflowPlacement } = await import("@/lib/workflow/api/workflow-api-service")
+  return probeWorkflowPlacement({
+    accountId: getActiveAccountId(),
+    deploymentId,
+    expectedVersionDigest,
+    scopes: ["workflow:read"],
+  })
+}
+
+async function workflowHandoffCreate(payload: Record<string, unknown>): Promise<unknown> {
+  const deploymentId = payload.deploymentId as string | undefined
+  const expectedVersionDigest = payload.expectedVersionDigest as string | undefined
+  const idempotencyKey = payload.idempotencyKey as string | undefined
+  const callerDeviceId = payload.callerDeviceId as string | undefined
+  if (!deploymentId) throw new Error("workflow_handoff_create.deploymentId is required")
+  if (!expectedVersionDigest) {
+    throw new Error("workflow_handoff_create.expectedVersionDigest is required")
+  }
+  if (!idempotencyKey) throw new Error("workflow_handoff_create.idempotencyKey is required")
+  if (!callerDeviceId) throw new Error("workflow_handoff_create caller identity is required")
+  if (!isTriggerEvent(payload.trigger)) {
+    throw new Error("workflow_handoff_create.trigger is invalid")
+  }
+  const { createWorkflowApiRun } = await import("@/lib/workflow/api/workflow-api-service")
+  return createWorkflowApiRun({
+    accountId: getActiveAccountId(),
+    deploymentId,
+    expectedVersionDigest,
+    entrypoint: "trigger",
+    caller: `host:${callerDeviceId}`,
+    scopes: ["workflow:run", "workflow:read"],
+    idempotencyKey,
+    trigger: payload.trigger,
+    triggeredBy: { source: "api", deviceId: callerDeviceId },
+    input: payload.trigger.payload,
+  })
+}
+
 /** Read-only projection of the pending workflow-approval registry (ADR-0061). */
 /** List pending approval + risk_gate waitpoints, oldest first. Reached only on
  *  a headless host (a Tauri host answers natively) — see the dispatch arm. The
@@ -1611,6 +1706,208 @@ async function workflowApprovalRespond(
   return result.ok ? { ok: true } : { ok: false, reason: result.reason }
 }
 
+function companionHumanInputActor(
+  callerDeviceId: string,
+  initiatorId?: string
+): { id: string; isInitiator?: boolean } {
+  const id = `device:${callerDeviceId}`
+  return { id, ...(initiatorId === id ? { isInitiator: true } : {}) }
+}
+
+const HUMAN_INPUT_FILE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000
+
+function humanInputFileMatchesAccept(
+  accept: readonly string[] | undefined,
+  file: { name: string; mediaType: string }
+): boolean {
+  if (!accept || accept.length === 0) return true
+  const lowerName = file.name.toLowerCase()
+  const lowerMediaType = file.mediaType.toLowerCase()
+  return accept.some((raw) => {
+    const token = raw.trim().toLowerCase()
+    if (token.startsWith(".")) return lowerName.endsWith(token)
+    if (token.endsWith("/*")) return lowerMediaType.startsWith(token.slice(0, -1))
+    return lowerMediaType === token
+  })
+}
+
+async function promoteCompanionHumanInputFiles(input: {
+  request: import("@/types/workflow/human-input").WorkflowHumanInputRequest
+  responderId: string
+  callerDeviceId: string
+  values: Record<string, import("@/types/workflow/human-input").HumanInputValue>
+}): Promise<
+  | {
+      ok: true
+      values: Record<string, import("@/types/workflow/human-input").HumanInputValue>
+      promotedIds: string[]
+      stagingRefs: string[]
+    }
+  | { ok: false; message: string }
+> {
+  const fileFields = input.request.fields.filter(
+    (field) => field.type === "file" || field.type === "file-list"
+  )
+  if (fileFields.length === 0) {
+    return { ok: true, values: input.values, promotedIds: [], stagingRefs: [] }
+  }
+
+  const { resolveAttachmentRef } = await import("@/lib/db/session-attachment-uploads")
+  const { deleteHumanInputFiles, promoteHumanInputFile } =
+    await import("@/lib/db/workflow-human-input-files")
+  const values = { ...input.values }
+  const promotedIds: string[] = []
+  const stagingRefs: string[] = []
+  const now = Date.now()
+
+  try {
+    for (const field of fileFields) {
+      const raw = input.values[field.id]
+      if (raw === null || raw === undefined || raw === "") continue
+      let refs: string[]
+      if (field.type === "file-list") {
+        if (!Array.isArray(raw) || !raw.every((ref): ref is string => typeof ref === "string")) {
+          await deleteHumanInputFiles(promotedIds)
+          return { ok: false, message: `Invalid file value for ${field.id}` }
+        }
+        refs = raw
+      } else if (typeof raw === "string") {
+        refs = [raw]
+      } else {
+        await deleteHumanInputFiles(promotedIds)
+        return { ok: false, message: `Invalid file value for ${field.id}` }
+      }
+      if (field.type === "file" && refs.length !== 1) {
+        await deleteHumanInputFiles(promotedIds)
+        return { ok: false, message: `Only one file is allowed for ${field.id}` }
+      }
+      if (field.maxFiles !== undefined && refs.length > field.maxFiles) {
+        await deleteHumanInputFiles(promotedIds)
+        return { ok: false, message: `Too many files for ${field.id}` }
+      }
+
+      const durableRefs: string[] = []
+      for (const ref of refs) {
+        const staged = await resolveAttachmentRef(ref, {
+          sessionId: `human-input:${input.request.id}`,
+          deviceId: input.callerDeviceId,
+        })
+        if (!staged || !humanInputFileMatchesAccept(field.accept, staged)) {
+          await deleteHumanInputFiles(promotedIds)
+          return { ok: false, message: `File validation failed for ${field.id}` }
+        }
+        const retentionDays = field.sensitive ? (input.request.sensitiveRetentionDays ?? 30) : 30
+        const promoted = await promoteHumanInputFile({
+          accountId: input.request.accountId,
+          requestId: input.request.id,
+          responderId: input.responderId,
+          fieldId: field.id,
+          name: staged.name,
+          mediaType: staged.mediaType,
+          size: staged.size,
+          hash: staged.hash,
+          bytes: staged.bytes as Uint8Array,
+          expiresAt:
+            now + Math.min(retentionDays * 24 * 60 * 60 * 1_000, HUMAN_INPUT_FILE_RETENTION_MS),
+          now,
+        })
+        promotedIds.push(promoted.id)
+        stagingRefs.push(ref)
+        durableRefs.push(promoted.ref)
+      }
+      values[field.id] = field.type === "file-list" ? durableRefs : (durableRefs[0] ?? null)
+    }
+    return { ok: true, values, promotedIds, stagingRefs }
+  } catch {
+    await deleteHumanInputFiles(promotedIds)
+    return { ok: false, message: "File validation failed" }
+  }
+}
+
+/** List only requests assigned to the verified paired device. */
+async function workflowHumanInputList(
+  payload: Record<string, unknown>
+): Promise<{ requests: unknown[] }> {
+  const callerDeviceId = callerDeviceIdFor("workflow_human_input_list", payload)
+  const { isHumanInputAssigned, listPendingHumanInputRequests } =
+    await import("@/lib/db/workflow-human-input")
+  const pending = await listPendingHumanInputRequests()
+  return {
+    requests: pending
+      .filter((request) =>
+        isHumanInputAssigned(request, companionHumanInputActor(callerDeviceId, request.initiatorId))
+      )
+      .map((request) => ({
+        id: request.id,
+        status: request.status,
+        runId: request.runId,
+        workflowId: request.workflowId,
+        stepId: request.stepId,
+        title: request.title,
+        ...(request.message ? { message: request.message } : {}),
+        fields: request.fields,
+        actions: request.actions,
+        completionPolicy: request.completionPolicy,
+        createdAt: request.createdAt,
+        expiresAt: request.expiresAt,
+      })),
+  }
+}
+
+/** Submit a form response as the JWT-bound paired device; actor fields in the
+ * client payload are ignored so a device cannot impersonate a member/group. */
+async function workflowHumanInputSubmit(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; completed?: boolean; reason?: string; message?: string }> {
+  const callerDeviceId = callerDeviceIdFor("workflow_human_input_submit", payload)
+  const requestId = payload.requestId
+  if (typeof requestId !== "string" || !requestId) {
+    throw new Error("workflow_human_input_submit.requestId is required")
+  }
+  const actionId = payload.actionId
+  if (typeof actionId !== "string" || !actionId) {
+    throw new Error("workflow_human_input_submit.actionId is required")
+  }
+  const values = payload.values
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw new Error("workflow_human_input_submit.values must be an object")
+  }
+  const { getHumanInputRequest, submitHumanInput } = await import("@/lib/db/workflow-human-input")
+  const request = await getHumanInputRequest(requestId)
+  if (!request) return { ok: false, reason: "not-found" }
+  const actor = companionHumanInputActor(callerDeviceId, request.initiatorId)
+  const promoted = await promoteCompanionHumanInputFiles({
+    request,
+    responderId: actor.id,
+    callerDeviceId,
+    values: values as Record<string, import("@/types/workflow/human-input").HumanInputValue>,
+  })
+  if (!promoted.ok) return { ok: false, reason: "invalid-values", message: promoted.message }
+  let result: Awaited<ReturnType<typeof submitHumanInput>>
+  try {
+    result = await submitHumanInput({
+      requestId,
+      actor,
+      actionId,
+      values: promoted.values,
+    })
+  } catch (error) {
+    const { deleteHumanInputFiles } = await import("@/lib/db/workflow-human-input-files")
+    await deleteHumanInputFiles(promoted.promotedIds)
+    throw error
+  }
+  if (!result.ok) {
+    const { deleteHumanInputFiles } = await import("@/lib/db/workflow-human-input-files")
+    await deleteHumanInputFiles(promoted.promotedIds)
+  } else if (promoted.stagingRefs.length > 0) {
+    const { consumeAttachmentRefs } = await import("@/lib/db/session-attachment-uploads")
+    await consumeAttachmentRefs(promoted.stagingRefs)
+  }
+  return result.ok
+    ? { ok: true, completed: result.completed }
+    : { ok: false, reason: result.reason, ...(result.message ? { message: result.message } : {}) }
+}
+
 /** Feed one chunk of a remote-step result into the broker (ADR-0061 P3).
  *  The responder identity is the JWT-injected `callerDeviceId`; the broker
  *  rejects answers from any device other than the request's target. */
@@ -1622,7 +1919,7 @@ async function workflowStepResult(
   const requestId = payload.requestId as string | undefined
   if (!requestId) throw new Error("workflow_step_result.requestId is required")
   const { resolveRemoteStep } = await import("@/lib/workflow/runtime/remote-step-broker")
-  const outcome = resolveRemoteStep(deviceId, {
+  const outcome = await resolveRemoteStep(deviceId, {
     requestId,
     seq: payload.seq as number,
     total: payload.total as number,

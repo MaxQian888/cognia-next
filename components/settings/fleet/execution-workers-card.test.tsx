@@ -39,10 +39,12 @@ import {
   __resetRemoteWorkerRuntimeForTesting,
   type RemoteWorkerRuntime,
 } from "@/lib/ai/agent/team/remote-worker-runtime"
+import { isAgentTeamRemoteDispatchEnabled } from "@/lib/ai/agent/execution/feature-flags"
 
 describe("ExecutionWorkersCard", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    window.localStorage.clear()
     api.list.mockResolvedValue([
       {
         deviceId: "worker-a",
@@ -52,6 +54,22 @@ describe("ExecutionWorkersCard", () => {
       },
     ])
     api.revoke.mockResolvedValue(undefined)
+  })
+
+  it("lets the operator enable and stop new remote AgentTeam dispatch", async () => {
+    render(<ExecutionWorkersCard hosts={[]} />)
+
+    const toggle = await screen.findByRole("switch", { name: "remoteDispatchLabel" })
+    expect(toggle).not.toBeChecked()
+    expect(isAgentTeamRemoteDispatchEnabled()).toBe(false)
+
+    fireEvent.click(toggle)
+    await waitFor(() => expect(toggle).toBeChecked())
+    expect(isAgentTeamRemoteDispatchEnabled()).toBe(true)
+
+    fireEvent.click(toggle)
+    await waitFor(() => expect(toggle).not.toBeChecked())
+    expect(isAgentTeamRemoteDispatchEnabled()).toBe(false)
   })
 
   it("shows authenticated host readiness and creates one-time enrollment", async () => {

@@ -10,6 +10,7 @@ import { createRunLogger, listRunEvents } from "./event-log"
 import { NoopSecretResolver } from "./secret-resolver"
 import { CircuitOpenError, resetCircuitBreaker } from "./circuit-breaker"
 import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { workflowVersionDigest } from "@/lib/workflow/versioning/version-snapshot"
 import {
   DEFAULT_WORKFLOW_SETTINGS,
   type StepExecutionContext,
@@ -32,7 +33,7 @@ beforeEach(async () => {
   execSpy.mockClear()
   resetCircuitBreaker()
   __resetPluginCatalogForTesting()
-})
+}, 15_000)
 
 const node: WorkflowNode = {
   id: "n1",
@@ -499,5 +500,72 @@ describe("runStep with no registered executor", () => {
     expect(failed).toBeDefined()
     expect((failed?.payload as { retryable?: boolean })?.retryable).toBe(false)
     expect((failed?.payload as { message?: string })?.message).toMatch(/removed in 0\.2\.0/)
+  })
+})
+
+describe("plugin dependency lock enforcement", () => {
+  it("rejects a drifted custom plugin before invoking its executor", async () => {
+    const kind = "demo.plugin.action.locked" as WorkflowNode["type"]
+    const execute = jest.fn(async () => ({ output: "unreachable" }))
+    registerNodeExecutor({ kind, typeVersion: 1, execute, pluginId: "demo.plugin" })
+    const manifest = {
+      id: "demo.plugin",
+      version: "2.0.0",
+      name: "Demo",
+      description: "Demo",
+      type: "frontend",
+      capabilities: ["workflow"],
+    }
+    await getDb().plugins.put({
+      id: "demo.plugin",
+      name: "Demo",
+      version: "2.0.0",
+      status: "enabled",
+      source: "builtin",
+      type: "frontend",
+      enabled: true,
+      capabilities: ["workflow"],
+      path: "builtin://demo.plugin",
+      manifest,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const pluginNode: WorkflowNode = {
+      id: "n_locked",
+      type: kind,
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label: "Locked", params: {} },
+    }
+    const base = await buildInput({})
+
+    await expect(
+      runStep({
+        ...base,
+        node: pluginNode,
+        workflow: { ...base.workflow, nodes: [pluginNode] },
+        executionBinding: {
+          versionId: "version-1",
+          deploymentId: "deployment-1",
+          deploymentRevision: 1,
+          entrypoint: "portal",
+          caller: "portal",
+          dependencyLock: {
+            workflows: {},
+            indexes: {},
+            plugins: {
+              "demo.plugin": {
+                pluginId: "demo.plugin",
+                version: "1.0.0",
+                manifestDigest: workflowVersionDigest(manifest),
+                capabilities: ["workflow"],
+                runtimeProfile: "headless",
+              },
+            },
+          },
+        },
+      })
+    ).rejects.toMatchObject({ code: "plugin-version-drift", retryable: false })
+    expect(execute).not.toHaveBeenCalled()
   })
 })

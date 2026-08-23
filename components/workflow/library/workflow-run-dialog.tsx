@@ -3,7 +3,8 @@
 /**
  * WorkflowRunDialog — start a fresh run of a saved workflow straight from the
  * library, optionally with a JSON trigger payload. Reuses the orchestrator's
- * `runWorkflow` (a `trigger.manual` event, `triggeredBy.source: "desktop"`).
+ * the published placement bridge when a deployment exists, or the draft
+ * orchestrator otherwise (a `trigger.manual` event from the desktop).
  * Live progress is surfaced globally by `WorkflowRunToaster`, so this dialog
  * only confirms the run started.
  */
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import type { TriggerEvent, WorkflowRow } from "@/types/workflow/visual"
 
 export interface WorkflowRunDialogProps {
@@ -64,8 +66,12 @@ export function WorkflowRunDialog({ workflow, open, onOpenChange }: WorkflowRunD
         payload: parsed.value,
         originAt: Date.now(),
       }
-      // Fire-and-forget: the global toaster reports progress; we only confirm start.
-      void runWorkflow({ workflow, trigger, triggeredBy: { source: "desktop" } })
+      if (workflow.published?.deploymentId) {
+        await dispatchTrigger(trigger, { triggeredBy: { source: "desktop" } })
+      } else {
+        // Draft previews stay local; only immutable published artifacts are placeable.
+        void runWorkflow({ workflow, trigger, triggeredBy: { source: "desktop" } })
+      }
       toast.success(t("runStarted"))
       onOpenChange(false)
       setPayloadText("")

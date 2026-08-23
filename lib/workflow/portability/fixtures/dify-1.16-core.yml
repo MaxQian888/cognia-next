@@ -1,0 +1,79 @@
+version: 0.7.0
+kind: app
+app:
+  name: Dify Core Import
+  description: Golden fixture for the dify-1.16 profile
+  mode: advanced-chat
+  icon: "🤖"
+dependencies:
+  - type: marketplace
+    value:
+      marketplace_plugin_unique_identifier: acme/review-tools:1.0.0@digest
+workflow:
+  environment_variables:
+    - name: REGION
+      value: us-east
+      value_type: string
+  graph:
+    nodes:
+      - id: start
+        position: { x: 0, y: 0 }
+        data:
+          type: start
+          title: Start
+          variables:
+            - variable: query
+              label: Query
+              type: text-input
+              required: true
+      - id: llm
+        position: { x: 250, y: 0 }
+        data:
+          type: llm
+          title: Draft
+          model:
+            provider: openai
+            name: gpt-4.1
+            mode: chat
+          prompt_template:
+            - role: system
+              text: Be concise.
+            - role: user
+              text: "{{#start.query#}}"
+      - id: branch
+        position: { x: 500, y: 0 }
+        data:
+          type: if-else
+          title: Needs review
+          cases:
+            - case_id: review
+              logical_operator: and
+              conditions:
+                - variable_selector: [start, query]
+                  comparison_operator: contains
+                  value: review
+      - id: human
+        position: { x: 750, y: -100 }
+        data:
+          type: human-input
+          title: Confirm response
+          form_content: Review the generated answer.
+          inputs: []
+          user_actions:
+            - id: approve
+              title: Approve
+              button_style: default
+          timeout: 3
+          timeout_unit: day
+      - id: answer
+        position: { x: 1000, y: 0 }
+        data:
+          type: answer
+          title: Answer
+          answer: "{{#llm.text#}}"
+    edges:
+      - { id: e1, source: start, sourceHandle: source, target: llm }
+      - { id: e2, source: llm, sourceHandle: source, target: branch }
+      - { id: e3, source: branch, sourceHandle: review, target: human }
+      - { id: e4, source: branch, sourceHandle: false, target: answer }
+      - { id: e5, source: human, sourceHandle: approve, target: answer }

@@ -9,12 +9,11 @@ import { mintSquadRunId, startSquadRun, type StartSquadRunDeps } from "./start-s
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { WorkflowTriggeredFrom } from "@/types/workflow/visual"
 
-const ensureTeamExecutionRunMock = jest.fn(async () => "execution:team:stub")
-const ensureImTeamExecutionRunMock = jest.fn(async () => "execution:team:stub")
+const ensureTeamExecutionRunMock = jest.fn(async (_input: unknown) => "execution:team:stub")
+const ensureImTeamExecutionRunMock = jest.fn(async (_input: unknown) => "execution:team:stub")
 jest.mock("@/lib/execution/agent-team-bridge", () => ({
-  ensureTeamExecutionRun: (...args: unknown[]) => ensureTeamExecutionRunMock(...(args as [never])),
-  ensureImTeamExecutionRun: (...args: unknown[]) =>
-    ensureImTeamExecutionRunMock(...(args as [never])),
+  ensureTeamExecutionRun: (input: unknown) => ensureTeamExecutionRunMock(input),
+  ensureImTeamExecutionRun: (input: unknown) => ensureImTeamExecutionRunMock(input),
   agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
 }))
 

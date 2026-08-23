@@ -1,14 +1,19 @@
 import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { redactText } from "@cognia/redact"
 import { getDb } from "@/lib/db/schema"
-import { getWorkflowDeploymentById } from "@/lib/db/workflow-deployments"
+import { getWorkflowDeploymentById, getWorkflowVersion } from "@/lib/db/workflow-deployments"
 import { cancelWorkflowRun } from "@/lib/workflow/runtime/cancel-run"
 import {
   executeDeployedWorkflow,
   WorkflowAdmissionError,
 } from "@/lib/workflow/runtime/execution-authority"
 import type { WorkflowEntrypoint } from "@/types/workflow/deployment"
-import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
+import type {
+  RunStatus,
+  TriggerEvent,
+  WorkflowRunRow,
+  WorkflowTriggeredFrom,
+} from "@/types/workflow/visual"
 
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["succeeded", "failed", "cancelled"])
 const SENSITIVE_KEY = /(?:authorization|cookie|password|secret|token|api[-_]?key)/i
@@ -69,6 +74,11 @@ export interface CreateWorkflowApiRunInput {
   caller: string
   scopes: readonly string[]
   idempotencyKey?: string
+  /** Exact immutable artifact selected by the source Host. */
+  expectedVersionDigest?: string
+  /** Trusted Host-to-Host trigger envelope; public HTTP callers omit it. */
+  trigger?: TriggerEvent
+  triggeredBy?: WorkflowTriggeredFrom
   input: unknown
 }
 
@@ -97,6 +107,22 @@ export async function createWorkflowApiRun(
       "Workflow deployment was not found"
     )
   }
+  const version = await getWorkflowVersion(deployment.versionId)
+  if (!version || version.workflowId !== deployment.workflowId) {
+    throw new WorkflowApiServiceError(
+      "deployment_not_found",
+      404,
+      "Workflow deployment was not found"
+    )
+  }
+  if (input.expectedVersionDigest !== undefined && version.digest !== input.expectedVersionDigest) {
+    throw new WorkflowApiServiceError(
+      "deployment_digest_mismatch",
+      409,
+      "The target Host has a different active workflow version",
+      { expected: input.expectedVersionDigest, actual: version.digest }
+    )
+  }
 
   let resolveAdmission: (runId: string) => void = () => undefined
   const admitted = new Promise<string>((resolve) => {
@@ -109,9 +135,22 @@ export async function createWorkflowApiRun(
     caller: input.caller,
     ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     authorizedScopes: input.scopes,
-    triggerKind: "trigger.manual",
-    payload: { input: input.input },
-    triggeredBy: { source: "api" },
+    triggerKind: input.trigger?.kind ?? "trigger.manual",
+    triggerId: input.trigger?.triggerId,
+    triggerBinding: input.trigger?.binding,
+    triggerOriginAt: input.trigger?.originAt,
+    payload: input.trigger?.payload ?? { input: input.input },
+    triggeredBy: input.triggeredBy ?? { source: "api" },
+    ...(input.expectedVersionDigest
+      ? {
+          lockedDependency: {
+            workflowId: deployment.workflowId,
+            versionId: version.id,
+            deploymentId: deployment.id,
+            deploymentRevision: deployment.revision,
+          },
+        }
+      : {}),
     onAdmitted: resolveAdmission,
   })
 
@@ -133,6 +172,55 @@ export async function createWorkflowApiRun(
 
   const run = await getDb().workflowRuns.get(runId)
   return { runId, status: run?.status ?? "pending" }
+}
+
+export interface ProbeWorkflowPlacementInput {
+  accountId: string
+  deploymentId: string
+  expectedVersionDigest: string
+  scopes: readonly string[]
+}
+
+export interface WorkflowPlacementProbe {
+  compatible: boolean
+  reason?: "deployment_not_found" | "deployment_digest_mismatch"
+  workflowId?: string
+  deploymentDigest?: string
+  activeUnits: number
+  maxUnits: number
+}
+
+/** Read-only compatibility/capacity probe used before a Host is selected. */
+export async function probeWorkflowPlacement(
+  input: ProbeWorkflowPlacementInput
+): Promise<WorkflowPlacementProbe> {
+  assertScope(input.scopes, "workflow:read")
+  if (input.accountId !== getActiveAccountId()) {
+    return { compatible: false, reason: "deployment_not_found", activeUnits: 0, maxUnits: 0 }
+  }
+  const deployment = await getWorkflowDeploymentById(input.deploymentId, input.accountId)
+  if (!deployment || deployment.status !== "active") {
+    return { compatible: false, reason: "deployment_not_found", activeUnits: 0, maxUnits: 0 }
+  }
+  const version = await getWorkflowVersion(deployment.versionId)
+  if (!version || version.workflowId !== deployment.workflowId) {
+    return { compatible: false, reason: "deployment_not_found", activeUnits: 0, maxUnits: 0 }
+  }
+  const activeUnits = await getDb()
+    .workflowRuns.where("workflowId")
+    .equals(deployment.workflowId)
+    .filter((run) => ["pending", "running", "waiting", "paused"].includes(run.status))
+    .count()
+  return {
+    compatible: version.digest === input.expectedVersionDigest,
+    ...(version.digest === input.expectedVersionDigest
+      ? {}
+      : { reason: "deployment_digest_mismatch" as const }),
+    workflowId: deployment.workflowId,
+    deploymentDigest: version.digest,
+    activeUnits,
+    maxUnits: Math.max(1, version.definition.settings.concurrency),
+  }
 }
 
 export interface GetWorkflowApiRunInput {

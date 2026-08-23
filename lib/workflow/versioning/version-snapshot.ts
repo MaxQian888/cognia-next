@@ -83,6 +83,8 @@ export function createWorkflowVersion(input: {
   sequence: number
   createdAt: number
   createdBy?: string
+  versionName?: string
+  releaseNotes?: string
 }): WorkflowVersion {
   const definition = cloneSerializable({
     ...input.workflow,
@@ -118,6 +120,8 @@ export function createWorkflowVersion(input: {
     digest,
     name: input.workflow.name,
     description: input.workflow.description,
+    ...(input.versionName?.trim() ? { versionName: input.versionName.trim() } : {}),
+    ...(input.releaseNotes?.trim() ? { releaseNotes: input.releaseNotes.trim() } : {}),
     createdAt: input.createdAt,
     createdBy: input.createdBy,
   }

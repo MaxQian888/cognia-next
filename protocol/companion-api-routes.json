@@ -24,6 +24,72 @@
     { "path": "/api/workflow-runs/{run_id}", "method": "get", "document": "public" },
     { "path": "/api/workflow-runs/{run_id}/events", "method": "get", "document": "public" },
     { "path": "/api/workflow-runs/{run_id}/cancel", "method": "post", "document": "public" },
+    { "path": "/api/portal/bootstrap", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/bootstrap", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/embed-token", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/runs", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/runs/{run_id}", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/runs/{run_id}/events", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/runs/{run_id}/cancel", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/chat-messages", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/feedback", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/runs/{run_id}/shares", "method": "post", "document": "public" },
+    {
+      "path": "/api/apps/{app_slug}/result-shares/{code}",
+      "method": "delete",
+      "document": "public"
+    },
+    { "path": "/api/apps/{app_slug}/mcp", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/batch-template", "method": "get", "document": "public" },
+    { "path": "/api/apps/{app_slug}/batches", "method": "post", "document": "public" },
+    { "path": "/api/apps/{app_slug}/batches/{job_id}", "method": "get", "document": "public" },
+    {
+      "path": "/api/apps/{app_slug}/batches/{job_id}/pause",
+      "method": "post",
+      "document": "public"
+    },
+    {
+      "path": "/api/apps/{app_slug}/batches/{job_id}/resume",
+      "method": "post",
+      "document": "public"
+    },
+    {
+      "path": "/api/apps/{app_slug}/batches/{job_id}/cancel",
+      "method": "post",
+      "document": "public"
+    },
+    {
+      "path": "/api/apps/{app_slug}/batches/{job_id}/export",
+      "method": "get",
+      "document": "public"
+    },
+    { "path": "/api/apps/{app_slug}/human-input", "method": "get", "document": "public" },
+    {
+      "path": "/api/apps/{app_slug}/human-input/{request_id}/submit",
+      "method": "post",
+      "document": "public"
+    },
+    {
+      "path": "/api/apps/{app_slug}/human-input/{request_id}/files",
+      "method": "post",
+      "document": "public"
+    },
+    { "path": "/v1/workflows/run", "method": "post", "document": "public" },
+    { "path": "/v1/workflows/run/{run_id}", "method": "get", "document": "public" },
+    { "path": "/v1/workflows/tasks/{task_id}/stop", "method": "post", "document": "public" },
+    { "path": "/v1/chat-messages", "method": "post", "document": "public" },
+    { "path": "/v1/chat-messages/{task_id}/stop", "method": "post", "document": "public" },
+    { "path": "/v1/conversations", "method": "get", "document": "public" },
+    { "path": "/v1/messages", "method": "get", "document": "public" },
+    { "path": "/v1/conversations/{conversation_id}/name", "method": "post", "document": "public" },
+    { "path": "/v1/conversations/{conversation_id}", "method": "delete", "document": "public" },
+    {
+      "path": "/v1/conversations/{conversation_id}/variables",
+      "method": "post",
+      "document": "public"
+    },
+    { "path": "/v1/messages/{message_id}/feedbacks", "method": "post", "document": "public" },
+    { "path": "/v1/files/upload", "method": "post", "document": "public" },
     { "path": "/api/devices", "method": "get", "document": "public" },
     { "path": "/api/devices/{device_id}", "method": "delete", "document": "public" },
     {

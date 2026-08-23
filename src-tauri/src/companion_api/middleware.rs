@@ -1178,6 +1178,7 @@ mod tests {
         let claims = oidc::OidcClaims {
             sub: "user_x".into(),
             organization_id: Some("org_y".into()),
+            group_ids: vec![],
             scopes: vec!["brain:rpc".into()],
             exp: 0,
         };
@@ -1192,6 +1193,7 @@ mod tests {
         let claims = oidc::OidcClaims {
             sub: "user_x".into(),
             organization_id: None,
+            group_ids: vec![],
             scopes: vec![],
             exp: 0,
         };

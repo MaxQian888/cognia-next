@@ -22,6 +22,7 @@ describe("flow-data-nodes registration", () => {
     ["flow.wait", 1],
     ["io.http", 1],
     ["io.output", 1],
+    ["io.answer", 1],
     ["io.webhook.respond", 1],
   ])("registers %s@%s", (kind, version) => {
     expect(getExecutor(kind as never, version)).toBeDefined()

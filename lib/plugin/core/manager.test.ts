@@ -302,15 +302,15 @@ describe("PluginManager", () => {
         return undefined
       })
       const unsubscribe = jest.fn()
-      const hostSubscriber = jest.fn(
-        (_event: string, _handler: (event: unknown) => void) => unsubscribe
-      )
+      const hostSubscriber = jest.fn((_event: string, _handler: unknown) => unsubscribe)
+      const nodeHostSubscriber = <T>(event: string, handler: (payload: T) => void) =>
+        hostSubscriber(event, handler)
       const manager = new PluginManager({
         pluginDirectory: "/plugins",
         enablePython: true,
         runtimeProfile: "headless",
         nodeHostInvoker: hostInvoker as never,
-        nodeHostSubscriber: hostSubscriber,
+        nodeHostSubscriber,
       })
       const internals = manager as unknown as {
         initializePythonRuntime: () => Promise<void>

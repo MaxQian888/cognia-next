@@ -18,6 +18,8 @@
  *   - otherwise the host must equal, or be a subdomain of, an entry
  */
 
+import { evaluateFetchTarget } from "@cognia/network-guard"
+
 /** Host security posture (see `pluginSecurityPosture` setting). */
 export type PluginSecurityPosture = "strict" | "balanced"
 
@@ -38,10 +40,23 @@ export interface NetworkAccessRule {
   methods: NetworkHttpMethod[]
   /** URL pathname globs. `*` matches within and across path segments. */
   paths: string[]
+  /** Defaults to HTTPS when omitted. */
+  protocols?: Array<"http" | "https">
+  /** Defaults to the selected protocol's standard port when omitted. */
+  ports?: number[]
 }
 
 export type EgressReason =
-  "no-declaration" | "strict-no-declaration" | "wildcard" | "host-match" | "host-denied" | "bad-url"
+  | "no-declaration"
+  | "strict-no-declaration"
+  | "wildcard"
+  | "host-match"
+  | "host-denied"
+  | "bad-url"
+  | "bad-scheme"
+  | "private-host"
+  | "protocol-denied"
+  | "port-denied"
 
 export interface EgressDecision {
   allowed: boolean
@@ -80,8 +95,9 @@ export function evaluateEgress(
   networkAccess: NetworkAllowlist | undefined,
   posture: PluginSecurityPosture = "balanced"
 ): EgressDecision {
-  const host = hostFromUrl(url)
-  if (host === null) return { allowed: false, reason: "bad-url" }
+  const target = evaluateFetchTarget(url)
+  if (!target.allowed) return { allowed: false, reason: target.reason }
+  const host = target.host!
 
   const domains = networkAccess?.allowedDomains ?? networkAccess?.rules?.map((rule) => rule.domain)
   if (!domains) {
@@ -130,15 +146,25 @@ export function evaluateNetworkRequest(
     return { allowed: false, reason: "bad-url" }
   }
 
-  const rule = rules.find(
+  const requestRules = rules.filter(
     (candidate) =>
       matchHost(parsed.hostname, [candidate.domain]) &&
       candidate.methods.includes(method) &&
       candidate.paths.some((pattern) => wildcardPathMatches(parsed.pathname, pattern))
   )
+  if (!requestRules.length) return { allowed: false, reason: "host-denied" }
+  const protocol = parsed.protocol.slice(0, -1) as "http" | "https"
+  const protocolRules = requestRules.filter((candidate) =>
+    (candidate.protocols ?? ["https"]).includes(protocol)
+  )
+  if (!protocolRules.length) return { allowed: false, reason: "protocol-denied" }
+  const port = parsed.port ? Number(parsed.port) : protocol === "https" ? 443 : 80
+  const rule = protocolRules.find((candidate) =>
+    (candidate.ports ?? [protocol === "https" ? 443 : 80]).includes(port)
+  )
   return rule
     ? { allowed: true, reason: "host-match", rule }
-    : { allowed: false, reason: "host-denied" }
+    : { allowed: false, reason: "port-denied" }
 }
 
 /** Thrown by {@link assertEgressAllowed} when an egress target is not allowed. */

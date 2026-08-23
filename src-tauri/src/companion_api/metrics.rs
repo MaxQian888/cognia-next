@@ -21,6 +21,12 @@ static AUTH_FAILURES_TOTAL: AtomicU64 = AtomicU64::new(0);
 static DPOP_REJECTIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static DPOP_REPLAYS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static WS_CLIENTS_ACTIVE: AtomicI64 = AtomicI64::new(0);
+static WORKFLOW_APP_REQUESTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static WORKFLOW_APP_ERRORS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static WORKFLOW_APP_QUOTA_REJECTIONS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static WORKFLOW_APP_SSE_ACTIVE: AtomicI64 = AtomicI64::new(0);
+static WORKFLOW_APP_CHALLENGES_ISSUED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static WORKFLOW_APP_CHALLENGES_SOLVED_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 const RPC_DURATION_BUCKETS_SECONDS: [f64; 8] = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 10.0];
 
@@ -260,6 +266,39 @@ pub fn ws_client_disconnected() {
     WS_CLIENTS_ACTIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
+pub fn record_workflow_app_request(success: bool, quota_rejected: bool) {
+    WORKFLOW_APP_REQUESTS_TOTAL.fetch_add(1, Ordering::Relaxed);
+    if !success {
+        WORKFLOW_APP_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
+    if quota_rejected {
+        WORKFLOW_APP_QUOTA_REJECTIONS_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn record_workflow_app_challenge(solved: bool) {
+    if solved {
+        WORKFLOW_APP_CHALLENGES_SOLVED_TOTAL.fetch_add(1, Ordering::Relaxed);
+    } else {
+        WORKFLOW_APP_CHALLENGES_ISSUED_TOTAL.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub struct WorkflowAppSseGuard;
+
+impl WorkflowAppSseGuard {
+    pub fn connect() -> Self {
+        WORKFLOW_APP_SSE_ACTIVE.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for WorkflowAppSseGuard {
+    fn drop(&mut self) {
+        WORKFLOW_APP_SSE_ACTIVE.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 fn push_metric(
     out: &mut String,
     name: &str,
@@ -324,6 +363,48 @@ pub fn render_prometheus() -> String {
         "gauge",
         "Open /ws/events client connections.",
         WS_CLIENTS_ACTIVE.load(Ordering::Relaxed).max(0),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_requests_total",
+        "counter",
+        "Public Workflow App bridge requests.",
+        WORKFLOW_APP_REQUESTS_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_errors_total",
+        "counter",
+        "Public Workflow App bridge requests that returned errors.",
+        WORKFLOW_APP_ERRORS_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_quota_rejections_total",
+        "counter",
+        "Public Workflow App requests rejected by deployment quotas.",
+        WORKFLOW_APP_QUOTA_REJECTIONS_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_sse_active",
+        "gauge",
+        "Open Workflow App SSE streams.",
+        WORKFLOW_APP_SSE_ACTIVE.load(Ordering::Relaxed).max(0),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_challenges_issued_total",
+        "counter",
+        "Adaptive anonymous Workflow App challenges issued.",
+        WORKFLOW_APP_CHALLENGES_ISSUED_TOTAL.load(Ordering::Relaxed),
+    );
+    push_metric(
+        &mut out,
+        "cognia_workflow_app_challenges_solved_total",
+        "counter",
+        "Adaptive anonymous Workflow App challenges solved.",
+        WORKFLOW_APP_CHALLENGES_SOLVED_TOTAL.load(Ordering::Relaxed),
     );
 
     out.push_str("# HELP cognia_rpc_requests_total Canonical RPC requests by plane and outcome.\n");
@@ -560,6 +641,11 @@ mod tests {
         assert!(before.contains("cognia_dpop_replays_total"));
         assert!(before.contains("cognia_dpop_rejections_total"));
         assert!(before.contains("cognia_ws_clients_active"));
+        assert!(before.contains("cognia_workflow_app_requests_total"));
+        assert!(before.contains("cognia_workflow_app_quota_rejections_total"));
+        assert!(before.contains("cognia_workflow_app_sse_active"));
+        assert!(before.contains("cognia_workflow_app_challenges_issued_total"));
+        assert!(before.contains("cognia_workflow_app_challenges_solved_total"));
 
         record_rpc_call(true);
         record_rpc_call(false);
@@ -584,6 +670,19 @@ mod tests {
         assert!(value(&after, "cognia_dpop_replays_total") >= 1);
         assert!(value(&after, "cognia_dpop_rejections_total") >= 1);
         ws_client_disconnected();
+    }
+
+    #[test]
+    fn workflow_app_metrics_track_quota_rejections_and_live_sse_streams() {
+        let before = render_prometheus();
+        record_workflow_app_request(false, true);
+        let guard = WorkflowAppSseGuard::connect();
+        let active = render_prometheus();
+        assert!(active.contains("cognia_workflow_app_sse_active 1"));
+        assert_ne!(before, active);
+        drop(guard);
+        let after = render_prometheus();
+        assert!(after.contains("cognia_workflow_app_sse_active 0"));
     }
 
     #[test]

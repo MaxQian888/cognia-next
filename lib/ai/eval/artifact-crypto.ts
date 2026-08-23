@@ -11,7 +11,7 @@ const PBKDF2_ITERATIONS = 600_000
 const ENVELOPE_AAD = new TextEncoder().encode("cognia-eval-artifact/v1")
 const WEB_DATA_KEY_SECRET = "evaluation-artifact-data-key"
 
-export type AccountArtifactDomain = "evaluation" | "performance" | "work-submission"
+export type AccountArtifactDomain = "evaluation" | "performance" | "work-submission" | "human-input"
 
 /**
  * Per-domain key locations. Kept as literals rather than derived from the
@@ -32,6 +32,11 @@ const ARTIFACT_KEY_LOCATIONS: Record<
     keyringNamespace: "work-submission-artifacts",
     keyIdSuffix: "work-submission-data-key",
     vaultSecretName: "work-submission-artifact-data-key",
+  },
+  "human-input": {
+    keyringNamespace: "human-input-artifacts",
+    keyIdSuffix: "human-input-data-key",
+    vaultSecretName: "human-input-artifact-data-key",
   },
 }
 

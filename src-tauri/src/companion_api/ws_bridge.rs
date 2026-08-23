@@ -866,9 +866,20 @@ fn route_respond(state: &SharedState, command: &str, payload: Value) {
         // bridge peer is the brain process, and letting it name arbitrary
         // topics would let a compromised brain publish e.g.
         // `host-state://action` frames that clients treat as authoritative.
-        // Both allowed topics carry ids only.
+        // Push topics carry ids only; authenticated foreground WS topics may
+        // carry the full approval or remote-step request.
         "companion_event_publish" => {
-            const ALLOWED_TOPICS: &[&str] = &["sync://invalidate", "connector://message-added"];
+            const ALLOWED_TOPICS: &[&str] = &[
+                "sync://invalidate",
+                "connector://message-added",
+                "workflow://run-status",
+                "workflow://run-terminal",
+                "workflow://approval-request",
+                "workflow://approval-resolved",
+                "workflow://approval-pending",
+                "workflow://step-execute",
+                "workflow://step-pending",
+            ];
             let topic = payload.get("topic").and_then(Value::as_str);
             let event = payload.get("event").cloned();
             match (topic, event) {
@@ -1557,8 +1568,8 @@ mod tests {
         assert_eq!(state.sync_bridge.pending_count(), 0);
     }
 
-    /// ADR-0131 — the brain publishes host events through the bridge. Only the
-    /// two id-only relay topics may pass; anything else is dropped, so a
+    /// ADR-0131/0136 — the brain publishes host events through the bridge. Only
+    /// the explicit host-owned relay topics may pass; anything else is dropped, so a
     /// compromised brain cannot forge e.g. `host-state://action` frames that
     /// clients treat as authoritative.
     #[test]
@@ -1588,6 +1599,23 @@ mod tests {
         );
         assert!(seen("sync://invalidate"));
         assert!(seen("connector://message-added"));
+
+        for topic in [
+            "workflow://run-status",
+            "workflow://run-terminal",
+            "workflow://approval-request",
+            "workflow://approval-resolved",
+            "workflow://approval-pending",
+            "workflow://step-execute",
+            "workflow://step-pending",
+        ] {
+            route_respond(
+                &state,
+                "companion_event_publish",
+                json!({ "topic": topic, "event": { "id": "opaque" } }),
+            );
+            assert!(seen(topic), "expected {topic} to be allowed");
+        }
 
         // Not on the allowlist → dropped, not published.
         route_respond(

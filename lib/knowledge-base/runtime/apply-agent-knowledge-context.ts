@@ -48,6 +48,13 @@ export interface ApplyAgentKnowledgeContextInput {
   userMessage: string
   topKPerBase: number
   tokenBudget: number
+  minScore?: number
+  revisionBindings?: Readonly<Record<string, readonly string[]>>
+  /** Optional document-level authorization applied before content enters the prompt. */
+  authorizeChunk?: (input: {
+    chunk: KnowledgeBaseChunk
+    source: KnowledgeBaseSource | undefined
+  }) => boolean
   deps: ApplyAgentKnowledgeContextDeps
 }
 
@@ -137,12 +144,25 @@ export async function applyAgentKnowledgeContext(
     }
   }
 
-  candidates.sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id))
+  const candidateSourceIds = [...new Set(candidates.map((item) => item.chunk.sourceId))]
+  const candidateSources =
+    candidateSourceIds.length > 0 ? await input.deps.loadSources(candidateSourceIds) : []
+  const candidateSourceById = new Map(candidateSources.map((row) => [row.id, row]))
+  const scoredCandidates = candidates.filter(
+    (candidate) => input.minScore === undefined || candidate.score >= input.minScore
+  )
+  const authorizedCandidates = input.authorizeChunk
+    ? scoredCandidates.filter(({ chunk }) =>
+        input.authorizeChunk?.({ chunk, source: candidateSourceById.get(chunk.sourceId) })
+      )
+    : scoredCandidates
+
+  authorizedCandidates.sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id))
   const seenContent = new Set<string>()
   const retrievedChunks: RetrievedAgentKnowledgeChunk[] = []
   let used = 0
   let truncated = false
-  for (const candidate of candidates) {
+  for (const candidate of authorizedCandidates) {
     const key = normalizeForDedupe(candidate.chunk.content)
     if (!key || seenContent.has(key)) {
       truncated = true
@@ -158,10 +178,8 @@ export async function applyAgentKnowledgeContext(
     retrievedChunks.push(candidate)
   }
 
-  const sourceIds = [...new Set(retrievedChunks.map((item) => item.chunk.sourceId))]
-  const sources = sourceIds.length > 0 ? await input.deps.loadSources(sourceIds) : []
   const libraryById = new Map(libraries.map((row) => [row.id, row]))
-  const sourceById = new Map(sources.map((row) => [row.id, row]))
+  const sourceById = candidateSourceById
   const citations = retrievedChunks.map(({ chunk, score }) => {
     const knowledgeBaseName = libraryById.get(chunk.knowledgeBaseId)?.name ?? chunk.knowledgeBaseId
     const sourceTitle = sourceById.get(chunk.sourceId)?.title ?? chunk.sourceId
@@ -225,6 +243,7 @@ export function applyAgentKnowledgeContextFromDb(
           userMessage,
           topK,
           precomputedQueryEmbedding: input.precomputedQueryEmbedding,
+          generationIds: input.revisionBindings?.[knowledgeBaseId],
           deps: input.runtimeDeps,
         }),
       loadLibraries: getKnowledgeBasesByIds,

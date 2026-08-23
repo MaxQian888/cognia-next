@@ -748,6 +748,199 @@ describe("getDb", () => {
     )
   })
 
+  it("v192 opens durable Human Input request and unique responder submission tables", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowHumanInputRequests.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["waitpointId", "status", "runId", "workflowId", "stepId"])
+    )
+    expect(db.workflowHumanInputSubmissions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "requestId",
+        "responderId",
+        "actionId",
+        "submittedAt",
+        "sensitiveExpiresAt",
+      ])
+    )
+    expect(
+      db.workflowHumanInputSubmissions.schema.indexes.some(
+        (index) => index.unique && index.name === "[requestId+responderId]"
+      )
+    ).toBe(true)
+  })
+
+  it("v192 opens durable mobile-step receipts for crash-safe replay guards", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.mobileStepReceipts.schema.primKey.name).toBe("requestId")
+    expect(db.mobileStepReceipts.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["deviceId", "status", "[deviceId+status]", "updatedAt", "expiresAt"])
+    )
+  })
+
+  it("v192 stores encrypted Human Input files with request-scoped retention indexes", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowHumanInputFiles.schema.primKey.name).toBe("id")
+    expect(db.workflowHumanInputFiles.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "requestId",
+        "responderId",
+        "fieldId",
+        "expiresAt",
+        "[requestId+responderId]",
+      ])
+    )
+  })
+
+  it("v192 separates mutable app drafts from immutable account-scoped releases", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowApps.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "workflowId",
+        "slug",
+        "[accountId+slug]",
+        "[accountId+workflowId]",
+        "currentReleaseId",
+        "updatedAt",
+      ])
+    )
+    expect(
+      db.workflowApps.schema.indexes.find((index) => index.name === "[accountId+slug]")?.unique
+    ).toBe(true)
+    expect(db.workflowAppReleases.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "appId",
+        "accountId",
+        "workflowId",
+        "versionId",
+        "sequence",
+        "createdAt",
+        "[appId+sequence]",
+      ])
+    )
+  })
+
+  it("v192 indexes release-pinned Chatflow history for windows, export, and retention", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowConversations.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "appId",
+        "appReleaseId",
+        "versionId",
+        "status",
+        "updatedAt",
+        "expiresAt",
+        "[appId+status]",
+        "[accountId+status]",
+      ])
+    )
+    expect(db.workflowConversationMessages.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "conversationId",
+        "sequence",
+        "role",
+        "runId",
+        "createdAt",
+        "expiresAt",
+        "[conversationId+sequence]",
+      ])
+    )
+    expect(
+      db.workflowConversationMessages.schema.indexes.find(
+        (index) => index.name === "[conversationId+sequence]"
+      )?.unique
+    ).toBe(true)
+  })
+
+  it("v192 deduplicates Chatflow messages by conversation-scoped idempotency key", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    const index = db.workflowConversationMessages.schema.indexes.find(
+      (candidate) => candidate.name === "[conversationId+idempotencyKey]"
+    )
+    expect(index?.unique).toBe(true)
+  })
+
+  it("v192 isolates immutable-release batch jobs into independently recoverable rows", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowBatchJobs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["accountId", "appId", "appReleaseId", "status", "[appId+status]"])
+    )
+    expect(db.workflowBatchRows.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "jobId",
+        "rowNumber",
+        "status",
+        "runId",
+        "[jobId+rowNumber]",
+        "[jobId+status]",
+      ])
+    )
+    expect(
+      db.workflowBatchRows.schema.indexes.find((index) => index.name === "[jobId+rowNumber]")
+        ?.unique
+    ).toBe(true)
+  })
+
+  it("v192 stores knowledge pipeline handoffs as expiring encrypted artifacts", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(192)
+    expect(db.workflowKnowledgeArtifacts.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "accountId",
+        "runId",
+        "stepId",
+        "stage",
+        "expiresAt",
+        "[runId+stage]",
+      ])
+    )
+  })
+
+  fullSchemaIt("v192 backfills both workflow app review defaults in one upgrade pass", async () => {
+    const dbName = "cognia-v191-workflow-app-defaults-test"
+    await Dexie.delete(dbName)
+    const legacy = new Dexie(dbName)
+    legacy.version(191).stores({ workflowApps: "&id" })
+    await legacy.open()
+    await legacy.table("workflowApps").put({ id: "app-1", draft: {} })
+    legacy.close()
+
+    const db = new CogniaDB(dbName)
+    await db.open()
+    await expect(db.workflowApps.get("app-1")).resolves.toMatchObject({
+      draft: {
+        annotationReply: { enabled: false, threshold: 0.85 },
+        reviewGate: {
+          enabled: false,
+          requiredApprovals: 1,
+          reviewerSubjectIds: [],
+          reviewerGroupIds: [],
+          requireNoBlockingComments: true,
+        },
+      },
+    })
+    db.close()
+    await Dexie.delete(dbName)
+  })
+
   it("v178 makes the attachment cache accountable and defaults the media policy", async () => {
     // Three defects are pinned here, because each one was silently wrong:
     // the cache had no access stamp to evict by, deleting a row left its

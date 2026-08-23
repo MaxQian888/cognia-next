@@ -65,7 +65,7 @@ impl A2aTurn {
     pub fn apply(&mut self, action: AcpOutbound) -> A2aStep {
         let mut step = A2aStep::default();
         match action {
-            AcpOutbound::Update(SessionUpdate::AgentMessageChunk { content }) => {
+            AcpOutbound::Update(SessionUpdate::AgentMessageChunk { content, .. }) => {
                 if let Some(text) = content.get("text").and_then(Value::as_str) {
                     self.text.push_str(text);
                 }

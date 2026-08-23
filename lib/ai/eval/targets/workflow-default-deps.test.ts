@@ -1,6 +1,13 @@
 jest.mock("@/lib/db/workflows", () => ({
   getWorkflow: jest.fn(async (id: string) => ({ id, nodes: [], edges: [] })),
 }))
+jest.mock("@/lib/db/workflow-deployments", () => ({
+  getWorkflowVersion: jest.fn(async (id: string) => ({
+    id,
+    workflowId: "wf1",
+    definition: { id: "wf1", name: "Pinned", nodes: [], edges: [] },
+  })),
+}))
 jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
   runWorkflow: jest.fn(async () => ({
     runId: "wfrun_1",
@@ -12,14 +19,18 @@ jest.mock("@/lib/db/agent-traces", () => ({ queryByTrace: jest.fn(async () => []
 
 import { defaultWorkflowTargetDeps } from "./workflow-default-deps"
 import { getWorkflow } from "@/lib/db/workflows"
+import { getWorkflowVersion } from "@/lib/db/workflow-deployments"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { queryByTrace } from "@/lib/db/agent-traces"
 
 const mockGetWorkflow = getWorkflow as jest.Mock
+const mockGetWorkflowVersion = getWorkflowVersion as jest.Mock
 const mockRunWorkflow = runWorkflow as jest.Mock
 const mockQueryByTrace = queryByTrace as jest.Mock
 
 describe("defaultWorkflowTargetDeps.runWorkflow", () => {
+  beforeEach(() => jest.clearAllMocks())
+
   it("loads the workflow, runs it with a manual trigger + threaded trace id", async () => {
     const deps = defaultWorkflowTargetDeps()
     const out = await deps.runWorkflow({
@@ -46,6 +57,22 @@ describe("defaultWorkflowTargetDeps.runWorkflow", () => {
     await expect(
       deps.runWorkflow({ workflowId: "nope", payload: {}, traceId: "tr" })
     ).rejects.toThrow(/not found/)
+  })
+
+  it("loads an exact immutable workflow version when the eval target pins one", async () => {
+    const deps = defaultWorkflowTargetDeps()
+    await deps.runWorkflow({
+      workflowId: "wf1",
+      versionId: "version_1",
+      payload: {},
+      traceId: "tr-version",
+    })
+
+    expect(mockGetWorkflowVersion).toHaveBeenCalledWith("version_1")
+    expect(mockGetWorkflow).not.toHaveBeenCalled()
+    expect(mockRunWorkflow).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workflow: expect.objectContaining({ name: "Pinned" }) })
+    )
   })
 
   it("delegates fetchSpansByTrace to queryByTrace", async () => {

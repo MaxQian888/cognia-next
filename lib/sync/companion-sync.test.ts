@@ -23,6 +23,8 @@ import {
   installForegroundSync,
   installNetworkSync,
   installResumeSync,
+  installWorkflowRunStatusSync,
+  getSyncStateFor,
   runSyncDown,
   snapshotSyncStates,
 } from "./companion-sync"
@@ -71,6 +73,10 @@ describe("SYNC_HANDLER_TABLES registry", () => {
 })
 
 describe("runSyncDown", () => {
+  it("accepts an empty handler set with the production transport default", async () => {
+    await expect(runSyncDown({ handlers: [] })).resolves.toEqual([])
+  })
+
   it("runs every handler and aggregates outcomes", async () => {
     const transport = makeTransport()
     const handlers = [
@@ -104,6 +110,7 @@ describe("runSyncDown", () => {
     // Second invocation should pass `since: 100` to the handler.
     expect(handler.mock.calls[1][1]).toEqual({ since: 100 })
     expect(snapshotSyncStates().characters.since).toBe(200)
+    expect(getSyncStateFor("characters")).toMatchObject({ since: 200, lastError: null })
   })
 
   it("captures lastError on a failing handler without breaking the others", async () => {
@@ -433,6 +440,29 @@ describe("installEventDrivenSync", () => {
     teardown()
   })
 
+  it("does not arm a keyed window while a full invalidation is already pending", async () => {
+    const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
+    let subscriber: ((payload: { table?: "outboundQueue" }) => void) | undefined
+    const transport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as typeof subscriber
+        return jest.fn()
+      }),
+    }
+    const teardown = installEventDrivenSync({
+      transport,
+      handlers: [{ table: "outboundQueue", run: outbound }],
+    })
+
+    subscriber?.({})
+    subscriber?.({ table: "outboundQueue" })
+    await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 150))
+
+    expect(outbound).toHaveBeenCalledTimes(1)
+    teardown()
+  })
+
   it("teardown cancels a pending window so no pull fires after unsubscribe", async () => {
     const outbound = jest.fn().mockResolvedValue(makeOkOutcome("outboundQueue"))
     let subscriber: ((payload: { table?: "outboundQueue" }) => void) | undefined
@@ -449,6 +479,7 @@ describe("installEventDrivenSync", () => {
     })
     subscriber?.({ table: "outboundQueue" })
     teardown()
+    subscriber?.({ table: "outboundQueue" })
     await new Promise((resolve) => setTimeout(resolve, EVENT_SYNC_COALESCE_MS + 100))
     expect(outbound).not.toHaveBeenCalled()
   })
@@ -504,6 +535,132 @@ describe("installEventDrivenSync", () => {
 
     teardown()
     expect(unsub).toHaveBeenCalled()
+  })
+})
+
+describe("installWorkflowRunStatusSync", () => {
+  it("applies live status to an existing mirror and never regresses a terminal run", async () => {
+    await getDb().workflowRuns.clear()
+    await getDb().workflowRuns.put({
+      id: "run-live",
+      workflowId: "workflow-1",
+      status: "pending",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: 1,
+      workflowSnapshot: {
+        id: "workflow-1",
+        name: "Live",
+        nodes: [],
+        edges: [],
+        settings: { concurrency: 1 },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    } as never)
+    let subscriber: ((frame: unknown) => void) | undefined
+    const unsubscribe = jest.fn()
+    const liveTransport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as (frame: unknown) => void
+        return unsubscribe
+      }),
+    }
+    const teardown = installWorkflowRunStatusSync({ transport: liveTransport })
+
+    subscriber?.({
+      runId: "run-live",
+      workflowId: "workflow-1",
+      status: "running",
+      lastStepId: "step-1",
+    })
+    for (let index = 0; index < 20; index += 1) {
+      if ((await getDb().workflowRuns.get("run-live"))?.status === "running") break
+      await Promise.resolve()
+    }
+    await expect(getDb().workflowRuns.get("run-live")).resolves.toMatchObject({
+      status: "running",
+      lastCompletedStepId: "step-1",
+    })
+
+    await getDb().workflowRuns.update("run-live", { status: "succeeded" })
+    subscriber?.({ runId: "run-live", workflowId: "workflow-1", status: "running" })
+    await Promise.resolve()
+    await expect(getDb().workflowRuns.get("run-live")).resolves.toMatchObject({
+      status: "succeeded",
+    })
+
+    teardown()
+    expect(liveTransport.subscribe).toHaveBeenCalledWith(
+      "workflow://run-status",
+      expect.any(Function)
+    )
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it("pulls the workflow run mirror when a live frame arrives before its row", async () => {
+    await getDb().workflowRuns.clear()
+    const workflowRuns = jest.fn().mockResolvedValue(makeOkOutcome("workflowRuns"))
+    let subscriber: ((frame: unknown) => void) | undefined
+    const liveTransport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as (frame: unknown) => void
+        return jest.fn()
+      }),
+    }
+    installWorkflowRunStatusSync({
+      transport: liveTransport,
+      handlers: [{ table: "workflowRuns", run: workflowRuns }],
+    })
+
+    subscriber?.({ runId: "run-new", workflowId: "workflow-1", status: "pending" })
+    for (let index = 0; index < 20 && workflowRuns.mock.calls.length === 0; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    expect(workflowRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects malformed frames and falls back to a pull when local persistence fails", async () => {
+    const workflowRuns = jest.fn().mockResolvedValue(makeOkOutcome("workflowRuns"))
+    let subscriber: ((frame: unknown) => void) | undefined
+    const liveTransport: Transport = {
+      call: jest.fn(),
+      subscribe: jest.fn((_channel, handler) => {
+        subscriber = handler as (frame: unknown) => void
+        return jest.fn()
+      }),
+    }
+    const getSpy = jest.spyOn(getDb().workflowRuns, "get").mockRejectedValueOnce(new Error("disk"))
+    const teardown = installWorkflowRunStatusSync({
+      transport: liveTransport,
+      handlers: [{ table: "workflowRuns", run: workflowRuns }],
+    })
+
+    for (const frame of [
+      null,
+      {},
+      { runId: "", workflowId: "workflow-1", status: "running" },
+      { runId: "run-1", workflowId: "", status: "running" },
+      { runId: "run-1", workflowId: "workflow-1", status: "unknown" },
+    ]) {
+      subscriber?.(frame)
+    }
+    expect(getSpy).not.toHaveBeenCalled()
+
+    subscriber?.({ runId: "run-1", workflowId: "workflow-1", status: "running" })
+    for (let index = 0; index < 20 && workflowRuns.mock.calls.length === 0; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(workflowRuns).toHaveBeenCalledTimes(1)
+
+    teardown()
+    subscriber?.({ runId: "run-2", workflowId: "workflow-1", status: "running" })
+    await Promise.resolve()
+    expect(getSpy).toHaveBeenCalledTimes(1)
+    getSpy.mockRestore()
   })
 })
 

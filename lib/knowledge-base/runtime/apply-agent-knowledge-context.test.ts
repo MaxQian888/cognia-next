@@ -183,6 +183,56 @@ describe("applyAgentKnowledgeContext", () => {
     ])
   })
 
+  it("removes unauthorized chunks before prompt, citation, and budget construction", async () => {
+    const result = await applyAgentKnowledgeContext({
+      knowledgeBaseIds: ["kb-a", "kb-b"],
+      userMessage: "private material",
+      topKPerBase: 2,
+      tokenBudget: 100,
+      authorizeChunk: ({ source }) => source?.id === "source-b",
+      deps: {
+        retrieveLibrary: async ({ knowledgeBaseId }) => ({
+          chunks:
+            knowledgeBaseId === "kb-a"
+              ? [chunk("private", "kb-a", "source-a", "Do not leak", 1, 10)]
+              : [chunk("public", "kb-b", "source-b", "Allowed", 0.5, 6)],
+          degraded: false,
+        }),
+        loadLibraries: async () => libraries,
+        loadSources: async () => sources,
+      },
+    })
+
+    expect(result.retrievedChunks.map((item) => item.chunk.id)).toEqual(["public"])
+    expect(result.citations).toHaveLength(1)
+    expect(result.systemPromptSection).not.toContain("Do not leak")
+    expect(result.budget.used).toBe(6)
+  })
+
+  it("applies a minimum score before budget construction", async () => {
+    const result = await applyAgentKnowledgeContext({
+      knowledgeBaseIds: ["kb-a"],
+      userMessage: "threshold",
+      topKPerBase: 2,
+      tokenBudget: 100,
+      minScore: 0.8,
+      deps: {
+        retrieveLibrary: async () => ({
+          chunks: [
+            chunk("high", "kb-a", "source-a", "Keep", 0.9, 4),
+            chunk("low", "kb-a", "source-a", "Drop", 0.79, 5),
+          ],
+          degraded: false,
+        }),
+        loadLibraries: async () => libraries,
+        loadSources: async () => sources,
+      },
+    })
+
+    expect(result.retrievedChunks.map((item) => item.chunk.id)).toEqual(["high"])
+    expect(result.budget.used).toBe(4)
+  })
+
   it("surfaces embedding incompatibility as an explicit rebuild requirement", async () => {
     const result = await applyAgentKnowledgeContext({
       knowledgeBaseIds: ["kb-a"],

@@ -49,6 +49,9 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "workflow_delete",
   "workflow_schedule_pause",
   "workflow_schedule_resume",
+  // Durable result chunks for Host-issued interactive mobile steps. The same
+  // request/sequence key is replayed until the Host acknowledges the chunk.
+  "workflow_step_result",
   // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
   "twin_source_create",

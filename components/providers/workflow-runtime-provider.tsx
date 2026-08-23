@@ -25,6 +25,9 @@ import {
 } from "@/lib/workflow/triggers/lifecycle"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
 import { loggers } from "@cognia/logging"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
+import { installHostDispatchRuntime } from "@/lib/placement/host-dispatch-runtime"
+import { registerScheduleHandoffDelivery } from "@/lib/workflow/runtime/schedule-handoff-delivery"
 
 const log = loggers.scheduler
 
@@ -57,6 +60,18 @@ export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNo
     let cancelled = false
     const startupController = new AbortController()
     const disposers: Disposer[] = []
+
+    try {
+      const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
+      disposers.push(unregisterScheduleHandoff)
+      const hostDispatchRuntime = installHostDispatchRuntime({ accountId: getActiveAccountId() })
+      disposers.push(() => hostDispatchRuntime.stop())
+      log.info?.("workflow runtime: durable Host dispatch installed")
+    } catch (err) {
+      log.warn?.("workflow runtime: Host dispatch install failed", {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
 
     void (async () => {
       try {

@@ -617,7 +617,10 @@ async fn preflight_is_derived_from_the_registered_target() {
         .await
         .expect("reject preflight parameters");
     assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(json_body(rejected).await["code"], "invalid_preflight_request");
+    assert_eq!(
+        json_body(rejected).await["code"],
+        "invalid_preflight_request"
+    );
 
     let missing = application
         .oneshot(keyed(
@@ -708,10 +711,7 @@ async fn cancel_applies_only_to_a_queued_operation() {
         .await
         .expect("cancel twice");
     assert_eq!(again.status(), StatusCode::CONFLICT);
-    assert_eq!(
-        json_body(again).await["code"],
-        "operation_not_cancellable"
-    );
+    assert_eq!(json_body(again).await["code"], "operation_not_cancellable");
 
     let unknown = application
         .clone()
@@ -825,7 +825,10 @@ async fn operation_history_survives_the_session_that_queued_it() {
         ))
         .await
         .expect("list narrowed operations");
-    assert_eq!(json_body(narrowed).await["items"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        json_body(narrowed).await["items"].as_array().unwrap().len(),
+        0
+    );
 
     let limited = application
         .clone()
@@ -837,7 +840,10 @@ async fn operation_history_survives_the_session_that_queued_it() {
         ))
         .await
         .expect("list limited operations");
-    assert_eq!(json_body(limited).await["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json_body(limited).await["items"].as_array().unwrap().len(),
+        1
+    );
 
     // Another tenant's history is invisible.
     let cross_tenant = application
@@ -850,7 +856,10 @@ async fn operation_history_survives_the_session_that_queued_it() {
         .await
         .expect("list across tenants");
     assert_eq!(
-        json_body(cross_tenant).await["items"].as_array().unwrap().len(),
+        json_body(cross_tenant).await["items"]
+            .as_array()
+            .unwrap()
+            .len(),
         0
     );
 }

@@ -83,4 +83,16 @@ describe("workflow deployments", () => {
       undefined
     )
   })
+
+  it("scopes workflow pointer resolution to the requested account", async () => {
+    const workflow = await createWorkflow({ name: "Account scoped", nodes: [], edges: [] })
+    await publishWorkflow(workflow.id, 10)
+
+    await expect(
+      resolveWorkflowDeployment(workflow.id, "production", {}, "other-account")
+    ).resolves.toBeUndefined()
+    await expect(resolveWorkflowDeployment(workflow.id)).resolves.toMatchObject({
+      workflow: { id: workflow.id },
+    })
+  })
 })

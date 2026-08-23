@@ -83,9 +83,10 @@ async function hydrateWorkflowDeployment(
 export async function resolveWorkflowDeployment(
   workflowId: string,
   environment = "production",
-  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {}
+  provenance: { entrypoint?: WorkflowEntrypoint; caller?: string; idempotencyKey?: string } = {},
+  accountId = getActiveAccountId()
 ): Promise<ResolvedWorkflowDeployment | undefined> {
-  const deployment = await getWorkflowDeployment(workflowId, environment)
+  const deployment = await getWorkflowDeployment(workflowId, environment, accountId)
   if (!deployment || deployment.status !== "active") return undefined
   return hydrateWorkflowDeployment(deployment, deployment.versionId, provenance, {
     entrypoint: "trigger",

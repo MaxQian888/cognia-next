@@ -100,6 +100,51 @@ describe("workflow execution bridge", () => {
     )
   })
 
+  it("projects terminal workflow history in durable sequence order", async () => {
+    const row = workflowRun({ status: "completed", endedAt: 5 })
+    const events = [
+      {
+        id: "a-terminal-sorts-first-by-primary-key",
+        runId: row.id,
+        sequence: 3,
+        ts: 5,
+        type: "run_completed" as const,
+      },
+      {
+        id: "z-step-started",
+        runId: row.id,
+        sequence: 1,
+        ts: 3,
+        type: "step_started" as const,
+        stepId: "step-1",
+      },
+      {
+        id: "y-step-completed",
+        runId: row.id,
+        sequence: 2,
+        ts: 4,
+        type: "step_completed" as const,
+        stepId: "step-1",
+      },
+    ]
+
+    await syncWorkflowExecutionRun(row, events, [])
+    await expect(syncWorkflowExecutionRun(row, events, [])).resolves.toBeUndefined()
+
+    const runId = "execution:workflow:wf-run-1"
+    const run = await getDb().executionRuns.get(runId)
+    expect(run?.status).toBe("completed")
+    const projected = await getDb()
+      .executionRunEvents.where("[runId+seq]")
+      .between([runId, 0], [runId, Number.POSITIVE_INFINITY])
+      .toArray()
+    expect(projected.slice(-3).map((event) => event.sourceEventId)).toEqual([
+      "z-step-started",
+      "y-step-completed",
+      "a-terminal-sorts-first-by-primary-key",
+    ])
+  })
+
   it.each([
     ["trigger.manual", "workflow"],
     ["trigger.team", "team"],

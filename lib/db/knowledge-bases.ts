@@ -82,6 +82,7 @@ export type KnowledgeBaseSourceDraft = Pick<
       | "status"
       | "chunkCount"
       | "errorCode"
+      | "acl"
     >
   > & { now?: number }
 
@@ -106,6 +107,7 @@ export async function createKnowledgeBaseSource(
     status: draft.status ?? "pending",
     chunkCount: draft.chunkCount ?? 0,
     errorCode: cleanOptionalText(draft.errorCode),
+    acl: draft.acl,
     createdAt: now,
     updatedAt: now,
   }
@@ -134,7 +136,7 @@ export async function getKnowledgeBaseSourcesByIds(
 
 export async function updateKnowledgeBaseSource(
   id: string,
-  patch: Partial<Pick<KnowledgeBaseSource, "status" | "chunkCount" | "errorCode">>,
+  patch: Partial<Pick<KnowledgeBaseSource, "status" | "chunkCount" | "errorCode" | "acl">>,
   now = Date.now()
 ): Promise<KnowledgeBaseSource | undefined> {
   await getDb().knowledgeBaseSources.update(id, {
@@ -188,6 +190,32 @@ export async function listKnowledgeBaseChunks(
   knowledgeBaseId: string
 ): Promise<KnowledgeBaseChunk[]> {
   return getDb().knowledgeBaseChunks.where("knowledgeBaseId").equals(knowledgeBaseId).toArray()
+}
+
+/** Resolve either an explicit immutable revision set or each source's current channel. */
+export async function listKnowledgeBaseRevisionChunks(
+  knowledgeBaseId: string,
+  generationIds?: readonly string[]
+): Promise<KnowledgeBaseChunk[]> {
+  const rows = await listKnowledgeBaseChunks(knowledgeBaseId)
+  if (generationIds) {
+    const allowed = new Set(generationIds)
+    return rows.filter((row) => row.generationId && allowed.has(row.generationId))
+  }
+  const sourceIds = [...new Set(rows.map((row) => row.sourceId))]
+  const db = getDb()
+  const pointers = await db.retrievalActivePointers.bulkGet(
+    sourceIds.map((sourceId) => `knowledge_base:${knowledgeBaseId}:source:${sourceId}`)
+  )
+  const activeBySourceId = new Map(
+    pointers.flatMap((pointer, index) =>
+      pointer ? ([[sourceIds[index], pointer.generationId]] as const) : []
+    )
+  )
+  return rows.filter((row) => {
+    const active = activeBySourceId.get(row.sourceId)
+    return active ? row.generationId === active : true
+  })
 }
 
 export async function listKnowledgeBaseVectorCollections(

@@ -19,12 +19,14 @@ export interface RunGenerationSwapInput<T> {
   corpusId: string
   domain: RetrievalDomain
   profileFingerprint: string
-  collection: string
+  collection: string | ((generationId: string) => string)
   store: IVectorStore
   contentHash: string
   expectedCount: number
   expectedDimension?: number
   oldVectors: Array<{ collection: string; id: string }>
+  /** Prepare a generation-specific collection after the immutable id exists. */
+  prepare?: (collection: string, generationId: string) => Promise<void>
   now?: number
   build: (generationId: string) => GenerationStage<T>
   /** Must mutate domain rows and call `activate` in the same durable transaction. */
@@ -51,13 +53,18 @@ export async function runGenerationSwap<T>(
     profileFingerprint: input.profileFingerprint,
     createdAt: now,
   })
-
-  const stage = input.build(generationId)
-  const vectorDocIds = stage.documents.map((document) => document.id)
+  const collection =
+    typeof input.collection === "function" ? input.collection(generationId) : input.collection
+  let vectorDocIds: string[] = []
+  let value!: T
   let activated = false
   try {
+    await input.prepare?.(collection, generationId)
+    const stage = input.build(generationId)
+    value = stage.value
+    vectorDocIds = stage.documents.map((document) => document.id)
     if (stage.documents.length > 0) {
-      await input.store.addDocuments(input.collection, stage.documents)
+      await input.store.addDocuments(collection, stage.documents)
     }
     const dimensions = new Set(
       stage.documents
@@ -88,7 +95,7 @@ export async function runGenerationSwap<T>(
         () => undefined
       )
       if (vectorDocIds.length > 0 && typeof input.store.deleteDocuments === "function") {
-        await input.store.deleteDocuments(input.collection, vectorDocIds).catch(() => undefined)
+        await input.store.deleteDocuments(collection, vectorDocIds).catch(() => undefined)
       }
     }
     throw error
@@ -111,5 +118,5 @@ export async function runGenerationSwap<T>(
     }
   }
 
-  return { value: stage.value, generationId, vectorDocIds, cleanupPending }
+  return { value, generationId, vectorDocIds, cleanupPending }
 }

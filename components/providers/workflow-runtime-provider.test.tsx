@@ -14,10 +14,25 @@ const unsyncWorkflowTriggersMock = jest.fn()
 const resumeInFlightRunsMock = jest.fn()
 const initPluginTriggerLifecycleMock = jest.fn()
 const disposePluginTriggerLifecycleMock = jest.fn(async () => undefined)
+const registerScheduleHandoffDeliveryMock = jest.fn()
+const installHostDispatchRuntimeMock = jest.fn()
+const stopHostDispatchRuntimeMock = jest.fn(async () => undefined)
 
 jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
   __esModule: true,
   installTriggerBridge: (...args: unknown[]) => installTriggerBridgeMock(...args),
+}))
+
+jest.mock("@/lib/workflow/runtime/schedule-handoff-delivery", () => ({
+  registerScheduleHandoffDelivery: () => registerScheduleHandoffDeliveryMock(),
+}))
+
+jest.mock("@/lib/placement/host-dispatch-runtime", () => ({
+  installHostDispatchRuntime: (...args: unknown[]) => installHostDispatchRuntimeMock(...args),
+}))
+
+jest.mock("@/lib/accounts/active-account-id", () => ({
+  getActiveAccountId: () => "account-1",
 }))
 
 jest.mock("@/lib/db/workflows", () => ({
@@ -57,6 +72,12 @@ beforeEach(() => {
   resumeInFlightRunsMock.mockReset()
   initPluginTriggerLifecycleMock.mockClear()
   disposePluginTriggerLifecycleMock.mockClear()
+  registerScheduleHandoffDeliveryMock.mockReset().mockReturnValue(jest.fn())
+  stopHostDispatchRuntimeMock.mockClear()
+  installHostDispatchRuntimeMock.mockReset().mockReturnValue({
+    kick: jest.fn(async () => undefined),
+    stop: stopHostDispatchRuntimeMock,
+  })
   // Default: nothing in-flight. Individual tests can override.
   resumeInFlightRunsMock.mockResolvedValue({ attempted: 0, succeeded: 0, failed: 0, skipped: 0 })
 })
@@ -78,6 +99,8 @@ describe("WorkflowRuntimeProvider", () => {
     )
 
     await waitFor(() => expect(installTriggerBridgeMock).toHaveBeenCalledTimes(1))
+    expect(registerScheduleHandoffDeliveryMock).toHaveBeenCalledTimes(1)
+    expect(installHostDispatchRuntimeMock).toHaveBeenCalledWith({ accountId: "account-1" })
     await waitFor(() => expect(listWorkflowsMock).toHaveBeenCalledTimes(1))
     expect(resolveWorkflowDeploymentMock).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(2))
@@ -91,6 +114,7 @@ describe("WorkflowRuntimeProvider", () => {
 
     unmount()
     expect(disposer).toHaveBeenCalledTimes(1)
+    expect(stopHostDispatchRuntimeMock).toHaveBeenCalledTimes(1)
     expect(disposePluginTriggerLifecycleMock).toHaveBeenCalledTimes(1)
   })
 

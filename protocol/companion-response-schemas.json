@@ -2990,6 +2990,139 @@
         }
       },
       "additionalProperties": false
+    },
+    "WorkflowHumanInputList": {
+      "type": "object",
+      "required": ["requests"],
+      "properties": {
+        "requests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/WorkflowHumanInputRequest" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowHumanInputRequest": {
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "runId",
+        "workflowId",
+        "stepId",
+        "title",
+        "fields",
+        "actions",
+        "completionPolicy",
+        "createdAt",
+        "expiresAt"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "const": "pending" },
+        "runId": { "type": "string" },
+        "workflowId": { "type": "string" },
+        "stepId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "type", "label"],
+            "properties": {
+              "id": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "short-text",
+                  "long-text",
+                  "number",
+                  "boolean",
+                  "single-select",
+                  "multi-select",
+                  "file",
+                  "file-list"
+                ]
+              },
+              "label": { "type": "string" },
+              "description": { "type": "string" },
+              "required": { "type": "boolean" },
+              "sensitive": { "type": "boolean" },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["value", "label"],
+                  "properties": { "value": { "type": "string" }, "label": { "type": "string" } },
+                  "additionalProperties": false
+                }
+              },
+              "min": { "type": "number" },
+              "max": { "type": "number" },
+              "accept": { "type": "array", "items": { "type": "string" } },
+              "maxFiles": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "tone": { "type": "string", "enum": ["primary", "secondary", "destructive"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "completionPolicy": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["mode"],
+              "properties": { "mode": { "enum": ["any", "all"] } },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["mode", "count"],
+              "properties": {
+                "mode": { "const": "quorum" },
+                "count": { "type": "integer", "minimum": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "createdAt": { "type": "integer" },
+        "expiresAt": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "WorkflowHumanInputSubmitResult": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "completed": { "type": "boolean" },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "not-found",
+            "not-pending",
+            "not-assigned",
+            "already-submitted",
+            "invalid-action",
+            "invalid-values"
+          ]
+        },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
     }
   },
   "commands": {
@@ -4649,6 +4782,12 @@
     "workflow_approval_respond": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "workflow_human_input_list": {
+      "$ref": "#/$defs/WorkflowHumanInputList"
+    },
+    "workflow_human_input_submit": {
+      "$ref": "#/$defs/WorkflowHumanInputSubmitResult"
+    },
     "workflow_cancel_run": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -4657,6 +4796,46 @@
     },
     "workflow_delete": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "workflow_handoff_create": {
+      "type": "object",
+      "required": ["runId", "status"],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "workflow_placement_probe": {
+      "type": "object",
+      "required": ["compatible", "activeUnits", "maxUnits"],
+      "properties": {
+        "compatible": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string"
+        },
+        "deploymentDigest": {
+          "type": "string"
+        },
+        "activeUnits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxUnits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "workflow_run_list": {
       "$ref": "#/$defs/LegacyList"

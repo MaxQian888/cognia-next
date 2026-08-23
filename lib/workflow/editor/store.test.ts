@@ -391,6 +391,42 @@ describe("editor store — loadWorkflow", () => {
   })
 })
 
+describe("editor store — external workflow transaction", () => {
+  it("applies a merged review snapshot as one undoable graph and envelope change", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const merged: VisualWorkflow = {
+      ...emptyWorkflow(),
+      name: "Reviewed",
+      nodes: [
+        {
+          id: "output",
+          type: "io.output",
+          position: { x: 10, y: 20 },
+          data: { label: "Output", typeVersion: 1, params: {} },
+        },
+      ],
+    }
+
+    expect(useStore.getState().applyWorkflowTransaction(merged)).toBe(true)
+    expect(useStore.getState().toWorkflow()).toMatchObject({ name: "Reviewed" })
+    expect(useStore.getState().nodes).toHaveLength(1)
+    expect(useStore.getState().dirty).toBe(true)
+
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().toWorkflow()).toMatchObject({ name: "Empty" })
+    expect(useStore.getState().nodes).toHaveLength(0)
+  })
+
+  it("rejects a snapshot for another workflow without creating history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+
+    expect(
+      useStore.getState().applyWorkflowTransaction({ ...emptyWorkflow(), id: "another" })
+    ).toBe(false)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(0)
+  })
+})
+
 describe("editor store — performance tier", () => {
   it("defaults to 'auto'", () => {
     const useStore = createEditorStore(emptyWorkflow())
@@ -911,6 +947,33 @@ describe("editor store — productivity actions", () => {
       )
       expect(useStore.getState().nodes).toEqual([])
       expect(useStore.getState().edges).toEqual([])
+    })
+
+    it("upgrades a pinned instance in one undoable explicit mutation", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const inserted = useStore
+        .getState()
+        .insertNodeGroup(nodeGroupDefinition(), { x: 500, y: 400 })
+      useStore.temporal.getState().clear()
+      const next = nodeGroupDefinition()
+      next.version = "2.0.0"
+      next.revision = 2
+      next.contentHash = "b".repeat(64)
+      next.payload.nodes.push({
+        id: "archive",
+        type: "data.transform",
+        typeVersion: 1,
+        position: { x: 600, y: 0 },
+        data: { label: "Archive", params: {} },
+      })
+
+      const plan = useStore.getState().upgradeNodeGroup(inserted.groupId, next)
+
+      expect(plan).toMatchObject({ compatible: true, addedNodeIds: ["archive"] })
+      expect(useStore.getState().nodes).toHaveLength(4)
+      expect(useStore.temporal.getState().pastStates).toHaveLength(1)
+      useStore.temporal.getState().undo()
+      expect(useStore.getState().nodes).toHaveLength(3)
     })
   })
 

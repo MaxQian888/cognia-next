@@ -66,6 +66,7 @@ export interface PlacementCandidate {
  */
 export type PlacementReason =
   | "offline"
+  | "deployment_mismatch"
   | "capability_mismatch"
   | "sandbox_mismatch"
   | "workspace_missing"

@@ -82,6 +82,7 @@ const MANUAL_ENABLE_ONLY_BUILTINS = new Set(["github-delivery"])
 import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
+import { collectPluginRuntimeProfileDiagnostics } from "@/lib/plugin/core/runtime-compatibility"
 import {
   applyPluginTables,
   removePluginTables,
@@ -1653,78 +1654,7 @@ export class PluginManager {
   private collectRuntimeProfileDiagnostics(
     manifest: PluginManifest
   ): ExtensionCompatibilityDiagnostic[] {
-    // The Tauri (desktop) profile trusts every built-in. Other profiles gate
-    // against their declared surface, with compatibility fallbacks for older
-    // manifests that predate mobile/headless metadata.
-    if (this.runtimeProfile === "tauri") {
-      return []
-    }
-    const surface = this.runtimeProfile
-
-    const compat = manifest.runtimeCompatibility
-    let compatibility = compat?.[surface]
-    let fallbackSurface: "browser" | "tauri" | undefined
-
-    // Mobile is a browser-class runtime. Headless frontend modules without a
-    // dedicated target inherit browser compatibility, while native/Node
-    // plugins inherit Tauri compatibility because their existing Rust/Node
-    // host contract is the one cognia-server exposes.
-    if (!compatibility && surface === "mobile") {
-      fallbackSurface = "browser"
-      compatibility = compat?.browser
-    } else if (!compatibility && surface === "headless") {
-      const nativeOrNodeTarget =
-        manifest.type !== "frontend" ||
-        Boolean(
-          manifest.engines?.node || manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
-        )
-      fallbackSurface = nativeOrNodeTarget ? "tauri" : "browser"
-      compatibility = compat?.[fallbackSurface]
-    }
-    const fallbackNote = fallbackSurface ? ` (inherited from ${fallbackSurface} compatibility)` : ""
-
-    if (!compatibility) {
-      return [
-        {
-          code: `runtime.${surface}.unsupported`,
-          severity: "error",
-          message: `Plugin ${manifest.id} does not declare ${surface} runtime compatibility.`,
-          hint: `Add ${surface} runtime compatibility metadata before enabling this plugin in ${surface} mode.`,
-        },
-      ]
-    }
-
-    if (compatibility.availability === "supported") {
-      return []
-    }
-
-    if (compatibility.availability === "degraded") {
-      return [
-        {
-          code: `runtime.${surface}.degraded`,
-          severity: "warning",
-          message:
-            compatibility.reason ||
-            `Plugin ${manifest.id} is only partially supported in ${surface} runtime${fallbackNote}.`,
-          hint: compatibility.entrypoint
-            ? `${surface} bundle entrypoint: ${compatibility.entrypoint}`
-            : undefined,
-        },
-      ]
-    }
-
-    return [
-      {
-        code: `runtime.${surface}.unsupported`,
-        severity: "error",
-        message:
-          compatibility.reason ||
-          `Plugin ${manifest.id} is blocked in ${surface} runtime${fallbackNote}.`,
-        hint: compatibility.entrypoint
-          ? `Declared ${surface} entrypoint: ${compatibility.entrypoint}`
-          : undefined,
-      },
-    ]
+    return collectPluginRuntimeProfileDiagnostics(manifest, this.runtimeProfile)
   }
 
   /**

@@ -324,6 +324,25 @@ test("removes released pairing and remote-control components from the public con
   )
 })
 
+test("documents workflow application routes with their application-scoped bearer authority", () => {
+  const { desiredPublicSpec } = inspectCommittedContract()
+
+  assert.deepEqual(desiredPublicSpec.paths["/api/portal/bootstrap"].get.security, [])
+  assert.deepEqual(desiredPublicSpec.paths["/api/apps/{app_slug}/embed-token"].get.security, [])
+  assert.deepEqual(desiredPublicSpec.paths["/api/apps/{app_slug}/runs"].post.security, [
+    { workflowAppBearer: [] },
+  ])
+  assert.deepEqual(desiredPublicSpec.paths["/v1/workflows/run"].post.security, [
+    { workflowAppBearer: [] },
+  ])
+  assert.deepEqual(desiredPublicSpec.components.securitySchemes.workflowAppBearer, {
+    type: "http",
+    scheme: "bearer",
+    description:
+      "Published workflow application session or application API key, depending on the endpoint.",
+  })
+})
+
 test("browser socket tickets require a session-bound canonical request", () => {
   const { desiredPublicSpec } = inspectCommittedContract()
   const schema = desiredPublicSpec.components.schemas.SocketTicketRequest
@@ -453,9 +472,11 @@ test("classifies every client-only command outside the Headless surface", () => 
     [...headlessDispositions.values()].every((entry) =>
       [
         "local-only",
+        "brain-owned-bridged",
         "covered-by-headless",
         "runtime-internal",
         "separate-design-required",
+        "unexposed-gap",
         "in-progress",
       ].includes(entry.disposition),
     ),

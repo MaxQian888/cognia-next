@@ -14,6 +14,7 @@
  * - This file: createRAGTools (advanced features, in-memory pipeline)
  */
 
+import type { Tool } from "ai"
 import { z } from "zod"
 import { createTool, combineTools } from "./tool-utils"
 import type { RAGPipeline } from "./rag-pipeline"
@@ -195,7 +196,7 @@ export function createSimpleRetrievalTool(
   findRelevantContent: (
     query: string
   ) => Promise<Array<{ content: string; similarity: number; source?: string }>>
-) {
+): Tool<z.infer<typeof simpleQuestionSchema>, string> {
   return createTool({
     description: "Search the knowledge base for relevant information to answer questions.",
     inputSchema: simpleQuestionSchema,
@@ -224,7 +225,13 @@ export function createSimpleRetrievalTool(
 /**
  * Create knowledge base management tools
  */
-export function createKnowledgeBaseManagementTools(pipeline: RAGPipeline, collectionName: string) {
+export function createKnowledgeBaseManagementTools(
+  pipeline: RAGPipeline,
+  collectionName: string
+): {
+  getKnowledgeBaseStats: Tool<z.infer<typeof emptySchema>, string>
+  clearKnowledgeBase: Tool<z.infer<typeof confirmSchema>, string>
+} {
   const statsTool = createTool({
     description: "Get statistics about the knowledge base",
     inputSchema: emptySchema,

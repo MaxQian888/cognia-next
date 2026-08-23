@@ -26,6 +26,7 @@ import { pruneExpiredWorkSubmissionPayloads } from "@/lib/db/work-submissions"
 import { recoverEvalQueueOnStartup } from "@/lib/ai/eval/recovery"
 import { getSettings, DEFAULTS } from "@/lib/db/settings"
 import { centralRetentionExecutorIds } from "@/lib/data-governance/table-catalog"
+import { pruneExpiredWorkflowAppData } from "@/lib/workflow/apps/retention-service"
 
 const MS_PER_DAY = 86_400_000
 /** Re-sweep cadence — once per day matches the resolution of `traceRetentionDays`. */
@@ -68,6 +69,10 @@ const RETENTION_EXECUTORS: Record<string, Omit<RetentionTarget, "id">> = {
   workSubmissions: {
     policy: "row-expiry",
     prune: () => pruneExpiredWorkSubmissionPayloads(Date.now()),
+  },
+  workflowAppData: {
+    policy: "row-expiry",
+    prune: () => pruneExpiredWorkflowAppData(Date.now()),
   },
 }
 

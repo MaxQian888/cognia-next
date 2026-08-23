@@ -18,12 +18,14 @@ import { newEvalTraceId } from "./span-scope"
 export interface WorkflowTargetConfig {
   label: string
   workflowId: string
+  versionId?: string
   timeoutMs?: number
 }
 
 export interface WorkflowTargetDeps {
   runWorkflow(input: {
     workflowId: string
+    versionId?: string
     payload: Record<string, unknown>
     traceId: string
     timeoutMs?: number
@@ -51,6 +53,7 @@ export function createWorkflowTarget(
           : { input: evalCase.input }
       const { output } = await deps.runWorkflow({
         workflowId: config.workflowId,
+        ...(config.versionId ? { versionId: config.versionId } : {}),
         payload,
         traceId,
         ...(config.timeoutMs ? { timeoutMs: config.timeoutMs } : {}),

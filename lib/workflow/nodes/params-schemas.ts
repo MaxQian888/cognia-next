@@ -816,6 +816,45 @@ const TwinIngestParams = z
     { message: "twinIngestSourceRequired", path: ["content"] }
   )
 
+const KnowledgeSourceParams = z
+  .object({
+    knowledgeBaseId: requiredString("required"),
+    sourceMode: z.enum(["text", "web", "existing"]),
+    sourceId: optionalString,
+    sourceKey: optionalString,
+    title: optionalString,
+    format: optionalString,
+    content: optionalString,
+    url: z.string().refine(isHttpUrlOrExpression, "invalidUrl").optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.sourceMode === "existing" && !value.sourceId?.trim()) {
+      context.addIssue({ code: "custom", message: "required", path: ["sourceId"] })
+    }
+    if (value.sourceMode === "text" && !value.content?.trim()) {
+      context.addIssue({ code: "custom", message: "required", path: ["content"] })
+    }
+    if (value.sourceMode === "web" && !value.url?.trim()) {
+      context.addIssue({ code: "custom", message: "required", path: ["url"] })
+    }
+  })
+
+const KnowledgeArtifactParams = z.object({ artifactId: requiredString("required") })
+const KnowledgeParseParams = z.object({ sourceId: requiredString("required") })
+const KnowledgeRetrieveParams = z.object({
+  knowledgeBaseIds: z.array(requiredString("required")).min(1).max(32),
+  query: requiredString("required"),
+  topKPerBase: numberRange(1, 50).optional(),
+  scoreThreshold: z.number().min(0).max(1).optional(),
+  tokenBudget: numberRange(1, 100_000).optional(),
+  revisionBindings: z
+    .record(
+      z.string(),
+      z.union([requiredString("required"), z.array(requiredString("required")).min(1)])
+    )
+    .optional(),
+})
+
 const ConnectorSendParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: requiredString("required"),
@@ -916,6 +955,102 @@ const ApprovalRequestParams = z.object({
   /** What a timeout means: route down "rejected" (default) or fail the step. */
   onTimeout: z.enum(["reject", "fail"]).optional(),
 })
+
+const HumanInputFieldOptionParams = z.object({
+  value: requiredString("required"),
+  label: requiredString("required"),
+})
+
+const HumanInputFieldParams = z
+  .object({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+    type: z.enum([
+      "short-text",
+      "long-text",
+      "number",
+      "boolean",
+      "single-select",
+      "multi-select",
+      "file",
+      "file-list",
+    ]),
+    label: requiredString("required"),
+    description: optionalString,
+    required: z.boolean().optional(),
+    sensitive: z.boolean().optional(),
+    options: z.array(HumanInputFieldOptionParams).optional(),
+    min: z.number().finite().optional(),
+    max: z.number().finite().optional(),
+    accept: z.array(z.string().trim().min(1)).optional(),
+    maxFiles: numberRange(1, 100).optional(),
+  })
+  .superRefine((field, ctx) => {
+    if (
+      (field.type === "single-select" || field.type === "multi-select") &&
+      (!field.options || field.options.length === 0)
+    ) {
+      ctx.addIssue({ code: "custom", message: "optionsRequired", path: ["options"] })
+    }
+    if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
+      ctx.addIssue({ code: "custom", message: "invalidRange", path: ["max"] })
+    }
+  })
+
+const HumanInputActionParams = z.object({
+  id: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[A-Za-z][A-Za-z0-9_-]*$/),
+  label: requiredString("required"),
+  tone: z.enum(["primary", "secondary", "destructive"]).optional(),
+})
+
+const HumanInputAssigneeParams = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("initiator") }),
+  z.object({ kind: z.literal("member"), id: requiredString("required") }),
+  z.object({ kind: z.literal("group"), id: requiredString("required") }),
+])
+
+const HumanInputRequestParams = z
+  .object({
+    title: requiredString("required"),
+    message: optionalString,
+    // Action-only forms are valid (for example, an acknowledge/reject gate).
+    // Dify 1.16.1 also persists Human Input nodes with an empty inputs list.
+    fields: z.array(HumanInputFieldParams),
+    actions: z.array(HumanInputActionParams).min(1),
+    assignees: z.array(HumanInputAssigneeParams).min(1),
+    completionPolicy: z.discriminatedUnion("mode", [
+      z.object({ mode: z.literal("any") }),
+      z.object({ mode: z.literal("all") }),
+      z.object({ mode: z.literal("quorum"), count: numberRange(1, 10_000) }),
+    ]),
+    /** Default 3 days; authored range is one minute through thirty days. */
+    timeoutMs: numberRange(60_000, 30 * 24 * 60 * 60 * 1000).optional(),
+    /** Encrypted sensitive values can be destroyed earlier than request metadata. */
+    sensitiveRetentionDays: numberRange(1, 30).optional(),
+  })
+  .superRefine((params, ctx) => {
+    const fieldIds = params.fields.map((field) => field.id)
+    if (new Set(fieldIds).size !== fieldIds.length) {
+      ctx.addIssue({ code: "custom", message: "duplicateFieldId", path: ["fields"] })
+    }
+    const actionIds = params.actions.map((action) => action.id)
+    if (new Set(actionIds).size !== actionIds.length || actionIds.includes("timeout")) {
+      ctx.addIssue({ code: "custom", message: "invalidActionId", path: ["actions"] })
+    }
+    if (
+      params.completionPolicy.mode === "quorum" &&
+      params.completionPolicy.count > params.assignees.length
+    ) {
+      ctx.addIssue({ code: "custom", message: "quorumTooLarge", path: ["completionPolicy"] })
+    }
+  })
 
 /** Shared remote-device fields (ADR 0061 P3): pin a device, bound the wait. */
 const mobileStepBase = {
@@ -1637,6 +1772,38 @@ const OutputParams = z.object({
   onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
+const AnswerParams = z
+  .object({
+    text: z.string().optional(),
+    content: z.unknown().optional(),
+    citations: z
+      .array(
+        z.object({
+          sourceId: requiredString("required"),
+          documentId: requiredString("required"),
+          revisionId: requiredString("required"),
+          chunkId: requiredString("required"),
+          label: optionalString,
+          location: optionalString,
+          previewUrl: optionalString,
+        })
+      )
+      .optional(),
+    files: z
+      .array(
+        z.object({
+          ref: requiredString("required"),
+          name: optionalString,
+          mediaType: optionalString,
+        })
+      )
+      .optional(),
+    suggestions: z.array(z.string()).optional(),
+  })
+  .refine((value) => value.text !== undefined || value.content !== undefined, {
+    message: "text or content is required",
+  })
+
 const CatchParams = z.object({
   /**
    * Recovery scope. "workflow" (default): runs on ANY terminal run failure.
@@ -1753,6 +1920,14 @@ export const PARAMS_SCHEMAS = {
   // Actions: twins
   "action.twin.rag": TwinRagParams,
   "action.twin.ingest": TwinIngestParams,
+  "knowledge.source": KnowledgeSourceParams,
+  "knowledge.parse": KnowledgeParseParams,
+  "knowledge.transform": KnowledgeArtifactParams,
+  "knowledge.chunk": KnowledgeArtifactParams,
+  "knowledge.embed": KnowledgeArtifactParams,
+  "knowledge.index": KnowledgeArtifactParams,
+  "knowledge.publish": KnowledgeArtifactParams,
+  "knowledge.retrieve": KnowledgeRetrieveParams,
   // Actions: memory
   "action.memory.recall": MemoryRecallParams,
   "action.memory.store": MemoryStoreParams,
@@ -1765,6 +1940,7 @@ export const PARAMS_SCHEMAS = {
   "action.connector.waitReply": ConnectorWaitReplyParams,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestParams,
+  "action.humanInput.request": HumanInputRequestParams,
   // Actions: remote device steps (ADR 0061 P3)
   "action.mobile.camera": MobileCameraParams,
   "action.mobile.scanBarcode": MobileScanBarcodeParams,
@@ -1820,6 +1996,7 @@ export const PARAMS_SCHEMAS = {
   "io.http": HttpRequestParams,
   "io.webhook.respond": WebhookRespondParams,
   "io.output": OutputParams,
+  "io.answer": AnswerParams,
   "io.webClone": WebCloneParams,
   // Annotation
   "annotation.note": NoteParams,

@@ -1,5 +1,5 @@
 /**
- * Headless smoke for the boot-initializer batch (ADR-0059 T-A7..A9): every
+ * Canonical headless smoke for the boot-initializer batch (ADR-0059 T-A7..A9): every
  * registered runtime must start (and tear down) in a pure-Node process with
  * the fake-indexeddb shim — no DOM, no Tauri.
  *
@@ -16,13 +16,19 @@ import {
 } from "@/lib/workflow/triggers/registry"
 import type { PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { createWorkflow } from "@/lib/db/workflows"
-import { __resetDbForTesting, whenSeeded } from "@/lib/db/schema"
+import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+import {
+  claimRunLease,
+  startLeaseHeartbeat,
+  stopLeaseHeartbeat,
+} from "@/lib/workflow/runtime/run-lease"
 import { _waitForPluginTriggerReconciliationForTest } from "@/lib/workflow/triggers/lifecycle"
 
 const EXPECTED = [
   "scheduler",
   "workflow-runtime",
+  "workflow-exit-lease-release",
   "agent-team-runtime",
   "external-agent",
   "ocr-runtime",
@@ -89,6 +95,18 @@ describe("initializer batch headless smoke", () => {
     })
     expect(workflow.id).toMatch(/^wf_/)
     await publishWorkflow(workflow.id, Date.now())
+    const leasedRunId = "headless_shutdown_run"
+    await getDb().workflowRuns.put({
+      id: leasedRunId,
+      workflowId: workflow.id,
+      status: "running",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: Date.now(),
+      workflowSnapshot: workflow,
+    } as never)
+    await expect(claimRunLease(leasedRunId)).resolves.toBe("claimed")
+    startLeaseHeartbeat(leasedRunId)
     const stop = jest.fn(async () => undefined)
     const start = jest.fn(async () => ({ stop }))
     const registration: TriggerRegistration = {
@@ -117,6 +135,10 @@ describe("initializer batch headless smoke", () => {
     await result.stop()
     expect(stop).toHaveBeenCalledTimes(1)
     expect(getPluginTrigger("trigger.headless.watch", 1)?.instances.size).toBe(0)
+    const releasedRun = await getDb().workflowRuns.get(leasedRunId)
+    expect(releasedRun?.lease).toBeUndefined()
+    expect(releasedRun?.releasedForHandoffAt).toEqual(expect.any(Number))
+    stopLeaseHeartbeat(leasedRunId)
     schedulerDb.close()
     __resetDbForTesting()
   }, 60_000)

@@ -56,11 +56,7 @@ pub async fn add_managed(
     lock_reason: Option<&str>,
 ) -> Result<()> {
     let cwd = PathBuf::from(main_repo);
-    let mut args: Vec<String> = vec![
-        "worktree".into(),
-        "add".into(),
-        "--detach".into(),
-    ];
+    let mut args: Vec<String> = vec!["worktree".into(), "add".into(), "--detach".into()];
     if let Some(reason) = lock_reason {
         args.extend(["--lock".into(), "--reason".into(), reason.into()]);
     }

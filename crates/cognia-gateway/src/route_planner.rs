@@ -651,6 +651,20 @@ mod tests {
     }
 
     #[test]
+    fn request_size_estimate_matches_serde_json_wire_length() {
+        let body = serde_json::json!({
+            "model": "fast",
+            "messages": [{ "role": "user", "content": "你好, analyze ```rust```" }],
+            "stream": true
+        });
+        let expected = serde_json::to_string(&body).unwrap().len() as u64;
+        assert_eq!(
+            request_requirements(&body).estimated_context_tokens,
+            expected.div_ceil(4)
+        );
+    }
+
+    #[test]
     fn provider_constraints_filter_circuit_and_rate_exhaustion() {
         let state = RoutePlannerState::default();
         let mut snapshot = snapshot("priority");

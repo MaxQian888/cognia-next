@@ -11,21 +11,37 @@
 
 import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { executeDeployedWorkflow, WorkflowAdmissionError } from "./execution-authority"
+import { WorkflowAdmissionError } from "./execution-authority"
+import { dispatchPlacedWorkflowTrigger } from "./placed-trigger"
 import { deterministicTriggerIdempotencyKey } from "./trigger-idempotency"
 import { listenTriggerEvents } from "./tauri-bridge"
 
 export type TriggerBridgeDisposer = () => void
 
+export interface TriggerBridgeDeps {
+  dispatchPlaced: typeof dispatchPlacedWorkflowTrigger
+}
+
+export interface TriggerBridgeInstallDeps {
+  listen: typeof listenTriggerEvents
+  dispatch: typeof dispatchTrigger
+}
+
+const defaultTriggerBridgeDeps: TriggerBridgeDeps = {
+  dispatchPlaced: dispatchPlacedWorkflowTrigger,
+}
+
 /** Subscribe to `workflow:trigger` events. Returns a disposer. */
-export async function installTriggerBridge(): Promise<TriggerBridgeDisposer> {
-  return listenTriggerEvents(async (raw) => {
+export async function installTriggerBridge(
+  deps: TriggerBridgeInstallDeps = { listen: listenTriggerEvents, dispatch: dispatchTrigger }
+): Promise<TriggerBridgeDisposer> {
+  return deps.listen(async (raw) => {
     if (!isTriggerEvent(raw)) {
       console.warn("workflow trigger bridge: discarding malformed event", raw)
       return
     }
     try {
-      await dispatchTrigger(raw)
+      await deps.dispatch(raw)
     } catch (err) {
       console.error("workflow trigger bridge: dispatch failed", {
         workflowId: raw.workflowId,
@@ -49,7 +65,8 @@ export async function dispatchTrigger(
      * the caller `deviceId` instead of defaulting to `"ui"`.
      */
     triggeredBy?: WorkflowTriggeredFrom
-  }
+  },
+  deps: TriggerBridgeDeps = defaultTriggerBridgeDeps
 ): Promise<void> {
   const triggerId = resolveTriggerId(event)
   const normalizedEvent =
@@ -68,17 +85,10 @@ export async function dispatchTrigger(
     ...(typeof normalizedEvent.originAt === "number" ? { originAt: normalizedEvent.originAt } : {}),
   })
   try {
-    await executeDeployedWorkflow({
-      workflowId: event.workflowId,
-      entrypoint: "trigger",
-      caller: event.kind,
-      triggerKind: normalizedEvent.kind,
-      triggerId: normalizedEvent.triggerId,
-      triggerBinding: normalizedEvent.binding,
-      triggerOriginAt: normalizedEvent.originAt,
-      payload: normalizedEvent.payload,
+    await deps.dispatchPlaced({
+      event: normalizedEvent,
       triggeredBy: opts?.triggeredBy,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
+      idempotencyKey,
       onAdmitted: () =>
         getPluginEventHooks().dispatchWorkflowTriggerFired(
           event.workflowId,

@@ -23,6 +23,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "background_monitor_register_scheduled",
     "workflow_approval_list",
     "workflow_approval_respond",
+    "workflow_human_input_list",
+    "workflow_human_input_submit",
     "character_upsert",
     "character_delete",
     "character_bind_twin",
@@ -46,6 +48,8 @@ pub(super) const COMMANDS: &[&str] = &[
     "connector_approve_draft",
     "connector_reject_draft",
     "workflow_trigger_manual",
+    "workflow_placement_probe",
+    "workflow_handoff_create",
     "twin_ingest_source",
     "device_capabilities_report",
     "session_attach",
@@ -654,6 +658,10 @@ pub(super) async fn dispatch(
         | "connector_approve_draft"
         | "connector_reject_draft"
         | "workflow_trigger_manual"
+        | "workflow_human_input_list"
+        | "workflow_human_input_submit"
+        | "workflow_placement_probe"
+        | "workflow_handoff_create"
         | "twin_ingest_source"
         // ADR-0060 — device capability report; TS arm persists onto the
         // caller's `pairedDevices` row (caller id injected below).
@@ -838,6 +846,20 @@ mod tests {
             )["callerDeviceId"],
             serde_json::json!("dev-real")
         );
+    }
+
+    #[test]
+    fn workflow_placement_commands_stay_in_the_desktop_write_dispatch_family() {
+        for name in ["workflow_placement_probe", "workflow_handoff_create"] {
+            assert!(
+                COMMANDS.contains(&name),
+                "{name} must reach the TS workflow authority"
+            );
+            assert!(
+                !waitpoint_command_needs_ts_authority(name, true),
+                "{name} must use its canonical desktop-write dispatch arm"
+            );
+        }
     }
 
     #[test]

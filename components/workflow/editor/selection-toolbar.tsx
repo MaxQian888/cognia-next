@@ -14,7 +14,7 @@
  * render coupling.
  */
 
-import { memo, useCallback } from "react"
+import { memo, useCallback, useState } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import {
@@ -36,6 +36,7 @@ import {
   Power,
   Trash2,
   Combine,
+  PackagePlus,
 } from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
@@ -54,6 +55,7 @@ import {
 } from "@/lib/workflow/editor/align-distribute"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { ToolbarButton, VSep } from "./canvas-toolbar"
+import { NodeGroupCreateDialog } from "./node-group-create-dialog"
 
 export interface SelectionToolbarProps {
   store: EditorStore
@@ -197,6 +199,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const t = useTranslations("workflows.editor.selectionToolbar")
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
   const count = selectedNodeIds.length
+  const [nodeGroupDialogOpen, setNodeGroupDialogOpen] = useState(false)
 
   // Stable-primitive selector: re-renders only when the lock state / group
   // status actually flips, not on every drag frame that mutates `nodes`.
@@ -328,6 +331,13 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         side="bottom"
         testid="wf-sel-group"
       />
+      <ToolbarButton
+        icon={PackagePlus}
+        label={t("createNodeGroup")}
+        onClick={() => setNodeGroupDialogOpen(true)}
+        side="bottom"
+        testid="wf-sel-create-node-group"
+      />
       <AlignPopover
         disabled={!canGroup}
         canDistribute={canDistribute}
@@ -391,6 +401,12 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         destructive
         side="bottom"
         testid="wf-sel-delete"
+      />
+      <NodeGroupCreateDialog
+        open={nodeGroupDialogOpen}
+        onOpenChange={setNodeGroupDialogOpen}
+        store={store}
+        selectedNodeIds={selectedNodeIds}
       />
     </div>
   )

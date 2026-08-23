@@ -17,6 +17,7 @@
 pub mod backup;
 pub mod brain;
 pub mod gateway_host;
+pub mod tenant_lease;
 
 use std::sync::Arc;
 

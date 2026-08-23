@@ -143,6 +143,20 @@ import type {
 } from "@/types/workflow/visual"
 import type { WorkflowWaitEvent, WorkflowWaitpoint } from "@/types/workflow/waitpoint"
 import type {
+  WorkflowHumanInputFileRow,
+  WorkflowHumanInputRequest,
+  WorkflowHumanInputSubmissionRow,
+} from "@/types/workflow/human-input"
+import type { WorkflowApp, WorkflowAppRelease } from "@/types/workflow/app"
+import type { WorkflowBatchJob, WorkflowBatchRow } from "@/types/workflow/batch"
+import type { WorkflowKnowledgeArtifactRow } from "@/types/workflow/knowledge-pipeline"
+import type {
+  WorkflowConversation,
+  WorkflowConversationMessage,
+  WorkflowConversationReleaseEvent,
+  WorkflowConversationSummary,
+} from "@/types/workflow/conversation"
+import type {
   WorkflowDeployment,
   WorkflowInvocation,
   WorkflowVersion,
@@ -153,6 +167,7 @@ import {
 } from "@/lib/workflow/versioning/version-snapshot"
 import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
+import type { MobileStepReceiptRow } from "@/types/mobile/mobile-step-receipt"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { SessionAttachmentUploadRow } from "./session-attachment-uploads"
@@ -244,6 +259,13 @@ import type { CalibrationItemRow } from "./calibration-items"
 import type { CalibrationRunRow } from "./calibration-runs"
 import type { BackgroundTaskJournalRow } from "./background-tasks"
 import type { ContextCommentRow } from "@/types/context-comment"
+import type { WorkflowReview, WorkflowReviewSuggestion } from "@/types/workflow/review"
+import type {
+  WorkflowAnnotationSet,
+  WorkflowAnnotationSetRevision,
+  WorkflowFeedbackCandidate,
+} from "@/types/workflow/quality"
+import type { WorkflowAppApiKey } from "@/types/workflow/api-key"
 import { contextCommentRowFromCanvas } from "./context-comments-backfill"
 import type { TeamPrObservationRow } from "./team-pr-observations"
 import type { AgentTeamBoardRow } from "./agent-team-board"
@@ -621,6 +643,27 @@ export class CogniaDB extends Dexie {
   // v156 — Durable workflow pause/resume state and persist-before-match events.
   workflowWaitpoints!: Table<WorkflowWaitpoint, string>
   workflowWaitEvents!: Table<WorkflowWaitEvent, string>
+  // v192 — Workflow App platform tables (Human Input, publication, Chatflow,
+  // batch, knowledge, review, feedback, API keys, and mobile receipts).
+  workflowHumanInputRequests!: Table<WorkflowHumanInputRequest, string>
+  workflowHumanInputSubmissions!: Table<WorkflowHumanInputSubmissionRow, string>
+  workflowHumanInputFiles!: Table<WorkflowHumanInputFileRow, string>
+  workflowApps!: Table<WorkflowApp, string>
+  workflowAppReleases!: Table<WorkflowAppRelease, string>
+  workflowBatchJobs!: Table<WorkflowBatchJob, string>
+  workflowBatchRows!: Table<WorkflowBatchRow, string>
+  workflowKnowledgeArtifacts!: Table<WorkflowKnowledgeArtifactRow, string>
+  workflowReviews!: Table<WorkflowReview, string>
+  workflowReviewSuggestions!: Table<WorkflowReviewSuggestion, string>
+  workflowFeedbackCandidates!: Table<WorkflowFeedbackCandidate, string>
+  workflowAnnotationSets!: Table<WorkflowAnnotationSet, string>
+  workflowAnnotationSetRevisions!: Table<WorkflowAnnotationSetRevision, string>
+  workflowAppApiKeys!: Table<WorkflowAppApiKey, string>
+  workflowConversations!: Table<WorkflowConversation, string>
+  workflowConversationMessages!: Table<WorkflowConversationMessage, string>
+  workflowConversationSummaries!: Table<WorkflowConversationSummary, string>
+  workflowConversationReleaseEvents!: Table<WorkflowConversationReleaseEvent, string>
+  mobileStepReceipts!: Table<MobileStepReceiptRow, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -4479,6 +4522,67 @@ export class CogniaDB extends Dexie {
         }
       })
 
+    // v192 — one monotonic claim for the unshipped Workflow App platform.
+    // Keeping the final schemas together avoids repeatedly rebuilding the
+    // entire Dexie graph during construction, while the high version safely
+    // upgrades developer databases that opened the interim v191 worktree.
+    this.version(192)
+      .stores({
+        workflowHumanInputRequests:
+          "&id, waitpointId, status, runId, workflowId, stepId, expiresAt, [workflowId+status], [runId+status]",
+        workflowHumanInputSubmissions:
+          "&id, requestId, responderId, actionId, submittedAt, sensitiveExpiresAt, &[requestId+responderId]",
+        mobileStepReceipts: "&requestId, deviceId, status, [deviceId+status], updatedAt, expiresAt",
+        workflowHumanInputFiles:
+          "&id, accountId, requestId, responderId, fieldId, expiresAt, [requestId+responderId]",
+        workflowApps:
+          "&id, accountId, workflowId, slug, &[accountId+slug], [accountId+workflowId], currentReleaseId, updatedAt",
+        workflowAppReleases:
+          "&id, appId, accountId, workflowId, versionId, sequence, createdAt, &[appId+sequence]",
+        workflowConversations:
+          "&id, accountId, appId, appReleaseId, versionId, status, updatedAt, expiresAt, [appId+status], [accountId+status]",
+        workflowConversationMessages:
+          "&id, accountId, conversationId, sequence, role, idempotencyKey, runId, createdAt, expiresAt, &[conversationId+sequence], &[conversationId+idempotencyKey]",
+        workflowConversationSummaries:
+          "&id, accountId, conversationId, revision, throughSequence, createdAt, &[conversationId+revision]",
+        workflowConversationReleaseEvents:
+          "&id, accountId, conversationId, fromReleaseId, toReleaseId, at",
+        workflowBatchJobs:
+          "&id, accountId, appId, appReleaseId, status, updatedAt, expiresAt, [appId+status], [accountId+status]",
+        workflowBatchRows:
+          "&id, accountId, jobId, rowNumber, status, runId, updatedAt, expiresAt, &[jobId+rowNumber], [jobId+status]",
+        workflowKnowledgeArtifacts:
+          "&id, accountId, runId, stepId, stage, expiresAt, [runId+stage]",
+        workflowReviews:
+          "&id, accountId, workflowId, versionId, status, updatedAt, [accountId+workflowId], [versionId+status]",
+        workflowReviewSuggestions:
+          "&id, accountId, workflowId, reviewId, baseVersionId, status, updatedAt, [reviewId+status]",
+        workflowFeedbackCandidates:
+          "&id, accountId, appId, appReleaseId, status, rating, fingerprint, expiresAt, [accountId+fingerprint], [appId+status]",
+        workflowAnnotationSets: "&id, accountId, appId, updatedAt, [accountId+appId]",
+        workflowAnnotationSetRevisions:
+          "&id, accountId, appId, setId, sequence, createdAt, &[setId+sequence]",
+        workflowAppApiKeys:
+          "&id, accountId, appId, &secretHash, expiresAt, revokedAt, updatedAt, [appId+revokedAt]",
+      })
+      .upgrade(async (tx) => {
+        const apps = tx.table<WorkflowApp, string>("workflowApps")
+        await apps.toCollection().modify((app) => {
+          if (!app.draft.annotationReply) {
+            app.draft.annotationReply = { enabled: false, threshold: 0.85 }
+          }
+          if (!app.draft.reviewGate) {
+            app.draft.reviewGate = {
+              enabled: false,
+              requiredApprovals: 1,
+              reviewerSubjectIds: [],
+              reviewerGroupIds: [],
+              requireNoBlockingComments: true,
+            }
+          }
+        })
+      })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -5160,6 +5264,18 @@ export function getDb(): CogniaDB {
     })
   }
   return _db
+}
+
+/**
+ * Replace the active singleton with an unopened instance for a schema repair.
+ *
+ * WKWebView can stall when Dexie opens an old static schema, closes that same
+ * instance, adds a version, and reopens it. Database boot uses a fresh instance
+ * so the complete repaired schema is declared before its first open request.
+ */
+export function recreateActiveDatabaseForSchemaUpgrade(): CogniaDB {
+  closeCachedDb()
+  return getDb()
 }
 
 /**

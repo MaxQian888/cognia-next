@@ -18,6 +18,10 @@ import {
   __resetNotificationCommandsForTesting,
 } from "@/lib/notifications/action-registry"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
+import {
+  __resetHostEventPublisherForTests,
+  setHostEventPublisher,
+} from "@/lib/companion/host-event-publisher"
 
 const entry: PendingApproval = {
   approvalId: "apr_run_x_n_gate",
@@ -35,6 +39,7 @@ beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   await __resetApprovalRegistryForTesting()
+  __resetHostEventPublisherForTests()
 })
 afterEach(async () => {
   await __resetApprovalRegistryForTesting()
@@ -45,7 +50,7 @@ afterAll(dbFixture.dispose)
 describe("notifyApprovalRequested", () => {
   it("posts a directed notification with approve/reject actions", async () => {
     const notify = jest.fn(async () => "n1")
-    await notifyApprovalRequested(entry, { notify, isTauriFn: () => false })
+    await notifyApprovalRequested(entry, { notify })
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "workflow",
@@ -69,7 +74,7 @@ describe("notifyApprovalRequested", () => {
   it("fans the full entry to WS and ids-only to the push channel (Tauri)", async () => {
     const notify = jest.fn(async () => "n1")
     const emit = jest.fn(async (_event: string, _payload: unknown) => undefined)
-    await notifyApprovalRequested(entry, { notify, emit, isTauriFn: () => true })
+    await notifyApprovalRequested(entry, { notify, emit })
     expect(emit).toHaveBeenCalledWith(APPROVAL_REQUEST_CHANNEL, entry)
     expect(emit).toHaveBeenCalledWith(APPROVAL_PENDING_PUSH_CHANNEL, {
       approvalId: entry.approvalId,
@@ -81,22 +86,37 @@ describe("notifyApprovalRequested", () => {
     expect(JSON.stringify(pushPayload)).not.toContain("Deploy?")
   })
 
-  it("skips companion emits off Tauri and never throws on failures", async () => {
+  it("fans out through the host event seam without a platform gate", async () => {
     const emit = jest.fn(async () => undefined)
+    setHostEventPublisher(emit)
+    const notify = jest.fn(async () => "n1")
+    await notifyApprovalRequested(entry, { notify })
+    expect(emit).toHaveBeenCalledWith(APPROVAL_REQUEST_CHANNEL, entry)
+    expect(emit).toHaveBeenCalledWith(APPROVAL_PENDING_PUSH_CHANNEL, {
+      approvalId: entry.approvalId,
+      runId: entry.runId,
+      workflowId: entry.workflowId,
+    })
+  })
+
+  it("never throws when either delivery surface fails", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const emit = jest.fn(async () => {
+      throw new Error("bus down")
+    })
     const notify = jest.fn(async () => {
       throw new Error("center down")
     })
-    await expect(
-      notifyApprovalRequested(entry, { notify, emit, isTauriFn: () => false })
-    ).resolves.toBeUndefined()
-    expect(emit).not.toHaveBeenCalled()
+    await expect(notifyApprovalRequested(entry, { notify, emit })).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(2)
+    warn.mockRestore()
   })
 })
 
 describe("notifyApprovalResolved", () => {
   it("emits the resolved frame with the decision", async () => {
     const emit = jest.fn(async () => undefined)
-    await notifyApprovalResolved(entry, "approved", { emit, isTauriFn: () => true })
+    await notifyApprovalResolved(entry, "approved", { emit })
     expect(emit).toHaveBeenCalledWith(APPROVAL_RESOLVED_CHANNEL, {
       approvalId: entry.approvalId,
       runId: entry.runId,

@@ -27,9 +27,11 @@
 import { subscribeResume } from "@/lib/capacitor/app"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import { companionCursorNamespace } from "@/lib/companion/credential-book/legacy-migration"
+import { getDb } from "@/lib/db/schema"
 import { transport } from "@/lib/tauri"
 import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
 import type { Transport } from "@/lib/tauri/transport-types"
+import type { RunStatus } from "@/types/workflow/visual"
 
 import { clearCursors, loadCursors, saveCursor } from "./cursor-store"
 import { syncAdapterInstances } from "./handlers/adapter-instances"
@@ -560,6 +562,74 @@ export function installEventDrivenSync(opts: RunSyncDownOptions = {}): () => voi
     for (const timer of pending.values()) clearTimeout(timer)
     pending.clear()
     unsub()
+  }
+}
+
+const WORKFLOW_RUN_STATUS_CHANNEL = "workflow://run-status"
+const WORKFLOW_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "running",
+  "waiting",
+  "paused",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+const TERMINAL_WORKFLOW_RUN_STATUSES: ReadonlySet<RunStatus> = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+
+interface WorkflowRunStatusFrame {
+  runId: string
+  workflowId: string
+  status: RunStatus
+  lastStepId?: string
+}
+
+/** Apply live Host run transitions to the paired client's existing mirror. */
+export function installWorkflowRunStatusSync(opts: RunSyncDownOptions = {}): () => void {
+  const t = opts.transport ?? transport
+  let disposed = false
+  const unsubscribe = t.subscribe<WorkflowRunStatusFrame>(WORKFLOW_RUN_STATUS_CHANNEL, (frame) => {
+    if (
+      disposed ||
+      !frame ||
+      typeof frame.runId !== "string" ||
+      !frame.runId ||
+      typeof frame.workflowId !== "string" ||
+      !frame.workflowId ||
+      !WORKFLOW_RUN_STATUSES.has(frame.status)
+    ) {
+      return
+    }
+    void (async () => {
+      const run = await getDb().workflowRuns.get(frame.runId)
+      if (!run) {
+        await runSyncDown({ ...opts, only: ["workflowRuns"] })
+        return
+      }
+      // WS replay must never move a terminal mirror back into an active state.
+      if (
+        TERMINAL_WORKFLOW_RUN_STATUSES.has(run.status) &&
+        !TERMINAL_WORKFLOW_RUN_STATUSES.has(frame.status)
+      ) {
+        return
+      }
+      await getDb().workflowRuns.update(frame.runId, {
+        status: frame.status,
+        ...(typeof frame.lastStepId === "string" && frame.lastStepId
+          ? { lastCompletedStepId: frame.lastStepId }
+          : {}),
+      })
+    })().catch(() => {
+      if (!disposed) void runSyncDown({ ...opts, only: ["workflowRuns"] })
+    })
+  })
+  return () => {
+    disposed = true
+    unsubscribe()
   }
 }
 

@@ -6,13 +6,16 @@ import {
   type CompanionRunEventDeps,
 } from "./companion-run-events"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
+import {
+  __resetHostEventPublisherForTests,
+  setHostEventPublisher,
+} from "@/lib/companion/host-event-publisher"
 
 function makeDeps(run?: Partial<WorkflowRunRow>) {
   const emit = jest.fn(async (_event: string, _payload: unknown) => undefined)
   const deps: CompanionRunEventDeps = {
     emit,
     getRun: jest.fn(async () => run as WorkflowRunRow | undefined),
-    isTauriFn: () => true,
   }
   return { emit, deps }
 }
@@ -20,13 +23,17 @@ function makeDeps(run?: Partial<WorkflowRunRow>) {
 const base = { runId: "run_1", workflowId: "wf_1" } as const
 
 describe("notifyCompanionsOfRunState", () => {
-  it("is a no-op outside Tauri", async () => {
-    const { emit, deps } = makeDeps()
-    await notifyCompanionsOfRunState(
-      { ...base, status: "failed" },
-      { ...deps, isTauriFn: () => false }
-    )
-    expect(emit).not.toHaveBeenCalled()
+  beforeEach(__resetHostEventPublisherForTests)
+
+  it("publishes through the host event seam without a platform gate", async () => {
+    const emit = jest.fn(async (_event: string, _payload: unknown) => undefined)
+    setHostEventPublisher(emit)
+    await notifyCompanionsOfRunState({ ...base, status: "running" })
+    expect(emit).toHaveBeenCalledWith(RUN_STATUS_CHANNEL, {
+      runId: "run_1",
+      workflowId: "wf_1",
+      status: "running",
+    })
   })
 
   it("emits only the live status frame for non-terminal transitions", async () => {

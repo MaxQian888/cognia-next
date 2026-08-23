@@ -7,6 +7,14 @@ import { NextIntlClientProvider } from "next-intl"
 
 const openProposal = jest.fn()
 const mockInsertNodeGroup = jest.fn(() => ({ groupId: "group-1", nodeIds: ["node-1"] }))
+const mockUpgradeNodeGroup = jest.fn(() => ({
+  compatible: true,
+  fromVersion: "1.0.0",
+  toVersion: "2.0.0",
+  addedNodeIds: [],
+  removedNodeIds: [],
+  changedNodeIds: ["prompt"],
+}))
 
 jest.mock("@/lib/workflow/copilot-templates", () => ({
   listCopilotTemplates: () => [
@@ -34,8 +42,8 @@ jest.mock("@/lib/templates/catalog", () => {
         id: "demo:review",
         domain: "workflow",
         status: "published",
-        revision: 1,
-        version: "1.0.0",
+        revision: 2,
+        version: "2.0.0",
         metadata: { name: "Review group", description: "Prompt then output" },
         payload: {
           kind: "cognia.workflow/node-group/v1",
@@ -55,7 +63,7 @@ jest.mock("@/lib/templates/catalog", () => {
         capabilities: [],
         compatibility: { platforms: ["desktop"] },
         provenance: { source: "plugin", pluginId: "demo" },
-        contentHash: "a".repeat(64),
+        contentHash: "b".repeat(64),
         createdAt: 1,
         updatedAt: 1,
       },
@@ -102,16 +110,39 @@ const messages = {
         help: "Insert a reusable graph fragment.",
         inserted: "Inserted {name}",
         failed: "Could not insert {name}: {message}",
+        draftVersion: "draft",
+        upgrade: "Upgrade instance",
+        upgradeDiff: "{from} to {to}: +{added} -{removed} ~{changed}",
+        upgradeFailed: "Upgrade failed: {message}",
+        upgraded: "Upgraded to {version}",
       },
     },
   },
 }
 
 const editorState = {
-  nodes: [],
+  nodes: [
+    {
+      id: "group-1",
+      data: {
+        kind: "annotation.group",
+        params: {
+          nodeGroupInstance: {
+            definitionId: "demo:review",
+            version: "1.0.0",
+            revision: 1,
+            contentHash: "a".repeat(64),
+            sourceNodeIds: { prompt: "node-1" },
+          },
+        },
+      },
+    },
+  ],
   edges: [],
+  selectedNodeIds: ["group-1"],
   viewport: { x: 0, y: 0, zoom: 1 },
   insertNodeGroup: mockInsertNodeGroup,
+  upgradeNodeGroup: mockUpgradeNodeGroup,
 }
 
 const useStore = Object.assign(
@@ -181,6 +212,19 @@ describe("TemplatesTab", () => {
     expect(mockInsertNodeGroup).toHaveBeenCalledWith(
       expect.objectContaining({ id: "demo:review" }),
       { x: 160, y: 120 }
+    )
+  })
+
+  it("shows a pinned-instance diff and upgrades only after an explicit click", async () => {
+    const user = userEvent.setup()
+    renderTab("workflow-1")
+
+    expect(screen.getByTestId("node-group-upgrade-diff")).toHaveTextContent(/1\.0\.0.*2\.0\.0/)
+    expect(mockUpgradeNodeGroup).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Upgrade instance" }))
+    expect(mockUpgradeNodeGroup).toHaveBeenCalledWith(
+      "group-1",
+      expect.objectContaining({ id: "demo:review", version: "2.0.0" })
     )
   })
 })

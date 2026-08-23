@@ -39,6 +39,10 @@
 
 import { sha256Bytes } from "@/lib/ocr/hash"
 import {
+  UploadContentInspectionError,
+  inspectUploadContent,
+} from "@/lib/security/upload-content-inspection"
+import {
   ATTACHMENT_UPLOAD_CHUNK_BYTES,
   COMPOSER_MAX_ATTACHMENTS,
   COMPOSER_MAX_ATTACHMENT_BYTES,
@@ -115,6 +119,8 @@ export type AttachmentUploadRejection =
   | "attachment_size_mismatch"
   | "attachment_hash_mismatch"
   | "attachment_type_mismatch"
+  | "attachment_malicious_content"
+  | "attachment_unsafe_archive"
   | "attachment_already_committed"
 
 export class AttachmentUploadError extends Error {
@@ -338,7 +344,26 @@ export async function commitAttachmentUpload(input: {
   if ((await sha256Bytes(bytes)) !== row.hash) {
     throw new AttachmentUploadError("attachment_hash_mismatch")
   }
-  const mediaType = resolveMediaType(row, bytes)
+  const claimedMediaType = resolveMediaType(row, bytes)
+  let mediaType: string
+  try {
+    mediaType = inspectUploadContent({
+      name: row.name,
+      declaredMediaType: claimedMediaType,
+      bytes,
+    }).mediaType
+  } catch (error) {
+    if (error instanceof UploadContentInspectionError) {
+      if (error.code === "malicious_content") {
+        throw new AttachmentUploadError("attachment_malicious_content")
+      }
+      if (error.code === "unsafe_archive") {
+        throw new AttachmentUploadError("attachment_unsafe_archive")
+      }
+      throw new AttachmentUploadError("attachment_type_mismatch")
+    }
+    throw error
+  }
 
   await getDb().sessionAttachmentUploads.update(row.uploadId, {
     status: "committed",

@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto"
-import { dispatchTrigger, isTriggerEvent } from "./trigger-bridge"
+import { dispatchTrigger, installTriggerBridge, isTriggerEvent } from "./trigger-bridge"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { createWorkflow, listWorkflowRuns } from "@/lib/db/workflows"
@@ -40,7 +40,100 @@ describe("isTriggerEvent", () => {
   })
 })
 
+describe("installTriggerBridge", () => {
+  it("discards malformed frames, dispatches valid frames, and disposes the listener", async () => {
+    let subscriber: ((raw: unknown) => Promise<void>) | undefined
+    const dispose = jest.fn()
+    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+      subscriber = handler
+      return dispose
+    })
+    const dispatch = jest.fn().mockResolvedValue(undefined)
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    const event: TriggerEvent = {
+      workflowId: "workflow-1",
+      kind: "trigger.cron",
+      payload: {},
+      originAt: 1,
+    }
+
+    const off = await installTriggerBridge({ listen, dispatch })
+    await subscriber?.(null)
+    await subscriber?.(event)
+    off()
+
+    expect(warn).toHaveBeenCalledWith("workflow trigger bridge: discarding malformed event", null)
+    expect(dispatch).toHaveBeenCalledWith(event)
+    expect(dispose).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it("contains listener dispatch failures", async () => {
+    let subscriber: ((raw: unknown) => Promise<void>) | undefined
+    const listen = jest.fn(async (handler: (raw: unknown) => Promise<void>) => {
+      subscriber = handler
+      return jest.fn()
+    })
+    const dispatch = jest.fn().mockRejectedValue("offline")
+    const error = jest.spyOn(console, "error").mockImplementation(() => undefined)
+
+    await installTriggerBridge({ listen, dispatch })
+    await subscriber?.({
+      workflowId: "workflow-1",
+      kind: "trigger.webhook",
+      payload: {},
+      originAt: 1,
+    })
+
+    expect(error).toHaveBeenCalledWith(
+      "workflow trigger bridge: dispatch failed",
+      expect.objectContaining({ workflowId: "workflow-1", error: "offline" })
+    )
+    error.mockRestore()
+  })
+})
+
 describe("dispatchTrigger", () => {
+  it("routes the canonical trigger ingress through placement with a durable key", async () => {
+    const dispatchPlaced = jest
+      .fn()
+      .mockResolvedValue({ kind: "remote", dispatchId: "dispatch-1", targetRef: "cloud-a" })
+    const trigger: TriggerEvent = {
+      workflowId: "workflow-remote",
+      kind: "trigger.cron",
+      triggerId: "cron-1",
+      payload: { scheduledAt: 100 },
+      originAt: 100,
+    }
+
+    await dispatchTrigger(trigger, { triggeredBy: { source: "schedule" } }, { dispatchPlaced })
+
+    expect(dispatchPlaced).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: trigger,
+        triggeredBy: { source: "schedule" },
+        idempotencyKey: expect.any(String),
+      })
+    )
+  })
+
+  it("propagates unexpected placement failures for triggers without an embedded id", async () => {
+    const dispatchPlaced = jest.fn().mockRejectedValue(new Error("placement unavailable"))
+
+    await expect(
+      dispatchTrigger(
+        {
+          workflowId: "workflow-error",
+          kind: "trigger.webhook",
+          payload: "legacy-non-object" as never,
+          originAt: 100,
+        },
+        undefined,
+        { dispatchPlaced }
+      )
+    ).rejects.toThrow("placement unavailable")
+  })
+
   it("runs a workflow from its real cron trigger node", async () => {
     const wf = await createWorkflow({
       name: "cron workflow",

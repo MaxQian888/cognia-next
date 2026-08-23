@@ -24,6 +24,8 @@
  * wire format for both the editor (TS-only) and the IPC contract (TS ↔ Rust).
  */
 
+import type { PlacementConstraint } from "@/lib/placement/types"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Node taxonomy. Namespaced as `<group>.<kind>` so plugin-contributed nodes
 // can use their own prefix (e.g., `myplugin.action.foo`) without colliding.
@@ -133,6 +135,16 @@ export type WorkflowNodeKind =
   | "action.skill.upsert"
   | "action.twin.rag"
   | "action.twin.ingest"
+  // Workflow-native knowledge production stages. Content-bearing handoffs
+  // use encrypted run-scoped artifacts rather than workflow event payloads.
+  | "knowledge.source"
+  | "knowledge.parse"
+  | "knowledge.transform"
+  | "knowledge.chunk"
+  | "knowledge.embed"
+  | "knowledge.index"
+  | "knowledge.publish"
+  | "knowledge.retrieve"
   // Autonomous long-term memory (lib/memory): hybrid recall + explicit store.
   | "action.memory.recall"
   | "action.memory.store"
@@ -150,6 +162,8 @@ export type WorkflowNodeKind =
   // rejects — desktop notification action, or a paired device via the
   // `workflow_approval_respond` RPC. Routes downstream via decision handles.
   | "action.approval.request"
+  // Durable multi-field, multi-action Human Input with any/all/quorum assignees.
+  | "action.humanInput.request"
   // Remote device steps (ADR 0061 P3): hub-side proxy executors dispatch to
   // a capable paired device via the remote-step broker and marshal the
   // device's output back into the run.
@@ -254,6 +268,7 @@ export type WorkflowNodeKind =
   | "io.http"
   | "io.webhook.respond"
   | "io.output"
+  | "io.answer"
   | "io.webClone"
   // Annotation
   | "annotation.note"
@@ -279,6 +294,7 @@ export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCatego
   if (head === "ai") return "ai"
   if (head === "flow") return "flow"
   if (head === "data") return "data"
+  if (head === "knowledge") return "data"
   if (head === "io") return "io"
   // OCR extraction is a data-producing node (ADR-0024).
   if (head === "ocr") return "data"
@@ -374,11 +390,20 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.skill.upsert",
   "action.twin.rag",
   "action.twin.ingest",
+  "knowledge.source",
+  "knowledge.parse",
+  "knowledge.transform",
+  "knowledge.chunk",
+  "knowledge.embed",
+  "knowledge.index",
+  "knowledge.publish",
+  "knowledge.retrieve",
   "action.memory.recall",
   "action.memory.store",
   "action.connector.send",
   "action.connector.draft",
   "action.approval.request",
+  "action.humanInput.request",
   "action.mobile.camera",
   "action.mobile.scanBarcode",
   "action.mobile.location",
@@ -445,6 +470,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "io.http",
   "io.webhook.respond",
   "io.output",
+  "io.answer",
   "io.webClone",
   "annotation.note",
   "annotation.group",
@@ -663,6 +689,11 @@ export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop" |
 export interface WorkflowSettings {
   errorPolicy: "stop" | "continue" | "branch"
   /**
+   * Placement for top-level asynchronous invocations. Legacy definitions omit
+   * the field and validate to `colocate`, preserving the pre-placement runtime.
+   */
+  runOn?: PlacementConstraint
+  /**
    * Auto-gate medium/high-risk nodes behind an approval wait (ADR-0070 Phase 3).
    *
    * Unlike `AgentTeamConfig.riskGating` and `GoalConfig.riskGating`, this is
@@ -798,6 +829,12 @@ export interface WorkflowTriggeredFrom {
     /** Resolved principal/account stamp — see `ExecutionRunInitiator`. */
     principalId?: string
     accountId?: string
+    /** True only when the request surface verified an OIDC member. */
+    authenticated?: boolean
+    /** Verified OIDC groups captured at admission for document ACL evaluation. */
+    groupIds?: string[]
+    /** App-local ownership key; never grants document permissions. */
+    externalSubjectKey?: string
   }
   /**
    * Paired-device id of the companion caller (ADR-0060). Stamped server-side
@@ -1203,6 +1240,7 @@ export const DEFAULT_MAX_CONCURRENCY = 4
 
 export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   errorPolicy: "stop",
+  runOn: { mode: "colocate" },
   timeoutMs: 600_000,
   concurrency: 1,
   maxConcurrency: DEFAULT_MAX_CONCURRENCY,

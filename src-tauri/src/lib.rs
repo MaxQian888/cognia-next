@@ -667,6 +667,7 @@ pub fn run() {
             claude::commands::agent_compact,
             claude::commands::agent_resolve_permission,
             claude::commands::agent_close_session,
+            claude::commands::agent_start,
             claude::commands::agent_status,
             claude::commands::agent_command_telemetry,
             claude::commands::claude_interrupt,

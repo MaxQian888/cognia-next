@@ -10,12 +10,19 @@ import type { WorkflowTargetDeps } from "./workflow"
 
 export function defaultWorkflowTargetDeps(): WorkflowTargetDeps {
   return {
-    async runWorkflow({ workflowId, payload, traceId, signal }) {
-      const [{ getWorkflow }, { runWorkflow }] = await Promise.all([
+    async runWorkflow({ workflowId, versionId, payload, traceId, signal }) {
+      const [{ getWorkflow }, { getWorkflowVersion }, { runWorkflow }] = await Promise.all([
         import("@/lib/db/workflows"),
+        import("@/lib/db/workflow-deployments"),
         import("@/lib/workflow/runtime/orchestrator"),
       ])
-      const workflow = await getWorkflow(workflowId)
+      const version = versionId ? await getWorkflowVersion(versionId) : undefined
+      if (versionId && (!version || version.workflowId !== workflowId)) {
+        throw new Error(
+          `eval workflow target: version "${versionId}" does not belong to workflow "${workflowId}"`
+        )
+      }
+      const workflow = version?.definition ?? (await getWorkflow(workflowId))
       if (!workflow) throw new Error(`eval workflow target: workflow "${workflowId}" not found`)
       const result = await runWorkflow({
         workflow,

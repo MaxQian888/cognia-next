@@ -44,6 +44,7 @@ export function createTargetFromSpec(spec: TargetSpec, deps: TargetDepsBundle): 
         {
           label: spec.label,
           workflowId: spec.workflowId,
+          ...(spec.versionId ? { versionId: spec.versionId } : {}),
           ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
         },
         deps.workflow

@@ -1325,6 +1325,16 @@ function authForPath(path) {
   ) {
     return []
   }
+  if (
+    path === "/api/portal/bootstrap" ||
+    (path.startsWith("/api/apps/") &&
+      (path.endsWith("/bootstrap") || path.endsWith("/embed-token")))
+  ) {
+    return []
+  }
+  if (path.startsWith("/api/apps/") || path.startsWith("/v1/")) {
+    return [{ workflowAppBearer: [] }]
+  }
   if (path.startsWith("/internal/") || path.startsWith("/ide/content")) {
     return [{ serviceBearer: [] }]
   }
@@ -1781,6 +1791,12 @@ function ensurePublicComponents(components, publicNames) {
       bearerFormat: "JWT",
       description:
         "Five-minute access token bound to the active device key and signed by a process-ephemeral authority; a server restart invalidates outstanding tokens. Send a matching DPoP header.",
+    },
+    workflowAppBearer: {
+      type: "http",
+      scheme: "bearer",
+      description:
+        "Published workflow application session or application API key, depending on the endpoint.",
     },
   }
   delete next.securitySchemes.legacyBearer

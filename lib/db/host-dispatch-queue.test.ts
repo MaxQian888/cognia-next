@@ -5,15 +5,28 @@ import "fake-indexeddb/auto"
 import {
   claimDueHostDispatch,
   completeHostDispatch,
+  cancelHostDispatch,
   enqueueHostDispatch,
   failHostDispatch,
   hostDispatchBackoffMs,
   listDeadLetteredHostDispatch,
   listHostDispatchForRun,
   markHostDispatchInflight,
+  markHostDispatchAwaitingResult,
+  pruneTerminalHostDispatch,
   recoverStrandedHostDispatch,
+  storeHostDispatchResultChunk,
+  consumeHostDispatchResult,
+  HOST_DISPATCH_LEASE_MS,
+  HOST_DISPATCH_RESULT_REDELIVERY_MS,
+  terminateHostDispatch,
 } from "./host-dispatch-queue"
 import { __resetDbForTesting, getDb } from "./schema"
+import {
+  HOST_DISPATCH_MAX_RESULT_CHARS,
+  HOST_DISPATCH_MAX_RESULT_CHUNKS,
+  HOST_DISPATCH_RESULT_CHUNK_CHARS,
+} from "@/types/placement/host-dispatch"
 
 const NOW = 1_700_000_000_000
 
@@ -36,7 +49,7 @@ describe("hostDispatchQueue", () => {
   beforeEach(async () => {
     __resetDbForTesting()
     await getDb().hostDispatchQueue.clear()
-  })
+  }, 15_000)
 
   it("enqueues a pending row addressed to its target", async () => {
     const row = await enqueueHostDispatch(input())
@@ -72,6 +85,17 @@ describe("hostDispatchQueue", () => {
     const due = await claimDueHostDispatch("local_acct_a", NOW)
 
     expect(due.map((row) => row.idempotencyKey)).toEqual(["k1", "k2"])
+    expect(due.every((row) => row.status === "inflight" && row.leaseExpiresAt)).toBe(true)
+  })
+
+  it("atomically gives a due row to only one concurrent runner", async () => {
+    await enqueueHostDispatch(input({ idempotencyKey: "one-owner" }))
+    const [left, right] = await Promise.all([
+      claimDueHostDispatch("local_acct_a", NOW, 1, "runner-left"),
+      claimDueHostDispatch("local_acct_a", NOW, 1, "runner-right"),
+    ])
+    expect([...left, ...right]).toHaveLength(1)
+    expect([...left, ...right][0]?.leaseOwner).toMatch(/runner-(left|right)/)
   })
 
   it("backs off exponentially and stops climbing at the ceiling", async () => {
@@ -110,8 +134,11 @@ describe("hostDispatchQueue", () => {
     await markHostDispatchInflight(row.id, NOW)
     expect(await claimDueHostDispatch("local_acct_a", NOW)).toEqual([])
 
-    expect(await recoverStrandedHostDispatch("local_acct_a", NOW)).toBe(1)
-    expect((await claimDueHostDispatch("local_acct_a", NOW)).map((r) => r.id)).toEqual([row.id])
+    expect(await recoverStrandedHostDispatch("local_acct_a", NOW)).toBe(0)
+    expect(await recoverStrandedHostDispatch("local_acct_a", NOW + HOST_DISPATCH_LEASE_MS)).toBe(1)
+    expect(
+      (await claimDueHostDispatch("local_acct_a", NOW + HOST_DISPATCH_LEASE_MS)).map((r) => r.id)
+    ).toEqual([row.id])
   })
 
   it("does not recover another account's stranded rows", async () => {
@@ -121,12 +148,242 @@ describe("hostDispatchQueue", () => {
     expect(await recoverStrandedHostDispatch("local_acct_a", NOW)).toBe(0)
   })
 
+  it("redelivers an acknowledged delivery after a bounded result wait", async () => {
+    const row = await enqueueHostDispatch(input({ id: "rst-await" }))
+    await claimDueHostDispatch("local_acct_a", NOW, 1, "runner")
+    await markHostDispatchAwaitingResult(row.id, NOW)
+    await expect(claimDueHostDispatch("local_acct_a", NOW)).resolves.toEqual([])
+    await expect(
+      claimDueHostDispatch("local_acct_a", NOW + HOST_DISPATCH_RESULT_REDELIVERY_MS)
+    ).resolves.toHaveLength(1)
+  })
+
+  it("recovers legacy awaiting-result rows into receipt-deduplicated delivery", async () => {
+    const row = await enqueueHostDispatch(input({ id: "rst-legacy-await" }))
+    await getDb().hostDispatchQueue.update(row.id, { status: "awaiting-result" })
+
+    await expect(recoverStrandedHostDispatch("local_acct_a", NOW + 1)).resolves.toBe(1)
+    await expect(claimDueHostDispatch("local_acct_a", NOW + 1)).resolves.toHaveLength(1)
+  })
+
+  it("leaves unrelated legacy awaiting-result rows untouched for a job-scoped runner", async () => {
+    const target = await enqueueHostDispatch(input({ id: "rst-target", idempotencyKey: "target" }))
+    const unrelated = await enqueueHostDispatch(
+      input({ id: "rst-unrelated", idempotencyKey: "unrelated" })
+    )
+    await getDb().hostDispatchQueue.bulkUpdate([
+      { key: target.id, changes: { status: "awaiting-result" } },
+      { key: unrelated.id, changes: { status: "awaiting-result" } },
+    ])
+
+    await expect(recoverStrandedHostDispatch("local_acct_a", NOW + 1, target.id)).resolves.toBe(1)
+    await expect(getDb().hostDispatchQueue.get(target.id)).resolves.toMatchObject({
+      status: "pending",
+    })
+    await expect(getDb().hostDispatchQueue.get(unrelated.id)).resolves.toMatchObject({
+      status: "awaiting-result",
+    })
+  })
+
+  it("persists out-of-order result chunks for restart-safe workflow recovery", async () => {
+    await enqueueHostDispatch(input({ id: "rst-result", targetRef: "phone-7" }))
+    await markHostDispatchAwaitingResult("rst-result", NOW)
+    await expect(
+      storeHostDispatchResultChunk("evil-phone", {
+        requestId: "rst-result",
+        seq: 0,
+        total: 2,
+        chunk: "a",
+      })
+    ).resolves.toEqual({ ok: false, reason: "wrong-target" })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-result",
+        seq: 1,
+        total: 2,
+        chunk: "secret}",
+      })
+    ).resolves.toEqual({ ok: true, complete: false })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-result",
+        seq: 0,
+        total: 2,
+        chunk: "{",
+      })
+    ).resolves.toEqual({ ok: true, complete: true })
+    await expect(consumeHostDispatchResult("rst-result")).resolves.toBe("{secret}")
+    await expect(consumeHostDispatchResult("rst-result")).resolves.toBe("{secret}")
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-result",
+        seq: 0,
+        total: 2,
+        chunk: "{",
+      })
+    ).resolves.toEqual({ ok: true, complete: true })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-result",
+        seq: 0,
+        total: 2,
+        chunk: "replacement",
+      })
+    ).resolves.toEqual({ ok: false, reason: "terminal" })
+  })
+
+  it("rejects a conflicting replacement before assembly completes", async () => {
+    await enqueueHostDispatch(input({ id: "rst-conflict", targetRef: "phone-7" }))
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-conflict",
+        seq: 0,
+        total: 2,
+        chunk: "first",
+      })
+    ).resolves.toEqual({ ok: true, complete: false })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-conflict",
+        seq: 0,
+        total: 2,
+        chunk: "replacement",
+      })
+    ).resolves.toEqual({ ok: false, reason: "malformed" })
+  })
+
+  it("rejects result chunk counts and payloads above the durable assembly bounds", async () => {
+    await enqueueHostDispatch(input({ id: "rst-bounded", targetRef: "phone-7" }))
+
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-bounded",
+        seq: 0,
+        total: HOST_DISPATCH_MAX_RESULT_CHUNKS + 1,
+        chunk: "x",
+      })
+    ).resolves.toEqual({ ok: false, reason: "malformed" })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: "rst-bounded",
+        seq: 0,
+        total: 1,
+        chunk: "x".repeat(HOST_DISPATCH_RESULT_CHUNK_CHARS + 1),
+      })
+    ).resolves.toEqual({ ok: false, reason: "malformed" })
+  })
+
   it("stops claiming a row once it succeeds", async () => {
     const row = await enqueueHostDispatch(input())
     await completeHostDispatch(row.id, NOW)
 
     expect(await claimDueHostDispatch("local_acct_a", NOW)).toEqual([])
     expect((await getDb().hostDispatchQueue.get(row.id))?.status).toBe("succeeded")
+  })
+
+  it("keeps terminal transitions monotonic when timeout and failure race a result", async () => {
+    const row = await enqueueHostDispatch(input({ id: "terminal-race" }))
+    await completeHostDispatch(row.id, NOW)
+
+    await cancelHostDispatch(row.id, "timeout", NOW + 1)
+    await terminateHostDispatch(row.id, "late failure", "delivery_failed", NOW + 2)
+    await expect(failHostDispatch(row.id, "late retry", NOW + 3)).resolves.toBe("succeeded")
+    await markHostDispatchInflight(row.id, NOW + 4)
+
+    await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
+      status: "succeeded",
+      attempts: 0,
+    })
+  })
+
+  it("applies cancellation and terminal failure only to nonterminal rows", async () => {
+    const cancelled = await enqueueHostDispatch(
+      input({ id: "cancel-pending", idempotencyKey: "cancel-pending" })
+    )
+    const failed = await enqueueHostDispatch(
+      input({ id: "fail-pending", idempotencyKey: "fail-pending" })
+    )
+
+    await cancelHostDispatch(cancelled.id, "aborted", NOW)
+    await terminateHostDispatch(failed.id, "invalid target", "invalid_target", NOW)
+
+    await expect(getDb().hostDispatchQueue.get(cancelled.id)).resolves.toMatchObject({
+      status: "cancelled",
+      terminalCode: "aborted",
+    })
+    await expect(getDb().hostDispatchQueue.get(failed.id)).resolves.toMatchObject({
+      status: "failed",
+      terminalCode: "invalid_target",
+    })
+    await expect(failHostDispatch("missing", "gone", NOW)).resolves.toBe("failed")
+    await expect(completeHostDispatch("missing", NOW)).resolves.toBeUndefined()
+    await expect(cancelHostDispatch("missing", "cancelled", NOW)).resolves.toBeUndefined()
+    await expect(terminateHostDispatch("missing", "gone", "missing", NOW)).resolves.toBeUndefined()
+  })
+
+  it("rejects terminal, mismatched, and corrupt oversized result assemblies", async () => {
+    const terminal = await enqueueHostDispatch(
+      input({ id: "result-terminal", idempotencyKey: "result-terminal", targetRef: "phone-7" })
+    )
+    await cancelHostDispatch(terminal.id, "aborted", NOW)
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: terminal.id,
+        seq: 0,
+        total: 1,
+        chunk: "x",
+      })
+    ).resolves.toEqual({ ok: false, reason: "terminal" })
+
+    const mismatched = await enqueueHostDispatch(
+      input({ id: "result-mismatch", idempotencyKey: "result-mismatch", targetRef: "phone-7" })
+    )
+    await storeHostDispatchResultChunk("phone-7", {
+      requestId: mismatched.id,
+      seq: 0,
+      total: 2,
+      chunk: "x",
+    })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: mismatched.id,
+        seq: 1,
+        total: 3,
+        chunk: "y",
+      })
+    ).resolves.toEqual({ ok: false, reason: "malformed" })
+
+    await getDb().hostDispatchQueue.update(mismatched.id, {
+      resultTotal: 2,
+      resultChunks: { legacy: "x".repeat(HOST_DISPATCH_MAX_RESULT_CHARS) },
+    })
+    await expect(
+      storeHostDispatchResultChunk("phone-7", {
+        requestId: mismatched.id,
+        seq: 1,
+        total: 2,
+        chunk: "y",
+      })
+    ).resolves.toEqual({ ok: false, reason: "malformed" })
+  })
+
+  it("prunes only terminal rows after the bounded retention window", async () => {
+    const stale = await enqueueHostDispatch(
+      input({ id: "terminal-stale", idempotencyKey: "stale" })
+    )
+    const fresh = await enqueueHostDispatch(
+      input({ id: "terminal-fresh", idempotencyKey: "fresh" })
+    )
+    const pending = await enqueueHostDispatch(
+      input({ id: "pending-stale", idempotencyKey: "pending" })
+    )
+    await completeHostDispatch(stale.id, NOW)
+    await completeHostDispatch(fresh.id, NOW + 5_000)
+
+    await expect(pruneTerminalHostDispatch(NOW + 10_000, 6_000)).resolves.toBe(1)
+    await expect(getDb().hostDispatchQueue.get(stale.id)).resolves.toBeUndefined()
+    await expect(getDb().hostDispatchQueue.get(fresh.id)).resolves.toBeDefined()
+    await expect(getDb().hostDispatchQueue.get(pending.id)).resolves.toBeDefined()
   })
 
   it("lets a resumed run find what it had already sent", async () => {
@@ -146,5 +403,16 @@ describe("hostDispatchQueue", () => {
 
     expect(await getDb().hostDispatchQueue.count()).toBe(1)
     expect(first!.idempotencyKey).toBe(second!.idempotencyKey)
+  })
+
+  it("rethrows storage failures that are not the unique-index race", async () => {
+    const add = jest
+      .spyOn(getDb().hostDispatchQueue, "add")
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+
+    await expect(enqueueHostDispatch(input({ idempotencyKey: "storage-failure" }))).rejects.toThrow(
+      "storage unavailable"
+    )
+    add.mockRestore()
   })
 })

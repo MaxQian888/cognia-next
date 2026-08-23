@@ -5,7 +5,13 @@ import "fake-indexeddb/auto"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import { createEditorStore } from "@/lib/workflow/editor/store"
+import { enqueueHostDispatch } from "@/lib/db/host-dispatch-queue"
+import { getDb } from "@/lib/db/schema"
+import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
+import { TIMEZONE_OPTIONS } from "@/types/scheduler"
 import type { VisualWorkflow } from "@/types/workflow/visual"
+
+jest.setTimeout(15_000)
 
 const publishWorkflow = jest.fn()
 const unpublishWorkflow = jest.fn()
@@ -32,6 +38,17 @@ const messages = {
   workflowEditor: {
     settings: {
       runPolicy: { title: "Run policy" },
+      runOn: {
+        label: "Run on",
+        hint: "Choose a Host for top-level asynchronous runs.",
+        colocate: "This Host",
+        auto: "Auto (least loaded)",
+        pinnedGroup: "Pinned Host",
+        publishRequired: "Publish before selecting remote placement.",
+        noCompatibleHosts: "No compatible Remote Hosts.",
+        handoffActive: "{count} handoff waiting or retrying.",
+        handoffFailed: "{count} handoff failed.",
+      },
       errorPolicy: {
         label: "On error",
         stop: "Stop the run",
@@ -116,8 +133,8 @@ function makeWorkflow(): VisualWorkflow {
   }
 }
 
-function mount() {
-  const store = createEditorStore(makeWorkflow())
+function mount(workflow = makeWorkflow()) {
+  const store = createEditorStore(workflow)
   render(
     <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
       <SettingsTab useStore={store} />
@@ -127,9 +144,11 @@ function mount() {
 }
 
 describe("SettingsTab", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     publishWorkflow.mockReset()
     unpublishWorkflow.mockReset()
+    useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    await getDb().hostDispatchQueue.clear()
   })
 
   it("renders all sections", () => {
@@ -149,6 +168,97 @@ describe("SettingsTab", () => {
     expect(store.getState().dirty).toBe(true)
   })
 
+  it("stores workflow-level auto placement for a published workflow", () => {
+    const workflow = makeWorkflow()
+    workflow.published = {
+      at: 1,
+      toolName: "wf_wf",
+      versionId: "wfv_wf_1",
+      deploymentId: "wfd_wf",
+      deploymentRevision: 1,
+    }
+    const store = mount(workflow)
+
+    fireEvent.click(screen.getByLabelText("Run on"))
+    fireEvent.click(screen.getByText("Auto (least loaded)"))
+
+    expect(store.getState().baseWorkflow.settings.runOn).toEqual({ mode: "auto" })
+    expect(store.getState().dirty).toBe(true)
+  })
+
+  it("pins a published workflow to the compatible Host's stable identity", () => {
+    const workflow = makeWorkflow()
+    workflow.published = {
+      at: 1,
+      toolName: "wf_wf",
+      versionId: "wfv_wf_1",
+      deploymentId: "wfd_wf",
+      deploymentRevision: 1,
+    }
+    useRemoteHostStore.setState({
+      hosts: [
+        {
+          id: "cloud-row",
+          label: "Cloud Host",
+          credentialRef: "remote-host:cloud-row",
+          addedAt: 1,
+          connectionState: "ready",
+          config: { baseUrl: "https://cloud.example", deviceId: "device-1" },
+          featureManifest: {
+            schemaVersion: 2,
+            hostBuildId: "build-1",
+            platform: "headless",
+            generatedAt: 1,
+            hostIdentity: { id: "cloud-stable", kind: "cloud" },
+            protocol: { min: 1, max: 2 },
+            operations: [],
+            features: { "workflow.execution": { version: 1 } },
+          },
+        } as never,
+      ],
+    })
+    const store = mount(workflow)
+
+    fireEvent.click(screen.getByLabelText("Run on"))
+    fireEvent.click(screen.getByText("Cloud Host"))
+
+    expect(store.getState().baseWorkflow.settings.runOn).toEqual({
+      mode: "pinned",
+      ref: "cloud-stable",
+    })
+  })
+
+  it("surfaces durable waiting and failed handoff records", async () => {
+    const workflow = makeWorkflow()
+    workflow.published = { at: 1, toolName: "wf_wf" }
+    await enqueueHostDispatch({
+      id: "handoff-active",
+      accountId: "account-1",
+      domain: "schedule-handoff",
+      targetRef: "cloud-a",
+      kind: "workflow.trigger",
+      payload: {},
+      idempotencyKey: "handoff-active",
+      label: workflow.id,
+    })
+    await enqueueHostDispatch({
+      id: "handoff-failed",
+      accountId: "account-1",
+      domain: "schedule-handoff",
+      targetRef: "cloud-b",
+      kind: "workflow.trigger",
+      payload: {},
+      idempotencyKey: "handoff-failed",
+      label: workflow.id,
+    })
+    await getDb().hostDispatchQueue.update("handoff-failed", { status: "deadletter" })
+
+    mount(workflow)
+
+    expect(await screen.findByTestId("wf-handoff-active")).toHaveTextContent("1 handoff")
+    expect(await screen.findByTestId("wf-handoff-failed")).toHaveTextContent("1 handoff")
+  })
+
   it("displays the shared max-concurrency default (4) when the field is absent", () => {
     // makeWorkflow's settings carry no maxConcurrency — the input must show
     // DEFAULT_MAX_CONCURRENCY, matching what the zod backfill actually runs,
@@ -161,6 +271,37 @@ describe("SettingsTab", () => {
     const store = mount()
     fireEvent.change(screen.getByLabelText("Attempts"), { target: { value: "5" } })
     expect(store.getState().baseWorkflow.settings.retryDefaults.attempts).toBe(5)
+  })
+
+  it("writes every numeric and select run-policy control through setSettings", () => {
+    const store = mount()
+
+    fireEvent.change(screen.getByLabelText("Concurrent runs"), { target: { value: "invalid" } })
+    fireEvent.change(screen.getByLabelText("Max in-run nodes"), { target: { value: "8" } })
+    fireEvent.change(screen.getByLabelText("Base (ms)"), { target: { value: "250" } })
+    fireEvent.change(screen.getByLabelText("Max (ms)"), { target: { value: "2000" } })
+    fireEvent.change(screen.getByLabelText("Run timeout"), { target: { value: "2" } })
+    fireEvent.pointerDown(screen.getByLabelText("On error"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("option", { name: /^Continue/ }))
+    fireEvent.pointerDown(screen.getByLabelText("Backoff"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("option", { name: /^Fixed/ }))
+    const otherTimezone = TIMEZONE_OPTIONS.find((timezone) => timezone.value !== "UTC")!
+    fireEvent.pointerDown(screen.getByTestId("wf-timezone"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("option", { name: otherTimezone.label }))
+
+    expect(store.getState().baseWorkflow.settings).toMatchObject({
+      concurrency: 1,
+      maxConcurrency: 8,
+      timeoutMs: 120_000,
+      timezone: otherTimezone.value,
+      errorPolicy: "continue",
+      retryDefaults: {
+        attempts: 3,
+        backoff: "fixed",
+        baseMs: 250,
+        maxMs: 2000,
+      },
+    })
   })
 
   it("toggling onFailure switches writes through setSettings", () => {

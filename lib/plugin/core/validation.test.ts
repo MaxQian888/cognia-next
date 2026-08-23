@@ -1165,6 +1165,23 @@ describe("Plugin Validation", () => {
         expect(result.errors).toHaveLength(0)
       })
 
+      it("accepts explicit protocol and port constraints", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({
+            rules: [
+              {
+                domain: "observability.example.com",
+                methods: ["GET"],
+                paths: ["/api/logs/*"],
+                protocols: ["https"],
+                ports: [443, 8443],
+              },
+            ],
+          })
+        )
+        expect(result.errors).toHaveLength(0)
+      })
+
       it.each([
         [{ rules: [] }, "manifest.networkAccess.rules.invalid"],
         [
@@ -1178,6 +1195,32 @@ describe("Plugin Validation", () => {
         [
           { rules: [{ domain: "example.com", methods: ["GET"], paths: ["relative/*"] }] },
           "manifest.networkAccess.rules.paths.invalid",
+        ],
+        [
+          {
+            rules: [
+              {
+                domain: "example.com",
+                methods: ["GET"],
+                paths: ["/api/*"],
+                protocols: ["ftp"],
+              },
+            ],
+          },
+          "manifest.networkAccess.rules.protocols.invalid",
+        ],
+        [
+          {
+            rules: [
+              {
+                domain: "example.com",
+                methods: ["GET"],
+                paths: ["/api/*"],
+                ports: [0, 65536],
+              },
+            ],
+          },
+          "manifest.networkAccess.rules.ports.invalid",
         ],
       ])("rejects malformed network rules %#", (networkAccess, code) => {
         const result = validatePluginManifest(withNetworkAccess(networkAccess))

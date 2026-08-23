@@ -115,12 +115,14 @@ jest.mock("@/lib/db/settings", () => ({
 const runSyncDownMock = jest.fn()
 const installForegroundSyncMock = jest.fn()
 const installEventDrivenSyncMock = jest.fn()
+const installWorkflowRunStatusSyncMock = jest.fn()
 const installNetworkSyncMock = jest.fn(async () => () => {})
 const installResumeSyncMock = jest.fn(async () => () => {})
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: () => runSyncDownMock(),
   installForegroundSync: () => installForegroundSyncMock(),
   installEventDrivenSync: () => installEventDrivenSyncMock(),
+  installWorkflowRunStatusSync: () => installWorkflowRunStatusSyncMock(),
   installNetworkSync: () => installNetworkSyncMock(),
   installResumeSync: () => installResumeSyncMock(),
 }))
@@ -233,6 +235,7 @@ beforeEach(() => {
   runSyncDownMock.mockReset().mockResolvedValue([])
   installForegroundSyncMock.mockReset().mockReturnValue(() => {})
   installEventDrivenSyncMock.mockReset().mockReturnValue(() => {})
+  installWorkflowRunStatusSyncMock.mockReset().mockReturnValue(() => {})
   registerPushMock.mockReset().mockResolvedValue({ kind: "permission_denied" })
   reportPushTokenMock.mockReset().mockResolvedValue({ ok: true })
   uninstallPushBridgeMock.mockClear()
@@ -615,6 +618,7 @@ describe("<CompanionBootProvider /> — paired", () => {
     await waitFor(() => expect(runSyncDownMock).toHaveBeenCalled())
     expect(installForegroundSyncMock).toHaveBeenCalled()
     expect(installEventDrivenSyncMock).toHaveBeenCalled()
+    expect(installWorkflowRunStatusSyncMock).toHaveBeenCalled()
     expect(registerPushMock).toHaveBeenCalledWith({ requestPermission: false })
     await waitFor(() => expect(reportPushTokenMock).toHaveBeenCalledWith("tok-123", "ios"))
     expect(installPushBridgeMock).toHaveBeenCalledTimes(1)

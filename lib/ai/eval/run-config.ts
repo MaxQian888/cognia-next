@@ -77,6 +77,8 @@ export async function runConfiguredEval(
     const runId = deps.newRunId()
     const configSummary: EvalReport["config"] = {
       targetKind: spec.kind,
+      ...(spec.kind === "workflow" ? { targetId: spec.workflowId } : {}),
+      ...(spec.kind === "workflow" && spec.versionId ? { targetVersionId: spec.versionId } : {}),
       scorerIds: config.scorerIds,
       k,
       ...(config.subset ? { subset: config.subset } : {}),

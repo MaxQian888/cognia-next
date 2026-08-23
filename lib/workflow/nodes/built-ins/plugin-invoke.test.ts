@@ -11,8 +11,18 @@ jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(async (pluginId: string) =>
     pluginId === "plug-a"
       ? {
+          id: "plug-a",
+          name: "Plugin A",
+          version: "1.0.0",
           status: "enabled",
-          manifest: { permissions: [] },
+          source: "builtin",
+          type: "frontend",
+          enabled: true,
+          capabilities: ["tools"],
+          path: "builtin://plug-a",
+          manifest: { id: "plug-a", version: "1.0.0", permissions: [] },
+          createdAt: 1,
+          updatedAt: 1,
         }
       : undefined
   ),
@@ -30,6 +40,7 @@ import type {
   StepExecutionResult,
   TriggerEvent,
 } from "@/types/workflow/visual"
+import { workflowVersionDigest } from "@/lib/workflow/versioning/version-snapshot"
 
 const trigger: TriggerEvent = {
   workflowId: "wf",
@@ -103,6 +114,38 @@ function makeSeamDeps(overrides?: {
 describe("action.plugin.invoke — tool mode", () => {
   afterEach(() => {
     __setInvokePluginToolDepsForTesting(null)
+  })
+
+  it("rejects plugin drift from an immutable release lock", async () => {
+    const reg = getExecutor("action.plugin.invoke", 1)
+    if (!reg) throw new Error("action.plugin.invoke not registered")
+    const manifest = { id: "plug-a", version: "1.0.0", permissions: [] }
+    const ctx = makeCtx({ pluginId: "plug-a", mode: "tool", toolName: "demo_tool" })
+    ctx.executionBinding = {
+      versionId: "version-1",
+      deploymentId: "deployment-1",
+      deploymentRevision: 1,
+      entrypoint: "portal",
+      caller: "portal",
+      dependencyLock: {
+        workflows: {},
+        indexes: {},
+        plugins: {
+          "plug-a": {
+            pluginId: "plug-a",
+            version: "2.0.0",
+            manifestDigest: workflowVersionDigest(manifest),
+            capabilities: ["tools"],
+            runtimeProfile: "headless",
+          },
+        },
+      },
+    }
+
+    await expect(reg.execute(ctx)).rejects.toMatchObject({
+      code: "plugin-version-drift",
+      retryable: false,
+    })
   })
 
   it("invokes a plugin tool through the seam and wraps the result", async () => {

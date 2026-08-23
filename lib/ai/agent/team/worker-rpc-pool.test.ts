@@ -1,4 +1,9 @@
-import type { AgentWorkerManifestV1, CogniaClient, CogniaClientOptions } from "@cognia/agent"
+import type {
+  AgentWorkerManifestV1,
+  CogniaClient,
+  CogniaClientOptions,
+  HandoffEnvelope,
+} from "@cognia/agent"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
 
 import { selectRemoteWorker } from "./remote-worker-runtime"
@@ -40,6 +45,20 @@ const executionSpec: ResolvedAgentExecutionSpec = {
   capabilities: { effective: ["streaming"], disabledOptional: [] },
   credential: { profileRef: "credential:test", affinity: "sticky-with-failover" },
   fallbackPolicy: "none",
+}
+
+const safeHandoff: HandoffEnvelope = {
+  envelopeVersion: 1,
+  identity: {
+    parentRunId: "team-run",
+    childRunId: "child-run",
+    depth: 1,
+    parentChain: ["team-run"],
+  },
+  task: { prompt: "do the thing" },
+  execution: { mode: "orchestrated" },
+  resources: [],
+  createdAt: "2026-08-12T00:00:00.000Z",
 }
 
 describe("WorkerRpcPool", () => {
@@ -504,6 +523,7 @@ describe("WorkerRpcPool", () => {
     const outcome = await pool.run({
       hostRef: "device:recovery",
       commandId: "lease-recovery",
+      handoff: safeHandoff,
       prompt: "do the thing",
       onSession: jest.fn(),
       onEvent: jest.fn(),
@@ -542,6 +562,7 @@ describe("WorkerRpcPool", () => {
     const outcome = await pool.run({
       hostRef: "device:clean",
       commandId: "lease-clean",
+      handoff: safeHandoff,
       prompt: "do the thing",
       onSession: jest.fn(),
       onEvent: jest.fn(),

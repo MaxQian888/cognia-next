@@ -232,6 +232,39 @@ describe("session attachment uploads", () => {
     expect(committed.mediaType).toBe("image/jpeg")
   })
 
+  it("sniffs document MIME and blocks malicious content before minting a ref", async () => {
+    const pdf = await uploadWhole({
+      sessionId: "ses-1",
+      deviceId: "dev-a",
+      name: "report.pdf",
+      mediaType: "application/octet-stream",
+      bytes: new TextEncoder().encode("%PDF-1.7\nbody"),
+    })
+    expect(pdf.committed.mediaType).toBe("application/pdf")
+
+    const malicious = new TextEncoder().encode(
+      "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    )
+    const hash = await sha256(malicious)
+    const init = await beginAttachmentUpload({
+      sessionId: "ses-1",
+      deviceId: "dev-a",
+      name: "notes.txt",
+      mediaType: "text/plain",
+      size: malicious.byteLength,
+      hash,
+    })
+    await appendAttachmentChunk({
+      uploadId: init.uploadId,
+      deviceId: "dev-a",
+      offset: 0,
+      bytes: malicious,
+    })
+    await expect(
+      commitAttachmentUpload({ uploadId: init.uploadId, deviceId: "dev-a" })
+    ).rejects.toMatchObject({ code: "attachment_malicious_content" })
+  })
+
   it("refuses a type the desktop composer would not stage either", async () => {
     await expect(
       beginAttachmentUpload({

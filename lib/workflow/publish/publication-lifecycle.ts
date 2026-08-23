@@ -142,7 +142,8 @@ export interface PublishWorkflowResult {
 /** Explicitly publish or re-publish a workflow and its generated Skill. */
 export async function publishWorkflowLifecycle(
   workflowId: string,
-  at: number
+  at: number,
+  metadata: { versionName?: string; releaseNotes?: string; createdBy?: string } = {}
 ): Promise<PublishWorkflowResult> {
   const skillBeforePublish = await findWorkflowSkill(workflowId)
   const accountId = getActiveAccountId()
@@ -192,6 +193,7 @@ export async function publishWorkflowLifecycle(
               accountId,
               sequence,
               createdAt: at,
+              ...metadata,
             })
             const deploymentId =
               existingDeployment?.id ?? workflowDeploymentId(accountId, workflowId, "production")

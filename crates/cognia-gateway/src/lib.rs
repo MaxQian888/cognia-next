@@ -126,10 +126,21 @@ struct GatewayInner {
     config_path: Option<PathBuf>,
 }
 
+fn load_initial_keys(agent_debug: bool) -> Vec<GatewayApiKey> {
+    if agent_debug {
+        // The agent-debug bridge must become reachable before macOS can show
+        // any Keychain authorization UI. Persisted gateway credentials are
+        // intentionally unavailable in this opt-in automation process.
+        Vec::new()
+    } else {
+        api_keys::load_keys().unwrap_or_default()
+    }
+}
+
 impl GatewayState {
     pub fn new() -> Self {
         let mut config = GatewayConfig::default();
-        let keys = api_keys::load_keys().unwrap_or_default();
+        let keys = load_initial_keys(std::env::var_os("COGNIA_AGENT_DEBUG").is_some());
         let now = chrono::Utc::now().timestamp_millis();
         let has_token = api_keys::has_usable_key(&keys, now);
         if !has_token {
@@ -598,6 +609,11 @@ mod tests {
         assert!(!cfg.enabled);
         assert_eq!(cfg.port, 47823);
         assert!(!state.status().running);
+    }
+
+    #[test]
+    fn agent_debug_startup_does_not_load_persisted_gateway_keys() {
+        assert!(load_initial_keys(true).is_empty());
     }
 
     #[test]

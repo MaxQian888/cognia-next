@@ -27,6 +27,10 @@ export interface WorkflowVersion {
   digest: string
   name: string
   description?: string
+  /** Operator-authored immutable label for this publication. */
+  versionName?: string
+  /** Operator-authored immutable release notes for this publication. */
+  releaseNotes?: string
   createdAt: number
   createdBy?: string
 }
@@ -92,6 +96,16 @@ export interface WorkflowDependencyBinding {
 export interface WorkflowDependencyLock {
   workflows: Record<string, WorkflowDependencyBinding>
   indexes: Record<string, string>
+  /** Exact production plugin artifacts selected during application publication. */
+  plugins?: Record<string, WorkflowPluginDependencyBinding>
+}
+
+export interface WorkflowPluginDependencyBinding {
+  pluginId: string
+  version: string
+  manifestDigest: string
+  capabilities: string[]
+  runtimeProfile: "headless"
 }
 
 export interface WorkflowExecutionBinding {

@@ -39,6 +39,26 @@ describe("outputHandlesFor", () => {
     ])
   })
 
+  it("human input exposes authored action handles plus the fixed timeout route", () => {
+    const handles = outputHandlesFor({
+      kind: "action.humanInput.request",
+      typeVersion: 1,
+      params: {
+        actions: [
+          { id: "submit", label: "Submit" },
+          { id: "reject", label: "Reject" },
+          null,
+          { id: "", label: "Ignored" },
+        ],
+      },
+    })
+    expect(handles).toEqual([
+      { id: "submit", kind: "case", label: "Submit" },
+      { id: "reject", kind: "case", label: "Reject" },
+      { id: "timeout", kind: "timeout" },
+    ])
+  })
+
   it("switch v2 exposes one handle per case plus default", () => {
     const handles = outputHandlesFor({
       kind: "flow.switch",

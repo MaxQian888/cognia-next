@@ -20,47 +20,65 @@ jest.mock("@/lib/tauri/transport-companion", () => ({
 const transportCallMock = jest.fn()
 const connectionStateListeners = new Set<(state: string) => void>()
 let connectionStateValue = "connected"
+let mockConnectionTransportEnabled = true
 const planeHealthListeners = new Set<(health: { rpc: string; events: string }) => void>()
 let planeHealthValue = { rpc: "ready", events: "ready" }
+let mockPlaneTransportEnabled = true
 const connectionUnsubscribeMock = jest.fn()
 const planeUnsubscribeMock = jest.fn()
 jest.mock("@/lib/tauri", () => ({
   transport: {
     call: (...args: unknown[]) => transportCallMock(...args),
-    getConnectionState: () => connectionStateValue,
-    onConnectionStateChange: (listener: (state: string) => void) => {
-      connectionStateListeners.add(listener)
-      return () => {
-        connectionUnsubscribeMock()
-        connectionStateListeners.delete(listener)
-      }
+    get getConnectionState() {
+      return mockConnectionTransportEnabled ? () => connectionStateValue : undefined
     },
-    getPlaneHealth: () => planeHealthValue,
-    onPlaneHealthChange: (listener: (health: { rpc: string; events: string }) => void) => {
-      planeHealthListeners.add(listener)
-      listener(planeHealthValue)
-      return () => {
-        planeUnsubscribeMock()
-        planeHealthListeners.delete(listener)
-      }
+    get onConnectionStateChange() {
+      return mockConnectionTransportEnabled
+        ? (listener: (state: string) => void) => {
+            connectionStateListeners.add(listener)
+            return () => {
+              connectionUnsubscribeMock()
+              connectionStateListeners.delete(listener)
+            }
+          }
+        : undefined
+    },
+    get getPlaneHealth() {
+      return mockPlaneTransportEnabled ? () => planeHealthValue : undefined
+    },
+    get onPlaneHealthChange() {
+      return mockPlaneTransportEnabled
+        ? (listener: (health: { rpc: string; events: string }) => void) => {
+            planeHealthListeners.add(listener)
+            listener(planeHealthValue)
+            return () => {
+              planeUnsubscribeMock()
+              planeHealthListeners.delete(listener)
+            }
+          }
+        : undefined
     },
   },
 }))
 
+let mockBrowserVault: object | null = { accountId: "acct-web" }
 jest.mock("@/lib/runtime/browser-vault", () => ({
-  getActiveBrowserVault: () => ({ accountId: "acct-web" }),
+  getActiveBrowserVault: () => mockBrowserVault,
 }))
 
 const runSyncDownMock = jest.fn()
 const foregroundTeardown = jest.fn()
 const eventTeardown = jest.fn()
 const installEventDrivenSyncMock = jest.fn(() => eventTeardown)
+const workflowRunStatusTeardown = jest.fn()
+const installWorkflowRunStatusSyncMock = jest.fn(() => workflowRunStatusTeardown)
 const networkTeardown = jest.fn()
 const installNetworkSyncMock = jest.fn(async () => networkTeardown)
 jest.mock("@/lib/sync/companion-sync", () => ({
   runSyncDown: (...args: unknown[]) => runSyncDownMock(...args),
   installForegroundSync: () => foregroundTeardown,
   installEventDrivenSync: () => installEventDrivenSyncMock(),
+  installWorkflowRunStatusSync: () => installWorkflowRunStatusSyncMock(),
   installNetworkSync: () => installNetworkSyncMock(),
 }))
 
@@ -95,8 +113,10 @@ beforeEach(() => {
   hydrateMock.mockResolvedValue(null)
   runSyncDownMock.mockResolvedValue(undefined)
   connectionStateValue = "connected"
+  mockConnectionTransportEnabled = true
   connectionStateListeners.clear()
   planeHealthValue = { rpc: "ready", events: "ready" }
+  mockPlaneTransportEnabled = true
   planeHealthListeners.clear()
   transportCallMock.mockResolvedValue({
     schemaVersion: 2,
@@ -133,6 +153,7 @@ beforeEach(() => {
   installHostStateSyncMock.mockClear()
   hostStateStopMock.mockClear()
   hostStateResyncMock.mockClear()
+  mockBrowserVault = { accountId: "acct-web" }
 })
 
 afterEach(() => {
@@ -170,6 +191,18 @@ describe("WebCompanionBootProvider", () => {
     expect(getRuntimeSnapshot().connectionState).toBe("offline")
   })
 
+  it("keeps the vault locked when neither pairing nor an unlocked browser vault exists", async () => {
+    mockBrowserVault = null
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(hydrateMock).toHaveBeenCalled())
+    expect(getRuntimeSnapshot().vaultState).toBe("locked")
+  })
+
   it("opens on connecting when a pairing is stored in the credential book", async () => {
     window.localStorage.setItem(
       "cognia.companion.hosts.v2",
@@ -194,6 +227,49 @@ describe("WebCompanionBootProvider", () => {
       </WebCompanionBootProvider>
     )
     expect(getRuntimeSnapshot().connectionState).toBe("connecting")
+  })
+
+  it("keeps a paired vault locked and classifies a LAN Web Host as desktop", async () => {
+    mockBrowserVault = null
+    window.localStorage.setItem(
+      "cognia.companion.hosts.v2",
+      JSON.stringify({
+        version: 2,
+        active: {},
+        hosts: {
+          "acct-web:companion-lan": {
+            hostId: "companion-lan",
+            accountNamespace: "acct-web",
+            endpoints: { baseUrl: "ws://192.168.1.20:7890" },
+            deviceId: "dev-1",
+            deviceKeyThumbprint: "thumbprint",
+            serverVersion: "1.0.0",
+          },
+        },
+      })
+    )
+    hydrateMock.mockResolvedValue({
+      baseUrl: "ws://192.168.1.20:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+      targetId: "companion-lan",
+    })
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    expect(getRuntimeSnapshot().vaultState).toBe("locked")
+    await waitFor(() =>
+      expect(getRuntimeSnapshot().target).toMatchObject({
+        id: "companion-lan",
+        hostKind: "desktop",
+      })
+    )
   })
 
   it("stays standalone with no server URL and no stored pairing", async () => {
@@ -286,6 +362,7 @@ describe("WebCompanionBootProvider", () => {
       </WebCompanionBootProvider>
     )
     await waitFor(() => expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(1))
+    expect(installWorkflowRunStatusSyncMock).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("connecting"))
     expect(runSyncDownMock).not.toHaveBeenCalled()
 
@@ -409,6 +486,57 @@ describe("WebCompanionBootProvider", () => {
     expect(planeUnsubscribeMock).toHaveBeenCalledTimes(1)
   })
 
+  it("contains a throwing subscription disposer and continues teardown", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    eventTeardown.mockImplementationOnce(() => {
+      throw new Error("already closed")
+    })
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(installNetworkSyncMock).toHaveBeenCalled())
+
+    expect(() => view.unmount()).not.toThrow()
+    expect(workflowRunStatusTeardown).toHaveBeenCalledTimes(1)
+    expect(networkTeardown).toHaveBeenCalledTimes(1)
+  })
+
+  it("tears down network sync that finishes installing after cancellation", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    let finishInstall: (() => void) | undefined
+    installNetworkSyncMock.mockImplementationOnce(
+      () =>
+        new Promise<() => void>((resolve) => {
+          finishInstall = () => resolve(networkTeardown)
+        })
+    )
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    await waitFor(() => expect(finishInstall).toBeDefined())
+
+    view.unmount()
+    await act(async () => finishInstall?.())
+
+    expect(networkTeardown).toHaveBeenCalledTimes(1)
+  })
+
   it("awaits teardown and rebinding after a canonical Web Host switch", async () => {
     hydrateMock.mockResolvedValue({
       baseUrl: "https://cloud.example.com:7890",
@@ -432,7 +560,9 @@ describe("WebCompanionBootProvider", () => {
     await restarting
 
     expect(eventTeardown).toHaveBeenCalledTimes(1)
+    expect(workflowRunStatusTeardown).toHaveBeenCalledTimes(1)
     expect(installEventDrivenSyncMock).toHaveBeenCalledTimes(2)
+    expect(installWorkflowRunStatusSyncMock).toHaveBeenCalledTimes(2)
   })
 
   it("stops old sync subscriptions before an external runtime-target switch", async () => {
@@ -454,6 +584,7 @@ describe("WebCompanionBootProvider", () => {
 
     expect(networkTeardown).toHaveBeenCalledTimes(1)
     expect(eventTeardown).toHaveBeenCalledTimes(1)
+    expect(workflowRunStatusTeardown).toHaveBeenCalledTimes(1)
     expect(foregroundTeardown).toHaveBeenCalledTimes(1)
     expect(connectionUnsubscribeMock).toHaveBeenCalledTimes(1)
   })
@@ -468,6 +599,7 @@ describe("WebCompanionBootProvider", () => {
     unmount()
 
     platformValue = "web"
+    mockBrowserVault = null
     delete process.env[ENV_KEY]
     render(
       <WebCompanionBootProvider>
@@ -481,6 +613,7 @@ describe("WebCompanionBootProvider", () => {
     expect(hydrateMock).not.toHaveBeenCalled()
     expect(getRuntimeSnapshot()).toMatchObject({
       target: { kind: "standalone" },
+      vaultState: "locked",
       connectionState: "online",
     })
   })
@@ -509,6 +642,92 @@ describe("WebCompanionBootProvider", () => {
 
     await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("online"))
     expect(transportCallMock).toHaveBeenCalledWith("host_feature_manifest", {})
+  })
+
+  it("reports an unavailable transport when plane health is unsupported", async () => {
+    mockPlaneTransportEnabled = false
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() =>
+      expect(getRuntimeSnapshot()).toMatchObject({
+        connectionState: "offline",
+        host: { compatible: false },
+      })
+    )
+    expect(transportCallMock).not.toHaveBeenCalled()
+  })
+
+  it("boots without optional connection-state events and handles unauthenticated planes", async () => {
+    mockConnectionTransportEnabled = false
+    planeHealthValue = { rpc: "unauthenticated", events: "ready" }
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+
+    render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+
+    await waitFor(() => expect(getRuntimeSnapshot().connectionState).toBe("offline"))
+    expect(connectionStateListeners.size).toBe(0)
+    expect(runSyncDownMock).not.toHaveBeenCalled()
+  })
+
+  it("stops manifest retry after unmounting during backoff", async () => {
+    hydrateMock.mockResolvedValue({
+      baseUrl: "https://cloud.example.com:7890",
+      devicePrivateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+      deviceKeyThumbprint: "thumbprint",
+      deviceId: "dev-1",
+      serverVersion: "1.0.0",
+    })
+    transportCallMock.mockRejectedValue(new Error("offline"))
+    const random = jest.spyOn(Math, "random").mockReturnValue(0)
+    const nativeSetTimeout = global.setTimeout
+    let finishBackoff: (() => void) | undefined
+    const timeout = jest
+      .spyOn(global, "setTimeout")
+      .mockImplementation((callback, delay, ...args) => {
+        if (typeof delay === "number" && delay >= 200 && delay < 300) {
+          finishBackoff = () => (callback as (...values: unknown[]) => void)(...args)
+          return 99 as unknown as ReturnType<typeof setTimeout>
+        }
+        return nativeSetTimeout(callback, delay, ...args)
+      })
+    const view = render(
+      <WebCompanionBootProvider>
+        <div />
+      </WebCompanionBootProvider>
+    )
+    for (let index = 0; index < 20 && !finishBackoff; index += 1) {
+      await act(async () => Promise.resolve())
+    }
+    expect(finishBackoff).toBeDefined()
+
+    view.unmount()
+    await act(async () => finishBackoff?.())
+
+    expect(transportCallMock).toHaveBeenCalledTimes(1)
+    timeout.mockRestore()
+    random.mockRestore()
   })
 
   it("returns to connecting for either plane and resyncs before becoming online again", async () => {

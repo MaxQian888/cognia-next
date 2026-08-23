@@ -219,6 +219,22 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     ...(input.traceId ? { traceId: input.traceId } : {}),
   }
 
+  if (reg.pluginId && input.executionBinding?.dependencyLock?.plugins) {
+    const [{ getPlugin }, { assertWorkflowPluginDependencyLock, WorkflowPluginLockError }] =
+      await Promise.all([
+        import("@/lib/db/plugins"),
+        import("@/lib/workflow/runtime/plugin-dependency-lock"),
+      ])
+    const plugin = await getPlugin(reg.pluginId)
+    if (!plugin) {
+      throw new WorkflowPluginLockError(
+        "plugin-not-locked",
+        `Plugin executor ${reg.pluginId} is unavailable for this immutable workflow release.`
+      )
+    }
+    assertWorkflowPluginDependencyLock(input.executionBinding, plugin)
+  }
+
   // Circuit breaker (A4): if this node has tripped its breaker, fail fast
   // BEFORE consuming an attempt. The CircuitOpenError is non-retryable, so it
   // flows straight through the orchestrator's onError / error-edge path.

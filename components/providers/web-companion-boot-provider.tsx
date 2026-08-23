@@ -17,6 +17,7 @@ import {
   installEventDrivenSync,
   installForegroundSync,
   installNetworkSync,
+  installWorkflowRunStatusSync,
   runSyncDown,
 } from "@/lib/sync/companion-sync"
 import { hydrateCompanionConfig } from "@/lib/tauri/transport-companion"
@@ -271,6 +272,7 @@ export function WebCompanionBootProvider({ children }: { children: React.ReactNo
       // Subscribe before the authoritative sync so invalidations cannot fall
       // into a sync-complete/subscription-not-yet-open race window.
       cleanup.push(installEventDrivenSync())
+      cleanup.push(installWorkflowRunStatusSync())
 
       const installBackgroundSync = async () => {
         if (backgroundSyncInstalled || cancelled) return

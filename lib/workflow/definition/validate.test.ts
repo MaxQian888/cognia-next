@@ -47,6 +47,27 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(true)
   })
 
+  it("preserves workflow-level placement and defaults legacy workflows to colocate", () => {
+    const legacy = visualWorkflowSchema.safeParse(baseWorkflow())
+    expect(legacy.success).toBe(true)
+    if (legacy.success) expect(legacy.data.settings.runOn).toEqual({ mode: "colocate" })
+
+    const pinned = baseWorkflow()
+    pinned.settings.runOn = { mode: "pinned", ref: "host-cloud-primary" }
+    const parsed = visualWorkflowSchema.safeParse(pinned)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.settings.runOn).toEqual({
+        mode: "pinned",
+        ref: "host-cloud-primary",
+      })
+    }
+
+    const malformed = baseWorkflow()
+    malformed.settings.runOn = { mode: "pinned", ref: "" }
+    expect(visualWorkflowSchema.safeParse(malformed).success).toBe(false)
+  })
+
   it("rejects an empty name", () => {
     const result = visualWorkflowSchema.safeParse(baseWorkflow({ name: "" }))
     expect(result.success).toBe(false)

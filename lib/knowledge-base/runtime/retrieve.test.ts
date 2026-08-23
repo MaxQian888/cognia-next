@@ -7,17 +7,21 @@ jest.mock("@cognia/vector/dimension-guard", () => ({
 }))
 jest.mock("@/lib/db/knowledge-bases", () => ({
   getKnowledgeBaseChunksByVectorDocIds: jest.fn(),
-  listKnowledgeBaseVectorCollections: jest.fn(async () => []),
+  listKnowledgeBaseRevisionChunks: jest.fn(),
 }))
 
 import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
-import { getKnowledgeBaseChunksByVectorDocIds } from "@/lib/db/knowledge-bases"
+import {
+  getKnowledgeBaseChunksByVectorDocIds,
+  listKnowledgeBaseRevisionChunks,
+} from "@/lib/db/knowledge-bases"
 import { retrieveKnowledgeBaseChunks, type KnowledgeBaseRuntimeDeps } from "./retrieve"
 
 const embedMock = generateEmbedding as jest.Mock
 const dimGuardMock = ensureCollectionDimensionCompatible as jest.Mock
 const loadMock = getKnowledgeBaseChunksByVectorDocIds as jest.Mock
+const revisionsMock = listKnowledgeBaseRevisionChunks as jest.Mock
 
 function makeDeps(
   hits: Array<{ id: string; content: string; score: number }>,
@@ -61,6 +65,7 @@ beforeEach(() => {
   embedMock.mockClear().mockResolvedValue({ embedding: [1, 0, 0] })
   dimGuardMock.mockClear().mockResolvedValue(undefined)
   loadMock.mockReset()
+  revisionsMock.mockReset().mockResolvedValue([row("v-high"), row("v-low")])
 })
 
 describe("retrieveKnowledgeBaseChunks", () => {
@@ -163,5 +168,20 @@ describe("retrieveKnowledgeBaseChunks", () => {
         deps,
       })
     ).resolves.toEqual({ chunks: [], degraded: true, degradedReason: "retrieve-failed" })
+  })
+
+  it("loads only an explicitly frozen revision set", async () => {
+    const deps = makeDeps([{ id: "v-high", content: "", score: 0.9 }])
+    loadMock.mockResolvedValue([row("v-high")])
+
+    await retrieveKnowledgeBaseChunks({
+      knowledgeBaseId: "kb-1",
+      userMessage: "query",
+      topK: 2,
+      generationIds: ["gen-frozen"],
+      deps,
+    })
+
+    expect(revisionsMock).toHaveBeenCalledWith("kb-1", ["gen-frozen"])
   })
 })

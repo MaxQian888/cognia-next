@@ -18,6 +18,17 @@ export interface KnowledgeBase {
 export type KnowledgeBaseSourceStatus = "pending" | "processing" | "ready" | "failed"
 export type KnowledgeBaseSourceContentEncoding = "utf8" | "base64"
 
+export type KnowledgeBaseSourceVisibility = "private" | "restricted" | "public"
+
+/** Document-level access policy evaluated after a deployment selects a Knowledge Base. */
+export interface KnowledgeBaseSourceAcl {
+  visibility: KnowledgeBaseSourceVisibility
+  /** Verified OIDC subjects. App-local/Dify `user` keys are never principals. */
+  principalIds?: string[]
+  /** Verified OIDC group ids. */
+  groupIds?: string[]
+}
+
 /** Original imported material. Content is portable; device-local paths are only provenance. */
 export interface KnowledgeBaseSource {
   id: string
@@ -34,6 +45,8 @@ export interface KnowledgeBaseSource {
   status: KnowledgeBaseSourceStatus
   chunkCount: number
   errorCode?: string
+  /** Missing on legacy rows and therefore private to trusted local execution. */
+  acl?: KnowledgeBaseSourceAcl
   createdAt: number
   updatedAt: number
 }

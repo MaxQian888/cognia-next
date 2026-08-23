@@ -883,6 +883,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     "workflow_update",
     "workflow_delete",
     "workflow_run_list",
+    "workflow_placement_probe",
+    "workflow_handoff_create",
     "workflow_cancel_run",
     "workflow_schedule_pause",
     "workflow_schedule_resume",
@@ -917,6 +919,8 @@ const KNOWN_COMMANDS: &[&str] = &[
     // list/respond remain available while the renderer is suspended.
     "workflow_approval_list",
     "workflow_approval_respond",
+    "workflow_human_input_list",
+    "workflow_human_input_submit",
     // ── Remote step execution (ADR-0061 P3) ─────────────────────────────────
     // A paired device answers a desktop-issued `workflow://step-execute`
     // request with a (chunked) result. Only meaningful for a pending request
@@ -1212,7 +1216,9 @@ const READ_ONLY_COMMANDS: &[&str] = &[
     "plugin_js_status",
     // Workflow run listing + pending-approval projection.
     "workflow_run_list",
+    "workflow_placement_probe",
     "workflow_approval_list",
+    "workflow_human_input_list",
     // Twin reads.
     "twin_source_list",
     "twin_job_status",
@@ -1487,6 +1493,7 @@ const CONTROL_COMMANDS: &[&str] = &[
     "background_monitor_register_scheduled",
     "workflow_cancel_run",
     "workflow_approval_respond",
+    "workflow_human_input_submit",
     // Twin destructive ops.
     "twin_delete",
     "twin_source_delete",
@@ -1647,8 +1654,11 @@ const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
     "provider_diagnostics_start",
     "provider_diagnostics_cancel",
     "workflow_trigger_manual",
+    "workflow_handoff_create",
     "device_capabilities_report",
     "workflow_approval_respond",
+    "workflow_human_input_list",
+    "workflow_human_input_submit",
     "workflow_step_result",
     "perf_close_lease",
     "perf_hotspots",

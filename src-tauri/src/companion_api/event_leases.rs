@@ -247,7 +247,10 @@ mod tests {
         let views = leases_for("device-wire");
         let json = serde_json::to_value(&views[0]).unwrap();
         assert_eq!(json["leaseId"], serde_json::json!(guard.id()));
-        assert!(json.get("id").is_none(), "`id` is the Rust field, not the wire name");
+        assert!(
+            json.get("id").is_none(),
+            "`id` is the Rust field, not the wire name"
+        );
         assert_eq!(json["transport"], serde_json::json!("ws"));
         assert_eq!(json["state"], serde_json::json!("connecting"));
         assert!(json.get("openedAt").is_some());

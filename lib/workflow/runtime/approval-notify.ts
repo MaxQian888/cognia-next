@@ -17,12 +17,12 @@
  * clear their pending list immediately.
  *
  * Notification copy is English by precedent (runtime notifications — see
- * TeamNotifier / handoff.ts). All delivery is best-effort: a lost frame
- * degrades to the pending-approvals RPC (`workflow_approval_list`) the
- * mobile card polls on mount / refresh.
+ * TeamNotifier / handoff.ts). Companion delivery uses the host-neutral event
+ * publisher, so both a desktop and a headless brain reach paired devices. All
+ * delivery is best-effort: a lost frame degrades to the pending-approvals RPC
+ * (`workflow_approval_list`) the mobile card polls on mount / refresh.
  */
 
-import { isTauri } from "@/lib/platform/detect"
 import { registerNotificationCommand } from "@/lib/notifications/action-registry"
 import { emitCompanionEvent } from "./companion-run-events"
 import { respondToApproval, type ApprovalDecision, type PendingApproval } from "./approval-registry"
@@ -53,7 +53,6 @@ export interface ApprovalNotifyDeps {
     }>
   }) => Promise<string>
   emit?: (event: string, payload: unknown) => Promise<void>
-  isTauriFn?: () => boolean
 }
 
 async function defaultNotify(
@@ -99,7 +98,6 @@ export async function notifyApprovalRequested(
     console.warn("approval notify: notification center delivery failed", err)
   }
 
-  if (!(deps.isTauriFn ?? isTauri)()) return
   const emit = deps.emit ?? emitCompanionEvent
   try {
     await emit(APPROVAL_REQUEST_CHANNEL, entry)
@@ -119,7 +117,6 @@ export async function notifyApprovalResolved(
   decision: ApprovalDecision,
   deps: ApprovalNotifyDeps = {}
 ): Promise<void> {
-  if (!(deps.isTauriFn ?? isTauri)()) return
   try {
     await (deps.emit ?? emitCompanionEvent)(APPROVAL_RESOLVED_CHANNEL, {
       approvalId: entry.approvalId,

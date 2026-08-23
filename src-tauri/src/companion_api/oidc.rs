@@ -81,6 +81,8 @@ pub struct OidcClaims {
     /// `organization_id` — the Logto Organization the token was issued for,
     /// mapped to a cognia tenant. `None` on non-organization tokens.
     pub organization_id: Option<String>,
+    /// Group/organization-role ids used by application release access policy.
+    pub group_ids: Vec<String>,
     /// Granted scopes, split from the space-delimited `scope` claim.
     pub scopes: Vec<String>,
     /// `exp` — expiry (seconds since Unix epoch).
@@ -123,6 +125,10 @@ struct RawClaims {
     scope: Option<String>,
     #[serde(default)]
     organization_id: Option<String>,
+    #[serde(default)]
+    groups: Vec<String>,
+    #[serde(default)]
+    organization_roles: Vec<String>,
     exp: i64,
 }
 
@@ -187,9 +193,18 @@ pub fn verify_access_token(
         }
     }
 
+    let group_ids = raw
+        .groups
+        .into_iter()
+        .chain(raw.organization_roles)
+        .filter(|group| !group.trim().is_empty())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     Ok(OidcClaims {
         sub: raw.sub,
         organization_id: raw.organization_id,
+        group_ids,
         scopes,
         exp: raw.exp,
     })
@@ -295,11 +310,9 @@ impl JwksCache {
         // not have picked up a proxy change afterwards either. The discovery
         // document and the JWKS may live on different hosts, so each gets its
         // own policy decision; the bypass list is per-host.
-        let discovery_client = crate::proxy_config::managed_client(
-            jwks_client_builder(),
-            &discovery_url,
-        )
-        .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
+        let discovery_client =
+            crate::proxy_config::managed_client(jwks_client_builder(), &discovery_url)
+                .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
         let discovery: DiscoveryDoc = discovery_client
             .get(&discovery_url)
             .send()
@@ -310,11 +323,9 @@ impl JwksCache {
             .await
             .map_err(|e| OidcError::Discovery(format!("parse discovery document: {e}")))?;
 
-        let jwks_client = crate::proxy_config::managed_client(
-            jwks_client_builder(),
-            &discovery.jwks_uri,
-        )
-        .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
+        let jwks_client =
+            crate::proxy_config::managed_client(jwks_client_builder(), &discovery.jwks_uri)
+                .map_err(|error| OidcError::Discovery(format!("proxy policy: {error}")))?;
         let jwks: JwkSet = jwks_client
             .get(&discovery.jwks_uri)
             .send()
@@ -577,6 +588,20 @@ mod tests {
         let claims =
             verify_access_token(&test_jwks(), &token, &cfg(&["brain:rpc"])).expect("verify");
         assert_eq!(claims.organization_id, None);
+    }
+
+    #[test]
+    fn groups_and_organization_roles_form_the_app_group_set() {
+        let mut c = valid_claims();
+        c["groups"] = json!(["engineering", "shared"]);
+        c["organization_roles"] = json!(["release-managers", "shared"]);
+        let token = mint(c, Some(TEST_KID), Algorithm::ES384);
+        let claims =
+            verify_access_token(&test_jwks(), &token, &cfg(&["brain:rpc"])).expect("verify");
+        assert_eq!(
+            claims.group_ids,
+            vec!["engineering", "release-managers", "shared"]
+        );
     }
 
     #[test]

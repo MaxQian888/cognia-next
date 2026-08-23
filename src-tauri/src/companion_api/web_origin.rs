@@ -99,7 +99,19 @@ pub async fn enforce(
     request: Request,
     next: Next,
 ) -> Response {
-    let decision = policy.evaluate(request.headers());
+    let workflow_embed_token = request.uri().path().starts_with("/api/apps/")
+        && request.uri().path().ends_with("/embed-token");
+    let decision = if workflow_embed_token {
+        request
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+            .and_then(normalize_allowed_origin)
+            .map(OriginDecision::AllowedCrossOrigin)
+            .unwrap_or(OriginDecision::Denied)
+    } else {
+        policy.evaluate(request.headers())
+    };
     if decision == OriginDecision::Denied {
         return super::api::public_error_response(
             StatusCode::FORBIDDEN,
@@ -404,7 +416,44 @@ mod tests {
                 "/ws/events",
                 get(|| async { StatusCode::SWITCHING_PROTOCOLS }),
             )
+            .route(
+                "/api/apps/review/embed-token",
+                get(|| async { StatusCode::OK }),
+            )
             .layer(axum::middleware::from_fn_with_state(policy, enforce))
+    }
+
+    #[tokio::test]
+    async fn embed_token_defers_an_exact_secure_origin_to_the_release_policy() {
+        let response = test_router(WebOriginPolicy::default())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/apps/review/embed-token")
+                    .header(header::HOST, "brain.example")
+                    .header(header::ORIGIN, "https://embed.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://embed.example"
+        );
+
+        let insecure = test_router(WebOriginPolicy::default())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/apps/review/embed-token")
+                    .header(header::HOST, "brain.example")
+                    .header(header::ORIGIN, "http://embed.example")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(insecure.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

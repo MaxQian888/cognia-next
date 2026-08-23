@@ -161,6 +161,22 @@ export type WorkflowNodeGroupEdge = {
   }
 }
 
+export type WorkflowNodeGroupBoundaryPort = {
+  id: string
+  label: string
+  nodeId: string
+  handleId?: string
+  schema: { [key: string]: TemplateJson }
+  required: boolean
+  defaultValue?: TemplateJson
+  source: "edge" | "variable" | "expression"
+}
+
+export type WorkflowNodeGroupInterface = {
+  inputs: WorkflowNodeGroupBoundaryPort[]
+  outputs: WorkflowNodeGroupBoundaryPort[]
+}
+
 /**
  * A reusable authoring-time graph fragment. The editor expands it into normal
  * workflow nodes/edges under the existing visual `annotation.group` frame;
@@ -170,6 +186,10 @@ export type WorkflowNodeGroupPayload = {
   kind: typeof WORKFLOW_NODE_GROUP_PAYLOAD_KIND
   nodes: WorkflowNodeGroupNode[]
   edges: WorkflowNodeGroupEdge[]
+  /** Confirmed authoring boundary; absent on legacy node groups. */
+  interface?: WorkflowNodeGroupInterface
+  /** Controls where the immutable definition may be distributed. */
+  distribution?: { scope: "personal" | "workspace" | "portable-bundle" }
 }
 
 export type WorkflowNodeGroupDefinition = TemplateDefinitionEnvelope<WorkflowNodeGroupPayload> & {

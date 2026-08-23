@@ -99,4 +99,17 @@ describe("evaluation artifact encryption", () => {
     })
     expect(vault.loadSecret).toHaveBeenCalledWith("performance-artifact-data-key")
   })
+
+  it("keeps Human Input values under a dedicated account-scoped domain key", async () => {
+    const vault = {
+      accountId: "account-web",
+      loadSecret: jest.fn<Promise<string | null>, [string]>().mockResolvedValue(null),
+      storeSecret: jest.fn<Promise<void>, [string, string]>().mockResolvedValue(),
+    }
+    await loadOrCreateAccountArtifactKey("account-web", "human-input", {
+      platform: "web",
+      getBrowserVault: () => vault,
+    })
+    expect(vault.loadSecret).toHaveBeenCalledWith("human-input-artifact-data-key")
+  })
 })

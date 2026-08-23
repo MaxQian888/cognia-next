@@ -15,7 +15,10 @@
 
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import type { CapabilityId } from "@/lib/platform/capabilities"
-import { dispatchRemoteStep } from "@/lib/workflow/runtime/remote-step-broker"
+import {
+  dispatchRemoteStep,
+  RemoteStepExecutionError,
+} from "@/lib/workflow/runtime/remote-step-broker"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { isPlaceable } from "@/lib/placement/liveness"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
@@ -118,11 +121,16 @@ export async function runMobileStep(
 
   const devices = await selectTargetDevices(capability, pinned, deps)
   const dispatch = deps.dispatch ?? dispatchRemoteStep
+  const deadline = (deps.now ?? Date.now)() + timeoutMs
 
   let lastError: unknown
   for (const device of devices) {
     ctx.log("info", `Dispatching ${kind} to device ${device.deviceId} (${device.label})`)
     try {
+      const remainingMs = deadline - (deps.now ?? Date.now)()
+      if (remainingMs <= 0) {
+        throw new RemoteStepExecutionError("timeout", true, `mobile step ${kind} timed out`)
+      }
       const output = await dispatch({
         targetDeviceId: device.deviceId,
         kind,
@@ -130,7 +138,7 @@ export async function runMobileStep(
         runId: ctx.runId,
         stepId: ctx.stepId,
         workflowId: ctx.workflowId,
-        timeoutMs,
+        timeoutMs: remainingMs,
         signal: ctx.signal,
       })
       return { output: { deviceId: device.deviceId, ...(output as Record<string, unknown>) } }
@@ -140,7 +148,9 @@ export async function runMobileStep(
       // somewhere else. Everything else (the device went offline between
       // selection and dispatch, the broker timed out) is worth the next
       // candidate rather than failing a step an idle phone could have run.
-      if (ctx.signal?.aborted || isTerminalDeviceError(error)) throw error
+      if (ctx.signal?.aborted || !(error instanceof RemoteStepExecutionError) || !error.retryable) {
+        throw error
+      }
       lastError = error
       ctx.log(
         "warn",
@@ -151,17 +161,6 @@ export async function runMobileStep(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`no paired device could run ${kind}`)
-}
-
-/** Denials and cancellations are the device's answer; do not ask another one. */
-function isTerminalDeviceError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  return (
-    message.includes("denied") ||
-    message.includes("cancelled") ||
-    message.includes("canceled") ||
-    message.includes("rejected")
-  )
 }
 
 export const runMobileCamera = (ctx: StepExecutionContext, deps?: MobileProxyDeps) =>

@@ -817,3 +817,42 @@ registerNodeExecutor({
     return { output: { value } }
   },
 })
+
+// ── io.answer ──────────────────────────────────────────────────────────────
+// Chatflow terminal output. The payload stays structured so Portal, API, and
+// conversation persistence can render and audit it without parsing markdown
+// or trusting arbitrary HTML.
+registerNodeExecutor({
+  kind: "io.answer",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      text?: unknown
+      content?: unknown
+      citations?: unknown
+      files?: unknown
+      suggestions?: unknown
+    }
+    const text = params.text
+    if (text !== undefined && typeof text !== "string") {
+      throw nonRetryable("io.answer: text must be a string")
+    }
+    if (text === undefined && params.content === undefined) {
+      throw nonRetryable("io.answer: text or content is required")
+    }
+    const citations = Array.isArray(params.citations) ? params.citations : []
+    const files = Array.isArray(params.files) ? params.files : []
+    const suggestions = Array.isArray(params.suggestions) ? params.suggestions : []
+    return {
+      output: {
+        answer: {
+          ...(text !== undefined ? { text } : {}),
+          ...(params.content !== undefined ? { content: params.content } : {}),
+          citations,
+          files,
+          suggestions,
+        } satisfies import("@/types/workflow/answer").WorkflowAnswer,
+      },
+    }
+  },
+})

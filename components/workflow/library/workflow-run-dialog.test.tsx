@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
@@ -14,6 +14,10 @@ const runWorkflow = jest.fn((..._a: unknown[]) =>
 )
 jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
   runWorkflow: (...a: unknown[]) => runWorkflow(...a),
+}))
+const dispatchTrigger = jest.fn(async () => undefined)
+jest.mock("@/lib/workflow/runtime/trigger-bridge", () => ({
+  dispatchTrigger: (...a: unknown[]) => dispatchTrigger(...a),
 }))
 
 const toastSuccess = jest.fn()
@@ -31,6 +35,7 @@ const workflow = {
 
 beforeEach(() => {
   runWorkflow.mockClear()
+  dispatchTrigger.mockClear()
   toastSuccess.mockClear()
 })
 
@@ -79,5 +84,23 @@ describe("WorkflowRunDialog", () => {
     fireEvent.click(screen.getByTestId("workflow-run-submit"))
     const arg = runWorkflow.mock.calls[0][0] as unknown as { trigger: { payload: unknown } }
     expect(arg.trigger.payload).toEqual({ x: 42 })
+  })
+
+  it("routes a published workflow through the placement-aware trigger bridge", async () => {
+    const published = {
+      ...workflow,
+      published: { deploymentId: "deployment-1", versionId: "version-1" },
+    } as WorkflowRow
+    render(<WorkflowRunDialog workflow={published} open onOpenChange={() => {}} />)
+
+    fireEvent.click(screen.getByTestId("workflow-run-submit"))
+
+    await waitFor(() =>
+      expect(dispatchTrigger).toHaveBeenCalledWith(
+        expect.objectContaining({ workflowId: "wf-1", kind: "trigger.manual" }),
+        { triggeredBy: { source: "desktop" } }
+      )
+    )
+    expect(runWorkflow).not.toHaveBeenCalled()
   })
 })

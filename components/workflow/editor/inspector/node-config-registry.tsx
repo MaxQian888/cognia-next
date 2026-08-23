@@ -33,6 +33,7 @@ import { WebCloneConfig } from "./forms/web-clone-form"
 import {
   AgentTurnConfig,
   ApprovalRequestConfig,
+  HumanInputRequestConfig,
   MobileCameraConfig,
   MobileScanBarcodeConfig,
   MobileLocationConfig,
@@ -148,6 +149,7 @@ import {
   WebhookTriggerConfig,
   WorkflowCompletedTriggerConfig,
   OutputConfig,
+  AnswerConfig,
 } from "./forms"
 
 export type NodeConfigComponent = ComponentType<{
@@ -180,6 +182,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.pet.interact": PetInteractConfig,
   // Actions: human-in-the-loop (ADR 0061 P2)
   "action.approval.request": ApprovalRequestConfig,
+  "action.humanInput.request": HumanInputRequestConfig,
   // Actions: remote device steps (ADR 0061 P3)
   "action.mobile.camera": MobileCameraConfig,
   "action.mobile.scanBarcode": MobileScanBarcodeConfig,
@@ -330,6 +333,7 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "io.http": HttpRequestConfig,
   "io.webhook.respond": WebhookRespondConfig,
   "io.output": OutputConfig,
+  "io.answer": AnswerConfig,
   "io.webClone": WebCloneConfig,
   // Annotations
   "annotation.note": NoteConfig,

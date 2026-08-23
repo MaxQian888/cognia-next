@@ -5,6 +5,7 @@ import "fake-indexeddb/auto"
 import { runMobileCamera, runMobileStep, selectTargetDevice, selectTargetDevices } from "./mobile"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { StepExecutionContext } from "@/types/workflow/visual"
+import { RemoteStepExecutionError } from "@/lib/workflow/runtime/remote-step-broker"
 
 const NOW = 1_000_000
 const now = () => NOW
@@ -135,7 +136,7 @@ describe("runMobileStep", () => {
     // A cancel is the device's answer, not an outage. Retrying elsewhere would
     // put the same prompt on a second phone the user never touched.
     const dispatch = jest.fn(async () => {
-      throw new Error("remote step failed on device: user cancelled (cancelled)")
+      throw new RemoteStepExecutionError("cancelled", false, "user cancelled")
     })
     await expect(
       runMobileStep(makeCtx({}), "action.mobile.camera", "camera", {
@@ -152,7 +153,9 @@ describe("runMobileStep", () => {
     // dispatch. Failing the whole step then, with an idle capable phone
     // available, is the outcome this avoids.
     const dispatch = jest.fn(async ({ targetDeviceId }: { targetDeviceId: string }) => {
-      if (targetDeviceId === "a") throw new Error("remote step timed out")
+      if (targetDeviceId === "a") {
+        throw new RemoteStepExecutionError("dispatch_failed", true, "device disconnected")
+      }
       return { ok: true }
     })
     const result = await runMobileStep(makeCtx({}), "action.mobile.camera", "camera", {
@@ -170,7 +173,7 @@ describe("runMobileStep", () => {
 
   it("surfaces the last failure when every candidate fails", async () => {
     const dispatch = jest.fn(async () => {
-      throw new Error("remote step timed out")
+      throw new RemoteStepExecutionError("timeout", true, "remote step timed out")
     })
     await expect(
       runMobileStep(makeCtx({}), "action.mobile.camera", "camera", {
@@ -186,7 +189,7 @@ describe("runMobileStep", () => {
     const controller = new AbortController()
     const dispatch = jest.fn(async () => {
       controller.abort()
-      throw new Error("remote step timed out")
+      throw new RemoteStepExecutionError("timeout", true, "remote step timed out")
     })
     const ctx = { ...makeCtx({}), signal: controller.signal } as StepExecutionContext
     await expect(
@@ -196,6 +199,20 @@ describe("runMobileStep", () => {
         now,
       })
     ).rejects.toThrow(/timed out/)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not fail over after a device restart interrupted native UI", async () => {
+    const dispatch = jest.fn(async () => {
+      throw new RemoteStepExecutionError("interrupted", false, "device restarted")
+    })
+    await expect(
+      runMobileStep(makeCtx({}), "action.mobile.camera", "camera", {
+        listDevices: async () => [device({ deviceId: "a" }), device({ deviceId: "b" })],
+        dispatch: dispatch as never,
+        now,
+      })
+    ).rejects.toMatchObject({ code: "interrupted", retryable: false })
     expect(dispatch).toHaveBeenCalledTimes(1)
   })
 })

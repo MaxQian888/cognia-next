@@ -22,12 +22,12 @@
  * names, no error text — because the push channel leaves the device via
  * APNs/FCM. Phones resolve names from their synced Dexie mirror.
  *
- * All emission is best-effort and web-mode no-op (same posture as
- * `needs-input-notifier.ts`); a lost frame degrades to the existing
- * foreground/resume/network sync triggers.
+ * All emission is best-effort through the host-neutral publisher: Tauri emits
+ * directly, while a headless brain publishes through its authenticated bridge.
+ * A lost frame degrades to the existing foreground/resume/network sync triggers.
  */
 
-import { isTauri } from "@/lib/platform/detect"
+import { publishHostEvent } from "@/lib/companion/host-event-publisher"
 import { getDb } from "@/lib/db/schema"
 import type { PersistRunStateInput, WorkflowRunRow } from "@/types/workflow/visual"
 
@@ -46,24 +46,18 @@ export interface WorkflowRunStatusFrame {
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["succeeded", "failed", "cancelled"])
 
 /**
- * Emit a Tauri event destined for companion fan-out (event bus / push
- * trigger). Shared by the run-state funnel below and the approval notifier.
- * Throws off-Tauri — callers gate on `isTauri()` and treat delivery as
- * best-effort.
+ * Publish a host event destined for companion fan-out (event bus / push
+ * trigger). Kept as a named compatibility seam for the approval and remote
+ * step modules; the underlying publisher is host-neutral.
  */
 export async function emitCompanionEvent(event: string, payload: unknown): Promise<void> {
-  const moduleId = "@tauri-apps/api/event"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    emit: (event: string, payload: unknown) => Promise<void>
-  }
-  await mod.emit(event, payload)
+  await publishHostEvent(event, payload)
 }
 
 /** Injectable seams so tests never touch Tauri or a real Dexie. */
 export interface CompanionRunEventDeps {
   emit?: (event: string, payload: unknown) => Promise<void>
   getRun?: (runId: string) => Promise<WorkflowRunRow | undefined>
-  isTauriFn?: () => boolean
 }
 
 async function defaultGetRun(runId: string): Promise<WorkflowRunRow | undefined> {
@@ -78,7 +72,6 @@ export async function notifyCompanionsOfRunState(
   input: PersistRunStateInput,
   deps: CompanionRunEventDeps = {}
 ): Promise<void> {
-  if (!(deps.isTauriFn ?? isTauri)()) return
   const emit = deps.emit ?? emitCompanionEvent
   try {
     const frame: WorkflowRunStatusFrame = {

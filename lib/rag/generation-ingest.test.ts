@@ -73,4 +73,33 @@ describe("runGenerationSwap", () => {
     expect(await getDb().retrievalActivePointers.get("kb:1:source:1")).toBeUndefined()
     expect(await getDb().retrievalGenerations.where("status").equals("failed").count()).toBe(1)
   })
+
+  it("prepares and writes a generation-specific collection", async () => {
+    const vectorStore = store()
+    const prepare = jest.fn(async () => undefined)
+    const result = await runGenerationSwap({
+      idPrefix: "generation",
+      corpusId: "kb:1:source:1",
+      domain: "kb",
+      profileFingerprint: "fingerprint",
+      collection: (generationId) => `collection__${generationId}`,
+      prepare,
+      store: vectorStore,
+      contentHash: "hash",
+      expectedCount: 1,
+      oldVectors: [],
+      build: (generationId) => ({
+        value: generationId,
+        count: 1,
+        documents: [{ id: `${generationId}:0`, content: "safe", embedding: [1, 2] }],
+      }),
+      commit: async (_value, activate) => activate(),
+    })
+
+    expect(prepare).toHaveBeenCalledWith(`collection__${result.generationId}`, result.generationId)
+    expect(vectorStore.addDocuments).toHaveBeenCalledWith(
+      `collection__${result.generationId}`,
+      expect.any(Array)
+    )
+  })
 })

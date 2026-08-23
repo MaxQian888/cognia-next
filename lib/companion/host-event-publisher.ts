@@ -10,8 +10,9 @@
  *  - Desktop webview: a plain Tauri `emit(topic, payload)`; the Rust side
  *    forwards every `tauri_forwarded` channel to WS subscribers and push
  *    triggers (`register_default_event_channels`).
- *  - Headless brain: no Tauri runtime. `lib/headless/runtimes/connector-runtime.ts`
- *    registers a publisher that pipes `{ topic, event }` through
+ *  - Headless brain: no Tauri runtime. The first headless runtime,
+ *    `lib/headless/runtimes/host-event-publisher.ts`, registers a publisher
+ *    that pipes `{ topic, event }` through
  *    `ctx.bridge.invoke("companion_event_publish", …)`, which
  *    `ws_bridge.rs:route_respond` validates against a topic allowlist before
  *    publishing on the same bus.

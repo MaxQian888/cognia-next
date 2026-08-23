@@ -52,6 +52,7 @@ type DndProps = {
   children?: ReactNode
   onDragStart?: (event: { active: { id: string } }) => void
   onDragEnd?: (event: { active: { id: string }; over: { id: string } | null }) => void
+  onDragCancel?: (event: unknown) => void
 }
 let dndProps: DndProps = {}
 jest.mock("@dnd-kit/core", () => ({

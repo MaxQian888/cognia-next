@@ -64,6 +64,17 @@ describe("evaluateEgress", () => {
     })
   })
 
+  it("denies non-HTTP schemes and private targets even when a wildcard is declared", () => {
+    expect(evaluateEgress("file://example.com/private", { allowedDomains: ["*"] })).toEqual({
+      allowed: false,
+      reason: "bad-scheme",
+    })
+    expect(evaluateEgress("http://169.254.169.254/latest", { allowedDomains: ["*"] })).toEqual({
+      allowed: false,
+      reason: "private-host",
+    })
+  })
+
   describe("no declaration", () => {
     it("is denied under balanced posture (fail-closed)", () => {
       expect(evaluateEgress("https://x.com", undefined, "balanced")).toEqual({
@@ -168,6 +179,8 @@ describe("method and path policy", () => {
         domain: "api.example.com",
         methods: ["GET" as const],
         paths: ["/api/logs/*", "/api/metrics"],
+        protocols: ["https" as const],
+        ports: [443],
       },
     ],
   }
@@ -201,5 +214,36 @@ describe("method and path policy", () => {
         policy
       )
     ).toThrow(PluginNetworkPolicyError)
+  })
+
+  it("defaults least-privilege rules to HTTPS/443 and honors explicit protocol and ports", () => {
+    const defaulted = {
+      rules: [{ domain: "api.example.com", methods: ["GET" as const], paths: ["/*"] }],
+    }
+    expect(evaluateNetworkRequest("https://api.example.com/data", "GET", defaulted).allowed).toBe(
+      true
+    )
+    expect(evaluateNetworkRequest("http://api.example.com/data", "GET", defaulted)).toMatchObject({
+      allowed: false,
+      reason: "protocol-denied",
+    })
+    expect(
+      evaluateNetworkRequest("https://api.example.com:8443/data", "GET", defaulted)
+    ).toMatchObject({ allowed: false, reason: "port-denied" })
+
+    const explicit = {
+      rules: [
+        {
+          domain: "api.example.com",
+          methods: ["GET" as const],
+          paths: ["/*"],
+          protocols: ["http" as const],
+          ports: [8080],
+        },
+      ],
+    }
+    expect(
+      evaluateNetworkRequest("http://api.example.com:8080/data", "GET", explicit).allowed
+    ).toBe(true)
   })
 })

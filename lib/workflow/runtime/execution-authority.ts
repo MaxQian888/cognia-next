@@ -10,6 +10,10 @@ import {
 } from "@/lib/db/workflow-deployments"
 import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 import { workflowVersionDigest } from "@/lib/workflow/versioning/version-snapshot"
+import {
+  assertKnowledgeBaseRevisionBindings,
+  resolveCurrentKnowledgeBaseRevisionBindings,
+} from "@/lib/knowledge-base/revisions"
 import type {
   WorkflowEntrypoint,
   WorkflowDependencyBinding,
@@ -74,6 +78,8 @@ export interface ExecuteDeployedWorkflowInput {
   lockedDependency?: WorkflowDependencyBinding
   /** Called after the admission ledger has durably reserved the run id. */
   onAdmitted?: (runId: string) => void
+  /** Runs inside the same write transaction as the invocation reservation. */
+  admissionCheck?: (context: { accountId: string; now: number }) => Promise<void>
   /** Called after the orchestrator has persisted the WorkflowRun row. */
   onPersisted?: (runId: string) => void
 }
@@ -121,14 +127,20 @@ function assertTriggerBinding(
   }
 }
 
-async function lockWorkflowDependencies(
+export async function createWorkflowDependencyLockForVersion(
   version: WorkflowVersion,
   environment = "production",
   ancestors: ReadonlySet<string> = new Set([version.workflowId])
 ): Promise<WorkflowDependencyLock> {
   const workflows: WorkflowDependencyLock["workflows"] = {}
+  const indexes: WorkflowDependencyLock["indexes"] = {}
   for (const dependency of version.dependencyManifest.workflows) {
-    const resolved = await resolveWorkflowDeployment(dependency.workflowId, environment)
+    const resolved = await resolveWorkflowDeployment(
+      dependency.workflowId,
+      environment,
+      {},
+      version.accountId
+    )
     if (!resolved) {
       throw new WorkflowAdmissionError(
         "dependency-not-deployed",
@@ -147,14 +159,33 @@ async function lockWorkflowDependencies(
       versionId: resolved.version.id,
       deploymentId: resolved.deployment.id,
       deploymentRevision: resolved.deployment.revision,
-      dependencyLock: await lockWorkflowDependencies(
+      dependencyLock: await createWorkflowDependencyLockForVersion(
         resolved.version,
         environment,
         new Set([...ancestors, resolved.version.workflowId])
       ),
     }
   }
-  return { workflows, indexes: {} }
+  for (const node of version.definition.nodes) {
+    if (node.type !== "knowledge.retrieve") continue
+    const params = node.data.params as {
+      knowledgeBaseIds?: string[]
+      revisionBindings?: Record<string, string | string[]>
+    }
+    for (const knowledgeBaseId of [...new Set(params.knowledgeBaseIds ?? [])]) {
+      const authored = params.revisionBindings?.[knowledgeBaseId]
+      const generationIds = Array.isArray(authored) ? authored : authored ? [authored] : []
+      if (generationIds.length > 0) {
+        await assertKnowledgeBaseRevisionBindings(knowledgeBaseId, generationIds)
+        generationIds.forEach((generationId, index) => {
+          indexes[`knowledge:${knowledgeBaseId}:pinned:${node.id}:${index}`] = generationId
+        })
+      } else {
+        Object.assign(indexes, await resolveCurrentKnowledgeBaseRevisionBindings(knowledgeBaseId))
+      }
+    }
+  }
+  return { workflows, indexes }
 }
 
 /** Resolve and freeze the complete production deployment graph for a caller-owned binding. */
@@ -177,7 +208,7 @@ export async function createPublishedWorkflowDependencyBinding(
     versionId: resolved.version.id,
     deploymentId: resolved.deployment.id,
     deploymentRevision: resolved.deployment.revision,
-    dependencyLock: await lockWorkflowDependencies(resolved.version, environment),
+    dependencyLock: await createWorkflowDependencyLockForVersion(resolved.version, environment),
   }
 }
 
@@ -267,7 +298,7 @@ export async function executeDeployedWorkflow(
 
   const dependencyLock =
     input.lockedDependency?.dependencyLock ??
-    (await lockWorkflowDependencies(resolved.version, input.environment))
+    (await createWorkflowDependencyLockForVersion(resolved.version, input.environment))
   const executionBinding: WorkflowExecutionBinding = {
     ...resolved.binding,
     dependencyLock,
@@ -329,21 +360,28 @@ export async function executeDeployedWorkflow(
     securityContext,
   }
   let admission: { invocation: WorkflowInvocation; reused: boolean }
+  let admissionCheckError: unknown
   try {
     const db = getDb()
     await Dexie.ignoreTransaction(() =>
-      db.transaction("rw", db.workflowInvocations, db.workflowRuns, () => {
+      db.transaction("rw", db.workflowInvocations, db.workflowRuns, db.sessionUsage, async () => {
+        if (input.admissionCheck) {
+          try {
+            await input.admissionCheck({ accountId: resolved.deployment.accountId, now })
+          } catch (error) {
+            admissionCheckError = error
+            throw error
+          }
+        }
         // The admission ledger and its externally visible pending run are one
         // durability unit. A process crash can no longer leave an invocation
         // that points at a run id absent from status/events APIs.
-        return Promise.all([
-          db.workflowInvocations.add(invocation),
-          db.workflowRuns.add(pendingRun),
-        ]).then(() => undefined)
+        await Promise.all([db.workflowInvocations.add(invocation), db.workflowRuns.add(pendingRun)])
       })
     )
     admission = { invocation, reused: false }
   } catch (error) {
+    if (admissionCheckError !== undefined) throw admissionCheckError
     // Idempotent requests use a deterministic primary key. A concurrent
     // winner may insert between our read and add; the losing add resolves to
     // that durable row rather than starting a second run.

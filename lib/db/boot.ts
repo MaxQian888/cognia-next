@@ -4,7 +4,7 @@ import { createMutex } from "@cognia/primitives"
 import { restorePluginTables } from "@/lib/plugin/dexie/bridge"
 import { getBuiltinPluginDexieManifests } from "@/lib/plugin/dexie/builtin-manifests"
 import { toNamespacedTableName } from "@/lib/plugin/dexie/namespace"
-import { getDb, type CogniaDB, whenSeeded } from "./schema"
+import { getDb, recreateActiveDatabaseForSchemaUpgrade, type CogniaDB, whenSeeded } from "./schema"
 
 interface PersistedPluginManifestRow {
   manifest?: unknown
@@ -21,8 +21,13 @@ export interface DatabaseBootDependencies {
   restorePluginSchema: (
     source: () => CogniaDB,
     manifests: Map<string, PluginManifestDexieBlock>,
-    options?: { registerMissing?: boolean }
+    options?: {
+      registerMissing?: boolean
+      requiredStoreNames?: readonly string[]
+      recreateDatabase?: () => CogniaDB
+    }
   ) => Promise<string[]>
+  recreateDatabase: () => CogniaDB
   verifySchema: (database: CogniaDB, manifests: Map<string, PluginManifestDexieBlock>) => void
   seed: () => Promise<void>
 }
@@ -31,6 +36,7 @@ const defaultDependencies: DatabaseBootDependencies = {
   getDatabase: getDb,
   getBuiltinPluginManifests: getBuiltinPluginDexieManifests,
   restorePluginSchema: restorePluginTables,
+  recreateDatabase: recreateActiveDatabaseForSchemaUpgrade,
   verifySchema: assertPluginSchemaReady,
   seed: whenSeeded,
 }
@@ -74,6 +80,12 @@ export function ensureActiveDatabaseReady(
   if (existing) return existing
 
   const attempt = runDatabaseBootExclusive(database.name, async () => {
+    // Capture the static code schema before opening. When a plugin mutation has
+    // already advanced IndexedDB beyond a later core migration, WKWebView opens
+    // at the higher physical version and Dexie can drop the skipped core stores
+    // from its live table list. The recovery bridge needs this pre-open snapshot
+    // to force one explicit version bump that materializes those stores.
+    const requiredStoreNames = database.tables.map((table) => table.name)
     await database.open()
     const pluginRows = await database.plugins.toArray()
     const manifests = collectPersistedPluginDexieManifests(pluginRows)
@@ -83,7 +95,11 @@ export function ensureActiveDatabaseReady(
     const restoredPluginTables = await dependencies.restorePluginSchema(
       () => dependencies.getDatabase(),
       manifests,
-      { registerMissing: true }
+      {
+        registerMissing: true,
+        requiredStoreNames,
+        recreateDatabase: dependencies.recreateDatabase,
+      }
     )
 
     const active = dependencies.getDatabase()

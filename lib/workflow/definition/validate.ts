@@ -115,12 +115,19 @@ const retryPolicySchema = z.object({
   maxMs: z.number().int().min(0).optional(),
 })
 
+const placementConstraintSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("colocate") }),
+  z.object({ mode: z.literal("auto") }),
+  z.object({ mode: z.literal("pinned"), ref: z.string().min(1) }),
+])
+
 const settingsSchema = z.object({
   // ADR-0070 Phase 3. Must be declared or zod strips it and the engine sees an
   // ungated workflow — the schema is what the orchestrator actually reads
   // (`validated`), not the caller's object.
   riskGating: z.boolean().optional(),
   errorPolicy: z.enum(["stop", "continue", "branch"]),
+  runOn: placementConstraintSchema.default({ mode: "colocate" }),
   timeoutMs: z
     .number()
     .int()

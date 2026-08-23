@@ -6,6 +6,8 @@ import { QRCodeSVG } from "qrcode.react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Switch } from "@/components/ui/switch"
 import { SettingsBlock } from "@/components/settings/common/settings-block"
 import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatusBadge } from "@/components/status-badge"
@@ -23,12 +25,15 @@ import {
   type WorkerEnrollmentIssue,
 } from "@/lib/fleet/execution-workers"
 import type { FleetHost } from "@/lib/fleet/types"
+import { useAgentExecutionFlag } from "@/hooks/agent/use-agent-execution-flag"
+import { setAgentExecutionFlag } from "@/lib/ai/agent/execution/feature-flags"
 
 export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] }) {
   const t = useTranslations("settings.fleet.workers")
   const [devices, setDevices] = useState<WorkerDeviceSummary[]>([])
   const [issue, setIssue] = useState<WorkerEnrollmentIssue | null>(null)
   const [busy, setBusy] = useState(false)
+  const remoteDispatchEnabled = useAgentExecutionFlag("agentTeamRemoteDispatch")
 
   const refresh = useCallback(async () => {
     setDevices(await listExecutionWorkers())
@@ -86,6 +91,20 @@ export function ExecutionWorkersCard({ hosts }: { hosts: readonly FleetHost[] })
         </Button>
       }
     >
+      <Field orientation="responsive">
+        <FieldContent>
+          <FieldLabel htmlFor="fleet-agent-team-remote-dispatch">
+            {t("remoteDispatchLabel")}
+          </FieldLabel>
+          <FieldDescription>{t("remoteDispatchDescription")}</FieldDescription>
+        </FieldContent>
+        <Switch
+          id="fleet-agent-team-remote-dispatch"
+          checked={remoteDispatchEnabled}
+          onCheckedChange={(enabled) => setAgentExecutionFlag("agentTeamRemoteDispatch", enabled)}
+        />
+      </Field>
+
       {issue ? (
         <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_auto]">
           <div className="min-w-0 space-y-2">

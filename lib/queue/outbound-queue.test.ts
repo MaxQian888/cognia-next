@@ -10,6 +10,7 @@ import {
   listAll,
 } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
+import { beginMobileStepReceipt, persistMobileStepResult } from "@/lib/db/mobile-step-receipts"
 import { createOutboundRunner } from "./outbound-queue"
 import {
   clearActiveRuntimeTargetContext,
@@ -34,6 +35,7 @@ describe("createOutboundRunner", () => {
     // fake-indexeddb resets between test files but not test cases — clear by hand.
     const all = await listAll()
     await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
+    await getDb().mobileStepReceipts.clear()
   }, 15_000)
 
   afterEach(() => {
@@ -56,6 +58,38 @@ describe("createOutboundRunner", () => {
     )
     const sent = await listByStatus("sent")
     expect(sent).toHaveLength(1)
+    await runner.stop()
+  })
+
+  it("ACKs durable mobile-step chunks and immediately erases their sensitive rows", async () => {
+    const call = jest.fn().mockResolvedValue({ ok: true, complete: true })
+    const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
+    await beginMobileStepReceipt({
+      requestId: "rst-sensitive",
+      deviceId: "phone-1",
+      kind: "action.mobile.camera",
+      timeoutAt: 10_000,
+      now: 1,
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+    })
+    await persistMobileStepResult(
+      "rst-sensitive",
+      [{ requestId: "rst-sensitive", seq: 0, total: 1, chunk: '"secret-photo"' }],
+      2
+    )
+
+    await runner.kick()
+
+    expect(call).toHaveBeenCalledWith(
+      "workflow_step_result",
+      expect.objectContaining({ requestId: "rst-sensitive", chunk: '"secret-photo"' }),
+      { idempotencyKey: "mobile-step-result:rst-sensitive:0" }
+    )
+    expect(await getDb().mobileOutboundQueue.count()).toBe(0)
+    const receipt = await getDb().mobileStepReceipts.get("rst-sensitive")
+    expect(receipt?.status).toBe("acknowledged")
+    expect(receipt).not.toHaveProperty("resultJson")
     await runner.stop()
   })
 

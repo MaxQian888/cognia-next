@@ -18,6 +18,7 @@ export type ShareKind =
   | "backup"
   | "a2ui"
   | "discover-item"
+  | "workflow-result"
 
 /**
  * The decrypted artifact. `data` is the artifact bytes: literal UTF-8 text when

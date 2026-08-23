@@ -78,6 +78,8 @@ export interface CreateShareInput {
   burnAfterRead?: boolean
   /** Optional extra passphrase, shared out-of-band (never in the URL). */
   passphrase?: string
+  /** Local owner namespace used to authorize domain-specific revocation. */
+  ownerScope?: string
 }
 
 export interface CreatedShare {
@@ -159,6 +161,7 @@ export async function createShareLink(
     burnAfterRead: Boolean(input.burnAfterRead),
     hasPassphrase: Boolean(input.passphrase),
     ownerToken,
+    ownerScope: input.ownerScope,
   }
   await recordSharedLink(row)
 

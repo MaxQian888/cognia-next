@@ -58,6 +58,8 @@ registerHeadlessRuntime({
       { resumeInFlightRuns },
       { initPluginTriggerLifecycle, disposePluginTriggerLifecycle },
       { reconcilePendingGoalVerifications },
+      { registerScheduleHandoffDelivery },
+      { installHostDispatchRuntime },
     ] = await Promise.all([
       import("@/lib/workflow/runtime/trigger-subscriptions"),
       import("@/lib/db/workflows"),
@@ -66,8 +68,12 @@ registerHeadlessRuntime({
       import("@/lib/workflow/runtime/resume-controller"),
       import("@/lib/workflow/triggers/lifecycle"),
       import("@/lib/goal/verification"),
+      import("@/lib/workflow/runtime/schedule-handoff-delivery"),
+      import("@/lib/placement/host-dispatch-runtime"),
     ])
 
+    const unregisterScheduleHandoff = registerScheduleHandoffDelivery()
+    const hostDispatchRuntime = installHostDispatchRuntime({ accountId: ctx.accountId })
     initTriggerSubscriptions()
     initPluginTriggerLifecycle()
     try {
@@ -102,6 +108,30 @@ registerHeadlessRuntime({
     return async () => {
       disposeTriggerSubscriptions()
       await disposePluginTriggerLifecycle()
+      await hostDispatchRuntime.stop()
+      unregisterScheduleHandoff()
+    }
+  },
+})
+
+// ── Workflow run lease handoff on graceful brain shutdown ─────────────────
+
+registerHeadlessRuntime({
+  name: "workflow-exit-lease-release",
+  hosts: ["brain"],
+  start: async () => {
+    const { installExitLeaseRelease, releaseHeldLeasesForExit } =
+      await import("@/lib/workflow/runtime/exit-lease-release")
+    // The installer owns pagehide/Tauri close events on desktop. In Node it is
+    // intentionally inert; `serveCommand` turns SIGINT/SIGTERM into the
+    // registry teardown below, which is the brain's equivalent lifecycle seam.
+    const disposeDesktopSignals =
+      typeof window !== "undefined" && typeof window.addEventListener === "function"
+        ? installExitLeaseRelease()
+        : () => undefined
+    return async () => {
+      disposeDesktopSignals()
+      await releaseHeldLeasesForExit()
     }
   },
 })
@@ -126,8 +156,21 @@ registerHeadlessRuntime({
   name: "external-agent",
   hosts: ["brain"],
   start: async () => {
-    const { startExternalAgentRehydration } = await import("@/lib/ai/agent/external/rehydrate")
-    return startExternalAgentRehydration()
+    const [
+      { startExternalAgentRehydration },
+      { setAcpDynamicMcpHostController },
+      { createAcpDynamicMcpHostController },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/external/rehydrate"),
+      import("@/lib/ai/agent/external/acp-client"),
+      import("@/lib/ai/agent/external/acp-dynamic-mcp-controller"),
+    ])
+    setAcpDynamicMcpHostController(createAcpDynamicMcpHostController())
+    const stopRehydration = startExternalAgentRehydration()
+    return async () => {
+      setAcpDynamicMcpHostController(undefined)
+      await stopRehydration?.()
+    }
   },
 })
 

@@ -61,6 +61,14 @@ describe("workflow node-group materialization", () => {
         kind: "annotation.group",
         typeVersion: 2,
         label: "Review pipeline",
+        params: {
+          nodeGroupInstance: {
+            definitionId: "demo:review",
+            version: "1.0.0",
+            contentHash: "a".repeat(64),
+            sourceNodeIds: { prompt: "n_2", output: "n_3" },
+          },
+        },
       },
     })
     expect(result.nodes.slice(1)).toEqual(

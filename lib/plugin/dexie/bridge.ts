@@ -190,7 +190,11 @@ export async function applyPluginTables(
 export async function restorePluginTables(
   dbSource: DexieSource,
   manifestDexie: Map<string, PluginManifestDexieBlock>,
-  options: { registerMissing?: boolean } = {}
+  options: {
+    registerMissing?: boolean
+    requiredStoreNames?: readonly string[]
+    recreateDatabase?: () => Dexie
+  } = {}
 ): Promise<string[]> {
   // Serialized against applyPluginTables/removePluginTables via the shared lock
   // so the launch-time consolidated bump can't race a concurrent enable.
@@ -210,12 +214,19 @@ export async function restorePluginTables(
     const liveTables = new Set(db.tables.map((t) => t.name))
     const physicalStores = new Set(Array.from(db.backendDB().objectStoreNames))
     const patch: Record<string, string> = {}
-    // Whether any store to declare must actually be CREATED (absent physically).
-    // If every declared store already exists physically we adopt them at the
-    // current native version instead of bumping past it — otherwise every boot
-    // re-upgrades stores that were never gone, drifting the native version up by
-    // one per launch (WKWebView never commits those perpetual upgrades → wedge).
-    let requiresCreate = false
+    // Whether any declared store must actually be CREATED (absent physically).
+    // This includes static core stores, not only the plugin patch below. Plugin
+    // mutations can advance the physical database beyond a later build's core
+    // migration number; that build then exposes the new core table in
+    // `db.tables` even though IndexedDB skipped its lower-numbered migration.
+    // Re-declaring plugin stores at the existing native version in that state
+    // triggers Dexie's implicit SchemaDiff bump, which can wedge WKWebView.
+    // Force one explicit next-version upgrade so both core and plugin schemas
+    // are materialized atomically. If every declared store already exists we
+    // still adopt in place, avoiding one version of drift per normal boot.
+    let requiresCreate = [...liveTables, ...(options.requiredStoreNames ?? [])].some(
+      (name) => !physicalStores.has(name)
+    )
 
     const candidates = options.registerMissing
       ? manifestDexie.entries()
@@ -274,8 +285,16 @@ export async function restorePluginTables(
       ? await nextSchemaVersion(db)
       : Math.max(db.verno, nativeVerno)
     db.close()
-    db.version(targetVersion).stores(patch)
-    await db.open()
+    // Boot-time repairs use a fresh, unopened CogniaDB. Declaring the complete
+    // repaired schema before that instance's first open avoids WKWebView's
+    // close→version→reopen stall on an instance that already observed the old
+    // physical schema. Runtime plugin mutations retain the existing instance.
+    const targetDb = options.recreateDatabase?.() ?? db
+    if (targetDb.name !== db.name) {
+      throw new Error(`Schema repair database changed (${db.name} → ${targetDb.name})`)
+    }
+    targetDb.version(targetVersion).stores(patch)
+    await targetDb.open()
     for (const registration of registrations) {
       await putPluginDexiaMeta({
         ...registration,

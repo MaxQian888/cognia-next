@@ -22,17 +22,21 @@ describe("database boot coordination", () => {
     Object.defineProperty(navigator, "locks", { value: { request }, configurable: true })
     const database = {
       name: "cognia-account-locked",
+      tables: [{ name: "settings" }, { name: "plugins" }],
       open: jest.fn(async () => order.push("open")),
       plugins: { toArray: jest.fn(async () => []) },
     }
+    const restorePluginSchema = jest.fn(async () => {
+      order.push("restore")
+      return []
+    })
+    const recreateDatabase = jest.fn(() => database)
 
     await ensureActiveDatabaseReady({
       getDatabase: () => database,
       getBuiltinPluginManifests: () => new Map(),
-      restorePluginSchema: jest.fn(async () => {
-        order.push("restore")
-        return []
-      }),
+      restorePluginSchema,
+      recreateDatabase,
       verifySchema: jest.fn(() => undefined),
       seed: jest.fn(async () => order.push("seed")),
     } as never)
@@ -41,6 +45,11 @@ describe("database boot coordination", () => {
       "cognia-database-boot:cognia-account-locked",
       expect.any(Function)
     )
+    expect(restorePluginSchema).toHaveBeenCalledWith(expect.any(Function), new Map(), {
+      registerMissing: true,
+      requiredStoreNames: ["settings", "plugins"],
+      recreateDatabase,
+    })
     expect(order).toEqual(["lock", "open", "restore", "seed", "unlock"])
   })
 
@@ -48,6 +57,7 @@ describe("database boot coordination", () => {
     const order: string[] = []
     const database = {
       name: "cognia-account-test",
+      tables: [{ name: "settings" }],
       open: jest.fn(async () => {
         order.push("open")
       }),
@@ -90,6 +100,7 @@ describe("database boot coordination", () => {
   it("allows a failed boot to be retried without reusing the rejected promise", async () => {
     const database = {
       name: "cognia-account-retry",
+      tables: [],
       open: jest.fn().mockRejectedValueOnce(new Error("open failed")).mockResolvedValue(undefined),
       plugins: { toArray: jest.fn(async () => []) },
     }

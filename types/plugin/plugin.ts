@@ -2637,6 +2637,10 @@ export interface PluginNetworkAccessRule {
   methods: PluginNetworkHttpMethod[]
   /** URL pathname globs admitted by this rule. */
   paths: string[]
+  /** Allowed URL protocols. Defaults to HTTPS. */
+  protocols?: Array<"http" | "https">
+  /** Allowed destination ports. Defaults to the selected protocol's standard port. */
+  ports?: number[]
 }
 
 export type NetworkDataClassification =

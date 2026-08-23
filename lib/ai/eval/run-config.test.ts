@@ -129,6 +129,32 @@ describe("runConfiguredEval", () => {
     expect(reports[0].config?.targetKind).toBe("chat")
   })
 
+  it("persists exact workflow identity for deployment-quality evidence", async () => {
+    const { deps } = makeDeps()
+    const reports = await runConfiguredEval(
+      "d",
+      {
+        targets: [
+          {
+            kind: "workflow",
+            label: "Release candidate",
+            workflowId: "workflow_1",
+            versionId: "version_7",
+          },
+        ],
+        scorerIds: [],
+        k: 1,
+      },
+      deps
+    )
+
+    expect(reports[0].config).toMatchObject({
+      targetKind: "workflow",
+      targetId: "workflow_1",
+      targetVersionId: "version_7",
+    })
+  })
+
   it("persists a per-case verdict row for every case×target", async () => {
     const { deps, savedCases } = makeDeps()
     await runConfiguredEval(

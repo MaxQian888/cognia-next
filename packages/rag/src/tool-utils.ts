@@ -1,4 +1,4 @@
-import { tool } from "ai"
+import { tool, type Tool } from "ai"
 import { z, type ZodType } from "zod"
 
 export { tool }
@@ -14,7 +14,7 @@ export interface ToolConfig<TInput extends ZodType, TOutput> {
 
 export function createTool<TInput extends ZodType, TOutput>(
   definition: ToolConfig<TInput, TOutput>
-) {
+): Tool<z.infer<TInput>, TOutput> {
   const toolConfig: Record<string, unknown> = {
     description: definition.description,
     inputSchema: definition.inputSchema,
@@ -31,11 +31,9 @@ export function createTool<TInput extends ZodType, TOutput>(
     toolConfig.inputExamples = definition.inputExamples
   }
 
-  return tool(toolConfig as never)
+  return tool(toolConfig as never) as Tool<z.infer<TInput>, TOutput>
 }
 
-export function combineTools(
-  ...toolObjects: Record<string, ReturnType<typeof tool>>[]
-): Record<string, ReturnType<typeof tool>> {
+export function combineTools(...toolObjects: Record<string, Tool>[]): Record<string, Tool> {
   return Object.assign({}, ...toolObjects)
 }

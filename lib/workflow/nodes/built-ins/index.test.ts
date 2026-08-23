@@ -2665,6 +2665,50 @@ describe("io.output", () => {
   })
 })
 
+describe("io.answer", () => {
+  it("returns renderer-safe structured Chatflow content", async () => {
+    const result = await exec(
+      "io.answer",
+      makeCtx("io.answer", {
+        text: "Release approved",
+        content: { status: "approved" },
+        citations: [
+          {
+            sourceId: "source_1",
+            documentId: "doc_1",
+            revisionId: "rev_1",
+            chunkId: "chunk_1",
+          },
+        ],
+        files: [{ ref: "cognia-human-input-file:hif_1", name: "evidence.pdf" }],
+        suggestions: ["Show evidence"],
+      })
+    )
+    expect(result.output).toEqual({
+      answer: {
+        text: "Release approved",
+        content: { status: "approved" },
+        citations: [
+          {
+            sourceId: "source_1",
+            documentId: "doc_1",
+            revisionId: "rev_1",
+            chunkId: "chunk_1",
+          },
+        ],
+        files: [{ ref: "cognia-human-input-file:hif_1", name: "evidence.pdf" }],
+        suggestions: ["Show evidence"],
+      },
+    })
+  })
+
+  it("rejects an answer without text or structured content", async () => {
+    await expect(exec("io.answer", makeCtx("io.answer", {}))).rejects.toMatchObject({
+      retryable: false,
+    })
+  })
+})
+
 describe("io.webhook.respond", () => {
   it("returns the supplied status / body / headers with deferred flag", async () => {
     const r = await exec(

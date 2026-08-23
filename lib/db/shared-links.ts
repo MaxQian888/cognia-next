@@ -25,6 +25,8 @@ export interface SharedLinkRow {
   kind: ShareKind
   /** Human title carried from the payload, for the list view. */
   title?: string
+  /** Non-secret local namespace used by the creating domain for revocation. */
+  ownerScope?: string
   /**
    * Full shareable URL including the `#fragment` decryption key. Persisted so
    * the owner can re-copy without re-encrypting; never leaves this device.
@@ -73,6 +75,7 @@ export async function recordSharedLink(
     code: partial.code,
     kind: partial.kind,
     title: partial.title,
+    ownerScope: partial.ownerScope,
     url: baseUrl,
     createdAt: partial.createdAt,
     expiresAt: partial.expiresAt,

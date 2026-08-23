@@ -1,12 +1,15 @@
-import { __resetHeadlessRuntimesForTesting, listHeadlessRuntimes } from "../registry"
-
 describe("headless runtime roster", () => {
   it("importing the anchor registers the extracted runtimes without error", async () => {
-    __resetHeadlessRuntimesForTesting()
-    await import("./index")
-    // T-A2..A9 extraction slices grow this list; the anchor itself must
-    // always be importable in Node (the brain imports it once at boot).
-    const names = listHeadlessRuntimes().map((r) => r.name)
-    expect(Array.isArray(names)).toBe(true)
+    await jest.isolateModulesAsync(async () => {
+      const registry = await import("../registry")
+      registry.__resetHeadlessRuntimesForTesting()
+      await import("./index")
+      const names = registry.listHeadlessRuntimes().map((runtime) => runtime.name)
+
+      expect(names[0]).toBe("host-event-publisher")
+      expect(names).toContain("workflow-runtime")
+      expect(names).toContain("workflow-trigger-bridge")
+      expect(new Set(names).size).toBe(names.length)
+    })
   })
 })

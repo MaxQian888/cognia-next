@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db/schema"
 import { createWorkflow, updateWorkflow } from "@/lib/db/workflows"
 import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 import {
+  createWorkflowDependencyLockForVersion,
   createPublishedWorkflowDependencyBinding,
   executeDeployedWorkflow,
   retryWorkflowRun,
@@ -15,6 +16,28 @@ beforeEach(dbFixture.restore)
 afterAll(dbFixture.dispose)
 
 describe("ExecutionAuthority", () => {
+  it("runs admission policy inside the durability transaction and persists nothing when denied", async () => {
+    const workflow = await createWorkflow({ name: "Quota guarded", nodes: [], edges: [] })
+    await publishWorkflow(workflow.id, 10)
+    const denied = new Error("quota denied")
+
+    await expect(
+      executeDeployedWorkflow({
+        workflowId: workflow.id,
+        entrypoint: "portal",
+        caller: "app:one",
+        authorizedScopes: ["workflow:run"],
+        triggerKind: "trigger.manual",
+        payload: {},
+        admissionCheck: async () => {
+          throw denied
+        },
+      })
+    ).rejects.toBe(denied)
+    expect(await getDb().workflowInvocations.count()).toBe(0)
+    expect(await getDb().workflowRuns.count()).toBe(0)
+  })
+
   it("freezes a published deployment and its dependency lock into a reusable binding", async () => {
     const workflow = await createWorkflow({ name: "Verifier", nodes: [], edges: [] })
     const published = await publishWorkflow(workflow.id, 10)
@@ -27,6 +50,86 @@ describe("ExecutionAuthority", () => {
     })
     await expect(createPublishedWorkflowDependencyBinding("missing")).rejects.toMatchObject({
       code: "deployment-not-found",
+    })
+  })
+
+  it("builds dependency locks directly and never crosses the parent account boundary", async () => {
+    const child = await createWorkflow({ name: "Scoped child", nodes: [], edges: [] })
+    const childPublication = await publishWorkflow(child.id, 5)
+    const parent = await createWorkflow({
+      name: "Scoped parent",
+      nodes: [
+        {
+          id: "child-step",
+          type: "flow.subworkflow",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "child", params: { workflowId: child.id } },
+        },
+      ],
+      edges: [],
+    })
+    const parentPublication = await publishWorkflow(parent.id, 10)
+    const parentVersion = (await getDb().workflowVersions.get(parentPublication.versionId))!
+
+    await expect(createWorkflowDependencyLockForVersion(parentVersion)).resolves.toMatchObject({
+      workflows: {
+        "child-step": { workflowId: child.id, versionId: childPublication.versionId },
+      },
+    })
+
+    await getDb().workflowDeployments.update(childPublication.deploymentId, {
+      accountId: "other-account",
+    })
+    await expect(createWorkflowDependencyLockForVersion(parentVersion)).rejects.toMatchObject({
+      code: "dependency-not-deployed",
+    })
+  })
+
+  it("freezes each Knowledge Base source current revision into the dependency lock", async () => {
+    const workflow = await createWorkflow({
+      name: "Knowledge app",
+      nodes: [
+        {
+          id: "retrieve",
+          type: "knowledge.retrieve",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: {
+            label: "Retrieve",
+            params: { knowledgeBaseIds: ["kb-1"], query: "{{ $trigger.payload.query }}" },
+          },
+        },
+      ],
+      edges: [],
+    })
+    const publication = await publishWorkflow(workflow.id, 10)
+    const corpusId = "knowledge_base:kb-1:source:source-1"
+    await getDb().knowledgeBaseSources.put({
+      id: "source-1",
+      knowledgeBaseId: "kb-1",
+      updatedAt: 1,
+    } as never)
+    await getDb().retrievalGenerations.put({
+      id: "gen-1",
+      corpusId,
+      domain: "kb",
+      profileFingerprint: "profile",
+      status: "active",
+      createdAt: 1,
+      validation: { count: 1, contentHash: "hash", valid: true },
+    })
+    await getDb().retrievalActivePointers.put({
+      corpusId,
+      generationId: "gen-1",
+      domain: "kb",
+      profileFingerprint: "profile",
+      updatedAt: 1,
+    })
+    const version = (await getDb().workflowVersions.get(publication.versionId))!
+
+    await expect(createWorkflowDependencyLockForVersion(version)).resolves.toMatchObject({
+      indexes: { "knowledge:kb-1:source-1": "gen-1" },
     })
   })
 
