@@ -131,13 +131,18 @@ const PLATFORM_BASELINES: Record<Platform, readonly CapabilityId[]> = {
   headless: SERVER_BACKED,
 }
 
+/** Immutable baseline for an explicitly selected execution platform. */
+export function capabilitiesForPlatform(platform: Platform): readonly CapabilityId[] {
+  return PLATFORM_BASELINES[platform]
+}
+
 /**
  * Capabilities of the local runtime, derived from {@link detectPlatform}.
  * Frozen — callers must not mutate; memoize freely (the runtime never changes
  * after first paint).
  */
 export function detectLocalCapabilities(): readonly CapabilityId[] {
-  return PLATFORM_BASELINES[detectPlatform()]
+  return capabilitiesForPlatform(detectPlatform())
 }
 
 /** True when `cap` is present in `caps` (defaults to the local baseline). */

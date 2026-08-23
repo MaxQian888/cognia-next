@@ -144,7 +144,7 @@ export async function runProgram({ source, toolNames, invoke, onLog }) {
  * IPC entry point. Only runs when this module is the process entry, so the
  * exports above stay unit-testable without spawning anything.
  */
-function main() {
+export function runSandboxChild() {
   /** @type {Map<number, { resolve: (v: unknown) => void, reject: (e: Error) => void }>} */
   const pending = new Map()
   let nextCallId = 0
@@ -211,6 +211,6 @@ export function safeResult(value) {
   }
 }
 
-if (process.env.COGNIA_CODE_SANDBOX_CHILD === "1") {
-  main()
+if (process.env.COGNIA_CODE_SANDBOX_CHILD === "1" && process.env.COGNIA_ROLE !== "run-code") {
+  runSandboxChild()
 }

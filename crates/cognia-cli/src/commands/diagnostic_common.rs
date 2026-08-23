@@ -42,7 +42,6 @@ pub fn load_or_create_signing_key(override_path: Option<PathBuf>) -> Result<Sign
     Ok(installation_identity(override_path)?.signing_key().clone())
 }
 
-
 pub fn emit<T: Serialize + ?Sized>(
     format: OutputFormat,
     value: &T,

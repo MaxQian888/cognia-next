@@ -305,9 +305,7 @@ async fn dial_upstream(
 
     let config = proxy_config::current().map_err(std::io::Error::other)?;
     let target = format!("https://{host}:{port}");
-    let route = config
-        .route_for(&target)
-        .map_err(std::io::Error::other)?;
+    let route = config.route_for(&target).map_err(std::io::Error::other)?;
 
     match route {
         ProxyRouteSummary::Direct { .. } => {
@@ -339,7 +337,9 @@ mod tests {
 
         // A real listener stands in for the vetted public address on the
         // direct leg; nothing ever connects to it on the proxied leg.
-        let origin = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let origin = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let vetted = origin.local_addr().unwrap();
 
         // 1. A blocked policy fails closed — never a silent direct dial.
@@ -358,7 +358,9 @@ mod tests {
         //    a closed port proves it: a direct fallback would reach `vetted`
         //    and succeed, so an error here is the assertion.
         let closed = {
-            let probe = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let probe = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
             let port = probe.local_addr().unwrap().port();
             drop(probe);
             port

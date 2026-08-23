@@ -232,6 +232,7 @@ const override = (patch: Partial<ConversationOverrideRow>): ConversationOverride
   createdAt: 1,
   updatedAt: 1,
   ...patch,
+  sessionId: patch.sessionId ?? "s1",
 })
 
 describe("composed-mode axes", () => {

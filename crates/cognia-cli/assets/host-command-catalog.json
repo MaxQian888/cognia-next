@@ -29888,6 +29888,160 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_bundle_acquire",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_acquire (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_begin",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_begin (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId",
+          "logicalRootId",
+          "input"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          },
+          "logicalRootId": {
+            "type": "string",
+            "example": ""
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_bundle_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_list",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_bundle_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_export_resource_manifest",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -30267,6 +30421,290 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_managed_adopt",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_adopt (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_archive",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_archive (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_delete",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_delete (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_managed_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_list",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_managed_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_permanent",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_permanent (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_pin",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_pin (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId",
+          "pinned"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          },
+          "pinned": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_managed_restore",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_managed_restore (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_pin",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -30311,6 +30749,69 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_policy_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_policy_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_policy_set",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_policy_set (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_prune",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -30339,6 +30840,33 @@
           "null"
         ],
         "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_reconcile",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_reconcile (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "task-workspaces"
       },
       "outputTyped": true
@@ -33477,6 +34005,464 @@
       "outputTyped": true
     },
     {
+      "name": "workflow_handoff_create",
+      "category": "automation",
+      "resource": "workflow",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "workflow_handoff_create (workflow.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "deploymentId",
+          "expectedVersionDigest",
+          "idempotencyKey",
+          "trigger"
+        ],
+        "properties": {
+          "deploymentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedVersionDigest": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trigger": {
+            "type": "object",
+            "required": [
+              "workflowId",
+              "kind",
+              "originAt"
+            ],
+            "properties": {
+              "workflowId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "minLength": 1
+              },
+              "triggerId": {
+                "type": "string"
+              },
+              "payload": {},
+              "originAt": {
+                "type": "number"
+              },
+              "binding": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "runId",
+          "status"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "workflow_human_input_list",
+      "category": "automation",
+      "resource": "workflow",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "workflow_human_input_list (workflow.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "requests"
+        ],
+        "properties": {
+          "requests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "status",
+                "runId",
+                "workflowId",
+                "stepId",
+                "title",
+                "fields",
+                "actions",
+                "completionPolicy",
+                "createdAt",
+                "expiresAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "const": "pending"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "workflowId": {
+                  "type": "string"
+                },
+                "stepId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "type",
+                      "label"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "short-text",
+                          "long-text",
+                          "number",
+                          "boolean",
+                          "single-select",
+                          "multi-select",
+                          "file",
+                          "file-list"
+                        ]
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      },
+                      "sensitive": {
+                        "type": "boolean"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "value",
+                            "label"
+                          ],
+                          "properties": {
+                            "value": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "accept": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "maxFiles": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "tone": {
+                        "type": "string",
+                        "enum": [
+                          "primary",
+                          "secondary",
+                          "destructive"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "completionPolicy": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "mode"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "any",
+                            "all"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "mode",
+                        "count"
+                      ],
+                      "properties": {
+                        "mode": {
+                          "const": "quorum"
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "integer"
+                },
+                "expiresAt": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "workflow_human_input_submit",
+      "category": "automation",
+      "resource": "workflow",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workflow.run",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "workflow_human_input_submit (workflow.run)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "actionId",
+          "values"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "not-found",
+              "not-pending",
+              "not-assigned",
+              "already-submitted",
+              "invalid-action",
+              "invalid-values"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "workflow_placement_probe",
+      "category": "automation",
+      "resource": "workflow",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workflow.run",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "workflow_placement_probe (workflow.run)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "deploymentId",
+          "expectedVersionDigest"
+        ],
+        "properties": {
+          "deploymentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedVersionDigest": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "compatible",
+          "activeUnits",
+          "maxUnits"
+        ],
+        "properties": {
+          "compatible": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "deploymentDigest": {
+            "type": "string"
+          },
+          "activeUnits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxUnits": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "workflow_run_list",
       "category": "automation",
       "resource": "workflow",
@@ -33871,5 +34857,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "cd8210516bd046ec5d904064c1d4a5a305f0fb7d53e74f832afe2bda2b7fc0b8"
+  "catalogHash": "e5c70e9417a1a0a07586d00ca7fbc92b69694833c81bd695c658ec57bd0e3d15"
 }

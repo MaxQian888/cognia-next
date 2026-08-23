@@ -9,7 +9,7 @@
 // warning. "Run it unsandboxed just this once" is the failure this design
 // exists to make unrepresentable.
 
-import { fork, spawn } from "node:child_process"
+import { fork, spawn, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 import limits from "../../../lib/ai/code-mode/limits.json" with { type: "json" }
@@ -88,10 +88,12 @@ export function probeSandbox(overrides = {}) {
   return { canSpawnProcess, strictSandbox: Array.isArray(launcher), launcher: launcher ?? null }
 }
 
-/** @param {{ canSpawnProcess: boolean, strictSandbox: boolean }} probe */
+/** @param {{ canSpawnProcess: boolean, strictSandbox: boolean, launcher?: string[] | null }} probe */
 export function assertSandboxable(probe) {
   if (!probe?.canSpawnProcess) throw new SandboxUnavailableError("no-fork")
-  if (!probe.strictSandbox) throw new SandboxUnavailableError("no-strict-sandbox")
+  if (!probe.strictSandbox || !Array.isArray(probe.launcher) || probe.launcher.length === 0) {
+    throw new SandboxUnavailableError("no-strict-sandbox")
+  }
 }
 
 /**
@@ -101,13 +103,60 @@ export function assertSandboxable(probe) {
  * sidecar's environment carries ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN,
  * and a deny-list would leak every future secret nobody remembered to add.
  */
-export function sandboxEnv() {
+export function sandboxEnv({ standalone = false } = {}) {
   return {
     COGNIA_CODE_SANDBOX_CHILD: "1",
     // Node itself needs almost nothing. NODE_ENV is passed so the child's
     // runtime assertions behave the same as the rest of the sidecar.
     NODE_ENV: process.env.NODE_ENV === "production" ? "production" : "development",
+    ...(standalone ? { BUN_OPTIONS: "--smol", COGNIA_ROLE: "run-code" } : {}),
   }
+}
+
+/** Resolve the strict-launcher command without treating a compiled CLI as Node. */
+export function resolveSandboxSpawn({ standalone, launcher, execPath, childPath, maxMemoryBytes }) {
+  const runtimeArgs = standalone
+    ? []
+    : [`--max-old-space-size=${Math.floor(maxMemoryBytes / (1024 * 1024))}`, childPath]
+  return {
+    command: launcher[0],
+    args: [...launcher.slice(1), execPath, ...runtimeArgs],
+    env: sandboxEnv({ standalone }),
+  }
+}
+
+/**
+ * Return resident bytes for the entire sandbox process group.
+ *
+ * Bun does not expose a hard heap-size flag equivalent to Node's
+ * `--max-old-space-size`. The child therefore runs in its own process group and
+ * the trusted supervisor accounts for the wrapper plus every descendant. A
+ * missing or unparsable `ps` result fails closed instead of silently dropping
+ * the documented memory boundary.
+ */
+export function readProcessGroupRssBytes(processGroupId, { spawnSyncImpl = spawnSync } = {}) {
+  const result = spawnSyncImpl("ps", ["-axo", "pid=,pgid=,rss="], {
+    encoding: "utf8",
+    timeout: 2_000,
+  })
+  if (result.status !== 0) {
+    throw new Error(
+      `cannot enforce sandbox memory limit: ps failed (${result.status ?? result.signal ?? "unknown"})`
+    )
+  }
+
+  let rssKilobytes = 0
+  let matched = false
+  for (const line of String(result.stdout ?? "").split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)$/)
+    if (!match || Number(match[2]) !== processGroupId) continue
+    matched = true
+    rssKilobytes += Number(match[3])
+  }
+  if (!matched || !Number.isSafeInteger(rssKilobytes)) {
+    throw new Error("cannot enforce sandbox memory limit: process group RSS is unavailable")
+  }
+  return rssKilobytes * 1024
 }
 
 /**
@@ -169,10 +218,14 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
   const budget = new CallBudget(config)
   const logs = []
   const toolNames = programmaticReadOnlyToolNames()
-  const nodeArgs = [
-    `--max-old-space-size=${Math.floor(config.maxMemoryBytes / (1024 * 1024))}`,
-    CHILD_PATH,
-  ]
+  const standalone = Boolean(globalThis.Bun?.isStandaloneExecutable)
+  const target = resolveSandboxSpawn({
+    standalone,
+    launcher: resolvedProbe.launcher,
+    execPath: process.execPath,
+    childPath: CHILD_PATH,
+    maxMemoryBytes: config.maxMemoryBytes,
+  })
   const spawnOptions = {
     // No `cwd` override on purpose. The launcher's policy defines the child's
     // filesystem view — `bwrap` chdirs into its own scratch bind, and the
@@ -181,7 +234,12 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
     // nothing about, so the child started in a directory the profile did not
     // grant. Letting the confinement own the cwd removes the mismatch instead
     // of duplicating a path convention across Rust and Node.
-    env: sandboxEnv(),
+    env: target.env,
+    // A dedicated process group lets the trusted parent account for and kill
+    // the sandbox wrapper plus all descendants as one memory-bounded unit.
+    // Code mode already fails closed on Windows because no strict launcher is
+    // available there.
+    detached: process.platform !== "win32",
     // The child must not inherit the sidecar's stdio: its stdout would
     // interleave with the sidecar's own protocol stream. Slot 3 is the IPC
     // channel; both `bwrap` and `sandbox-exec` pass inherited fds through, so
@@ -190,11 +248,7 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
   }
 
   const child = resolvedProbe.launcher
-    ? spawn(
-        resolvedProbe.launcher[0],
-        [...resolvedProbe.launcher.slice(1), process.execPath, ...nodeArgs],
-        spawnOptions
-      )
+    ? spawn(target.command, target.args, spawnOptions)
     : // Unreachable: `assertSandboxable` already rejected a probe with no
       // launcher. Kept as a throw rather than a `fork` fallback so that a future
       // edit to the assertion cannot silently reintroduce an unconfined path.
@@ -204,11 +258,14 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
 
   let settled = false
   let timer = null
+  let memoryTimer = null
 
   const cleanup = () => {
     if (timer) clearTimeout(timer)
+    if (memoryTimer) clearInterval(memoryTimer)
     try {
-      child.kill("SIGKILL")
+      if (spawnOptions.detached && child.pid) process.kill(-child.pid, "SIGKILL")
+      else child.kill("SIGKILL")
     } catch {
       /* already gone */
     }
@@ -229,6 +286,26 @@ export async function runCodeProgram({ source, callTool, probe, config = limits,
         limit: { kind: "wall-time", limit: config.wallTimeMs },
       })
     }, config.wallTimeMs)
+
+    const enforceMemoryLimit = () => {
+      try {
+        const observed = readProcessGroupRssBytes(child.pid)
+        if (observed <= config.maxMemoryBytes) return
+        settle({
+          ok: false,
+          error: { name: "CodeLimitExceeded", message: "memory limit exceeded" },
+          limit: { kind: "memory", limit: config.maxMemoryBytes, observed },
+        })
+      } catch (error) {
+        settle({
+          ok: false,
+          error: { name: "SandboxError", message: String(error?.message ?? error) },
+        })
+      }
+    }
+    memoryTimer = setInterval(enforceMemoryLimit, 25)
+    memoryTimer.unref?.()
+    enforceMemoryLimit()
 
     child.on("error", (error) => {
       settle({

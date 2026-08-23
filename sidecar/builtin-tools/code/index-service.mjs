@@ -33,11 +33,18 @@ const SNIPPET_CACHE_MAX = 64
  *   watch?: boolean,
  *   forceMemory?: boolean,
  *   now?: () => number,
+ *   bunRuntime?: { file(path: string): { bytes(): Promise<Uint8Array> }, CryptoHasher: new (algorithm: string) => { update(bytes: Uint8Array): unknown, digest(encoding: string): string } } | null,
  * }} opts
  */
 export function createIndexService(opts) {
   const root = path.resolve(opts.root)
   const now = opts.now ?? Date.now
+  const runtimeCandidate = opts.bunRuntime === undefined ? globalThis.Bun : opts.bunRuntime
+  const bunRuntime =
+    typeof runtimeCandidate?.file === "function" &&
+    typeof runtimeCandidate?.CryptoHasher === "function"
+      ? runtimeCandidate
+      : null
   const dbPath = opts.forceMemory
     ? undefined
     : (opts.dbPath ?? path.join(root, ".cognia", "codegraph.db"))
@@ -80,6 +87,11 @@ export function createIndexService(opts) {
   }
 
   async function hashFile(abs) {
+    if (bunRuntime) {
+      const buf = await bunRuntime.file(abs).bytes()
+      const hash = new bunRuntime.CryptoHasher("sha1").update(buf).digest("hex")
+      return { hash, size: buf.byteLength, buf }
+    }
     const buf = await fsp.readFile(abs)
     return { hash: crypto.createHash("sha1").update(buf).digest("hex"), size: buf.length, buf }
   }
@@ -98,7 +110,7 @@ export function createIndexService(opts) {
     const existing = ensureStore().getFile(rel)
     const { hash, size, buf } = await hashFile(abs)
     if (existing && existing.content_hash === hash) return { changed: false }
-    const source = buf.toString("utf-8")
+    const source = new TextDecoder().decode(buf)
     const result = await extractFile(rel, source)
     ensureStore().replaceFileGraph(rel, {
       nodes: result.nodes,

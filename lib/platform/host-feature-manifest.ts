@@ -33,6 +33,7 @@ export const HOST_FEATURE_IDS = [
   "session.remote-control",
   "session.attachment-upload",
   "connectors.inbox-relay",
+  "workflow.execution",
 ] as const
 
 export type HostFeatureId = (typeof HOST_FEATURE_IDS)[number]
@@ -208,6 +209,15 @@ export function buildLocalHostFeatureManifest({
     }
   }
   if (platform === "tauri" || platform === "headless") {
+    features["workflow.execution"] = {
+      version: 1,
+      operations: [
+        "workflow_placement_probe",
+        "workflow_handoff_create",
+        "workflow_run_list",
+        "workflow_cancel_run",
+      ],
+    }
     // The git arms carry no host gate; what used to keep this desktop-only was
     // the workspace registrar — the desktop resolves `workspaceId` through the
     // roots its renderer registers, while the headless host resolves it as a

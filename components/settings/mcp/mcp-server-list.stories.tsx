@@ -13,17 +13,20 @@ const meta = {
   component: McpServerList,
   args: {
     servers,
-    view: "grid",
+    density: "comfortable",
     groupBy: "none",
     selection: new Set<string>(),
-    agentStatuses: [],
-    agentStatusesLoading: false,
+    activeId: null,
+    toolCounts: new Map<string, number>(),
+    deniedToolCounts: new Map<string, number>(),
     isFavorite: (_id: string): boolean => false,
+    onOpen: fn(),
     onToggleSelect: fn(),
     onToggleFavorite: fn(),
     onToggle: fn(),
     onEdit: fn(),
     onClone: fn(),
+    onExport: fn(),
     onDelete: fn(),
   },
   decorators: [
@@ -41,7 +44,7 @@ type Story = StoryObj<typeof meta>
 export const Grid: Story = {}
 
 export const ListView: Story = {
-  args: { view: "list" },
+  args: { density: "compact" },
 }
 
 export const GroupedByTransport: Story = {

@@ -1,15 +1,20 @@
-const setActiveAccount = jest.fn().mockResolvedValue(undefined)
-const setProviderDefaultAccount = jest.fn().mockResolvedValue(undefined)
+const setActiveAccount = jest.fn(async (_provider: string, _accountId: string) => undefined)
+const setProviderDefaultAccount = jest.fn(
+  async (_provider: string, _accountId: string) => undefined
+)
 jest.mock("@/lib/subscription/core/transport", () => ({
-  setActiveAccount: (...a: unknown[]) => setActiveAccount(...a),
+  setActiveAccount: (provider: string, accountId: string) => setActiveAccount(provider, accountId),
 }))
 jest.mock("@/lib/subscription/core/account-lifecycle", () => ({
-  setProviderDefaultAccount: (...a: unknown[]) => setProviderDefaultAccount(...a),
+  setProviderDefaultAccount: (provider: string, accountId: string) =>
+    setProviderDefaultAccount(provider, accountId),
 }))
 
-const getBuiltInProviderReadiness = jest.fn(() => ({ readiness: "configured" as string }))
+const getBuiltInProviderReadiness = jest.fn((_provider: unknown) => ({
+  readiness: "configured" as string,
+}))
 jest.mock("@/components/settings/provider/provider-readiness", () => ({
-  getBuiltInProviderReadiness: (...a: unknown[]) => getBuiltInProviderReadiness(...a),
+  getBuiltInProviderReadiness: (provider: unknown) => getBuiltInProviderReadiness(provider),
 }))
 
 import { connectSubscriptionAccount, saveBuiltInProviderKey } from "./connect-provider"

@@ -25,7 +25,14 @@ function project(
   const effective = resolveImEffectiveConfig({
     adapter: { ...adapter, ...adapterPatch },
     override: overridePatch
-      ? { id: "o1", conversationKey: "k", createdAt: 1, updatedAt: 1, ...overridePatch }
+      ? {
+          id: "o1",
+          conversationKey: "k",
+          createdAt: 1,
+          updatedAt: 1,
+          ...overridePatch,
+          sessionId: overridePatch.sessionId ?? "s1",
+        }
       : null,
     rule: null,
     system: { mode: "auto" },
@@ -110,6 +117,7 @@ describe("preset from the session mode", () => {
       override: {
         id: "o1",
         conversationKey: "k",
+        sessionId: "s1",
         createdAt: 1,
         updatedAt: 1,
         approvalMode: "yolo",

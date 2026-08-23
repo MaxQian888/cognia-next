@@ -18,6 +18,23 @@ const fileHashShape = {
     .describe("Hash algorithm. Defaults to sha256."),
 }
 
+async function digestFile(filePath, algorithm, bun = globalThis.Bun) {
+  if (typeof bun?.CryptoHasher === "function" && typeof bun.file === "function") {
+    const hash = new bun.CryptoHasher(algorithm)
+    for await (const chunk of bun.file(filePath).stream()) hash.update(chunk)
+    return hash.digest("hex")
+  }
+
+  const hash = crypto.createHash(algorithm)
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath)
+    stream.on("data", (chunk) => hash.update(chunk))
+    stream.on("end", () => resolve(undefined))
+    stream.on("error", reject)
+  })
+  return hash.digest("hex")
+}
+
 async function execFileHash(args) {
   try {
     const st = await ensureExists(args.path)
@@ -25,17 +42,10 @@ async function execFileHash(args) {
     if (st.size > MAX_READ_BYTES) {
       return toolError(`file too large for hashing: ${st.size} bytes`)
     }
-    const hash = crypto.createHash(args.algorithm)
-    await new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(args.path)
-      stream.on("data", (chunk) => hash.update(chunk))
-      stream.on("end", () => resolve(undefined))
-      stream.on("error", reject)
-    })
     return toolText({
       path: args.path,
       algorithm: args.algorithm,
-      digest: hash.digest("hex"),
+      digest: await digestFile(args.path, args.algorithm),
       size: st.size,
     })
   } catch (err) {
@@ -51,4 +61,4 @@ export const fileHashTool = tool(
   { alwaysLoad: true }
 )
 
-export { execFileHash }
+export { digestFile, execFileHash }

@@ -52,6 +52,7 @@ export function makeAdapterInstance(over: Partial<AdapterInstanceRow> = {}): Ada
     createdAt: now,
     updatedAt: now,
     ...over,
+    mediaModelPolicy: over.mediaModelPolicy ?? "local_extract_only",
   }
 }
 

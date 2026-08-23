@@ -419,7 +419,22 @@ mod tests {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpListener;
 
+    /// `build_client` intentionally fails closed until the process-global
+    /// proxy policy is hydrated. Production does that during app startup;
+    /// these loopback tests must establish the same precondition explicitly
+    /// so they exercise the download policy rather than startup ordering.
+    fn init_proxy() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            cognia_net::proxy_config::apply_current(
+                cognia_net::proxy_config::ProxyConfig::default(),
+            )
+            .expect("initialize proxy policy for Open VSX download tests");
+        });
+    }
+
     fn test_policy(max_bytes: u64) -> DownloadPolicy {
+        init_proxy();
         DownloadPolicy {
             scheme: "http",
             allowed_hosts: &["127.0.0.1"],

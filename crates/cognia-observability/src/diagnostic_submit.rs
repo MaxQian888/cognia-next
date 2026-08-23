@@ -227,7 +227,11 @@ pub struct SubmissionTarget {
 }
 
 impl SubmissionTarget {
-    pub fn new(base_url: impl Into<String>, tenant_id: impl Into<String>, project_id: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        tenant_id: impl Into<String>,
+        project_id: impl Into<String>,
+    ) -> Self {
         let base_url = base_url.into();
         Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
@@ -499,7 +503,9 @@ pub fn submit_package<T: DiagnosticTransport>(
     let incident_id = created
         .pointer("/incident/id")
         .and_then(serde_json::Value::as_str)
-        .ok_or(SubmitError::Invalid("create response carried no incident id"))?
+        .ok_or(SubmitError::Invalid(
+            "create response carried no incident id",
+        ))?
         .to_owned();
 
     let already_stored = stored_part_checksums(transport, target, grant, &incident_id)?;
@@ -724,8 +730,7 @@ fn json_request<T: DiagnosticTransport>(
 /// Standard base64. Hand-rolled to keep a dependency out of a crate that needs
 /// exactly two encodes.
 fn base64_encode(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let b = [
@@ -910,7 +915,10 @@ mod tests {
         let target = target();
         let body = build_installation_proof_body(&identity, &target, "nonce-value", 1_700_000_000);
         assert_eq!(body["tenantId"], serde_json::json!(target.tenant_id));
-        assert_eq!(body["installationId"], serde_json::json!(identity.installation_id()));
+        assert_eq!(
+            body["installationId"],
+            serde_json::json!(identity.installation_id())
+        );
         assert_eq!(body["nonce"], serde_json::json!("nonce-value"));
         assert_eq!(body["timestamp"], serde_json::json!(1_700_000_000_i64));
 
@@ -964,7 +972,10 @@ mod tests {
         // all — one opaque `attachment` yields neither.
         assert_eq!(kinds, vec!["manifest", "events", "minidump"]);
         assert_eq!(
-            parts.iter().map(|part| part.part_number).collect::<Vec<_>>(),
+            parts
+                .iter()
+                .map(|part| part.part_number)
+                .collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
         for part in &parts {
@@ -978,7 +989,10 @@ mod tests {
         let package = sample_package(dir.path(), false);
         let (_, parts) = read_package_parts(&package).unwrap();
         assert_eq!(
-            parts.iter().map(|part| part.artifact_kind).collect::<Vec<_>>(),
+            parts
+                .iter()
+                .map(|part| part.artifact_kind)
+                .collect::<Vec<_>>(),
             vec!["manifest", "events"]
         );
     }

@@ -9,6 +9,8 @@ import { act, renderHook } from "@testing-library/react"
 import type { SendOptions } from "@cognia/agent-config-types"
 
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
+import type { StartSquadRunInput, StartSquadRunResult } from "@/lib/ai/agent/team/start-squad-run"
+import type { WatchSquadRunInput } from "@/lib/ai/agent/team/watch-squad-run"
 
 const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
@@ -335,14 +337,16 @@ jest.mock("@/lib/ai/agent/external/event-to-parts", () => ({
   ],
 }))
 
-const startSquadRunMock = jest.fn()
+const startSquadRunMock = jest.fn<Promise<StartSquadRunResult>, [StartSquadRunInput]>()
 const stopSquadWatchMock = jest.fn()
-const watchSquadRunSettlementMock = jest.fn(() => stopSquadWatchMock)
+const watchSquadRunSettlementMock = jest.fn<() => void, [WatchSquadRunInput]>(
+  () => stopSquadWatchMock
+)
 jest.mock("@/lib/ai/agent/team/start-squad-run", () => ({
-  startSquadRun: (...a: unknown[]) => startSquadRunMock(...(a as [])),
+  startSquadRun: (input: StartSquadRunInput) => startSquadRunMock(input),
 }))
 jest.mock("@/lib/ai/agent/team/watch-squad-run", () => ({
-  watchSquadRunSettlement: (...a: unknown[]) => watchSquadRunSettlementMock(...(a as [])),
+  watchSquadRunSettlement: (input: WatchSquadRunInput) => watchSquadRunSettlementMock(input),
 }))
 jest.mock("@/lib/execution/agent-team-bridge", () => ({
   agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
@@ -2224,7 +2228,17 @@ describe("useClaudeChat — actions", () => {
   it("permission_request for a non-open but remotely-attached session is not auto-denied", async () => {
     const registry = await import("@/lib/companion/remote-attach-registry")
     registry.__resetRemoteAttachForTests()
-    registry.attachSession("sess-1", "dev-remote")
+    registry.attachSession("sess-1", "dev-remote", {
+      eventStreams: [
+        {
+          leaseId: "esl-ready",
+          transport: "ws",
+          state: "ready",
+          openedAt: Date.now(),
+        },
+      ],
+      grants: [registry.REMOTE_CONTROL_CAPABILITY],
+    })
 
     chatState.activeSessionId = "sess-other"
     chatState.openSessionIds = ["sess-other"]
@@ -3169,7 +3183,7 @@ describe("useClaudeChat — Squad dispatch", () => {
     }
     act(() => onSettled.onSettled("completed"))
     expect(chatState.setSessionStatus).toHaveBeenCalledWith("sess-1", "idle")
-    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "ok")
+    expect(chatTurnPerformanceMock.finish).toHaveBeenCalledWith("sess-1", "completed")
   })
 
   it("leaves a record of the handoff in the conversation right away", async () => {

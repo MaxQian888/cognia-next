@@ -11,10 +11,27 @@ import { createSqliteStore } from "./store-sqlite.mjs"
 
 const require = createRequire(import.meta.url)
 
-/** Attempt to load better-sqlite3; returns the constructor or null. */
-export function loadSqliteBinding() {
+/** Prefer Bun's built-in SQLite, then retain the Node fallback for source hosts. */
+export function loadSqliteBinding({
+  bunRuntime = Boolean(process.versions.bun),
+  requireModule = require,
+} = {}) {
+  if (bunRuntime) {
+    try {
+      const mod = requireModule("bun:sqlite")
+      if (typeof mod?.Database === "function") {
+        return class BunSqliteDatabase extends mod.Database {
+          constructor(dbPath) {
+            super(dbPath, { strict: true })
+          }
+        }
+      }
+    } catch {
+      // Fall through for partial/older Bun runtimes.
+    }
+  }
   try {
-    const mod = require("better-sqlite3")
+    const mod = requireModule("better-sqlite3")
     return typeof mod === "function" ? mod : null
   } catch {
     return null

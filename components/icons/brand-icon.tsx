@@ -162,6 +162,7 @@ const BRAND_ALIASES: Record<string, BrandAsset> = {
   "openai-vision": assets.openai,
   opencode: assets.openCode,
   "opencode-go": assets.openCode,
+  "opencode-acp": assets.openCode,
   "opencode-server": assets.openCode,
   "opencode-remote": assets.openCode,
   "opencode-v2-preview": assets.openCode,

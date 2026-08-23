@@ -32,6 +32,7 @@ const meta = {
     selected: false,
     favorite: false,
     density: "comfortable",
+    tabIndex: 0,
     onOpen: fn(),
     onToggleSelect: fn(),
     onToggleFavorite: fn(),

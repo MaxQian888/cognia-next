@@ -147,6 +147,8 @@ function defaultDeps() {
     spawn: defaultSpawn,
     runnerPath: RUNNER_PATH,
     nodeExec: process.execPath,
+    standalone: Boolean(globalThis.Bun?.isStandaloneExecutable),
+    env: process.env,
     tmpDir: os.tmpdir(),
     randomId: () => randomUUID(),
     fs: {
@@ -155,6 +157,21 @@ function defaultDeps() {
       mkdir: (p) => fsp.mkdir(p, { recursive: true }),
     },
   }
+}
+
+/** Resolve the child command without assuming `process.execPath` is Node. */
+export function resolveRunnerSpawn({ standalone, execPath, runnerPath, jobPath, env }) {
+  return standalone
+    ? {
+        command: execPath,
+        args: [jobPath],
+        env: { ...env, COGNIA_ROLE: "webclone" },
+      }
+    : {
+        command: execPath,
+        args: [runnerPath, jobPath],
+        env,
+      }
 }
 
 /**
@@ -175,7 +192,17 @@ export async function runEngine(job, injected = {}) {
 
   try {
     const { code, stdout, stderr } = await new Promise((resolve) => {
-      const child = deps.spawn(deps.nodeExec, [deps.runnerPath, jobPath], { windowsHide: true })
+      const target = resolveRunnerSpawn({
+        standalone: deps.standalone,
+        execPath: deps.nodeExec,
+        runnerPath: deps.runnerPath,
+        jobPath,
+        env: deps.env,
+      })
+      const child = deps.spawn(target.command, target.args, {
+        windowsHide: true,
+        env: target.env,
+      })
       let out = ""
       let err = ""
       let killed = false

@@ -119,7 +119,7 @@ export async function openChatToolReview(
     const oldest = pending.keys().next()
     if (!oldest.done) pending.delete(oldest.value)
   }
-  const opening = (async () => {
+  const opening: Promise<ActionReviewRequest> = Promise.resolve().then(async () => {
     const runId = await resolveSessionRunId(input.sessionId)
     // Evicted while the run lookup was in flight. Projecting now would park an
     // interrupt nothing will ever come back to resolve.
@@ -127,7 +127,7 @@ export async function openChatToolReview(
     if (runId) request.origin.runId = runId
     await projectActionReviewOpened(request, now)
     return request
-  })()
+  })
   pending.set(mapKey, opening)
   try {
     await opening

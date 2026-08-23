@@ -57,6 +57,66 @@ test("ensureIndexed builds the graph; status/search/context/callers work", async
   }
 })
 
+test("Bun.file and Bun.CryptoHasher drive source hashing when available", async () => {
+  const root = await tmpRepo({
+    "native.ts": `export function nativeHash() { return true; }\n`,
+  })
+  const calls = []
+  class CryptoHasher {
+    constructor(algorithm) {
+      calls.push(["hasher", algorithm])
+    }
+    update(bytes) {
+      calls.push(["update", bytes.byteLength])
+      return this
+    }
+    digest(encoding) {
+      calls.push(["digest", encoding])
+      return "bun-native-sha1"
+    }
+  }
+  const bunRuntime = {
+    CryptoHasher,
+    file(abs) {
+      calls.push(["file", path.basename(abs)])
+      return {
+        bytes: async () => new TextEncoder().encode(await fsp.readFile(abs, "utf8")),
+      }
+    },
+  }
+  const svc = createIndexService({ root, forceMemory: true, bunRuntime })
+  try {
+    await svc.ensureIndexed()
+    assert.ok(svc.search("nativeHash").length >= 1)
+    assert.deepEqual(calls.slice(0, 4), [
+      ["file", "native.ts"],
+      ["hasher", "sha1"],
+      ["update", 46],
+      ["digest", "hex"],
+    ])
+  } finally {
+    svc.dispose()
+  }
+})
+
+test("partial Bun hashing capabilities fall back to Node file IO and crypto", async () => {
+  const root = await tmpRepo({
+    "portable.ts": `export function portableHash() { return true; }\n`,
+  })
+  const partialBun = {
+    file() {
+      throw new Error("partial Bun.file must not be selected")
+    },
+  }
+  const svc = createIndexService({ root, forceMemory: true, bunRuntime: partialBun })
+  try {
+    await svc.ensureIndexed()
+    assert.ok(svc.search("portableHash").length >= 1)
+  } finally {
+    svc.dispose()
+  }
+})
+
 test("syncStale picks up a content change and re-resolves", async () => {
   const root = await tmpRepo({
     "a.ts": `export function alpha() { return 1; }\n`,

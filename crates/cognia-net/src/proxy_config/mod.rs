@@ -448,9 +448,10 @@ pub fn validate_proxy_host(raw: &str) -> Result<String, ProxyHostRejection> {
     if host.contains('/') || host.contains('?') || host.contains('#') {
         return Err(ProxyHostRejection::Path);
     }
-    if !host.chars().all(|c| {
-        c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '[' | ']')
-    }) {
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '[' | ']'))
+    {
         return Err(ProxyHostRejection::IllegalCharacter);
     }
 
@@ -1007,7 +1008,10 @@ mod tests {
         use ProxyHostRejection::*;
         assert_eq!(validate_proxy_host("").unwrap_err(), Empty);
         assert_eq!(validate_proxy_host("   ").unwrap_err(), Empty);
-        assert_eq!(validate_proxy_host("http://proxy.corp").unwrap_err(), Scheme);
+        assert_eq!(
+            validate_proxy_host("http://proxy.corp").unwrap_err(),
+            Scheme
+        );
         assert_eq!(
             validate_proxy_host("socks5://proxy.corp").unwrap_err(),
             Scheme

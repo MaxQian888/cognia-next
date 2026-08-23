@@ -12,6 +12,6 @@ describe("ANTHROPIC_DEFAULT_MODEL", () => {
     // A default that is not in its own `models` list resolves no metadata:
     // no context length, no capability flags, no pricing.
     const anthropic = getBuiltInProviderCatalog().find((p) => p.id === "anthropic")
-    expect(anthropic?.models.map((m) => m.id)).toContain(ANTHROPIC_DEFAULT_MODEL)
+    expect(anthropic?.models?.map((m) => m.id)).toContain(ANTHROPIC_DEFAULT_MODEL)
   })
 })

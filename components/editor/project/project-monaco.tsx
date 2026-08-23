@@ -29,6 +29,7 @@ import {
   syncCogniaActiveTheme,
 } from "@/lib/canvas/themes/cognia-active-theme"
 import { useSettingsStore } from "@/stores"
+import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { resolveActiveThemeColors } from "@/lib/themes"
 import {
   buildWorkbenchUri,
@@ -59,6 +60,13 @@ interface RevealableEditor {
   setPosition(pos: { lineNumber: number; column: number }): void
   focus(): void
   getModel(): { getOffsetAt(position: { lineNumber: number; column: number }): number } | null
+  getPosition?(): { lineNumber: number; column: number } | null
+  getVisibleRanges?(): Array<{
+    startLineNumber: number
+    startColumn: number
+    endLineNumber: number
+    endColumn: number
+  }>
   onDidChangeCursorSelection(listener: (event: CursorSelectionEvent) => void): { dispose(): void }
 }
 
@@ -103,6 +111,7 @@ export function ProjectMonaco({
   const rawEditorRef = useRef<IMonacoEditor | null>(null)
   const monacoRef = useRef<MonacoNamespace | null>(null)
   const [diag, setDiag] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(null)
+  const nesDocumentRef = useRef<{ uri: string; version: number; savedContent: string } | null>(null)
 
   // Latest-value refs for everything read by a listener or an effect that must
   // not re-run when the value changes. Synced in an effect declared *first*, so
@@ -137,6 +146,67 @@ export function ProjectMonaco({
   useEffect(() => {
     configureMonacoLoader()
   }, [])
+
+  // Publish the Project Editor lifecycle only to ACP sessions that explicitly
+  // started NES through the manager. Full-content changes are valid ACP/LSP
+  // changes and avoid lossy range reconstruction across Monaco model swaps.
+  useEffect(() => {
+    if (!diag) return
+    const manager = getExternalAgentManager()
+    const document = {
+      uri: modelUri,
+      version: file.draftVersion,
+      savedContent: file.savedContent,
+    }
+    nesDocumentRef.current = document
+    manager.publishDidOpenDocument({
+      uri: modelUri,
+      languageId: file.language,
+      version: file.draftVersion,
+      text: file.draftContent,
+    })
+    const editor = editorRef.current
+    const position = editor?.getPosition?.() ?? { lineNumber: 1, column: 1 }
+    const visible = editor?.getVisibleRanges?.()[0] ?? {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    }
+    manager.publishDidFocusDocument({
+      uri: modelUri,
+      version: file.draftVersion,
+      position: { line: position.lineNumber - 1, character: position.column - 1 },
+      visibleRange: {
+        start: { line: visible.startLineNumber - 1, character: visible.startColumn - 1 },
+        end: { line: visible.endLineNumber - 1, character: visible.endColumn - 1 },
+      },
+    })
+    return () => {
+      manager.publishDidCloseDocument({ uri: modelUri })
+      if (nesDocumentRef.current?.uri === modelUri) nesDocumentRef.current = null
+    }
+    // Content/version changes are emitted by the incremental effect below;
+    // including them here would turn every keystroke into close+open churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diag, file.language, modelUri])
+
+  useEffect(() => {
+    const previous = nesDocumentRef.current
+    if (!diag || !previous || previous.uri !== modelUri) return
+    if (previous.version !== file.draftVersion) {
+      getExternalAgentManager().publishDidChangeDocument({
+        uri: modelUri,
+        version: file.draftVersion,
+        contentChanges: [{ text: file.draftContent }],
+      })
+      previous.version = file.draftVersion
+    }
+    if (previous.savedContent !== file.savedContent) {
+      getExternalAgentManager().publishDidSaveDocument({ uri: modelUri })
+      previous.savedContent = file.savedContent
+    }
+  }, [diag, file.draftContent, file.draftVersion, file.savedContent, modelUri])
 
   // Editor-lifetime teardown. The workbench handle and the action disposables
   // have their own per-file effects below; this only catches an unmount that
@@ -235,6 +305,20 @@ export function ProjectMonaco({
       const start = model.getOffsetAt(event.selection.getStartPosition())
       const end = model.getOffsetAt(event.selection.getEndPosition())
       onSelectionChangeRef.current?.(start === end ? undefined : { kind: "text", start, end })
+      const visible = revealableEditor.getVisibleRanges?.()[0]
+      const document = nesDocumentRef.current
+      if (visible && document) {
+        const position = event.selection.getEndPosition()
+        getExternalAgentManager().publishDidFocusDocument({
+          uri: document.uri,
+          version: document.version,
+          position: { line: position.lineNumber - 1, character: position.column - 1 },
+          visibleRange: {
+            start: { line: visible.startLineNumber - 1, character: visible.startColumn - 1 },
+            end: { line: visible.endLineNumber - 1, character: visible.endColumn - 1 },
+          },
+        })
+      }
     })
     const nextDiagnostics = {
       monaco: monaco as unknown as MonacoLike,

@@ -54,8 +54,67 @@ const sessions = new Map()
  */
 let cachedNodePty = undefined
 let nodePtyLoadError = null
+
+export function isBunPtyRuntime(runtime) {
+  return typeof runtime?.Terminal === "function" && typeof runtime?.spawn === "function"
+}
+
+/** Adapt Bun's built-in PTY to the narrow node-pty surface used below. */
+export function createBunPtyModule(runtime) {
+  return {
+    spawn(shell, args, options) {
+      let dataListener = null
+      let exitListener = null
+      let settledExit = null
+      const proc = runtime.spawn([shell, ...args], {
+        cwd: options.cwd,
+        env: options.env,
+        terminal: {
+          name: options.name,
+          cols: options.cols,
+          rows: options.rows,
+          data(_terminal, data) {
+            dataListener?.(Buffer.from(data).toString("utf8"))
+          },
+        },
+      })
+      void proc.exited.then((exitCode) => {
+        settledExit = { exitCode, signal: null }
+        exitListener?.(settledExit)
+      })
+      return {
+        write(data) {
+          proc.terminal.write(data)
+        },
+        resize(cols, rows) {
+          proc.terminal.resize(cols, rows)
+        },
+        kill(signal) {
+          proc.kill(signal)
+          proc.terminal.close()
+        },
+        onData(listener) {
+          dataListener = listener
+          return { dispose: () => (dataListener = null) }
+        },
+        onExit(listener) {
+          exitListener = listener
+          if (settledExit) listener(settledExit)
+          return { dispose: () => (exitListener = null) }
+        },
+      }
+    },
+  }
+}
+
 async function loadNodePty() {
   if (cachedNodePty !== undefined) return { mod: cachedNodePty, error: nodePtyLoadError }
+  const bun = globalThis.Bun
+  if (isBunPtyRuntime(bun)) {
+    cachedNodePty = createBunPtyModule(bun)
+    nodePtyLoadError = null
+    return { mod: cachedNodePty, error: null }
+  }
   try {
     cachedNodePty = await import("node-pty")
     nodePtyLoadError = null

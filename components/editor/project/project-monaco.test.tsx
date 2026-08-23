@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render } from "@testing-library/react"
+import { render, waitFor } from "@testing-library/react"
 import { PROJECT_EDITOR_GOTO_EVENT } from "./editor-events"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
@@ -45,6 +45,17 @@ jest.mock("@/stores", () => ({
 jest.mock("@/components/editor/lsp-server-hint", () => ({ LspServerHint: () => null }))
 jest.mock("@/components/editor/monaco-diagnostics-bar", () => ({
   MonacoDiagnosticsBar: () => null,
+}))
+
+const nesManager = {
+  publishDidOpenDocument: jest.fn(),
+  publishDidChangeDocument: jest.fn(),
+  publishDidCloseDocument: jest.fn(),
+  publishDidSaveDocument: jest.fn(),
+  publishDidFocusDocument: jest.fn(),
+}
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: () => nesManager,
 }))
 
 const revealLineInCenter = jest.fn()
@@ -149,9 +160,44 @@ beforeEach(() => {
   editorModelPresent = true
   resetMonacoModelRegistry()
   mockResolvedTheme = "dark"
+  Object.values(nesManager).forEach((mock) => mock.mockClear())
 })
 
 describe("ProjectMonaco", () => {
+  it("publishes open, change, save, focus, and close to active ACP NES sessions", async () => {
+    const view = render(
+      <ProjectMonaco
+        file={file}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    await waitFor(() => expect(nesManager.publishDidOpenDocument).toHaveBeenCalled())
+    expect(nesManager.publishDidFocusDocument).toHaveBeenCalled()
+
+    view.rerender(
+      <ProjectMonaco
+        file={{ ...file, draftContent: "changed", draftVersion: 2, savedContent: "changed" }}
+        projectRoot="/repo"
+        onChange={jest.fn()}
+        actions={[]}
+        actionLabels={{}}
+        bindings={{}}
+      />
+    )
+    await waitFor(() => expect(nesManager.publishDidChangeDocument).toHaveBeenCalled())
+    expect(nesManager.publishDidSaveDocument).toHaveBeenCalledWith({
+      uri: "file:///repo/src/a.ts",
+    })
+    view.unmount()
+    expect(nesManager.publishDidCloseDocument).toHaveBeenCalledWith({
+      uri: "file:///repo/src/a.ts",
+    })
+  })
+
   it("mounts the workbench on the file surface with the real absolute path", () => {
     render(
       <ProjectMonaco

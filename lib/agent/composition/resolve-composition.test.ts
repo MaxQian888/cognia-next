@@ -54,7 +54,13 @@ describe("axis precedence", () => {
       input({
         presets: [bare],
         selection: { presetId: "standard" },
-        hostDefaults: { authority: "plan", toolPresentation: "both", orchestration: "subagent" },
+        hostDefaults: {
+          authority: "plan",
+          toolPresentation: "both",
+          orchestration: "subagent",
+          engagement: "inline",
+          autonomy: "autopilot",
+        },
       })
     )
     expect(resolved.authority).toBe("plan")

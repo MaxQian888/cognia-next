@@ -201,6 +201,9 @@ describe("DiagnosticsWorkspace", () => {
     render(<DiagnosticsWorkspace />)
     await user.click(screen.getByTestId("logs-channel-traces"))
     expect(screen.getByTestId("embedded-trace-workspace")).toBeInTheDocument()
+    expect(traceWorkspaceProps).toHaveBeenCalledWith(
+      expect.objectContaining({ subView: "explore", onSubViewChange: expect.any(Function) })
+    )
     expect(new URLSearchParams(window.location.search).get("channel")).toBe("traces")
   })
 

@@ -10,6 +10,8 @@ describe("probeVendors", () => {
         opencodeDataDir: "/opencode-data",
         piAgentDir: "/pi/agent",
         piSessionDir: "/pi/agent/sessions",
+        geminiDir: "/gemini",
+        continueDir: "/continue",
       }),
       exists: async (path) => path === "/opencode-data" || path === "/pi/agent",
       readAgentConfig: async (vendor) => ({
@@ -36,6 +38,8 @@ describe("probeVendors", () => {
         opencodeDataDir: "",
         piAgentDir: "/pi/agent",
         piSessionDir: "/pi/agent/sessions",
+        geminiDir: "",
+        continueDir: "",
       }),
       exists: async () => false,
       readAgentConfig: async () => ({ exists: false, path: null }),

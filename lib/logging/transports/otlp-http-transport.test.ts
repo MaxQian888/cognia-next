@@ -161,8 +161,8 @@ describe("OtlpHttpTransport buffering & flush", () => {
       maxRequestBytes,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    t.log(makeEntry(makeSpan({ id: "a", operationName: "a".repeat(300) })))
-    t.log(makeEntry(makeSpan({ id: "b", operationName: "b".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "a", providerName: "a".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "b", providerName: "b".repeat(300) })))
 
     await t.close()
 
@@ -243,8 +243,8 @@ describe("OtlpHttpTransport buffering & flush", () => {
       maxRequestBytes: 1_600,
       fetchImpl: fetchMock as unknown as typeof fetch,
     })
-    t.log(makeEntry(makeSpan({ id: "a", operationName: "a".repeat(300) })))
-    t.log(makeEntry(makeSpan({ id: "b", operationName: "b".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "a", providerName: "a".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "b", providerName: "b".repeat(300) })))
     const flush = t.flush()
     await Promise.resolve()
     await Promise.resolve()

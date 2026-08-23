@@ -154,6 +154,8 @@ export function StrixPanel(_props: PluginViewProps) {
     setChecking(true)
     try {
       setPreflight(await runPreflight(terminal, { sleep, now, randomId: uuid, pollMs: 400 }))
+    } catch {
+      setPreflight({ docker: false, strix: false, checkedAt: now() })
     } finally {
       setChecking(false)
     }

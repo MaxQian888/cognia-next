@@ -185,8 +185,7 @@ impl FlowWindow {
             if self.is_open() {
                 return true;
             }
-            if tokio::time::timeout(stall_timeout, notified).await.is_err()
-            {
+            if tokio::time::timeout(stall_timeout, notified).await.is_err() {
                 return false;
             }
         }
@@ -241,7 +240,8 @@ pub async fn proxy_http_stream_open(
         ));
     }
 
-    let mut builder = reqwest::Client::builder().redirect(parse_redirect(input.redirect.as_deref())?);
+    let mut builder =
+        reqwest::Client::builder().redirect(parse_redirect(input.redirect.as_deref())?);
     if let Some(ms) = input.connect_timeout_ms {
         builder = builder.connect_timeout(Duration::from_millis(ms));
     }
@@ -312,7 +312,9 @@ pub async fn proxy_http_stream_open(
     let headers: HashMap<String, String> = response
         .headers()
         .iter()
-        .filter_map(|(name, value)| Some((name.as_str().to_string(), value.to_str().ok()?.to_string())))
+        .filter_map(|(name, value)| {
+            Some((name.as_str().to_string(), value.to_str().ok()?.to_string()))
+        })
         .collect();
 
     let request_id = input.request_id.clone();
@@ -404,10 +406,11 @@ fn finish(request_id: &str, generation: u64) {
 /// the terminal `end` — not an error.
 #[tauri::command]
 pub fn proxy_http_stream_ack(request_id: String, bytes: u64) -> bool {
-    let window = windows()
-        .lock()
-        .ok()
-        .and_then(|registry| registry.get(&request_id).map(|(_, window)| Arc::clone(window)));
+    let window = windows().lock().ok().and_then(|registry| {
+        registry
+            .get(&request_id)
+            .map(|(_, window)| Arc::clone(window))
+    });
     match window {
         Some(window) => {
             window.record_acked(bytes);

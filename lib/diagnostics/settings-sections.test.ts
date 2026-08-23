@@ -34,11 +34,11 @@ describe("diagnostic open-settings targets", () => {
     // Compile-time half of the same guarantee: if a literal below stops being a
     // member of the union, `pnpm typecheck` fails before this test ever runs.
     const sampled: SettingsSectionId[] = [
-      "providers",
+      "ai-connections",
       "subscription",
       "external-bridge",
       "agent-runtime",
-      "agent-teams",
+      "squads",
       "plugins",
       "network",
       "remote-hosts",

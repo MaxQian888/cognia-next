@@ -38,13 +38,17 @@
       "symbols": ["startSelectionToolbar"],
       "reason": "Restores the always-on-top native selection-toolbar window (ADR-0093). A recorded physical boundary in ADR-0059 D7 — the brain has no window server to place an overlay on."
     },
-    "components/providers/initializers/terminal-bridge-initializer.tsx": {
-      "symbols": ["syncTerminalHostProfiles"],
-      "reason": "Calls terminal_host_service, which the dispositions ledger records as local-only because it installs/configures the durable terminal host as a per-user OS login service (writing ~/Library/LaunchAgents on macOS). It has no dispatch arm in companion_api/rpc at all, so a brain call would fail closed. Remote terminal sessions reach a cloud host through the ADR-0031/0033 terminal plane, which does not read these OS login-service profiles."
+    "components/providers/initializers/session-import-watch-initializer.tsx": {
+      "symbols": ["startSessionImportWatch"],
+      "reason": "Owns the OS filesystem watch over desktop external-agent history roots. Its session_import_watch_start / session_import_watch_stop commands are target:client, capability:client.local, transports:[\"internal\"] in protocol/companion-commands.json and local-only in protocol/headless-command-dispositions.json. A brain has no Tauri event source or those per-user desktop history paths to watch."
     },
     "components/providers/initializers/webview-heartbeat-initializer.tsx": {
       "symbols": ["startWebviewHeartbeat"],
       "reason": "Proves the Tauri WebView is still painting so the watchdog can recover a wedged renderer. A headless brain has no WebView; its liveness is the supervisor's ready probe and /healthz in cognia-server, which is a different mechanism, not a missing port of this one."
+    },
+    "components/providers/initializers/worker-runtime-initializer.tsx": {
+      "symbols": ["attachTauriWorkerRuntime"],
+      "reason": "The desktop half attaches a @tauri-apps/api/core Channel to companion_worker_attach_channel. The brain half is the bridge-owned WorkerRpcPool created only after the authenticated bridge connects in cli/src/serve/serve-command.ts, where installRemoteWorkerRuntime is paired with bridge and pool teardown. lib/headless/runtimes/index.ts records this dependency-bound bootstrap exception; a registry import cannot construct that live bridge channel."
     }
   }
 }

@@ -20,6 +20,8 @@ function undigested(): Omit<ResolvedAgentCompositionV1, "compositionDigest"> {
     authority: "default",
     toolPresentation: "native",
     orchestration: "direct",
+    engagement: "inline",
+    autonomy: "autopilot",
     promptDigest: `sha256:${"a".repeat(64)}`,
     toolDigest: `sha256:${"b".repeat(64)}`,
     warnings: [],

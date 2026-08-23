@@ -48,6 +48,7 @@ async function seedAdapter(): Promise<void> {
       storeUnmatchedInDraftMode: false,
     },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     lastWhoamiAt: 999,
     createdAt: 0,
     updatedAt: 0,

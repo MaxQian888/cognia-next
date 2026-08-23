@@ -33,7 +33,7 @@ const AUTH_FAILURE: DiagnosticCodeSpec = {
   severity: "error",
   retryable: false,
   persistent: true,
-  actions: [{ kind: "open-settings", section: "providers" }, { kind: "reauth" }],
+  actions: [{ kind: "open-settings", section: "ai-connections" }, { kind: "reauth" }],
   icon: "key",
 }
 
@@ -177,7 +177,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: false,
-    actions: [{ kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "alert",
   },
   payloadTooLarge: {
@@ -193,7 +193,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     persistent: false,
     // A same-sized model fails identically, so the fallback offered here is a
     // *bigger* model, not the next one in the chain.
-    actions: [{ kind: "shorten-input" }, { kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "shorten-input" }, { kind: "open-settings", section: "ai-connections" }],
     icon: "alert",
   },
   contentPolicy: {
@@ -210,14 +210,14 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "settings",
   },
   modelRequired: {
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "settings",
   },
   pluginToolMissing: {
@@ -231,7 +231,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "settings",
   },
 
@@ -495,28 +495,28 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: false,
-    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    actions: [{ kind: "open-settings", section: "squads" }],
     icon: "alert",
   },
   teamMissing: {
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    actions: [{ kind: "open-settings", section: "squads" }],
     icon: "settings",
   },
   supervisorMissing: {
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    actions: [{ kind: "open-settings", section: "squads" }],
     icon: "settings",
   },
   supervisorNotMember: {
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    actions: [{ kind: "open-settings", section: "squads" }],
     icon: "settings",
   },
   // The conversation names a Squad the store no longer has — deleted, or
@@ -526,7 +526,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: true,
-    actions: [{ kind: "open-settings", section: "agent-teams" }],
+    actions: [{ kind: "open-settings", section: "squads" }],
     icon: "settings",
   },
   // The Squad exists but the run could not be launched. Retryable: the usual
@@ -559,7 +559,7 @@ export const DIAGNOSTIC_CODES: Readonly<Record<DiagnosticCode, DiagnosticCodeSpe
     severity: "error",
     retryable: false,
     persistent: false,
-    actions: [{ kind: "open-settings", section: "providers" }],
+    actions: [{ kind: "open-settings", section: "ai-connections" }],
     icon: "settings",
   },
   degradedFallback: {

@@ -297,11 +297,13 @@ export class OtlpHttpTransport implements Transport {
       let controller: AbortController | null = null
       let timeout: ReturnType<typeof setTimeout> | null = null
       try {
-        controller = typeof AbortController !== "undefined" ? new AbortController() : null
+        const requestController =
+          typeof AbortController !== "undefined" ? new AbortController() : null
+        controller = requestController
         if (controller) this.activeControllers.add(controller)
         timeout =
-          controller && this.options.requestTimeoutMs > 0
-            ? setTimeout(() => controller.abort(), this.options.requestTimeoutMs)
+          requestController && this.options.requestTimeoutMs > 0
+            ? setTimeout(() => requestController.abort(), this.options.requestTimeoutMs)
             : null
         const response = await this.fetchImpl(this.options.endpoint, {
           method: "POST",

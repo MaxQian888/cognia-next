@@ -239,9 +239,12 @@ describe("migrateLegacyDatabaseToAccount", () => {
     await expect(accountTwo.sharedLinks.count()).resolves.toBe(0)
     accountTwo.close()
 
-    const source = new CogniaDB(sourceDbName)
+    const source = new Dexie(sourceDbName)
     await source.open()
-    await expect(source.sessions.get("s1")).resolves.toMatchObject({ title: "Legacy session" })
+    expect(source.verno).toBe(86)
+    await expect(source.table("sessions").get("s1")).resolves.toMatchObject({
+      title: "Legacy session",
+    })
     source.close()
     registryDb.close()
   }, 30000)
@@ -292,6 +295,25 @@ describe("migrateLegacyDatabaseToAccount", () => {
       status: "deadlettered",
     })
     accountDb.close()
+    registryDb.close()
+  }, 30000)
+
+  it("refuses to mark migration complete when a non-empty unknown table cannot be copied", async () => {
+    const sourceDbName = "cognia-legacy-unknown-table-test"
+    await Dexie.delete(sourceDbName)
+    await deleteCogniaDb(accountDatabaseName("acct_legacy"))
+    const source = new Dexie(sourceDbName)
+    source.version(1).stores({ unknownLegacyRows: "&id" })
+    await source.open()
+    await source.table("unknownLegacyRows").put({ id: "unknown-1" })
+    source.close()
+    const { db: registryDb, registry } = await createRegistry("legacy-unknown-table")
+
+    await expect(
+      migrateLegacyDatabaseToAccount({ registry, sourceDbName, targetAccountId: "acct_legacy" })
+    ).rejects.toThrow(/unknown table unknownLegacyRows/i)
+    await expect(registry.getState()).resolves.not.toHaveProperty("legacyMigration")
+
     registryDb.close()
   }, 30000)
 

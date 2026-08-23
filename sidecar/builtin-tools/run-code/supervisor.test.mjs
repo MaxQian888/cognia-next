@@ -9,6 +9,8 @@ import {
   assertSandboxable,
   parseSandboxLauncher,
   probeSandbox,
+  readProcessGroupRssBytes,
+  resolveSandboxSpawn,
   runCodeProgram,
   sandboxEnv,
 } from "./supervisor.mjs"
@@ -43,6 +45,10 @@ test("fails closed when no strict sandbox is available", () => {
     () => assertSandboxable({ canSpawnProcess: false, strictSandbox: true }),
     (error) => error instanceof SandboxUnavailableError && error.reason === "no-fork"
   )
+  assert.throws(
+    () => assertSandboxable({ canSpawnProcess: true, strictSandbox: true, launcher: null }),
+    (error) => error instanceof SandboxUnavailableError && error.reason === "no-strict-sandbox"
+  )
 })
 
 test("an unprobed host is treated as unsandboxed", () => {
@@ -76,6 +82,75 @@ test("the child environment is built by construction, not by deletion", () => {
   // The sidecar's own env carries ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN;
   // an allow-list is the only thing that keeps future secrets out too.
   assert.deepEqual(Object.keys(env).sort(), ["COGNIA_CODE_SANDBOX_CHILD", "NODE_ENV"])
+})
+
+test("compiled executables self-exec the run-code role through the strict launcher", () => {
+  assert.deepEqual(
+    resolveSandboxSpawn({
+      standalone: true,
+      launcher: ["/sandbox", "--profile", "strict"],
+      execPath: "/dist/cognia-agent",
+      childPath: "/$bunfs/root/sandbox-child.mjs",
+      maxMemoryBytes: 64 * 1024 * 1024,
+    }),
+    {
+      command: "/sandbox",
+      args: ["--profile", "strict", "/dist/cognia-agent"],
+      env: {
+        BUN_OPTIONS: "--smol",
+        COGNIA_CODE_SANDBOX_CHILD: "1",
+        COGNIA_ROLE: "run-code",
+        NODE_ENV: "development",
+      },
+    }
+  )
+})
+
+test("source runtimes keep the physical sandbox child and V8 memory limit", () => {
+  assert.deepEqual(
+    resolveSandboxSpawn({
+      standalone: false,
+      launcher: ["/sandbox"],
+      execPath: "/usr/bin/node",
+      childPath: "/repo/sandbox-child.mjs",
+      maxMemoryBytes: 64 * 1024 * 1024,
+    }),
+    {
+      command: "/sandbox",
+      args: ["/usr/bin/node", "--max-old-space-size=64", "/repo/sandbox-child.mjs"],
+      env: {
+        COGNIA_CODE_SANDBOX_CHILD: "1",
+        NODE_ENV: "development",
+      },
+    }
+  )
+})
+
+test("process-group RSS sums the sandbox wrapper and every descendant", () => {
+  assert.equal(
+    readProcessGroupRssBytes(42, {
+      spawnSyncImpl() {
+        return {
+          status: 0,
+          stdout: " 42 42 1024\n 43 42 2048\n 99 99 4096\n",
+          stderr: "",
+        }
+      },
+    }),
+    3 * 1024 * 1024
+  )
+})
+
+test("process-group RSS fails closed when the OS measurement is unavailable", () => {
+  assert.throws(
+    () =>
+      readProcessGroupRssBytes(42, {
+        spawnSyncImpl() {
+          return { status: 1, stdout: "", stderr: "ps unavailable" }
+        },
+      }),
+    /cannot enforce sandbox memory limit/
+  )
 })
 
 test("runs a program and returns its value", async () => {
@@ -251,6 +326,16 @@ test("kills a program that exceeds its wall time", async () => {
   })
   assert.equal(outcome.ok, false)
   assert.equal(outcome.limit.kind, "wall-time")
+})
+
+test("kills the sandbox process group when resident memory exceeds the limit", async () => {
+  const outcome = await run("return 1", {
+    config: { ...smallConfig(), maxMemoryBytes: 1 },
+  })
+  assert.equal(outcome.ok, false)
+  assert.equal(outcome.limit.kind, "memory")
+  assert.equal(outcome.limit.limit, 1)
+  assert.ok(outcome.limit.observed > 1)
 })
 
 test("rejects an oversized result", async () => {

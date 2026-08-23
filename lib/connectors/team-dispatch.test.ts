@@ -33,10 +33,9 @@ const runTeamLifecycleMock = jest.fn(async (_teamId: string, deps: Record<string
   writer.updateTeammate("m", {})
   return { runId: "r", status: "completed" }
 })
-const ensureImTeamExecutionRunMock = jest.fn(async () => "execution:team:stub")
+const ensureImTeamExecutionRunMock = jest.fn(async (_input: unknown) => "execution:team:stub")
 jest.mock("@/lib/execution/agent-team-bridge", () => ({
-  ensureImTeamExecutionRun: (...args: unknown[]) =>
-    ensureImTeamExecutionRunMock(...(args as [never])),
+  ensureImTeamExecutionRun: (input: unknown) => ensureImTeamExecutionRunMock(input),
   agentTeamExecutionRunId: (id: string) => `execution:team:${id}`,
 }))
 

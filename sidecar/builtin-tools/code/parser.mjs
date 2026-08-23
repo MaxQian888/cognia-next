@@ -32,8 +32,11 @@ const parserCache = new Map()
  * @param {string} [baseDir]
  * @returns {string[]}
  */
-export function grammarSearchDirs(baseDir = HERE) {
+export function grammarSearchDirs(baseDir = HERE, resourceDir = standaloneResourceDir()) {
   return [
+    // Bun standalone resources live beside process.execPath; import.meta.url
+    // points into /$bunfs and cannot reach files copied by the package builder.
+    resourceDir ? path.join(resourceDir, "grammars") : null,
     // (a) Copied alongside the sidecar source (packaged Tauri resource / CLI).
     path.join(baseDir, "grammars"),
     // (b) Tauri resource layout: <resources>/sidecar/builtin-tools/code/grammars
@@ -42,6 +45,24 @@ export function grammarSearchDirs(baseDir = HERE) {
     // (c) Dev: the prebuilt wasms shipped by tree-sitter-wasms.
     nodeModulesGrammarDir(baseDir),
   ].filter(Boolean)
+}
+
+/** Physical resource directory for a Bun standalone executable, if any. */
+export function standaloneResourceDir(
+  runtime = {
+    bunStandalone: Boolean(globalThis.Bun?.isStandaloneExecutable),
+    execPath: process.execPath,
+  }
+) {
+  return runtime.bunStandalone ? path.dirname(runtime.execPath) : null
+}
+
+/** web-tree-sitter init options that redirect its runtime out of /$bunfs. */
+export function treeSitterInitOptions(resourceDir = standaloneResourceDir()) {
+  if (!resourceDir) return undefined
+  return {
+    locateFile: () => path.join(resourceDir, "tree-sitter.wasm"),
+  }
 }
 
 /** Locate `node_modules/tree-sitter-wasms/out` by walking up from `baseDir`. */
@@ -80,7 +101,7 @@ async function ensureInit() {
     initPromise = (async () => {
       const mod = await import("web-tree-sitter")
       webTreeSitter = mod
-      await mod.Parser.init()
+      await mod.Parser.init(treeSitterInitOptions())
       return mod
     })().catch((err) => {
       initPromise = null // allow a later retry

@@ -112,6 +112,26 @@ describe("host feature manifest", () => {
     expect(supportsHostFeatureOperation(manifest, "twin.runtime", "twin_draft_review")).toBe(true)
   })
 
+  it("advertises exact-version workflow placement only from execution Hosts", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["workflow.execution"]).toEqual({
+        version: 1,
+        operations: [
+          "workflow_placement_probe",
+          "workflow_handoff_create",
+          "workflow_run_list",
+          "workflow_cancel_run",
+        ],
+      })
+    }
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["workflow.execution"]
+      ).toBeUndefined()
+    }
+  })
+
   it("advertises every remotely executable Git operation with independent health", () => {
     const manifest = buildLocalHostFeatureManifest({
       platform: "tauri",

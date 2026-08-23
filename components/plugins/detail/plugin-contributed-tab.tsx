@@ -40,7 +40,7 @@ import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-a
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { listDynamicPresetEntries } from "@/lib/ai/agent/external/presets"
 import { listPluginProtocolAdapters } from "@/lib/ai/agent/external/protocol-adapter"
-import { getPluginAdapterIds } from "@/lib/plugin/bridge/connectors-bridge"
+import { getPluginConnectorKinds } from "@/lib/plugin/bridge/connectors-bridge"
 import {
   getPluginCatalogSnapshot,
   subscribePluginCatalog,
@@ -176,7 +176,7 @@ export function PluginContributedTab({ pluginId }: Props) {
     },
     {
       key: "connectors",
-      items: [...getPluginAdapterIds(pluginId)],
+      items: [...getPluginConnectorKinds(pluginId)],
     },
     {
       key: "workflowNodes",

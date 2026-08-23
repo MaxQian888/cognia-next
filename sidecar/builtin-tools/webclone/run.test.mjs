@@ -9,7 +9,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { buildJob, runEngine, snapshotSite } from "./run.mjs"
+import { buildJob, resolveRunnerSpawn, runEngine, snapshotSite } from "./run.mjs"
 
 function realCwd(prefix = "wc-tool-") {
   return mkdtempSync(join(tmpdir(), prefix))
@@ -178,6 +178,40 @@ test("buildJob builds a convert job from convertLocal", () => {
 })
 
 // ---- runEngine ------------------------------------------------------------
+
+test("compiled executables self-exec the webclone role instead of treating themselves as Node", () => {
+  assert.deepEqual(
+    resolveRunnerSpawn({
+      standalone: true,
+      execPath: "/dist/cognia-agent",
+      runnerPath: "/$bunfs/root/runner.js",
+      jobPath: "/tmp/job.json",
+      env: { PATH: "/usr/bin" },
+    }),
+    {
+      command: "/dist/cognia-agent",
+      args: ["/tmp/job.json"],
+      env: { PATH: "/usr/bin", COGNIA_ROLE: "webclone" },
+    }
+  )
+})
+
+test("source runtimes keep spawning the physical webclone runner", () => {
+  assert.deepEqual(
+    resolveRunnerSpawn({
+      standalone: false,
+      execPath: "/usr/bin/node",
+      runnerPath: "/repo/runner.js",
+      jobPath: "/tmp/job.json",
+      env: { PATH: "/usr/bin" },
+    }),
+    {
+      command: "/usr/bin/node",
+      args: ["/repo/runner.js", "/tmp/job.json"],
+      env: { PATH: "/usr/bin" },
+    }
+  )
+})
 
 const OK_ENVELOPE = JSON.stringify({
   ok: true,

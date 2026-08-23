@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import { render, screen, waitFor } from "@testing-library/react"
+import { runPreflight } from "./lib/preflight"
 
 jest.mock("next-intl", () => ({ useLocale: () => "en" }))
 jest.mock("dexie-react-hooks", () => ({ useLiveQuery: () => [] }))
@@ -29,6 +30,18 @@ jest.mock("./runtime", () => ({ peekStrixRuntime: () => mockRuntime }))
 import { StrixPanel } from "./StrixPanel"
 
 describe("StrixPanel", () => {
+  const mockedRunPreflight = jest.mocked(runPreflight)
+
+  beforeEach(() => {
+    mockRuntime = null
+    mockedRunPreflight.mockResolvedValue({
+      docker: true,
+      strix: true,
+      strixVersion: "0.1.3",
+      checkedAt: 0,
+    })
+  })
+
   it("renders the unavailable state when the runtime is not wired", () => {
     mockRuntime = null
     render(<StrixPanel pluginId="strix-security" viewId="strix-panel" />)
@@ -40,5 +53,18 @@ describe("StrixPanel", () => {
     render(<StrixPanel pluginId="strix-security" viewId="strix-panel" />)
     expect(screen.getByTestId("strix-panel")).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId("strix-preflight-ok")).toBeInTheDocument())
+  })
+
+  it("renders a blocked preflight when the terminal host connection is refused", async () => {
+    mockedRunPreflight.mockRejectedValue(
+      new Error(
+        "ctx.terminal.spawn failed: terminal host socket connect failed: Connection refused (os error 61)"
+      )
+    )
+    mockRuntime = { terminal: {}, dexie: {} }
+
+    render(<StrixPanel pluginId="strix-security" viewId="strix-panel" />)
+
+    await waitFor(() => expect(screen.getByTestId("strix-preflight-blocked")).toBeInTheDocument())
   })
 })

@@ -118,7 +118,7 @@ export function readJob(argv: string[], stdinFd = 0): RunnerJob {
   return parsed
 }
 
-async function main(): Promise<void> {
+export async function runWebcloneRunner(): Promise<void> {
   // Reserve real stdout for the single result line; reroute the library's
   // progress chatter to stderr so it never mingles with the envelope.
   const realStdoutWrite = process.stdout.write.bind(process.stdout)
@@ -144,5 +144,5 @@ async function main(): Promise<void> {
 const isDirectRun =
   typeof process.argv[1] === "string" && /runner(\.[cm]?[jt]s)?$/.test(process.argv[1])
 if (isDirectRun) {
-  void main()
+  void runWebcloneRunner()
 }

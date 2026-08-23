@@ -5,7 +5,7 @@ import fs from "node:fs"
 import os from "node:os"
 import crypto from "node:crypto"
 
-import { execFileHash } from "./file-hash.mjs"
+import { digestFile, execFileHash } from "./file-hash.mjs"
 
 let TMP
 before(() => {
@@ -41,6 +41,19 @@ test("file_hash supports md5 / sha1 / sha512", async () => {
     const want = crypto.createHash(algo).update("x").digest("hex")
     assert.equal(got, want, `${algo} mismatch`)
   }
+})
+
+test("file_hash falls back to Node when Bun hashing capabilities are partial", async () => {
+  const target = path.join(TMP, "hash-partial-runtime.txt")
+  fs.writeFileSync(target, "portable")
+  const expected = crypto.createHash("sha256").update("portable").digest("hex")
+  const partialBun = {
+    file() {
+      throw new Error("partial Bun.file must not be selected")
+    },
+  }
+
+  assert.equal(await digestFile(target, "sha256", partialBun), expected)
 })
 
 test("file_hash errors on missing file", async () => {

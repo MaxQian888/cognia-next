@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import {
+  capabilitiesForPlatform,
   CORE_CAPABILITY_IDS,
   detectHostProfile,
   detectLocalCapabilities,
@@ -216,5 +217,15 @@ describe("serverBackedCapabilities", () => {
   it("local-OR-server composition answers the C3 gating question", () => {
     const caps = serverBackedCapabilities("cloud-companion")
     expect(hasCapability("shell", caps)).toBe(true)
+  })
+})
+
+describe("capabilitiesForPlatform", () => {
+  it("returns the fixed Headless publication baseline without platform detection", () => {
+    expect(capabilitiesForPlatform("headless")).toEqual(
+      expect.arrayContaining(["shell", "sidecar", "keyring", "always-on", "headless"])
+    )
+    expect(capabilitiesForPlatform("headless")).not.toContain("webview")
+    expect(capabilitiesForPlatform("headless")).not.toContain("uia-automation")
   })
 })

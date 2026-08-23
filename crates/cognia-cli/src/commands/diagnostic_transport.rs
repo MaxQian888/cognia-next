@@ -35,12 +35,13 @@ impl DiagnosticTransport for UreqTransport {
             "DELETE" => prepared!(ureq::delete(&request.url), headers).call(),
             // The body-carrying verbs always send something, even if empty:
             // `POST /complete` has a `{}` body and the service expects one.
-            "POST" => prepared!(ureq::post(&request.url), headers)
-                .send(request.body.unwrap_or(&[])),
-            "PUT" => prepared!(ureq::put(&request.url), headers)
-                .send(request.body.unwrap_or(&[])),
-            "PATCH" => prepared!(ureq::patch(&request.url), headers)
-                .send(request.body.unwrap_or(&[])),
+            "POST" => {
+                prepared!(ureq::post(&request.url), headers).send(request.body.unwrap_or(&[]))
+            }
+            "PUT" => prepared!(ureq::put(&request.url), headers).send(request.body.unwrap_or(&[])),
+            "PATCH" => {
+                prepared!(ureq::patch(&request.url), headers).send(request.body.unwrap_or(&[]))
+            }
             other => return Err(format!("unsupported HTTP method {other}")),
         };
         let mut response = response.map_err(|error| error.to_string())?;

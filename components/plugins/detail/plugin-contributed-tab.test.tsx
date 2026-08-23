@@ -60,9 +60,9 @@ jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
   listPluginProtocolAdapters: () => mockListPluginProtocolAdapters(),
 }))
 
-const mockGetPluginAdapterIds = jest.fn<readonly string[], [string]>()
+const mockGetPluginConnectorKinds = jest.fn<readonly string[], [string]>()
 jest.mock("@/lib/plugin/bridge/connectors-bridge", () => ({
-  getPluginAdapterIds: (id: string) => mockGetPluginAdapterIds(id),
+  getPluginConnectorKinds: (id: string) => mockGetPluginConnectorKinds(id),
 }))
 
 const mockGetPluginCatalogSnapshot = jest.fn<unknown[], []>()
@@ -90,7 +90,7 @@ beforeEach(() => {
   mockListNativeToolEntries.mockReturnValue([])
   mockListDynamicPresetEntries.mockReturnValue([])
   mockListPluginProtocolAdapters.mockReturnValue([])
-  mockGetPluginAdapterIds.mockReturnValue([])
+  mockGetPluginConnectorKinds.mockReturnValue([])
   mockGetPluginCatalogSnapshot.mockReturnValue([])
   mockGetHooksByPlugin.mockReturnValue([])
 })
@@ -168,7 +168,7 @@ describe("PluginContributedTab", () => {
       { protocol: "p1:demo-echo", pluginId: "p1" },
       { protocol: "other:x", pluginId: "other" },
     ])
-    mockGetPluginAdapterIds.mockReturnValue(["telegram-bot", "discord-bot"])
+    mockGetPluginConnectorKinds.mockReturnValue(["telegram-bot", "discord-bot"])
     mockGetPluginCatalogSnapshot.mockReturnValue([
       { kind: "p1.action.x", category: "action", label: "Do X", pluginId: "p1", keywords: [] },
       {

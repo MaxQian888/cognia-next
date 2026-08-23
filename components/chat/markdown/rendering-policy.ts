@@ -1,9 +1,10 @@
 import rehypeRaw from "rehype-raw"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
+import type { Options as RehypeSanitizeOptions } from "rehype-sanitize"
 import type { StreamdownProps } from "streamdown"
 
 /** Shared safe HTML and URL policy for finalized, streaming, and reasoning Markdown. */
-export const chatMarkdownSanitizeSchema = {
+export const chatMarkdownSanitizeSchema: RehypeSanitizeOptions = {
   ...defaultSchema,
   tagNames: [
     ...(defaultSchema.tagNames ?? []),

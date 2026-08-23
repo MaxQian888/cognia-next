@@ -1023,7 +1023,7 @@ export function useClaudeChat() {
                 sessionId,
                 createDiagnostic(
                   result.reason === "squad_not_found" ? "squadNotFound" : "squadDispatchFailed",
-                  { source: "chat", meta: { sessionId, squadId } }
+                  { source: "chat", meta: { sessionId, extra: { squadId } } }
                 )
               )
             chatTurnPerformance.finish(sessionId, "failed")
@@ -1064,7 +1064,7 @@ export function useClaudeChat() {
             onSettled: (status) => {
               squadWatchersRef.current.delete(sessionId)
               store.getState().setSessionStatus(sessionId, "idle")
-              chatTurnPerformance.finish(sessionId, status === "completed" ? "ok" : "failed")
+              chatTurnPerformance.finish(sessionId, status === "completed" ? "completed" : "failed")
             },
           })
           // One watcher per session: a previous Squad turn's watcher would
@@ -1073,12 +1073,13 @@ export function useClaudeChat() {
           squadWatchersRef.current.set(sessionId, stopWatching)
         } catch (error) {
           store.getState().setSessionStatus(sessionId, "idle")
-          store
-            .getState()
-            .setSessionDiagnostic(
-              sessionId,
-              toDiagnostic(error, { source: "chat", meta: { sessionId, squadId } })
-            )
+          store.getState().setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error, {
+              source: "chat",
+              meta: { sessionId, extra: { squadId } },
+            })
+          )
           chatTurnPerformance.finish(sessionId, "failed")
         }
         return

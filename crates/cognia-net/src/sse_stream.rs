@@ -330,7 +330,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(delivered, 2, "the keep-alive comment must not count: {seen:?}");
+        assert_eq!(
+            delivered, 2,
+            "the keep-alive comment must not count: {seen:?}"
+        );
         assert_eq!(seen[0].id.as_deref(), Some("1"));
         assert_eq!(seen[0].event.as_deref(), Some("operation"));
         assert_eq!(seen[0].data, "one");

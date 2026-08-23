@@ -89,7 +89,6 @@ import type { DiagnosticIncidentSummary } from "@/hooks/logging/use-diagnostic-i
 import { useTransportHealth } from "@/hooks/logging"
 import { useEdgeResize, useIsNarrow } from "@/hooks/ui"
 import { cn } from "@/lib/utils"
-import type { AgentTraceStatsWindow } from "@/lib/observability/trace-window"
 import {
   LOG_WORKSPACE_VIEWS,
   resolveLogWorkspaceView,
@@ -148,8 +147,8 @@ export function DiagnosticsWorkspace() {
   const setIncidentStateFilter = useLogWorkspaceStore((state) => state.setIncidentStateFilter)
   const receiptsOnly = useLogWorkspaceStore((state) => state.receiptsOnly)
   const setReceiptsOnly = useLogWorkspaceStore((state) => state.setReceiptsOnly)
-  const traceWindow = useLogWorkspaceStore((state) => state.traceWindow)
-  const setTraceWindow = useLogWorkspaceStore((state) => state.setTraceWindow)
+  const traceSubView = useLogWorkspaceStore((state) => state.traceSubView)
+  const setTraceSubView = useLogWorkspaceStore((state) => state.setTraceSubView)
   const traceErrorsOnly = useLogWorkspaceStore((state) => state.traceErrorsOnly)
   const setTraceErrorsOnly = useLogWorkspaceStore((state) => state.setTraceErrorsOnly)
   const resetWorkspace = useLogWorkspaceStore((state) => state.resetWorkspace)
@@ -400,8 +399,8 @@ export function DiagnosticsWorkspace() {
           />
         ) : activeView === "traces" ? (
           <TraceWorkspace
-            window={traceWindow}
-            onWindowChange={(next: AgentTraceStatsWindow) => setTraceWindow(next)}
+            subView={traceSubView}
+            onSubViewChange={setTraceSubView}
             errorsOnly={traceErrorsOnly}
             onErrorsOnlyChange={setTraceErrorsOnly}
             selectedTraceId={selectedTraceId}

@@ -42,6 +42,7 @@ function makeAdapter(overrides: Partial<AdapterInstanceRow> = {}): AdapterInstan
       storeUnmatchedInDraftMode: false,
     },
     defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,

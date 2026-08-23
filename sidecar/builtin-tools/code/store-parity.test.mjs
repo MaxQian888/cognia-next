@@ -10,6 +10,21 @@ import { createSqliteStore, toFtsQuery } from "./store-sqlite.mjs"
 
 const Database = loadSqliteBinding()
 
+test("Bun runtimes prefer the built-in SQLite binding over better-sqlite3", () => {
+  const calls = []
+  class BunDatabase {}
+  const binding = loadSqliteBinding({
+    bunRuntime: true,
+    requireModule(specifier) {
+      calls.push(specifier)
+      if (specifier === "bun:sqlite") return { Database: BunDatabase }
+      throw new Error(`unexpected module: ${specifier}`)
+    },
+  })
+  assert.ok(new binding(":memory:") instanceof BunDatabase)
+  assert.deepEqual(calls, ["bun:sqlite"])
+})
+
 function node(over = {}) {
   return {
     id: over.id ?? "a.ts::foo::1",

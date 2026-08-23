@@ -11,7 +11,13 @@ import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 
-import { terminalReplTools, __testExports, __setNodePtyForTesting } from "../terminal-repl-tool.mjs"
+import {
+  terminalReplTools,
+  __testExports,
+  __setNodePtyForTesting,
+  createBunPtyModule,
+  isBunPtyRuntime,
+} from "../terminal-repl-tool.mjs"
 
 const {
   execSpawn,
@@ -80,6 +86,59 @@ test.beforeEach(() => {
 })
 
 // ── spawn ─────────────────────────────────────────────────────────────
+
+test("Bun.Terminal is adapted to the existing node-pty-shaped session seam", async () => {
+  let captured
+  let resolveExit
+  const exited = new Promise((resolve) => {
+    resolveExit = resolve
+  })
+  const terminal = {
+    write: () => {},
+    resize: () => {},
+    close: () => {},
+  }
+  const runtime = {
+    Terminal: class {},
+    spawn(command, options) {
+      captured = { command, options }
+      return { terminal, exited, kill: () => {} }
+    },
+  }
+  const pty = createBunPtyModule(runtime).spawn("/bin/bash", ["-i"], {
+    name: "xterm-color",
+    cols: 90,
+    rows: 30,
+    cwd: tmpdir,
+    env: { TERM: "xterm" },
+  })
+  let output = ""
+  let exitCode = null
+  pty.onData((data) => {
+    output += data
+  })
+  pty.onExit((event) => {
+    exitCode = event.exitCode
+  })
+  captured.options.terminal.data(terminal, Buffer.from("ready\n"))
+  resolveExit(7)
+  await exited
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(captured.command, ["/bin/bash", "-i"])
+  assert.equal(captured.options.cwd, tmpdir)
+  assert.equal(captured.options.terminal.cols, 90)
+  assert.equal(captured.options.terminal.rows, 30)
+  assert.equal(output, "ready\n")
+  assert.equal(exitCode, 7)
+})
+
+test("Bun PTY selection requires both callable terminal and spawn capabilities", () => {
+  assert.equal(isBunPtyRuntime(undefined), false)
+  assert.equal(isBunPtyRuntime({ Terminal: class {} }), false)
+  assert.equal(isBunPtyRuntime({ Terminal: {}, spawn() {} }), false)
+  assert.equal(isBunPtyRuntime({ Terminal: class {}, spawn() {} }), true)
+})
 
 test("execSpawn returns a sessionId for a happy-path spawn", async () => {
   const fake = makeFakePty()

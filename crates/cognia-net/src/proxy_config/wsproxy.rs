@@ -100,10 +100,9 @@ async fn connect_https_tunnel_with_config(
     let tcp = TcpStream::connect(&proxy_addr).await?;
     // The bare host, not the authority: `ServerName` takes a name or an IP,
     // never a bracketed one, and never a port.
-    let server_name = rustls::pki_types::ServerName::try_from(
-        super::normalize_host_for_match(&cfg.host),
-    )
-        .map_err(|_| IoError::new(ErrorKind::InvalidInput, "invalid HTTPS proxy hostname"))?;
+    let server_name =
+        rustls::pki_types::ServerName::try_from(super::normalize_host_for_match(&cfg.host))
+            .map_err(|_| IoError::new(ErrorKind::InvalidInput, "invalid HTTPS proxy hostname"))?;
     let connector = tokio_rustls::TlsConnector::from(tls_config);
     let mut stream = connector
         .connect(server_name, tcp)
@@ -126,9 +125,8 @@ where
     // `CONNECT ::1:443` — which a proxy reads as host `::1:443` with no port,
     // or rejects outright.
     let target = super::authority(target_host, target_port);
-    let mut request = format!(
-        "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Connection: keep-alive\r\n"
-    );
+    let mut request =
+        format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Connection: keep-alive\r\n");
     if let Some(auth) = cfg.basic_auth_header() {
         request.push_str(&format!("Proxy-Authorization: {auth}\r\n"));
     }

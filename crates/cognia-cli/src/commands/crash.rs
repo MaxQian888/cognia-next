@@ -357,7 +357,11 @@ fn resolve_grant(
 
 /// The tenant and project a grant is scoped to, for the routes that need a
 /// target rather than just a bearer token.
-fn submission_target(server: &str, tenant_id: Option<&str>, project_id: Option<&str>) -> SubmissionTarget {
+fn submission_target(
+    server: &str,
+    tenant_id: Option<&str>,
+    project_id: Option<&str>,
+) -> SubmissionTarget {
     SubmissionTarget::new(
         server,
         tenant_id.unwrap_or_default(),
@@ -526,11 +530,6 @@ fn delete_local(dir: PathBuf, stem: &str, format: OutputFormat) -> Result<()> {
         &[format!("Deleted {removed} local files for {stem}")],
     )
 }
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {

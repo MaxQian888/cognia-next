@@ -4,7 +4,14 @@ import os from "node:os"
 import fs from "node:fs"
 import path from "node:path"
 
-import { getParser, resolveGrammarWasm, grammarSearchDirs, resetParsers } from "./parser.mjs"
+import {
+  getParser,
+  grammarSearchDirs,
+  resetParsers,
+  resolveGrammarWasm,
+  standaloneResourceDir,
+  treeSitterInitOptions,
+} from "./parser.mjs"
 
 test("grammarSearchDirs puts the co-located grammars/ dir first", () => {
   const dirs = grammarSearchDirs("/base")
@@ -15,6 +22,25 @@ test("grammarSearchDirs surfaces the tree-sitter-wasms dev dir from the real bas
   // From the actual module dir, the node_modules walk finds tree-sitter-wasms.
   const dirs = grammarSearchDirs()
   assert.ok(dirs.some((d) => d.includes("tree-sitter-wasms")))
+})
+
+test("standalone Bun resolves the runtime and grammars beside the executable", () => {
+  const executable = path.join("/opt", "cognia", "cognia-agent")
+  const resourceDir = standaloneResourceDir({ bunStandalone: true, execPath: executable })
+  assert.equal(resourceDir, path.dirname(executable))
+  assert.equal(
+    grammarSearchDirs("/$bunfs/root", resourceDir)[0],
+    path.join(resourceDir, "grammars")
+  )
+  assert.equal(
+    treeSitterInitOptions(resourceDir).locateFile("tree-sitter.wasm"),
+    path.join(resourceDir, "tree-sitter.wasm")
+  )
+})
+
+test("source runtimes keep web-tree-sitter's default runtime resolution", () => {
+  assert.equal(standaloneResourceDir({ bunStandalone: false, execPath: "/usr/bin/node" }), null)
+  assert.equal(treeSitterInitOptions(null), undefined)
 })
 
 test("resolveGrammarWasm finds a prebuilt grammar in node_modules (dev)", () => {

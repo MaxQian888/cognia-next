@@ -6,6 +6,7 @@ import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import { accountDatabaseName, type LocalAccountRegistry } from "./account-db"
 
 export const DEFAULT_LEGACY_MIGRATION_BATCH_SIZE = 500
+const RETIRED_LEGACY_TABLES = new Set(["syncCursors"])
 
 export interface LegacyMigrationTableSummary {
   name: string
@@ -45,15 +46,39 @@ export async function migrateLegacyDatabaseToAccount(
     throw new Error(`Legacy database ${sourceDbName} does not exist.`)
   }
 
-  const source = new CogniaDB(sourceDbName, "legacy-migration:source")
+  // Open the legacy database in Dexie's schema-discovery mode. Constructing a
+  // CogniaDB here would upgrade and mutate the source before it is copied,
+  // adding every modern empty table and making old-database migration much
+  // slower than the data being migrated warrants.
+  const source = new Dexie(sourceDbName)
   const target = new CogniaDB(targetDbName, "legacy-migration:target")
 
   try {
     await source.open()
     await target.open()
 
+    const sourceTableCounts = await Promise.all(
+      source.tables.map(async (sourceTable) => ({
+        sourceTable,
+        rowCount: await sourceTable.count(),
+      }))
+    )
+    const targetTableNames = new Set(target.tables.map((table) => table.name))
     const tables: LegacyMigrationTableSummary[] = []
-    for (const sourceTable of source.tables) {
+    for (const { sourceTable, rowCount } of sourceTableCounts) {
+      if (rowCount === 0) {
+        tables.push({ name: sourceTable.name, copied: 0, verified: 0 })
+        continue
+      }
+      if (!targetTableNames.has(sourceTable.name)) {
+        if (!RETIRED_LEGACY_TABLES.has(sourceTable.name)) {
+          throw new Error(
+            `Legacy migration cannot copy unknown table ${sourceTable.name}; target schema has no matching table.`
+          )
+        }
+        tables.push({ name: sourceTable.name, copied: 0, verified: 0 })
+        continue
+      }
       const targetTable = target.table(sourceTable.name)
       const copied = await copyTableRows(sourceTable, targetTable, batchSize, (row) =>
         migrateLegacyRowForAccount(sourceTable.name, row, input.targetAccountId)

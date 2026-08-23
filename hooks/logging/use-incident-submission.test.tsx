@@ -79,7 +79,10 @@ describe("useIncidentSubmission", () => {
   })
 
   it("passes the consent decisions to the native packager and refreshes after", async () => {
-    const submitDesktop = jest.fn(async () => ({
+    const submitDesktop = jest.fn<
+      ReturnType<NonNullable<IncidentSubmissionDeps["submitDesktop"]>>,
+      Parameters<NonNullable<IncidentSubmissionDeps["submitDesktop"]>>
+    >(async () => ({
       incidentId: "inc-1",
       supportCode: "ABC123",
       clientState: "processing",
@@ -123,7 +126,10 @@ describe("useIncidentSubmission", () => {
   })
 
   it("omits a whitespace-only description entirely", async () => {
-    const submitDesktop = jest.fn(async () => ({
+    const submitDesktop = jest.fn<
+      ReturnType<NonNullable<IncidentSubmissionDeps["submitDesktop"]>>,
+      Parameters<NonNullable<IncidentSubmissionDeps["submitDesktop"]>>
+    >(async () => ({
       incidentId: "inc-1",
       supportCode: "",
       clientState: "processing",
@@ -145,7 +151,7 @@ describe("useIncidentSubmission", () => {
       })
     )
     await waitFor(() => expect(result.current.busy).toBe(false))
-    expect(submitDesktop.mock.calls[0][2].description).toBeUndefined()
+    expect(submitDesktop.mock.calls[0]![2].description).toBeUndefined()
   })
 
   it("surfaces the failure code and leaves the list untouched", async () => {
@@ -203,9 +209,10 @@ describe("useIncidentSubmission", () => {
           status: 200,
         }),
       ]
-      const fetchImpl = jest.fn(
-        async () => responses.shift() ?? new Response("{}", { status: 200 })
-      )
+      const fetchImpl = jest.fn<
+        Promise<Response>,
+        Parameters<NonNullable<IncidentSubmissionDeps["fetchImpl"]>>
+      >(async () => responses.shift() ?? new Response("{}", { status: 200 }))
       return {
         fetchImpl,
         deps: {
@@ -273,7 +280,7 @@ describe("useIncidentSubmission", () => {
       await waitFor(() => expect(result.current.busy).toBe(false))
       const parts = fetchImpl.mock.calls.filter(([url]) => String(url).includes("/parts/"))
       expect(parts).toHaveLength(2)
-      expect(String(parts[1][0])).toContain("/parts/2")
+      expect(String(parts[1]![0])).toContain("/parts/2")
     })
 
     it("reports an unsupported WebView instead of an opaque signature failure", async () => {
