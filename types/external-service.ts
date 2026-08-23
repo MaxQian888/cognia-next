@@ -68,3 +68,21 @@ export interface CapabilityGrant {
   createdAt: string
   updatedAt: string
 }
+
+export interface OpenApiImportRow {
+  id: string
+  pluginId?: string
+  serviceId: string
+  providerId: string
+  label: string
+  sourceKind: "url" | "file" | "plugin"
+  sourceUrl?: string
+  /** Original JSON/YAML. Credentials are never accepted in this document. */
+  document: string
+  documentFingerprint: string
+  approvedOrigins: string[]
+  approvedExternalRefOrigins: string[]
+  trust: "trusted" | "untrusted" | "blocked"
+  createdAt: string
+  updatedAt: string
+}
