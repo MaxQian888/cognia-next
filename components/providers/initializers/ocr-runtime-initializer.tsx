@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { installOcrRuntime } from "@/lib/ocr/runtime"
+import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
@@ -19,6 +20,13 @@ const log = loggers.shell
  * model assets stay lazy until a provider actually runs) and idempotent.
  * Following the `ProjectStoreInitializer` shape so `app/layout.tsx` stays
  * homogeneous.
+ *
+ * `cloudFetch` is the eighteen cloud providers' single outbound seam. Passing
+ * `proxyFetch` here is what routes them through the Rust proxy bridge; without
+ * it they fall back to a renderer `fetch`, which the packaged shell's
+ * `connect-src` CSP blocks and which ignores the configured proxy entirely.
+ * Off Tauri, `proxyFetch` is a passthrough to the platform `fetch`, so the
+ * browser and Capacitor builds behave exactly as before.
  */
 export function OcrRuntimeInitializer() {
   const hasInitialized = useRef(false)
@@ -26,7 +34,9 @@ export function OcrRuntimeInitializer() {
   useEffect(() => {
     if (hasInitialized.current) return
     hasInitialized.current = true
-    void installOcrRuntime().catch((err) => log.warn("ocr-runtime: boot install threw", { err }))
+    void installOcrRuntime({ cloudFetch: (input, init) => proxyFetch(input, init) }).catch((err) =>
+      log.warn("ocr-runtime: boot install threw", { err })
+    )
   }, [])
 
   return null

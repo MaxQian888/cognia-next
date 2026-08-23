@@ -30,6 +30,7 @@ const EXPECTED = [
   "audit-retention",
   "storage-retention",
   "template-trust-reconciliation",
+  "desktop-network-runtime",
   "provider-core-runtime",
   "routing-runtime",
   "background-task",

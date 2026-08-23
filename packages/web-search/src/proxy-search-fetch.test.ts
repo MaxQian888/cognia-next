@@ -12,6 +12,10 @@ import {
   perplexityFetch,
   serperFetch,
 } from "./proxy-search-fetch"
+import {
+  resetWebSearchRuntimeAdaptersForTesting,
+  setWebSearchRuntimeAdapters,
+} from "./runtime-adapters"
 
 function makeFakeResponse(status = 200, body = "ok"): unknown {
   return {
@@ -34,6 +38,7 @@ describe("proxy-search-fetch", () => {
   })
 
   afterEach(() => {
+    resetWebSearchRuntimeAdaptersForTesting()
     globalThis.fetch = originalFetch
     Object.defineProperty(process.env, "NODE_ENV", {
       value: originalNodeEnv,
@@ -106,6 +111,20 @@ describe("proxy-search-fetch", () => {
       const resp = (await fn("https://example.com")) as { status: number }
       expect(resp.status).toBe(200)
       expect(fetchMock).toHaveBeenCalled()
+    })
+  })
+
+  describe("host-installed transport", () => {
+    it("sends provider traffic through the installed proxy fetch instead of bare fetch", async () => {
+      const proxied = jest.fn().mockResolvedValue(makeFakeResponse(200, "proxied"))
+      setWebSearchRuntimeAdapters({ proxyFetch: proxied as unknown as typeof globalThis.fetch })
+
+      await braveFetch("https://api.search.brave.com/res/v1/web/search", { method: "GET" })
+
+      expect(proxied).toHaveBeenCalledWith("https://api.search.brave.com/res/v1/web/search", {
+        method: "GET",
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
     })
   })
 })

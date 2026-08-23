@@ -4,6 +4,13 @@
  * Every cloud provider goes through `cloudFetch()` so credential checks,
  * timeout / signal plumbing, and HTTP-status -> OcrError mapping land in one
  * spot instead of being copy-pasted across nine provider files.
+ *
+ * That single spot is also the package's only outbound seam, which is why the
+ * host transport is installed here rather than threaded through every
+ * provider's options: `installOcrRuntime({ cloudFetch })` sets it once at boot
+ * so cloud OCR obeys the desktop proxy policy and is not blocked by the
+ * packaged shell's `connect-src` CSP. Absent a host it stays `globalThis.fetch`,
+ * which is correct for Node, the browser build, and tests.
  */
 
 import { type OcrErrorCode } from "../types"
@@ -26,8 +33,30 @@ export interface CloudFetchOptions {
    * (e.g. AWS `__type`) can classify beyond the status code.
    */
   errorCodeFor?: (status: number, bodyText?: string) => OcrErrorCode
-  /** Override fetch — primarily used in tests. */
+  /** Override fetch — primarily used in tests. Wins over the host transport. */
   fetchImpl?: typeof fetch
+}
+
+/**
+ * Host transport installed by `installOcrRuntime`. `null` means "no host has
+ * spoken", which is different from a host that deliberately installed
+ * `globalThis.fetch`; only the former falls through to the ambient global.
+ */
+let hostCloudFetch: typeof fetch | null = null
+
+/**
+ * Install the transport every cloud provider request goes through.
+ *
+ * Passing `null` restores the ambient `globalThis.fetch` — the shape tests use
+ * to undo an install, and what a host without a proxy bridge leaves in place.
+ */
+export function setOcrCloudFetch(next: typeof fetch | null): void {
+  hostCloudFetch = next
+}
+
+/** Whether a host has installed a transport. Diagnostics read this. */
+export function hasOcrCloudFetch(): boolean {
+  return hostCloudFetch !== null
 }
 
 export interface CloudFetchResponse {
@@ -56,7 +85,7 @@ function encodeBody(body: CloudFetchOptions["body"]): {
 }
 
 export async function cloudFetch(opts: CloudFetchOptions): Promise<CloudFetchResponse> {
-  const fetchFn = opts.fetchImpl ?? globalThis.fetch
+  const fetchFn = opts.fetchImpl ?? hostCloudFetch ?? globalThis.fetch
   if (!fetchFn) {
     throw new OcrError("provider_failed", opts.providerId, "fetch is unavailable in this runtime")
   }

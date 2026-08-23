@@ -187,6 +187,26 @@ registerHeadlessRuntime({
   },
 })
 
+// ── Host network transport for the adapter-based packages ──────────────────
+//
+// Same seam the desktop mounts via `DesktopNetworkRuntimeInitializer`. The
+// brain is not a WebView and has no CSP, so `proxyFetch` degrades to the
+// platform `fetch` here — but leaving the adapters uninstalled would also
+// leave `@cognia/rag` logging into a void, and a host that installs the seam
+// on one shell and not the other is exactly the drift this registry exists to
+// prevent.
+
+registerHeadlessRuntime({
+  name: "desktop-network-runtime",
+  hosts: ["brain"],
+  start: async () => {
+    const { installDesktopNetworkRuntime, __resetDesktopNetworkRuntime } =
+      await import("@/lib/network/desktop-network-runtime")
+    installDesktopNetworkRuntime()
+    return () => __resetDesktopNetworkRuntime()
+  },
+})
+
 // ── A9: provider-core runtime adapters ──────────────────────────────────────
 
 registerHeadlessRuntime({

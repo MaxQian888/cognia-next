@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 
+import { DesktopNetworkRuntimeInitializer } from "./desktop-network-runtime-initializer"
 import { ExecutionControlInitializer } from "./execution-control-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
@@ -20,6 +21,9 @@ import { startRendererWorkOutbox } from "@/lib/work-submission/bootstrap"
  * ProviderCoreRuntimeInitializer must mount BEFORE both (it installs the
  * proxy-fetch adapter every provider-core network call reads; without it they
  * fall back to a bare `fetch` the packaged shell's CSP blocks).
+ * DesktopNetworkRuntimeInitializer solves that same problem for
+ * `@cognia/web-search` and `@cognia/rag`, and heads the chain because a search
+ * or a rerank can be issued by the very first turn this chunk enables.
  *
  * Mount order preserves `app/layout.tsx`'s previous document order.
  *
@@ -37,6 +41,7 @@ export function DeferredBootInitializersImpl() {
 
   return (
     <>
+      <DesktopNetworkRuntimeInitializer />
       <ProviderCoreRuntimeInitializer />
       <RoutingRuntimeInitializer />
       <RemoteNotificationInitializer />

@@ -1,21 +1,25 @@
 /**
  * Proxy-aware Fetch for Search Providers
  *
- * In cognia-next we don't (yet) have a project-wide proxy abstraction. This
- * module mirrors the surface of Cognia's `proxy-search-fetch` so provider
- * files compile unchanged — internally it just delegates to the global
- * `fetch`. When proxy support lands, swap the implementation here.
+ * Every provider file in this package routes its HTTP through `searchFetch`,
+ * which delegates to whatever transport the host installed via
+ * `setWebSearchRuntimeAdapters`. On the desktop that is the Rust
+ * `proxy_http_request` bridge, so search obeys the configured proxy and is
+ * not stopped by the packaged shell's `connect-src` CSP. With no host
+ * installed — Node scripts, tests, the browser build — the adapter's own
+ * default is a bare `fetch`, which is what this module used to hard-code.
  */
 
 import { log } from "./log"
+import { webSearchFetch } from "./runtime-adapters"
 
 /**
- * Search-specific fetch. Currently a thin wrapper over `fetch`; kept as a
- * named export so providers (and the rest of the codebase) can later be
- * pointed at a proxy-aware fetch without touching call sites.
+ * Search-specific fetch. Resolves the installed transport per call: providers
+ * import this module at evaluation time, before the host's boot initializer
+ * runs, so binding the transport once at import would pin the inert default.
  */
 export async function searchFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, init)
+  return webSearchFetch(input, init)
 }
 
 /**

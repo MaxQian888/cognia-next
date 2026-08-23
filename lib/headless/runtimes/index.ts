@@ -16,7 +16,8 @@
  *   A2UI store (T-A4).
  * - `scheduler`, `workflow-runtime`, `agent-team-runtime`,
  *   `automation-policy`, `audit-retention`, `storage-retention`,
- *   `provider-core-runtime`, `routing-runtime`, `ocr-runtime`,
+ *   `desktop-network-runtime`, `provider-core-runtime`, `routing-runtime`,
+ *   `ocr-runtime`,
  *   `template-trust-reconciliation`, `background-task`,
  *   `provider-cost-mirror` — the boot-initializer batch (T-A7..A9; see
  *   ./initializers.ts for what is deliberately excluded and why).

@@ -1,4 +1,11 @@
-import { cloudFetch, defaultErrorCodeFor, parseJson, requireSecret } from "./_http"
+import {
+  cloudFetch,
+  defaultErrorCodeFor,
+  hasOcrCloudFetch,
+  parseJson,
+  requireSecret,
+  setOcrCloudFetch,
+} from "./_http"
 import { OcrError } from "../errors"
 
 describe("defaultErrorCodeFor", () => {
@@ -207,5 +214,63 @@ describe("requireSecret", () => {
     expect(() => requireSecret("demo", { key: "" }, "key")).toThrow(
       expect.objectContaining({ code: "missing_credentials" })
     )
+  })
+})
+
+describe("host cloud fetch", () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    setOcrCloudFetch(null)
+    globalThis.fetch = originalFetch
+  })
+
+  it("uses the ambient global until a host installs a transport", async () => {
+    const ambient = mockFetch(() => new Response("ambient", { status: 200 }))
+    globalThis.fetch = ambient
+
+    expect(hasOcrCloudFetch()).toBe(false)
+    const res = await cloudFetch({ providerId: "demo", url: "https://api.example.com" })
+    expect(res.body).toBe("ambient")
+  })
+
+  it("routes through the installed transport instead of the ambient global", async () => {
+    const ambient = mockFetch(() => new Response("ambient", { status: 200 }))
+    globalThis.fetch = ambient
+    const host = mockFetch(() => new Response("host", { status: 200 }))
+
+    setOcrCloudFetch(host)
+
+    expect(hasOcrCloudFetch()).toBe(true)
+    const res = await cloudFetch({ providerId: "demo", url: "https://api.example.com" })
+    expect(res.body).toBe("host")
+    expect(ambient).not.toHaveBeenCalled()
+  })
+
+  it("lets an explicit fetchImpl win over the host transport", async () => {
+    const host = mockFetch(() => new Response("host", { status: 200 }))
+    const explicit = mockFetch(() => new Response("explicit", { status: 200 }))
+    setOcrCloudFetch(host)
+
+    const res = await cloudFetch({
+      providerId: "demo",
+      url: "https://api.example.com",
+      fetchImpl: explicit,
+    })
+
+    expect(res.body).toBe("explicit")
+    expect(host).not.toHaveBeenCalled()
+  })
+
+  it("restores the ambient global when the host transport is cleared", async () => {
+    const ambient = mockFetch(() => new Response("ambient", { status: 200 }))
+    globalThis.fetch = ambient
+    setOcrCloudFetch(mockFetch(() => new Response("host", { status: 200 })))
+
+    setOcrCloudFetch(null)
+
+    expect(hasOcrCloudFetch()).toBe(false)
+    const res = await cloudFetch({ providerId: "demo", url: "https://api.example.com" })
+    expect(res.body).toBe("ambient")
   })
 })

@@ -211,7 +211,10 @@ export async function getUsageHistory(
     url.searchParams.set("offset", offset.toString())
   }
 
-  const response = await fetch(url.toString(), {
+  // `proxyFetch`, like every other call in this file: a bare `fetch` here was
+  // the one request that skipped the host transport, so usage history was the
+  // single OpenRouter surface the packaged shell's CSP blocked.
+  const response = await proxyFetch(url.toString(), {
     method: "GET",
     headers: {
       Authorization: `Bearer ${apiKey}`,

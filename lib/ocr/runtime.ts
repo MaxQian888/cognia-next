@@ -53,6 +53,7 @@ import {
   type LocalHttpTransportRequest,
   type LocalHttpTransportResponse,
 } from "./providers/local-http"
+import { setOcrCloudFetch } from "@cognia/ocr/providers/_http"
 
 const ALL_PROVIDERS = [
   mistralOcrProvider,
@@ -93,6 +94,20 @@ export interface OcrRuntimeOptions {
   modelReadinessProbe?: (backend: "ocrs" | "paddle-ocr", variant?: string) => Promise<boolean>
   /** Inject the packaged local HTTP bridge (tests/alternate Tauri hosts). */
   localHttpTransport?: LocalHttpTransport
+  /**
+   * Transport every *cloud* provider request goes through.
+   *
+   * The eighteen providers share one outbound seam (`cloudFetch` in
+   * `@cognia/ocr/providers/_http`), so this installs there rather than being
+   * threaded per provider. The desktop host passes `proxyFetch`, which is what
+   * makes cloud OCR obey the configured proxy and survive the packaged shell's
+   * `connect-src` CSP. Omitting it leaves `globalThis.fetch` — correct for the
+   * browser build, Node, and tests.
+   *
+   * Local providers are unaffected: `localHttpTransport` is their seam and it
+   * already crosses into Rust.
+   */
+  cloudFetch?: typeof fetch
 }
 
 /**
@@ -130,11 +145,17 @@ export async function installOcrRuntime(opts: OcrRuntimeOptions = {}): Promise<v
 
   const localHttpTransport = opts.localHttpTransport ?? (await tryBuildLocalHttpTransport())
   __setLocalHttpTransport(localHttpTransport)
+
+  // Null rather than `globalThis.fetch` when the host stays quiet: the seam
+  // distinguishes "no host spoke" from "a host chose the global", and only the
+  // former falls through to whatever `fetch` is ambient at call time.
+  setOcrCloudFetch(opts.cloudFetch ?? null)
 }
 
 /** Reset state — test-only. */
 export function __resetOcrRuntime(): void {
   installed = false
+  setOcrCloudFetch(null)
   __setNativeOcrInvoker(null)
   __setWindowsMediaOcrInvoker(null)
   __setWindowsMediaOcrReadiness(null)
