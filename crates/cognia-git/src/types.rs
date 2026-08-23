@@ -142,6 +142,14 @@ pub struct GitWorktree {
     pub branch: Option<String>,
     /// HEAD commit SHA, or `None` for a freshly-`add`ed worktree with no commit.
     pub head: Option<String>,
+    /// Whether Git currently protects this worktree with `worktree lock`.
+    pub locked: bool,
+    /// Optional lock reason. Cognia-managed rows use `cognia:<workspaceId>`.
+    pub lock_reason: Option<String>,
+    /// Whether Git considers the administrative entry safe to prune.
+    pub prunable: bool,
+    /// Optional diagnostic emitted after the `prunable` porcelain field.
+    pub prune_reason: Option<String>,
     /// `true` for the repository's main worktree (always listed first by git).
     pub is_main: bool,
 }

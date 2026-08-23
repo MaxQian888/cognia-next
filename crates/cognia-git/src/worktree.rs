@@ -38,7 +38,7 @@ pub async fn add(main_repo: &str, path: &str, branch: &str, base_ref: Option<&st
 }
 
 /// ADR-0111 managed-worktree add: detached HEAD by default, no auto-branch,
-/// optional post-add lock reason.
+/// optional atomic lock reason.
 ///
 /// Unlike [`add`], the managed variant does **not** create a per-dispatch
 /// branch (ADR-0111 §4 — every dispatch previously produced a stale
@@ -46,9 +46,9 @@ pub async fn add(main_repo: &str, path: &str, branch: &str, base_ref: Option<&st
 /// [`create_branch_here`] after the worktree materializes — the Registry
 /// UI does this on explicit "Create branch here" only.
 ///
-/// When `lock_reason` is `Some(reason)`, `git worktree lock --reason
-/// <reason>` runs immediately after the add succeeds, so no window exists
-/// where another owner could delete the worktree.
+/// When `lock_reason` is `Some(reason)`, `--lock --reason <reason>` is passed
+/// to `git worktree add` itself. Native Git therefore publishes the worktree
+/// and its ownership lock as one operation.
 pub async fn add_managed(
     main_repo: &str,
     path: &str,
@@ -60,23 +60,15 @@ pub async fn add_managed(
         "worktree".into(),
         "add".into(),
         "--detach".into(),
-        path.into(),
     ];
+    if let Some(reason) = lock_reason {
+        args.extend(["--lock".into(), "--reason".into(), reason.into()]);
+    }
+    args.push(path.into());
     if let Some(base) = base_ref {
         args.push(base.into());
     }
-    exec::run(&cwd, args.clone()).await?;
-    if let Some(reason) = lock_reason {
-        // Lock the worktree so [`remove_managed`] can validate ownership
-        // before allowing deletion. If the lock fails we roll back the add
-        // so callers never see a half-provisioned managed row.
-        if let Err(error) = lock(main_repo, path, reason).await {
-            // Best-effort rollback — surface the lock error to the caller.
-            let _ = exec::run(&cwd, ["worktree", "remove", "--force", path]).await;
-            return Err(error);
-        }
-    }
-    Ok(())
+    exec::run(&cwd, args).await
 }
 
 /// `git -C <main_repo> worktree lock <path> --reason <reason>`.
@@ -104,7 +96,7 @@ pub async fn unlock(main_repo: &str, path: &str) -> Result<()> {
 /// reason was set, or bare `locked` otherwise.
 pub async fn lock_reason(main_repo: &str, path: &str) -> Result<Option<String>> {
     let cwd = PathBuf::from(main_repo);
-    let porcelain = exec::capture(&cwd, ["worktree", "list", "--porcelain"]).await?;
+    let porcelain = exec::capture(&cwd, ["worktree", "list", "--porcelain", "-z"]).await?;
     Ok(extract_lock_reason(&porcelain, path))
 }
 
@@ -187,10 +179,10 @@ pub async fn create_branch_here(worktree_path: &str, branch: &str) -> Result<()>
     exec::run(&cwd, ["checkout", "-b", branch]).await
 }
 
-/// `git -C <main_repo> worktree list --porcelain`, parsed into [`GitWorktree`].
+/// `git -C <main_repo> worktree list --porcelain -z`, parsed into [`GitWorktree`].
 pub async fn list(main_repo: &str) -> Result<Vec<GitWorktree>> {
     let cwd = PathBuf::from(main_repo);
-    let out = exec::capture(&cwd, ["worktree", "list", "--porcelain"]).await?;
+    let out = exec::capture(&cwd, ["worktree", "list", "--porcelain", "-z"]).await?;
     Ok(parse_worktree_list(&out))
 }
 
@@ -227,7 +219,7 @@ pub async fn commit(worktree_path: &str, message: &str) -> Result<Option<String>
 /// path is not present or is unlocked.
 fn extract_lock_reason(porcelain: &str, target_path: &str) -> Option<String> {
     let mut current_path: Option<&str> = None;
-    for raw in porcelain.lines() {
+    for raw in porcelain_fields(porcelain) {
         let line = raw.trim_end();
         if let Some(rest) = line.strip_prefix("worktree ") {
             current_path = Some(rest);
@@ -253,12 +245,20 @@ fn parse_worktree_list(porcelain: &str) -> Vec<GitWorktree> {
     let mut path: Option<String> = None;
     let mut head: Option<String> = None;
     let mut branch: Option<String> = None;
+    let mut locked = false;
+    let mut lock_reason: Option<String> = None;
+    let mut prunable = false;
+    let mut prune_reason: Option<String> = None;
 
     fn flush(
         out: &mut Vec<GitWorktree>,
         path: &mut Option<String>,
         head: &mut Option<String>,
         branch: &mut Option<String>,
+        locked: &mut bool,
+        lock_reason: &mut Option<String>,
+        prunable: &mut bool,
+        prune_reason: &mut Option<String>,
     ) {
         if let Some(p) = path.take() {
             let is_main = out.is_empty();
@@ -266,35 +266,83 @@ fn parse_worktree_list(porcelain: &str) -> Vec<GitWorktree> {
                 path: p,
                 branch: branch.take(),
                 head: head.take(),
+                locked: std::mem::take(locked),
+                lock_reason: lock_reason.take(),
+                prunable: std::mem::take(prunable),
+                prune_reason: prune_reason.take(),
                 is_main,
             });
         } else {
             // No `worktree` line seen for this block — drop stray fields.
             *head = None;
             *branch = None;
+            *locked = false;
+            *lock_reason = None;
+            *prunable = false;
+            *prune_reason = None;
         }
     }
 
-    for raw in porcelain.lines() {
+    for raw in porcelain_fields(porcelain) {
         let line = raw.trim_end();
         if line.is_empty() {
-            flush(&mut out, &mut path, &mut head, &mut branch);
+            flush(
+                &mut out,
+                &mut path,
+                &mut head,
+                &mut branch,
+                &mut locked,
+                &mut lock_reason,
+                &mut prunable,
+                &mut prune_reason,
+            );
             continue;
         }
         if let Some(rest) = line.strip_prefix("worktree ") {
             // A new record without a separating blank line — flush the prior.
-            flush(&mut out, &mut path, &mut head, &mut branch);
+            flush(
+                &mut out,
+                &mut path,
+                &mut head,
+                &mut branch,
+                &mut locked,
+                &mut lock_reason,
+                &mut prunable,
+                &mut prune_reason,
+            );
             path = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("HEAD ") {
             head = Some(rest.to_string());
         } else if let Some(rest) = line.strip_prefix("branch ") {
             branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
+        } else if line == "locked" {
+            locked = true;
+        } else if let Some(rest) = line.strip_prefix("locked ") {
+            locked = true;
+            lock_reason = Some(rest.to_string());
+        } else if line == "prunable" {
+            prunable = true;
+        } else if let Some(rest) = line.strip_prefix("prunable ") {
+            prunable = true;
+            prune_reason = Some(rest.to_string());
         }
-        // `detached` / `bare` / `locked` / `prunable ...` → ignored (branch
-        // stays `None` for detached, which is the only field we surface).
+        // `detached` / `bare` leave branch as `None`.
     }
-    flush(&mut out, &mut path, &mut head, &mut branch);
+    flush(
+        &mut out,
+        &mut path,
+        &mut head,
+        &mut branch,
+        &mut locked,
+        &mut lock_reason,
+        &mut prunable,
+        &mut prune_reason,
+    );
     out
+}
+
+fn porcelain_fields(porcelain: &str) -> impl Iterator<Item = &str> {
+    porcelain.split(if porcelain.contains('\0') { '\0' } else { '\n' })
 }
 
 #[cfg(test)]
@@ -377,6 +425,30 @@ branch refs/heads/agent/run_x/alice/t1
         let wts = parse_worktree_list(porcelain);
         assert_eq!(wts.len(), 1);
         assert_eq!(wts[0].branch.as_deref(), Some("main"));
+        assert!(wts[0].locked);
+        assert!(wts[0].lock_reason.is_none());
+        assert!(!wts[0].prunable);
+    }
+
+    #[test]
+    fn parses_nul_terminated_lock_and_prune_metadata_without_quoting_paths() {
+        let porcelain = concat!(
+            "worktree /repo with spaces\0",
+            "HEAD abc\0",
+            "detached\0",
+            "locked cognia:ws-42\0",
+            "prunable gitdir file points to non-existent location\0\0"
+        );
+        let wts = parse_worktree_list(porcelain);
+        assert_eq!(wts.len(), 1);
+        assert_eq!(wts[0].path, "/repo with spaces");
+        assert!(wts[0].locked);
+        assert_eq!(wts[0].lock_reason.as_deref(), Some("cognia:ws-42"));
+        assert!(wts[0].prunable);
+        assert_eq!(
+            wts[0].prune_reason.as_deref(),
+            Some("gitdir file points to non-existent location")
+        );
     }
 
     // ---------------------------------------------------------------
