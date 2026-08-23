@@ -1,0 +1,130 @@
+---
+title: 网络代理
+description: 桌面 Host 的统一出站策略 —— Off / Manual / Auto，支持 HTTP、HTTPS、SOCKS5，在 Rust 侧强制执行，渲染端没有任何路径能绕过。
+---
+
+# 网络代理
+
+<Status variant="stable">Stable · 桌面 Host · 凭据存 keyring</Status>
+
+<TLDR>
+  设置 → 网络 配置的是**桌面 Host** 的唯一代理：Tauri 渲染端、Rust 核心、由它管理的 WebSocket 与流式桥，
+  以及它派生的、被允许联网的子进程。渲染端从不决定「直连还是走代理」，也从不接触密码 —— 每个请求都跨到
+  Rust，由 `apply_reqwest_policy` 应用模式、绕过列表和 keyring 凭据。`audit:network-egress` 负责维持这个
+  不变量：新增的裸 `fetch`、`new WebSocket` 或 `reqwest::Client::new()` 会让构建失败，除非逐文件声明并写明理由。
+</TLDR>
+
+<StatGrid>
+  <Stat label="模式" value="3" hint="off · manual · auto（自动探测本地客户端）" />
+  <Stat label="协议" value="3" hint="http · https · socks5" />
+  <Stat label="受管传输" value="4" hint="proxyFetch · 流式 · WebSocket · Rust managed_client" />
+  <Stat label="已声明例外" value="38" hint="scripts/gates/network-egress-allowlist.json" />
+</StatGrid>
+
+## 作用范围：只管桌面 Host
+
+文案说「所有出站请求」，指的是**本桌面应用**发出的所有请求。三类流量刻意不在范围内：
+
+- **浏览器构建。** 浏览器标签页用的是浏览器自己的代理设置，Web 应用无法覆盖；界面上假装能覆盖就是撒谎。
+- **Capacitor 移动壳。** 同理 —— 路由由操作系统决定。
+- **Companion 传输。** `lib/tauri/pinned-fetch.ts` 及其 socket 对用户直接配对的设备做 TLS 指纹固定，
+  改走代理会破坏它本身要校验的那个固定。
+
+## 为什么每个请求都要跨到 Rust
+
+打包后的壳用一份静态 CSP 提供渲染端，其 `connect-src` 是
+`'self' ipc: http://ipc.localhost ws: wss:`。里面没有 `http:` / `https:` scheme，所以渲染端的
+`fetch("https://api.example.com")` **在离开 WebView 之前就被拦下**；`http://127.0.0.1:11434` 同样被拦，
+因为 loopback 不属于 `'self'`。
+
+`pnpm dev` 没有 CSP。这个落差正是问题所在：裸 `fetch` 在开发里看着完全正常，在打包应用里却是死的。
+这类问题已经反复上线过 —— OTLP 与 Langfuse 日志传输、整个本地 provider 面、Web 搜索、RAG 重排、云端 OCR，
+还有一个一直在轮询自己永远够不到的 dev server 的 Site 预览探针。
+
+即使请求没被拦，渲染端 `fetch` 也看不到代理：模式、绕过列表和 keyring 密码都在
+`crates/cognia-net/src/proxy_config/` 里。
+
+## 四条受管传输
+
+| 出站形态 | 用法 |
+| --- | --- |
+| 请求/响应式 HTTP | `proxyFetch`（`lib/network/proxy-fetch.ts`）；调用方还需要 Capacitor 路径时用 `createPlatformFetch` |
+| SSE、NDJSON、大响应体 | `createPlatformStreamingFetch`（`lib/network/platform-streaming-fetch.ts`） |
+| WebSocket | `createPlatformWebSocket`（`lib/network/platform-websocket.ts`） |
+| Rust | `proxy_config::managed_client` / `apply_reqwest_policy` / `wsproxy::connect_via_proxy` |
+
+与框架无关的包（`@cognia/web-search`、`@cognia/rag`、`@cognia/ocr`、`@cognia/provider-core`、
+`@cognia/tts`）通过 host 在启动时安装的 runtime adapter 联网 —— `installDesktopNetworkRuntime()`
+加上两个 provider 初始化器和 `installOcrRuntime({ cloudFetch })`。在 host 安装之前，每个包都保留一个
+惰性的裸 `fetch`：这对 Node 和浏览器是对的，对桌面是错的。
+
+### 缓冲式与流式
+
+`proxy_http_request` 会一次性返回整个响应体。对一条永不结束的 SSE 流来说，「一次性」就等于「永远不」——
+缓冲式传输一个字节都送不出来。`proxy_http_stream_open` 在响应头就返回，随后通过
+`tauri::ipc::Channel` 推送分片，并由渲染端回执已消费字节数，避免慢消费者让宿主缓冲整份下载。
+两者应用同一套策略、同一套保留头拒绝规则、同一个可选的私网地址守卫。
+
+已有的专用流 —— Ollama 的 `/api/pull`、Ops Controller 事件流、TTS 下载 —— 各自带有协议特定的分帧，
+保持原样，不改走通用桥。
+
+## 结构上的 fail-closed
+
+运行时策略的初始状态是**未初始化**，而不是「直连」。在渲染端下发配置之前，
+`install_uninitialized_proxy_environment` 会把环境里的代理变量指向 `http://127.0.0.1:9` —— 一个刻意的黑洞 ——
+并把 loopback 放进 `NO_PROXY`。在这个窗口内构建的受管 client 会直接报错而不是直连，
+`child_network_env()` 也会把同一个黑洞交给此时派生的子进程。「因为启动得早所以溜出去了」的请求，
+正是这套设计要防的失败。
+
+`Blocked` 策略（keyring 凭据读不到、host 非法）行为相同。`proxyWebsockets: false` 同理：
+对本应走代理的目标，`websocket_route_for` 返回错误，而不是偷偷直连。
+
+## 绕过规则，以及 IPv6 的那个细节
+
+绕过条目支持字面 host、`.suffix` 域名后缀和 CIDR 网段。两端用同一套方式归一化 host，而这个归一化是关键：
+`URL.hostname` 和 `Url::host_str` 会保留 IPv6 字面量的方括号，于是条目 `::1` 一直在和 `"[::1]"` 比较、
+永远匹配不上 —— 而 `::1` 就在**默认**绕过列表里，也就是说 loopback IPv6 一直被静默地送进了代理。
+
+同样的原因，`formatProxyAuthority` / `proxy_config::authority` 在拼 URL、TCP 地址或 `CONNECT` 行之前
+会给 IPv6 字面量加方括号：`::1:8080` 不是「`::1` 的 8080 端口」，而是另一个非法地址。
+
+## Host 校验
+
+`validateProxyHost`（TS）与 `validate_proxy_host`（Rust）逐条对应，因此设置表单不可能接受一个原生侧会拒绝的值。
+host 不允许包含 scheme、userinfo、path/query/fragment、内嵌端口，以及任何 DNS 名称不允许的字节。
+最后这条同时封住了 parser/resolver 差异类漏洞：被校验的字符串就是被拨号的字符串。
+
+表单会指出具体错在哪（「端口请填在『端口』字段」），而不是稍后抛出一个看不懂的连接错误；
+同时仍会保存用户输入的内容 —— 静默丢弃会让输入框显示一个应用其实并不持有的值。
+
+## 子进程
+
+继承环境的子进程能看到策略：`proxy_apply` 会把它镜像进进程环境。
+用 `env_clear()` 派生的子进程看不到，所以那些具备联网能力的 —— 定时任务、它的就绪探针、插件的
+`shell:execute` —— 会显式拿到 `child_network_env()`，且注入在调用方自带 env 之前，让显式覆盖仍然生效。
+
+权限永远优先于便利。声明了任意 `network:*` 权限的 Node 插件会被运行时直接拒绝，因此不会拿到代理凭据；
+网络关闭和 sandbox deny 策略同理优先。sandbox 自己的过滤代理是**链式**转发到 Host 代理，而不是自己直连出网，
+同时保留 SSRF 固定：解析到 loopback、link-local、RFC1918 或 `169.254.169.254` 的白名单域名，在任何字节流动前就被拒绝。
+
+## 门禁
+
+`pnpm audit:network-egress` 会标记 TypeScript 里对全局 `fetch` 的调用、`new WebSocket`、`new EventSource`，
+以及 Rust 里的 `reqwest::Client::new()` / `.no_proxy()`。测试脚手架、stories 和 Rust 的
+`#[cfg(test)]` 模块直接排除在扫描之外，而不是逐条加白。
+
+其余一律在 `scripts/gates/network-egress-allowlist.json` 里逐文件声明，带一个来自固定词表的 `reason`
+（`loopback`、`resource-read`、`browser-fallback`、`capacitor`、`companion-pinned`、`server-side`、
+`transport-impl`）和一句说明。通配符和目录前缀会被拒绝：覆盖整棵树的例外没人再会去读，只会变成一个洞。
+失效的条目同样会让构建失败 —— 它会悄悄给该文件里下一个裸调用重新开门。
+
+## 代码位置
+
+| 部分 | 路径 |
+| --- | --- |
+| 策略、绕过、校验、WSS 拨号 | `crates/cognia-net/src/proxy_config/` |
+| Tauri 命令（`proxy_apply`、`proxy_detect`、`proxy_test`、两座桥） | `src-tauri/src/proxy_config/` |
+| 渲染端传输 | `lib/network/` |
+| Host adapter 安装 | `lib/network/desktop-network-runtime.ts` |
+| 设置界面 | `components/settings/network/` |
+| 门禁 | `scripts/gates/check-network-egress.mjs` |

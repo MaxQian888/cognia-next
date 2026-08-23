@@ -1,0 +1,150 @@
+---
+title: Network Proxy
+description: One outbound policy for the desktop Host — Off / Manual / Auto over HTTP, HTTPS or SOCKS5, enforced in Rust so no renderer path can dial around it.
+---
+
+# Network Proxy
+
+<Status variant="stable">Stable · desktop Host · keyring credentials</Status>
+
+<TLDR>
+  Settings → Network configures one proxy for the **desktop Host**: the Tauri renderer, the Rust
+  core, the WebSocket and streaming bridges it owns, and the child processes it spawns that are
+  allowed to reach the network. The renderer never decides direct-vs-proxy and never sees the
+  password — every request crosses into Rust, where `apply_reqwest_policy` applies the mode, the
+  bypass list and the keyring credential. `audit:network-egress` keeps it that way: a new bare
+  `fetch`, `new WebSocket`, or `reqwest::Client::new()` fails the build unless it is declared, one
+  file at a time, with a reason.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Modes" value="3" hint="off · manual · auto (detected local client)" />
+  <Stat label="Protocols" value="3" hint="http · https · socks5" />
+  <Stat label="Managed transports" value="4" hint="proxyFetch · streaming · WebSocket · Rust managed_client" />
+  <Stat label="Declared exceptions" value="38" hint="scripts/gates/network-egress-allowlist.json" />
+</StatGrid>
+
+## Scope: the desktop Host, and nothing else
+
+The setting says "route every outbound request" and it means every request **this desktop app**
+makes. Three things are deliberately outside it:
+
+- **The browser build.** A page in a browser tab uses the browser's own proxy settings; a web app
+  cannot override them, and pretending otherwise would be a lie in the UI.
+- **The Capacitor mobile shell.** Same reasoning — the OS owns the route.
+- **The companion transport.** `lib/tauri/pinned-fetch.ts` and its socket pin a TLS fingerprint
+  against a device the user paired with directly. Re-routing that through a proxy would break the
+  pin it exists to check.
+
+## Why every request crosses into Rust
+
+The packaged shell serves the renderer under a static CSP whose `connect-src` is
+`'self' ipc: http://ipc.localhost ws: wss:`. There is no `http:` or `https:` scheme in it, so a
+renderer `fetch("https://api.example.com")` is blocked **before it leaves the WebView** — and
+`http://127.0.0.1:11434` is blocked too, because loopback is not `'self'`.
+
+`pnpm dev` runs without a CSP. That gap is the whole problem: a bare `fetch` looks perfectly healthy
+in development and is dead in the packaged app. It has shipped that way repeatedly — the OTLP and
+Langfuse log transports, the entire local-provider surface, web search, RAG reranking, cloud OCR,
+and a Site preview readiness probe that had been polling a dev server it could never reach.
+
+Even where a request is not blocked, a renderer `fetch` never sees the proxy: the mode, the bypass
+list and the keyring password all live in `crates/cognia-net/src/proxy_config/`.
+
+## The four managed transports
+
+| Egress shape | Use |
+| --- | --- |
+| Request/response HTTP | `proxyFetch` (`lib/network/proxy-fetch.ts`) or `createPlatformFetch` when the caller also needs the Capacitor path |
+| SSE, NDJSON, large bodies | `createPlatformStreamingFetch` (`lib/network/platform-streaming-fetch.ts`) |
+| WebSocket | `createPlatformWebSocket` (`lib/network/platform-websocket.ts`) |
+| Rust | `proxy_config::managed_client` / `apply_reqwest_policy` / `wsproxy::connect_via_proxy` |
+
+Framework-agnostic packages (`@cognia/web-search`, `@cognia/rag`, `@cognia/ocr`,
+`@cognia/provider-core`, `@cognia/tts`) reach the network through a runtime adapter the host
+installs at boot — `installDesktopNetworkRuntime()` plus the two provider initializers and
+`installOcrRuntime({ cloudFetch })`. Until a host installs one, each package keeps an inert bare
+`fetch`, which is correct for Node and the browser and wrong on the desktop.
+
+### Buffered vs streaming
+
+`proxy_http_request` returns the whole body at once. For an SSE stream that never ends, "at once"
+means never — a buffered transport delivers literally nothing. `proxy_http_stream_open` resolves on
+the response head and then pushes chunks over a `tauri::ipc::Channel`, with the renderer
+acknowledging consumed bytes so a slow reader cannot make the host buffer a whole download. Both
+apply the same policy, the same reserved-header rejection, and the same optional private-host guard.
+
+The pre-existing dedicated streams — Ollama's `/api/pull`, the Ops Controller event feed, the TTS
+download — keep their protocol-specific framing and are not routed through the generic bridge.
+
+## Fail-closed, by construction
+
+The runtime policy starts **uninitialized**, not "direct". Before the renderer applies a
+configuration, `install_uninitialized_proxy_environment` points the ambient proxy variables at
+`http://127.0.0.1:9` — a deliberate black hole — with loopback in `NO_PROXY`. A managed client built
+during that window refuses rather than dialling direct, and `child_network_env()` hands a child
+spawned during it the same black hole. A request that leaves the machine because it was early is the
+failure this design exists to prevent.
+
+A `Blocked` policy (an unreadable keyring credential, an invalid host) behaves the same way. So does
+`proxyWebsockets: false`: `websocket_route_for` returns an error for a target that would be proxied,
+rather than quietly connecting direct.
+
+## Bypass, and the IPv6 detail
+
+Bypass entries match a literal host, a `.suffix` domain, or a CIDR block. Both sides normalize the
+host the same way, and that normalization is load-bearing: `URL.hostname` and `Url::host_str` keep
+the brackets on an IPv6 literal, so an entry of `::1` was being compared against `"[::1]"` and never
+matched — with `::1` in the **default** bypass list, loopback IPv6 was silently proxied.
+
+For the same reason `formatProxyAuthority` / `proxy_config::authority` bracket an IPv6 literal
+before building a URL, a TCP address, or a `CONNECT` line: `::1:8080` is not a parse of `::1` port
+8080, it is a different and invalid address.
+
+## Host validation
+
+`validateProxyHost` (TS) and `validate_proxy_host` (Rust) mirror each other case for case, so the
+settings form cannot accept a value the native side rejects. A host may not carry a scheme, userinfo,
+a path/query/fragment, an embedded port, or any byte a DNS name cannot contain. That last rule also
+closes the parser/resolver differential class: the string validated is the string dialled.
+
+The form names the specific mistake ("the port goes in the Port field") instead of failing later as
+an opaque connection error, and still persists what the user typed — silently discarding it would
+leave the field showing a value the app does not have.
+
+## Child processes
+
+A child that inherits the environment sees the policy: `proxy_apply` mirrors it into the process.
+A child spawned with `env_clear()` does not, so the network-capable ones — a scheduled job, its
+readiness predicate, a plugin's `shell:execute` — are given `child_network_env()` explicitly, before
+the caller's own env so an override still wins.
+
+Permission always wins over convenience. A Node plugin that declares any `network:*` permission is
+refused outright by the runtime, so it is not given proxy credentials; network-off and a sandbox
+deny policy take precedence for the same reason. The sandbox's own filtering proxy chains **through**
+the Host proxy rather than dialling out itself, while keeping its SSRF pin: an allowlisted name that
+resolves to loopback, link-local, RFC1918 or `169.254.169.254` is refused before any byte flows.
+
+## The gate
+
+`pnpm audit:network-egress` flags a call to the global `fetch`, `new WebSocket`, and
+`new EventSource` in TypeScript, and `reqwest::Client::new()` / `.no_proxy()` in Rust. Test
+scaffolding, stories and Rust `#[cfg(test)]` modules are excluded rather than allowlisted.
+
+Everything else is declared one file at a time in
+`scripts/gates/network-egress-allowlist.json`, with a `reason` from a fixed vocabulary — `loopback`,
+`resource-read`, `browser-fallback`, `capacitor`, `companion-pinned`, `server-side`,
+`transport-impl` — and a written note. Wildcards and directory prefixes are rejected: an exception
+that covers a tree stops being read and starts being a hole. A stale entry fails the build too,
+because it would silently re-open the next bare call written in that file.
+
+## Where it lives
+
+| Piece | Path |
+| --- | --- |
+| Policy, bypass, validation, WSS dialer | `crates/cognia-net/src/proxy_config/` |
+| Tauri commands (`proxy_apply`, `proxy_detect`, `proxy_test`, the two bridges) | `src-tauri/src/proxy_config/` |
+| Renderer transports | `lib/network/` |
+| Host adapter install | `lib/network/desktop-network-runtime.ts` |
+| Settings UI | `components/settings/network/` |
+| Gate | `scripts/gates/check-network-egress.mjs` |

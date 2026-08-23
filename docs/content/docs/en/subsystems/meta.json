@@ -29,6 +29,7 @@
     "session-import",
     "optical-compaction",
     "knowledge-capture",
+    "network-proxy",
     "companion-api",
     "observability",
     "performance",
