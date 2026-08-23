@@ -434,6 +434,21 @@ function mapStructuredError(code: string | undefined): number {
       return RPC_ERROR_CODES.timeout
     case "recovery_required":
       return RPC_ERROR_CODES.recoveryRequired
+    case "version_conflict":
+      return RPC_ERROR_CODES.versionConflict
+    case "agent_not_found":
+      // A missing agent is a lookup failure the caller can act on, not an
+      // internal error; it shares the session-not-found code family.
+      return RPC_ERROR_CODES.sessionNotFound
+    case "agent_exists":
+    case "agent_archived":
+      return RPC_ERROR_CODES.configError
+    case "schema_mismatch":
+      return RPC_ERROR_CODES.schemaMismatch
+    case "handler_unavailable":
+      return RPC_ERROR_CODES.handlerUnavailable
+    case "output_invalid":
+      return RPC_ERROR_CODES.outputInvalid
     case "config_error":
     case "usage_error":
       return RPC_ERROR_CODES.configError

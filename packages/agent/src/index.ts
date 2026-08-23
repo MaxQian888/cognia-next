@@ -13,6 +13,8 @@ export {
   type CogniaSession,
   type SessionEventOptions,
   type TraceSubscription,
+  type AgentApi,
+  type AgentHandle,
   type AuditApi,
   type AuthApi,
   type HookApi,
@@ -26,7 +28,37 @@ export {
   type TraceApi,
   type ToolApi,
 } from "./client"
-export { CogniaError, type CogniaErrorCode } from "./errors"
+export { CogniaError, StructuredOutputError, ToolSchemaError, type CogniaErrorCode } from "./errors"
+export {
+  AGENT_DEFINITION_SCHEMA_VERSION,
+  buildAgentDefinition,
+  computeDefinitionDigest,
+  computeToolSchemaDigest,
+  isAgentDefinitionV1,
+  validateAgentDefinitionInput,
+  type AgentCompositionSelection,
+  type AgentDefinitionChanges,
+  type AgentDefinitionInput,
+  type AgentDefinitionSummaryV1,
+  type AgentDefinitionV1,
+  type AgentToolReference,
+  type JsonSchemaContract,
+} from "./agent-definition"
+export {
+  defineRawTool,
+  defineTool,
+  type DefinedTool,
+  type RawToolSpec,
+  type ToolSpec,
+} from "./define-tool"
+export {
+  defineOutput,
+  defineRawOutput,
+  hasStructuredOutput,
+  parseStructuredOutput,
+} from "./structured-output"
+export { UnsupportedSchemaError, valibotToJsonSchema } from "./valibot-json-schema"
+export { canonicalJson, contentDigest, sha256Hex } from "./digest"
 export {
   DEFAULT_SUBSCRIBER_CAPACITY,
   type EventSubscriptionOptions,
@@ -73,6 +105,7 @@ export type {
   AgentPermissionMode,
   AgentRunResultV1,
   AgentRunStatus,
+  AgentSessionBinding,
   AgentTurnOutcome,
   CanonicalSession,
   CanonicalSessionHeader,

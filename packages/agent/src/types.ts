@@ -120,6 +120,13 @@ export type AgentRunStatus = "completed" | "failed" | "cancelled" | "timeout"
 export interface AgentRunResultV1 {
   status: AgentRunStatus
   text?: string
+  /**
+   * Present when the session's agent definition declared an output schema and
+   * the host validated the turn against it. Read it with
+   * `parseStructuredOutput`, which types it and reports a schema failure as a
+   * distinct error rather than as a string on a successful result.
+   */
+  structuredOutput?: unknown
   [key: string]: unknown
 }
 
@@ -246,6 +253,23 @@ export interface SessionCreateOptions {
   permissionMode?: AgentPermissionMode
   tags?: string[]
   handoff?: import("./handoff-envelope").HandoffEnvelope
+  /**
+   * Create this session from a host-persisted agent definition.
+   *
+   * `version` is resolved once, here — omit it to mean "latest at creation
+   * time". The resolved version and its digests are then frozen into the
+   * session, which never follows a later `agent/update`.
+   */
+  agent?: { agentId: string; version?: number }
+}
+
+/** The agent version a session was frozen at, if it was created from one. */
+export interface AgentSessionBinding {
+  agentId: string
+  version: number
+  definitionDigest: string
+  compositionPresetId?: string
+  executionFingerprint?: string
 }
 
 export interface SessionSummary {

@@ -204,6 +204,50 @@ export class ReconnectFailedError extends CogniaError {
 }
 
 /**
+ * A tool's input or output did not satisfy the schema its contract declares.
+ *
+ * Raised client-side, before a handler runs and before its result is returned.
+ * The host validates the same contract independently, so a client that skips
+ * this check still cannot slip a malformed payload past the model — the two
+ * sides fail the same call for the same reason.
+ */
+export class ToolSchemaError extends CogniaError {
+  readonly code: "schema_mismatch" | "output_invalid"
+  readonly toolName: string
+  readonly issues: readonly string[]
+
+  constructor(options: { side: "input" | "output"; toolName: string; issues: readonly string[] }) {
+    super(
+      `tool ${options.toolName} ${options.side} failed validation: ${options.issues.join("; ")}`
+    )
+    this.name = "ToolSchemaError"
+    this.code = options.side === "input" ? "schema_mismatch" : "output_invalid"
+    this.toolName = options.toolName
+    this.issues = options.issues
+  }
+}
+
+/**
+ * A turn's structured output did not satisfy the definition's output schema.
+ *
+ * Terminal and explicit. The previous contract surfaced this as a `parseError`
+ * string on an otherwise successful result, which a caller had to know to look
+ * for and could not distinguish from a model that simply said nothing.
+ */
+export class StructuredOutputError extends CogniaError {
+  readonly code = "output_invalid" as const
+  readonly issues: readonly string[]
+  readonly received: unknown
+
+  constructor(issues: readonly string[], received: unknown) {
+    super(`the turn's structured output failed validation: ${issues.join("; ")}`)
+    this.name = "StructuredOutputError"
+    this.issues = issues
+    this.received = received
+  }
+}
+
+/**
  * A negotiated protocol limit would be exceeded by this call.
  *
  * Raised client-side before the frame is written so the caller sees which limit

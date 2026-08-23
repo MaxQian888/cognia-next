@@ -1,5 +1,16 @@
+import type {
+  AgentDefinitionChanges,
+  AgentDefinitionInput,
+  AgentDefinitionSummaryV1,
+  AgentDefinitionV1,
+} from "./agent-definition"
 import { assertSupportedInput } from "./agent-input"
-import { CAP_TRACE_UNSUBSCRIBE_V1, hasCapability } from "./capabilities"
+import {
+  CAP_AGENT_DEFINITIONS_V1,
+  CAP_AGENT_SESSION_BINDING_V1,
+  CAP_TRACE_UNSUBSCRIBE_V1,
+  hasCapability,
+} from "./capabilities"
 import { HostConnection, type ReconnectPolicy } from "./connection"
 import {
   BackpressureError,
@@ -115,6 +126,44 @@ export interface AuthApi {
   status(): Promise<Record<string, unknown>>
 }
 
+/**
+ * A host-persisted agent definition, plus the calls that operate on it.
+ *
+ * `definition` is the exact version that was read or written. It never mutates:
+ * `update` returns a *new* handle at version N+1, so a caller holding an older
+ * handle keeps describing what it actually created sessions from.
+ */
+export interface AgentHandle {
+  readonly id: string
+  readonly version: number
+  readonly definition: AgentDefinitionV1
+  /** Compare-and-swap against this handle's version unless told otherwise. */
+  update(
+    changes: AgentDefinitionChanges,
+    options?: { expectedVersion?: number }
+  ): Promise<AgentHandle>
+  /** Create a session frozen at this agent's exact version. */
+  sessions: { create(options?: Omit<SessionCreateOptions, "agent">): Promise<CogniaSession> }
+  /** Create a session at this version and immediately begin a turn on it. */
+  start(input: AgentInput, options?: RunOptions): Promise<AgentRunHandle>
+  archive(): Promise<AgentDefinitionSummaryV1>
+  restore(): Promise<AgentDefinitionSummaryV1>
+  versions(): Promise<readonly number[]>
+}
+
+export interface AgentApi {
+  create(definition: AgentDefinitionInput): Promise<AgentHandle>
+  get(agentId: string, version?: number): Promise<AgentHandle>
+  list(options?: { includeArchived?: boolean }): Promise<readonly AgentDefinitionSummaryV1[]>
+  update(
+    agentId: string,
+    options: { expectedVersion: number; changes: AgentDefinitionChanges }
+  ): Promise<AgentHandle>
+  archive(agentId: string): Promise<AgentDefinitionSummaryV1>
+  restore(agentId: string): Promise<AgentDefinitionSummaryV1>
+  versions(agentId: string): Promise<readonly number[]>
+}
+
 export interface McpApi {
   configure(servers: readonly Record<string, unknown>[]): Promise<Record<string, unknown>>
   status(): Promise<Record<string, unknown>>
@@ -169,6 +218,7 @@ export interface CogniaClient extends AsyncDisposable {
   readonly runtime: RuntimeApi
   readonly models: ModelApi
   readonly auth: AuthApi
+  readonly agents: AgentApi
   readonly sessions: SessionApi
   readonly tools: ToolApi
   readonly hooks: HookApi
@@ -758,6 +808,52 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     if (closed) throw new ConnectionLostError("the Cognia client is closed")
   }
 
+  function requireAuthoring(): void {
+    if (!hasCapability(connection.info.capabilities, CAP_AGENT_DEFINITIONS_V1)) {
+      throw new RpcError(
+        RPC_ERROR_CODES.capabilityError,
+        `host does not support ${CAP_AGENT_DEFINITIONS_V1}`
+      )
+    }
+  }
+
+  function materializeAgent(definition: AgentDefinitionV1): AgentHandle {
+    const createSession = async (options: Omit<SessionCreateOptions, "agent"> = {}) => {
+      if (!hasCapability(connection.info.capabilities, CAP_AGENT_SESSION_BINDING_V1)) {
+        throw new RpcError(
+          RPC_ERROR_CODES.capabilityError,
+          `host does not support ${CAP_AGENT_SESSION_BINDING_V1}`
+        )
+      }
+      // The exact version is pinned, not `latest`: a handle describes one
+      // version, and a session created from it must run that one even if the
+      // agent moves on between this call and the next.
+      return client.sessions.create({
+        ...options,
+        agent: { agentId: definition.agentId, version: definition.version },
+      })
+    }
+    return {
+      id: definition.agentId,
+      version: definition.version,
+      definition,
+      sessions: { create: createSession },
+      async start(input, runOptions) {
+        const session = await createSession()
+        return session.start(input, runOptions)
+      },
+      update(changes, updateOptions = {}) {
+        return client.agents.update(definition.agentId, {
+          expectedVersion: updateOptions.expectedVersion ?? definition.version,
+          changes,
+        })
+      },
+      archive: () => client.agents.archive(definition.agentId),
+      restore: () => client.agents.restore(definition.agentId),
+      versions: () => client.agents.versions(definition.agentId),
+    }
+  }
+
   function materializeSession(
     sessionId: string,
     spec: ResolvedAgentExecutionSpec
@@ -838,6 +934,85 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
       status() {
         assertUsable()
         return connection.call("auth/status", {}, { timeoutMs: requestTimeoutMs })
+      },
+    },
+    agents: {
+      async create(definitionInput) {
+        assertUsable()
+        requireAuthoring()
+        const { agentId, ...definition } = definitionInput
+        const created = await connection.call(
+          "agent/create",
+          {
+            definition:
+              definition as unknown as RpcMethodMap["agent/create"]["params"]["definition"],
+            ...(agentId !== undefined ? { agentId } : {}),
+            commandId: randomUUID(),
+          },
+          { timeoutMs: requestTimeoutMs }
+        )
+        return materializeAgent(created as unknown as AgentDefinitionV1)
+      },
+      async get(agentId, version) {
+        assertUsable()
+        requireAuthoring()
+        const found = await connection.call(
+          "agent/get",
+          { agentId, ...(version !== undefined ? { version } : {}) },
+          { timeoutMs: requestTimeoutMs }
+        )
+        return materializeAgent(found as unknown as AgentDefinitionV1)
+      },
+      async list(listOptions = {}) {
+        assertUsable()
+        requireAuthoring()
+        const response = await connection.call(
+          "agent/list",
+          listOptions.includeArchived === true ? { includeArchived: true } : {},
+          { timeoutMs: requestTimeoutMs }
+        )
+        return response.agents as unknown as AgentDefinitionSummaryV1[]
+      },
+      async update(agentId, updateOptions) {
+        assertUsable()
+        requireAuthoring()
+        const updated = await connection.call(
+          "agent/update",
+          {
+            agentId,
+            expectedVersion: updateOptions.expectedVersion,
+            changes:
+              updateOptions.changes as unknown as RpcMethodMap["agent/update"]["params"]["changes"],
+            commandId: randomUUID(),
+          },
+          { timeoutMs: requestTimeoutMs }
+        )
+        return materializeAgent(updated as unknown as AgentDefinitionV1)
+      },
+      async archive(agentId) {
+        assertUsable()
+        requireAuthoring()
+        return (await connection.call(
+          "agent/archive",
+          { agentId, commandId: randomUUID() },
+          { timeoutMs: requestTimeoutMs }
+        )) as unknown as AgentDefinitionSummaryV1
+      },
+      async restore(agentId) {
+        assertUsable()
+        requireAuthoring()
+        return (await connection.call(
+          "agent/restore",
+          { agentId, commandId: randomUUID() },
+          { timeoutMs: requestTimeoutMs }
+        )) as unknown as AgentDefinitionSummaryV1
+      },
+      async versions(agentId) {
+        assertUsable()
+        requireAuthoring()
+        return (
+          await connection.call("agent/versions", { agentId }, { timeoutMs: requestTimeoutMs })
+        ).versions
       },
     },
     sessions: {

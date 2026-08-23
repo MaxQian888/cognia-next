@@ -5,6 +5,7 @@ import path from "node:path"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
+import { computeToolSchemaDigest } from "@/packages/agent/src/agent-definition"
 import type { PluginTool } from "@/types/plugin"
 import {
   __resetSandboxPolicyBridgeForTesting,
@@ -15,6 +16,7 @@ import type { UnifiedTurnParams, UnifiedTurnResult } from "../runtime/unified-ru
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
 import { createAgentRuntimeService } from "./runtime-service"
+import type { AgentRpcServiceContext } from "./server"
 
 const mockRegisteredPluginTools = new Map<string, PluginTool>()
 const mockRegisterTool = jest.fn((_pluginId: string, tool: PluginTool) => {
@@ -57,7 +59,7 @@ jest.mock("@/stores/plugin-runtime", () => ({
 }))
 
 const context = {
-  emit: jest.fn(async () => undefined),
+  emit: jest.fn(async (..._args: Parameters<AgentRpcServiceContext["emit"]>) => undefined),
   requestClient: jest.fn(),
 }
 
@@ -1390,6 +1392,364 @@ describe("createAgentRuntimeService", () => {
       runId: "run-session-slow",
       attemptId: "attempt-session-slow",
     })
+    await service.close()
+  })
+  // ---- ADR-0142 Phase 3: host-persisted agent definitions --------------------
+
+  const AGENT = { name: "Release bot", composition: { presetId: "coding" } }
+
+  it("creates, reads, versions and archives agent definitions over RPC", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+
+    const created = (await service.handle(
+      "agent/create",
+      { definition: AGENT, agentId: "release-bot", commandId: "create-1" },
+      context as never
+    )) as { agentId: string; version: number; definitionDigest: string }
+    expect(created).toMatchObject({ agentId: "release-bot", version: 1 })
+
+    const updated = (await service.handle(
+      "agent/update",
+      {
+        agentId: "release-bot",
+        expectedVersion: 1,
+        changes: { ...AGENT, name: "Release bot v2" },
+        commandId: "update-1",
+      },
+      context as never
+    )) as { version: number; name: string }
+    expect(updated).toMatchObject({ version: 2, name: "Release bot v2" })
+
+    expect(
+      await service.handle("agent/versions", { agentId: "release-bot" }, context as never)
+    ).toEqual({ agentId: "release-bot", versions: [1, 2] })
+
+    expect(
+      await service.handle("agent/get", { agentId: "release-bot", version: 1 }, context as never)
+    ).toMatchObject({ version: 1, name: "Release bot" })
+
+    expect(await service.handle("agent/list", {}, context as never)).toMatchObject({
+      agents: [expect.objectContaining({ agentId: "release-bot", latestVersion: 2 })],
+    })
+
+    await service.handle("agent/archive", { agentId: "release-bot" }, context as never)
+    expect(await service.handle("agent/list", {}, context as never)).toEqual({ agents: [] })
+    // An archived version stays readable, because sessions reference it.
+    expect(
+      await service.handle("agent/get", { agentId: "release-bot", version: 1 }, context as never)
+    ).toMatchObject({ version: 1, archivedAt: expect.any(String) })
+    await service.close()
+  })
+
+  it("reports a stale compare-and-swap as version_conflict", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("agent/create", { definition: AGENT, agentId: "cas" }, context as never)
+    await service.handle(
+      "agent/update",
+      { agentId: "cas", expectedVersion: 1, changes: { ...AGENT, name: "Second" } },
+      context as never
+    )
+    await expect(
+      service.handle(
+        "agent/update",
+        { agentId: "cas", expectedVersion: 1, changes: { ...AGENT, name: "Third" } },
+        context as never
+      )
+    ).rejects.toMatchObject({
+      structuredError: {
+        code: "version_conflict",
+        detail: { expectedVersion: 1, actualVersion: 2 },
+      },
+    })
+    await service.close()
+  })
+
+  it("freezes the resolved agent version into the session it creates", async () => {
+    let next = 0
+    const ids = ["session-a", "session-b"]
+    const service = makeService(emittingTurn(0), () => ids[next++] ?? `session-${next}`)
+    const v1 = (await service.handle(
+      "agent/create",
+      { definition: AGENT, agentId: "frozen" },
+      context as never
+    )) as { definitionDigest: string }
+
+    const first = (await service.handle(
+      "session/create",
+      { agent: { agentId: "frozen" }, commandId: "create-a" },
+      context as never
+    )) as { sessionId: string; agentBinding: Record<string, unknown> }
+    expect(first.agentBinding).toMatchObject({
+      agentId: "frozen",
+      version: 1,
+      definitionDigest: v1.definitionDigest,
+    })
+
+    const v2 = (await service.handle(
+      "agent/update",
+      { agentId: "frozen", expectedVersion: 1, changes: { ...AGENT, name: "Moved on" } },
+      context as never
+    )) as { definitionDigest: string }
+
+    const second = (await service.handle(
+      "session/create",
+      { agent: { agentId: "frozen" }, commandId: "create-b" },
+      context as never
+    )) as { agentBinding: Record<string, unknown> }
+    expect(second.agentBinding).toMatchObject({ version: 2, definitionDigest: v2.definitionDigest })
+
+    // The older session did not follow the update.
+    expect(
+      await service.handle("session/state", { sessionId: "session-a" }, context as never)
+    ).toMatchObject({ agentBinding: { version: 1, definitionDigest: v1.definitionDigest } })
+    await service.close()
+  })
+
+  it("pins an explicit version rather than resolving latest", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("agent/create", { definition: AGENT, agentId: "pinned" }, context as never)
+    await service.handle(
+      "agent/update",
+      { agentId: "pinned", expectedVersion: 1, changes: { ...AGENT, name: "Newer" } },
+      context as never
+    )
+    const created = (await service.handle(
+      "session/create",
+      { agent: { agentId: "pinned", version: 1 }, commandId: "create-pinned" },
+      context as never
+    )) as { agentBinding: Record<string, unknown> }
+    expect(created.agentBinding).toMatchObject({ version: 1 })
+    await service.close()
+  })
+
+  it("keeps the frozen binding across a host restart", async () => {
+    const first = makeService(emittingTurn(0), () => "session-1")
+    await service_create_agent(first)
+    await first.handle(
+      "session/create",
+      { agent: { agentId: "durable" }, commandId: "create-1" },
+      context as never
+    )
+    await first.close()
+
+    const restarted = makeService(emittingTurn(0), () => "session-1")
+    expect(
+      await restarted.handle("session/state", { sessionId: "session-1" }, context as never)
+    ).toMatchObject({ agentBinding: { agentId: "durable", version: 1 } })
+    await restarted.close()
+  })
+
+  async function service_create_agent(service: ReturnType<typeof makeService>) {
+    await service.handle(
+      "agent/create",
+      { definition: AGENT, agentId: "durable" },
+      context as never
+    )
+  }
+
+  it("refuses to resolve latest on an archived agent but honours an explicit pin", async () => {
+    let next = 0
+    const ids = ["session-a", "session-b"]
+    const service = makeService(emittingTurn(0), () => ids[next++] ?? `session-${next}`)
+    await service.handle(
+      "agent/create",
+      { definition: AGENT, agentId: "shelved" },
+      context as never
+    )
+    await service.handle("agent/archive", { agentId: "shelved" }, context as never)
+
+    await expect(
+      service.handle(
+        "session/create",
+        { agent: { agentId: "shelved" }, commandId: "create-a" },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "agent_archived" } })
+
+    const pinned = (await service.handle(
+      "session/create",
+      { agent: { agentId: "shelved", version: 1 }, commandId: "create-b" },
+      context as never
+    )) as { agentBinding: Record<string, unknown> }
+    expect(pinned.agentBinding).toMatchObject({ version: 1 })
+    await service.close()
+  })
+
+  it("reports an unknown agent instead of creating a session without one", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await expect(
+      service.handle(
+        "session/create",
+        { agent: { agentId: "ghost" }, commandId: "create-1" },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "agent_not_found" } })
+    await service.close()
+  })
+
+  it("leaves sessions created without an agent unbound", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const created = (await service.handle("session/create", {}, context as never)) as Record<
+      string,
+      unknown
+    >
+    expect(created.agentBinding).toBeUndefined()
+    await service.close()
+  })
+
+  it("refuses a definition that would store a credential", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await expect(
+      service.handle(
+        "agent/create",
+        { definition: { ...AGENT, metadata: { apiKey: "sk-live" } }, agentId: "leaky" },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "usage_error" } })
+    await service.close()
+  })
+
+  it("declares the authoring capabilities it now implements", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    expect(service.capabilities).toContain("agent-definitions-v1")
+    expect(service.capabilities).toContain("agent-session-binding-v1")
+    expect(service.methods).toEqual(expect.arrayContaining(["agent/create", "agent/update"]))
+    await service.close()
+  })
+  it("refuses a turn whose agent declares a tool with no registered handler", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    const contract = {
+      name: "read_file",
+      description: "Read a file",
+      inputSchema: { type: "object" },
+      sideEffect: "none" as const,
+    }
+    await service.handle(
+      "agent/create",
+      {
+        definition: {
+          ...AGENT,
+          toolRefs: [{ ...contract, schemaDigest: computeToolSchemaDigest(contract) }],
+        },
+        agentId: "tooled",
+      },
+      context as never
+    )
+    await service.handle(
+      "session/create",
+      { agent: { agentId: "tooled" }, commandId: "create-1" },
+      context as never
+    )
+
+    await expect(
+      service.handle(
+        "turn/run",
+        { sessionId: "session-1", input: "go", commandId: "run-1" },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "handler_unavailable" } })
+    expect(runTurn).not.toHaveBeenCalled()
+    await service.close()
+  })
+
+  it("refuses a turn when the registered handler's schema digest has drifted", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    const contract = {
+      name: "read_file",
+      description: "Read a file",
+      inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      sideEffect: "none" as const,
+    }
+    await service.handle(
+      "agent/create",
+      {
+        definition: {
+          ...AGENT,
+          toolRefs: [{ ...contract, schemaDigest: computeToolSchemaDigest(contract) }],
+        },
+        agentId: "drifted",
+      },
+      context as never
+    )
+    // Registered with a *different* input schema than the definition recorded.
+    await service.handle(
+      "tool/register",
+      {
+        handlerId: "handler-1",
+        name: "read_file",
+        description: "Read a file",
+        inputSchema: { type: "object", properties: { file: { type: "string" } } },
+        sideEffect: "none",
+      },
+      context as never
+    )
+    await service.handle(
+      "session/create",
+      { agent: { agentId: "drifted" }, commandId: "create-1" },
+      context as never
+    )
+
+    await expect(
+      service.handle(
+        "turn/run",
+        { sessionId: "session-1", input: "go", commandId: "run-1" },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "schema_mismatch" } })
+    expect(runTurn).not.toHaveBeenCalled()
+    await service.close()
+  })
+
+  it("runs the turn once a matching handler is registered", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    const contract = {
+      name: "read_file",
+      description: "Read a file",
+      inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      sideEffect: "none" as const,
+    }
+    await service.handle(
+      "agent/create",
+      {
+        definition: {
+          ...AGENT,
+          toolRefs: [{ ...contract, schemaDigest: computeToolSchemaDigest(contract) }],
+        },
+        agentId: "matched",
+      },
+      context as never
+    )
+    await service.handle("tool/register", { handlerId: "handler-1", ...contract }, context as never)
+    await service.handle(
+      "session/create",
+      { agent: { agentId: "matched" }, commandId: "create-1" },
+      context as never
+    )
+    await expect(
+      service.handle(
+        "turn/run",
+        { sessionId: "session-1", input: "go", commandId: "run-1" },
+        context as never
+      )
+    ).resolves.toMatchObject({ status: "completed" })
+    expect(runTurn).toHaveBeenCalledTimes(1)
+    await service.close()
+  })
+
+  it("leaves an unbound session's turns unaffected by the preflight", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    await service.handle("session/create", { commandId: "create-1" }, context as never)
+    await expect(
+      service.handle(
+        "turn/run",
+        { sessionId: "session-1", input: "go", commandId: "run-1" },
+        context as never
+      )
+    ).resolves.toMatchObject({ status: "completed" })
     await service.close()
   })
 })

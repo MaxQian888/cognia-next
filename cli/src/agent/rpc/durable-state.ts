@@ -15,6 +15,14 @@ export interface DurableRpcSessionState {
   >
   suspendedTurn: DurableRpcSuspendedTurn | null
   recoveryRequired: boolean
+  /**
+   * The agent definition version this session was created under.
+   *
+   * Persisted rather than recomputed: `latest` is resolved once, at creation,
+   * and a session must keep reporting the version it actually ran even after
+   * the agent has been updated many times.
+   */
+  agentBinding: Record<string, unknown> | null
 }
 
 export interface DurableRpcSuspendedTurn {
@@ -69,6 +77,7 @@ export function createDurableRpcStateStore(
           : {},
         suspendedTurn: isSuspendedTurn(parsed.suspendedTurn) ? parsed.suspendedTurn : null,
         recoveryRequired: parsed.recoveryRequired === true,
+        agentBinding: isRecord(parsed.agentBinding) ? parsed.agentBinding : null,
       }
     } catch {
       return emptyState()
@@ -104,6 +113,7 @@ function emptyState(): DurableRpcSessionState {
     sandboxSnapshots: {},
     suspendedTurn: null,
     recoveryRequired: false,
+    agentBinding: null,
   }
 }
 

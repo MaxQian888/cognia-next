@@ -93,6 +93,13 @@ export const RPC_METHODS = [
   "session/tree",
   "session/forest",
   "session/close",
+  "agent/create",
+  "agent/get",
+  "agent/list",
+  "agent/update",
+  "agent/archive",
+  "agent/restore",
+  "agent/versions",
   "turn/run",
   "turn/steer",
   "turn/followUp",
@@ -175,6 +182,10 @@ export const SIDE_EFFECTING_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>
   "sandbox/restore",
   "trace/subscribe",
   "trace/unsubscribe",
+  "agent/create",
+  "agent/update",
+  "agent/archive",
+  "agent/restore",
 ])
 
 /** A read whose repetition after a reconnect changes nothing host-side. */
@@ -214,6 +225,50 @@ const handoffEnvelopeSchema = v.custom<HandoffEnvelope>(
   isHandoffEnvelope,
   "handoff must be a valid stable ref-only envelope"
 )
+
+const jsonSchemaObject = v.record(v.string(), v.unknown())
+
+const toolReferenceSchema = v.looseObject({
+  name: nonEmptyString,
+  description: v.string(),
+  inputSchema: jsonSchemaObject,
+  outputSchema: v.optional(jsonSchemaObject),
+  sideEffect: v.picklist(["none", "idempotent", "non-idempotent"]),
+  schemaDigest: nonEmptyString,
+})
+
+const compositionSelectionSchema = v.looseObject({ presetId: nonEmptyString })
+
+/** What a caller may send; identity, version and digest are the host's to mint. */
+const agentDefinitionInputSchema = v.looseObject({
+  name: nonEmptyString,
+  description: v.optional(v.string()),
+  composition: compositionSelectionSchema,
+  instructions: v.optional(v.object({ append: v.string() })),
+  runtimeBindingRef: v.optional(nonEmptyString),
+  toolRefs: v.optional(v.array(toolReferenceSchema)),
+  output: v.optional(v.object({ schema: jsonSchemaObject, schemaDigest: nonEmptyString })),
+  metadata: v.optional(v.record(v.string(), v.union([v.string(), v.number(), v.boolean()]))),
+})
+
+const agentDefinitionResult = v.looseObject({
+  schemaVersion: v.literal(1),
+  agentId: nonEmptyString,
+  version: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  name: nonEmptyString,
+  definitionDigest: nonEmptyString,
+  createdAt: nonEmptyString,
+  toolRefs: v.array(toolReferenceSchema),
+})
+
+const agentSummaryResult = v.looseObject({
+  agentId: nonEmptyString,
+  name: nonEmptyString,
+  latestVersion: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  definitionDigest: nonEmptyString,
+  createdAt: nonEmptyString,
+  archivedAt: v.optional(nonEmptyString),
+})
 
 const registrationSchema = v.looseObject({
   handlerId: nonEmptyString,
@@ -274,11 +329,30 @@ export const rpcMethodSchemas = {
       permissionMode: v.optional(nonEmptyString),
       tags: v.optional(v.array(nonEmptyString)),
       handoff: v.optional(handoffEnvelopeSchema),
+      /**
+       * Resolved once, here. `version` is omitted to mean "latest at creation
+       * time"; the exact version is then frozen into the session and never
+       * follows a later definition.
+       */
+      agent: v.optional(
+        v.object({
+          agentId: nonEmptyString,
+          version: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+        })
+      ),
     }),
     result: v.looseObject({
       sessionId: nonEmptyString,
       spec: objectResult,
       commandId: v.optional(nonEmptyString),
+      /** The frozen binding, present when the session was created from an agent. */
+      agentBinding: v.optional(
+        v.looseObject({
+          agentId: nonEmptyString,
+          version: v.pipe(v.number(), v.integer(), v.minValue(1)),
+          definitionDigest: nonEmptyString,
+        })
+      ),
     }),
   },
   "session/open": {
@@ -345,6 +419,47 @@ export const rpcMethodSchemas = {
   "session/tree": { params: sessionParams, result: objectResult },
   "session/forest": { params: emptyParams, result: objectResult },
   "session/close": { params: sessionCommandParams, result: objectResult },
+  "agent/create": {
+    params: v.looseObject({
+      definition: agentDefinitionInputSchema,
+      agentId: v.optional(nonEmptyString),
+      commandId: optionalCommandId,
+    }),
+    result: agentDefinitionResult,
+  },
+  "agent/get": {
+    params: v.looseObject({
+      agentId: nonEmptyString,
+      version: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    }),
+    result: agentDefinitionResult,
+  },
+  "agent/list": {
+    params: v.looseObject({ includeArchived: v.optional(v.boolean()) }),
+    result: v.object({ agents: v.array(agentSummaryResult) }),
+  },
+  "agent/update": {
+    params: v.looseObject({
+      agentId: nonEmptyString,
+      /** Compare-and-swap: the version the caller believes is current. */
+      expectedVersion: v.pipe(v.number(), v.integer(), v.minValue(1)),
+      changes: agentDefinitionInputSchema,
+      commandId: optionalCommandId,
+    }),
+    result: agentDefinitionResult,
+  },
+  "agent/archive": {
+    params: v.looseObject({ agentId: nonEmptyString, commandId: optionalCommandId }),
+    result: agentSummaryResult,
+  },
+  "agent/restore": {
+    params: v.looseObject({ agentId: nonEmptyString, commandId: optionalCommandId }),
+    result: agentSummaryResult,
+  },
+  "agent/versions": {
+    params: v.object({ agentId: nonEmptyString }),
+    result: v.object({ agentId: nonEmptyString, versions: v.array(v.number()) }),
+  },
   "turn/run": {
     params: v.looseObject({
       sessionId: nonEmptyString,

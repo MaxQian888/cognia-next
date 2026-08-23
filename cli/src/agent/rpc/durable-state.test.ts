@@ -52,6 +52,7 @@ describe("createDurableRpcStateStore", () => {
         sandboxSnapshots: {},
         suspendedTurn: null,
         recoveryRequired: false,
+        agentBinding: null,
       })
     } finally {
       rmSync(root, { recursive: true, force: true })

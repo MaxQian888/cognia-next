@@ -59,6 +59,58 @@ const client = await createCogniaClient({
 
 Tests can inject connected Node streams with `host: { kind: "streams", ... }`.
 
+## Agents
+
+An agent definition lives in the host, is immutable, and is versioned.
+
+```ts
+import { defineOutput, defineTool } from "@cognia/agent"
+import * as v from "valibot"
+
+const readFile = defineTool({
+  name: "read_file",
+  description: "Read a file from the workspace",
+  input: v.object({ path: v.pipe(v.string(), v.description("Absolute path")) }),
+  output: v.object({ contents: v.string() }),
+  handler: async ({ path }) => ({ contents: await readTheFile(path) }),
+})
+await client.tools.register(readFile.registration, readFile.invoke)
+
+const agent = await client.agents.create({
+  agentId: "release-bot",
+  name: "Release bot",
+  composition: { presetId: "coding" },
+  instructions: { append: "Prefer pnpm over npm." },
+  toolRefs: [readFile.reference],
+  output: defineOutput(v.object({ summary: v.string() })),
+})
+
+const run = await agent.start("Cut the release")
+```
+
+`defineTool` derives the JSON Schema the model sees, the handler's types, and
+the runtime validation on both sides from one Valibot schema. The definition
+stores the tool's _contract_ and a schema digest — never handler code — and the
+host refuses to start a turn when a declared tool has no registered handler or
+the handler's digest has drifted from the contract. For a schema outside the
+convertible subset, `defineRawTool` takes a hand-written JSON Schema and types
+its handler input as `unknown`, so the lost inference is visible.
+
+Updating is a compare-and-swap that writes a new version:
+
+```ts
+const next = await agent.update({ ...changes }) // expectedVersion defaults to agent.version
+```
+
+Versions never change once written. `session/create` resolves `latest` **once**,
+at creation, and freezes that version and its digests into the session — a
+session created from v1 keeps running v1 after the agent reaches v9. Archiving
+is logical: any version a session references stays readable.
+
+Read a structured result with `parseStructuredOutput`, which types it and
+reports a schema failure as a distinct error rather than a string on an
+otherwise successful result.
+
 ## Events
 
 Each `events()` call is an independent subscriber with its own bounded queue

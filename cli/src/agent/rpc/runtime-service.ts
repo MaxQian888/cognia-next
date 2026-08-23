@@ -48,6 +48,11 @@ import { subscribePluginToolDispatch } from "../../plugin/plugin-tool-dispatch"
 import { makeCliPluginToolHandle } from "../subagent-dispatch"
 import type { AgentRpcService, AgentRpcServiceContext } from "./server"
 import { AgentRpcHostError } from "./server"
+import {
+  AgentDefinitionStoreError,
+  createAgentDefinitionStore,
+  type AgentDefinitionStore,
+} from "./agent-definition-store"
 import { currentTurnContext, runInTurnContext, type RpcTurnContext } from "./session-context"
 import {
   createDurableRpcStateStore,
@@ -55,6 +60,12 @@ import {
   type DurableRpcSuspendedTurn,
 } from "./durable-state"
 import {
+  computeToolSchemaDigest,
+  type AgentDefinitionV1,
+} from "@/packages/agent/src/agent-definition"
+import {
+  CAP_AGENT_DEFINITIONS_V1,
+  CAP_AGENT_SESSION_BINDING_V1,
   CAP_AUDIT_DURABLE_V1,
   CAP_CALLBACK_ATTRIBUTION_V1,
   CAP_CLIENT_HOOKS_V1,
@@ -110,6 +121,13 @@ const SUPPORTED_METHODS = [
   "session/tree",
   "session/forest",
   "session/close",
+  "agent/create",
+  "agent/get",
+  "agent/list",
+  "agent/update",
+  "agent/archive",
+  "agent/restore",
+  "agent/versions",
   "turn/run",
   "turn/steer",
   "turn/followUp",
@@ -173,6 +191,8 @@ const SERVICE_CAPABILITIES = [
   CAP_AUDIT_DURABLE_V1,
   CAP_COMPACTION_UNDO_LIVE_V1,
   CAP_SESSION_FOREST_V1,
+  CAP_AGENT_DEFINITIONS_V1,
+  CAP_AGENT_SESSION_BINDING_V1,
 ] as const
 
 /**
@@ -188,6 +208,15 @@ const MAX_REPLAY_EVENTS = 10_000
 const MAX_TRACE_SUBSCRIPTIONS = 64
 const TRACE_SUBSCRIPTION_TTL_MS = 60 * 60_000
 const MAX_RETAINED_COMMAND_RESULTS = 1_024
+
+/** What a session records about the agent definition it was created from. */
+export interface AgentSessionBinding {
+  agentId: string
+  version: number
+  definitionDigest: string
+  compositionPresetId: string
+  executionFingerprint: string
+}
 
 interface CompactionSnapshot {
   sessionId: string
@@ -212,6 +241,11 @@ interface HostedSession {
   spec: ResolvedAgentExecutionSpec
   lease: ProviderSessionLease
   busy: boolean
+  /**
+   * The agent version this session was created under, frozen at creation.
+   * Absent for sessions created without an agent reference.
+   */
+  agentBinding?: AgentSessionBinding
   status: "idle" | "running" | "waiting" | "recovery_required" | "closed"
   abortController: AbortController | null
   activeRun: Promise<unknown> | null
@@ -231,6 +265,8 @@ export interface AgentRuntimeServiceOptions {
   home: string
   sessionDirOverride?: string
   store?: SessionStore
+  /** Injected in tests; defaults to the on-disk store under `home`. */
+  agentDefinitions?: AgentDefinitionStore
   runTurn?: typeof runUnifiedTurn
   createLease?: () => ProviderSessionLease
   mintSessionId?: (now?: number, random?: number) => string
@@ -264,7 +300,12 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const sessions = new Map<string, HostedSession>()
   const durableState = createDurableRpcStateStore((sessionId) => store.paths(sessionId).dir)
   const auditStore = createRpcAuditStore(options.home)
-  const registeredTools = new Map<string, { pluginId: string; toolName: string }>()
+  const agentStore: AgentDefinitionStore =
+    options.agentDefinitions ?? createAgentDefinitionStore({ home: options.home, now })
+  const registeredTools = new Map<
+    string,
+    { pluginId: string; toolName: string; schemaDigest: string }
+  >()
   const registeredHooks = new Map<string, { pluginId: string }>()
   const deletedCommands = new Map<string, Record<string, unknown>>()
   const createCommands = new Map<string, Promise<Record<string, unknown>>>()
@@ -360,6 +401,9 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       currentRunId: null,
       currentAttemptId: null,
       durableState,
+      ...(persisted.agentBinding
+        ? { agentBinding: persisted.agentBinding as unknown as AgentSessionBinding }
+        : {}),
     }
     if (persisted.sandboxPolicy) {
       setActiveSandboxPolicy(sessionId, persisted.sandboxPolicy as SandboxResourcePolicy)
@@ -500,6 +544,55 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       }
       case "session/forest":
         return result({ roots: store.tree() })
+      case "agent/create":
+        return result(
+          withDefinitionErrors(() =>
+            agentStore.create({
+              ...(params.definition as Record<string, unknown>),
+              ...(typeof params.agentId === "string" ? { agentId: params.agentId } : {}),
+            } as never)
+          )
+        )
+      case "agent/get":
+        return result(
+          withDefinitionErrors(() =>
+            agentStore.get(
+              requireString(params, "agentId"),
+              typeof params.version === "number" ? params.version : undefined
+            )
+          )
+        )
+      case "agent/list":
+        return result({
+          agents: withDefinitionErrors(() =>
+            agentStore.list(params.includeArchived === true ? { includeArchived: true } : {})
+          ),
+        })
+      case "agent/update":
+        return result(
+          withDefinitionErrors(() =>
+            agentStore.update(
+              requireString(params, "agentId"),
+              params.expectedVersion as number,
+              params.changes as never
+            )
+          )
+        )
+      case "agent/archive":
+        return result(
+          withDefinitionErrors(() => agentStore.archive(requireString(params, "agentId")))
+        )
+      case "agent/restore":
+        return result(
+          withDefinitionErrors(() => agentStore.restore(requireString(params, "agentId")))
+        )
+      case "agent/versions": {
+        const agentId = requireString(params, "agentId")
+        return result({
+          agentId,
+          versions: withDefinitionErrors(() => agentStore.versions(agentId)),
+        })
+      }
       case "session/close": {
         const session = materialize(requireString(params, "sessionId"))
         return result(
@@ -881,7 +974,21 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         const { usePluginStore } = await import("@/stores/plugin-runtime")
         getPluginManager().getRegistry().registerTool(pluginId, tool)
         usePluginStore.getState().registerPluginTool(pluginId, tool)
-        registeredTools.set(handlerId, { pluginId, toolName })
+        registeredTools.set(handlerId, {
+          pluginId,
+          toolName,
+          // Computed from what the client actually registered, never taken on
+          // trust from the caller, so a preflight compares like with like.
+          schemaDigest: computeToolSchemaDigest({
+            name: toolName,
+            description: requireString(params, "description"),
+            inputSchema: params.inputSchema as Record<string, unknown>,
+            ...(params.outputSchema !== undefined
+              ? { outputSchema: params.outputSchema as Record<string, unknown> }
+              : {}),
+            sideEffect: sideEffect as "none" | "idempotent" | "non-idempotent",
+          }),
+        })
         invalidateSessionOptions(sessions)
         return result({ ok: true })
       }
@@ -1192,6 +1299,20 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     if (handoff && typeof params.cwd === "string") {
       throw structured("usage_error", "remote handoff session creation does not accept cwd")
     }
+    // Resolved exactly once, here. `latest` is a creation-time question: after
+    // this the session carries the precise version and its digests, and a later
+    // `agent/update` cannot retroactively change what this session runs.
+    const agentRef = params.agent as { agentId: string; version?: number } | undefined
+    const definition: AgentDefinitionV1 | undefined = agentRef
+      ? withDefinitionErrors(() => agentStore.get(agentRef.agentId, agentRef.version))
+      : undefined
+    if (definition?.archivedAt !== undefined && agentRef?.version === undefined) {
+      throw structured(
+        "agent_archived",
+        `agent ${definition.agentId} is archived; pin an explicit version to keep using it`,
+        { agentId: definition.agentId }
+      )
+    }
     const base = options.config
     const handoffWorkspace = handoff
       ? await options.workerDispatch!.resolveHandoffWorkspace(handoff, commandId)
@@ -1207,6 +1328,10 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       ...(typeof params.permissionMode === "string"
         ? { permissionMode: params.permissionMode as ResolvedConfig["permissionMode"] }
         : {}),
+      // The definition lowers onto the existing config surface rather than
+      // introducing a parallel authority: its runtime binding is the same
+      // `AgentExecutionPolicy` reference the composition resolver already reads.
+      ...(definition?.runtimeBindingRef ? { agentBackend: definition.runtimeBindingRef } : {}),
     }
     const id = uniqueSessionId()
     const spec = resolveSessionExecutionSpec(config, { sessionId: id, runId: id })
@@ -1246,8 +1371,28 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         state.tags = [...new Set((params.tags as string[]).map((tag) => tag.trim()))]
       })
     }
+    const agentBinding = definition
+      ? {
+          agentId: definition.agentId,
+          version: definition.version,
+          definitionDigest: definition.definitionDigest,
+          compositionPresetId: definition.composition.presetId,
+          executionFingerprint: spec.executionFingerprint,
+        }
+      : undefined
+    if (agentBinding) {
+      session.agentBinding = agentBinding
+      durableState.update(id, (state) => {
+        state.agentBinding = agentBinding
+      })
+    }
     sessions.set(id, session)
-    const createdResult = { sessionId: id, spec, commandId }
+    const createdResult = {
+      sessionId: id,
+      spec,
+      commandId,
+      ...(agentBinding ? { agentBinding } : {}),
+    }
     durableState.update(id, (state) => {
       state.commandResults[commandKey] = createdResult
     })
@@ -1278,6 +1423,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     recovery?: DurableRpcSuspendedTurn
   ): Promise<Record<string, unknown>> {
     if (session.busy) throw structured("session_busy", "a turn is already active")
+    preflightDefinitionTools(session)
     if (session.workerHandoff) {
       options.workerDispatch?.validateHandoffExecution?.(session.workerHandoff)
     }
@@ -1625,6 +1771,60 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   }
 
+  /**
+   * Refuse to run a turn whose agent declares tools the client cannot serve.
+   *
+   * A definition stores a tool contract and its digest but never a handler, so
+   * the handler is only real while a client is connected and has registered it.
+   * Discovering that mid-turn means the model has already been told the tool
+   * exists and has already decided to call it; checking here turns a confusing
+   * tool failure into a clear precondition failure before any tokens are spent.
+   */
+  function preflightDefinitionTools(session: HostedSession): void {
+    const binding = session.agentBinding
+    if (!binding) return
+    let definition: AgentDefinitionV1
+    try {
+      definition = agentStore.get(binding.agentId, binding.version)
+    } catch {
+      // The frozen version is unreadable; that is a definition problem, not a
+      // handler problem, and `agent/get` reports it precisely.
+      return
+    }
+    if (definition.toolRefs.length === 0) return
+    const byDigest = new Map<string, string>()
+    for (const registered of registeredTools.values()) {
+      byDigest.set(`${registered.toolName}:${registered.schemaDigest}`, registered.toolName)
+    }
+    const byName = new Set([...registeredTools.values()].map((entry) => entry.toolName))
+
+    const missing: string[] = []
+    const mismatched: string[] = []
+    for (const tool of definition.toolRefs) {
+      if (!byName.has(tool.name)) {
+        missing.push(tool.name)
+      } else if (!byDigest.has(`${tool.name}:${tool.schemaDigest}`)) {
+        mismatched.push(tool.name)
+      }
+    }
+    if (missing.length > 0) {
+      throw structured(
+        "handler_unavailable",
+        `agent ${binding.agentId}@${binding.version} declares tools with no registered handler: ` +
+          missing.join(", "),
+        { agentId: binding.agentId, version: binding.version, tools: missing }
+      )
+    }
+    if (mismatched.length > 0) {
+      throw structured(
+        "schema_mismatch",
+        `registered handlers for ${mismatched.join(", ")} do not match the schema digest the ` +
+          `definition ${binding.agentId}@${binding.version} recorded`,
+        { agentId: binding.agentId, version: binding.version, tools: mismatched }
+      )
+    }
+  }
+
   /** Drop subscriptions past their TTL so an abandoned client cannot pin them. */
   function reapTraceSubscriptions(): void {
     const cutoff = now() - TRACE_SUBSCRIPTION_TTL_MS
@@ -1704,6 +1904,7 @@ function readState(session: HostedSession): Record<string, unknown> {
     sessionId: session.id,
     status: session.status,
     locked: session.busy,
+    ...(session.agentBinding ? { agentBinding: session.agentBinding } : {}),
     tags: persisted.tags,
     pendingPermissions: [...livePermissions.values()],
     pendingElicitations: Object.values(persisted.pendingElicitations),
@@ -1747,6 +1948,33 @@ function evictOldest(map: Map<string, unknown>): void {
     const oldest = map.keys().next()
     if (oldest.done) return
     map.delete(oldest.value)
+  }
+}
+
+/**
+ * Map definition-store failures onto the wire's structured error codes.
+ *
+ * A version conflict in particular has to arrive as `version_conflict` rather
+ * than as a generic internal error, because it is the one failure a caller is
+ * expected to handle by re-reading and retrying.
+ */
+function withDefinitionErrors<T>(operation: () => T): T {
+  try {
+    return operation()
+  } catch (error) {
+    if (!(error instanceof AgentDefinitionStoreError)) throw error
+    switch (error.code) {
+      case "not_found":
+        throw structured("agent_not_found", error.message, error.detail)
+      case "version_conflict":
+        throw structured("version_conflict", error.message, error.detail)
+      case "already_exists":
+        throw structured("agent_exists", error.message, error.detail)
+      case "archived":
+        throw structured("agent_archived", error.message, error.detail)
+      default:
+        throw structured("usage_error", error.message, error.detail)
+    }
   }
 }
 

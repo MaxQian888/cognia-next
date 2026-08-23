@@ -77,6 +77,8 @@ export const CAP_AGENT_DEFINITIONS_V1 = "agent-definitions-v1"
 export const CAP_STRUCTURED_OUTPUT_V1 = "structured-output-v1"
 /** Tool contracts carry a schema digest the host preflights before each call. */
 export const CAP_TYPED_TOOLS_V1 = "typed-tools-v1"
+/** `session/create({ agent })` freezes the resolved version into the session. */
+export const CAP_AGENT_SESSION_BINDING_V1 = "agent-session-binding-v1"
 /** Content-addressed asset upload; turns reference assets by id. */
 export const CAP_ASSETS_V1 = "assets-v1"
 /** The client can re-attach after a transport drop and replay from a cursor. */
