@@ -1,6 +1,7 @@
 {
   "environments": {
     "actions": "操作",
+    "archive": "归档环境",
     "base": "基线",
     "bases": {
       "gitRef": "Git 引用",
@@ -10,6 +11,11 @@
       "workingState": "当前工作状态"
     },
     "description": "此设备上的受管、永久和已导入执行环境。",
+    "cancel": "取消",
+    "confirmDelete": "删除环境",
+    "delete": "删除环境",
+    "deleteDescription": "永久删除位于 {path} 的已归档环境，其快照将无法恢复。",
+    "deleteTitle": "删除已归档环境？",
     "emptyDescription": "启动 Worktree 会话后，隔离环境会显示在这里。",
     "emptyTitle": "暂无执行环境",
     "kind": "类型",
@@ -21,8 +27,10 @@
     "loadError": "无法加载执行环境：{error}",
     "loading": "正在加载执行环境",
     "path": "路径",
+    "makePermanent": "设为永久环境",
     "pin": "固定环境",
     "refresh": "刷新环境",
+    "restore": "恢复环境",
     "state": "状态",
     "states": {
       "active": "活跃",

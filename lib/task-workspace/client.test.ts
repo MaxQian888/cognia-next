@@ -14,6 +14,7 @@ jest.mock("@/lib/tauri", () => ({
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
   acquireWorkspaceBundle,
+  archiveManagedWorkspace,
   applyTaskWorkspace,
   beginTaskWorkspaceTurn,
   exportTaskResourceManifest,
@@ -24,12 +25,15 @@ import {
   listManagedWorkspaces,
   listWorkspaceBundles,
   getWorkspaceLifecyclePolicy,
+  deleteManagedWorkspace,
+  makeManagedWorkspacePermanent,
   setWorkspaceLifecyclePolicy,
   pinManagedWorkspace,
   resolveTaskWorkspaceConflict,
   runIdForTurn,
   settleTaskWorkspaceTurn,
   restoreTaskWorkspaceSnapshot,
+  restoreManagedWorkspace,
   taskIdForMessage,
 } from "./client"
 
@@ -166,6 +170,26 @@ describe("task workspace client", () => {
     await acquireWorkspaceBundle(input)
 
     expect(call).toHaveBeenCalledWith("task_workspace_bundle_acquire", { input })
+  })
+
+  it("routes protected environment lifecycle actions through the Registry", async () => {
+    call
+      .mockResolvedValueOnce({ workspaceId: "ws-1", environmentKind: "permanent" })
+      .mockResolvedValueOnce({ workspaceId: "ws-2", state: "archived" })
+      .mockResolvedValueOnce({ workspaceId: "ws-2", state: "active" })
+      .mockResolvedValueOnce(undefined)
+
+    await makeManagedWorkspacePermanent("ws-1")
+    await archiveManagedWorkspace("ws-2")
+    await restoreManagedWorkspace("ws-2")
+    await deleteManagedWorkspace("ws-2")
+
+    expect(call.mock.calls).toEqual([
+      ["task_workspace_managed_permanent", { workspaceId: "ws-1" }],
+      ["task_workspace_managed_archive", { workspaceId: "ws-2" }],
+      ["task_workspace_managed_restore", { workspaceId: "ws-2" }],
+      ["task_workspace_managed_delete", { workspaceId: "ws-2" }],
+    ])
   })
 
   it("restores a historical content-addressed snapshot", async () => {

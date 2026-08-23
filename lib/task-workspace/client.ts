@@ -207,6 +207,24 @@ export function pinManagedWorkspace(
   return transport.call("task_workspace_managed_pin", { workspaceId, pinned })
 }
 
+export function makeManagedWorkspacePermanent(
+  workspaceId: string
+): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_managed_permanent", { workspaceId })
+}
+
+export function archiveManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_managed_archive", { workspaceId })
+}
+
+export function restoreManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_managed_restore", { workspaceId })
+}
+
+export function deleteManagedWorkspace(workspaceId: string): Promise<void> {
+  return transport.call("task_workspace_managed_delete", { workspaceId })
+}
+
 export function listTaskRuns(taskId: string): Promise<TaskRun[]> {
   return transport.call("task_workspace_list_runs", { taskId })
 }

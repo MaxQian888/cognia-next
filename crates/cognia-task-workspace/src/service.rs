@@ -745,6 +745,216 @@ impl TaskWorkspaceService {
             .map_err(|error| error.to_string())
     }
 
+    pub fn make_workspace_permanent(&self, workspace_id: &str) -> Result<WorkspaceRecord, String> {
+        let record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.state != WorkspaceState::Active {
+            return Err("only an active environment can be made permanent".into());
+        }
+        self.registry
+            .set_environment_kind(workspace_id, crate::WorkspaceEnvironmentKind::Permanent)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn archive_managed_workspace(&self, workspace_id: &str) -> Result<WorkspaceRecord, String> {
+        let mut record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        match record.environment_kind {
+            crate::WorkspaceEnvironmentKind::Imported => {
+                return Err("imported environments cannot be archived before adoption".into())
+            }
+            crate::WorkspaceEnvironmentKind::Permanent => {
+                return Err(
+                    "permanent environments require an explicit detach before archive".into(),
+                )
+            }
+            crate::WorkspaceEnvironmentKind::Managed => {}
+        }
+        if !matches!(
+            record.state,
+            WorkspaceState::Active | WorkspaceState::Archived
+        ) {
+            return Err(format!(
+                "workspace {workspace_id} cannot be archived from state {:?}",
+                record.state
+            ));
+        }
+        let execution_root = Path::new(&record.execution_root);
+        if execution_root.is_dir() {
+            let (snapshot, blobs) =
+                capture_with_policy(execution_root, &crate::ResourceTrackingPolicy::default())?;
+            let now = now_ms();
+            let size_bytes = blobs.values().fold(0_u64, |total, bytes| {
+                total.saturating_add(bytes.len() as u64)
+            });
+            {
+                let mut store = self.store.lock();
+                for (hash, bytes) in &blobs {
+                    store.put_blob(hash, bytes, now)?;
+                }
+                store.put_workspace_archive(workspace_id, &snapshot, now)?;
+            }
+            record = self
+                .registry
+                .set_archive_metadata(
+                    workspace_id,
+                    Some(format!("workspace:{workspace_id}")),
+                    Some(size_bytes),
+                )
+                .map_err(|error| error.to_string())?;
+            if record.state == WorkspaceState::Active {
+                record = self
+                    .registry
+                    .transition(
+                        workspace_id,
+                        record.owner_type,
+                        record.owner_ref.as_deref(),
+                        WorkspaceState::Archived,
+                        now,
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            remove_managed_execution(&record)?;
+        } else if self
+            .store
+            .lock()
+            .get_workspace_archive(workspace_id)?
+            .is_none()
+        {
+            return Err(format!(
+                "workspace {workspace_id} has no directory or restorable archive"
+            ));
+        }
+        Ok(record)
+    }
+
+    pub fn restore_managed_workspace(&self, workspace_id: &str) -> Result<WorkspaceRecord, String> {
+        let mut record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed {
+            return Err("only managed environments can be restored".into());
+        }
+        let now = now_ms();
+        if record.state == WorkspaceState::Archived {
+            record = self
+                .registry
+                .transition(
+                    workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Restorable,
+                    now,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        if record.state != WorkspaceState::Restorable {
+            return Err(format!(
+                "workspace {workspace_id} cannot be restored from state {:?}",
+                record.state
+            ));
+        }
+        let execution_root = Path::new(&record.execution_root);
+        if execution_root.exists() {
+            return Err(format!(
+                "workspace archive directory still exists and requires repair: {}",
+                execution_root.display()
+            ));
+        }
+        let snapshot = self
+            .store
+            .lock()
+            .get_workspace_archive(workspace_id)?
+            .ok_or_else(|| format!("workspace {workspace_id} has no restorable archive"))?;
+        let mut blobs = HashMap::new();
+        {
+            let mut store = self.store.lock();
+            for entry in snapshot.entries.values() {
+                if !blobs.contains_key(&entry.hash) {
+                    blobs.insert(entry.hash.clone(), store.get_blob(&entry.hash, now)?);
+                }
+            }
+        }
+        if let Err(error) = create_execution(
+            Path::new(&record.source_root),
+            execution_root,
+            &WorkspaceBaseSpec::WorkingState,
+            &snapshot,
+            &blobs,
+            record.locked_by.as_deref(),
+        ) {
+            return Err(error);
+        }
+        match self.registry.transition(
+            workspace_id,
+            record.owner_type,
+            record.owner_ref.as_deref(),
+            WorkspaceState::Active,
+            now,
+        ) {
+            Ok(restored) => Ok(restored),
+            Err(error) => {
+                unlock_git_worktree(
+                    Path::new(&record.source_root),
+                    execution_root,
+                    record.isolation_kind,
+                );
+                cleanup_execution(
+                    Path::new(&record.source_root),
+                    execution_root,
+                    record.isolation_kind,
+                    None,
+                );
+                Err(error.to_string())
+            }
+        }
+    }
+
+    pub fn delete_managed_workspace(&self, workspace_id: &str) -> Result<(), String> {
+        let record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed {
+            return Err("permanent and imported environments are protected from deletion".into());
+        }
+        if !matches!(
+            record.state,
+            WorkspaceState::Archived | WorkspaceState::Restorable
+        ) {
+            return Err("archive the managed environment before deleting it".into());
+        }
+        if Path::new(&record.execution_root).exists() {
+            return Err(
+                "archive still owns a physical directory; retry archive before delete".into(),
+            );
+        }
+        let now = now_ms();
+        self.registry
+            .transition(
+                workspace_id,
+                record.owner_type,
+                record.owner_ref.as_deref(),
+                WorkspaceState::Removing,
+                now,
+            )
+            .map_err(|error| error.to_string())?;
+        self.store.lock().delete_workspace_archive(workspace_id)?;
+        let reason = crate::registry::compose_lock_reason(workspace_id);
+        self.registry
+            .remove_workspace(workspace_id, &reason)
+            .map_err(|error| error.to_string())
+    }
+
     fn reactivate_managed_workspace(&self, workspace_id: &str) -> Result<(), String> {
         let Some(record) = self
             .registry
@@ -2153,6 +2363,97 @@ fn cleanup_execution(
             let _ = fs::remove_dir_all(execution_root);
         }
     }
+}
+
+fn remove_managed_execution(record: &WorkspaceRecord) -> Result<(), String> {
+    let execution_root = Path::new(&record.execution_root);
+    match record.isolation_kind {
+        IsolationKind::Shadow => fs::remove_dir_all(execution_root).map_err(|error| {
+            format!(
+                "remove managed shadow {}: {error}",
+                execution_root.display()
+            )
+        }),
+        IsolationKind::GitWorktree => {
+            let expected = record
+                .locked_by
+                .as_deref()
+                .ok_or_else(|| format!("workspace {} has no signed lock", record.workspace_id))?;
+            let actual = managed_git_lock_reason(Path::new(&record.source_root), execution_root)?;
+            if actual.as_deref() != Some(expected) {
+                return Err(format!(
+                    "workspace {} lock mismatch: expected {expected:?}, found {actual:?}",
+                    record.workspace_id
+                ));
+            }
+            let unlock = Command::new("git")
+                .args(["-C"])
+                .arg(&record.source_root)
+                .args(["worktree", "unlock"])
+                .arg(execution_root)
+                .output()
+                .map_err(|error| format!("start git worktree unlock: {error}"))?;
+            if !unlock.status.success() {
+                return Err(format!(
+                    "git worktree unlock failed: {}",
+                    String::from_utf8_lossy(&unlock.stderr).trim()
+                ));
+            }
+            let remove = Command::new("git")
+                .args(["-C"])
+                .arg(&record.source_root)
+                .args(["worktree", "remove", "--force"])
+                .arg(execution_root)
+                .output()
+                .map_err(|error| format!("start git worktree remove: {error}"))?;
+            remove.status.success().then_some(()).ok_or_else(|| {
+                format!(
+                    "git worktree remove failed: {}",
+                    String::from_utf8_lossy(&remove.stderr).trim()
+                )
+            })
+        }
+    }
+}
+
+fn managed_git_lock_reason(
+    workspace_root: &Path,
+    execution_root: &Path,
+) -> Result<Option<String>, String> {
+    let output = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .output()
+        .map_err(|error| format!("start git worktree list: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let inventory = String::from_utf8(output.stdout)
+        .map_err(|error| format!("git worktree list returned invalid UTF-8: {error}"))?;
+    let target = execution_root
+        .canonicalize()
+        .unwrap_or_else(|_| execution_root.to_path_buf());
+    let mut current_matches = false;
+    for raw in inventory.split(if inventory.contains('\0') { '\0' } else { '\n' }) {
+        let line = raw.trim_end();
+        if let Some(path) = line.strip_prefix("worktree ") {
+            let listed = Path::new(path)
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from(path));
+            current_matches = listed == target;
+        } else if let Some(reason) = line.strip_prefix("locked ") {
+            if current_matches {
+                return Ok(Some(reason.to_string()));
+            }
+        } else if line == "locked" && current_matches {
+            return Ok(None);
+        }
+    }
+    Ok(None)
 }
 
 fn git_common_dir(workspace_root: &Path) -> Option<String> {
@@ -3818,6 +4119,134 @@ mod tests {
                 .filter(|line| line.starts_with("worktree "))
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn archive_restore_and_delete_preserve_shadow_wip() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-lifecycle".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "notes".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let lease = &bundle.leases[0];
+        fs::write(Path::new(&lease.alias_path).join("notes.txt"), "after\n").unwrap();
+
+        let archived = service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert_eq!(archived.state, WorkspaceState::Archived);
+        assert!(!Path::new(&archived.execution_root).exists());
+        let expected_snapshot_id = format!("workspace:{}", lease.workspace_id);
+        assert_eq!(
+            archived.snapshot_task_id.as_deref(),
+            Some(expected_snapshot_id.as_str())
+        );
+
+        let restored = service
+            .restore_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert_eq!(restored.state, WorkspaceState::Active);
+        assert_eq!(
+            fs::read_to_string(Path::new(&restored.execution_root).join("notes.txt")).unwrap(),
+            "after\n"
+        );
+
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        service
+            .delete_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(service
+            .get_managed_workspace(&lease.workspace_id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn permanent_environments_are_protected_from_archive_and_delete() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::User,
+                owner_ref: Some("project-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Permanent,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let workspace_id = &bundle.leases[0].workspace_id;
+
+        assert!(service
+            .archive_managed_workspace(workspace_id)
+            .unwrap_err()
+            .contains("explicit detach"));
+        assert!(service
+            .delete_managed_workspace(workspace_id)
+            .unwrap_err()
+            .contains("protected"));
+        assert!(Path::new(&bundle.leases[0].alias_path).exists());
+    }
+
+    #[test]
+    fn archive_and_restore_recreate_the_signed_git_worktree() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-git-archive".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repository.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let lease = &bundle.leases[0];
+        fs::write(Path::new(&lease.alias_path).join("README.md"), "managed\n").unwrap();
+
+        service
+            .archive_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert!(!Path::new(&lease.alias_path).exists());
+        let restored = service
+            .restore_managed_workspace(&lease.workspace_id)
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(Path::new(&restored.execution_root).join("README.md")).unwrap(),
+            "managed\n"
+        );
+        let expected_lock = crate::registry::compose_lock_reason(&lease.workspace_id);
+        assert_eq!(
+            managed_git_lock_reason(repository.path(), Path::new(&restored.execution_root))
+                .unwrap()
+                .as_deref(),
+            Some(expected_lock.as_str())
         );
     }
 

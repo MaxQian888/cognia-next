@@ -268,6 +268,30 @@ pub fn task_workspace_managed_pin(
 }
 
 #[tauri::command]
+pub fn task_workspace_managed_permanent(workspace_id: String) -> Result<WorkspaceRecord, String> {
+    service()?.make_workspace_permanent(&workspace_id)
+}
+
+#[tauri::command]
+pub async fn task_workspace_managed_archive(
+    workspace_id: String,
+) -> Result<WorkspaceRecord, String> {
+    blocking(move |service| service.archive_managed_workspace(&workspace_id)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_managed_restore(
+    workspace_id: String,
+) -> Result<WorkspaceRecord, String> {
+    blocking(move |service| service.restore_managed_workspace(&workspace_id)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_managed_delete(workspace_id: String) -> Result<(), String> {
+    blocking(move |service| service.delete_managed_workspace(&workspace_id)).await
+}
+
+#[tauri::command]
 pub fn task_workspace_list_runs(task_id: String) -> Result<Vec<TaskRun>, String> {
     service()?.list_runs(&task_id)
 }

@@ -1,6 +1,7 @@
 {
   "environments": {
     "actions": "Actions",
+    "archive": "Archive environment",
     "base": "Base",
     "bases": {
       "gitRef": "Git ref",
@@ -10,6 +11,11 @@
       "workingState": "Working state"
     },
     "description": "Managed, permanent, and imported execution environments on this device.",
+    "cancel": "Cancel",
+    "confirmDelete": "Delete environment",
+    "delete": "Delete environment",
+    "deleteDescription": "Permanently delete the archived environment at {path}. Its snapshot cannot be recovered.",
+    "deleteTitle": "Delete archived environment?",
     "emptyDescription": "An isolated environment appears here after a Worktree chat starts.",
     "emptyTitle": "No execution environments",
     "kind": "Kind",
@@ -21,8 +27,10 @@
     "loadError": "Environments could not be loaded: {error}",
     "loading": "Loading execution environments",
     "path": "Path",
+    "makePermanent": "Make environment permanent",
     "pin": "Pin environment",
     "refresh": "Refresh environments",
+    "restore": "Restore environment",
     "state": "State",
     "states": {
       "active": "Active",

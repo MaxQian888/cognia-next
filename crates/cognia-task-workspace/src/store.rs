@@ -195,6 +195,13 @@ impl WorkspaceStore {
                  CREATE TABLE IF NOT EXISTS workspace_settings (
                    key TEXT PRIMARY KEY,
                    payload TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS workspace_archives (
+                   workspace_id TEXT PRIMARY KEY,
+                   payload TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   FOREIGN KEY(workspace_id) REFERENCES workspace_registry(workspace_id)
+                     ON DELETE CASCADE
                  );",
             )
             .map_err(|error| format!("apply workspace registry migration: {error}"))?;
@@ -805,8 +812,11 @@ impl WorkspaceStore {
     // ADR-0111 Managed Workspace Registry CRUD
     // -----------------------------------------------------------------
 
-    /// Insert-or-replace one Registry row. Callers use this both to create
-    /// new managed workspaces and to persist state transitions.
+    /// Insert or update one Registry row without replacing its identity.
+    ///
+    /// `INSERT OR REPLACE` is intentionally forbidden here: SQLite implements
+    /// it as DELETE + INSERT, which would cascade-delete leases, grants, and
+    /// archive snapshots on every state or pin update.
     pub fn put_workspace(&self, record: &crate::WorkspaceRecord) -> Result<(), String> {
         let (base_kind, base_ref) = record.base.to_storage();
         let base_kind_str = serde_json::to_value(base_kind)
@@ -818,12 +828,31 @@ impl WorkspaceStore {
         let isolation_kind = serialize_enum(&record.isolation_kind, "isolation kind")?;
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO workspace_registry (
+                "INSERT INTO workspace_registry (
                    workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
                    git_common_dir, base_kind, base_ref, head, branch,
                    isolation_kind, execution_root, snapshot_task_id, size_bytes,
                    last_used_at, locked_by, pinned, created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+                 ON CONFLICT(workspace_id) DO UPDATE SET
+                   environment_kind=excluded.environment_kind,
+                   owner_type=excluded.owner_type,
+                   owner_ref=excluded.owner_ref,
+                   state=excluded.state,
+                   source_root=excluded.source_root,
+                   git_common_dir=excluded.git_common_dir,
+                   base_kind=excluded.base_kind,
+                   base_ref=excluded.base_ref,
+                   head=excluded.head,
+                   branch=excluded.branch,
+                   isolation_kind=excluded.isolation_kind,
+                   execution_root=excluded.execution_root,
+                   snapshot_task_id=excluded.snapshot_task_id,
+                   size_bytes=excluded.size_bytes,
+                   last_used_at=excluded.last_used_at,
+                   locked_by=excluded.locked_by,
+                   pinned=excluded.pinned,
+                   created_at=excluded.created_at",
                 params![
                     record.workspace_id,
                     environment_kind,
@@ -1140,6 +1169,58 @@ impl WorkspaceStore {
             )
             .map(|_| ())
             .map_err(|error| format!("delete workspace bundle {bundle_id}: {error}"))
+    }
+
+    pub fn put_workspace_archive(
+        &self,
+        workspace_id: &str,
+        snapshot: &crate::snapshot::WorkspaceSnapshot,
+        now: i64,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(snapshot)
+            .map_err(|error| format!("encode workspace archive {workspace_id}: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_archives(workspace_id, payload, created_at)
+                 VALUES(?1, ?2, ?3)
+                 ON CONFLICT(workspace_id) DO UPDATE SET
+                   payload=excluded.payload,
+                   created_at=excluded.created_at",
+                params![workspace_id, payload, now],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put workspace archive {workspace_id}: {error}"))
+    }
+
+    pub fn get_workspace_archive(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<crate::snapshot::WorkspaceSnapshot>, String> {
+        let payload = self
+            .connection
+            .query_row(
+                "SELECT payload FROM workspace_archives WHERE workspace_id=?1",
+                [workspace_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("get workspace archive {workspace_id}: {error}"))?;
+        payload
+            .map(|value| {
+                serde_json::from_str(&value)
+                    .map_err(|error| format!("decode workspace archive {workspace_id}: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn delete_workspace_archive(&self, workspace_id: &str) -> Result<(), String> {
+        self.connection
+            .execute(
+                "DELETE FROM workspace_archives WHERE workspace_id=?1",
+                [workspace_id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("delete workspace archive {workspace_id}: {error}"))
     }
 
     /// Record a sensitive-path grant. Idempotent: replaces any existing
@@ -1590,6 +1671,40 @@ mod tests {
         store.put_workspace(&record).unwrap();
         let loaded = store.get_workspace("ws-pr").unwrap().unwrap();
         assert_eq!(loaded.base, record.base);
+    }
+
+    #[test]
+    fn workspace_updates_preserve_leases_and_archives() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let mut record = sample_record("ws-update");
+        store.put_workspace(&record).unwrap();
+        store
+            .put_root_lease(
+                &crate::WorkspaceRootLease {
+                    bundle_id: "bundle-update".into(),
+                    workspace_id: record.workspace_id.clone(),
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    alias_path: record.execution_root.clone(),
+                },
+                1,
+            )
+            .unwrap();
+        let snapshot = crate::snapshot::WorkspaceSnapshot::default();
+        store
+            .put_workspace_archive(&record.workspace_id, &snapshot, 1)
+            .unwrap();
+
+        record.pinned = true;
+        record.state = crate::WorkspaceState::Archived;
+        store.put_workspace(&record).unwrap();
+
+        assert_eq!(store.list_bundle_leases("bundle-update").unwrap().len(), 1);
+        assert_eq!(
+            store.get_workspace_archive("ws-update").unwrap(),
+            Some(snapshot)
+        );
     }
 
     #[test]
