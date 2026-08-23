@@ -211,6 +211,9 @@
   "workspace": {
     "title": "工作区",
     "overview": "总览",
+    "environments": "环境",
+    "sourceControl": "源代码管理",
+    "viewsLabel": "工作区视图",
     "issueSummary": "议题",
     "projectSummary": "项目",
     "agentsWorking": "工作中的 Agent",

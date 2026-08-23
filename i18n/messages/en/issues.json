@@ -211,6 +211,9 @@
   "workspace": {
     "title": "Workspace",
     "overview": "Overview",
+    "environments": "Environments",
+    "sourceControl": "Source Control",
+    "viewsLabel": "Workspace views",
     "issueSummary": "Issues",
     "projectSummary": "Projects",
     "agentsWorking": "Agents working",

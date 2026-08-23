@@ -12478,6 +12478,7 @@
     },
     "workspace": {
       "agentsWorking": "工作中的 Agent",
+      "environments": "环境",
       "issueSummary": "议题",
       "manage": "管理工作区",
       "manageHint": "目录只有一个编辑入口 —— 工作区管理器。",
@@ -12487,11 +12488,13 @@
       "projectSummary": "项目",
       "recentActivity": "最近活动",
       "resources": "资源",
+      "sourceControl": "源代码管理",
       "title": "工作区",
       "trust": "工作区信任",
       "trustUnknown": "未决定",
       "trusted": "已信任",
-      "untrusted": "未信任"
+      "untrusted": "未信任",
+      "viewsLabel": "工作区视图"
     },
     "writeback": {
       "account": "以 {account} 的身份写入",

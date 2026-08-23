@@ -12478,6 +12478,7 @@
     },
     "workspace": {
       "agentsWorking": "Agents working",
+      "environments": "Environments",
       "issueSummary": "Issues",
       "manage": "Manage workspace",
       "manageHint": "Roots have exactly one editor — the workspace manager.",
@@ -12487,11 +12488,13 @@
       "projectSummary": "Projects",
       "recentActivity": "Recent activity",
       "resources": "Resources",
+      "sourceControl": "Source Control",
       "title": "Workspace",
       "trust": "Workspace trust",
       "trustUnknown": "Trust undecided",
       "trusted": "Trusted",
-      "untrusted": "Not trusted"
+      "untrusted": "Not trusted",
+      "viewsLabel": "Workspace views"
     },
     "writeback": {
       "account": "Writing as {account}",

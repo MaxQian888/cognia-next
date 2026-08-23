@@ -27,6 +27,8 @@ import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import { WorkspaceManageDialog } from "@/components/shell/workspace-manage-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SourceControlPanel } from "@/components/source-control/source-control-panel"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listIssues } from "@/lib/db/issues"
 import { listIssueProjects } from "@/lib/db/issue-projects"
@@ -99,139 +101,161 @@ export function WorkspaceOverview() {
         />
       }
     >
-      <div className="flex flex-col gap-6 p-4" data-testid="workspace-overview">
-        <section className="grid gap-3 sm:grid-cols-3">
-          <StatTile
-            label={t("workspace.openIssues")}
-            value={counts.open}
-            testId="workspace-open-issues"
-          />
-          <StatTile
-            label={t("workspace.projectSummary")}
-            value={(projects ?? []).length}
-            testId="workspace-project-count"
-          />
-          <StatTile
-            label={t("workspace.agentsWorking")}
-            value={runningIssueIds?.size ?? 0}
-            testId="workspace-agents-working"
-          />
-        </section>
+      <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+        <TabsList className="w-fit" aria-label={t("workspace.viewsLabel")}>
+          <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
+          <TabsTrigger value="environments">{t("workspace.environments")}</TabsTrigger>
+          <TabsTrigger value="source-control">{t("workspace.sourceControl")}</TabsTrigger>
+        </TabsList>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("workspace.issueSummary")}
-          </h2>
-          <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
-            {ISSUE_STATUSES.map((status) => (
-              <li
-                key={status}
-                className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
-                data-testid={`workspace-status-${status}`}
-              >
-                <IssueStatusIcon status={status} />
-                <span>{t(`status.${status}`)}</span>
-                <span className="tabular-nums text-muted-foreground">
-                  {counts.byStatus[status]}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <TabsContent
+          value="overview"
+          className="mt-0 flex flex-col gap-6"
+          data-testid="workspace-overview"
+        >
+          <section className="grid gap-3 sm:grid-cols-3">
+            <StatTile
+              label={t("workspace.openIssues")}
+              value={counts.open}
+              testId="workspace-open-issues"
+            />
+            <StatTile
+              label={t("workspace.projectSummary")}
+              value={(projects ?? []).length}
+              testId="workspace-project-count"
+            />
+            <StatTile
+              label={t("workspace.agentsWorking")}
+              value={runningIssueIds?.size ?? 0}
+              testId="workspace-agents-working"
+            />
+          </section>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("projects.title")}
-          </h2>
-          {(projects ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
-              {t("workspace.noProjects")}
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {(projects ?? []).map((project) => (
-                <li key={project.id}>
-                  <Link
-                    href={`/projects?id=${encodeURIComponent(project.id)}`}
-                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
-                    data-testid={`workspace-project-${project.id}`}
-                  >
-                    <span aria-hidden>{project.icon ?? "📁"}</span>
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    <Badge variant="outline" className="font-mono text-[10px]">
-                      {project.key}
-                    </Badge>
-                    <Badge variant="secondary" className="font-normal">
-                      {t(`projects.status.${project.status}`)}
-                    </Badge>
-                  </Link>
+          <section className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("workspace.issueSummary")}
+            </h2>
+            <ul className="flex flex-wrap gap-2" data-testid="workspace-status-breakdown">
+              {ISSUE_STATUSES.map((status) => (
+                <li
+                  key={status}
+                  className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs"
+                  data-testid={`workspace-status-${status}`}
+                >
+                  <IssueStatusIcon status={status} />
+                  <span>{t(`status.${status}`)}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {counts.byStatus[status]}
+                  </span>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
 
-        <section className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
+          <section className="flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("workspace.resources")}
+              {t("projects.title")}
             </h2>
-            <span className="flex-1" />
-            {/*
+            {(projects ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="workspace-no-projects">
+                {t("workspace.noProjects")}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {(projects ?? []).map((project) => (
+                  <li key={project.id}>
+                    <Link
+                      href={`/projects?id=${encodeURIComponent(project.id)}`}
+                      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                      data-testid={`workspace-project-${project.id}`}
+                    >
+                      <span aria-hidden>{project.icon ?? "📁"}</span>
+                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      <Badge variant="outline" className="font-mono text-[10px]">
+                        {project.key}
+                      </Badge>
+                      <Badge variant="secondary" className="font-normal">
+                        {t(`projects.status.${project.status}`)}
+                      </Badge>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {t("workspace.resources")}
+              </h2>
+              <span className="flex-1" />
+              {/*
               Deliberately the existing manager dialog rather than inline root
               editing: workspace roots have exactly one editor, and the trust
               gate lives on that path.
             */}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setManageOpen(true)}
-              title={t("workspace.manageHint")}
-              data-testid="workspace-manage-link"
-            >
-              <SettingsIcon className="size-4" />
-              {t("workspace.manage")}
-            </Button>
-          </div>
-          {workspace?.roots?.length ? (
-            <ul className="flex flex-col gap-1" data-testid="workspace-roots">
-              {workspace.roots.map((root) => {
-                const isTrusted = trustedPaths.has(normalizePath(root.path))
-                return (
-                  <li
-                    key={root.id}
-                    className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
-                  >
-                    <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
-                    {root.isPrimary ? (
-                      <Badge variant="secondary" className="text-[10px] font-normal">
-                        1
-                      </Badge>
-                    ) : null}
-                    <Badge
-                      variant={isTrusted ? "secondary" : "outline"}
-                      className="gap-1 text-[10px] font-normal"
-                      data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setManageOpen(true)}
+                title={t("workspace.manageHint")}
+                data-testid="workspace-manage-link"
+              >
+                <SettingsIcon className="size-4" />
+                {t("workspace.manage")}
+              </Button>
+            </div>
+            {workspace?.roots?.length ? (
+              <ul className="flex flex-col gap-1" data-testid="workspace-roots">
+                {workspace.roots.map((root) => {
+                  const isTrusted = trustedPaths.has(normalizePath(root.path))
+                  return (
+                    <li
+                      key={root.id}
+                      className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
                     >
-                      {isTrusted ? (
-                        <ShieldCheckIcon aria-hidden className="size-3" />
-                      ) : (
-                        <ShieldOffIcon aria-hidden className="size-3" />
-                      )}
-                      {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
-                    </Badge>
-                  </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
-          )}
-        </section>
+                      <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate font-mono">{root.path}</span>
+                      {root.isPrimary ? (
+                        <Badge variant="secondary" className="text-[10px] font-normal">
+                          1
+                        </Badge>
+                      ) : null}
+                      <Badge
+                        variant={isTrusted ? "secondary" : "outline"}
+                        className="gap-1 text-[10px] font-normal"
+                        data-testid={`workspace-root-trust-${isTrusted ? "trusted" : "untrusted"}`}
+                      >
+                        {isTrusted ? (
+                          <ShieldCheckIcon aria-hidden className="size-3" />
+                        ) : (
+                          <ShieldOffIcon aria-hidden className="size-3" />
+                        )}
+                        {isTrusted ? t("workspace.trusted") : t("workspace.untrusted")}
+                      </Badge>
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
+            )}
+          </section>
+        </TabsContent>
 
-        <WorkspaceEnvironmentList />
-      </div>
+        <TabsContent value="environments" className="mt-0" data-testid="workspace-environments">
+          <WorkspaceEnvironmentList />
+        </TabsContent>
+
+        <TabsContent
+          value="source-control"
+          className="mt-0 min-h-0 flex-1 overflow-hidden rounded-lg border"
+          data-testid="workspace-source-control"
+        >
+          <SourceControlPanel />
+        </TabsContent>
+      </Tabs>
       <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
     </FeaturePageShell>
   )

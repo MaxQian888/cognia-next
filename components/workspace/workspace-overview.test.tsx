@@ -31,6 +31,9 @@ jest.mock("@/components/feature-shell/feature-page-header", () => ({
 jest.mock("./workspace-environment-list", () => ({
   WorkspaceEnvironmentList: () => <section data-testid="workspace-environments-stub" />,
 }))
+jest.mock("@/components/source-control/source-control-panel", () => ({
+  SourceControlPanel: () => <section data-testid="workspace-source-control-stub" />,
+}))
 
 let projectsResult: unknown[] = []
 let issuesResult: unknown[] = []
@@ -67,6 +70,7 @@ jest.mock("@/stores/project/project-store", () => ({
 }))
 
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { WorkspaceOverview } from "./workspace-overview"
 
 function issue(status: string) {
@@ -90,7 +94,16 @@ describe("WorkspaceOverview", () => {
     }
     render(<WorkspaceOverview />)
     expect(screen.getByRole("heading", { name: "Cognia" })).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-overview")).toBeInTheDocument()
+  })
+
+  it("switches between Overview, Environments, and Source Control", async () => {
+    const user = userEvent.setup()
+    render(<WorkspaceOverview />)
+    await user.click(screen.getByRole("tab", { name: "workspace.environments" }))
     expect(screen.getByTestId("workspace-environments-stub")).toBeInTheDocument()
+    await user.click(screen.getByRole("tab", { name: "workspace.sourceControl" }))
+    expect(screen.getByTestId("workspace-source-control-stub")).toBeInTheDocument()
   })
 
   it("counts only unstarted and started issues as open", () => {
