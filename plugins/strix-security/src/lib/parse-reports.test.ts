@@ -41,6 +41,10 @@ describe("normalizeFinding", () => {
     }
     expect(normalizeFinding(raw, "run1", 0)).toEqual({
       runId: "run1",
+      // Derived identity, asserted separately below — `vulnId` is Strix's own
+      // per-run id and is deliberately NOT the identity.
+      fingerprint: expect.stringMatching(/^[0-9a-f]{16}$/),
+      ruleId: "cwe-89",
       vulnId: "vuln-0001",
       title: "SQL Injection",
       severity: "high",
@@ -58,6 +62,38 @@ describe("normalizeFinding", () => {
       method: "POST",
       codeLocations: [{ file: "a.py", startLine: 1, endLine: 3, snippet: "x", label: "sink" }],
     })
+  })
+
+  it("fingerprints identically across two runs of the same vulnerability", () => {
+    // The whole point of the shared fingerprint: a rescan must land on the
+    // same key so a triage decision survives it. `id` and `runId` differ here
+    // exactly as they would between two real scans.
+    const first = normalizeFinding(
+      { id: "vuln-1", rule_id: "sqli", title: "SQLi", code_locations: [{ file: "a.py" }] },
+      "run1",
+      0
+    )
+    const second = normalizeFinding(
+      { id: "vuln-9", rule_id: "sqli", title: "SQLi", code_locations: [{ file: "a.py" }] },
+      "run2",
+      3
+    )
+    expect(second.fingerprint).toBe(first.fingerprint)
+    expect(second.vulnId).not.toBe(first.vulnId)
+  })
+
+  it("ignores snippets and labels when deriving identity", () => {
+    const withSnippet = normalizeFinding(
+      { rule_id: "sqli", title: "t", code_locations: [{ file: "a.py", snippet: "before" }] },
+      "run1",
+      0
+    )
+    const without = normalizeFinding(
+      { rule_id: "sqli", title: "t", code_locations: [{ file: "a.py", snippet: "after" }] },
+      "run1",
+      0
+    )
+    expect(without.fingerprint).toBe(withSnippet.fingerprint)
   })
 
   it("provides fallbacks for missing id/title", () => {

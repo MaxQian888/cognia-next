@@ -5,18 +5,53 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { ShieldAlert } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { PluginViewProps } from "@/types/plugin/plugin-view"
-import type { PreflightStatus, ScanOptions } from "./types"
+import { toSarifLog } from "@cognia/security-findings"
+import { downloadBlob } from "@/lib/connectors/audit-export"
+import type {
+  FindingState,
+  FindingStateRow,
+  PreflightStatus,
+  ScanOptions,
+  StrixFinding,
+  SuppressionRule,
+} from "./types"
 import { peekStrixRuntime } from "./runtime"
 import { usePluginT } from "./use-plugin-t"
-import { clearAllRuns, deleteRun, getPref, listFindings, listRuns, setPref } from "./db"
+import {
+  addSuppressionRule,
+  clearAllRuns,
+  removeSuppressionRule,
+  deleteRun,
+  getPref,
+  listFindingStates,
+  listFindings,
+  listRuns,
+  listSuppressionRules,
+  setFindingState,
+  setPref,
+  suppressionRuleId,
+} from "./db"
 import { sortBySeverity } from "./lib/parse-reports"
+import { suppressedFingerprints, toScanReport } from "./lib/triage"
 import { runPreflight } from "./lib/preflight"
 import { purgeAllArtifacts, purgeRunArtifacts, runScan } from "./lib/strix-runner"
+import {
+  securityScanExecutionRunId,
+  syncSecurityScanExecutionRun,
+} from "@/lib/execution/security-scan-bridge"
+import { registerSecurityScanRunController } from "@/lib/execution/control-handlers"
 import { PreflightBanner } from "./components/preflight-banner"
 import { ScanForm } from "./components/scan-form"
 import { ScanConsole } from "./components/scan-console"
 import { FindingsList } from "./components/findings-list"
 import { ScanHistory } from "./components/scan-history"
+
+// Shared empty results: `useLiveQuery(...) ?? []` would mint a new array on
+// every render where the query has not resolved, changing the identity of
+// every callback that depends on it.
+const NO_FINDINGS: StrixFinding[] = []
+const NO_STATES: FindingStateRow[] = []
+const NO_RULES: SuppressionRule[] = []
 
 const uuid = () => crypto.randomUUID()
 const now = () => Date.now()
@@ -46,7 +81,73 @@ export function StrixPanel(_props: PluginViewProps) {
       async () =>
         dexie && selectedRunId ? sortBySeverity(await listFindings(dexie, selectedRunId)) : [],
       [dexie, selectedRunId]
-    ) ?? []
+    ) ?? NO_FINDINGS
+
+  // Triage is stored per TARGET, so it is loaded from the selected run's
+  // target rather than the run id — a verdict recorded on one scan applies to
+  // the next scan of the same system, which is the whole point of a stable
+  // fingerprint.
+  const selectedRun = runs.find((run) => run.runId === selectedRunId) ?? null
+  const target = selectedRun?.target ?? ""
+  const states =
+    useLiveQuery(
+      () => (dexie && target ? listFindingStates(dexie, target) : Promise.resolve([])),
+      [dexie, target]
+    ) ?? NO_STATES
+  const rules =
+    useLiveQuery(
+      () => (dexie && target ? listSuppressionRules(dexie, target) : Promise.resolve([])),
+      [dexie, target]
+    ) ?? NO_RULES
+
+  const onStateChange = useCallback(
+    (finding: StrixFinding, state: FindingState) => {
+      if (!dexie || !target || !finding.fingerprint) return
+      void setFindingState(dexie, {
+        target,
+        fingerprint: finding.fingerprint,
+        state,
+        now: now(),
+      })
+    },
+    [dexie, target]
+  )
+
+  const onSuppressRule = useCallback(
+    (finding: StrixFinding) => {
+      if (!dexie || !target || !finding.ruleId) return
+      void addSuppressionRule(dexie, { target, ruleId: finding.ruleId, now: now() })
+    },
+    [dexie, target]
+  )
+
+  const onUnsuppressRule = useCallback(
+    (finding: StrixFinding) => {
+      if (!dexie || !target || !finding.ruleId) return
+      void removeSuppressionRule(dexie, suppressionRuleId(target, finding.ruleId))
+    },
+    [dexie, target]
+  )
+
+  /**
+   * Export the selected run as SARIF 2.1.0.
+   *
+   * Suppressed findings are omitted from the log and the report carries the
+   * run's own completeness, so an unreadable scan exports with
+   * `executionSuccessful: false` rather than as a clean result. Proof-of-concept
+   * code never reaches the file — `toScanReport` drops it.
+   */
+  const onExport = useCallback(() => {
+    if (!selectedRun) return
+    const report = toScanReport(selectedRun, findings)
+    const log = toSarifLog(report, {
+      suppressed: suppressedFingerprints(findings, { states, rules }),
+    })
+    downloadBlob(
+      `cognia-security-${selectedRun.runId}.sarif`,
+      new Blob([JSON.stringify(log, null, 2)], { type: "application/sarif+json" })
+    )
+  }, [selectedRun, findings, states, rules])
 
   const check = useCallback(async () => {
     if (!terminal) return
@@ -84,6 +185,7 @@ export function StrixPanel(_props: PluginViewProps) {
       if (!terminal || !dexie) return
       setConsoleText("")
       const controller = new AbortController()
+      let unregisterController: (() => void) | undefined
       abortRef.current = controller
       setScanning(true)
       try {
@@ -96,11 +198,23 @@ export function StrixPanel(_props: PluginViewProps) {
           pollMs: 800,
           signal: controller.signal,
           onConsole: (txt) => setConsoleText((prev) => prev + txt),
-          onRun: (r) => setSelectedRunId(r.runId),
+          onRun: (r) => {
+            setSelectedRunId(r.runId)
+            unregisterController ??= registerSecurityScanRunController(
+              securityScanExecutionRunId(r.runId),
+              controller
+            )
+            // Project the scan onto the canonical run journal so it shows up
+            // in the task cockpit alongside every other long-running thing.
+            // Best-effort: a projection failure must never take down a scan
+            // that is otherwise working.
+            void syncSecurityScanExecutionRun(r).catch(() => undefined)
+          },
         })
         await setPref(dexie, "lastTarget", opts.target)
         await setPref(dexie, "lastModel", opts.model ?? "")
       } finally {
+        unregisterController?.()
         setScanning(false)
         abortRef.current = null
       }
@@ -182,7 +296,17 @@ export function StrixPanel(_props: PluginViewProps) {
               onCancel={onCancel}
             />
             <ScanConsole text={consoleText} />
-            {selectedRunId && <FindingsList findings={findings} />}
+            {selectedRunId && (
+              <FindingsList
+                findings={findings}
+                states={states}
+                rules={rules}
+                onStateChange={onStateChange}
+                onSuppressRule={onSuppressRule}
+                onUnsuppressRule={onUnsuppressRule}
+                onExport={onExport}
+              />
+            )}
           </div>
         </TabsContent>
 

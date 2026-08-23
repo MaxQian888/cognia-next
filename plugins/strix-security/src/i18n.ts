@@ -46,6 +46,18 @@ export const I18N_MESSAGES = {
     "plugin.strix-security.finding.remediation": "Remediation",
     "plugin.strix-security.finding.cvss": "CVSS {score}",
 
+    "plugin.strix-security.triage.label": "Verdict",
+    "plugin.strix-security.triage.state.open": "Open",
+    "plugin.strix-security.triage.state.accepted": "Risk accepted",
+    "plugin.strix-security.triage.state.false-positive": "False positive",
+    "plugin.strix-security.triage.state.fixed": "Fixed",
+    "plugin.strix-security.triage.suppressed": "Muted",
+    "plugin.strix-security.triage.muteRule": "Mute all {rule}",
+    "plugin.strix-security.triage.unmuteRule": "Unmute {rule}",
+    "plugin.strix-security.triage.mutedCount": "{count} muted",
+
+    "plugin.strix-security.export.sarif": "Export SARIF",
+
     "plugin.strix-security.history.title": "Scan history",
     "plugin.strix-security.history.empty": "No scans yet.",
     "plugin.strix-security.history.findingsCount": "{count} findings",
@@ -99,6 +111,18 @@ export const I18N_MESSAGES = {
     "plugin.strix-security.finding.poc": "复现验证",
     "plugin.strix-security.finding.remediation": "修复建议",
     "plugin.strix-security.finding.cvss": "CVSS {score}",
+
+    "plugin.strix-security.triage.label": "处置",
+    "plugin.strix-security.triage.state.open": "待处理",
+    "plugin.strix-security.triage.state.accepted": "已接受风险",
+    "plugin.strix-security.triage.state.false-positive": "误报",
+    "plugin.strix-security.triage.state.fixed": "已修复",
+    "plugin.strix-security.triage.suppressed": "已静默",
+    "plugin.strix-security.triage.muteRule": "静默全部 {rule}",
+    "plugin.strix-security.triage.unmuteRule": "取消静默 {rule}",
+    "plugin.strix-security.triage.mutedCount": "{count} 项已静默",
+
+    "plugin.strix-security.export.sarif": "导出 SARIF",
 
     "plugin.strix-security.history.title": "扫描历史",
     "plugin.strix-security.history.empty": "暂无扫描记录。",

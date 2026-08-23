@@ -29,6 +29,12 @@
     "lines": 75,
     "statements": 75
   },
+  "./packages/security-findings/src/**/*.{ts,tsx}": {
+    "branches": 90,
+    "functions": 90,
+    "lines": 90,
+    "statements": 90
+  },
   "./packages/eval-core/src/**/*.{ts,tsx}": {
     "branches": 90,
     "functions": 90,

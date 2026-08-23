@@ -2,7 +2,7 @@
   "id": "strix-security",
   "name": "Strix Security Scan",
   "version": "0.1.0",
-  "description": "Run Strix autonomous AI penetration tests from a dedicated panel and browse the findings. Desktop only \u2014 requires a local Docker daemon and the strix CLI on PATH.",
+  "description": "Run Strix autonomous AI penetration tests from a dedicated panel and browse the findings. Desktop only — requires a local Docker daemon and the strix CLI on PATH.",
   "type": "frontend",
   "capabilities": ["view-container", "commands"],
   "permissions": ["terminal:spawn", "terminal:write", "terminal:kill"],
@@ -37,13 +37,21 @@
       {
         "name": "prefs",
         "schema": "&key"
+      },
+      {
+        "name": "findingStates",
+        "schema": "&key, target, fingerprint, state"
+      },
+      {
+        "name": "suppressionRules",
+        "schema": "&id, target, ruleId"
       }
     ]
   },
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "reason": "Shells out to the strix CLI and drives a local Docker daemon \u2014 desktop only."
+      "reason": "Shells out to the strix CLI and drives a local Docker daemon — desktop only."
     },
     "tauri": {
       "availability": "supported",
@@ -51,7 +59,7 @@
     },
     "mobile": {
       "availability": "blocked",
-      "reason": "Requires a local Docker daemon and the strix CLI \u2014 unavailable on mobile."
+      "reason": "Requires a local Docker daemon and the strix CLI — unavailable on mobile."
     }
   },
   "commands": [

@@ -117,6 +117,7 @@ export async function runScan(opts: ScanOptions, deps: RunScanDeps): Promise<Str
       endedAt: deps.now(),
       exitCode,
       findingsCount: parsed.length,
+      reportUnreadable: unreadable,
       error: unreadable
         ? `Strix produced a vulnerability report that could not be parsed (${vulns.detail}). ` +
           `Treat this run as INCONCLUSIVE, not as zero findings.`

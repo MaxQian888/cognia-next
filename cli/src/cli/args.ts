@@ -48,6 +48,12 @@ export const BOOLEAN_FLAGS = new Set([
   "confirm",
   // `x --verbose` — log proxy requests for debugging.
   "verbose",
+  // `security scan --authorized` — the operator's assertion that they are
+  // cleared to attack the target. Must never swallow the next token, or
+  // `--authorized --target x` would consume the target as its value.
+  "authorized",
+  // `security --only-new` — gate on findings absent from the baseline.
+  "only-new",
 ])
 
 /** Commands whose first extra positional is a subcommand, not free content. */
@@ -62,6 +68,7 @@ export const GROUPED_COMMANDS = new Set([
   "worker",
   "sync",
   "backend",
+  "security",
 ])
 
 const SHORT_ALIAS: Record<string, string> = {

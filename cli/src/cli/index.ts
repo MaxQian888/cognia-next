@@ -20,6 +20,7 @@ import { backendCommand as defaultBackend } from "./backend-command"
 import { xCommand as defaultX } from "./x-command"
 import { rpcCommand as defaultRpc } from "./rpc-command"
 import { workerCommand as defaultWorker } from "./worker-command"
+import { securityCommand as defaultSecurity } from "./security-command"
 import {
   attachCommand as defaultAttach,
   detachCommand as defaultDetach,
@@ -79,6 +80,13 @@ Usage:
                      [--profile name] [-n lines]      background worker lifecycle
   cognia-agent worker service <install|uninstall> [--profile name]
                      start the worker daemon at login (launchd / systemd / schtasks)
+  cognia-agent security report --input <file> [--target t]
+  cognia-agent security scan --target <t> --authorized
+                     [--fail-on critical|high|medium|low|info] [--only-new]
+                     [--baseline f.sarif] [--sarif out.sarif] [--json]
+                     evaluate a scanner artifact (or run strix, then evaluate).
+                     Exit 0 clean / 1 inconclusive or unauthorized / 2 threshold met.
+                     LLM credentials come from env (LLM_API_KEY), never a flag
   cognia-agent serve [--server-url u] [--account id] [--home dir]
                      [--flush-debounce ms]           headless brain for cognia-server
                      (COGNIA_SERVER_URL / COGNIA_SERVICE_TOKEN / COGNIA_BRIDGE_URL /
@@ -127,6 +135,7 @@ const KNOWN_COMMANDS = new Set([
   "detach",
   "sync",
   "backend",
+  "security",
 ])
 
 export interface MainDeps {
@@ -149,6 +158,7 @@ export interface MainDeps {
   detach?: typeof defaultDetach
   syncStatus?: typeof defaultSyncStatus
   backend?: typeof defaultBackend
+  security?: typeof defaultSecurity
   out?: OutputSink
 }
 
@@ -232,6 +242,8 @@ export async function main(argv: string[], deps: MainDeps = {}): Promise<number>
       return (deps.detach ?? defaultDetach)(args, { out })
     case "sync":
       return (deps.syncStatus ?? defaultSyncStatus)(args, { out })
+    case "security":
+      return (deps.security ?? defaultSecurity)(args, { out })
     default:
       out.error(`unknown command "${args.command}"\n\n${HELP}`)
       return 2

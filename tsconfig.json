@@ -67,6 +67,8 @@
       "@cognia/plugin-sdk/api/native-anthropic-tool": [
         "./packages/plugin-sdk/src/api/native-anthropic-tool.ts"
       ],
+      "@cognia/security-findings": ["./packages/security-findings/src/index.ts"],
+      "@cognia/security-findings/*": ["./packages/security-findings/src/*"],
       "@cognia/redact": ["./packages/redact/src/index.ts"],
       "@cognia/redact/*": ["./packages/redact/src/*"],
       "@cognia/web-search": ["./packages/web-search/src/index.ts"],

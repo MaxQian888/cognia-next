@@ -78,6 +78,31 @@ describe("main", () => {
     expect(worker.mock.calls[0][0].subcommand).toBe("list")
   })
 
+  it("dispatches security scanning and propagates its exit code", async () => {
+    const security = jest.fn().mockResolvedValue(2)
+    // 2 is "findings met the threshold" — the dispatcher must pass it through
+    // rather than normalizing every non-zero to 1, or CI loses the distinction
+    // between a vulnerable build and a broken scanner.
+    expect(await main(["security", "report", "--input", "r.json"], { security })).toBe(2)
+    expect(security.mock.calls[0][0].subcommand).toBe("report")
+  })
+
+  it("treats security as a real command, not a --print prompt", async () => {
+    // `KNOWN_COMMANDS` membership: without it, `-p security …` would be routed
+    // to `run` as a prompt.
+    const security = jest.fn().mockResolvedValue(0)
+    const run = jest.fn().mockResolvedValue(0)
+    await main(["--print", "security", "scan"], { security, run })
+    expect(run).not.toHaveBeenCalled()
+    expect(security).toHaveBeenCalled()
+  })
+
+  it("lists security in the help text", async () => {
+    const s = sink()
+    await main(["--help"], { out: s.out })
+    expect(s.stdout()).toMatch(/cognia-agent security report/)
+  })
+
   it("lists durability in the help text", async () => {
     const s = sink()
     await main(["--help"], { out: s.out })

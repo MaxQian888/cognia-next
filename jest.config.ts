@@ -195,6 +195,7 @@ const projectCommon: Config = {
     "^@cognia/plugin-sdk/contracts$": "<rootDir>/packages/plugin-sdk/src/contracts/catalog.ts",
     "^@cognia/plugin-sdk/api/(tool|native-anthropic-tool)$":
       "<rootDir>/packages/plugin-sdk/src/api/$1.ts",
+    "^@cognia/security-findings(.*)$": "<rootDir>/packages/security-findings/src$1",
     "^@cognia/redact(.*)$": "<rootDir>/packages/redact/src$1",
     "^@cognia/web-search(.*)$": "<rootDir>/packages/web-search/src$1",
     "^@cognia/tts(.*)$": "<rootDir>/packages/tts/src$1",
@@ -465,6 +466,15 @@ const globalConfig: Config = {
     "packages/error-parsers/src/**/*.{ts,tsx}",
     // diagnostics is new code, held to the 90% floor rather than a legacy one.
     "packages/diagnostics/src/**/*.{ts,tsx}",
+    // security-findings is new code, held to the 90% floor. `types.ts` and
+    // `index.ts` are excluded on the same grounds as eval-core's: one is
+    // interface-only and the other pure re-exports, so v8 maps them back to
+    // source and scores both 0%, diluting a bucket where every executable
+    // module is at 100%.
+    "packages/security-findings/src/**/*.{ts,tsx}",
+    "!packages/security-findings/src/**/*.test.{ts,tsx}",
+    "!packages/security-findings/src/types.ts",
+    "!packages/security-findings/src/index.ts",
     // Type-only module: the v8 provider still maps it back to source and scores
     // it 0%, exactly as for transformers-runtime/src/types.ts below.
     "!packages/diagnostics/src/types.ts",
