@@ -14,7 +14,10 @@ import {
   __TESTING__,
   configureBehaviorEventExporters,
   createOtlpBehaviorEventExporter,
+  getBehaviorEventExporterHealthSnapshot,
+  shutdownBehaviorEventExporters,
   trackEvent,
+  trackEventDelivery,
 } from "./track-event"
 
 beforeEach(() => {
@@ -119,6 +122,24 @@ it("keeps the local sink independent when remote export fails", async () => {
   expect(appendBehaviorEvent).toHaveBeenCalledTimes(1)
 })
 
+it("reports the actual outcome of every attempted destination", async () => {
+  localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, "true")
+  configureBehaviorEventExporters([
+    {
+      id: "posthog-managed",
+      export: jest.fn().mockRejectedValue(new Error("managed unavailable")),
+    },
+    { id: "posthog-byo", export: jest.fn().mockResolvedValue(undefined) },
+  ])
+
+  await expect(
+    trackEventDelivery("telemetry.posthog.test", { source: "settings" })
+  ).resolves.toEqual({
+    delivered: ["local", "posthog-byo"],
+    failed: ["posthog-managed"],
+  })
+})
+
 it("routes eligible events only to the independently enabled destinations", async () => {
   saveBehaviorTelemetrySettings({
     ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
@@ -190,6 +211,22 @@ it("samples fractional rates deterministically", async () => {
   ).resolves.toBe(false)
   expect(appendBehaviorEvent).toHaveBeenCalledTimes(1)
   random.mockRestore()
+})
+
+it("does not sample away an explicit PostHog test event", async () => {
+  saveBehaviorTelemetrySettings({
+    ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+    enabled: true,
+    destinations: { local: false, remote: false },
+    sampleRate: 0,
+  })
+  const managed = jest.fn().mockResolvedValue(undefined)
+  configureBehaviorEventExporters([{ id: "posthog-managed", export: managed }])
+
+  await expect(
+    trackEventDelivery("telemetry.posthog.test", { source: "settings" })
+  ).resolves.toEqual({ delivered: ["posthog-managed"], failed: [] })
+  expect(managed).toHaveBeenCalledTimes(1)
 })
 
 it("returns false when no destination accepts the event", async () => {
@@ -304,4 +341,54 @@ it("closes only the exporters that a reconfigure actually removes", () => {
 
   configureBehaviorEventExporters([])
   expect(closeRetained).toHaveBeenCalledTimes(1)
+})
+
+it("awaits exporter shutdown during a normal runtime teardown", async () => {
+  const shutdown = jest.fn(async () => undefined)
+  configureBehaviorEventExporters([
+    { id: "posthog-managed", export: jest.fn(), close: jest.fn(), shutdown },
+  ])
+
+  await shutdownBehaviorEventExporters()
+
+  expect(shutdown).toHaveBeenCalledTimes(1)
+})
+
+it("discards pending remote batches immediately when master consent is withdrawn", () => {
+  const discardPending = jest.fn()
+  const close = jest.fn()
+  saveBehaviorTelemetrySettings({
+    ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+    enabled: true,
+  })
+  configureBehaviorEventExporters([
+    { id: "posthog-managed", export: jest.fn(), close, discardPending },
+  ])
+
+  saveBehaviorTelemetrySettings({
+    ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+    enabled: false,
+  })
+
+  expect(discardPending).toHaveBeenCalledTimes(1)
+  expect(close).not.toHaveBeenCalled()
+})
+
+it("exposes health for configured behavior exporters", () => {
+  const getHealth = jest.fn(() => ({
+    transport: "posthog-managed",
+    status: "healthy" as const,
+    queueDepth: 0,
+    retryCount: 2,
+    droppedEntries: 0,
+    updatedAt: "2026-08-22T00:00:00.000Z",
+  }))
+  configureBehaviorEventExporters([
+    { id: "posthog-managed", export: jest.fn(), getHealth },
+    { id: "otlp", export: jest.fn() },
+  ])
+
+  expect(getBehaviorEventExporterHealthSnapshot()).toEqual({
+    "posthog-managed": expect.objectContaining({ transport: "posthog-managed", retryCount: 2 }),
+  })
 })

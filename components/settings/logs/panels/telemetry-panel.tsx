@@ -29,28 +29,14 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { clearBehaviorEvents, exportBehaviorEvents } from "@/lib/db/behavior-events"
 import { BEHAVIOR_TELEMETRY_CATEGORIES } from "@/lib/telemetry/events/settings"
-import { trackEvent } from "@/lib/telemetry/events/track-event"
+import { trackEventDelivery } from "@/lib/telemetry/events/track-event"
+import { isValidPostHogProject } from "@/lib/telemetry/posthog-product"
 
 import { SliderField } from "../components/slider-field"
 import type { UseLogSettingsDraftResult } from "@/hooks/logging/use-log-settings-draft"
 
 export interface LogsTelemetryPanelProps {
   draft: UseLogSettingsDraftResult
-}
-
-/**
- * A PostHog destination is usable only with a public ingestion token and a
- * parseable host. Anything else would silently drop every event, so the scope
- * switches stay disabled rather than accepting consent that cannot be honoured.
- */
-export function isValidPostHogProject(host: string, projectToken: string): boolean {
-  if (!projectToken.trim().startsWith("phc_")) return false
-  try {
-    const url = new URL(host)
-    return url.protocol === "https:" || url.protocol === "http:"
-  } catch {
-    return false
-  }
 }
 
 interface ScopeControlsProps {
@@ -139,9 +125,11 @@ export function LogsTelemetryPanel({ draft }: LogsTelemetryPanelProps) {
     process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN ?? ""
   )
   const byoAvailable = isValidPostHogProject(posthog.byo.host, posthog.byo.projectToken)
-  const hasProductDestination =
-    (managedAvailable && posthog.managed.productAnalytics) ||
-    (byoAvailable && posthog.byo.productAnalytics)
+  const productDestinationIds = [
+    ...(managedAvailable && posthog.managed.productAnalytics ? ["posthog-managed"] : []),
+    ...(byoAvailable && posthog.byo.productAnalytics ? ["posthog-byo"] : []),
+  ]
+  const hasProductDestination = productDestinationIds.length > 0
 
   const exportEvents = async (format: "json" | "csv") => {
     const contents = await exportBehaviorEvents(format)
@@ -441,8 +429,13 @@ export function LogsTelemetryPanel({ draft }: LogsTelemetryPanelProps) {
                 setTestStatus("blocked")
                 return
               }
-              const sent = await trackEvent("telemetry.posthog.test", { source: "settings" })
-              setTestStatus(sent ? "sent" : "blocked")
+              const delivery = await trackEventDelivery("telemetry.posthog.test", {
+                source: "settings",
+              })
+              const everyPostHogDestinationAccepted = productDestinationIds.every((id) =>
+                delivery.delivered.includes(id)
+              )
+              setTestStatus(everyPostHogDestinationAccepted ? "sent" : "blocked")
             }}
           >
             {t("settings.posthog.sendTest")}

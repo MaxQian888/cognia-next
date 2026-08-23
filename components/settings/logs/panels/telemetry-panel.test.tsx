@@ -17,20 +17,26 @@ jest.mock("@/lib/db/behavior-events", () => ({
 }))
 
 const trackEvent = jest.fn(async () => true)
+const trackEventDelivery = jest.fn(async () => ({
+  delivered: ["posthog-byo"],
+  failed: [] as string[],
+}))
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   ...jest.requireActual("@/lib/telemetry/events/track-event"),
   trackEvent: (...args: unknown[]) => trackEvent(...(args as [])),
+  trackEventDelivery: (...args: unknown[]) => trackEventDelivery(...(args as [])),
 }))
 
 import { useEffect } from "react"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { clearBehaviorEvents, exportBehaviorEvents } from "@/lib/db/behavior-events"
 import { BEHAVIOR_TELEMETRY_CATEGORIES } from "@/lib/telemetry/events/settings"
+import { isValidPostHogProject } from "@/lib/telemetry/posthog-product"
 import { useLogSettingsDraft } from "@/hooks/logging/use-log-settings-draft"
 
-import { LogsTelemetryPanel, isValidPostHogProject } from "./telemetry-panel"
+import { LogsTelemetryPanel } from "./telemetry-panel"
 
 let draft: ReturnType<typeof useLogSettingsDraft>
 
@@ -48,6 +54,8 @@ beforeEach(() => {
   URL.createObjectURL = jest.fn(() => "blob:mock")
   URL.revokeObjectURL = jest.fn()
   trackEvent.mockClear()
+  trackEventDelivery.mockClear()
+  trackEventDelivery.mockResolvedValue({ delivered: ["posthog-byo"], failed: [] })
   ;(exportBehaviorEvents as jest.Mock).mockClear()
   ;(clearBehaviorEvents as jest.Mock).mockClear()
 })
@@ -250,6 +258,31 @@ describe("PostHog", () => {
     await user.click(screen.getByRole("button", { name: /Send test event/i }))
 
     expect(trackEvent).not.toHaveBeenCalled()
+    expect(screen.getByRole("status")).toHaveTextContent("Not sent.")
+  })
+
+  it("reports failure when PostHog rejects the test even if another sink succeeds", async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+
+    await user.type(screen.getByLabelText("BYO PostHog host"), "https://us.i.posthog.com")
+    await user.type(screen.getByLabelText("BYO project token"), "phc_abc")
+    await user.click(screen.getByTestId("posthog-byo-product-switch"))
+    await user.click(screen.getByTestId("behavior-telemetry-switch"))
+    await act(async () => {
+      await draft.save()
+    })
+    await waitFor(() => expect(draft.status).not.toBe("dirty"))
+    trackEventDelivery.mockResolvedValueOnce({
+      delivered: ["local"],
+      failed: ["posthog-byo"],
+    })
+
+    await user.click(screen.getByRole("button", { name: /Send test event/i }))
+
+    expect(trackEventDelivery).toHaveBeenCalledWith("telemetry.posthog.test", {
+      source: "settings",
+    })
     expect(screen.getByRole("status")).toHaveTextContent("Not sent.")
   })
 })

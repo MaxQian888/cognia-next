@@ -187,14 +187,6 @@ export interface TelemetryEventCatalog {
     executionKind: string
     legacyMigrated: boolean
   }
-  /** Resolver-v2 observation while the legacy rail still owns execution. */
-  "agent.execution.shadow": {
-    runtimeAdapter: string
-    executionKind: string
-    routeKind: string
-    missingRequiredCount: number
-    compatibilityEvidence: string
-  }
   "support.session.opened": { sessionId: string }
   "support.diagnostics.consent.changed": {
     enabled: boolean
@@ -256,7 +248,6 @@ export const TELEMETRY_EVENT_CATALOG: Readonly<
   "telemetry.preference.changed": { category: "system" },
   "telemetry.posthog.test": { category: "system" },
   "agent.execution.resolved": { category: "system" },
-  "agent.execution.shadow": { category: "system" },
   "support.session.opened": { category: "system" },
   "support.diagnostics.consent.changed": { category: "system" },
   "support.feedback.draft.opened": { category: "system" },

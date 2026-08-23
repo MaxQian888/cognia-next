@@ -12,6 +12,7 @@ const mockSubscribe = jest.fn<{ unsubscribe: typeof mockUnsubscribe }, [unknown]
   unsubscribe: mockUnsubscribe,
 }))
 const mockConfigureExporters = jest.fn()
+const mockShutdownExporters = jest.fn(async () => undefined)
 const mockLiveQuery = jest.fn((query: () => Promise<unknown>) => ({
   query,
   subscribe: (observer: unknown) => mockSubscribe(observer),
@@ -42,6 +43,7 @@ jest.mock("@/lib/telemetry/events/settings", () => ({
 }))
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   configureBehaviorEventExporters: (...args: unknown[]) => mockConfigureExporters(...args),
+  shutdownBehaviorEventExporters: () => mockShutdownExporters(),
   createOtlpBehaviorEventExporter: (exportBody: (body: string) => Promise<void>) => ({
     id: "otlp",
     requiresRemoteConsent: true,
@@ -54,6 +56,8 @@ interface StubExporter {
   requiresRemoteConsent?: boolean
   export: (body: string) => Promise<void>
 }
+
+let behaviorTelemetryModule: typeof import("./behavior-telemetry")
 
 /** The OTLP body sender behind the last installed exporter set. */
 function otlpSender(): ((body: string) => Promise<void>) | undefined {
@@ -73,7 +77,7 @@ const mockConfigure = jest.mocked(configureBehaviorTelemetrySettings)
 describe("behavior telemetry headless runtime", () => {
   beforeAll(async () => {
     __resetHeadlessRuntimesForTesting()
-    await import("./behavior-telemetry")
+    behaviorTelemetryModule = await import("./behavior-telemetry")
   })
 
   beforeEach(() => {
@@ -87,6 +91,7 @@ describe("behavior telemetry headless runtime", () => {
     delete process.env.NEXT_PUBLIC_POSTHOG_HOST
     delete process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN
     delete process.env.COGNIA_OBSERVABILITY_INSTALLATION_ID
+    delete process.env.COGNIA_POSTHOG_PRODUCT_DISTINCT_ID
   })
 
   it("registers and installs the structured account policy", async () => {
@@ -105,6 +110,7 @@ describe("behavior telemetry headless runtime", () => {
     expect(mockSubscribe).toHaveBeenCalledTimes(1)
     await stop!()
     expect(mockUnsubscribe).toHaveBeenCalledTimes(1)
+    expect(mockShutdownExporters).toHaveBeenCalledTimes(1)
     expect(mockConfigure).toHaveBeenLastCalledWith(null)
   })
 
@@ -158,7 +164,7 @@ describe("behavior telemetry headless runtime", () => {
       })
     )
     await stop!()
-    expect(mockConfigureExporters).toHaveBeenLastCalledWith([])
+    expect(mockShutdownExporters).toHaveBeenCalledTimes(1)
     fetchSpy.mockRestore()
   })
 
@@ -255,6 +261,31 @@ describe("behavior telemetry headless runtime", () => {
   })
 
   describe("headless PostHog destination", () => {
+    it("keeps the headless Product Analytics id separate from AI observability", () => {
+      expect(
+        behaviorTelemetryModule.resolveHeadlessPostHogProductDistinctId({
+          COGNIA_OBSERVABILITY_INSTALLATION_ID: "ai-install-1",
+        })
+      ).toBe("ai-install-1.product")
+      expect(
+        behaviorTelemetryModule.resolveHeadlessPostHogProductDistinctId({
+          COGNIA_OBSERVABILITY_INSTALLATION_ID: "ai-install-1",
+          COGNIA_POSTHOG_PRODUCT_DISTINCT_ID: "product-install-1",
+        })
+      ).toBe("product-install-1")
+      expect(
+        behaviorTelemetryModule.resolveHeadlessPostHogProductDistinctId({
+          COGNIA_OBSERVABILITY_INSTALLATION_ID: "ai-install-1",
+          COGNIA_POSTHOG_PRODUCT_DISTINCT_ID: "ai-install-1",
+        })
+      ).toBe("ai-install-1.product")
+      expect(
+        behaviorTelemetryModule.resolveHeadlessPostHogProductDistinctId({
+          COGNIA_POSTHOG_PRODUCT_DISTINCT_ID: "jane.doe@example.com",
+        })
+      ).toBeNull()
+    })
+
     it("installs a PostHog exporter alongside OTLP when host, token and installation id are set", async () => {
       process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "https://collector.example/v1/logs"
       process.env.COGNIA_POSTHOG_HOST = "https://posthog.example"

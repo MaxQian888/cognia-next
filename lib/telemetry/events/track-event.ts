@@ -1,6 +1,7 @@
 import { hasNoLeakingPii } from "@cognia/redact"
+import type { TransportHealthSnapshot } from "@/types/logging"
 import { appendBehaviorEvent } from "@/lib/db/behavior-events"
-import { getBehaviorTelemetrySettings } from "./settings"
+import { getBehaviorTelemetrySettings, subscribeBehaviorTelemetrySettings } from "./settings"
 import {
   TELEMETRY_EVENT_CATALOG,
   type TelemetryEventCatalog,
@@ -29,9 +30,28 @@ export interface BehaviorEventExporter {
   requiresRemoteConsent?: boolean
   /** Withdraw consent immediately and discard any destination-owned queue. */
   close?: () => void | Promise<void>
+  /** Drop queued work without disabling a configured destination. */
+  discardPending?: () => void
+  /** Normal runtime teardown: stop accepting events and drain pending work. */
+  shutdown?: () => void | Promise<void>
+  /** Current exporter delivery health for the unified Logs overview. */
+  getHealth?: () => TransportHealthSnapshot
+}
+
+export interface BehaviorEventDeliveryResult {
+  /** Destination ids that accepted the event (`local` denotes Dexie). */
+  delivered: string[]
+  /** Destination ids that were attempted but rejected the event. */
+  failed: string[]
 }
 
 let exporters: BehaviorEventExporter[] = []
+
+subscribeBehaviorTelemetrySettings((previous, next) => {
+  if (previous.enabled && !next.enabled) {
+    for (const exporter of exporters) exporter.discardPending?.()
+  }
+})
 
 /**
  * Swap the active exporter set.
@@ -47,6 +67,25 @@ export function configureBehaviorEventExporters(next: BehaviorEventExporter[]): 
     if (!retained.has(exporter)) void exporter.close?.()
   }
   exporters = [...next]
+}
+
+export async function shutdownBehaviorEventExporters(): Promise<void> {
+  const shuttingDown = exporters
+  exporters = []
+  await Promise.allSettled(
+    shuttingDown.map((exporter) =>
+      Promise.resolve(exporter.shutdown ? exporter.shutdown() : exporter.close?.())
+    )
+  )
+}
+
+export function getBehaviorEventExporterHealthSnapshot(): Record<string, TransportHealthSnapshot> {
+  return Object.fromEntries(
+    exporters.flatMap((exporter) => {
+      const health = exporter.getHealth?.()
+      return health ? [[exporter.id, health] as const] : []
+    })
+  )
 }
 
 export function createOtlpBehaviorEventExporter(exportBody: OtlpBodySender): BehaviorEventExporter {
@@ -117,23 +156,28 @@ function toOtlpLogBody(name: TelemetryEventName, attributes: EventAttributes, at
   })
 }
 
-export async function trackEvent<Name extends TelemetryEventName>(
+export async function trackEventDelivery<Name extends TelemetryEventName>(
   name: Name,
   attributes: TelemetryEventCatalog[Name]
-): Promise<boolean> {
+): Promise<BehaviorEventDeliveryResult> {
+  const empty = (): BehaviorEventDeliveryResult => ({ delivered: [], failed: [] })
   const settings = getBehaviorTelemetrySettings()
-  if (!settings.enabled) return false
+  if (!settings.enabled) return empty()
   const definition = TELEMETRY_EVENT_CATALOG[name]
-  if (!definition || !settings.categories[definition.category]) return false
+  if (!definition || !settings.categories[definition.category]) return empty()
+  // A user-triggered delivery probe must be deterministic: it still requires
+  // the master/category consent and passes every privacy gate, but sampling it
+  // away would make a healthy PostHog destination appear broken at random.
+  const isDeliveryProbe = name === "telemetry.posthog.test"
   if (
-    settings.sampleRate <= 0 ||
-    (settings.sampleRate < 1 && Math.random() >= settings.sampleRate)
+    !isDeliveryProbe &&
+    (settings.sampleRate <= 0 || (settings.sampleRate < 1 && Math.random() >= settings.sampleRate))
   ) {
-    return false
+    return empty()
   }
   const normalized = normalizeEventAttributes(attributes)
-  if (!normalized) return false
-  if (!hasNoLeakingPii(JSON.stringify({ name, attributes: normalized }))) return false
+  if (!normalized) return empty()
+  if (!hasNoLeakingPii(JSON.stringify({ name, attributes: normalized }))) return empty()
 
   const at = Date.now()
   const envelope: BehaviorEventEnvelope = {
@@ -143,21 +187,33 @@ export async function trackEvent<Name extends TelemetryEventName>(
     attributes: normalized,
   }
   const sessionId = "sessionId" in normalized ? String(normalized.sessionId) : undefined
-  const writes: Promise<unknown>[] = []
+  const writes: Array<{ id: string; promise: Promise<unknown> }> = []
   if (settings.destinations.local) {
-    writes.push(
-      appendBehaviorEvent(
+    writes.push({
+      id: "local",
+      promise: appendBehaviorEvent(
         { eventName: name, at, sessionId, attributes: normalized },
         { maxEntries: settings.maxStoredEvents, maxAgeDays: settings.retentionDays }
-      )
-    )
+      ),
+    })
   }
   for (const eventExporter of exporters) {
     if (eventExporter.requiresRemoteConsent && !settings.destinations.remote) continue
-    writes.push(eventExporter.export(envelope))
+    writes.push({ id: eventExporter.id, promise: eventExporter.export(envelope) })
   }
-  const results = await Promise.allSettled(writes)
-  return results.some((result) => result.status === "fulfilled")
+  const results = await Promise.allSettled(writes.map((write) => write.promise))
+  return results.reduce<BehaviorEventDeliveryResult>((delivery, result, index) => {
+    delivery[result.status === "fulfilled" ? "delivered" : "failed"].push(writes[index].id)
+    return delivery
+  }, empty())
+}
+
+export async function trackEvent<Name extends TelemetryEventName>(
+  name: Name,
+  attributes: TelemetryEventCatalog[Name]
+): Promise<boolean> {
+  const delivery = await trackEventDelivery(name, attributes)
+  return delivery.delivered.length > 0
 }
 
 export const __TESTING__ = { toOtlpLogBody }

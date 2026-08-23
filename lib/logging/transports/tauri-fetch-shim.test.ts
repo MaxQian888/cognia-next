@@ -29,6 +29,7 @@ describe("createTauriOtlpFetch", () => {
 
     expect(response.status).toBe(202)
     expect(invokeMock).toHaveBeenCalledWith("telemetry_otlp_export", {
+      requestId: expect.any(String),
       endpoint: "https://collector.example/v1/traces",
       body: '{"resourceSpans":[]}',
       headers: { "content-type": "application/json", "x-tenant": "prod" },
@@ -75,6 +76,25 @@ describe("createTauriOtlpFetch", () => {
     )
     expect(response.ok).toBe(false)
     expect(response.status).toBe(503)
+  })
+
+  it("cancels the native request when its AbortSignal is withdrawn", async () => {
+    let requestId = ""
+    invokeMock.mockImplementation((command, args) => {
+      if (command === "telemetry_otlp_cancel") return Promise.resolve(true)
+      requestId = String((args as { requestId?: unknown }).requestId)
+      return new Promise(() => {})
+    })
+    const controller = new AbortController()
+    const pending = createTauriOtlpFetch({ credential: { kind: "none" } })(
+      "http://localhost:4318/v1/traces",
+      { method: "POST", body: "{}", signal: controller.signal }
+    )
+
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "telemetry_otlp_cancel", { requestId })
   })
 
   it("accepts URL inputs and rejects unsupported request shapes", async () => {

@@ -33,6 +33,8 @@ interface TelemetryExportResult {
   accepted: boolean
 }
 
+let requestSequence = 0
+
 const SENSITIVE_HEADERS = new Set([
   "authorization",
   "proxy-authorization",
@@ -59,11 +61,23 @@ function normalizeHeaders(init: RequestInit | undefined): Record<string, string>
   return headers
 }
 
+function nextTelemetryRequestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  requestSequence += 1
+  return `telemetry-${Date.now().toString(16)}-${requestSequence.toString(16)}`
+}
+
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted", "AbortError")
+}
+
 /** Fetch-compatible OTLP POST implemented by the Tauri Rust command. */
 export function createTauriOtlpFetch(options: TauriOtlpFetchOptions): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     if (init?.signal?.aborted) {
-      throw new DOMException("The operation was aborted", "AbortError")
+      throw abortError()
     }
     if (init?.method && init.method.toUpperCase() !== "POST") {
       throw new Error("Tauri OTLP export only supports POST")
@@ -71,13 +85,27 @@ export function createTauriOtlpFetch(options: TauriOtlpFetchOptions): typeof fet
     if (init?.body != null && typeof init.body !== "string") {
       throw new Error("Tauri OTLP export requires a string body")
     }
-    const result = await invoke<TelemetryExportResult>("telemetry_otlp_export", {
+    const requestId = nextTelemetryRequestId()
+    const pending = invoke<TelemetryExportResult>("telemetry_otlp_export", {
+      requestId,
       endpoint: endpointOf(input),
       body: typeof init?.body === "string" ? init.body : "",
       headers: normalizeHeaders(init),
       credential: options.credential,
       traceparent: options.traceparent,
     })
+    const result = init?.signal
+      ? await new Promise<TelemetryExportResult>((resolve, reject) => {
+          const onAbort = () => {
+            void invoke("telemetry_otlp_cancel", { requestId }).catch(() => {})
+            reject(abortError())
+          }
+          init.signal?.addEventListener("abort", onAbort, { once: true })
+          pending
+            .then(resolve, reject)
+            .finally(() => init.signal?.removeEventListener("abort", onAbort))
+        })
+      : await pending
     return new Response("", { status: result.status })
   }
 }
@@ -86,12 +114,14 @@ export function createTauriOtlpFetch(options: TauriOtlpFetchOptions): typeof fet
 export async function postTauriTelemetryJson(
   endpoint: string,
   body: string,
-  credential: TauriTelemetryCredential
+  credential: TauriTelemetryCredential,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await createTauriOtlpFetch({ credential })(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body,
+    signal,
   })
   if (!response.ok) throw new Error(`Native telemetry export failed with ${response.status}`)
 }

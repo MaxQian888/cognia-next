@@ -26,6 +26,8 @@ test("rejects Personal API Keys and non-HTTP PostHog destinations", () => {
     __TESTING__.parsePostHogDestinations(
       JSON.stringify([
         { id: "byo", host: "https://posthog.example", projectToken: "phx_personal" },
+        { id: "byo", host: "https://posthog.example", projectToken: "phc_" },
+        { id: "byo", host: "https://posthog.example", projectToken: "phc_bad token" },
         { id: "byo", host: "file:///tmp/posthog", projectToken: "phc_project" },
       ])
     ),
@@ -130,6 +132,12 @@ test("remote span filtering removes content, tool arguments, files, URLs, and ex
       "exception.message": "private exception",
     },
     status: { code: 2, message: "private failure" },
+    resource: {
+      attributes: {
+        "service.name": "cognia-sidecar",
+        "process.command": "/Users/private/bin/node",
+      },
+    },
     events: [
       {
         name: "generation.status",
@@ -142,7 +150,89 @@ test("remote span filtering removes content, tool arguments, files, URLs, and ex
   assert.equal(sanitized.attributes["gen_ai.request.model"], "gpt-5")
   assert.equal(sanitized.events[0].attributes["cognia.span.status"], "failed")
   assert.deepEqual(sanitized.status, { code: 2 })
+  assert.deepEqual(sanitized.resource.attributes, { "service.name": "cognia-sidecar" })
   assert.equal(sanitized.spanContext().traceId, "a".repeat(32))
+})
+
+test("remote span filtering drops a sanitized span when an allowed value still contains PII", () => {
+  let delegated = false
+  let result
+  const exporter = new __TESTING__.PrivacyFilteringSpanExporter({
+    export() {
+      delegated = true
+    },
+    shutdown: async () => undefined,
+  })
+  exporter.export(
+    [
+      {
+        name: "chat jane.doe@example.com",
+        attributes: { "gen_ai.request.model": "model@example.com" },
+        events: [],
+      },
+    ],
+    (value) => {
+      result = value
+    }
+  )
+
+  assert.equal(delegated, false)
+  assert.deepEqual(result, { code: 0 })
+})
+
+test("remote span filtering forwards safe spans and removes only unsafe members of a batch", () => {
+  let delegatedSpans = []
+  const exporter = new __TESTING__.PrivacyFilteringSpanExporter({
+    export(spans, callback) {
+      delegatedSpans = spans
+      callback({ code: 0 })
+    },
+    shutdown: async () => undefined,
+  })
+  exporter.export(
+    [
+      {
+        name: "chat jane.doe@example.com",
+        attributes: { "gen_ai.request.model": "model@example.com" },
+        events: [],
+      },
+      {
+        name: "chat gpt-5",
+        attributes: { "gen_ai.request.model": "gpt-5" },
+        events: [],
+      },
+    ],
+    () => undefined
+  )
+
+  assert.equal(delegatedSpans.length, 1)
+  assert.equal(delegatedSpans[0].name, "chat gpt-5")
+})
+
+test("privacy filtering exporter forwards lifecycle calls when supported", async () => {
+  let shutdownCalls = 0
+  let flushCalls = 0
+  const exporter = new __TESTING__.PrivacyFilteringSpanExporter({
+    export() {},
+    shutdown: async () => {
+      shutdownCalls += 1
+    },
+    forceFlush: async () => {
+      flushCalls += 1
+    },
+  })
+
+  await exporter.forceFlush()
+  await exporter.shutdown()
+
+  assert.equal(flushCalls, 1)
+  assert.equal(shutdownCalls, 1)
+
+  const exporterWithoutFlush = new __TESTING__.PrivacyFilteringSpanExporter({
+    export() {},
+    shutdown: async () => undefined,
+  })
+  await exporterWithoutFlush.forceFlush()
 })
 
 // ---- local span repatriation ---------------------------------------------

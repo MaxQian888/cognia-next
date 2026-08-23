@@ -106,14 +106,57 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     await trackEvent("telemetry.posthog.test", { source: "settings" })
 
     expect(mockPostTauriTelemetryJson).toHaveBeenCalledTimes(1)
-    const [endpoint, body, credential] = mockPostTauriTelemetryJson.mock.calls[0]
+    const [endpoint, body, credential, signal] = mockPostTauriTelemetryJson.mock.calls[0]
     // The renderer CSP blocks a direct connection, so this must not be a
     // browser fetch — it has to cross into Rust.
     expect(endpoint).toBe("https://posthog.example/batch/")
     expect(credential).toEqual({ kind: "none" })
+    expect(signal).toEqual(expect.any(AbortSignal))
     const payload = JSON.parse(body as string)
     expect(payload.api_key).toBe("phc_project")
     expect(payload.batch[0].event).toBe("telemetry.posthog.test")
+    expect(payload.batch[0].distinct_id).toBe(
+      localStorage.getItem("cognia-posthog-product-distinct-id")
+    )
+    expect(payload.batch[0].distinct_id).not.toBe(
+      localStorage.getItem("cognia-observability-installation-id")
+    )
+  })
+
+  it("wires PostHog AI with its separate identity and 4 MB request limit", async () => {
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        posthogConfig: {
+          managed: { productAnalytics: false, aiObservability: false },
+          byo: {
+            productAnalytics: true,
+            aiObservability: true,
+            host: "https://posthog.example",
+            projectToken: "phc_project",
+          },
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    const { getTransport } = await import("@cognia/logging/core")
+    const transport = getTransport("agent-trace-posthog-byo") as unknown as {
+      options: {
+        destinationFingerprint: string
+        maxRequestBytes: number
+        resource: { spanAttributes?: Record<string, string> }
+      }
+    }
+
+    expect(transport.options.maxRequestBytes).toBe(4 * 1024 * 1024)
+    expect(transport.options.destinationFingerprint).toContain("https://posthog.example")
+    expect(transport.options.resource.spanAttributes?.["posthog.distinct_id"]).toBe(
+      localStorage.getItem("cognia-observability-installation-id")
+    )
+    expect(transport.options.resource.spanAttributes?.["posthog.distinct_id"]).not.toBe(
+      localStorage.getItem("cognia-posthog-product-distinct-id")
+    )
   })
 
   it("registers the default transports on first run", async () => {

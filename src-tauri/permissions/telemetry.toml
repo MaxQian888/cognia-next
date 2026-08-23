@@ -3,6 +3,7 @@ identifier = "telemetry"
 description = "Allows the main window to configure telemetry, export JSON payloads, and manage write-only telemetry secrets."
 permissions = [
   "allow-telemetry-otlp-export",
+  "allow-telemetry-otlp-cancel",
   "allow-telemetry-secret-set",
   "allow-telemetry-secret-has",
   "allow-telemetry-secret-clear",
@@ -13,6 +14,11 @@ permissions = [
 identifier = "allow-telemetry-otlp-export"
 description = "Allows exporting a validated JSON telemetry payload through the native HTTP client."
 commands.allow = ["telemetry_otlp_export"]
+
+[[permission]]
+identifier = "allow-telemetry-otlp-cancel"
+description = "Allows cancelling an in-flight native telemetry export by its opaque request id."
+commands.allow = ["telemetry_otlp_cancel"]
 
 [[permission]]
 identifier = "allow-telemetry-secret-set"

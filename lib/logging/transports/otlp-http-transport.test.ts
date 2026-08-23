@@ -146,6 +146,137 @@ describe("OtlpHttpTransport buffering & flush", () => {
     expect(fetchMock).not.toHaveBeenCalled()
     expect(t.getHealth().droppedEntries).toBe(1)
   })
+
+  it("splits serialized requests at the configured byte limit", async () => {
+    const maxRequestBytes = 1_600
+    const bodies: string[] = []
+    const fetchMock = jest.fn(async (_url, init) => {
+      bodies.push(init!.body as string)
+      return makeOkResponse()
+    })
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 10,
+      flushInterval: 0,
+      maxRequestBytes,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "a", operationName: "a".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "b", operationName: "b".repeat(300) })))
+
+    await t.close()
+
+    expect(bodies.length).toBeGreaterThan(1)
+    expect(
+      bodies.every((body) => new TextEncoder().encode(body).byteLength <= maxRequestBytes)
+    ).toBe(true)
+  })
+
+  it("waits for an already in-flight flush before close resolves", async () => {
+    let resolveFirst!: (response: Response) => void
+    const firstRequest = new Promise<Response>((resolve) => {
+      resolveFirst = resolve
+    })
+    const fetchMock = jest
+      .fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+      .mockImplementationOnce(async () => firstRequest)
+      .mockImplementation(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "first" })))
+    await Promise.resolve()
+    t.log(makeEntry(makeSpan({ id: "second" })))
+
+    let closed = false
+    const close = t.close().then(() => {
+      closed = true
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(closed).toBe(false)
+
+    resolveFirst(makeOkResponse())
+    await close
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("aborts an in-flight request when consent is withdrawn", async () => {
+    let resolveRequest!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => {
+      resolveRequest = resolve
+    })
+    const fetchMock = jest.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => pending)
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "in-flight" })))
+    await Promise.resolve()
+    const signal = fetchMock.mock.calls[0]?.[1]?.signal
+
+    t.discardPending()
+
+    expect(signal?.aborted).toBe(true)
+    resolveRequest(makeOkResponse())
+    await t.close()
+  })
+
+  it("does not send a later split after consent is withdrawn during the first request", async () => {
+    let resolveFirst!: (response: Response) => void
+    const firstRequest = new Promise<Response>((resolve) => {
+      resolveFirst = resolve
+    })
+    const fetchMock = jest
+      .fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+      .mockImplementationOnce(async () => firstRequest)
+      .mockImplementation(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 10,
+      flushInterval: 0,
+      maxRequestBytes: 1_600,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "a", operationName: "a".repeat(300) })))
+    t.log(makeEntry(makeSpan({ id: "b", operationName: "b".repeat(300) })))
+    const flush = t.flush()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    t.discardPending()
+    resolveFirst(makeOkResponse())
+    await flush
+    await t.close()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(t.getHealth().droppedEntries).toBe(2)
+  })
+
+  it("drops one span that cannot fit and reports the byte-limit failure", async () => {
+    const fetchMock = jest.fn(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      maxRequestBytes: 100,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "oversized" })))
+    await t.close()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(t.getHealth()).toMatchObject({
+      status: "degraded",
+      droppedEntries: 1,
+      lastError: "OTLP payload exceeds 100 byte limit",
+    })
+  })
 })
 
 describe("OtlpHttpTransport retry & failure handling", () => {
@@ -218,6 +349,49 @@ describe("OtlpHttpTransport retry & failure handling", () => {
     await t.close()
   })
 
+  it("does not retry an OTLP 500 response", async () => {
+    const fetchMock = jest.fn(async () => makeErrorResponse(500))
+    const sleepMock = jest.fn(async () => {})
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      maxRetries: 3,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      sleepImpl: sleepMock,
+    })
+    t.log(makeEntry(makeSpan({ id: "a" })))
+    await t.close()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(sleepMock).not.toHaveBeenCalled()
+    expect(t.getHealth().droppedEntries).toBe(1)
+  })
+
+  it("honors Retry-After on retryable responses", async () => {
+    const responses = [
+      new Response("rate limited", { status: 429, headers: { "Retry-After": "2" } }),
+      makeOkResponse(),
+    ]
+    const fetchMock = jest.fn(async () => responses.shift()!)
+    const sleepMock = jest.fn(async () => {})
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      maxRetries: 1,
+      retryBaseMs: 1,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      sleepImpl: sleepMock,
+      randomImpl: () => 0,
+    })
+    t.log(makeEntry(makeSpan({ id: "a" })))
+    await t.close()
+
+    expect(sleepMock).toHaveBeenCalledWith(2_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it("drops the batch after exhausting retries on network errors", async () => {
     const fetchMock = jest.fn(async () => {
       throw new Error("network down")
@@ -242,6 +416,27 @@ describe("OtlpHttpTransport retry & failure handling", () => {
 })
 
 describe("OtlpHttpTransport content gate", () => {
+  it("drops the final serialized batch when an allowed identifier contains PII", async () => {
+    const fetchMock = jest.fn(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ providerName: "jane.doe@example.com" })))
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(t.getHealth()).toMatchObject({
+      status: "degraded",
+      droppedEntries: 1,
+      lastError: "OTLP payload rejected by privacy gate",
+    })
+    await t.close()
+  })
+
   it("strips content and exception messages when captureContent is off", async () => {
     let captured: unknown = null
     const fetchMock = jest.fn(async (_url, init) => {
@@ -399,5 +594,40 @@ describe("OtlpHttpTransport options + resource", () => {
     expect(url).toBe("http://b.local/v1/traces")
     expect((init?.headers as Record<string, string>)["X-Tenant"]).toBe("v2")
     await t.close()
+  })
+
+  it("discards old in-flight work before switching an authenticated destination", async () => {
+    let resolveFirst!: (response: Response) => void
+    const firstRequest = new Promise<Response>((resolve) => {
+      resolveFirst = resolve
+    })
+    const fetchMock = jest
+      .fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>()
+      .mockImplementationOnce(async () => firstRequest)
+      .mockImplementation(async () => makeOkResponse())
+    const t = new OtlpHttpTransport({
+      endpoint: "http://a.local/v1/traces",
+      destinationFingerprint: "project-a",
+      bufferSize: 1,
+      flushInterval: 0,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "old" })))
+    await Promise.resolve()
+    const oldSignal = fetchMock.mock.calls[0]?.[1]?.signal
+
+    t.updateOptions({
+      endpoint: "http://b.local/v1/traces",
+      destinationFingerprint: "project-b",
+    })
+    t.log(makeEntry(makeSpan({ id: "new" })))
+    resolveFirst(makeOkResponse())
+    await t.close()
+
+    expect(oldSignal?.aborted).toBe(true)
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://a.local/v1/traces",
+      "http://b.local/v1/traces",
+    ])
   })
 })

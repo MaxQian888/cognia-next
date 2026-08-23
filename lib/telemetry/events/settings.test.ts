@@ -8,6 +8,7 @@ import {
   isBehaviorTelemetryEnabled,
   saveBehaviorTelemetrySettings,
   setBehaviorTelemetryEnabled,
+  subscribeBehaviorTelemetrySettings,
 } from "./settings"
 
 beforeEach(() => {
@@ -131,4 +132,14 @@ it("supports a host-owned runtime configuration without localStorage", () => {
   setBehaviorTelemetryEnabled(false)
   expect(getBehaviorTelemetrySettings().enabled).toBe(false)
   expect(localStorage.getItem(BEHAVIOR_TELEMETRY_STORAGE_KEY)).toContain('"enabled":false')
+})
+
+it("does not let a telemetry lifecycle listener break consent saves", () => {
+  const unsubscribe = subscribeBehaviorTelemetrySettings(() => {
+    throw new Error("exporter failed")
+  })
+
+  expect(() => setBehaviorTelemetryEnabled(true)).not.toThrow()
+  expect(getBehaviorTelemetrySettings().enabled).toBe(true)
+  unsubscribe()
 })

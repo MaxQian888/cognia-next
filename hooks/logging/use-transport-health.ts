@@ -15,6 +15,7 @@ import {
   getNativeLoggingReadiness,
   type NativeLoggingReadiness,
 } from "@/lib/native/native-logging-readiness"
+import { getBehaviorEventExporterHealthSnapshot } from "@/lib/telemetry/events/track-event"
 
 export type { UseTransportHealthOptions, UseTransportHealthResult } from "@/types/logging"
 
@@ -78,7 +79,10 @@ export function useTransportHealth(
 
   const refresh = useCallback(() => {
     try {
-      const snapshot = getTransportHealthSnapshot()
+      const snapshot = {
+        ...getTransportHealthSnapshot(),
+        ...getBehaviorEventExporterHealthSnapshot(),
+      }
       const changed = !snapshotsShallowEqual(lastSnapshotRef.current, snapshot)
       if (changed) {
         lastSnapshotRef.current = snapshot

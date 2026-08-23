@@ -999,6 +999,7 @@ pub fn run() {
             telemetry::telemetry_secret_has,
             telemetry::telemetry_secret_clear,
             telemetry::telemetry_otlp_export,
+            telemetry::telemetry_otlp_cancel,
             telemetry::telemetry_configure_sidecar,
             cli_bridge::cli_bridge_status,
             cli_bridge::cli_bridge_renderer_response,

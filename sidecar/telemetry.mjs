@@ -5,6 +5,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http"
 import { NodeSDK } from "@opentelemetry/sdk-node"
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import { PostHogTraceExporter } from "@posthog/ai/otel"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 let sdk = null
 let installationId = ""
@@ -134,6 +135,15 @@ const ALLOWED_ATTRIBUTE_KEYS = new Set([
   "server.address",
 ])
 
+const ALLOWED_RESOURCE_ATTRIBUTE_KEYS = new Set([
+  "service.name",
+  "service.version",
+  "deployment.environment.name",
+  "telemetry.sdk.name",
+  "telemetry.sdk.language",
+  "telemetry.sdk.version",
+])
+
 function isAllowedAttributeKey(key) {
   return (
     ALLOWED_ATTRIBUTE_KEYS.has(key) ||
@@ -177,9 +187,28 @@ function sanitizeAttributes(attributes = {}) {
   )
 }
 
+function sanitizeResource(resource) {
+  if (!resource || typeof resource !== "object") return resource
+  const attributes = Object.fromEntries(
+    Object.entries(resource.attributes ?? {}).flatMap(([key, value]) => {
+      if (!ALLOWED_RESOURCE_ATTRIBUTE_KEYS.has(key)) return []
+      const bounded = boundedAttributeValue(value)
+      return bounded === undefined ? [] : [[key, bounded]]
+    })
+  )
+  return new Proxy(resource, {
+    get(target, property, receiver) {
+      if (property === "attributes") return attributes
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
+
 function sanitizeReadableSpan(span) {
   const overrides = {
     attributes: sanitizeAttributes(span.attributes),
+    resource: sanitizeResource(span.resource),
     status: span.status ? { code: span.status.code } : span.status,
     links: [],
     events: (span.events ?? [])
@@ -199,13 +228,28 @@ function sanitizeReadableSpan(span) {
   })
 }
 
+function isPrivacySafeReadableSpan(span) {
+  return hasNoLeakingPiiDeep({
+    name: span.name,
+    attributes: span.attributes,
+    resourceAttributes: span.resource?.attributes,
+    instrumentationScope: span.instrumentationScope,
+    events: span.events,
+  })
+}
+
 class PrivacyFilteringSpanExporter {
   constructor(delegate) {
     this.delegate = delegate
   }
 
   export(spans, resultCallback) {
-    this.delegate.export(spans.map(sanitizeReadableSpan), resultCallback)
+    const safeSpans = spans.map(sanitizeReadableSpan).filter(isPrivacySafeReadableSpan)
+    if (safeSpans.length === 0) {
+      resultCallback({ code: 0 })
+      return
+    }
+    this.delegate.export(safeSpans, resultCallback)
   }
 
   shutdown() {
@@ -231,7 +275,9 @@ function parsePostHogDestinations(value) {
       try {
         const url = new URL(host)
         if (
+          projectToken.length <= "phc_".length ||
           !projectToken.startsWith("phc_") ||
+          /\s/.test(projectToken) ||
           !["http:", "https:"].includes(url.protocol) ||
           url.username ||
           url.password
@@ -406,5 +452,6 @@ export const __TESTING__ = {
   parseHeaders,
   parsePostHogDestinations,
   randomSpanId,
+  PrivacyFilteringSpanExporter,
   sanitizeReadableSpan,
 }

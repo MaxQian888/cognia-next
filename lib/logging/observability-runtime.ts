@@ -1,6 +1,8 @@
 import type { ObservabilityEventScope, ObservabilityRuntime } from "@cognia/logging"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export const INSTALLATION_ID_STORAGE_KEY = "cognia-observability-installation-id"
+export const POSTHOG_PRODUCT_DISTINCT_ID_STORAGE_KEY = "cognia-posthog-product-distinct-id"
 
 interface StorageLike {
   getItem(key: string): string | null
@@ -36,13 +38,17 @@ function randomInstallationId(): string {
   return `install-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
 }
 
-function installationId(storage: StorageLike | undefined, randomId: () => string): string {
+function persistedId(
+  storageKey: string,
+  storage: StorageLike | undefined,
+  randomId: () => string
+): string {
   if (!storage) return randomId()
   try {
-    const existing = storage.getItem(INSTALLATION_ID_STORAGE_KEY)
+    const existing = storage.getItem(storageKey)
     if (existing) return existing
     const created = randomId()
-    storage.setItem(INSTALLATION_ID_STORAGE_KEY, created)
+    storage.setItem(storageKey, created)
     return created
   } catch {
     return randomId()
@@ -53,7 +59,29 @@ export function resolveObservabilityInstallationId(
   storage?: StorageLike,
   randomId: () => string = randomInstallationId
 ): string {
-  return installationId(storage, randomId)
+  return persistedId(INSTALLATION_ID_STORAGE_KEY, storage, randomId)
+}
+
+/** Stable anonymous id reserved for personless PostHog Product Analytics. */
+export function resolvePostHogProductDistinctId(
+  storage?: StorageLike,
+  randomId: () => string = randomInstallationId
+): string {
+  const createSafeId = (aiId?: string | null): string => {
+    const created = randomId()
+    return created !== aiId && hasNoLeakingPii(created) ? created : ""
+  }
+  if (!storage) return createSafeId()
+  try {
+    const aiId = storage.getItem(INSTALLATION_ID_STORAGE_KEY)
+    const existing = storage.getItem(POSTHOG_PRODUCT_DISTINCT_ID_STORAGE_KEY)
+    if (existing && existing !== aiId && hasNoLeakingPii(existing)) return existing
+    const created = createSafeId(aiId)
+    if (created) storage.setItem(POSTHOG_PRODUCT_DISTINCT_ID_STORAGE_KEY, created)
+    return created
+  } catch {
+    return createSafeId()
+  }
 }
 
 export function resolveObservabilityRuntime(

@@ -32,6 +32,7 @@ fn main() {
 
     attributes = attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
         "telemetry_otlp_export",
+        "telemetry_otlp_cancel",
         "telemetry_secret_set",
         "telemetry_secret_has",
         "telemetry_secret_clear",

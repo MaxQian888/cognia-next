@@ -48,6 +48,24 @@ export const DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS: BehaviorTelemetrySettings = {
 }
 
 let runtimeSettings: BehaviorTelemetrySettings | null = null
+type BehaviorTelemetrySettingsListener = (
+  previous: BehaviorTelemetrySettings,
+  next: BehaviorTelemetrySettings
+) => void
+const settingsListeners = new Set<BehaviorTelemetrySettingsListener>()
+
+function notifySettingsListeners(
+  previous: BehaviorTelemetrySettings,
+  next: BehaviorTelemetrySettings
+): void {
+  for (const listener of settingsListeners) {
+    try {
+      listener(previous, next)
+    } catch {
+      // Telemetry lifecycle failures must never make consent settings unsaveable.
+    }
+  }
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -127,18 +145,19 @@ export function getBehaviorTelemetrySettings(): BehaviorTelemetrySettings {
 }
 
 export function saveBehaviorTelemetrySettings(settings: BehaviorTelemetrySettings): void {
+  const previous = getBehaviorTelemetrySettings()
+  const next = sanitizeBehaviorTelemetrySettings(settings)
   if (runtimeSettings) {
-    runtimeSettings = sanitizeBehaviorTelemetrySettings(settings)
+    runtimeSettings = next
   }
-  if (typeof localStorage === "undefined") return
-  try {
-    localStorage.setItem(
-      BEHAVIOR_TELEMETRY_STORAGE_KEY,
-      JSON.stringify(sanitizeBehaviorTelemetrySettings(settings))
-    )
-  } catch {
-    // Consent reads fail closed; storage failures must never break the product.
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(BEHAVIOR_TELEMETRY_STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      // Consent reads fail closed; storage failures must never break the product.
+    }
   }
+  notifySettingsListeners(previous, next)
 }
 
 export function isBehaviorTelemetryEnabled(): boolean {
@@ -155,5 +174,15 @@ export function setBehaviorTelemetryEnabled(enabled: boolean): BehaviorTelemetry
 export function configureBehaviorTelemetrySettings(
   settings: BehaviorTelemetrySettings | null
 ): void {
+  const previous = getBehaviorTelemetrySettings()
   runtimeSettings = settings ? sanitizeBehaviorTelemetrySettings(settings) : null
+  const next = getBehaviorTelemetrySettings()
+  notifySettingsListeners(previous, next)
+}
+
+export function subscribeBehaviorTelemetrySettings(
+  listener: BehaviorTelemetrySettingsListener
+): () => void {
+  settingsListeners.add(listener)
+  return () => settingsListeners.delete(listener)
 }

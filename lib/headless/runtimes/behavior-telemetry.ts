@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/db/settings"
 import { getDb } from "@/lib/db/schema"
 import Dexie from "dexie"
 import { APP_VERSION } from "@/lib/app-version"
+import { hasNoLeakingPii } from "@cognia/redact"
 import {
   configureBehaviorTelemetrySettings,
   DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
@@ -20,6 +21,7 @@ import {
 import {
   configureBehaviorEventExporters,
   createOtlpBehaviorEventExporter,
+  shutdownBehaviorEventExporters,
   type BehaviorEventExporter,
 } from "@/lib/telemetry/events/track-event"
 import { buildPostHogProductExporters } from "@/lib/telemetry/posthog-product"
@@ -94,13 +96,23 @@ export interface HeadlessPostHogResolution {
  * as a fallback so a deployment that already carries the renderer's managed
  * project does not need the values twice.
  *
- * The installation id is deliberately NOT auto-generated here. The brain's
+ * The Product Analytics id is deliberately NOT auto-generated here. The brain's
  * `localStorage` is the in-memory shim from `lib/headless/node-indexeddb.ts`,
  * so a minted id would be new on every restart and PostHog would count one
  * install as a fresh person per process — worse than no data. Without a pinned
- * `COGNIA_OBSERVABILITY_INSTALLATION_ID` (the same variable the desktop already
- * passes to its sidecar) the destination stays off and says so.
+ * `COGNIA_POSTHOG_PRODUCT_DISTINCT_ID` the destination derives a separate
+ * `.product` id from the stable observability id for backwards-compatible
+ * deployments. It never sends the AI observability id itself to Product.
  */
+export function resolveHeadlessPostHogProductDistinctId(environment: Env): string | null {
+  const configured = trimmed(environment?.COGNIA_POSTHOG_PRODUCT_DISTINCT_ID)
+  const observabilityId = trimmed(environment?.COGNIA_OBSERVABILITY_INSTALLATION_ID)
+  if (configured && configured !== observabilityId && hasNoLeakingPii(configured)) return configured
+  if (!observabilityId) return null
+  const derived = `${observabilityId}.product`
+  return derived.length <= 200 && hasNoLeakingPii(derived) ? derived : null
+}
+
 export function resolveHeadlessPostHogExporters(environment: Env): HeadlessPostHogResolution {
   const host =
     trimmed(environment?.COGNIA_POSTHOG_HOST) || trimmed(environment?.NEXT_PUBLIC_POSTHOG_HOST)
@@ -109,7 +121,7 @@ export function resolveHeadlessPostHogExporters(environment: Env): HeadlessPostH
     trimmed(environment?.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN)
   if (!host || !projectToken) return { exporters: [], skipped: "unconfigured" }
 
-  const installationId = trimmed(environment?.COGNIA_OBSERVABILITY_INSTALLATION_ID)
+  const installationId = resolveHeadlessPostHogProductDistinctId(environment)
   if (!installationId) return { exporters: [], skipped: "missing-installation-id" }
 
   const exporters = buildPostHogProductExporters({
@@ -173,7 +185,7 @@ registerHeadlessRuntime({
         warnedPostHogSkipped = true
         ctx.log(
           "warn",
-          "PostHog behavior export is configured but disabled: set COGNIA_OBSERVABILITY_INSTALLATION_ID to a stable value, or the brain would report a new person on every restart"
+          "PostHog behavior export is configured but disabled: set COGNIA_POSTHOG_PRODUCT_DISTINCT_ID (or a stable COGNIA_OBSERVABILITY_INSTALLATION_ID fallback), or the brain would report a new person on every restart"
         )
       }
       return policy
@@ -193,12 +205,10 @@ registerHeadlessRuntime({
           }`
         ),
     })
-    return () => {
+    return async () => {
       subscription.unsubscribe()
+      await shutdownBehaviorEventExporters()
       configureBehaviorTelemetrySettings(null)
-      // Closes every destination, which for PostHog drops whatever is still
-      // buffered rather than flushing it after consent context is gone.
-      configureBehaviorEventExporters([])
     }
   },
 })

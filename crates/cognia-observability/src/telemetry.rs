@@ -10,6 +10,9 @@ const TELEMETRY_SECRET_NAMESPACE: &str = "telemetry";
 const GRAFANA_API_TOKEN_KEY: &str = "grafana-cloud-api-token";
 const LANGFUSE_SECRET_KEY: &str = "langfuse-secret-key";
 const EXPORT_TIMEOUT: Duration = Duration::from_secs(15);
+static TELEMETRY_EXPORT_CANCELLATIONS: Lazy<
+    cognia_net::request_cancellation::RequestCancellationRegistry,
+> = Lazy::new(Default::default);
 
 #[cfg(any(test, feature = "otel-export"))]
 fn resolve_otlp_trace_endpoint(specific: Option<&str>, base: Option<&str>) -> Option<String> {
@@ -270,12 +273,21 @@ pub async fn telemetry_secret_clear(kind: TelemetrySecretKind) -> Result<(), Str
 
 #[tauri::command]
 pub async fn telemetry_otlp_export(
+    request_id: String,
     endpoint: String,
     body: String,
     headers: HashMap<String, String>,
     credential: TelemetryCredential,
     traceparent: Option<String>,
 ) -> Result<TelemetryExportResult, String> {
+    if request_id.is_empty()
+        || request_id.len() > 128
+        || !request_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("telemetry request id is invalid".to_string());
+    }
     serde_json::from_str::<serde_json::Value>(&body)
         .map_err(|error| format!("telemetry payload must be valid JSON: {error}"))?;
     let endpoint = validate_endpoint(&endpoint)?;
@@ -301,15 +313,30 @@ pub async fn telemetry_otlp_export(
     if let Some(value) = traceparent {
         request = request.header("traceparent", value);
     }
-    let response = request
-        .send()
-        .await
+    let (generation, cancelled) = TELEMETRY_EXPORT_CANCELLATIONS.register(&request_id);
+    let request_task = tauri::async_runtime::spawn(async move { request.send().await });
+    let abort_handle = request_task.inner().abort_handle();
+    let cancellation_task = tauri::async_runtime::spawn(async move {
+        if cancelled.await.is_ok() {
+            abort_handle.abort();
+        }
+    });
+    let response = request_task.await;
+    TELEMETRY_EXPORT_CANCELLATIONS.finish(&request_id, generation);
+    cancellation_task.abort();
+    let response = response
+        .map_err(|_| "telemetry export cancelled".to_string())?
         .map_err(|e| format!("telemetry export failed: {e}"))?;
     let status = response.status().as_u16();
     Ok(TelemetryExportResult {
         status,
         accepted: response.status().is_success(),
     })
+}
+
+#[tauri::command]
+pub fn telemetry_otlp_cancel(request_id: String) -> bool {
+    TELEMETRY_EXPORT_CANCELLATIONS.cancel(&request_id)
 }
 
 #[cfg(feature = "otel-export")]
@@ -704,6 +731,7 @@ mod tests {
         let traceparent = format!("00-{}-{}-01", "a".repeat(32), "b".repeat(16));
 
         let result = telemetry_otlp_export(
+            "request-success".to_string(),
             format!("http://{address}/v1/traces"),
             "{\"resourceSpans\":[]}".to_string(),
             HashMap::new(),
@@ -728,6 +756,7 @@ mod tests {
     #[tokio::test]
     async fn native_export_rejects_non_json_before_networking() {
         let error = telemetry_otlp_export(
+            "request-invalid-json".to_string(),
             "http://127.0.0.1:1/v1/traces".to_string(),
             "not-json".to_string(),
             HashMap::new(),
@@ -737,5 +766,32 @@ mod tests {
         .await
         .expect_err("invalid payload");
         assert!(error.contains("valid JSON"));
+    }
+
+    #[tokio::test]
+    async fn native_export_can_be_cancelled_by_request_id() {
+        cognia_net::proxy_config::apply_current(cognia_net::proxy_config::ProxyConfig::default())
+            .expect("initialize proxy policy");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        let export = tokio::spawn(telemetry_otlp_export(
+            "request-cancel".to_string(),
+            format!("http://{address}/v1/traces"),
+            "{\"resourceSpans\":[]}".to_string(),
+            HashMap::new(),
+            TelemetryCredential::None,
+            None,
+        ));
+
+        let (mut stream, _) = listener.accept().await.expect("connection");
+        let mut request = vec![0; 4096];
+        let _ = stream.read(&mut request).await.expect("request");
+        assert!(telemetry_otlp_cancel("request-cancel".to_string()));
+
+        let error = export
+            .await
+            .expect("export task")
+            .expect_err("cancelled export");
+        assert!(error.contains("cancelled"));
     }
 }

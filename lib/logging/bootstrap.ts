@@ -63,10 +63,15 @@ import {
   createOtlpBehaviorEventExporter,
   type BehaviorEventExporter,
 } from "@/lib/telemetry/events/track-event"
-import { buildPostHogProductExporters } from "@/lib/telemetry/posthog-product"
+import {
+  buildPostHogProductExporters,
+  isValidPostHogProject,
+  normalizePostHogOrigin,
+} from "@/lib/telemetry/posthog-product"
 import {
   createObservabilityRuntimeScope,
   resolveObservabilityInstallationId,
+  resolvePostHogProductDistinctId,
   resolveObservabilityRuntime,
 } from "./observability-runtime"
 
@@ -704,6 +709,9 @@ function applyTransportSettings(
   const installationId = resolveObservabilityInstallationId(
     typeof localStorage === "undefined" ? undefined : localStorage
   )
+  const postHogProductDistinctId = resolvePostHogProductDistinctId(
+    typeof localStorage === "undefined" ? undefined : localStorage
+  )
   const posthogDestinations = resolvePostHogDestinations(transports.posthogConfig)
 
   if (transports.console) {
@@ -935,6 +943,7 @@ function applyTransportSettings(
     const options = {
       transportName,
       endpoint: postHogAiEndpoint(destination.host),
+      destinationFingerprint: `${destination.host}|${destination.projectToken}`,
       resource: {
         serviceName: "cognia-ai",
         environment: transports.agentTraceOtlpConfig.environment || undefined,
@@ -946,6 +955,9 @@ function applyTransportSettings(
       },
       captureContent: false,
       maxPreviewBytes: 0,
+      // PostHog's OTLP intake rejects request bodies above 4 MB. The transport
+      // recursively splits by serialized UTF-8 size before sending.
+      maxRequestBytes: 4 * 1024 * 1024,
       fetchImpl,
     } as const
     if (existing) {
@@ -1027,14 +1039,14 @@ function applyTransportSettings(
   const byo = posthogDestinations.find((item) => item.id === "byo")
   behaviorExporters.push(
     ...buildPostHogProductExporters({
-      installationId,
+      installationId: postHogProductDistinctId,
       appVersion: process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0",
       runtime,
       // The desktop CSP (`connect-src` in tauri.conf.json) does not allow the
       // renderer to reach PostHog directly, so the capture batch goes out over
       // the same Rust leg as every other outbound request.
       postJson: isTauri()
-        ? (url, body) => postTauriTelemetryJson(url, body, { kind: "none" })
+        ? (url, body, signal) => postTauriTelemetryJson(url, body, { kind: "none" }, signal)
         : undefined,
       managed: {
         enabled: managed?.productAnalytics === true,
@@ -1065,8 +1077,8 @@ export function resolvePostHogDestinations(
   const destinations: ResolvedPostHogDestination[] = []
   const managedHost = process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ?? ""
   const managedToken = process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN?.trim() ?? ""
-  const normalizedManagedHost = normalizeHttpOrigin(managedHost)
-  if (normalizedManagedHost && managedToken.startsWith("phc_")) {
+  const normalizedManagedHost = normalizePostHogOrigin(managedHost)
+  if (normalizedManagedHost && isValidPostHogProject(managedHost, managedToken)) {
     destinations.push({
       id: "managed",
       host: normalizedManagedHost,
@@ -1076,8 +1088,8 @@ export function resolvePostHogDestinations(
   }
   const byoHost = config.byo.host.trim()
   const byoToken = config.byo.projectToken.trim()
-  const normalizedByoHost = normalizeHttpOrigin(byoHost)
-  if (normalizedByoHost && byoToken.startsWith("phc_")) {
+  const normalizedByoHost = normalizePostHogOrigin(byoHost)
+  if (normalizedByoHost && isValidPostHogProject(byoHost, byoToken)) {
     destinations.push({
       id: "byo",
       host: normalizedByoHost,
@@ -1087,15 +1099,6 @@ export function resolvePostHogDestinations(
     })
   }
   return destinations
-}
-
-function normalizeHttpOrigin(value: string): string | null {
-  try {
-    const url = new URL(value)
-    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null
-  } catch {
-    return null
-  }
 }
 
 export function postHogAiEndpoint(host: string): string {
