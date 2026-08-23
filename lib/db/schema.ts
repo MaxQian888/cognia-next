@@ -143,11 +143,6 @@ import type {
 } from "@/types/workflow/visual"
 import type { WorkflowWaitEvent, WorkflowWaitpoint } from "@/types/workflow/waitpoint"
 import type {
-  WorkflowHumanInputFileRow,
-  WorkflowHumanInputRequest,
-  WorkflowHumanInputSubmissionRow,
-} from "@/types/workflow/human-input"
-import type {
   WorkflowDeployment,
   WorkflowInvocation,
   WorkflowVersion,
@@ -158,7 +153,6 @@ import {
 } from "@/lib/workflow/versioning/version-snapshot"
 import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
-import type { MobileStepReceiptRow } from "@/types/mobile/mobile-step-receipt"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
 import type { SessionAttachmentUploadRow } from "./session-attachment-uploads"
@@ -627,13 +621,6 @@ export class CogniaDB extends Dexie {
   // v156 — Durable workflow pause/resume state and persist-before-match events.
   workflowWaitpoints!: Table<WorkflowWaitpoint, string>
   workflowWaitEvents!: Table<WorkflowWaitEvent, string>
-  // v181 — Multi-responder authored Human Input requests and submissions.
-  workflowHumanInputRequests!: Table<WorkflowHumanInputRequest, string>
-  workflowHumanInputSubmissions!: Table<WorkflowHumanInputSubmissionRow, string>
-  // v183 — encrypted files promoted from Human Input upload quarantine.
-  workflowHumanInputFiles!: Table<WorkflowHumanInputFileRow, string>
-  // v182 — device-side replay guard and durable result receipt.
-  mobileStepReceipts!: Table<MobileStepReceiptRow, string>
   // v52 — Workflow library folders (ADR-0011 library upgrade). See
   // `types/workflow/folder.ts`.
   workflowFolders!: Table<WorkflowFolder, string>
@@ -4447,31 +4434,6 @@ export class CogniaDB extends Dexie {
     // older client that never uploads simply leaves the table empty.
     this.version(180).stores({
       sessionAttachmentUploads: "&uploadId, sessionId, deviceId, expiresAt, [sessionId+deviceId]",
-    })
-
-    // v181 — Human Input keeps append-only per-responder submissions separate
-    // from the waitpoint's single terminal CAS. This makes any/all/quorum
-    // completion restart-safe without weakening approval/event semantics.
-    this.version(181).stores({
-      workflowHumanInputRequests:
-        "&id, waitpointId, status, runId, workflowId, stepId, expiresAt, [workflowId+status], [runId+status]",
-      workflowHumanInputSubmissions:
-        "&id, requestId, responderId, actionId, submittedAt, sensitiveExpiresAt, &[requestId+responderId]",
-    })
-
-    // v182 — interactive mobile steps persist before opening native UI. A
-    // replay after either side restarts therefore cannot prompt twice; after
-    // Host acknowledgement only a short-lived content-free tombstone remains.
-    this.version(182).stores({
-      mobileStepReceipts: "&requestId, deviceId, status, [deviceId+status], updatedAt, expiresAt",
-    })
-
-    // v183 — Human Input files leave the resumable session-upload quarantine
-    // only after real-MIME validation, policy scanning, and encryption. The
-    // request index supports deletion/retention without decrypting payloads.
-    this.version(183).stores({
-      workflowHumanInputFiles:
-        "&id, accountId, requestId, responderId, fieldId, expiresAt, [requestId+responderId]",
     })
 
     // v184 — provider-neutral external-service control plane. Existing MCP
