@@ -41,6 +41,13 @@ const provider = {
   findForBranch: jest.fn(async (root: string) =>
     root === "/repo" ? pr("acme/repo", 7) : pr("acme/second", 9)
   ),
+  resolveCheckout: jest.fn(async () => ({
+    provider: "github",
+    repository: "acme/repo",
+    number: 7,
+    fetchRef: "refs/pull/7/head",
+    headSha: "0123456789abcdef0123456789abcdef01234567",
+  })),
   push: jest.fn(async () => undefined),
   create: jest.fn(async () => pr("acme/repo", 7)),
   publishFeedback: jest.fn(

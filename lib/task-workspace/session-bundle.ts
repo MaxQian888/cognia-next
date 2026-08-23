@@ -3,6 +3,7 @@ import type { SessionExecutionContext } from "@/types/execution-context"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { acquireWorkspaceBundle, getWorkspaceBundle } from "./client"
 import type { WorkspaceBundle } from "./types"
+import { resolvePullRequestWorkspaceBase } from "./pull-request-base"
 
 export interface SessionBundleBinding {
   context: SessionExecutionContext
@@ -24,6 +25,8 @@ export async function ensureSessionExecutionBundle(input: {
   }
   const primaryRoot = primaryRootOf(project)
   if (!primaryRoot) throw new Error("managed execution requires at least one Project root")
+  const requestedBase = context.execution?.base ?? { kind: "workingState" as const }
+  const resolvedBase = await resolvePullRequestWorkspaceBase(primaryRoot.path, requestedBase)
 
   let bundle = context.execution?.bundleId
     ? await getWorkspaceBundle(context.execution.bundleId)
@@ -33,7 +36,7 @@ export async function ensureSessionExecutionBundle(input: {
       ownerType: "session",
       ownerRef: sessionId,
       environmentKind: context.execution?.mode === "permanent" ? "permanent" : "managed",
-      base: context.execution?.base ?? { kind: "workingState" },
+      base: resolvedBase,
       roots: project.roots.map((root) => ({
         logicalRootId: root.id,
         role: root.id === primaryRoot.id ? ("primary" as const) : ("additional" as const),
@@ -76,7 +79,7 @@ export async function ensureSessionExecutionBundle(input: {
         ? { environmentId: context.execution.environmentId }
         : {}),
       bundleId: bundle.bundleId,
-      base: context.execution?.base ?? { kind: "workingState" },
+      base: resolvedBase,
       roots: rootLeases,
     },
     worktreePath: primaryLease.aliasPath,

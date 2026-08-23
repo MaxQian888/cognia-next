@@ -3,6 +3,8 @@ import { assertSingleRootBundle } from "./bundle"
 import type {
   CreatePullRequestInput,
   PullRequestProvider,
+  PullRequestCheckoutRequest,
+  PullRequestCheckoutResolution,
   PullRequestRef,
   ReviewFeedbackBundle,
 } from "@/types/review"
@@ -32,7 +34,7 @@ export interface GitHubPullRequestProviderOptions {
 export class PullRequestProviderError extends Error {
   constructor(
     message: string,
-    readonly operation: "lookup" | "push" | "create" | "feedback",
+    readonly operation: "lookup" | "checkout" | "push" | "create" | "feedback",
     readonly recoverable: boolean,
     options?: ErrorOptions & {
       /**
@@ -135,6 +137,40 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
         : null
     } catch (error) {
       throw wrapError(error, "lookup")
+    }
+  }
+
+  async resolveCheckout(
+    repositoryRoot: string,
+    request: PullRequestCheckoutRequest
+  ): Promise<PullRequestCheckoutResolution> {
+    try {
+      const binding = await this.options.resolveRepository(repositoryRoot)
+      if (binding.fullName.toLowerCase() !== request.repository.toLowerCase()) {
+        throw new Error(
+          `Pull request repository mismatch: expected ${binding.fullName}, received ${request.repository}`
+        )
+      }
+      const response = await binding.client.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+        {
+          owner: binding.owner,
+          repo: binding.repo,
+          pull_number: request.number,
+        }
+      )
+      const data = response.data as { head?: { sha?: unknown } }
+      const headSha = typeof data.head?.sha === "string" ? data.head.sha.trim() : ""
+      if (!headSha) throw new Error("Pull request response has no immutable head SHA")
+      return {
+        provider: this.id,
+        repository: binding.fullName,
+        number: request.number,
+        fetchRef: `refs/pull/${request.number}/head`,
+        headSha,
+      }
+    } catch (error) {
+      throw wrapError(error, "checkout")
     }
   }
 

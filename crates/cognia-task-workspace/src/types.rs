@@ -473,6 +473,10 @@ pub enum WorkspaceBaseSpec {
         provider: String,
         repo: String,
         number: u64,
+        #[serde(default)]
+        fetch_ref: Option<String>,
+        #[serde(default)]
+        head_sha: Option<String>,
     },
 }
 
@@ -500,9 +504,15 @@ impl WorkspaceBaseSpec {
                 provider,
                 repo,
                 number,
+                fetch_ref,
+                head_sha,
             } => (
                 WorkspaceBaseKind::PullRequest,
-                Some(format!("{provider}#{repo}#{number}")),
+                Some(format!(
+                    "{provider}#{repo}#{number}#{}#{}",
+                    fetch_ref.as_deref().unwrap_or_default(),
+                    head_sha.as_deref().unwrap_or_default()
+                )),
             ),
         }
     }
@@ -525,7 +535,7 @@ impl WorkspaceBaseSpec {
             WorkspaceBaseKind::PullRequest => {
                 let value = base_ref
                     .ok_or_else(|| "pullRequest base spec is missing its marker".to_string())?;
-                let mut parts = value.splitn(3, '#');
+                let mut parts = value.splitn(5, '#');
                 let provider = parts
                     .next()
                     .ok_or_else(|| "pullRequest marker missing provider".to_string())?;
@@ -537,10 +547,20 @@ impl WorkspaceBaseSpec {
                     .ok_or_else(|| "pullRequest marker missing number".to_string())?
                     .parse::<u64>()
                     .map_err(|error| format!("pullRequest marker number: {error}"))?;
+                let fetch_ref = parts
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
+                let head_sha = parts
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string);
                 Ok(WorkspaceBaseSpec::PullRequest {
                     provider: provider.to_string(),
                     repo: repo.to_string(),
                     number,
+                    fetch_ref,
+                    head_sha,
                 })
             }
         }
@@ -761,12 +781,33 @@ mod tests {
                 provider: "github".into(),
                 repo: "acme/app".into(),
                 number: 42,
+                fetch_ref: Some("refs/pull/42/head".into()),
+                head_sha: Some("0123456789abcdef0123456789abcdef01234567".into()),
             },
         ] {
             let (kind, base_ref) = spec.to_storage();
             let decoded = WorkspaceBaseSpec::from_storage(kind, base_ref.as_deref()).unwrap();
             assert_eq!(spec, decoded, "spec {spec:?} did not round-trip");
         }
+    }
+
+    #[test]
+    fn legacy_pull_request_base_decodes_without_claiming_resolution() {
+        let decoded = WorkspaceBaseSpec::from_storage(
+            WorkspaceBaseKind::PullRequest,
+            Some("github#acme/app#42"),
+        )
+        .unwrap();
+        assert_eq!(
+            decoded,
+            WorkspaceBaseSpec::PullRequest {
+                provider: "github".into(),
+                repo: "acme/app".into(),
+                number: 42,
+                fetch_ref: None,
+                head_sha: None,
+            }
+        );
     }
 
     #[test]

@@ -42,6 +42,36 @@ it("reports authentication and discovers the branch PR", async () => {
   )
 })
 
+it("resolves a PR checkout to a fetch ref and immutable head SHA", async () => {
+  request.mockResolvedValue({
+    status: 200,
+    data: { number: 42, head: { sha: "0123456789abcdef0123456789abcdef01234567" } },
+  })
+
+  await expect(
+    provider.resolveCheckout("/repo", { repository: "owner/repo", number: 42 })
+  ).resolves.toEqual({
+    provider: "github",
+    repository: "owner/repo",
+    number: 42,
+    fetchRef: "refs/pull/42/head",
+    headSha: "0123456789abcdef0123456789abcdef01234567",
+  })
+  expect(request).toHaveBeenCalledWith("GET /repos/{owner}/{repo}/pulls/{pull_number}", {
+    owner: "owner",
+    repo: "repo",
+    pull_number: 42,
+  })
+})
+
+it("fails closed when PR checkout refresh has no immutable SHA", async () => {
+  request.mockResolvedValue({ status: 200, data: { number: 42, head: {} } })
+
+  await expect(
+    provider.resolveCheckout("/repo", { repository: "owner/repo", number: 42 })
+  ).rejects.toMatchObject({ operation: "checkout", recoverable: false })
+})
+
 it("pushes through the existing native Git bridge and preserves rejection", async () => {
   await provider.push("/repo", "codex/change")
   expect(gitPushMock).toHaveBeenCalledWith("/repo", {

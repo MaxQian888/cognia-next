@@ -54,6 +54,19 @@ export interface CreatePullRequestInput {
   draft?: boolean
 }
 
+export interface PullRequestCheckoutRequest {
+  repository: string
+  number: number
+}
+
+export interface PullRequestCheckoutResolution extends PullRequestCheckoutRequest {
+  provider: string
+  /** Provider-specific ref fetched from the repository remote. */
+  fetchRef: string
+  /** Immutable commit selected when the provider refreshed the PR. */
+  headSha: string
+}
+
 /**
  * One repository's leg of a cross-repository delivery.
  *
@@ -116,6 +129,10 @@ export interface PullRequestProvider {
   readonly id: string
   getAuthenticationState(): Promise<"authenticated" | "unauthenticated" | "unavailable">
   findForBranch(repositoryRoot: string, branch: string): Promise<PullRequestRef | null>
+  resolveCheckout(
+    repositoryRoot: string,
+    request: PullRequestCheckoutRequest
+  ): Promise<PullRequestCheckoutResolution>
   push(repositoryRoot: string, branch: string): Promise<void>
   create(input: CreatePullRequestInput): Promise<PullRequestRef>
   /**

@@ -1667,6 +1667,8 @@ mod tests {
             provider: "github".into(),
             repo: "acme/app".into(),
             number: 42,
+            fetch_ref: Some("refs/pull/42/head".into()),
+            head_sha: Some("0123456789abcdef0123456789abcdef01234567".into()),
         };
         store.put_workspace(&record).unwrap();
         let loaded = store.get_workspace("ws-pr").unwrap().unwrap();

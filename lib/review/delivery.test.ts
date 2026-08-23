@@ -61,6 +61,12 @@ function makeProvider(publishFeedback: jest.Mock): PullRequestProvider {
     id: "test",
     getAuthenticationState: async () => "authenticated",
     findForBranch: async () => null,
+    resolveCheckout: async (_root, request) => ({
+      provider: "test",
+      ...request,
+      fetchRef: `refs/pull/${request.number}/head`,
+      headSha: "0123456789abcdef0123456789abcdef01234567",
+    }),
     push: async () => undefined,
     create: async () => pr("owner/a", 1),
     publishFeedback,

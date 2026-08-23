@@ -2485,10 +2485,67 @@ fn resolve_git_base(workspace_root: &Path, base: &WorkspaceBaseSpec) -> Result<S
             }
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        WorkspaceBaseSpec::PullRequest { .. } => {
-            Err("pullRequest bases must be resolved by the configured PullRequestProvider".into())
-        }
+        WorkspaceBaseSpec::PullRequest {
+            fetch_ref,
+            head_sha,
+            ..
+        } => resolve_pull_request_base(workspace_root, fetch_ref.as_deref(), head_sha.as_deref()),
     }
+}
+
+fn resolve_pull_request_base(
+    workspace_root: &Path,
+    fetch_ref: Option<&str>,
+    head_sha: Option<&str>,
+) -> Result<String, String> {
+    let fetch_ref = fetch_ref
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "pullRequest base has no provider-resolved fetch ref".to_string())?;
+    let head_sha = head_sha
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "pullRequest base has no immutable head SHA".to_string())?;
+    let valid_sha =
+        matches!(head_sha.len(), 40 | 64) && head_sha.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !valid_sha {
+        return Err("pullRequest base has an invalid immutable head SHA".into());
+    }
+    let check_ref = Command::new("git")
+        .args(["check-ref-format", fetch_ref])
+        .output()
+        .map_err(|error| format!("validate pull request fetch ref: {error}"))?;
+    if !check_ref.status.success() || !fetch_ref.starts_with("refs/") {
+        return Err("pullRequest base has an invalid provider fetch ref".into());
+    }
+    let fetch = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["fetch", "origin", fetch_ref])
+        .output()
+        .map_err(|error| format!("refresh pull request head: {error}"))?;
+    if !fetch.status.success() {
+        return Err(format!(
+            "refresh pull request head failed: {}",
+            String::from_utf8_lossy(&fetch.stderr).trim()
+        ));
+    }
+    let resolved = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["rev-parse", "FETCH_HEAD^{commit}"])
+        .output()
+        .map_err(|error| format!("resolve refreshed pull request head: {error}"))?;
+    if !resolved.status.success() {
+        return Err("refreshed pull request head is not a commit".into());
+    }
+    let resolved_sha = String::from_utf8_lossy(&resolved.stdout).trim().to_string();
+    if !resolved_sha.eq_ignore_ascii_case(head_sha) {
+        return Err(format!(
+            "pull request head changed during refresh: expected {head_sha}, resolved {resolved_sha}"
+        ));
+    }
+    Ok(resolved_sha)
 }
 
 fn is_git_root(workspace_root: &Path) -> bool {
@@ -3225,6 +3282,68 @@ mod tests {
         repository
             .commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
             .unwrap();
+    }
+
+    #[test]
+    fn pull_request_base_refreshes_and_verifies_the_provider_sha() {
+        let repository = TempDir::new().unwrap();
+        let remote = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        git2::Repository::init_bare(remote.path()).unwrap();
+        seed_git_repository(repository.path());
+        let remote_add = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["remote", "add", "origin"])
+            .arg(remote.path())
+            .output()
+            .unwrap();
+        assert!(remote_add.status.success());
+        let push = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["push", "origin", "HEAD:refs/pull/42/head"])
+            .output()
+            .unwrap();
+        assert!(push.status.success());
+        let head = git2::Repository::open(repository.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            resolve_pull_request_base(repository.path(), Some("refs/pull/42/head"), Some(&head))
+                .unwrap(),
+            head
+        );
+        let error = resolve_pull_request_base(
+            repository.path(),
+            Some("refs/pull/42/head"),
+            Some("0000000000000000000000000000000000000000"),
+        )
+        .unwrap_err();
+        assert!(error.contains("changed during refresh"));
+    }
+
+    #[test]
+    fn pull_request_base_rejects_unresolved_or_unsafe_provider_data() {
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+
+        assert!(resolve_pull_request_base(repository.path(), None, None)
+            .unwrap_err()
+            .contains("fetch ref"));
+        assert!(resolve_pull_request_base(
+            repository.path(),
+            Some("--upload-pack=malicious"),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        )
+        .unwrap_err()
+        .contains("invalid provider fetch ref"));
     }
 
     #[test]

@@ -5,7 +5,14 @@ export type SessionWorkspaceBaseSpec =
   | { kind: "localHead" }
   | { kind: "remoteDefault" }
   | { kind: "gitRef"; gitRef: string }
-  | { kind: "pullRequest"; provider: string; repo: string; number: number }
+  | {
+      kind: "pullRequest"
+      provider: string
+      repo: string
+      number: number
+      fetchRef?: string
+      headSha?: string
+    }
 
 export interface SessionExecutionRootLease {
   logicalRootId: string

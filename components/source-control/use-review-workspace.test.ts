@@ -47,6 +47,14 @@ function provider(overrides: Partial<PullRequestProvider> = {}): PullRequestProv
       published.push([pullRequest, bundle])
     },
     ...overrides,
+    resolveCheckout:
+      overrides.resolveCheckout ??
+      (async (_root, request) => ({
+        provider: "test",
+        ...request,
+        fetchRef: `refs/pull/${request.number}/head`,
+        headSha: "0123456789abcdef0123456789abcdef01234567",
+      })),
   }
 }
 
