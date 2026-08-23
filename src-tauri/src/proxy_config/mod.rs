@@ -8,3 +8,4 @@
 pub use cognia_net::proxy_config::*;
 
 pub mod commands;
+pub mod stream;

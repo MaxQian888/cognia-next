@@ -214,7 +214,10 @@ pub struct ProxyHttpRequestInput {
 /// and unresolved hostnames are treated as *not* private here — the caller's
 /// primary (TS) guard already rejects bad URLs; this is only a backstop against
 /// the fixed IP ranges. Mirrors `lib/web/fetch-guard.ts`.
-fn host_is_private(url: &str) -> bool {
+///
+/// Shared with `stream.rs` so the buffered and streaming bridges cannot drift
+/// into two different definitions of "private".
+pub(super) fn host_is_private(url: &str) -> bool {
     use std::net::IpAddr;
 
     let Ok(parsed) = reqwest::Url::parse(url) else {
