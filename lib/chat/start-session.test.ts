@@ -107,7 +107,8 @@ describe("startNewSession", () => {
 
     expect(session.executionContext).toEqual(
       expect.objectContaining({
-        location: "local",
+        location: "managedWorktree",
+        execution: expect.objectContaining({ mode: "managed" }),
         workspaceBinding: { kind: "project", projectId: "p_quick" },
         projectRoot: "/repo",
         environmentId: "env-1",
@@ -117,6 +118,27 @@ describe("startNewSession", () => {
     await expect(getSession(session.id)).resolves.toMatchObject({
       executionContext: session.executionContext,
     })
+  })
+
+  it("remembers an explicit Local or Worktree choice on the active Project", async () => {
+    const updateProject = jest.fn()
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      activeProjectId: "p_1",
+      addSessionToProject: jest.fn(),
+      updateProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    await startNewSession({
+      executionContext: {
+        location: "local",
+        projectId: "p_1",
+        projectRoot: "/repo",
+        taskWorkspace: { taskId: "task-1", workspaceKey: "workspace-1" },
+      },
+    })
+
+    expect(updateProject).toHaveBeenCalledWith("p_1", { defaultExecutionLocation: "local" })
   })
 
   it("automatically gives a projectless chat a durable managed workspace identity", async () => {

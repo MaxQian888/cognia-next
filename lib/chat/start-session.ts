@@ -46,7 +46,8 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
 
   // Auto-link to the active workspace so it groups under that project
   // (persisted via `project.sessionIds`). No-op when no workspace is active.
-  const { activeProjectId, addSessionToProject, projects } = useProjectStore.getState()
+  const { activeProjectId, addSessionToProject, projects, updateProject } =
+    useProjectStore.getState()
   if (activeProjectId) addSessionToProject(activeProjectId, session.id)
 
   // Every conversation has one durable workspace identity. Active-project
@@ -66,7 +67,7 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
             projectRoot: root.path,
             rootId: root.id,
             environmentId: project.defaultEnvironmentId,
-            requestedLocation: "local",
+            requestedLocation: project.defaultExecutionLocation ?? "managedWorktree",
             isGitRepository: false,
             now: Date.now(),
           })
@@ -82,6 +83,10 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
         // rebind/import before execution, rather than guessing a directory.
       }
     }
+  } else if (activeProjectId) {
+    updateProject(activeProjectId, {
+      defaultExecutionLocation: partial.executionContext.location,
+    })
   }
 
   useChatStore.getState().setActiveSession(session.id)

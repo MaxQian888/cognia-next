@@ -1,5 +1,7 @@
 import type {
   ManagedWorktreeLifecycleState,
+  SessionExecutionRootLease,
+  SessionWorkspaceBaseSpec,
   SessionExecutionContext,
   SessionExecutionLocation,
 } from "@/types/execution-context"
@@ -13,6 +15,10 @@ export interface CreateSessionExecutionContextInput {
   requestedLocation: SessionExecutionLocation
   isGitRepository: boolean
   baseRef?: string
+  base?: SessionWorkspaceBaseSpec
+  bundleId?: string
+  environmentKind?: "managed" | "permanent"
+  rootLeases?: SessionExecutionRootLease[]
   managedWorkspaceId?: string
   managedWorkspaceRoot?: string
   now: number
@@ -32,6 +38,30 @@ export function createSessionExecutionContext(
     ? ({ kind: "managed", workspaceId: managedWorkspaceId } as const)
     : ({ kind: "project", projectId: input.projectId } as const)
   return {
+    execution: {
+      mode:
+        location === "local"
+          ? "local"
+          : input.environmentKind === "permanent"
+            ? "permanent"
+            : "managed",
+      ...(input.environmentId ? { environmentId: input.environmentId } : {}),
+      ...(input.bundleId ? { bundleId: input.bundleId } : {}),
+      base:
+        input.base ??
+        (input.baseRef ? { kind: "gitRef", gitRef: input.baseRef } : { kind: "workingState" }),
+      roots:
+        input.rootLeases ??
+        (input.projectRoot
+          ? [
+              {
+                logicalRootId: input.rootId ?? "primary",
+                role: "primary" as const,
+                aliasPath: input.projectRoot,
+              },
+            ]
+          : []),
+    },
     location,
     workspaceBinding,
     ...(managedWorkspaceId
@@ -103,6 +133,8 @@ export function canBypassEnvironmentSetup(surface: "interactive" | "scheduled"):
 
 /** Resolve only an explicitly available device-local root; never guess one. */
 export function resolveSessionWorkspaceRoot(context: SessionExecutionContext): string | undefined {
+  const primary = context.execution?.roots.find((root) => root.role === "primary")
+  if (primary) return primary.aliasPath
   if (context.workspaceBinding?.kind !== "managed") return context.projectRoot || undefined
   return context.managedWorkspace?.availability === "available"
     ? context.managedWorkspace.localRoot

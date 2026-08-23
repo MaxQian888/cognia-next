@@ -1,5 +1,27 @@
 export type SessionExecutionLocation = "local" | "managedWorktree"
 
+export type SessionWorkspaceBaseSpec =
+  | { kind: "workingState" }
+  | { kind: "localHead" }
+  | { kind: "remoteDefault" }
+  | { kind: "gitRef"; gitRef: string }
+  | { kind: "pullRequest"; provider: string; repo: string; number: number }
+
+export interface SessionExecutionRootLease {
+  logicalRootId: string
+  role: "primary" | "additional"
+  aliasPath: string
+  workspaceId?: string
+}
+
+export interface SessionExecutionBinding {
+  mode: "local" | "managed" | "permanent"
+  environmentId?: string
+  bundleId?: string
+  base: SessionWorkspaceBaseSpec
+  roots: SessionExecutionRootLease[]
+}
+
 export type SessionWorkspaceBinding =
   { kind: "project"; projectId: string } | { kind: "managed"; workspaceId: string }
 
@@ -49,6 +71,8 @@ export interface ManagedWorktreeLifecycle {
 
 /** Durable execution identity shared by interactive and scheduled chat turns. */
 export interface SessionExecutionContext {
+  /** Canonical execution identity for new rows. Missing only on legacy data. */
+  execution?: SessionExecutionBinding
   location: SessionExecutionLocation
   /** Portable ownership identity. Optional only for legacy persisted rows. */
   workspaceBinding?: SessionWorkspaceBinding

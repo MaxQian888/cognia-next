@@ -21,6 +21,11 @@ describe("session execution context", () => {
     expect(context).toEqual(
       expect.objectContaining({
         location: "managedWorktree",
+        execution: {
+          mode: "managed",
+          base: { kind: "gitRef", gitRef: "main" },
+          roots: [{ logicalRootId: "primary", role: "primary", aliasPath: "/repo" }],
+        },
         workspaceBinding: { kind: "project", projectId: "project-1" },
         baseRef: "main",
         taskWorkspace: {
@@ -62,6 +67,11 @@ describe("session execution context", () => {
       })
     )
     expect(context.taskWorkspace.workspaceKey).toBe("managed-workspace:session-1")
+    expect(context.execution).toEqual({
+      mode: "managed",
+      base: { kind: "workingState" },
+      roots: [],
+    })
   })
 
   it("keeps managed execution for non-Git projects so Task Workspace can use shadow isolation", () => {

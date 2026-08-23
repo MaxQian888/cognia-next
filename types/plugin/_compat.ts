@@ -170,6 +170,8 @@ export interface Project {
   pinned?: boolean
   /** Project-local environment selected for new chats and managed worktrees. */
   defaultEnvironmentId?: string
+  /** Device-local default remembered by the new-chat Local/Worktree selector. */
+  defaultExecutionLocation?: "local" | "managedWorktree"
   description?: string
   /**
    * Mounted directories of this workspace. Single source of truth for the cwd
