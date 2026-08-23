@@ -8,6 +8,8 @@ import type { PendingApproval } from "@cognia/agent-config-types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
 import type { PersistedApproval } from "@/stores/agent/approval-journal-store"
 import type { FleetSession, FleetSnapshot } from "@/lib/fleet/types"
+import type { ExecutionRunInterrupt } from "@/types/execution/run"
+import { actionReviewRequestIdFromInterrupt } from "@/lib/policy/action-review/projection"
 import type { AttentionItem, AttentionKind } from "./types"
 
 export interface AttentionInputs {
@@ -21,6 +23,15 @@ export interface AttentionInputs {
    * asks restored after a relaunch). Optional — omitted in older callers.
    */
   approvalJournal?: readonly PersistedApproval[]
+  /**
+   * Pending `executionRunInterrupts` rows — the durable per-run approvals.
+   *
+   * The only source here that survives a reload, so it is what surfaces an
+   * approval nobody in this tab ever saw: an IM-originated tool ask, a
+   * delegation held for sign-off, a workflow gate. Optional — omitted in older
+   * callers.
+   */
+  runInterrupts?: readonly ExecutionRunInterrupt[]
 }
 
 /** Label for a chat approval — subagent asks name the asking subagent. */
@@ -49,11 +60,17 @@ function fleetWaitingDetail(session: FleetSession): string | undefined {
 const KIND_RANK: Record<AttentionKind, number> = {
   "fleet-permission": 0,
   "tool-approval": 1,
+  // Beside the chat approval it may be a durable twin of, and ahead of the
+  // gates: a run interrupt has an `expiresAt` and answers itself if ignored.
+  "run-approval": 1,
   "hitl-gate": 2,
   "fleet-waiting": 3,
 }
 
-export function projectAttention(inputs: AttentionInputs): AttentionItem[] {
+export function projectAttention(
+  inputs: AttentionInputs,
+  now: number = Date.now()
+): AttentionItem[] {
   const items: AttentionItem[] = []
 
   const liveRequestIds = new Set<string>()
@@ -134,6 +151,31 @@ export function projectAttention(inputs: AttentionInputs): AttentionItem[] {
         fleetSession: session,
       })
     }
+  }
+
+  // Durable run approvals, LAST so the dedupe below can see every live chat
+  // request id first.
+  for (const interrupt of inputs.runInterrupts ?? []) {
+    if (interrupt.status !== "pending") continue
+    // A chat tool approval also parks its run on an interrupt (see
+    // `lib/policy/action-review/projection.ts`). Both describe the SAME thing
+    // waiting on the SAME person, and the chat row is the one that can answer
+    // it inline, so the durable twin is dropped rather than listed twice.
+    const requestId = actionReviewRequestIdFromInterrupt(interrupt.id)
+    if (requestId && liveRequestIds.has(requestId)) continue
+    items.push({
+      id: `run:${interrupt.id}`,
+      source: "run",
+      kind: "run-approval",
+      title: interrupt.title,
+      ...(interrupt.toolName ? { detail: interrupt.toolName } : {}),
+      openedAt: interrupt.createdAt,
+      // A pending row past its deadline has not been swept yet. It is not
+      // answerable, so it is stale — which also sorts it out of the way.
+      stale: interrupt.expiresAt <= now,
+      runId: interrupt.runId,
+      interrupt,
+    })
   }
 
   return sortAttention(items)

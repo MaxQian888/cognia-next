@@ -434,7 +434,6 @@
       "capTools": "Tool use",
       "capVision": "Vision",
       "contextWindowLabel": "Context window",
-      "effortSuffix": "· {effort}",
       "liveSwitchFailed": "Couldn't switch the live model",
       "liveSwitched": "Switched to {model}",
       "noProviders": "No providers configured",
@@ -1744,6 +1743,7 @@
     "dismiss": "Dismiss",
     "inputLabel": "Input",
     "interruptedNotice": "This request was interrupted — the tool was already denied. Resend the message to retry.",
+    "observeRedacted": "This device is watching only — the arguments are withheld and it cannot answer.",
     "titleFallback": "Allow {tool}?",
     "toolLabel": "Tool"
   },

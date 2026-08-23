@@ -1,4 +1,11 @@
-import { prepareComposerAttachments } from "./prepare"
+import {
+  ATTACHMENT_UPLOAD_CHUNK_BYTES,
+  COMPOSER_MAX_ATTACHMENTS,
+  COMPOSER_MAX_ATTACHMENT_BYTES,
+  isSupportedAttachmentDescriptor,
+  isSupportedComposerAttachment,
+  prepareComposerAttachments,
+} from "./prepare"
 
 function sizedFile(name: string, type: string, size: number): File {
   return new File([new Uint8Array(size)], name, { type })
@@ -87,5 +94,43 @@ describe("prepareComposerAttachments", () => {
     expect(result.files).toEqual([])
     expect(result.optimizedCount).toBe(0)
     expect(result.tooLargeCount).toBe(1)
+  })
+})
+
+describe("isSupportedAttachmentDescriptor", () => {
+  it("accepts anything the paperclip would, from metadata alone", () => {
+    // The Host validates an upload it has not received yet, so the rule has to
+    // hold over `{name, mediaType}` and not over a `File`.
+    expect(isSupportedAttachmentDescriptor({ name: "shot.png", mediaType: "image/png" })).toBe(true)
+    expect(isSupportedAttachmentDescriptor({ name: "notes.pdf", mediaType: "" })).toBe(true)
+    expect(isSupportedAttachmentDescriptor({ name: "run.sh", mediaType: "" })).toBe(true)
+    expect(
+      isSupportedAttachmentDescriptor({ name: "app.dmg", mediaType: "application/octet-stream" })
+    ).toBe(false)
+  })
+
+  it("is the same rule the composer applies to a File", () => {
+    const cases = [
+      new File([new Uint8Array(1)], "shot.png", { type: "image/png" }),
+      new File([new Uint8Array(1)], "app.dmg", { type: "application/octet-stream" }),
+      new File([new Uint8Array(1)], "notes.md", { type: "" }),
+    ]
+    for (const file of cases) {
+      expect(isSupportedComposerAttachment(file)).toBe(
+        isSupportedAttachmentDescriptor({ name: file.name, mediaType: file.type })
+      )
+    }
+  })
+})
+
+describe("shared attachment ceilings", () => {
+  it("keeps a base64 chunk inside the RPC body ceiling", () => {
+    // 4/3 inflation plus the JSON envelope; the ceiling is 64 KB.
+    expect(Math.ceil(ATTACHMENT_UPLOAD_CHUNK_BYTES / 3) * 4).toBeLessThan(64 * 1024)
+  })
+
+  it("states the composer limits once so the Host can publish them", () => {
+    expect(COMPOSER_MAX_ATTACHMENTS).toBe(6)
+    expect(COMPOSER_MAX_ATTACHMENT_BYTES).toBe(10 * 1024 * 1024)
   })
 })

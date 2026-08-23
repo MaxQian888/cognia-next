@@ -148,9 +148,9 @@ describe("popover", () => {
     fireEvent.click(screen.getByTestId("effort-chip"))
     const card = screen.getByTestId("effort-selector-section")
     expect(card).toBeInTheDocument()
-    // The standalone variant owns its whole surface, so it drops the divider
-    // the in-popover copy needs.
-    expect(card).toHaveAttribute("data-variant", "card")
+    // This popover is the tier's only surface, so the card owns the whole
+    // thing and carries no divider from a copy sitting above it.
+    expect(card.className).not.toContain("border-t")
   })
 
   it("stays shut and unfocusable while a turn is in flight", () => {

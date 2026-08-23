@@ -242,11 +242,13 @@ describe("tier presentation", () => {
     expect(screen.getByTestId("effort-track-fill").className).toContain("effort-fill--ultra")
   })
 
-  it("renders the standalone card variant without the in-popover divider", () => {
-    const { container } = render(<EffortSelector session={capableSession} variant="card" />)
+  it("owns its whole surface — no leftover in-popover divider", () => {
+    // The model popover no longer mounts a second copy, so the only chrome
+    // this block has is the standalone card's.
+    const { container } = render(<EffortSelector session={capableSession} />)
     const root = screen.getByTestId("effort-selector-section")
-    expect(root).toHaveAttribute("data-variant", "card")
     expect(root.className).not.toContain("border-t")
+    expect(root.className).toContain("px-3.5")
     expect(container).not.toBeEmptyDOMElement()
   })
 })

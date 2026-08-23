@@ -13,14 +13,22 @@
 import type { PendingApproval } from "@cognia/agent-config-types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
 import type { FleetSession } from "@/lib/fleet/types"
+import type { ExecutionRunInterrupt } from "@/types/execution/run"
 
-export type AttentionSource = "chat" | "team" | "fleet"
+/**
+ * `run` is the durable fourth source: `executionRunInterrupts`, the per-run
+ * pending table. The other three are in-memory or localStorage, so before this
+ * an approval that outlived the tab that asked for it — an IM-originated one,
+ * a delegation handoff, a workflow gate — had nowhere to appear at all.
+ */
+export type AttentionSource = "chat" | "team" | "fleet" | "run"
 
 export type AttentionKind =
   | "tool-approval" // chat PendingApproval
   | "hitl-gate" // team PendingGate
   | "fleet-permission" // fleet session with pendingPermission
   | "fleet-waiting" // fleet session plan-pending / waiting-input
+  | "run-approval" // durable ExecutionRunInterrupt
 
 export interface AttentionItem {
   /** Stable id: `chat:<requestId>` | `team:<scope>:<id>` | `fleet:<agent>:<sessionId>`. */
@@ -40,4 +48,5 @@ export interface AttentionItem {
   approval?: PendingApproval
   gate?: PendingGate
   fleetSession?: FleetSession
+  interrupt?: ExecutionRunInterrupt
 }

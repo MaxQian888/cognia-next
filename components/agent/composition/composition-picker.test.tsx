@@ -4,7 +4,9 @@ import { NextIntlClientProvider } from "next-intl"
 
 import { CompositionPicker } from "./composition-picker"
 import compositionMessages from "@/i18n/messages/en/agentComposition.json"
+import zhCompositionMessages from "@/i18n/messages/zh-CN/agentComposition.json"
 import agentModeMessages from "@/i18n/messages/en/agentMode.json"
+import { AGENT_ORCHESTRATION_POLICIES } from "@cognia/agent-config-types/agent-composition"
 import {
   CODE_PRESET,
   CREATOR_PRESET,
@@ -101,6 +103,13 @@ describe("CompositionPicker", () => {
     expect(screen.getByRole("combobox", { name: /permission/i })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: /tools/i })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: /orchestration/i })).toBeInTheDocument()
+  })
+
+  it("resolves every orchestration option message", () => {
+    for (const policy of AGENT_ORCHESTRATION_POLICIES) {
+      expect(compositionMessages.axis.orchestration.options).toHaveProperty(policy)
+      expect(zhCompositionMessages.axis.orchestration.options).toHaveProperty(policy)
+    }
   })
 
   it("reports an axis change without disturbing the preset", async () => {

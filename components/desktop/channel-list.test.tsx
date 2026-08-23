@@ -2418,10 +2418,10 @@ describe("order freeze", () => {
     expect(listOrder()).toEqual(["Bravo", "Alpha"])
   })
 
-  test("holds the order under the pointer, says how many are waiting, and applies on click", async () => {
-    // The row you were reaching for must not slide out from under the cursor.
+  test("holds the order under the pointer, silently", () => {
+    // The row you were reaching for must not slide out from under the cursor —
+    // and the hold announces nothing, because leaving ends it.
     conversationSidebar = { groupBy: "none" }
-    const user = userEvent.setup()
     const { container, rerender } = renderWith([
       baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
       baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
@@ -2443,11 +2443,35 @@ describe("order freeze", () => {
       />
     )
     expect(listOrder()).toEqual(["Alpha", "Bravo"])
-    const pill = await screen.findByTestId("channel-list-order-pending")
-    expect(pill).toHaveTextContent('orderPending:{"count":1}')
-    await user.click(pill)
+    expect(container.textContent).not.toContain("orderPending")
+  })
+
+  test("does not freeze a scrolled list nobody is pointing at", () => {
+    // Scrolled-but-not-hovered means reading, not aiming. Freezing on it is
+    // what made an escape hatch necessary in the first place, and the escape
+    // hatch is what read as strange.
+    conversationSidebar = { groupBy: "none" }
+    const { container, rerender } = renderWith([
+      baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+      baseSession("s-b", { title: "Bravo", updatedAt: 20 }),
+    ])
+    const viewport = container.querySelector("[data-slot=scroll-area-viewport]")!
+    fireEvent.scroll(viewport, { target: { scrollTop: 400 } })
+    rerender(
+      <ChannelList
+        sessions={[
+          baseSession("s-a", { title: "Alpha", updatedAt: 30 }),
+          baseSession("s-b", { title: "Bravo", updatedAt: 99 }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
     expect(listOrder()).toEqual(["Bravo", "Alpha"])
-    expect(screen.queryByTestId("channel-list-order-pending")).toBeNull()
   })
 
   test("releases once the pointer leaves", () => {
@@ -2510,7 +2534,6 @@ describe("order freeze", () => {
     // Equal-length prefix matches score identically, so recency decides the tie
     // — and it is allowed to reorder them, pointer or not.
     expect(listOrder()).toEqual(["Alpha two", "Alpha one"])
-    expect(screen.queryByTestId("channel-list-order-pending")).toBeNull()
   })
 })
 

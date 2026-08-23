@@ -9,8 +9,15 @@
 // persistence. What stays here is everything that is genuinely about a chat
 // session: persisting to the `ChatSession` row via `lib/db/sessions.ts:
 // updateSession`, the in-place `setModel` live switch, closing the runtime on a
-// provider change, the optimistic label overlay, the effort qualifier on the
-// trigger, and the static chip rendered between sessions.
+// provider change, the optimistic label overlay, and the static chip rendered
+// between sessions.
+//
+// The thinking level is NOT here. It used to ride along on two of those
+// surfaces — a `· low` qualifier on the trigger and the full effort selector at
+// the bottom of the popover — while `./effort-chip` rendered the same tier as
+// its own labelled chip immediately to the right. One setting stated three
+// times, twice within a centimetre of itself. The chip is the one that stayed:
+// it is readable without opening anything, which the other two were not.
 
 import { ANTHROPIC_DEFAULT_MODEL } from "@/lib/ai/provider-default-model"
 import { useState } from "react"
@@ -26,9 +33,6 @@ import { useOptionalChatScope } from "@/components/chat/chat-scope-provider"
 import { setSessionModel, closeSession } from "@/lib/claude/ipc"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { collectModelOptions } from "@/lib/ai/model-options"
-import { modelSupportsEffort } from "@/lib/ai/reasoning-capability"
-import { resolveThinkingLevel } from "@/lib/ai/thinking-level"
-import { EffortSelector } from "./effort-selector"
 import { cn } from "@/lib/utils"
 import {
   ModelSelect,
@@ -48,7 +52,6 @@ interface ModelPickerProps {
 export function ModelPicker({ session, disabled, className }: ModelPickerProps) {
   const scope = useOptionalChatScope()
   const t = useTranslations("chat.composer.modelPicker")
-  const tEffortLevels = useTranslations("settings.general")
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const autoRouting = useSettingsStore((s) => s.settings?.autoRouting)
@@ -71,16 +74,6 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
   const activeProvider =
     optimisticProvider ?? session?.providerOverride ?? defaultProvider ?? "anthropic"
   const autoActive = activeModel === "auto"
-
-  // Only surfaced when the user has actually chosen a level AND the active
-  // model honours it — an "Auto" suffix on every chip would be noise. Read the
-  // TIER rather than `session.effort`: `ultracode` persists as `"xhigh"` effort,
-  // so the raw field would label the chip with the wrong tier.
-  const effortTier = resolveThinkingLevel(session)
-  const effortLabel =
-    effortTier !== "off" && modelSupportsEffort(activeProvider, activeModel)
-      ? tEffortLevels(`effort.${effortTier}`)
-      : null
 
   const handleSelect = ({ providerId, modelId }: { providerId: string; modelId: string }) => {
     if (!session?.id) return
@@ -179,24 +172,6 @@ export function ModelPicker({ session, disabled, className }: ModelPickerProps) 
       autoEnabled={autoEnabled}
       disabled={disabled}
       className={className}
-      triggerSuffix={
-        /* Effort rides on the model chip instead of a second one beside it:
-           it is a qualifier of the model, meaningless on its own, and only
-           shown once set to something other than the model's own default. */
-        effortLabel ? (
-          <span className="shrink-0 text-muted-foreground/80" data-testid="model-picker-effort">
-            {t("effortSuffix", { effort: effortLabel })}
-          </span>
-        ) : null
-      }
-      footer={
-        /* The thinking level lives here rather than as its own toolbar chip —
-           it qualifies a model and is meaningless on its own. It self-gates to
-           nothing on models that ignore effort, so this block simply does not
-           appear for them, and picks its own slider/list presentation from
-           `composerBehavior.effortSelectorMode`. */
-        <EffortSelector session={session} disabled={disabled} />
-      }
     />
   )
 }

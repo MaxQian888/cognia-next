@@ -1,5 +1,7 @@
 import { projectAttention, sortAttention, liveAttentionCount } from "./project"
+import { actionReviewInterruptId } from "@/lib/policy/action-review/projection"
 import type { AttentionItem } from "./types"
+import type { ExecutionRunInterrupt } from "@/types/execution/run"
 import type { PendingApproval } from "@cognia/agent-config-types"
 import type { PendingGate } from "@/stores/agent/pending-gates-store"
 import type { FleetSession, FleetSnapshot } from "@/lib/fleet/types"
@@ -270,5 +272,109 @@ describe("liveAttentionCount", () => {
       fleet: emptyFleet,
     })
     expect(liveAttentionCount(items)).toBe(1)
+  })
+})
+
+const interrupt = (over: Partial<ExecutionRunInterrupt> = {}): ExecutionRunInterrupt => ({
+  id: "i1",
+  runId: "run-9",
+  type: "tool_approval",
+  status: "pending",
+  title: "Bash",
+  expiresAt: 10_000,
+  createdAt: 300,
+  ...over,
+})
+
+describe("durable run approvals", () => {
+  const base = { chatSessions: {}, gates: [], fleet: emptyFleet }
+
+  it("surfaces a pending run interrupt with its run id", () => {
+    const [item] = projectAttention({ ...base, runInterrupts: [interrupt()] }, 1_000)
+    expect(item).toMatchObject({
+      id: "run:i1",
+      source: "run",
+      kind: "run-approval",
+      title: "Bash",
+      runId: "run-9",
+      stale: false,
+    })
+  })
+
+  it("ignores an interrupt that was already answered", () => {
+    const items = projectAttention(
+      {
+        ...base,
+        runInterrupts: [
+          interrupt({ id: "a", status: "approved" }),
+          interrupt({ id: "b", status: "denied" }),
+          interrupt({ id: "c", status: "expired" }),
+        ],
+      },
+      1_000
+    )
+    expect(items).toEqual([])
+  })
+
+  /** A pending row past its deadline has not been swept yet; it is not answerable. */
+  it("marks a past-deadline interrupt stale rather than offering it as live", () => {
+    const items = projectAttention(
+      { ...base, runInterrupts: [interrupt({ expiresAt: 500 })] },
+      1_000
+    )
+    expect(items[0].stale).toBe(true)
+    expect(liveAttentionCount(items)).toBe(0)
+  })
+
+  /**
+   * A chat tool approval also parks its run on an interrupt. Both describe the
+   * same thing waiting on the same person; only the chat row can answer it
+   * inline, so the durable twin must not be listed beside it.
+   */
+  it("does not list a chat approval twice when its run interrupt exists too", () => {
+    const items = projectAttention(
+      {
+        ...base,
+        chatSessions: { s1: { pendingApprovals: [approval({ requestId: "req-7" })] } },
+        runInterrupts: [interrupt({ id: actionReviewInterruptId("req-7") })],
+      },
+      1_000
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].source).toBe("chat")
+  })
+
+  /** The dedupe is by request, not by "any interrupt exists". */
+  it("keeps a run interrupt whose chat approval is NOT live here", () => {
+    const items = projectAttention(
+      {
+        ...base,
+        chatSessions: { s1: { pendingApprovals: [approval({ requestId: "req-7" })] } },
+        runInterrupts: [interrupt({ id: actionReviewInterruptId("req-other") })],
+      },
+      1_000
+    )
+    expect(items.map((i) => i.source).sort()).toEqual(["chat", "run"])
+  })
+
+  it("keeps an interrupt that did not come from a review at all", () => {
+    const items = projectAttention(
+      { ...base, runInterrupts: [interrupt({ id: "handoff:42", type: "human_handoff" })] },
+      1_000
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].id).toBe("run:handoff:42")
+  })
+
+  it("ranks a run approval alongside a chat approval and ahead of a team gate", () => {
+    const items = projectAttention(
+      {
+        ...base,
+        gates: [gate()],
+        runInterrupts: [interrupt()],
+      },
+      1_000
+    )
+    expect(items.map((i) => i.kind)).toEqual(["run-approval", "hitl-gate"])
   })
 })

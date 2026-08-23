@@ -11,6 +11,7 @@
     "fleet-permission": "Agent waiting for permission",
     "fleet-waiting": "Agent waiting for input",
     "hitl-gate": "Team gate awaiting decision",
+    "run-approval": "Run awaiting approval",
     "tool-approval": "Tool call awaiting approval"
   },
   "openOwner": "Open",
@@ -18,6 +19,7 @@
   "source": {
     "chat": "Chat",
     "fleet": "Fleet",
+    "run": "Run",
     "team": "Team"
   },
   "title": "Attention"

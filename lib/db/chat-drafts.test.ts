@@ -106,7 +106,7 @@ describe("chat-drafts", () => {
     ])
 
     const actionRow = (await getDb().mobileOutboundQueue.toArray()).find(
-      (row) => row.protocol === "host-state-v1"
+      (row) => row.protocol === "host-state"
     )
     expect(actionRow).toMatchObject({ status: "pending", baseRevision: 5 })
     expect(actionRow?.payload).toMatchObject({

@@ -13,16 +13,22 @@
 //
 // Extracted rather than copied so the two surfaces can never drift on model
 // grouping, capability glyphs, the Auto row, or the "scroll the active row into
-// view once per open" behaviour. The markup is deliberately byte-identical to
-// what the chat picker rendered before the split — its test suite asserts the
-// trigger geometry, the popover anchoring and the positioning callback, and
-// passes unchanged against this component.
+// view once per open" behaviour.
+//
+// The row is a two-column read, not a left-indented list: identity (name over
+// the raw id) on the left, and everything that describes the model — context
+// window, capability glyphs, and the active tick — right-aligned against the
+// opposite edge. The tick used to lead every row through a 32px gutter that
+// 99% of rows spent empty, which pushed every name away from the left edge
+// while the right half of a 360px popover stayed blank. Reserving the tick's
+// box (opacity, not conditional mounting) keeps the meta column from stepping
+// sideways on the one row that owns it.
 //
 // The `chat.composer.modelPicker` namespace stays as-is: the strings describe a
 // model picker, not a chat, and re-keying them would fork the catalog for no
 // gain.
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   BrainIcon,
@@ -84,10 +90,6 @@ export interface ModelSelectProps {
   onSelectAuto?: () => void
   /** Whether auto-routing is enabled app-wide; drives the Auto row's hint copy. */
   autoEnabled?: boolean
-  /** Rendered after the model name on the trigger. Chat shows the effort tier. */
-  triggerSuffix?: ReactNode
-  /** Rendered at the bottom of the popover. Chat mounts the effort selector. */
-  footer?: ReactNode
   disabled?: boolean
   /** Applied to the trigger button. */
   className?: string
@@ -184,8 +186,6 @@ export function ModelSelect({
   onSelect,
   onSelectAuto,
   autoEnabled = false,
-  triggerSuffix,
-  footer,
   disabled,
   className,
   align = "center",
@@ -248,7 +248,6 @@ export function ModelSelect({
           <span className="min-w-0 truncate" title={model}>
             {activeModelName}
           </span>
-          {triggerSuffix}
           <ChevronsUpDownIcon className="size-3 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -272,21 +271,23 @@ export function ModelSelect({
                       setOpen(false)
                       onSelectAuto()
                     }}
-                    className="mx-1 rounded-lg"
+                    className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
                   >
-                    <CheckIcon
-                      className={cn(
-                        "mr-2 size-4 shrink-0",
-                        autoActive ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <BrainIcon className="mr-2 size-4 shrink-0 text-primary" />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-xs">{t("autoModel")}</span>
-                      <span className="truncate text-[10px] text-muted-foreground">
+                    <BrainIcon className="size-4 shrink-0 text-primary" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className={cn("text-xs leading-none", autoActive && "font-medium")}>
+                        {t("autoModel")}
+                      </span>
+                      <span className="truncate text-[10px] leading-tight text-muted-foreground">
                         {autoEnabled ? t("autoToggleHint") : t("autoEnableHint")}
                       </span>
                     </span>
+                    <CheckIcon
+                      className={cn(
+                        "size-3.5 shrink-0 text-primary",
+                        autoActive ? "opacity-100" : "opacity-0"
+                      )}
+                    />
                   </ModelSelectorItem>
                 </ModelSelectorGroup>
                 <ModelSelectorSeparator />
@@ -318,40 +319,51 @@ export function ModelSelect({
                             setOpen(false)
                             onSelect({ providerId: group.providerId, modelId })
                           }}
-                          className="mx-1 rounded-lg"
+                          className="mx-1 gap-2.5 rounded-lg px-2.5 py-2"
                         >
-                          <CheckIcon
-                            className={cn(
-                              "mr-2 size-4 shrink-0",
-                              isActive ? "opacity-100" : "opacity-0"
-                            )}
-                          />
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate text-xs">{modelName}</span>
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span
+                              className={cn(
+                                "truncate text-xs leading-none",
+                                isActive && "font-medium text-foreground"
+                              )}
+                            >
+                              {modelName}
+                            </span>
                             {modelName !== modelId ? (
-                              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                              <span className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
                                 {modelId}
                               </span>
                             ) : null}
-                            {hasMeta ? (
-                              <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                                {gm.contextLength !== undefined ? (
-                                  <span title={t("contextWindowLabel")}>
-                                    {formatContextWindow(gm.contextLength)}
-                                  </span>
-                                ) : null}
-                                {gm.supportsTools ? (
-                                  <WrenchIcon className="size-3" aria-label={t("capTools")} />
-                                ) : null}
-                                {gm.supportsVision ? (
-                                  <EyeIcon className="size-3" aria-label={t("capVision")} />
-                                ) : null}
-                                {gm.supportsReasoning ? (
-                                  <BrainIcon className="size-3" aria-label={t("capReasoning")} />
-                                ) : null}
-                              </span>
-                            ) : null}
                           </span>
+                          {/* Metadata reads as one right-aligned cluster: the
+                              context window, then the capability glyphs in a
+                              fixed order so the same capability sits in the
+                              same place on every row. */}
+                          {hasMeta ? (
+                            <span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+                              {gm.contextLength !== undefined ? (
+                                <span title={t("contextWindowLabel")}>
+                                  {formatContextWindow(gm.contextLength)}
+                                </span>
+                              ) : null}
+                              {gm.supportsTools ? (
+                                <WrenchIcon className="size-3" aria-label={t("capTools")} />
+                              ) : null}
+                              {gm.supportsVision ? (
+                                <EyeIcon className="size-3" aria-label={t("capVision")} />
+                              ) : null}
+                              {gm.supportsReasoning ? (
+                                <BrainIcon className="size-3" aria-label={t("capReasoning")} />
+                              ) : null}
+                            </span>
+                          ) : null}
+                          <CheckIcon
+                            className={cn(
+                              "size-3.5 shrink-0 text-primary",
+                              isActive ? "opacity-100" : "opacity-0"
+                            )}
+                          />
                         </ModelSelectorItem>
                       )
                     })}
@@ -360,7 +372,6 @@ export function ModelSelect({
               ))
             )}
           </ModelSelectorList>
-          {footer}
         </Command>
       </PopoverContent>
     </Popover>

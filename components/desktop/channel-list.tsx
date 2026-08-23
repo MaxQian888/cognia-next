@@ -1317,24 +1317,18 @@ function ChannelListBody({
     () => projectPendingReorder(sections, pendingReorder),
     [sections, pendingReorder]
   )
-  // Hold the order still while the reader is in the list. The two signals are
-  // read from the DOM rather than derived: "the pointer is over the list" and
-  // "the list is scrolled" are facts about the surface, not about the model.
+  // Hold the order still while the pointer is in the list — the one moment a
+  // moving row costs something. Read from the DOM rather than derived: whether
+  // the pointer is over the list is a fact about the surface, not the model.
   const [pointerInList, setPointerInList] = useState(false)
-  const [listScrolled, setListScrolled] = useState(false)
-  const handleListScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
-    setListScrolled(event.currentTarget.scrollTop > 0)
-  }, [])
-  const orderFreeze = useConversationOrderFreeze({
+  const displaySections = useConversationOrderFreeze({
     sections: projectedReorder.sections,
     hovering: pointerInList,
-    scrolled: listScrolled,
     // Search results are ranked by relevance and a drag already owns the order
     // it is previewing; a freeze on top of either would be a third story about
     // where a row is.
     disabled: query.trim().length > 0 || activeDragId !== null,
   })
-  const displaySections = orderFreeze.sections
   // Drop the projection the moment it stops being needed: `settled` means the
   // store now carries the dropped order; `stale` means the store moved
   // elsewhere and the snapshot must not override it. Either way it must not
@@ -1647,26 +1641,10 @@ function ChannelListBody({
           </p>
         ) : null}
         <Separator className="opacity-60" />
-        {orderFreeze.pending > 0 ? (
-          // The freeze is honest about itself: a held list that never said so
-          // would just look stale. One click applies everything at once.
-          <button
-            type="button"
-            onClick={orderFreeze.release}
-            className="mx-3 mb-1 inline-flex h-6 items-center justify-center gap-1 self-start rounded-full border border-border/60 bg-muted/60 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            data-testid="channel-list-order-pending"
-          >
-            <ArrowUpIcon className="size-3 shrink-0" aria-hidden />
-            {t("orderPending", { count: orderFreeze.pending })}
-          </button>
-        ) : null}
         <ScrollArea
           className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
           onMouseEnter={() => setPointerInList(true)}
           onMouseLeave={() => setPointerInList(false)}
-          // The viewport is what scrolls; `onScroll` does not bubble and the
-          // root is `overflow-hidden`, so a handler on the root never fires.
-          viewportProps={{ onScroll: handleListScroll }}
         >
           {loading && total === 0 ? (
             <SessionListLoading />

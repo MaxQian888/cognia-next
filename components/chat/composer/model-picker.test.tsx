@@ -477,7 +477,11 @@ describe("active model positioning", () => {
   })
 })
 
-describe("reasoning effort integration", () => {
+describe("reasoning effort is not restated here", () => {
+  // The tier has exactly one composer surface — `./effort-chip`. This picker
+  // used to state it twice more (a `· high` qualifier on the trigger and the
+  // full selector in the popover footer), which put three labels for one
+  // setting within a centimetre of each other on the toolbar.
   const capableSession: ChatSession = {
     id: "ses_effort",
     title: "t",
@@ -510,12 +514,7 @@ describe("reasoning effort integration", () => {
                   ultracode: "Ultracode",
                 },
               },
-              modelPicker: { effortSuffix: "· {effort}" },
-            },
-          },
-          settings: {
-            general: {
-              effort: { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+              modelPicker: {},
             },
           },
         }}
@@ -525,26 +524,19 @@ describe("reasoning effort integration", () => {
     )
   }
 
-  it("shows the selected effort on the model chip and inside the open picker", () => {
+  it("keeps the trigger free of an effort qualifier", () => {
     renderPicker(capableSession)
 
-    expect(screen.getByTestId("model-picker-effort")).toHaveTextContent("high")
-    fireEvent.click(screen.getByRole("button"))
-    expect(screen.getByTestId("effort-selector-section")).toBeInTheDocument()
-    // The chip keeps the raw wire value (it labels the MODEL); the selector
-    // announces the tier's display name.
-    expect(screen.getByRole("slider", { name: "Thinking level" })).toHaveAttribute(
-      "aria-valuetext",
-      "High"
-    )
+    expect(screen.queryByTestId("model-picker-effort")).not.toBeInTheDocument()
+    expect(screen.getByRole("button").textContent).not.toContain("High")
   })
 
-  it("omits effort UI for a model that does not support effort", () => {
-    renderPicker({ ...capableSession, model: "claude-sonnet-4-5" })
+  it("does not mount the effort selector inside the popover", () => {
+    renderPicker(capableSession)
 
-    expect(screen.queryByTestId("model-picker-effort")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button"))
     expect(screen.queryByTestId("effort-selector-section")).not.toBeInTheDocument()
+    expect(screen.queryByRole("slider", { name: "Thinking level" })).not.toBeInTheDocument()
   })
 })
 

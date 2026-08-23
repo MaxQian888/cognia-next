@@ -13,6 +13,11 @@
  *
  * What stays:
  *   • ModelPicker            — the user still picks the model.
+ *   • EffortChip             — and how deeply it thinks. It rides beside the
+ *                              model here for the same reason it does on the
+ *                              generic toolbar: the chip is the thinking
+ *                              level's only surface, so a composer without it
+ *                              cannot reach the setting at all.
  *   • PermissionModeIndicator — wf_* tools respect permission mode.
  *   • Context gauge          — token-window read-out, always pinned right.
  *
@@ -44,6 +49,7 @@ import { useSettingsStore } from "@/stores/settings"
 import type { ChatSession } from "@cognia/agent-config-types"
 import { PermissionModeIndicator } from "../permission-mode-indicator"
 import { ModelPicker } from "./model-picker"
+import { EffortChip } from "./effort-chip"
 import {
   useWorkflowEditor,
   type WorkflowEditorContextValue,
@@ -79,6 +85,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
     <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-1 text-[11px] text-muted-foreground">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <ModelPicker session={session} disabled={isStreaming} />
+        <EffortChip session={session} disabled={isStreaming} />
         <PermissionModeIndicator
           onCycle={(next) => setPermissionMode(next)}
           disabled={isStreaming}

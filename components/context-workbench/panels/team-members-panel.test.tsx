@@ -5,12 +5,25 @@
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import type { Character, Team } from "@cognia/agent-config-types"
 
-jest.mock("next-intl", () => ({
-  // Bare keys read as `<namespace>.<key>`; interpolated ones keep their values
-  // so per-member labels stay distinguishable.
-  useTranslations: (ns: string) => (key: string, values?: Record<string, unknown>) =>
-    values ? `${key}:${Object.values(values).join(",")}` : `${ns}.${key}`,
-}))
+jest.mock("next-intl", () => {
+  // Keys this bundle is missing. `t.has` answers false for them and `t` falls
+  // back to the full key path — how a shell running an older message bundle
+  // than the code behaves.
+  const missing = new Set<string>()
+  return {
+    // Bare keys read as `<namespace>.<key>`; interpolated ones keep their
+    // values so per-member labels stay distinguishable.
+    useTranslations: (ns: string) => {
+      const t = (key: string, values?: Record<string, unknown>) =>
+        values && !missing.has(key) ? `${key}:${Object.values(values).join(",")}` : `${ns}.${key}`
+      t.has = (key: string) => !missing.has(key)
+      return t
+    },
+    __missingMessageKeys: missing,
+  }
+})
+const missingMessageKeys = (jest.requireMock("next-intl") as { __missingMessageKeys: Set<string> })
+  .__missingMessageKeys
 
 const routerPush = jest.fn()
 jest.mock("next/navigation", () => ({
@@ -86,6 +99,7 @@ const character = (id: string, name: string, model?: string): Character =>
 
 beforeEach(() => {
   routerPush.mockClear()
+  missingMessageKeys.clear()
   openCharacterChat.mockClear()
   requestComposerMention.mockClear()
   requestStopMember.mockClear()
@@ -165,6 +179,22 @@ it("opens the member's own conversation on click and reports it to the host", as
     expect.objectContaining({ newChatTitle: "chatTitle:Brainstorm Buddy", pathname: "/" })
   )
   expect(onNavigated).toHaveBeenCalled()
+})
+
+// The conversation title is persisted, so an unresolved message would name the
+// conversation `desktop.memberList.chatTitle` forever — including in the shell
+// that later ships the message.
+it("names a new conversation after the character when the title message is missing", async () => {
+  missingMessageKeys.add("chatTitle")
+  render(<TeamMembersPanel teamSessionId="s-1" teamId="t-1" />)
+
+  await act(async () => {
+    fireEvent.click(screen.getByLabelText("openChat:Brainstorm Buddy"))
+  })
+  expect(openCharacterChat).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "c-1" }),
+    expect.objectContaining({ newChatTitle: "Brainstorm Buddy" })
+  )
 })
 
 it("keeps the sheet open when opening the chat fails", async () => {

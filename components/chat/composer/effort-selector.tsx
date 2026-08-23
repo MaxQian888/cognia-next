@@ -9,13 +9,12 @@
 // so a change applies from the NEXT turn: there is no live-apply IPC here,
 // unlike model switching.
 //
-// Rendered in two places, both passing the same session, so there is one state
-// and one component:
-//   - `./effort-chip` — the composer toolbar's own control, which is how the
-//     user reaches it; and
-//   - `./model-picker` — the bottom of the model popover, because depth
-//     qualifies a model and adjusting both at once is the common edit.
-// The `variant` prop only changes chrome (a divider vs a standalone card).
+// Mounted in exactly one place: `./effort-chip`, the composer toolbar's own
+// control. It used to have a second mount at the bottom of the model popover
+// (on the argument that depth qualifies a model), which meant the same tier was
+// stated three times on one toolbar — chip label, model-chip suffix, and the
+// slider one click away. That copy is gone, and with it the `variant` prop that
+// existed only to swap this block's chrome between the two.
 //
 // Two presentations, chosen by `composerBehavior.effortSelectorMode`:
 //   - "slider" (default) — a Faster→Smarter track, mirroring the CLI's effort
@@ -61,19 +60,11 @@ import {
   type EffortSelectorMode,
 } from "./effort-selector-view"
 
-/**
- * Where the control is drawn. `"section"` is the divider-topped block inside
- * the model popover; `"card"` is the standalone popover the toolbar chip opens
- * and owns the whole surface, so it carries no divider and breathes more.
- */
-export type EffortSelectorVariant = "section" | "card"
-
 interface EffortSelectorProps {
   session: ChatSession | null
   /** Disable interaction while a turn is in flight. */
   disabled?: boolean
   className?: string
-  variant?: EffortSelectorVariant
   /**
    * Force a presentation instead of reading `composerBehavior.effortSelectorMode`.
    * Only for stories and tests — production always follows the preference.
@@ -85,7 +76,6 @@ export function EffortSelector({
   session,
   disabled,
   className,
-  variant = "section",
   mode: modeProp,
 }: EffortSelectorProps) {
   const t = useTranslations("chat.composer.effort")
@@ -193,15 +183,12 @@ export function EffortSelector({
   return (
     <div
       ref={rootRef}
-      className={cn(
-        "flex flex-col",
-        variant === "card" ? "gap-3 px-3.5 py-3" : "gap-2.5 border-t px-3 py-2.5",
-        className
-      )}
+      // Owns the whole popover surface, so it breathes rather than sitting
+      // under a divider the way the popover-footer copy did.
+      className={cn("flex flex-col gap-3 px-3.5 py-3", className)}
       data-testid="effort-selector-section"
       data-mode={mode}
       data-layout={layout}
-      data-variant={variant}
     >
       {header}
       {mode === "slider" ? (

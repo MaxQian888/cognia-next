@@ -83,15 +83,3 @@ export const CompactSlider: Story = {
 export const Disabled: Story = {
   args: { session: session("max"), mode: "slider", disabled: true },
 }
-
-// The standalone card the composer's thinking-level chip opens. Same component
-// and same state as the in-popover copy above — only the chrome differs (no
-// divider, more breathing room), because here it owns the whole surface.
-export const Card: Story = {
-  args: { session: session("high"), mode: "slider", variant: "card" },
-}
-
-// The card at the composite top tier, where the track picks up its lattice.
-export const CardUltracode: Story = {
-  args: { session: session("ultracode"), mode: "slider", variant: "card" },
-}

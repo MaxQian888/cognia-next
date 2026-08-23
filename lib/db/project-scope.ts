@@ -130,6 +130,10 @@ const SESSION_CHILD_TABLES = [
   "chatDrafts",
   "chatInputHistory",
   "sessionState",
+  // Staged remote attachments for a session that is going away. The bytes are
+  // the whole point of the row, so leaving them behind would keep a deleted
+  // workspace's files on disk with nothing left that can reference them.
+  "sessionAttachmentUploads",
   // agentTraces carries `sessionId` — cascade by session so the high-volume
   // trace flush never pays a per-span lookup just to stamp `projectId`.
   "agentTraces",

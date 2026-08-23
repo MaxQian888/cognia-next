@@ -434,7 +434,6 @@
       "capTools": "工具调用",
       "capVision": "视觉",
       "contextWindowLabel": "上下文窗口",
-      "effortSuffix": "· {effort}",
       "liveSwitchFailed": "无法实时切换模型",
       "liveSwitched": "已切换到 {model}",
       "noProviders": "尚未配置任何模型提供商",
@@ -1744,6 +1743,7 @@
     "dismiss": "关闭",
     "inputLabel": "输入",
     "interruptedNotice": "该请求已被中断——工具调用已被拒绝。重新发送消息可重试。",
+    "observeRedacted": "此设备仅在观察——参数已隐藏，且无法作答。",
     "titleFallback": "允许执行 {tool}？",
     "toolLabel": "工具"
   },

@@ -28,6 +28,26 @@ export interface DraftAttachmentMeta {
   /** Cached extraction, so a restored document is not parsed a second time. */
   extractedText?: string
   tokens?: number
+  /**
+   * SHA-256 of the staged bytes, lowercase hex.
+   *
+   * Computed once at staging time and carried so a resumed upload does not
+   * re-hash a 10 MB file on a phone just to learn the key the Host already
+   * knows it by.
+   */
+  hash?: string
+  /**
+   * The Host-side upload this file is (or was) being transferred through, and
+   * how much of it landed.
+   *
+   * Kept on the draft rather than in an upload table of its own: the draft is
+   * already the record of "what is staged in this composer", already survives
+   * an app restart, and is already dropped when the target database goes. A
+   * parallel table would be a second thing to keep in step with it, and the
+   * two would disagree exactly when a restart interrupted a send.
+   */
+  uploadId?: string
+  uploadedBytes?: number
 }
 
 /**
@@ -129,7 +149,14 @@ export async function setDraft(
       ...(options.originClientId || hostStateRow?.clientId
         ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
         : {}),
-      attachmentRefs: attachments.map(({ name, mediaType, size }) => ({ name, mediaType, size })),
+      // The content hash rides along so a draft restored after a restart can
+      // rejoin its upload instead of re-hashing and re-sending the file.
+      attachmentRefs: attachments.map(({ name, mediaType, size, hash }) => ({
+        name,
+        mediaType,
+        size,
+        ...(hash ? { hash } : {}),
+      })),
       ...(attachments.length > 0 ? { attachments } : {}),
     })
   })

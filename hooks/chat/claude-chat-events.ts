@@ -204,7 +204,9 @@ export async function tryAutoModeDecision(evt: {
       }),
     ])
     if (decision && decision.decision === "allow") {
-      await approveTool(evt.sessionId, evt.requestId, "allow")
+      await approveTool(evt.sessionId, evt.requestId, "allow", undefined, undefined, undefined, {
+        authority: "policy-rule",
+      })
       return true
     }
     if (decision && decision.decision === "deny") {
@@ -212,7 +214,10 @@ export async function tryAutoModeDecision(evt: {
         evt.sessionId,
         evt.requestId,
         "deny",
-        `auto-denied (${decision.source}): ${decision.reason}`
+        `auto-denied (${decision.source}): ${decision.reason}`,
+        undefined,
+        undefined,
+        { authority: "policy-deny" }
       )
       return true
     }
@@ -531,7 +536,10 @@ export async function handleEvent(
               evt.sessionId,
               evt.requestId,
               "deny",
-              pre.reason ?? "denied by plugin onPreToolUse"
+              pre.reason ?? "denied by plugin onPreToolUse",
+              undefined,
+              undefined,
+              { authority: "policy-deny" }
             )
           } catch (err) {
             console.error("plugin pre-tool deny failed", err)
@@ -540,7 +548,17 @@ export async function handleEvent(
         }
         if (pre.action === "modify" && pre.modifiedArgs) {
           try {
-            await approveTool(evt.sessionId, evt.requestId, "allow", undefined, pre.modifiedArgs)
+            await approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "allow",
+              undefined,
+              pre.modifiedArgs,
+              undefined,
+              {
+                authority: "policy-rule",
+              }
+            )
           } catch (err) {
             console.error("plugin pre-tool modify failed", err)
           }
@@ -550,7 +568,17 @@ export async function handleEvent(
       // Auto-approve if the user has previously allowed this tool.
       if (allowListRef.current.includes(evt.toolName)) {
         try {
-          await approveTool(evt.sessionId, evt.requestId, "allow")
+          await approveTool(
+            evt.sessionId,
+            evt.requestId,
+            "allow",
+            undefined,
+            undefined,
+            undefined,
+            {
+              authority: "policy-rule",
+            }
+          )
         } catch (err) {
           console.error("auto-approve failed", err)
         }
@@ -601,10 +629,12 @@ export async function handleEvent(
       // so a gate in session B never blocks or is confused with session A's.
       const isOpen = isSessionOpen(evt.sessionId)
       if (!isOpen) {
-        // Remote Session Control: if a remote device is watching this
-        // (non-open) session, route the approval to it instead of
+        // Remote Session Control: if a remote device holds a CONTROL lease on
+        // this (non-open) session, route the approval to it instead of
         // auto-denying. The remote already received this permission_request
-        // frame over /ws/events and will resolve it via claude_approve.
+        // frame over its event stream and will resolve it via claude_approve.
+        // Observers do not count — holding a prompt open for a device that may
+        // only watch stalls the turn until the backstop denies it.
         // The sidecar's canUseTool has no timeout of its own, so arm a
         // backstop deny that fires only if the remote never answers — the
         // next SDK event for this session (the turn proceeding) cancels it.
@@ -619,10 +649,11 @@ export async function handleEvent(
           })
           // Notify a backgrounded (WS-closed) watcher via push so it can come
           // back and decide before the backstop denies.
+          // Ids only — the notifier resolves which attached devices to wake and
+          // never puts the tool name on a push.
           void notifyRemoteNeedsInput({
             sessionId: evt.sessionId,
             requestId: evt.requestId,
-            toolName: evt.toolName,
           })
           return
         }

@@ -11,6 +11,7 @@
     "fleet-permission": "智能体等待权限确认",
     "fleet-waiting": "智能体等待输入",
     "hitl-gate": "团队审批门待决策",
+    "run-approval": "运行等待审批",
     "tool-approval": "工具调用待审批"
   },
   "openOwner": "打开",
@@ -18,6 +19,7 @@
   "source": {
     "chat": "聊天",
     "fleet": "舰队",
+    "run": "运行",
     "team": "团队"
   },
   "title": "注意力中心"

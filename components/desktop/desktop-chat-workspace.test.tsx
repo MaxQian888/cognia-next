@@ -1,16 +1,28 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, act } from "@testing-library/react"
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
 
-jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-}))
+jest.mock("next-intl", () => {
+  // Keys this bundle is missing — `t.has` answers false for them, the way a
+  // shell running an older message bundle than the code does.
+  const missing = new Set<string>()
+  return {
+    useTranslations: () => {
+      const t = (key: string) => key
+      t.has = (key: string) => !missing.has(key)
+      return t
+    },
+    __missingMessageKeys: missing,
+  }
+})
+const missingMessageKeys = (jest.requireMock("next-intl") as { __missingMessageKeys: Set<string> })
+  .__missingMessageKeys
 
 const routerPush = jest.fn()
 const routerReplace = jest.fn()
@@ -260,8 +272,13 @@ jest.mock("@/components/chat/workspace-trust-gate", () => ({
   WorkspaceTrustGate: () => null,
 }))
 jest.mock("@/components/chat/character-picker", () => ({
-  CharacterPicker: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="char-picker" /> : null,
+  CharacterPicker: ({ open, onPick }: { open: boolean; onPick: (c: unknown) => void }) =>
+    open ? (
+      <button
+        data-testid="char-picker"
+        onClick={() => onPick({ id: "c-pick", name: "Brainstorm Buddy" })}
+      />
+    ) : null,
 }))
 const channelListPropsLog: Array<Record<string, unknown>> = []
 jest.mock("@/components/desktop/channel-list", () => ({
@@ -289,6 +306,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 
 beforeEach(() => {
   insertMention.mockReset()
+  missingMessageKeys.clear()
   logInfo.mockReset()
   logWarn.mockReset()
   select.mockReset()
@@ -940,6 +958,25 @@ test("ChannelList callback props stay referentially stable across re-renders", (
   expect(secondProps.onBulkDelete).toBe(firstProps.onBulkDelete)
   expect(secondProps.onBulkSetPinned).toBe(firstProps.onBulkSetPinned)
   expect(secondProps.onTogglePinned).toBe(firstProps.onTogglePinned)
+})
+
+// The picked character's conversation title is persisted, so an unresolved
+// message would name the conversation `desktop.memberList.chatTitle` for good —
+// including in the shell that later ships the message.
+test("names a picked character's conversation after them when the title message is missing", async () => {
+  missingMessageKeys.add("chatTitle")
+  create.mockResolvedValue({ id: "new-direct" } as ChatSession)
+  render(<DesktopChatWorkspace />)
+  const props = channelListPropsLog[channelListPropsLog.length - 1]
+  await act(async () => {
+    ;(props.onNewDirect as () => void)()
+  })
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("char-picker"))
+  })
+  expect(create).toHaveBeenCalledWith(
+    expect.objectContaining({ title: "Brainstorm Buddy", kind: "direct", characterId: "c-pick" })
+  )
 })
 
 test("onBulkDelete delegates to bulkRemove and surfaces the i18n'd success toast", async () => {

@@ -3,8 +3,6 @@ import type { ChatSession, SessionFolder } from "@cognia/agent-config-types"
 import type { ConversationSection } from "@/lib/chat/conversation-list-model"
 import {
   freezeConversationLayout,
-  frozenLayoutPending,
-  frozenOrderPending,
   mergeFrozenOrder,
   projectFrozenSections,
 } from "@/lib/chat/conversation-order-freeze"
@@ -75,30 +73,6 @@ describe("mergeFrozenOrder", () => {
   it("is idempotent — re-merging its own output changes nothing", () => {
     const once = mergeFrozenOrder(["a", "b", "c"], ["c", "a", "b"])
     expect(mergeFrozenOrder(["a", "b", "c"], once)).toEqual(once)
-  })
-})
-
-describe("frozenOrderPending", () => {
-  it("is zero with no freeze and no movement", () => {
-    expect(frozenOrderPending([], ["a", "b"])).toBe(0)
-    expect(frozenOrderPending(["a", "b"], ["a", "b"])).toBe(0)
-  })
-
-  it("counts the row something happened to, not everything it displaced", () => {
-    // One chat jumping to the top of a five-row list is one update, not four.
-    expect(frozenOrderPending(["a", "b", "c", "d", "e"], ["e", "a", "b", "c", "d"])).toBe(1)
-  })
-
-  it("counts each row that moved earlier", () => {
-    expect(frozenOrderPending(["a", "b", "c", "d"], ["c", "d", "a", "b"])).toBe(2)
-  })
-
-  it("does not count new rows — they are already on screen", () => {
-    expect(frozenOrderPending(["a", "b"], ["new", "a", "b"])).toBe(0)
-  })
-
-  it("does not read a deletion elsewhere as movement", () => {
-    expect(frozenOrderPending(["a", "b", "c"], ["b", "c"])).toBe(0)
   })
 })
 
@@ -202,25 +176,5 @@ describe("projectFrozenSections", () => {
     const ids = projectFrozenSections(frozen, live).flatMap((s) => s.sessions.map((r) => r.id))
     expect([...ids].sort()).toEqual(["a", "b", "c", "new"])
     expect(new Set(ids).size).toBe(ids.length)
-  })
-})
-
-describe("frozenLayoutPending", () => {
-  it("is zero when nothing moved", () => {
-    const sections = [dateSection("today", ["a", "b"])]
-    expect(frozenLayoutPending(freezeConversationLayout(sections), sections)).toBe(0)
-  })
-
-  it("counts a row that changed section", () => {
-    const frozen = freezeConversationLayout([
-      dateSection("today", ["a"]),
-      dateSection("yesterday", ["b"]),
-    ])
-    expect(frozenLayoutPending(frozen, [dateSection("today", ["b", "a"])])).toBeGreaterThan(0)
-  })
-
-  it("does not count a new conversation — it is already on screen", () => {
-    const frozen = freezeConversationLayout([dateSection("today", ["a"])])
-    expect(frozenLayoutPending(frozen, [dateSection("today", ["new", "a"])])).toBe(0)
   })
 })

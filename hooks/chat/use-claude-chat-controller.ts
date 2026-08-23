@@ -57,6 +57,7 @@ import {
   sendPrompt,
   setSessionModel,
 } from "@/lib/claude/ipc"
+import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-tool-channel"
 import { isEmbeddedSession } from "@/lib/chat/session-exposure"
 import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
 import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
@@ -2183,22 +2184,23 @@ export function useClaudeChat() {
         )
         return
       }
-      try {
-        const handle = getExecutionHandle(approval.sessionId)
-        if (handle) {
-          await handle.resolvePermission(approval.requestId, decision)
-        } else {
-          await approveTool(
-            approval.sessionId,
-            approval.requestId,
-            decision === "allow_always" ? "allow" : decision
-          )
-        }
-      } finally {
-        // Scope the clear to the approval's own session so resolving a gate in
-        // one pane never disturbs another pane's pending queue.
-        store.getState().clearApproval(approval.requestId, approval.sessionId)
+      const handle = getExecutionHandle(approval.sessionId)
+      if (handle) {
+        await handle.resolvePermission(approval.requestId, decision)
+      } else {
+        await approveTool(
+          approval.sessionId,
+          approval.requestId,
+          decision === "allow_always" ? "allow" : decision
+        )
       }
+      // The receipt asserts the backend received the decision, so it is written
+      // only after either dispatch path succeeds. A failure leaves the approval
+      // mounted and pending, allowing the operator to retry.
+      await recordChatToolApprovalDecision(approval, decision)
+      // Scope the clear to the approval's own session so resolving a gate in
+      // one pane never disturbs another pane's pending queue.
+      store.getState().clearApproval(approval.requestId, approval.sessionId)
     },
     [store, getExecutionHandle]
   )

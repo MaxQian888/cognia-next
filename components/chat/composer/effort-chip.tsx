@@ -4,16 +4,16 @@
 // point, and the reason this feature stopped being invisible.
 //
 // It used to live only at the bottom of the model popover, on the argument that
-// depth qualifies a model and so belongs with it. That argument is still true
-// (the model popover keeps its copy) but it made a per-turn decision cost two
-// interactions and a scroll, and it left the current tier unreadable without
-// opening something. A user who never went looking had no way to learn the
-// control existed at all.
+// depth qualifies a model and so belongs with it. That made a per-turn decision
+// cost two interactions and a scroll, and left the current tier unreadable
+// without opening something — a user who never went looking had no way to learn
+// the control existed at all.
 //
 // So the tier gets a chip on the permanent execution row, beside the model and
-// permission chips that answer the same "what will this run as" question. The
-// chip is the label; the popover is `./effort-selector` in its `card` variant —
-// one component, one piece of state, two mount points.
+// permission chips that answer the same "what will this run as" question. This
+// is now the ONLY surface for it: the model popover's copy and the `· low`
+// qualifier on the model chip are gone, because three statements of one setting
+// on one row read as three settings.
 //
 // Self-gates to nothing on a surface with no depth control (see
 // `./effort-surface`), so a composer where it would be a no-op pays nothing for
@@ -72,8 +72,8 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
         >
           {/* Both halves are keyed by tier so React remounts them and their
               entrance re-fires: this chip is often the only part of the control
-              on screen when the level changes (from the model popover, a
-              keyboard commit, or a preset), and a silent relabel is easy to
+              on screen when the level changes (a keyboard commit inside the
+              popover, or a preset), and a silent relabel is easy to
               miss on a row this quiet. */}
           <BrainIcon
             key={`glyph-${current}`}
@@ -91,7 +91,7 @@ export function EffortChip({ session, disabled, className }: EffortChipProps) {
       {/* Width matches the model popover's, so opening one after the other
           doesn't resize the surface under the pointer. */}
       <PopoverContent align="start" side="top" className="w-[19rem] p-0">
-        <EffortSelector session={session} disabled={disabled} variant="card" />
+        <EffortSelector session={session} disabled={disabled} />
       </PopoverContent>
     </Popover>
   )

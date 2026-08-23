@@ -41,6 +41,7 @@ import type {
   PendingApproval,
   SendContent,
 } from "@cognia/agent-config-types"
+import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
@@ -514,7 +515,7 @@ export function DesktopChatWorkspace() {
     async (c: Character) => {
       log.info("character-picker pick", { characterId: c.id })
       const s = await create({
-        title: tMembers("chatTitle", { name: c.name }),
+        title: characterChatTitle(tMembers, c.name),
         kind: "direct",
         characterId: c.id,
       })

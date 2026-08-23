@@ -11,6 +11,7 @@ import type {
   ApprovalDecision,
   ChatSession,
   ClaudeEvent,
+  PermissionRequestEvent,
   PluginToolExecEvent,
   SdkContextUsage,
   SdkMcpServerStatus,
@@ -31,6 +32,10 @@ import {
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
 import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
 import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
+import type {
+  ActionReviewActorKind,
+  ActionReviewAuthority,
+} from "@cognia/agent-config-types/action-review"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { isRemoteExecutionContext, type RemoteExecutionContext } from "./remote-execution"
 
@@ -41,6 +46,22 @@ const remoteApprovalContexts = new Map<string, RemoteExecutionContext>()
 
 function remoteApprovalKey(sessionId: string, requestId: string): string {
   return `${sessionId}:${requestId}`
+}
+
+/**
+ * Narrow a sidecar frame to a permission ask. Local rather than exported from
+ * the contract package because it guards a projection, not a protocol branch:
+ * a frame that fails it is simply not audited.
+ */
+function isPermissionRequestEvent(event: unknown): event is PermissionRequestEvent {
+  if (!event || typeof event !== "object") return false
+  const candidate = event as Partial<PermissionRequestEvent>
+  return (
+    candidate.type === "permission_request" &&
+    typeof candidate.sessionId === "string" &&
+    typeof candidate.requestId === "string" &&
+    typeof candidate.toolName === "string"
+  )
 }
 
 export async function sendPrompt(
@@ -654,13 +675,27 @@ export async function sendMessageFromMobile(
   })
 }
 
+/**
+ * Who authorized this decision, for the action-review audit trail.
+ *
+ * Optional and explicit on purpose: every resolution path funnels through
+ * `approveTool`, so this function cannot tell a human's click from an
+ * auto-mode rule. A caller that omits it gets no receipt rather than a
+ * fabricated `"human"` one — see `lib/policy/action-review/chat-tool-channel`.
+ */
+export interface ApproveToolAttribution {
+  authority: ActionReviewAuthority
+  actor?: { kind: ActionReviewActorKind; id?: string; label?: string }
+}
+
 export async function approveTool(
   sessionId: string,
   requestId: string,
   decision: ApprovalDecision,
   message?: string,
   updatedInput?: unknown,
-  remoteExecutionContext?: RemoteExecutionContext
+  remoteExecutionContext?: RemoteExecutionContext,
+  attribution?: ApproveToolAttribution
 ): Promise<void> {
   const { recordToolAuthorizationGovernance } =
     await import("@/lib/governance/producers/tool-authorization")
@@ -717,6 +752,9 @@ export async function approveTool(
         error
       )
     }
+    if (attribution) {
+      await recordApprovalReceipt(sessionId, requestId, decision, message, attribution)
+    }
   } catch (error) {
     try {
       await recordToolAuthorizationGovernance({
@@ -745,6 +783,43 @@ export async function approveTool(
     throw error
   } finally {
     remoteApprovalContexts.delete(key)
+  }
+}
+
+/**
+ * Write the action-review receipt for a decision that actually reached the
+ * sidecar.
+ *
+ * Called on the success path only — NOT from a `finally`. The receipt is a
+ * 90-day audit record asserting that this tool call was authorized and
+ * settled; a dispatch that threw authorized nothing, and recording one anyway
+ * would put a decision in the trail that the sidecar never received. That is
+ * the same distinction `recordToolAuthorizationGovernance` already draws with
+ * its `dispatched` flag, and the receipt contract has no way to express it.
+ *
+ * Never throws: the projection is an observer of a decision the user already
+ * made.
+ */
+async function recordApprovalReceipt(
+  sessionId: string,
+  requestId: string,
+  decision: ApprovalDecision,
+  message: string | undefined,
+  attribution: ApproveToolAttribution
+): Promise<void> {
+  try {
+    const { settleChatToolReview } = await import("@/lib/policy/action-review/chat-tool-channel")
+    await settleChatToolReview({
+      sessionId,
+      requestId,
+      outcome:
+        decision === "deny" ? "deny" : decision === "allow_always" ? "allow_always" : "allow",
+      authority: attribution.authority,
+      ...(message ? { reason: message } : {}),
+      ...(attribution.actor ? { actor: attribution.actor } : {}),
+    })
+  } catch {
+    // Audit projection must never fail an approval the user already made.
   }
 }
 
@@ -850,6 +925,19 @@ export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Prom
         remoteApprovalKey(routed.sessionId, routed.requestId),
         routed.remoteExecutionContext
       )
+    }
+    if (isPermissionRequestEvent(routed)) {
+      // Fire-and-forget: the ask must reach its handler at once, and a failed
+      // projection is a missing list row, never a stalled approval.
+      void import("@/lib/policy/action-review/chat-tool-channel")
+        .then(({ openChatToolReview }) =>
+          openChatToolReview({
+            sessionId: routed.sessionId,
+            requestId: routed.requestId,
+            toolName: routed.toolName,
+          })
+        )
+        .catch(() => undefined)
     }
     handler(event)
   })

@@ -49,6 +49,7 @@ import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "@/components/ui
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Textarea } from "@/components/ui/textarea"
 import { useClientLiveQuery } from "@/hooks/data"
+import { characterChatTitle } from "@/lib/chat/character-chat-title"
 import { requestComposerMention } from "@/lib/chat/composer-mention-request"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { getSession, updateSession } from "@/lib/db/sessions"
@@ -276,7 +277,7 @@ function MemberRow({
   const openChat = () => {
     log.info("team-members open chat", { teamSessionId, characterId: character.id })
     void openCharacterChat(character, {
-      newChatTitle: t("chatTitle", { name: character.name }),
+      newChatTitle: characterChatTitle(t, character.name),
       navigate: (route) => router.push(route),
       pathname,
     })

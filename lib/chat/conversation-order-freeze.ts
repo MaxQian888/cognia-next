@@ -87,35 +87,6 @@ function isSortedByRank(ids: readonly string[], rank: Map<string, number>): bool
   return true
 }
 
-/**
- * How many conversations the freeze is holding back — the number the "N
- * updates" pill reports.
- *
- * Counts rows that the live order would move *earlier* than the frozen one
- * does: those are the ones something happened to. Counting every row whose
- * index differs would report "29 updates" for one chat jumping to the top of a
- * thirty-row list, which is true of the indices and false of the world.
- *
- * New rows are not counted: they are already on screen, un-frozen.
- */
-export function frozenOrderPending(frozen: readonly string[], live: readonly string[]): number {
-  if (frozen.length === 0) return 0
-  const rank = new Map<string, number>()
-  for (let i = 0; i < frozen.length; i++) rank.set(frozen[i]!, i)
-  // Positions among the rows both orders know about, so a deletion elsewhere
-  // does not read as movement.
-  const shared: string[] = []
-  for (const id of live) if (rank.has(id)) shared.push(id)
-  const frozenShared = [...shared].sort((a, b) => rank.get(a)! - rank.get(b)!)
-  const frozenIndex = new Map<string, number>()
-  for (let i = 0; i < frozenShared.length; i++) frozenIndex.set(frozenShared[i]!, i)
-  let moved = 0
-  for (let i = 0; i < shared.length; i++) {
-    if (i < frozenIndex.get(shared[i]!)!) moved += 1
-  }
-  return moved
-}
-
 // ---------------------------------------------------------------------------
 // Section-level freeze
 // ---------------------------------------------------------------------------
@@ -230,34 +201,4 @@ export function projectFrozenSections(
 function frozenHas(frozen: FrozenConversationLayout, id: string): boolean {
   for (const entry of frozen.sections) if (entry.ids.includes(id)) return true
   return false
-}
-
-/** Rows the freeze is holding back, across every section. */
-export function frozenLayoutPending(
-  frozen: FrozenConversationLayout,
-  live: readonly ConversationSection[]
-): number {
-  if (frozen.sections.length === 0) return 0
-  const frozenSectionOf = new Map<string, string>()
-  const frozenOrder: string[] = []
-  for (const entry of frozen.sections) {
-    const key = conversationSectionKey(entry.section)
-    for (const id of entry.ids) {
-      frozenSectionOf.set(id, key)
-      frozenOrder.push(id)
-    }
-  }
-  const liveOrder: string[] = []
-  let migrated = 0
-  for (const section of live) {
-    const key = conversationSectionKey(section)
-    for (const session of section.sessions) {
-      liveOrder.push(session.id)
-      const was = frozenSectionOf.get(session.id)
-      // Changing section is the loudest kind of movement — the row is not
-      // merely lower down, it is somewhere else entirely.
-      if (was !== undefined && was !== key) migrated += 1
-    }
-  }
-  return migrated + frozenOrderPending(frozenOrder, liveOrder)
 }

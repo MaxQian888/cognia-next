@@ -29,6 +29,7 @@ import {
   onClaudeMessage,
   sendPrompt,
 } from "@/lib/claude/ipc"
+import { recordChatToolApprovalDecision } from "@/lib/policy/action-review/chat-tool-channel"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
@@ -810,15 +811,13 @@ export function useTeamChat() {
       if (decision === "allow_always") {
         await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
       }
-      try {
-        await approveTool(
-          approval.sessionId,
-          approval.requestId,
-          decision === "allow_always" ? "allow" : decision
-        )
-      } finally {
-        useChatStore.getState().clearApproval(approval.requestId)
-      }
+      await approveTool(
+        approval.sessionId,
+        approval.requestId,
+        decision === "allow_always" ? "allow" : decision
+      )
+      await recordChatToolApprovalDecision(approval, decision)
+      useChatStore.getState().clearApproval(approval.requestId)
     },
     []
   )
@@ -1330,7 +1329,17 @@ async function handleTeamEvent(
     case "permission_request": {
       if (allowListRef.current.includes(evt.toolName)) {
         try {
-          await approveTool(evt.sessionId, evt.requestId, "allow")
+          await approveTool(
+            evt.sessionId,
+            evt.requestId,
+            "allow",
+            undefined,
+            undefined,
+            undefined,
+            {
+              authority: "policy-rule",
+            }
+          )
         } catch (err) {
           console.error("auto-approve failed", err)
         }
@@ -1338,7 +1347,16 @@ async function handleTeamEvent(
       }
       if (!isOpen) {
         try {
-          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not open")
+          await approveTool(
+            evt.sessionId,
+            evt.requestId,
+            "deny",
+            "auto-denied: session not open",
+            undefined,
+            undefined,
+            // The waiter had nowhere to ask; nothing was authorized by anyone.
+            { authority: "system" }
+          )
         } catch (err) {
           console.error("non-open deny failed", err)
         }

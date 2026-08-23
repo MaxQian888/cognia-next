@@ -115,14 +115,20 @@ describe("ModelSelect", () => {
     expect(onSelectAuto).toHaveBeenCalled()
   })
 
-  it("renders the trigger suffix and the popover footer supplied by the binding", () => {
-    renderSelect({
-      triggerSuffix: <span data-testid="suffix">· high</span>,
-      footer: <div data-testid="footer">effort</div>,
-    })
-    expect(screen.getByTestId("suffix")).toBeInTheDocument()
+  it("puts the active tick and the model metadata on the right of the row", () => {
+    renderSelect()
     fireEvent.click(screen.getByRole("button", { name: /switch model/i }))
-    expect(screen.getByTestId("footer")).toBeInTheDocument()
+    // The trigger carries the same name, so pick the occurrence inside a row.
+    const row = screen
+      .getAllByText(ANTHROPIC_NAME!)
+      .map((el) => el.closest("[data-slot='command-item']"))
+      .find(Boolean)
+    expect(row).toBeTruthy()
+    const children = Array.from(row!.children)
+    // Identity column first, tick last — nothing indents the name off the
+    // left edge, and the row's trailing space is where the tick lives.
+    expect(children[0]).toHaveTextContent(ANTHROPIC_NAME!)
+    expect(children.at(-1)?.tagName.toLowerCase()).toBe("svg")
   })
 
   it("keeps the trigger shrinkable so long model ids truncate", () => {

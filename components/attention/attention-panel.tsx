@@ -51,6 +51,17 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
     router.push("/")
     onNavigated()
   }
+  /**
+   * A durable run approval is answered where the run lives, not here: the
+   * cockpit has the run's revision, its pending interrupt id and the control
+   * plane. Sending the user there beats an inline button that would have to
+   * re-derive all three from a list row.
+   */
+  const openRunCockpit = () => {
+    if (!item.runId) return
+    router.push(`/agent-runs?run=${encodeURIComponent(item.runId)}`)
+    onNavigated()
+  }
   const openTeamWorkspace = () => {
     router.push(
       item.teamId
@@ -59,11 +70,32 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
     )
     onNavigated()
   }
+  /**
+   * Whether Dismiss can actually clear this row.
+   *
+   * A `human_handoff` is deliberately excluded even past its deadline:
+   * `recoverPendingRunInterrupts` refuses to expire that type for the same
+   * reason, because expiring it would silently un-assign work a person still
+   * owns. Fleet rows have no clearing path at all. Rendering the button for
+   * either would be an affordance that does nothing.
+   */
+  const canDismiss =
+    (item.source === "chat" && Boolean(item.approval)) ||
+    (item.source === "team" && Boolean(item.gate)) ||
+    (item.source === "run" && Boolean(item.interrupt) && item.interrupt?.type !== "human_handoff")
+
   const dismiss = () => {
     if (item.source === "chat" && item.approval) {
       useChatStore.getState().clearApproval(item.approval.requestId, item.sessionId)
     } else if (item.source === "team" && item.gate) {
       usePendingGatesStore.getState().close(item.gate.key)
+    } else if (item.source === "run" && item.interrupt) {
+      // Only ever reached from the stale branch, i.e. the row is already past
+      // its deadline — this is the sweep the recovery pass would have run.
+      const { runId, id } = item.interrupt
+      void import("@/lib/execution/run-control").then(({ expireRunInterruptFromSource }) =>
+        expireRunInterruptFromSource(runId, id)
+      )
     }
   }
 
@@ -107,6 +139,18 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
             className="size-6"
             aria-label={t("openOwner")}
             onClick={openChatSession}
+          >
+            <ExternalLinkIcon className="size-3.5" />
+          </Button>
+        )}
+        {!item.stale && item.source === "run" && item.runId && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            aria-label={t("openOwner")}
+            data-testid={`attention-open-run-${item.id}`}
+            onClick={openRunCockpit}
           >
             <ExternalLinkIcon className="size-3.5" />
           </Button>
@@ -157,7 +201,7 @@ function AttentionRow({ item, onNavigated }: { item: AttentionItem; onNavigated:
               <TerminalIcon className="size-3.5" />
             </Button>
           )}
-        {item.stale && (
+        {item.stale && canDismiss && (
           <Button
             variant="ghost"
             size="icon"

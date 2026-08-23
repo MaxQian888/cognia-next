@@ -21,6 +21,9 @@ jest.mock("next-intl", () => ({
 jest.mock("./model-picker", () => ({
   ModelPicker: () => <div data-testid="model-picker" />,
 }))
+jest.mock("./effort-chip", () => ({
+  EffortChip: () => <div data-testid="effort-chip" />,
+}))
 jest.mock("../permission-mode-indicator", () => ({
   PermissionModeIndicator: () => <div data-testid="permission-mode-indicator" />,
 }))
@@ -147,9 +150,13 @@ describe("WorkflowBottomToolbar", () => {
     expect(screen.queryByLabelText(/composer\.skillPicker\.trigger/i)).toBeNull()
   })
 
-  it("renders Model + Permission + Context + 3 quick actions", () => {
+  it("renders Model + Effort + Permission + Context + 3 quick actions", () => {
     renderWithCtx()
     expect(screen.getByTestId("model-picker")).toBeInTheDocument()
+    // The chip is the thinking level's ONLY surface (the model popover no
+    // longer carries a copy), so this composer has to mount it or the setting
+    // is unreachable from a workflow chat.
+    expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
     expect(screen.getByTestId("context-gauge")).toBeInTheDocument()
     expect(screen.getByTestId("workflow-quick-action-validate")).toBeInTheDocument()
@@ -239,6 +246,7 @@ describe("WorkflowBottomToolbar", () => {
     expect(screen.queryByTestId("workflow-quick-actions")).toBeNull()
     // But the tier-1 controls are still present.
     expect(screen.getByTestId("model-picker")).toBeInTheDocument()
+    expect(screen.getByTestId("effort-chip")).toBeInTheDocument()
     expect(screen.getByTestId("permission-mode-indicator")).toBeInTheDocument()
   })
 })

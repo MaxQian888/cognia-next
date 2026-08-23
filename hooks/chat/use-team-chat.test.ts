@@ -635,6 +635,23 @@ describe("useTeamChat — actions", () => {
     expect(approveToolMock).toHaveBeenCalledWith("team-1::char::c1::t1", "r-1", "allow")
   })
 
+  it("keeps a team approval pending when permission dispatch fails", async () => {
+    approveToolMock.mockRejectedValueOnce(new Error("sidecar unavailable"))
+    const { result } = renderHook(() => useTeamChat())
+    await flush()
+
+    await act(async () => {
+      await expect(
+        result.current.respondToApproval(
+          { sessionId: "team-1::char::c1::t1", requestId: "r-retry", toolName: "read" } as never,
+          "deny"
+        )
+      ).rejects.toThrow("sidecar unavailable")
+    })
+
+    expect(chatState.clearApproval).not.toHaveBeenCalledWith("r-retry")
+  })
+
   it("respondToApproval allow_always toggles always-allow", async () => {
     const { result } = renderHook(() => useTeamChat())
     await flush()
@@ -1528,7 +1545,16 @@ describe("useTeamChat — event handler coverage", () => {
       await new Promise<void>((r) => setTimeout(r, 10))
     })
 
-    expect(approveToolMock).toHaveBeenCalledWith("team-1::char::c1::t1", "req-1", "allow")
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "team-1::char::c1::t1",
+      "req-1",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      // An allowlist hit is a rule authorizing it, not a person.
+      { authority: "policy-rule" }
+    )
   })
 
   it("permission_request auto-denies when the team session has no open pane", async () => {
@@ -1560,7 +1586,11 @@ describe("useTeamChat — event handler coverage", () => {
       "OTHER-team::char::c1::t1",
       "req-2",
       "deny",
-      expect.any(String)
+      expect.any(String),
+      undefined,
+      undefined,
+      // Nobody could be asked, so nobody authorized it.
+      { authority: "system" }
     )
   })
 

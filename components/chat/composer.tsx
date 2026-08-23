@@ -57,7 +57,11 @@ import {
   type ExtractedAttachment,
   type SubmittedFile,
 } from "@/lib/chat/attachments/dispatch"
-import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
+import {
+  COMPOSER_MAX_ATTACHMENTS,
+  COMPOSER_MAX_ATTACHMENT_BYTES,
+  prepareComposerAttachments,
+} from "@/lib/chat/attachments/prepare"
 import { captureSmartSnapshotFiles, SMART_SNAPSHOT_COMMAND_ID } from "@/lib/chat/smart-snapshot"
 import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
@@ -284,8 +288,10 @@ export interface ComposerHandle {
   focus: () => void
 }
 
-const MAX_FILES = 6
-const MAX_FILE_SIZE = 10 * 1024 * 1024
+// Shared with the Host attachment-upload manifest so a remote client is held
+// to the same ceiling as the desktop paperclip.
+const MAX_FILES = COMPOSER_MAX_ATTACHMENTS
+const MAX_FILE_SIZE = COMPOSER_MAX_ATTACHMENT_BYTES
 // Max composer textarea height before it scrolls. Single source of truth so the
 // CSS cap (`maxHeight`) and the JS auto-resize fallback can't drift apart. The
 // px form assumes the app's default 16px root (the JS path only runs on old

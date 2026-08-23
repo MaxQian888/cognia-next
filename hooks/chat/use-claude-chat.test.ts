@@ -1547,6 +1547,23 @@ describe("useClaudeChat — actions", () => {
     expect(chatState.clearApproval).toHaveBeenCalledWith("r-1", "sess-1")
   })
 
+  it("keeps a manual approval pending when permission dispatch fails", async () => {
+    approveToolMock.mockRejectedValueOnce(new Error("sidecar unavailable"))
+    const { result } = renderHook(() => useClaudeChat())
+    await flush()
+
+    await act(async () => {
+      await expect(
+        result.current.respondToApproval(
+          { sessionId: "sess-1", requestId: "r-retry", toolName: "read" } as never,
+          "allow"
+        )
+      ).rejects.toThrow("sidecar unavailable")
+    })
+
+    expect(chatState.clearApproval).not.toHaveBeenCalledWith("r-retry", "sess-1")
+  })
+
   it("respondToApproval queues the attached decision and skips direct approval RPC", async () => {
     enqueueHostStateIntentMock.mockResolvedValueOnce({ id: "approval-action", status: "pending" })
     const { result } = renderHook(() => useClaudeChat())
@@ -2012,7 +2029,17 @@ describe("useClaudeChat — actions", () => {
         input: {},
       })
     })
-    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "req-1", "allow")
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-1",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      {
+        authority: "policy-rule",
+      }
+    )
     settingsState.settings.alwaysAllowTools = []
   })
 
@@ -2032,7 +2059,17 @@ describe("useClaudeChat — actions", () => {
         input: { command: "git status" },
       })
     })
-    expect(approveToolMock).toHaveBeenCalledWith("sess-1", "req-auto-allow", "allow")
+    expect(approveToolMock).toHaveBeenCalledWith(
+      "sess-1",
+      "req-auto-allow",
+      "allow",
+      undefined,
+      undefined,
+      undefined,
+      {
+        authority: "policy-rule",
+      }
+    )
     delete (settingsState.settings as Record<string, unknown>).agentPermissions
   })
 
@@ -2056,7 +2093,10 @@ describe("useClaudeChat — actions", () => {
       "sess-1",
       "req-auto-deny",
       "deny",
-      expect.stringContaining("auto-denied")
+      expect.stringContaining("auto-denied"),
+      undefined,
+      undefined,
+      { authority: "policy-deny" }
     )
     delete (settingsState.settings as Record<string, unknown>).agentPermissions
   })
