@@ -245,7 +245,7 @@ beforeEach(() => {
     bundleId: "bundle-1",
     environmentKind: "managed",
     ownerType: "session",
-    ownerRef: "session-created",
+    ownerRef: "session-1",
     state: "active",
     leases: [
       {
@@ -703,10 +703,11 @@ describe("executeChatTask", () => {
     resolveSendOptionsMock.mockResolvedValueOnce({
       additionalDirectories: ["/live/docs"],
     } as SendOptions)
-    emitTerminalResult()
+    getSessionMock.mockResolvedValueOnce({ id: "session-1", executionContext })
+    emitTerminalResult("session-1")
 
     const result = await executeChatTask(
-      makeTask({ payload: { prompt: "hi", executionContext } }),
+      makeTask({ payload: { prompt: "hi", sessionId: "session-1" } }),
       { ...makeExecution(), id: "execution-bundle-1" },
       makeSignal()
     )
@@ -720,9 +721,10 @@ describe("executeChatTask", () => {
       })
     )
     expect(getWorkspaceBundleMock).toHaveBeenCalledWith("bundle-1")
+    expect(createSessionMock).not.toHaveBeenCalled()
     expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalledWith(
-      "session-created",
+      "session-1",
       "hi",
       expect.objectContaining({
         cwd: "/bundle/primary",

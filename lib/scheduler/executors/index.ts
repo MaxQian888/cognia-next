@@ -439,7 +439,10 @@ async function runChatPrompt(
   // there is nobody present to approve bypassing failed isolation/setup. The
   // durable workspaceKey binds subsequent schedule fires to the same chat
   // worktree while each execution still gets its own versioned TaskRun.
-  const executionContext = payload.executionContext
+  // Real schedule producers persist the owning session id, not a second copy
+  // of its execution binding. Prefer an explicit frozen payload context for
+  // migrated rows, otherwise use the resolved session's canonical binding.
+  const executionContext = payload.executionContext ?? session.executionContext
   const canonicalExecution = executionContext?.execution
   const canonicalManaged = canonicalExecution && canonicalExecution.mode !== "local"
   const canonicalBundle = canonicalManaged
