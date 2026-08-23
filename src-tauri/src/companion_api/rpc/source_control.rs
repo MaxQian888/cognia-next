@@ -789,7 +789,7 @@ pub(super) async fn dispatch(
             let path: String = required(&args, "path")?;
             let force: bool = required(&args, "force")?;
             let delete_branch: Option<String> = optional(&args, "deleteBranch")?;
-            crate::git::commands::git_worktree_remove(repo_path, path, force, delete_branch)
+            crate::task_workspace::git_worktree_remove(repo_path, path, force, delete_branch)
                 .await
                 .map(|_| Value::Null)
                 .map_err(|e| RpcError::internal(e.to_string()))

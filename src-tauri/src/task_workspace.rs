@@ -338,6 +338,30 @@ pub async fn task_workspace_managed_delete(workspace_id: String) -> Result<(), S
     blocking(move |service| service.delete_managed_workspace(&workspace_id)).await
 }
 
+/// Host-side protected form of the generic Source Control worktree removal.
+/// Registry-owned and newly discovered external worktrees must flow through
+/// Archive/Delete or explicit Adopt instead of this manual command.
+#[tauri::command]
+pub async fn git_worktree_remove(
+    repo_path: String,
+    path: String,
+    force: bool,
+    delete_branch: Option<String>,
+) -> Result<(), String> {
+    let guard_repo_path = repo_path.clone();
+    let guard_path = path.clone();
+    blocking(move |service| {
+        service.ensure_manual_worktree_removal_allowed(
+            PathBuf::from(guard_repo_path).as_path(),
+            PathBuf::from(guard_path).as_path(),
+        )
+    })
+    .await?;
+    crate::git::commands::git_worktree_remove(repo_path, path, force, delete_branch)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn task_workspace_list_runs(task_id: String) -> Result<Vec<TaskRun>, String> {
     service()?.list_runs(&task_id)
@@ -669,6 +693,21 @@ mod tests {
         }
     }
 
+    fn run_git(root: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(["-C"])
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
     fn worktree_hook_fields_carry_the_documented_wire_names() {
         let event = WorktreeLifecycleEvent {
@@ -705,6 +744,48 @@ mod tests {
         );
         // Restore whatever the other tests expect: leave the slot populated.
         assert!(super::service().is_ok());
+    }
+
+    #[tokio::test]
+    async fn generic_worktree_remove_fails_closed_for_external_inventory() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        let worktrees = TempDir::new().unwrap();
+        let external = worktrees.path().join("external");
+        run_git(repository.path(), &["init"]);
+        run_git(repository.path(), &["config", "user.name", "Cognia Test"]);
+        run_git(
+            repository.path(),
+            &["config", "user.email", "cognia@example.com"],
+        );
+        std::fs::write(repository.path().join("README.md"), "seed\n").unwrap();
+        run_git(repository.path(), &["add", "README.md"]);
+        run_git(repository.path(), &["commit", "-m", "seed"]);
+        let external_arg = external.to_string_lossy().into_owned();
+        run_git(
+            repository.path(),
+            &["worktree", "add", "--detach", &external_arg],
+        );
+        install(data.path().to_path_buf()).unwrap();
+
+        let error = git_worktree_remove(
+            repository.path().to_string_lossy().into_owned(),
+            external_arg,
+            true,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("is owned by workspace"));
+        assert!(external.exists());
+        let records = task_workspace_managed_list().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].environment_kind,
+            cognia_task_workspace::WorkspaceEnvironmentKind::Imported
+        );
     }
 
     fn turn_envelope(workspace: &TempDir, run_id: &str) -> TaskWorkspaceTurnEnvelope {

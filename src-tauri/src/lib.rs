@@ -1606,7 +1606,7 @@ pub fn run() {
             git::commands::git_delete_branch,
             git::commands::git_rename_branch,
             git::commands::git_worktree_add,
-            git::commands::git_worktree_remove,
+            task_workspace::git_worktree_remove,
             git::commands::git_worktree_list,
             git::commands::git_worktree_commit,
             git::commands::git_worktree_prune,

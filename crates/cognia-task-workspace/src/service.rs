@@ -612,6 +612,54 @@ impl TaskWorkspaceService {
         Ok(outcome)
     }
 
+    /// Reconcile one Git repository and reject generic removal when the target
+    /// is owned by the Registry. This is the host-side backstop for callers
+    /// that bypass the manual Worktree panel (Companion, headless, or direct
+    /// Tauri commands).
+    ///
+    /// Unknown linked worktrees are imported before the ownership check, so an
+    /// external worktree cannot be force-removed in the same request that first
+    /// exposes it to Cognia. Adopted/managed worktrees remain removable only via
+    /// the Registry lifecycle commands, which verify their signed Git lock.
+    pub fn ensure_manual_worktree_removal_allowed(
+        &self,
+        source_root: &Path,
+        target: &Path,
+    ) -> Result<(), String> {
+        let source_root = source_root
+            .canonicalize()
+            .map_err(|error| format!("canonicalize worktree source: {error}"))?;
+        let target = if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            source_root.join(target)
+        };
+        let records = self.registry.list().map_err(|error| error.to_string())?;
+        let mut outcome = crate::ReconcileOutcome {
+            reclaimed: Vec::new(),
+            orphaned: Vec::new(),
+            imported: Vec::new(),
+        };
+        self.reconcile_git_source(&source_root, &records, &mut outcome)?;
+
+        let target_key = normalized_path_key(&target);
+        if let Some(record) = self
+            .registry
+            .list()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|record| normalized_path_key(Path::new(&record.execution_root)) == target_key)
+        {
+            return Err(format!(
+                "worktree {} is owned by workspace {} ({:?}); use the workspace Archive or Delete action",
+                target.display(),
+                record.workspace_id,
+                record.environment_kind
+            ));
+        }
+        Ok(())
+    }
+
     fn reconcile_git_source(
         &self,
         source_root: &Path,
@@ -3468,6 +3516,57 @@ mod tests {
             .resolve_workspace_source("repository:project-1:repo-1")
             .unwrap_err()
             .contains("not bound"));
+    }
+
+    #[test]
+    fn manual_removal_imports_and_blocks_an_unknown_external_worktree() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        let worktrees = TempDir::new().unwrap();
+        let external = worktrees.path().join("external");
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let add = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["worktree", "add", "--detach"])
+            .arg(&external)
+            .output()
+            .unwrap();
+        assert!(
+            add.status.success(),
+            "{}",
+            String::from_utf8_lossy(&add.stderr)
+        );
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let error = service
+            .ensure_manual_worktree_removal_allowed(repository.path(), &external)
+            .unwrap_err();
+
+        assert!(error.contains("is owned by workspace"));
+        assert!(error.contains("Imported"));
+        let records = service.list_managed_workspaces().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].environment_kind,
+            crate::WorkspaceEnvironmentKind::Imported
+        );
+        assert!(external.exists());
+    }
+
+    #[test]
+    fn manual_removal_allows_a_path_outside_the_git_inventory() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        service
+            .ensure_manual_worktree_removal_allowed(repository.path(), Path::new("missing"))
+            .unwrap();
+        assert!(service.list_managed_workspaces().unwrap().is_empty());
     }
 
     #[cfg(unix)]
