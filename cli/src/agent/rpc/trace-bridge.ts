@@ -42,20 +42,30 @@ export interface TraceBridge {
  * buys visibility, not an exemption.
  */
 export function redactSpan(span: AgentTraceSpan, includeContent: boolean): AgentTraceSpan {
-  if (!includeContent) {
-    const { inputPreview, outputPreview, ...rest } = span
-    void inputPreview
-    void outputPreview
-    return { ...rest, metadata: { ...span.metadata, redacted: true } }
-  }
   const safe: AgentTraceSpan = { ...span }
-  if (safe.inputPreview !== undefined && !hasNoLeakingPiiDeep(safe.inputPreview)) {
+
+  if (!includeContent) {
     delete safe.inputPreview
-    safe.metadata = { ...safe.metadata, inputPreviewBlocked: "pii-gate" }
-  }
-  if (safe.outputPreview !== undefined && !hasNoLeakingPiiDeep(safe.outputPreview)) {
     delete safe.outputPreview
-    safe.metadata = { ...safe.metadata, outputPreviewBlocked: "pii-gate" }
+    safe.metadata = { ...safe.metadata, redacted: true }
+  } else {
+    if (safe.inputPreview !== undefined && !hasNoLeakingPiiDeep(safe.inputPreview)) {
+      delete safe.inputPreview
+      safe.metadata = { ...safe.metadata, inputPreviewBlocked: "pii-gate" }
+    }
+    if (safe.outputPreview !== undefined && !hasNoLeakingPiiDeep(safe.outputPreview)) {
+      delete safe.outputPreview
+      safe.metadata = { ...safe.metadata, outputPreviewBlocked: "pii-gate" }
+    }
+  }
+
+  // An error message is not a "preview", but a provider routinely echoes the
+  // offending input back inside one, so it goes through the same gate — and
+  // unconditionally, because a span is redacted by default precisely so that a
+  // subscriber who asked for nothing receives nothing.
+  if (safe.errorMessage !== undefined && !hasNoLeakingPiiDeep(safe.errorMessage)) {
+    delete safe.errorMessage
+    safe.metadata = { ...safe.metadata, errorMessageBlocked: "pii-gate" }
   }
   return safe
 }

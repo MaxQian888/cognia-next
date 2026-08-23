@@ -44,6 +44,21 @@ describe("redactSpan", () => {
     expect(out.outputPreview).toBe("an answer")
   })
 
+  it("gates an error message even for a subscriber that asked for nothing", () => {
+    // A provider routinely echoes the offending input back inside its error.
+    const leaky = span({ errorMessage: "rejected input from alice@example.com" })
+    for (const includeContent of [false, true]) {
+      const out = redactSpan(leaky, includeContent)
+      expect(out.errorMessage).toBeUndefined()
+      expect(out.metadata).toMatchObject({ errorMessageBlocked: "pii-gate" })
+    }
+  })
+
+  it("keeps a clean error message", () => {
+    const out = redactSpan(span({ errorMessage: "timeout after 30000ms" }), false)
+    expect(out.errorMessage).toBe("timeout after 30000ms")
+  })
+
   it("leaves everything but the previews intact", () => {
     const out = redactSpan(span(), false)
     expect(out).toMatchObject({
