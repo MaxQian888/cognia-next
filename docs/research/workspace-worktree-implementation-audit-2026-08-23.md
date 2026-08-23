@@ -30,26 +30,27 @@ controls, and a clear path from isolated changes back to Local or a PR.
 
 ## Implemented and verified in this slice
 
-| Area                          | Evidence in the tree                                                                                                       | Verification                                                              |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Canonical physical ownership  | `workspace_registry`, `workspace_bundles`, `workspace_root_leases`; managed/permanent/imported classification              | Rust persistence and transition tests                                     |
-| Signed atomic Git acquisition | Registry reserves the ID before `git worktree add --detach --lock --reason cognia:<id>`                                    | Git lifecycle tests inspect porcelain lock reason                         |
-| Multi-root provisioning       | Same-common-dir roots share one worktree; separate repositories receive separate worktrees; non-Git roots receive shadows  | Multi-repository + shadow integration test                                |
-| Transactional acquisition     | A failed leg removes every previously acquired Git/shadow leg and Registry row                                             | Faulted non-Git base integration test                                     |
-| Canonical session binding     | Typed `mode`, `environmentId`, `bundleId`, `base`, and root leases; legacy mirrors remain decoder-only                     | Co-located TypeScript tests                                               |
-| Base transport                | `workingState`, `localHead`, `remoteDefault`, `gitRef`, and typed PR request cross Rust/TypeScript boundaries              | Type and Rust base tests                                                  |
-| Repository config boundary    | `.cognia/workspace.json` schema v1 validation and safe merge into `ProjectEnvironment`                                     | Co-located parser/merge tests                                             |
-| Lifecycle policy              | Defaults 15 / 30 days / 1 GiB, persisted device-locally; acquisition blocks at capacity                                    | Restart and capacity tests                                                |
-| Archive/restore/delete        | Content-addressed WIP archive, physical release, signed Git restore, confirmation-gated delete                             | Shadow and Git lifecycle tests plus component tests                       |
-| Product inventory             | `/workspace` renders Registry rows and protected lifecycle actions                                                         | Co-located component tests and i18n gates                                 |
-| Interactive chat entry        | New chat exposes Local/Worktree, remembers the per-Project choice, and renders a persistent environment chip               | Focused picker/header component and session-binding tests                 |
-| Registry-backed chat          | Worktree chat acquires a persisted bundle and replaces live Project roots and `additionalDirectories` with lease aliases   | Focused route/session bundle tests                                        |
-| Pull request bases            | Provider-neutral PR checkout resolution returns a fetch ref and immutable SHA; Rust fetches and verifies the resolved head | GitHub provider, Rust base, and session bundle tests                      |
-| Import and adoption           | Startup reconcile registers external worktrees as Imported without mutation; explicit Adopt establishes signed ownership   | Restart, foreign-lock, interrupted-lock retry, and capacity tests         |
-| Scheduled canonical binding   | Scheduled chat borrows the persisted bundle and replaces live additional directories with Registry aliases                 | Full scheduler executor suite (74 tests)                                  |
-| Unified management views      | `/workspace` exposes Overview, Environments, and the existing multi-root Source Control panel                              | Focused workspace overview suite (9 tests)                                |
-| Protected manual inventory    | Manual Worktree inventory joins Git rows with Registry ownership and disables removal for owned/imported paths             | Focused Worktree panel suite (17 tests)                                   |
-| Host transport                | Tauri and Companion runtime contracts cover inventory, bundles, lifecycle, policy, pin, permanent, and adoption            | Crate/TypeScript transport tests; generated headless catalogs remain open |
+| Area                          | Evidence in the tree                                                                                                         | Verification                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Canonical physical ownership  | `workspace_registry`, `workspace_bundles`, `workspace_root_leases`; managed/permanent/imported classification                | Rust persistence and transition tests                                     |
+| Signed atomic Git acquisition | Registry reserves the ID before `git worktree add --detach --lock --reason cognia:<id>`                                      | Git lifecycle tests inspect porcelain lock reason                         |
+| Multi-root provisioning       | Same-common-dir roots share one worktree; separate repositories receive separate worktrees; non-Git roots receive shadows    | Multi-repository + shadow integration test                                |
+| Transactional acquisition     | A failed leg removes every previously acquired Git/shadow leg and Registry row                                               | Faulted non-Git base integration test                                     |
+| Canonical session binding     | Typed `mode`, `environmentId`, `bundleId`, `base`, and root leases; legacy mirrors remain decoder-only                       | Co-located TypeScript tests                                               |
+| Base transport                | `workingState`, `localHead`, `remoteDefault`, `gitRef`, and typed PR request cross Rust/TypeScript boundaries                | Type and Rust base tests                                                  |
+| Repository config boundary    | `.cognia/workspace.json` schema v1 validation and safe merge into `ProjectEnvironment`                                       | Co-located parser/merge tests                                             |
+| Lifecycle policy              | Defaults 15 / 30 days / 1 GiB, persisted device-locally; acquisition blocks at capacity                                      | Restart and capacity tests                                                |
+| Archive/restore/delete        | Content-addressed WIP archive, physical release, signed Git restore, confirmation-gated delete                               | Shadow and Git lifecycle tests plus component tests                       |
+| Product inventory             | `/workspace` renders Registry rows and protected lifecycle actions                                                           | Co-located component tests and i18n gates                                 |
+| Interactive chat entry        | New chat exposes Local/Worktree, remembers the per-Project choice, and renders a persistent environment chip                 | Focused picker/header component and session-binding tests                 |
+| Registry-backed chat          | Worktree chat acquires a persisted bundle and replaces live Project roots and `additionalDirectories` with lease aliases     | Focused route/session bundle tests                                        |
+| Pull request bases            | Provider-neutral PR checkout resolution returns a fetch ref and immutable SHA; Rust fetches and verifies the resolved head   | GitHub provider, Rust base, and session bundle tests                      |
+| Import and adoption           | Startup reconcile registers external worktrees as Imported without mutation; explicit Adopt establishes signed ownership     | Restart, foreign-lock, interrupted-lock retry, and capacity tests         |
+| Scheduled canonical binding   | Scheduled chat borrows the persisted bundle and replaces live additional directories with Registry aliases                   | Full scheduler executor suite (74 tests)                                  |
+| Unified management views      | `/workspace` exposes Overview, Environments, and the existing multi-root Source Control panel                                | Focused workspace overview suite (9 tests)                                |
+| Protected manual inventory    | Manual inventory joins Git rows with Registry ownership and disables removal for owned/imported paths                        | Focused Worktree panel suite (20 tests)                                   |
+| Host removal guard            | Tauri and Companion generic removal reconcile the repository, import unknown worktrees, and reject every Registry-owned path | Two Registry guard tests plus one real Tauri command test                 |
+| Host transport                | Tauri and Companion runtime contracts cover inventory, bundles, lifecycle, policy, pin, permanent, and adoption              | Crate/TypeScript transport tests; generated headless catalogs remain open |
 
 The implementation also corrected a persistence defect discovered by the new
 lifecycle tests: Registry updates now use a true SQLite UPSERT. The previous
@@ -99,7 +100,12 @@ Checks completed during the 2026-08-23 implementation:
   PR resolution, and Companion transport passed. The final adoption slice ran
   20 focused frontend tests.
 - The scheduler executor suite passed 74 tests; Workspace management tabs
-  passed 9 tests; the protected Worktree inventory passed 17 tests.
+  passed 9 tests; the protected Worktree inventory passed 20 tests.
+- The host worktree removal guard passed two focused
+  `cognia-task-workspace` tests and one direct `cognia-next` Tauri command
+  test. `cargo check -p cognia-next --lib` passed. Focused Clippy passed after
+  allowing six pre-existing lint categories elsewhere in the crate; the
+  unfiltered run still reports nine unrelated existing findings.
 - `pnpm typecheck` passed.
 - `pnpm i18n:build`, `pnpm i18n:build:check`, and `pnpm lint:i18n` passed.
 - A Tauri `cargo check -p cognia-next` passed after bundle command wiring. The

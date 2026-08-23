@@ -13,7 +13,7 @@ ADR-0111 **尚未接受**。只有“验证”章节的端到端矩阵全部通�
 
 ## Rollout 更正（2026-08-23）
 
-2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、启动导入与显式 Adopt、provider-neutral PR base resolution、Tauri/Companion 命令、scheduled chat 的 canonical bundle lease、new-chat/header 控件，以及统一的 Overview/Environments/Source Control 视图。手动 Worktree 面板也会读取 Registry 所有权，并拒绝移除受管或导入环境。
+2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、启动导入与显式 Adopt、provider-neutral PR base resolution、Tauri/Companion 命令、scheduled chat 的 canonical bundle lease、new-chat/header 控件，以及统一的 Overview/Environments/Source Control 视图。手动 Worktree 面板会读取 Registry 所有权并拒绝移除受管或导入环境；Tauri 与 Companion 的删除命令也会先 reconcile 目标仓库、导入未知外部 worktree，再在 Git 变更前拒绝任何 Registry 所有路径。
 
 Rollout 仍未完成：尚未证明所有可写 agent 入口都经过 Registry Bundle；Agent Team 仍会构造 legacy allocator，持久化多根 Selective Apply 与 Continue Branch handoff 尚未完成，生成的 headless catalog 落后于 canonical protocol，定时 cleanup/history、grant UX、聚合交付与验收 E2E 矩阵仍是开放项。在这些 consumer 与测试闭环前，不得宣称 legacy allocator 或 live-tree fallback 已完成迁移。详见 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`。
 
@@ -29,7 +29,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 2. **状态机。** 每个受管工作区在 `provisioning → active → (archived | conflict) → (restorable | removing) → removed` 之间迁移。Registry 受控路径之外的任何迁移一律 fail closed。`active`、`pinned`、`permanent`、`locked`、`dirty`、`untracked`、`unpushed`、`unapplied`、`conflict` 都不参与自动 prune。目录回收与快照过期是两个独立的定时作业，各自写审计。
 
-3. **签名所有权。** `ownerType ∈ {user, imported, session, team, scheduled}` 与 `owner_ref` 是身份；`cognia/task/**` 之类的分支前缀不再作为所有权凭据。启动 reconcile 只认领签名可验证的行；未认领的磁盘现存 worktree 标记为 `imported`，永不自动 prune。受管 worktree 携带 `git worktree lock --reason "cognia:<workspaceId>"`；只有 Registry 受控删除路径可以解锁。`components/source-control/worktree-panel.tsx` 拒绝对任何受管行执行 force remove。
+3. **签名所有权。** `ownerType ∈ {user, imported, session, team, scheduled}` 与 `owner_ref` 是身份；`cognia/task/**` 之类的分支前缀不再作为所有权凭据。启动 reconcile 只认领签名可验证的行；未认领的磁盘现存 worktree 标记为 `imported`，永不自动 prune。受管 worktree 携带 `git worktree lock --reason "cognia:<workspaceId>"`；只有 Registry 受控删除路径可以解锁。`components/source-control/worktree-panel.tsx` 拒绝对任何受管行执行 force remove。Host 命令会在 reconcile 仓库后再次检查所有权，因此 direct Tauri、Companion 与 headless caller 都无法绕过 renderer。
 
 4. **默认 detached HEAD。** `service::create_execution` 使用 `git worktree add --detach <path> <base>`。仅当用户显式执行 `Create branch here` 时才创建分支，届时 Registry 根据 base kind 在 `-b <name>` 与 `git branch --track` 之间选择。彻底消除每次 dispatch 遗留 `cognia/task/**` 分支。
 

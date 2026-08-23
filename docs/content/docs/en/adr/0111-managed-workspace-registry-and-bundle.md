@@ -25,7 +25,10 @@ classification, startup import plus explicit adoption, provider-neutral PR base
 resolution, Tauri/Companion commands, canonical scheduled-chat bundle leases,
 new-chat/header controls, and unified Overview/Environments/Source Control
 views. The manual Worktree panel now consumes Registry ownership and refuses
-removal of owned or imported rows.
+removal of owned or imported rows. The Tauri and Companion removal command is
+also Registry-guarded: it reconciles the target repository, imports previously
+unknown external worktrees, and rejects every Registry-owned path before Git
+can mutate it.
 
 The rollout is still incomplete: all writable agent entry points are not yet
 proven to acquire Registry Bundles; Agent Team still constructs its legacy
@@ -49,7 +52,7 @@ Three separate owners create and remove Git worktrees today (`crates/cognia-task
 
 2. **State machine.** Every managed workspace transitions across `provisioning → active → (archived | conflict) → (restorable | removing) → removed`. Any transition outside the Registry's controlled paths is fail-closed. `active`, `pinned`, `permanent`, `locked`, `dirty`, `untracked`, `unpushed`, `unapplied`, and `conflict` are ineligible for automatic prune. Directory reclaim and snapshot expiration are separate periodic jobs and each writes its own audit trail.
 
-3. **Signed ownership.** `ownerType ∈ {user, imported, session, team, scheduled}` and `owner_ref` are the identity; branch-name prefixes such as `cognia/task/**` are no longer treated as ownership. Startup reconcile claims only rows whose signature verifies; unowned rows on disk are marked `imported` and are never auto-pruned. Managed worktrees carry `git worktree lock --reason "cognia:<workspaceId>"`; only the Registry's controlled remove path unlocks. `components/source-control/worktree-panel.tsx` refuses to force-remove any managed row.
+3. **Signed ownership.** `ownerType ∈ {user, imported, session, team, scheduled}` and `owner_ref` are the identity; branch-name prefixes such as `cognia/task/**` are no longer treated as ownership. Startup reconcile claims only rows whose signature verifies; unowned rows on disk are marked `imported` and are never auto-pruned. Managed worktrees carry `git worktree lock --reason "cognia:<workspaceId>"`; only the Registry's controlled remove path unlocks. `components/source-control/worktree-panel.tsx` refuses to force-remove any managed row. The host command repeats the ownership check after reconciling the repository, so direct Tauri, Companion, and headless callers cannot bypass the renderer.
 
 4. **Detached HEAD by default.** `service::create_execution` invokes `git worktree add --detach <path> <base>`. A branch is created only when the user explicitly executes `Create branch here`, in which case the Registry chooses between `-b <name>` and `git branch --track` based on the base kind. Stale `cognia/task/**` branches per run are eliminated.
 
