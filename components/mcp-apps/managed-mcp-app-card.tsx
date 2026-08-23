@@ -64,6 +64,17 @@ export function ManagedMcpAppCard({
     () => (app && allApproved ? approveAll(app.csp, app.permissions) : {}),
     [allApproved, app]
   )
+  const provenance = useMemo(
+    () =>
+      app
+        ? {
+            serverId: app.server.id,
+            serverName: app.server.name,
+            resourceUri: app.resourceUri,
+          }
+        : undefined,
+    [app]
+  )
 
   const authorizeToolCall = useCallback(
     (request: { name: string }) => {
@@ -132,17 +143,13 @@ export function ManagedMcpAppCard({
             </label>
           ))}
         </div>
-      ) : (
+      ) : provenance ? (
         <McpAppFrame
           html={app.html}
           csp={app.csp}
           permissions={app.permissions}
           approvals={approvals}
-          provenance={{
-            serverId: app.server.id,
-            serverName: app.server.name,
-            resourceUri: app.resourceUri,
-          }}
+          provenance={provenance}
           toolInput={isRecord(part.input) ? part.input : undefined}
           toolResult={{
             content: blocks ?? [],
@@ -155,7 +162,7 @@ export function ManagedMcpAppCard({
           confirmDownload={confirmDownload}
           quarantineDownload={quarantineDownload}
         />
-      )}
+      ) : null}
       {quarantine.map((contents, index) => (
         <div key={index} className="flex items-center justify-between gap-2 rounded border p-2">
           <span className="text-xs">{t("quarantinedDownload", { count: contents.length })}</span>

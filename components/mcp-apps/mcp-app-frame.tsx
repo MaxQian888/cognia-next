@@ -70,14 +70,29 @@ function safeExternalUrl(value: string): URL | undefined {
 }
 
 export function McpAppFrame(props: McpAppFrameProps) {
+  const {
+    html,
+    csp,
+    permissions,
+    approvals,
+    provenance,
+    toolInput,
+    toolResult,
+    authorizeToolCall,
+    callTool,
+    confirmOpenLink,
+    openLink,
+    confirmDownload,
+    quarantineDownload,
+  } = props
   const t = useTranslations("mcpApps")
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [proxyHtml, setProxyHtml] = useState<string>()
   const [height, setHeight] = useState(360)
   const [runtimeError, setRuntimeError] = useState(false)
   const policy = useMemo(
-    () => evaluateMcpAppSandbox(props.csp, props.permissions, props.approvals),
-    [props.approvals, props.csp, props.permissions]
+    () => evaluateMcpAppSandbox(csp, permissions, approvals),
+    [approvals, csp, permissions]
   )
 
   useEffect(() => {
@@ -99,32 +114,32 @@ export function McpAppFrame(props: McpAppFrameProps) {
           }
         )
         bridge.oncalltool = async ({ name, arguments: args }) => {
-          const request = { name, arguments: args, provenance: props.provenance }
-          if (!(await props.authorizeToolCall(request))) {
+          const request = { name, arguments: args, provenance }
+          if (!(await authorizeToolCall(request))) {
             return { isError: true, content: [] }
           }
-          return (await props.callTool(request)) as never
+          return (await callTool(request)) as never
         }
         bridge.onopenlink = async ({ url: value }) => {
           const url = safeExternalUrl(value)
-          if (!url || !props.confirmOpenLink || !props.openLink) return { isError: true }
-          const approved = await props.confirmOpenLink({
+          if (!url || !confirmOpenLink || !openLink) return { isError: true }
+          const approved = await confirmOpenLink({
             url: url.href,
             hostname: url.hostname,
-            provenance: props.provenance,
+            provenance,
           })
           if (!approved) return { isError: true }
-          await props.openLink(url.href)
+          await openLink(url.href)
           return {}
         }
         bridge.ondownloadfile = async ({ contents }) => {
-          if (!props.confirmDownload || !props.quarantineDownload) return { isError: true }
-          const approved = await props.confirmDownload({
+          if (!confirmDownload || !quarantineDownload) return { isError: true }
+          const approved = await confirmDownload({
             contents,
-            provenance: props.provenance,
+            provenance,
           })
           if (!approved) return { isError: true }
-          await props.quarantineDownload(contents)
+          await quarantineDownload(contents)
           return {}
         }
         bridge.onsizechange = ({ height: requestedHeight }) => {
@@ -132,15 +147,15 @@ export function McpAppFrame(props: McpAppFrameProps) {
         }
         bridge.onsandboxready = () => {
           void bridge?.sendSandboxResourceReady({
-            html: injectMcpAppCsp(props.html, policy.csp),
+            html: injectMcpAppCsp(html, policy.csp),
             sandbox: policy.sandbox,
             csp: policy.csp,
             permissions: policy.permissions,
           })
         }
         bridge.oninitialized = () => {
-          if (props.toolInput) void bridge?.sendToolInput({ arguments: props.toolInput })
-          if (props.toolResult) void bridge?.sendToolResult(props.toolResult as never)
+          if (toolInput) void bridge?.sendToolInput({ arguments: toolInput })
+          if (toolResult) void bridge?.sendToolResult(toolResult as never)
         }
         await bridge.connect(new PostMessageTransport(target, target))
         if (!disposed) setProxyHtml(MCP_APP_SANDBOX_PROXY_HTML)
@@ -155,16 +170,16 @@ export function McpAppFrame(props: McpAppFrameProps) {
     }
   }, [
     policy,
-    props.authorizeToolCall,
-    props.callTool,
-    props.confirmDownload,
-    props.confirmOpenLink,
-    props.html,
-    props.openLink,
-    props.provenance,
-    props.quarantineDownload,
-    props.toolInput,
-    props.toolResult,
+    authorizeToolCall,
+    callTool,
+    confirmDownload,
+    confirmOpenLink,
+    html,
+    openLink,
+    provenance,
+    quarantineDownload,
+    toolInput,
+    toolResult,
   ])
 
   if (!policy.allowed) {
@@ -184,7 +199,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
   return (
     <iframe
       ref={iframeRef}
-      title={t("frameTitle", { server: props.provenance.serverName })}
+      title={t("frameTitle", { server: provenance.serverName })}
       sandbox="allow-scripts"
       srcDoc={proxyHtml}
       className="w-full rounded-md border bg-background"

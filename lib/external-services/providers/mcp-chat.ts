@@ -7,7 +7,6 @@ import {
   unregisterDocsProvider,
   type DocsProvider,
   type RemoteDocContent,
-  type RemoteDocRef,
 } from "@/lib/docs-providers"
 import { resolveMcpSecrets } from "@/lib/mcp/credentials"
 import { defaultMcpRuntimeGateway } from "@/lib/mcp/runtime-gateway"
