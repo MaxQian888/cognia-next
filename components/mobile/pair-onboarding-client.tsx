@@ -36,6 +36,7 @@ import {
 } from "@/lib/companion/host-orchestration"
 import { getActiveRuntimeTargetContext } from "@/lib/runtime/runtime-target-context"
 import { mobileTransition } from "@/lib/ui/motion"
+import { cn } from "@/lib/utils"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 import {
@@ -421,12 +422,23 @@ export function PairOnboardingClient() {
 
   return (
     <main
-      className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col px-4 py-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] safe-area-pt sm:max-w-lg sm:px-6 md:max-w-xl"
+      className={cn(
+        // `my-auto` on the inner block rather than `justify-center` on this
+        // one: auto margins centre short content without clipping the top of
+        // content that outgrows the viewport, which centring does.
+        "mx-auto flex min-h-[100dvh] w-full max-w-md flex-col px-4 py-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] safe-area-pt sm:max-w-lg sm:px-6",
+        // A browser is not a phone. The web flow lays its form out in two
+        // columns from `lg`, so the column it lives in has to be allowed to
+        // be that wide — the fixed `md:max-w-xl` is what forced every piece
+        // of state into one tall stack and put a scrollbar on the page as
+        // soon as an invitation was pasted.
+        isWebHost ? "lg:max-w-4xl lg:px-8" : "md:max-w-xl"
+      )}
       data-testid="pair-onboarding"
       data-step={step}
       data-mode={pairParams.mode}
     >
-      <div className="my-auto flex w-full flex-col gap-4" data-testid="pair-onboarding-content">
+      <div className="my-auto flex w-full flex-col gap-5" data-testid="pair-onboarding-content">
         <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">

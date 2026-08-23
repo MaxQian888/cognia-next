@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { getOsInfo, isLinuxPlatform, isMacPlatform } from "./os"
+import { getOsInfo, hostPlatformId, isLinuxPlatform, isMacPlatform } from "./os"
 
 jest.mock("@tauri-apps/plugin-os", () => ({
   arch: jest.fn(),
@@ -96,6 +96,31 @@ describe("lib/tauri/os", () => {
       mockedHostname.mockRejectedValue(new Error("hn boom"))
       mockedLocale.mockResolvedValue(null)
       await expect(getOsInfo()).resolves.toBeNull()
+    })
+  })
+
+  describe("hostPlatformId", () => {
+    it("asks the OS plugin inside Tauri, never process.platform", () => {
+      // The WebView's `process.platform` is not the desktop's OS. A caller that
+      // reads it there answers for the wrong machine — which is how a Windows
+      // desktop reported the mandatory external-agent sandbox as available.
+      setTauri(true)
+      mockedPlatform.mockReturnValue("windows" as ReturnType<typeof platformNative>)
+      expect(hostPlatformId()).toBe("windows")
+    })
+
+    it("returns undefined when the OS plugin is unavailable in Tauri", () => {
+      setTauri(true)
+      mockedPlatform.mockImplementation(() => {
+        throw new Error("plugin missing")
+      })
+      expect(hostPlatformId()).toBeUndefined()
+    })
+
+    it("falls back to process.platform in Node", () => {
+      // jsdom still exposes `process`, which is the CLI / headless host case.
+      expect(hostPlatformId()).toBe(process.platform)
+      expect(mockedPlatform).not.toHaveBeenCalled()
     })
   })
 

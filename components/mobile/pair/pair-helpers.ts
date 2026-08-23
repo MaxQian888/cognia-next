@@ -1,5 +1,7 @@
 "use client"
 
+import { isLoopbackHostname } from "@/lib/connectivity/origin-reachability"
+
 /**
  * Pure helpers shared by the mobile pair coordinator and its child step
  * components. Extracted from `pair-onboarding-client.tsx` so the step
@@ -11,12 +13,37 @@
 
 export type WebPairingTransportError = "https_required"
 
+/**
+ * Reject a browser pairing whose credential would cross the network in
+ * cleartext.
+ *
+ * Loopback is exempt, and has to be: `http://127.0.0.1:27891` is the Host's
+ * *intended* door for a browser (see `browser_access.rs` — a tab cannot pin the
+ * self-signed cert the HTTPS listener presents, and loopback is "potentially
+ * trustworthy" per the Secure Contexts spec, so nothing leaves the machine).
+ * Holding it to `https:` would ban the only transport that works. This mirrors
+ * the Host's own `web_origin::is_secure_or_loopback`, so client and server agree
+ * on what counts as safe plaintext.
+ *
+ * Fails CLOSED on a URL that will not parse. `null` here means "this transport
+ * is acceptable", and a base URL the platform cannot even parse is not — every
+ * request built from it is going nowhere, and answering "acceptable" spends the
+ * user's one-shot invitation before reporting a generic `unknown` failure
+ * instead of naming the transport as the problem.
+ */
 export function validateWebPairingTransport(
   baseUrl: string,
   webMode: boolean
 ): WebPairingTransportError | null {
   if (!webMode) return null
-  return new URL(baseUrl).protocol === "https:" ? null : "https_required"
+  let url: URL
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    return "https_required"
+  }
+  if (url.protocol === "https:") return null
+  return isLoopbackHostname(url.hostname) ? null : "https_required"
 }
 
 

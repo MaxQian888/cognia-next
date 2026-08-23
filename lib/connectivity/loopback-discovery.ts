@@ -37,10 +37,14 @@
  * A `mode: "no-cors"` retry separates them. An opaque response means something
  * answered on that port; a rejection means nothing did. That turns a dead end
  * into an actionable message naming the exact origin to allowlist.
+ *
+ * That retry now lives in `origin-reachability.ts` — the pairing flow needs the
+ * same discrimination against an arbitrary Host base URL, so the two share one
+ * probe rather than two copies that can drift.
  */
 
-import { combineAbortSignals } from "./capacitor-http"
 import { fetchHealthz, type HealthzResult } from "./healthz"
+import { probeOriginReachable } from "./origin-reachability"
 
 /**
  * Mirrors Rust `browser_access::DEFAULT_BROWSER_PORT` — one above the HTTPS
@@ -91,37 +95,6 @@ function currentOrigin(explicit?: string): string {
 }
 
 /**
- * Detect whether *something* is listening, ignoring whether we are allowed to
- * read its answer.
- *
- * `no-cors` makes the browser issue the request and hand back an opaque
- * response whatever the status was — the one signal available to JS that
- * distinguishes "refused this origin" from "connection refused".
- */
-async function somethingIsListening(
-  baseUrl: string,
-  signal: AbortSignal,
-  timeoutMs: number,
-  fetchImpl: typeof fetch
-): Promise<boolean> {
-  const composite = combineAbortSignals(signal, AbortSignal.timeout(timeoutMs))
-  try {
-    await fetchImpl(`${baseUrl}/healthz`, {
-      method: "GET",
-      mode: "no-cors",
-      // No credentials: this probe must never carry cookies to a port that
-      // may not be ours.
-      credentials: "omit",
-      cache: "no-store",
-      signal: composite,
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
  * Look for a Cognia Host on this machine's loopback browser-access listener.
  *
  * Best-effort and non-throwing: a caller renders a list, and has nothing to do
@@ -151,7 +124,7 @@ export async function discoverLoopbackHost(
     if (signal.aborted) return { kind: "absent" }
 
     // Unreadable. Distinguish "refused this origin" from "nobody home".
-    if (fetchImpl && (await somethingIsListening(baseUrl, signal, timeoutMs, fetchImpl))) {
+    if (fetchImpl && (await probeOriginReachable(baseUrl, { signal, timeoutMs, fetchImpl }))) {
       return { kind: "blocked", baseUrl, origin: currentOrigin(origin) }
     }
   }

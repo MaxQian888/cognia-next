@@ -1,7 +1,7 @@
 "use client"
 
 import { getDeviceLabel } from "./pair-helpers"
-import { decodePairPayload, type PairPayload } from "@/lib/qr/pair-payload"
+import { decodePairPayload, type DecodeOutcome, type PairPayload } from "@/lib/qr/pair-payload"
 import {
   fetchCompanionAuthConfig,
   registerCompanionDevice,
@@ -12,10 +12,22 @@ import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 import { getActiveLogtoSession, signInToLogto } from "@/lib/logto/app-session"
 import { createLogtoWebPopupDrivers } from "@/lib/logto/web-popup"
 
+/**
+ * Registration outcome.
+ *
+ * The failure arms carry the *cause*, not only a rendered sentence: the caller
+ * classifies it with `diagnosePairFailure` / `diagnosePayloadFailure`, which
+ * need the `CompanionApiError` status, the decode outcome and the Host base URL
+ * to tell "invitation already used" from "this browser cannot trust that
+ * certificate". `message` stays for the log line and the technical-detail row.
+ */
 export type PairRegistrationResult =
   | { kind: "ok"; config: CompanionConfig }
-  | { kind: "invalid_payload"; message: string }
-  | { kind: "registration_error"; message: string }
+  | { kind: "invalid_payload"; message: string; outcome: DecodeFailure }
+  | { kind: "registration_error"; message: string; error: unknown; baseUrl: string }
+
+/** The non-`ok` arms of {@link DecodeOutcome}. */
+export type DecodeFailure = Exclude<DecodeOutcome, { kind: "ok" }>
 
 export async function registerPairPayload(
   rawPayload: string,
@@ -25,6 +37,7 @@ export async function registerPairPayload(
   if (decoded.kind !== "ok") {
     return {
       kind: "invalid_payload",
+      outcome: decoded,
       message:
         decoded.kind === "version_mismatch"
           ? `unsupported pairing payload version ${decoded.got}`
@@ -61,6 +74,8 @@ export async function registerDecodedPairPayload(
   } catch (error) {
     return {
       kind: "registration_error",
+      error,
+      baseUrl: payload.baseUrl,
       message: error instanceof Error ? error.message : String(error),
     }
   }

@@ -129,10 +129,18 @@ it("registers and persists a scanned cgnp3 payload in one step", async () => {
 
 it("keeps a scanned payload editable when registration fails", async () => {
   scan.mockResolvedValue({ kind: "scanned", raw: payload })
-  register.mockResolvedValue({ kind: "registration_error", message: "registration failed" })
+  register.mockResolvedValue({
+    kind: "registration_error",
+    message: "registration failed",
+    error: new Error("registration failed"),
+    baseUrl: "https://host.local:27890",
+  })
   render(<PairStep onPaired={jest.fn()} />)
   await userEvent.click(screen.getByTestId("pair-scan-qr"))
-  expect(await screen.findByTestId("pair-error")).toHaveTextContent("registration failed")
+  const panel = await screen.findByTestId("pair-error")
+  expect(panel).toHaveAttribute("data-stage", "register")
+  await userEvent.click(screen.getByTestId("pair-error-detail-toggle"))
+  expect(await screen.findByTestId("pair-error-detail")).toHaveTextContent("registration failed")
   expect(screen.getByTestId("pair-payload")).toHaveValue(payload)
 })
 
@@ -261,13 +269,19 @@ it("auto-submits an invitation the user arrived with", async () => {
 it("surfaces an auto-submit failure on the manual form and does not retry", async () => {
   // A one-shot invitation is burned by the attempt; retrying would only
   // produce a second, more confusing rejection.
-  register.mockResolvedValue({ kind: "registration_error", message: "invitation already used" })
+  register.mockResolvedValue({
+    kind: "registration_error",
+    message: "invitation already used",
+    error: new Error("invitation already used"),
+    baseUrl: "https://host.local:27890",
+  })
   const onPaired = jest.fn()
   const { rerender } = render(
     <PairStep webMode autoSubmit prefilledPairPayload={payload} onPaired={onPaired} />
   )
-  await waitFor(() => expect(screen.getByTestId("pair-error")).toHaveTextContent(
-    "invitation already used"
+  await waitFor(() => expect(screen.getByTestId("pair-error")).toHaveAttribute(
+    "data-stage",
+    "register"
   ))
   rerender(<PairStep webMode autoSubmit prefilledPairPayload={payload} onPaired={onPaired} />)
   expect(register).toHaveBeenCalledTimes(1)

@@ -63,15 +63,56 @@
     "viaProbe": "LAN probe"
   },
   "errorTitle": "Pairing failed",
+  "failure": {
+    "whatToDo": "What to do",
+    "retry": "Try again",
+    "startOver": "Paste a new invitation",
+    "copyDiagnostics": "Copy diagnostics",
+    "diagnosticsCopied": "Diagnostics copied",
+    "technicalDetail": "Technical detail",
+    "invitationSpent": "This invitation is now spent — the Host consumed it. Issue a fresh one before trying again; re-submitting the same string cannot work.",
+    "title": {
+      "activate_failed": "Paired, but the Host didn't come online",
+      "clipboard_unavailable": "Clipboard unavailable",
+      "http": "The Host rejected the pairing request",
+      "insecure_transport": "Connection would be unencrypted",
+      "offline": "This device is offline",
+      "origin_blocked": "The Host refused this browser",
+      "payload_expired": "Invitation expired",
+      "payload_invalid": "Invitation couldn't be read",
+      "payload_version": "Invitation version not supported",
+      "payload_wrong_format": "That isn't a pairing invitation",
+      "persist_failed": "The device key couldn't be stored",
+      "scan_failed": "Couldn't scan the QR code",
+      "tls_untrusted": "This browser can't verify the Host's certificate",
+      "unknown": "Pairing failed",
+      "unreachable": "Couldn't reach the Host",
+      "vault_locked": "Your local account is locked"
+    },
+    "body": {
+      "expired": "Pairing invitations last five minutes. Issue a new one on the Host and paste it here.",
+      "vaultLocked": "The device key is kept in this browser's encrypted vault, which only unlocks when you sign in to your local account with its password. The Host has already registered this device, so signing in and pairing again with a fresh invitation is the way through — re-submitting this one will not help.",
+      "activateFailed": "The device key is stored and this client is paired, but bringing the Host online failed: {message}. Your pairing is intact — this is a connection problem, not a pairing one."
+    },
+    "remedy": {
+      "enableBrowserAccess": "On the Host: Settings → Companion → browser access, turn it on. A browser can only reach the Host through its plaintext loopback listener.",
+      "allowlistOrigin": "Add this exact origin to that allowlist: {origin}",
+      "useLoopbackInvitation": "Issue the invitation against {loopback} instead of {host}. The LAN address uses a self-signed certificate that only the native app can pin.",
+      "checkHostRunning": "Confirm the Host is running and that {host} is the address it is actually listening on.",
+      "sameNetwork": "Put both devices on the same network and check the firewall isn't dropping the connection.",
+      "freshInvitation": "Issue a new invitation on the Host — Settings → Companion, or “cognia-server pair” — and paste it here.",
+      "unlockAccount": "Sign in to your local account with its password, then pair again. In development, start the app with NEXT_PUBLIC_ACCOUNT_GATE=1 so the unlock prompt appears.",
+      "updateHost": "Update the Host to a build that issues cgnp3 invitations, then restart it.",
+      "checkHostLogs": "Check the Host's logs for the matching error.",
+      "removeStaleDevice": "On the Host, remove this device under Settings → Companion → Paired Devices before pairing again.",
+      "reloadAndRetry": "Reload this page — the credential is already stored, so it will reconnect without a new invitation."
+    }
+  },
   "fingerprintHint": "This phone will refuse a different desktop signing key on every reconnect.",
   "fingerprintMismatch": "Server identity mismatch (expected {expected}…, got {reported}…). The pair code was already consumed — generate a fresh QR/code on the desktop and pair again.",
   "fingerprintPinned": "Desktop identity pinned",
   "formCardDescription": "One-tap scan or manual paste — both routes use the same 5-minute pair token.",
   "formCardTitle": "Pair this phone",
-  "invitationSummary": {
-    "description": "Server v{version} · expires at {expiresAt, time, short}",
-    "title": "Invitation ready for {host}"
-  },
   "health": {
     "checking": "Checking",
     "continueToChat": "Continue to chat",
@@ -92,6 +133,10 @@
     "generic": "Pairing failed (HTTP {status})."
   },
   "intro": "Scan the QR shown in desktop Settings → Companion. You can also paste the 5-minute pair token manually.",
+  "invitationSummary": {
+    "description": "Server v{version} · expires at {expiresAt, time, short}",
+    "title": "Invitation ready for {host}"
+  },
   "loadingManualCta": "Set up manually",
   "loadingSlow": "Taking longer than usual — your device may be slow to unlock secure storage. You can set up the pairing manually instead.",
   "loadingTitle": "Checking for an existing pairing…",
@@ -117,7 +162,7 @@
       "title": "Local network access required"
     }
   },
-  "persistenceError": "The device was registered, but its credential couldn't be saved securely. Pair again.",
+  "persistenceError": "The device was registered on the Host, but this client couldn't store its key: {message}",
   "recovery": {
     "incompatible": {
       "description": "This Host's protocol or feature manifest is incompatible. Switch Hosts or pair again with an updated Host.",

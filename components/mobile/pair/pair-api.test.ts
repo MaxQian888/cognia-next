@@ -136,10 +136,24 @@ it("rejects old and malformed payloads without registering", async () => {
   expect(register).not.toHaveBeenCalled()
 })
 
-it("normalizes registration failures", async () => {
-  register.mockRejectedValue(new Error("invitation already consumed"))
+it("normalizes registration failures and keeps the cause for classification", async () => {
+  const cause = new Error("invitation already consumed")
+  register.mockRejectedValue(cause)
   await expect(registerDecodedPairPayload(payload)).resolves.toEqual({
     kind: "registration_error",
     message: "invitation already consumed",
+    error: cause,
+    baseUrl: payload.baseUrl,
+  })
+})
+
+it("hands the decode outcome back so the caller can name the exact payload fault", async () => {
+  await expect(registerPairPayload("cgnp2|legacy")).resolves.toMatchObject({
+    kind: "invalid_payload",
+    outcome: { kind: "version_mismatch", got: 2 },
+  })
+  await expect(registerPairPayload("not-cognia")).resolves.toMatchObject({
+    kind: "invalid_payload",
+    outcome: { kind: "wrong_format" },
   })
 })

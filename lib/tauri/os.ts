@@ -44,6 +44,34 @@ export async function getOsInfo(): Promise<OsInfo | null> {
   }
 }
 
+/**
+ * The platform id this shell actually runs on, or `undefined` when nothing can
+ * name it.
+ *
+ * Two sources, because neither one answers everywhere. `process.platform` is
+ * the real OS in Node (the CLI, the headless host) and is NOT the desktop's OS
+ * inside the Tauri WebView — the browser bundle has no real `process`, so a
+ * caller that reads it alone silently answers for the wrong machine. The OS
+ * plugin is the only source in the WebView and throws outside it.
+ *
+ * Spellings differ between the two (`macos`/`windows` vs `darwin`/`win32`);
+ * consumers normalise (see `externalAgentSandboxSupportsPlatform`) rather than
+ * having to know which side answered.
+ */
+export function hostPlatformId(): string | undefined {
+  if (isTauri()) {
+    try {
+      return platformNative()
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof process !== "undefined" && typeof process.platform === "string") {
+    return process.platform
+  }
+  return undefined
+}
+
 /** Quick check for "is the user on macOS" — drives ⌘ vs Ctrl shortcut hints. */
 export function isMacPlatform(): boolean {
   if (!isTauri()) {

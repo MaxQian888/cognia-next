@@ -63,15 +63,56 @@
     "viaProbe": "局域网探测"
   },
   "errorTitle": "配对失败",
+  "failure": {
+    "whatToDo": "接下来怎么做",
+    "retry": "重试",
+    "startOver": "粘贴新的邀请码",
+    "copyDiagnostics": "复制诊断信息",
+    "diagnosticsCopied": "诊断信息已复制",
+    "technicalDetail": "技术细节",
+    "invitationSpent": "该邀请码已被 Host 消费，无法再次使用。请重新生成一个再试；重复提交同一串字符不会成功。",
+    "title": {
+      "activate_failed": "配对已完成，但 Host 未能上线",
+      "clipboard_unavailable": "无法读取剪贴板",
+      "http": "Host 拒绝了本次配对请求",
+      "insecure_transport": "连接将以明文传输",
+      "offline": "本设备已离线",
+      "origin_blocked": "Host 拒绝了此浏览器",
+      "payload_expired": "邀请码已过期",
+      "payload_invalid": "无法解析该邀请码",
+      "payload_version": "不支持该邀请码版本",
+      "payload_wrong_format": "这不是配对邀请码",
+      "persist_failed": "设备密钥未能保存",
+      "scan_failed": "无法扫描二维码",
+      "tls_untrusted": "浏览器无法验证 Host 的证书",
+      "unknown": "配对失败",
+      "unreachable": "无法连接到 Host",
+      "vault_locked": "本地账户处于锁定状态"
+    },
+    "body": {
+      "expired": "配对邀请码有效期为 5 分钟。请在 Host 上重新生成一个并粘贴到这里。",
+      "vaultLocked": "设备密钥保存在此浏览器的加密保险库中，只有用密码登录本地账户后才会解锁。Host 已经注册了这台设备，因此正确做法是先登录账户，再用新的邀请码重新配对——重复提交当前这一个不会有帮助。",
+      "activateFailed": "设备密钥已保存、配对已生效，但让 Host 上线时失败：{message}。配对本身没有问题，这是连接问题。"
+    },
+    "remedy": {
+      "enableBrowserAccess": "在 Host 上打开 设置 → Companion → 浏览器访问。浏览器只能通过 Host 的明文回环监听端口访问它。",
+      "allowlistOrigin": "把这个来源原样加入允许列表：{origin}",
+      "useLoopbackInvitation": "改用 {loopback} 生成邀请码，而不是 {host}。局域网地址使用自签名证书，只有原生 App 才能固定校验。",
+      "checkHostRunning": "确认 Host 正在运行，并且 {host} 确实是它监听的地址。",
+      "sameNetwork": "让两台设备处于同一网络，并检查防火墙没有拦截连接。",
+      "freshInvitation": "在 Host 上重新生成邀请码（设置 → Companion，或执行 “cognia-server pair”），然后粘贴到这里。",
+      "unlockAccount": "用密码登录本地账户后再配对。开发环境下可用 NEXT_PUBLIC_ACCOUNT_GATE=1 启动，以便出现解锁界面。",
+      "updateHost": "把 Host 更新到能签发 cgnp3 邀请码的版本并重启。",
+      "checkHostLogs": "查看 Host 日志中对应的错误。",
+      "removeStaleDevice": "在 Host 的 设置 → Companion → 已配对设备 中移除这台设备，然后重新配对。",
+      "reloadAndRetry": "刷新本页——凭证已保存，无需新的邀请码即可重新连接。"
+    }
+  },
   "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
   "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…）。该配对码已被使用——请在桌面端重新生成二维码/配对码后再试。",
   "fingerprintPinned": "桌面身份已锁定",
   "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
   "formCardTitle": "配对手机",
-  "invitationSummary": {
-    "description": "服务器 v{version} · {expiresAt, time, short} 过期",
-    "title": "已识别 {host} 的配对邀请"
-  },
   "health": {
     "checking": "检查中",
     "continueToChat": "进入聊天",
@@ -92,6 +133,10 @@
     "generic": "配对失败（HTTP {status}）。"
   },
   "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "invitationSummary": {
+    "description": "服务器 v{version} · {expiresAt, time, short} 过期",
+    "title": "已识别 {host} 的配对邀请"
+  },
   "loadingManualCta": "手动配对",
   "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
   "loadingTitle": "正在检查既有配对…",
@@ -117,7 +162,7 @@
       "title": "需要本地网络权限"
     }
   },
-  "persistenceError": "设备已注册，但无法安全保存其凭据。请重新配对。",
+  "persistenceError": "设备已在 Host 上注册，但本客户端未能保存其密钥：{message}",
   "recovery": {
     "incompatible": {
       "description": "此 Host 的协议或功能清单不兼容。请切换 Host，或与更新后的 Host 重新配对。",
