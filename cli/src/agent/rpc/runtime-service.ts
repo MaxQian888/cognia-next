@@ -78,6 +78,7 @@ import {
   CAP_CONCURRENT_SESSIONS_V1,
   CAP_DURABLE_PROVIDER_SESSION_V1,
   CAP_ELICITATION_V1,
+  CAP_EVALS_V1,
   CAP_EVENT_REPLAY_V2,
   CAP_EXTERNAL_TOOLS_V1,
   CAP_MCP_V1,
@@ -166,6 +167,10 @@ const SUPPORTED_METHODS = [
   "asset/register",
   "asset/stat",
   "asset/delete",
+  "eval/replay",
+  "eval/fixture/refresh",
+  "eval/record/start",
+  "eval/record/stop",
 ] as const satisfies readonly RpcMethod[]
 
 /**
@@ -201,6 +206,7 @@ const SERVICE_CAPABILITIES = [
   CAP_AGENT_DEFINITIONS_V1,
   CAP_AGENT_SESSION_BINDING_V1,
   CAP_ASSETS_V1,
+  CAP_EVALS_V1,
 ] as const
 
 /**
@@ -332,6 +338,11 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   >()
   const traceBridge: TraceBridge = options.traces ?? createTraceBridge()
+  /** Recording proxies the caller opened and has not yet stopped. */
+  const recordings = new Map<
+    string,
+    { stop: () => Promise<{ fixture: unknown; actors: string[] }> }
+  >()
   // Real spans, not audit rows: one `trace/event` per finished span, redacted
   // unless that subscriber explicitly asked for content.
   const detachSpanListener = traceBridge.onSpan((span) => {
@@ -639,6 +650,76 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             })
           )
         )
+      case "eval/replay": {
+        const { runReplay } = await import("../../eval/replay/run-replay")
+        const { createRuntimeDriver } = await import("../../eval/replay/runtime-driver")
+        // The real agent loop with only the model endpoint substituted -- which
+        // is what makes the run keyless rather than merely mocked.
+        const replayResult = await runReplay({
+          raw: params.fixture,
+          requireSynthetic: params.requireSynthetic !== false,
+          platform: "headless",
+          driver: createRuntimeDriver({ config: options.config }),
+          ...(typeof params.provider === "string" ? { provider: params.provider } : {}),
+        })
+        return result({
+          ok: replayResult.ok,
+          requests: replayResult.requests,
+          unmatched: replayResult.unmatched,
+          summary: replayResult.summary,
+          ...(replayResult.scenarioId ? { scenarioId: replayResult.scenarioId } : {}),
+          ...(replayResult.errors ? { errors: replayResult.errors } : {}),
+          ...(replayResult.report
+            ? { report: replayResult.report as unknown as Record<string, unknown> }
+            : {}),
+        })
+      }
+      case "eval/fixture/refresh": {
+        const { refreshFixture } = await import("../../eval/replay/fixture-maintenance")
+        return result(refreshFixture(params.fixture) as unknown as Record<string, unknown>)
+      }
+      case "eval/record/start": {
+        const { createRecordingProxy } = await import("../../eval/replay/recording-proxy")
+        const scenario = params.scenario as {
+          actors?: { role?: string; actorRef?: string }[]
+        }
+        const rootActor = scenario.actors?.find((actor) => actor.role === "root")?.actorRef
+        const proxy = createRecordingProxy({
+          ...(typeof params.upstream === "string" ? { upstream: params.upstream } : {}),
+          ...(typeof params.provider === "string" ? { provider: params.provider } : {}),
+          ...(rootActor ? { defaultActorRef: rootActor } : {}),
+        })
+        await proxy.start(typeof params.port === "number" ? params.port : undefined)
+        const recordingId = randomUUID()
+        recordings.set(recordingId, {
+          stop: async () => {
+            await proxy.stop()
+            const snapshot = proxy.snapshot()
+            return {
+              // Every tape is marked non-synthetic, so it cannot be committed
+              // until a human has read and scrubbed it.
+              fixture: {
+                scenario: params.scenario,
+                tapes: snapshot.tapes,
+                assets: snapshot.assets,
+              },
+              actors: snapshot.actors,
+            }
+          },
+        })
+        return result({ recordingId, proxyUrl: proxy.baseUrl })
+      }
+      case "eval/record/stop": {
+        const recordingId = requireString(params, "recordingId")
+        const recording = recordings.get(recordingId)
+        if (!recording) throw structured("usage_error", `unknown recording ${recordingId}`)
+        recordings.delete(recordingId)
+        const stopped = await recording.stop()
+        return result({
+          fixture: stopped.fixture as Record<string, unknown>,
+          actors: stopped.actors,
+        })
+      }
       case "asset/stat":
         return result(withAssetErrors(() => assetStore.stat(requireString(params, "assetId"))))
       case "asset/delete":
@@ -1771,6 +1852,12 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     if (closing) return
     detachSpanListener()
     traceBridge.close()
+    // A recording proxy holds a listening socket; leaving one open would keep
+    // the process alive after the client disconnected.
+    for (const [recordingId, recording] of recordings) {
+      recordings.delete(recordingId)
+      await recording.stop().catch(() => undefined)
+    }
     closing = true
     await Promise.all([...sessions.values()].map((session) => closeSession(session)))
     if (registeredTools.size > 0 || registeredHooks.size > 0) {

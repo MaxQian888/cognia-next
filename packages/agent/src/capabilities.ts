@@ -98,6 +98,13 @@ export const CAP_ASSETS_V1 = "assets-v1"
  * which is the failure mode attachments already had.
  */
 export const CAP_ASSETS_IN_TURN_V1 = "assets-in-turn-v1"
+/**
+ * Keyless record and replay of a scenario through the real agent loop.
+ *
+ * Declared only when the host can actually substitute the model endpoint, which
+ * is what makes a replay run without a provider credential.
+ */
+export const CAP_EVALS_V1 = "evals-v1"
 /** The client can re-attach after a transport drop and replay from a cursor. */
 export const CAP_RECONNECT_V1 = "reconnect-v1"
 

@@ -172,6 +172,10 @@ describe("RPC protocol", () => {
         "asset/register",
         "asset/stat",
         "asset/delete",
+        "eval/replay",
+        "eval/fixture/refresh",
+        "eval/record/start",
+        "eval/record/stop",
       ])
       expect(HOST_REQUEST_METHODS).toEqual(["client/tool/invoke", "client/hook/invoke"])
     })

@@ -135,6 +135,10 @@ export const RPC_METHODS = [
   "asset/register",
   "asset/stat",
   "asset/delete",
+  "eval/replay",
+  "eval/fixture/refresh",
+  "eval/record/start",
+  "eval/record/stop",
 ] as const
 
 export type RpcMethod = (typeof RPC_METHODS)[number]
@@ -193,6 +197,8 @@ export const SIDE_EFFECTING_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>
   "asset/put",
   "asset/register",
   "asset/delete",
+  "eval/record/start",
+  "eval/record/stop",
 ])
 
 /** A read whose repetition after a reconnect changes nothing host-side. */
@@ -708,6 +714,45 @@ export const rpcMethodSchemas = {
   "asset/delete": {
     params: v.looseObject({ assetId: nonEmptyString, commandId: optionalCommandId }),
     result: okResult,
+  },
+  /**
+   * Replay a recorded fixture through the real agent loop with only the model
+   * endpoint substituted. No provider credential is used or needed.
+   */
+  "eval/replay": {
+    params: v.looseObject({
+      fixture: objectResult,
+      /** Refuse a real recording. On for anything read out of a repository. */
+      requireSynthetic: v.optional(v.boolean()),
+      provider: v.optional(nonEmptyString),
+    }),
+    result: v.looseObject({
+      ok: v.boolean(),
+      scenarioId: v.optional(nonEmptyString),
+      requests: v.pipe(v.number(), v.integer(), v.minValue(0)),
+      unmatched: v.pipe(v.number(), v.integer(), v.minValue(0)),
+      summary: v.string(),
+      errors: v.optional(v.array(v.string())),
+      report: v.optional(objectResult),
+    }),
+  },
+  "eval/fixture/refresh": {
+    params: v.object({ fixture: objectResult }),
+    result: objectResult,
+  },
+  "eval/record/start": {
+    params: v.looseObject({
+      scenario: objectResult,
+      upstream: v.optional(nonEmptyString),
+      provider: v.optional(nonEmptyString),
+      port: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+      commandId: optionalCommandId,
+    }),
+    result: v.looseObject({ recordingId: nonEmptyString, proxyUrl: nonEmptyString }),
+  },
+  "eval/record/stop": {
+    params: v.looseObject({ recordingId: nonEmptyString, commandId: optionalCommandId }),
+    result: v.looseObject({ fixture: objectResult, actors: v.array(v.string()) }),
   },
 } satisfies Record<RpcMethod, { params: v.GenericSchema; result: v.GenericSchema }>
 

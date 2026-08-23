@@ -9,6 +9,7 @@ import {
   CAP_AGENT_DEFINITIONS_V1,
   CAP_AGENT_SESSION_BINDING_V1,
   CAP_ASSETS_V1,
+  CAP_EVALS_V1,
   CAP_TRACE_UNSUBSCRIBE_V1,
   hasCapability,
 } from "./capabilities"
@@ -235,6 +236,45 @@ export interface AssetApi {
   delete(assetId: string): Promise<void>
 }
 
+export interface ReplayResult {
+  ok: boolean
+  scenarioId?: string
+  requests: number
+  unmatched: number
+  summary: string
+  errors?: readonly string[]
+  report?: Record<string, unknown>
+}
+
+/** An open recording proxy. Stop it to get the fixture it captured. */
+export interface RecordingHandle extends AsyncDisposable {
+  readonly recordingId: string
+  /** Point the provider at this URL while driving the session being recorded. */
+  readonly proxyUrl: string
+  stop(): Promise<{ fixture: Record<string, unknown>; actors: readonly string[] }>
+}
+
+/**
+ * Record and replay, on the host's existing engine.
+ *
+ * A replay runs the real agent loop — real build-options assembly, real tools,
+ * real permission gate, real persistence — and substitutes only the model
+ * endpoint, so it needs no provider credential and cannot reach a provider even
+ * if something tries.
+ */
+export interface EvalApi {
+  replay(
+    fixture: Record<string, unknown>,
+    options?: { requireSynthetic?: boolean; provider?: string }
+  ): Promise<ReplayResult>
+  /** Re-derive a fixture's digests after an intentional edit. */
+  refreshFixture(fixture: Record<string, unknown>): Promise<Record<string, unknown>>
+  record(
+    scenario: Record<string, unknown>,
+    options?: { upstream?: string; provider?: string; port?: number }
+  ): Promise<RecordingHandle>
+}
+
 export interface AuditApi {
   query(options?: { sessionId?: string; cursor?: string; limit?: number }): Promise<AuditPage>
 }
@@ -255,6 +295,7 @@ export interface CogniaClient extends AsyncDisposable {
   readonly auth: AuthApi
   readonly agents: AgentApi
   readonly assets: AssetApi
+  readonly evals: EvalApi
   readonly sessions: SessionApi
   readonly tools: ToolApi
   readonly hooks: HookApi
@@ -856,6 +897,12 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     }
   }
 
+  function requireEvals(): void {
+    if (!hasCapability(connection.info.capabilities, CAP_EVALS_V1)) {
+      throw new RpcError(RPC_ERROR_CODES.capabilityError, `host does not support ${CAP_EVALS_V1}`)
+    }
+  }
+
   function requireAuthoring(): void {
     if (!hasCapability(connection.info.capabilities, CAP_AGENT_DEFINITIONS_V1)) {
       throw new RpcError(
@@ -1112,6 +1159,68 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
           { assetId, commandId: randomUUID() },
           { timeoutMs: requestTimeoutMs }
         )
+      },
+    },
+    evals: {
+      async replay(fixture, replayOptions = {}) {
+        assertUsable()
+        requireEvals()
+        return (await connection.call(
+          "eval/replay",
+          {
+            fixture,
+            ...(replayOptions.requireSynthetic !== undefined
+              ? { requireSynthetic: replayOptions.requireSynthetic }
+              : {}),
+            ...(replayOptions.provider !== undefined ? { provider: replayOptions.provider } : {}),
+          },
+          // A replay drives a whole scenario; the ordinary request timeout is
+          // sized for a single control call and would cut it off.
+          { timeoutMs: Math.max(requestTimeoutMs, 300_000) }
+        )) as unknown as ReplayResult
+      },
+      async refreshFixture(fixture) {
+        assertUsable()
+        requireEvals()
+        return connection.call("eval/fixture/refresh", { fixture }, { timeoutMs: requestTimeoutMs })
+      },
+      async record(scenario, recordOptions = {}) {
+        assertUsable()
+        requireEvals()
+        const started = await connection.call(
+          "eval/record/start",
+          {
+            scenario,
+            ...(recordOptions.upstream !== undefined ? { upstream: recordOptions.upstream } : {}),
+            ...(recordOptions.provider !== undefined ? { provider: recordOptions.provider } : {}),
+            ...(recordOptions.port !== undefined ? { port: recordOptions.port } : {}),
+            commandId: randomUUID(),
+          },
+          { timeoutMs: requestTimeoutMs }
+        )
+        let stopped = false
+        const stop = async () => {
+          if (stopped)
+            throw new RpcError(RPC_ERROR_CODES.invalidParams, "recording already stopped")
+          stopped = true
+          const finished = await connection.call(
+            "eval/record/stop",
+            { recordingId: started.recordingId, commandId: randomUUID() },
+            { timeoutMs: requestTimeoutMs }
+          )
+          return {
+            fixture: finished.fixture as Record<string, unknown>,
+            actors: finished.actors as readonly string[],
+          }
+        }
+        return {
+          recordingId: started.recordingId,
+          proxyUrl: started.proxyUrl,
+          stop,
+          async [Symbol.asyncDispose]() {
+            if (!stopped) await stop().catch(() => undefined)
+          },
+        }
       },
     },
     sessions: {

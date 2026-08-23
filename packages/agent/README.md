@@ -236,6 +236,29 @@ Audit rows remain available on `client.audit.query()` and in the JSON export's
 `audit` block. They answer a different question — which method ran and how it
 ended — and are no longer mixed into the span stream.
 
+## Record and replay
+
+`client.evals` drives the host's existing replay engine — it does not add one.
+
+```ts
+await using recording = await client.evals.record(scenario)
+// Point the provider at recording.proxyUrl and drive the session, then:
+const { fixture } = await recording.stop()
+
+const result = await client.evals.replay(fixture, { requireSynthetic: false })
+console.log(result.summary, result.unmatched)
+```
+
+A replay runs the real agent loop — real build-options assembly, real sidecar,
+real tools, real permission gate, real persistence — and substitutes only the
+model endpoint. It needs no provider credential and cannot reach a provider even
+if something tries. `requireSynthetic` defaults to on, so a fixture read out of a
+repository is refused unless every tape is marked synthetic; a fresh recording
+is marked non-synthetic and has to be read and scrubbed before it can be
+committed.
+
+`refreshFixture` re-derives a fixture's digests after an intentional edit.
+
 ## Licensing
 
 `@cognia/agent` is **Apache-2.0**. The host — `cognia-agent`, shipped in the

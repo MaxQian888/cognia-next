@@ -1896,4 +1896,61 @@ describe("createAgentRuntimeService", () => {
     expect(runTurn).not.toHaveBeenCalled()
     await service.close()
   })
+  // ---- ADR-0142 Phase 4: keyless record and replay ---------------------------
+
+  it("declares evals and refuses a fixture it cannot accept", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    expect(service.capabilities).toContain("evals-v1")
+
+    const rejected = (await service.handle(
+      "eval/replay",
+      { fixture: { nonsense: true } },
+      context as never
+    )) as { ok: boolean; errors?: string[]; summary: string }
+    expect(rejected.ok).toBe(false)
+    expect(rejected.summary).toContain("fixture rejected")
+    expect(rejected.errors?.length).toBeGreaterThan(0)
+    await service.close()
+  })
+
+  it("opens and closes a recording proxy, returning a non-committable fixture", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const scenario = { scenarioId: "s1", actors: [{ role: "root", actorRef: "actor-root" }] }
+
+    const started = (await service.handle(
+      "eval/record/start",
+      { scenario, port: 0, commandId: "record-1" },
+      context as never
+    )) as { recordingId: string; proxyUrl: string }
+    expect(started.proxyUrl).toMatch(/^http:\/\//)
+
+    const stopped = (await service.handle(
+      "eval/record/stop",
+      { recordingId: started.recordingId, commandId: "record-stop-1" },
+      context as never
+    )) as { fixture: { tapes: unknown[]; scenario: unknown }; actors: string[] }
+    expect(stopped.fixture.scenario).toEqual(scenario)
+    expect(Array.isArray(stopped.fixture.tapes)).toBe(true)
+
+    await expect(
+      service.handle("eval/record/stop", { recordingId: started.recordingId }, context as never)
+    ).rejects.toMatchObject({ structuredError: { code: "usage_error" } })
+    await service.close()
+  })
+
+  it("closes an abandoned recording proxy when the service shuts down", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const started = (await service.handle(
+      "eval/record/start",
+      { scenario: { scenarioId: "s1", actors: [] }, port: 0 },
+      context as never
+    )) as { proxyUrl: string }
+    const url = new URL(started.proxyUrl)
+    // A listening socket would keep the process alive after the client left.
+    await service.close()
+    await expect(
+      fetch(started.proxyUrl, { signal: AbortSignal.timeout(1_000) }).then(() => "reachable")
+    ).rejects.toBeDefined()
+    expect(url.port).not.toBe("0")
+  })
 })
