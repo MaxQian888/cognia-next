@@ -843,6 +843,7 @@ commands.allow = [
   "task_workspace_apply",
   "task_workspace_begin",
   "task_workspace_bundle_acquire",
+  "task_workspace_bundle_begin",
   "task_workspace_bundle_get",
   "task_workspace_bundle_list",
   "task_workspace_export_resource_manifest",

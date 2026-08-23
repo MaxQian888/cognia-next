@@ -195,6 +195,27 @@ pub async fn task_workspace_begin(
 }
 
 #[tauri::command]
+pub async fn task_workspace_bundle_begin(
+    bundle_id: String,
+    logical_root_id: String,
+    input: BeginTaskRun,
+    app: tauri::AppHandle,
+) -> Result<TaskRun, String> {
+    blocking(move |service| {
+        begin_bundle_and_watch(
+            service,
+            &bundle_id,
+            &logical_root_id,
+            input,
+            move |service, run| {
+                service.watch_run(&run.run_id, Arc::new(TauriResourceEventSink(app)))
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn task_workspace_settle(
     run_id: String,
     final_state: Option<RunState>,
@@ -541,6 +562,31 @@ where
     F: FnOnce(&TaskWorkspaceService, &TaskRun) -> Result<(), String>,
 {
     let run = service.begin_run(input)?;
+    watch_started_run(service, run, watch)
+}
+
+fn begin_bundle_and_watch<F>(
+    service: &TaskWorkspaceService,
+    bundle_id: &str,
+    logical_root_id: &str,
+    input: BeginTaskRun,
+    watch: F,
+) -> Result<TaskRun, String>
+where
+    F: FnOnce(&TaskWorkspaceService, &TaskRun) -> Result<(), String>,
+{
+    let run = service.begin_bundle_run(bundle_id, logical_root_id, input)?;
+    watch_started_run(service, run, watch)
+}
+
+fn watch_started_run<F>(
+    service: &TaskWorkspaceService,
+    run: TaskRun,
+    watch: F,
+) -> Result<TaskRun, String>
+where
+    F: FnOnce(&TaskWorkspaceService, &TaskRun) -> Result<(), String>,
+{
     if matches!(run.state, RunState::Running | RunState::Settling) {
         if let Err(error) = watch(service, &run) {
             let _ = service.settle_failed_run(&run.run_id);
@@ -720,6 +766,53 @@ mod tests {
             .find(|run| run.run_id == "run-failed")
             .unwrap();
         assert_eq!(run.state, RunState::Failed);
+    }
+
+    #[test]
+    fn bundle_watcher_start_failure_marks_the_borrowed_run_failed() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = install(data.path().to_path_buf()).unwrap();
+        let bundle = service
+            .acquire_bundle(cognia_task_workspace::AcquireWorkspaceBundle {
+                owner_type: cognia_task_workspace::WorkspaceOwnerType::Session,
+                owner_ref: Some("session-test".into()),
+                environment_kind: cognia_task_workspace::WorkspaceEnvironmentKind::Managed,
+                base: cognia_task_workspace::WorkspaceBaseSpec::WorkingState,
+                roots: vec![cognia_task_workspace::WorkspaceBundleRootRequest {
+                    logical_root_id: "root-1".into(),
+                    role: cognia_task_workspace::WorkspaceRootRole::Primary,
+                    source_root: workspace.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+
+        let error = begin_bundle_and_watch(
+            &service,
+            &bundle.bundle_id,
+            "root-1",
+            begin_input(&workspace, "run-bundle-failed"),
+            |_, _| Err("watcher unavailable".into()),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "watcher unavailable");
+        let run = service
+            .list_runs("task-test")
+            .unwrap()
+            .into_iter()
+            .find(|run| run.run_id == "run-bundle-failed")
+            .unwrap();
+        assert_eq!(run.state, RunState::Failed);
+        assert_eq!(
+            service
+                .get_bundle(&bundle.bundle_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            cognia_task_workspace::WorkspaceBundleState::Active
+        );
     }
 
     #[test]

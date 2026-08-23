@@ -17,6 +17,7 @@ import {
   archiveManagedWorkspace,
   applyTaskWorkspace,
   beginTaskWorkspaceTurn,
+  beginTaskWorkspaceBundleTurn,
   exportTaskResourceManifest,
   getTaskResourceSummary,
   listTaskResourceEvents,
@@ -171,6 +172,31 @@ describe("task workspace client", () => {
     await acquireWorkspaceBundle(input)
 
     expect(call).toHaveBeenCalledWith("task_workspace_bundle_acquire", { input })
+  })
+
+  it("begins tracking inside a Registry bundle lease without reprovisioning", async () => {
+    const input = {
+      taskId: "task-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      agentId: "built-in",
+      agentKind: "in-app",
+      workspaceRoot: "/isolated/repo",
+    }
+    call.mockResolvedValueOnce({
+      taskId: "task-1",
+      runId: "run-1",
+      executionRoot: "/isolated/repo",
+      state: "running",
+    })
+
+    await beginTaskWorkspaceBundleTurn("bundle-1", "primary", input)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_begin", {
+      bundleId: "bundle-1",
+      logicalRootId: "primary",
+      input,
+    })
   })
 
   it("routes protected environment lifecycle actions through the Registry", async () => {

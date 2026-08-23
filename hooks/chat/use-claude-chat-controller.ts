@@ -103,7 +103,11 @@ import {
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
 } from "@/lib/ai/agent/execution/event-envelope"
-import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import {
+  openTaskWorkspaceBundleRunLease,
+  openTaskWorkspaceRunLease,
+} from "@/lib/task-workspace/run-lease"
+import { ensureSessionExecutionBundle } from "@/lib/task-workspace/session-bundle"
 import {
   bindExecutionRun,
   resolveSessionWorkspaceRoot,
@@ -146,6 +150,7 @@ import {
   subagentSignature,
 } from "@/lib/claude/subagent-bridge"
 import { useSettingsStore } from "@/stores/settings"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { isTauri } from "@/lib/tauri"
 import { isCapacitor } from "@/lib/platform/detect"
@@ -1084,7 +1089,7 @@ export function useClaudeChat() {
       // worktree. The developer flag remains a compatibility path for sessions
       // created before execution contexts existed.
       const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
-      const executionContext = session?.executionContext
+      let executionContext = session?.executionContext
       const hasNoToolSurface = sendOptions.toolSurface === "none"
       const agentRuntime = useAgentRuntimeStore.getState().runtime
       const manualExternal = !hasNoToolSurface && agentRuntime === "external"
@@ -1129,9 +1134,6 @@ export function useClaudeChat() {
       if (!hasNoToolSurface && executionContext?.location === "local") {
         sendOptions = { ...sendOptions, cwd: executionContext.projectRoot }
       }
-      const boundWorkspaceRoot = executionContext
-        ? resolveSessionWorkspaceRoot(executionContext)
-        : undefined
       const executionRunId = runIdForTurn(sessionId, chatRunId)
 
       // ADR-0130 hard cost ceiling. Evaluated BEFORE any durable acceptance so
@@ -1226,6 +1228,52 @@ export function useClaudeChat() {
           )
         }
       }
+      let bundlePrimaryRootId: string | undefined
+      if (!hasNoToolSurface && executionContext?.location === "managedWorktree") {
+        const project = useProjectStore
+          .getState()
+          .projects.find((candidate) => candidate.id === executionContext?.projectId)
+        if (!project) {
+          store.getState().setSessionStatus(sessionId, "idle")
+          store.getState().setSessionError(sessionId, tInlineErr("managedWorktreeUnavailable"))
+          chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "managed_project_unavailable",
+          })
+          stopAssemblyHeartbeat()
+          return
+        }
+        try {
+          const binding = await ensureSessionExecutionBundle({
+            sessionId,
+            context: executionContext,
+            project,
+          })
+          executionContext = binding.context
+          bundlePrimaryRootId = binding.primaryLogicalRootId
+          sendOptions = {
+            ...sendOptions,
+            cwd: binding.primaryAlias,
+            additionalDirectories: binding.additionalAliases,
+          }
+          await updateSession(sessionId, { executionContext })
+        } catch (error) {
+          console.error("managed workspace bundle acquisition failed", error)
+          store.getState().setSessionStatus(sessionId, "idle")
+          store.getState().setSessionError(sessionId, tInlineErr("managedWorktreeUnavailable"))
+          chatTurnPerformance.finish(sessionId, "failed")
+          await settleChatTurnForSession(sessionId, {
+            outcome: "failed",
+            errorCode: "workspace_bundle_unavailable",
+          })
+          stopAssemblyHeartbeat()
+          return
+        }
+      }
+      const boundWorkspaceRoot = executionContext
+        ? resolveSessionWorkspaceRoot(executionContext)
+        : undefined
       try {
         await startDirectChatExecutionRun({
           sessionId,
@@ -1291,7 +1339,16 @@ export function useClaudeChat() {
             ? { workspaceKey: executionContext.taskWorkspace.workspaceKey }
             : {}),
         }
-        const taskLease = await openTaskWorkspaceRunLease(taskEnvelope)
+        const taskLease =
+          executionContext?.location === "managedWorktree" &&
+          executionContext.execution?.bundleId &&
+          bundlePrimaryRootId
+            ? await openTaskWorkspaceBundleRunLease(
+                executionContext.execution.bundleId,
+                bundlePrimaryRootId,
+                taskEnvelope
+              )
+            : await openTaskWorkspaceRunLease(taskEnvelope)
         if (!taskLease && executionContext?.location === "managedWorktree") {
           await finishDirectChatExecutionRun(sessionId, "failed")
           const message = tInlineErr("managedWorktreeUnavailable")

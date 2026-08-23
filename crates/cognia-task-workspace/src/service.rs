@@ -78,6 +78,13 @@ struct BundleAcquiredRoot {
     execution_root: PathBuf,
 }
 
+struct BorrowedExecution {
+    root: PathBuf,
+    isolation_kind: IsolationKind,
+    isolation_ref: Option<String>,
+    base: WorkspaceBaseSpec,
+}
+
 impl TaskWorkspaceService {
     pub fn open(config: ServiceConfig) -> Result<Self, String> {
         let service_dir = config.data_dir.join("task-workspaces");
@@ -179,6 +186,70 @@ impl TaskWorkspaceService {
         self.begin_run(input)
     }
 
+    /// Start resource tracking inside an already-provisioned Registry lease.
+    ///
+    /// The TaskRun borrows the physical directory: settling the run must not
+    /// archive or remove the Bundle-owned environment.
+    pub fn begin_bundle_run(
+        &self,
+        bundle_id: &str,
+        logical_root_id: &str,
+        mut input: BeginTaskRun,
+    ) -> Result<TaskRun, String> {
+        let bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {bundle_id}"))?;
+        if bundle.state != WorkspaceState::Active {
+            return Err(format!("workspace bundle is not active: {bundle_id}"));
+        }
+        if bundle.environment_kind == crate::WorkspaceEnvironmentKind::Imported {
+            return Err("imported environments must be adopted before execution".into());
+        }
+        if bundle.owner_type == WorkspaceOwnerType::Session
+            && bundle.owner_ref.as_deref() != Some(input.session_id.as_str())
+        {
+            return Err("workspace bundle is owned by another session".into());
+        }
+        let lease = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == logical_root_id)
+            .ok_or_else(|| format!("workspace bundle has no logical root: {logical_root_id}"))?;
+        let record = self
+            .registry
+            .get(&lease.workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("managed workspace is missing: {}", lease.workspace_id))?;
+        if record.state != WorkspaceState::Active {
+            return Err(format!(
+                "managed workspace is not active: {}",
+                lease.workspace_id
+            ));
+        }
+        let execution_root = PathBuf::from(&record.execution_root)
+            .canonicalize()
+            .map_err(|error| format!("canonicalize managed execution root: {error}"))?;
+        let alias_root = PathBuf::from(&lease.alias_path)
+            .canonicalize()
+            .map_err(|error| format!("canonicalize workspace lease alias: {error}"))?;
+        if !alias_root.starts_with(&execution_root) {
+            return Err("workspace lease alias escapes its managed execution root".into());
+        }
+        input.workspace_root = alias_root.to_string_lossy().into_owned();
+        input.base = record.base.clone();
+        self.begin_run_internal(
+            input,
+            Some(BorrowedExecution {
+                root: alias_root,
+                isolation_kind: record.isolation_kind,
+                isolation_ref: record.branch,
+                base: record.base,
+            }),
+        )
+    }
+
     fn reject_registry_owned_source(&self, source_root: &Path) -> Result<(), String> {
         for workspace in self.registry.list().map_err(|error| error.to_string())? {
             let execution_root = PathBuf::from(&workspace.execution_root);
@@ -194,6 +265,14 @@ impl TaskWorkspaceService {
     }
 
     pub fn begin_run(&self, input: BeginTaskRun) -> Result<TaskRun, String> {
+        self.begin_run_internal(input, None)
+    }
+
+    fn begin_run_internal(
+        &self,
+        input: BeginTaskRun,
+        borrowed: Option<BorrowedExecution>,
+    ) -> Result<TaskRun, String> {
         validate_id("taskId", &input.task_id)?;
         validate_id("runId", &input.run_id)?;
         if let Some(workspace_key) = input.workspace_key.as_deref() {
@@ -252,7 +331,7 @@ impl TaskWorkspaceService {
         } else {
             None
         };
-        if reusable.is_none() {
+        if reusable.is_none() && borrowed.is_none() {
             self.enforce_managed_workspace_capacity(1)?;
         }
         let (
@@ -284,6 +363,21 @@ impl TaskWorkspaceService {
                 previous.isolation_ref,
                 previous.workspace_id,
                 previous.base,
+                false,
+            )
+        } else if let Some(borrowed) = borrowed {
+            if borrowed.root != root {
+                return Err("workspace lease changed during run acquisition".into());
+            }
+            let (baseline, blobs) = capture_with_policy(&root, &tracking_policy)?;
+            (
+                baseline,
+                blobs,
+                root.clone(),
+                borrowed.isolation_kind,
+                borrowed.isolation_ref,
+                None,
+                borrowed.base,
                 false,
             )
         } else {
@@ -4236,6 +4330,85 @@ mod tests {
                 .unwrap(),
             bundle
         );
+    }
+
+    #[test]
+    fn bundle_runs_track_changes_without_archiving_the_borrowed_environment() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "notes".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let lease = &bundle.leases[0];
+        let run = service
+            .begin_bundle_run(
+                &bundle.bundle_id,
+                "notes",
+                input(&shadow, "task-bundle-run", "run-bundle-run"),
+            )
+            .unwrap();
+
+        assert_eq!(
+            Path::new(&run.execution_root).canonicalize().unwrap(),
+            Path::new(&lease.alias_path).canonicalize().unwrap()
+        );
+        assert!(run.workspace_id.is_none());
+        fs::write(Path::new(&run.execution_root).join("notes.txt"), "after\n").unwrap();
+        let changes = service.settle_run(&run.run_id).unwrap();
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].path, "notes.txt");
+        assert_eq!(
+            service
+                .get_workspace_bundle(&bundle.bundle_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            WorkspaceState::Active
+        );
+        assert!(Path::new(&lease.alias_path).is_dir());
+    }
+
+    #[test]
+    fn bundle_runs_reject_cross_session_ownership() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-other".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "notes".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+
+        let error = service
+            .begin_bundle_run(
+                &bundle.bundle_id,
+                "notes",
+                input(&shadow, "task-wrong-owner", "run-wrong-owner"),
+            )
+            .unwrap_err();
+
+        assert!(error.contains("owned by another session"));
     }
 
     #[test]

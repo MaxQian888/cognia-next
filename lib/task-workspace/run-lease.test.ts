@@ -1,18 +1,38 @@
 const begin = jest.fn()
+const beginBundle = jest.fn()
 const settle = jest.fn()
 
 jest.mock("./client", () => ({
+  beginTaskWorkspaceBundleTurn: (...args: unknown[]) => beginBundle(...args),
   beginTaskWorkspaceTurn: (...args: unknown[]) => begin(...args),
   settleTaskWorkspaceRunWithProjection: (...args: unknown[]) => settle(...args),
 }))
 
-import { withTaskWorkspaceRun } from "./run-lease"
+import { openTaskWorkspaceBundleRunLease, withTaskWorkspaceRun } from "./run-lease"
 
 describe("withTaskWorkspaceRun", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     begin.mockResolvedValue({ runId: "workspace-run", executionRoot: "/isolated" })
+    beginBundle.mockResolvedValue({ runId: "bundle-run", executionRoot: "/bundle/repo" })
     settle.mockResolvedValue([{ path: "src/a.ts", kind: "modified", captureClass: "source" }])
+  })
+
+  it("opens a run that borrows an existing Registry bundle lease", async () => {
+    const input = {
+      taskId: "task-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      agentId: "built-in",
+      agentKind: "in-app",
+      workspaceRoot: "/bundle/repo",
+    }
+
+    const lease = await openTaskWorkspaceBundleRunLease("bundle-1", "root-1", input)
+
+    expect(beginBundle).toHaveBeenCalledWith("bundle-1", "root-1", input)
+    await lease?.settle("ready")
+    expect(settle).toHaveBeenCalledWith("bundle-run", "ready")
   })
 
   it("executes in the isolated root and settles with correlated identities", async () => {

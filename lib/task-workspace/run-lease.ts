@@ -1,4 +1,5 @@
 import {
+  beginTaskWorkspaceBundleTurn,
   beginTaskWorkspaceTurn,
   settleTaskWorkspaceRunWithProjection,
   type BeginTaskWorkspaceTurn,
@@ -8,6 +9,19 @@ import type { ResourceChange, ResourceTrackingPolicy, TaskRun, WorkspaceBaseSpec
 export interface TaskWorkspaceRunLease {
   run: TaskRun
   settle: (finalState?: "ready" | "failed" | "cancelled") => Promise<ResourceChange[]>
+}
+
+export async function openTaskWorkspaceBundleRunLease(
+  bundleId: string,
+  logicalRootId: string,
+  input: BeginTaskWorkspaceTurn
+): Promise<TaskWorkspaceRunLease | null> {
+  const run = await beginTaskWorkspaceBundleTurn(bundleId, logicalRootId, input)
+  if (!run) return null
+  return {
+    run,
+    settle: (finalState = "ready") => settleTaskWorkspaceRunWithProjection(run.runId, finalState),
+  }
 }
 
 export async function openTaskWorkspaceRunLease(

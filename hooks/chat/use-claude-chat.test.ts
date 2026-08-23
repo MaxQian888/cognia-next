@@ -255,8 +255,29 @@ jest.mock("@/lib/claude/build-options", () => ({
 }))
 
 const openTaskWorkspaceRunLeaseMock = jest.fn()
+const openTaskWorkspaceBundleRunLeaseMock = jest.fn()
 jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceBundleRunLease: (...args: unknown[]) =>
+    openTaskWorkspaceBundleRunLeaseMock(...args),
   openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+}))
+
+const ensureSessionExecutionBundleMock = jest.fn()
+jest.mock("@/lib/task-workspace/session-bundle", () => ({
+  ensureSessionExecutionBundle: (input: unknown) => ensureSessionExecutionBundleMock(input),
+}))
+
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: {
+    getState: () => ({
+      projects: [
+        {
+          id: "project-1",
+          roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+        },
+      ],
+    }),
+  },
 }))
 
 const getProjectEnvironmentMock = jest.fn()
@@ -627,6 +648,31 @@ beforeEach(() => {
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
   openTaskWorkspaceRunLeaseMock.mockReset().mockResolvedValue(null)
+  openTaskWorkspaceBundleRunLeaseMock.mockReset().mockResolvedValue(null)
+  ensureSessionExecutionBundleMock
+    .mockReset()
+    .mockImplementation(async ({ context }: { context: Record<string, unknown> }) => ({
+      context: {
+        ...context,
+        execution: {
+          mode: "managed",
+          bundleId: "bundle-1",
+          base: { kind: "workingState" },
+          roots: [
+            {
+              logicalRootId: "root-1",
+              role: "primary",
+              aliasPath: "/managed/sess-1",
+              workspaceId: "workspace-1",
+            },
+          ],
+        },
+        worktreePath: "/managed/sess-1",
+      },
+      primaryAlias: "/managed/sess-1",
+      additionalAliases: [],
+      primaryLogicalRootId: "root-1",
+    }))
   getProjectEnvironmentMock.mockReset().mockResolvedValue(undefined)
   executeProjectEnvironmentMock.mockReset().mockResolvedValue({ success: true, bypassed: false })
   chatState.activeSessionId = "sess-1"
@@ -878,7 +924,7 @@ describe("useClaudeChat — actions", () => {
         lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
       },
     })
-    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+    openTaskWorkspaceBundleRunLeaseMock.mockResolvedValue({
       run: {
         runId: "run:sess-1:1",
         executionRoot: "/managed/sess-1",
@@ -893,11 +939,13 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("hello")
     })
 
-    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+    expect(openTaskWorkspaceBundleRunLeaseMock).toHaveBeenCalledWith(
+      "bundle-1",
+      "root-1",
       expect.objectContaining({
         taskId: "task-workspace:sess-1",
         workspaceKey: "sess-1",
-        workspaceRoot: "/repo",
+        workspaceRoot: "/managed/sess-1",
       })
     )
     expect(sendPromptMock).toHaveBeenCalledWith(
@@ -1009,7 +1057,7 @@ describe("useClaudeChat — actions", () => {
         lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
       },
     })
-    openTaskWorkspaceRunLeaseMock.mockResolvedValue({
+    openTaskWorkspaceBundleRunLeaseMock.mockResolvedValue({
       run: { runId: "run-1", executionRoot: "/managed/sess-1", isolationRef: "branch" },
       settle: jest.fn(),
     })

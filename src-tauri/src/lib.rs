@@ -895,6 +895,7 @@ pub fn run() {
             files::fs_write_workspace_file,
             task_workspace::task_workspace_status,
             task_workspace::task_workspace_begin,
+            task_workspace::task_workspace_bundle_begin,
             task_workspace::task_workspace_settle,
             task_workspace::task_workspace_get,
             task_workspace::task_workspace_list,

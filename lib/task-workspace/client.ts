@@ -87,6 +87,38 @@ export async function beginTaskWorkspaceTurn(
   }
 }
 
+export async function beginTaskWorkspaceBundleTurn(
+  bundleId: string,
+  logicalRootId: string,
+  input: BeginTaskWorkspaceTurn
+): Promise<TaskRun | null> {
+  try {
+    const run = await transport.call<TaskRun>("task_workspace_bundle_begin", {
+      bundleId,
+      logicalRootId,
+      input,
+    })
+    useTaskWorkspaceStore.getState().activate({
+      taskId: run.taskId,
+      runId: run.runId,
+      sessionId: input.sessionId,
+      workspaceRoot: input.workspaceRoot,
+      executionRoot: run.executionRoot,
+      state: run.state,
+      ...(input.executionRunId ? { executionRunId: input.executionRunId } : {}),
+      ...(input.traceId ? { traceId: input.traceId } : {}),
+      ...(input.traceSpanId ? { traceSpanId: input.traceSpanId } : {}),
+      ...(input.surface ? { surface: input.surface } : {}),
+    })
+    return run
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const hostDeferred = /remote.control|not authorized|unknown.command|forbidden/i.test(message)
+    if (!hostDeferred) throw error
+    return null
+  }
+}
+
 export async function settleTaskWorkspaceTurn(
   sessionId: string,
   chatRunId: number,
