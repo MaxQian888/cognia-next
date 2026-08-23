@@ -170,6 +170,22 @@ pub fn begin_hosted_turn(
     })
 }
 
+pub fn begin_hosted_bundle_turn(
+    bundle_id: String,
+    logical_root_id: String,
+    input: BeginTaskRun,
+    sink: Arc<dyn TaskWorkspaceEventSink>,
+) -> Result<TaskRun, String> {
+    let service = service()?;
+    begin_bundle_and_watch(
+        &service,
+        &bundle_id,
+        &logical_root_id,
+        input,
+        move |service, run| service.watch_run(&run.run_id, sink),
+    )
+}
+
 #[tauri::command]
 pub fn task_workspace_status() -> TaskWorkspaceStatus {
     TaskWorkspaceStatus {
@@ -775,12 +791,12 @@ mod tests {
         let workspace = TempDir::new().unwrap();
         let service = install(data.path().to_path_buf()).unwrap();
         let bundle = service
-            .acquire_bundle(cognia_task_workspace::AcquireWorkspaceBundle {
+            .acquire_workspace_bundle(cognia_task_workspace::AcquireWorkspaceBundle {
                 owner_type: cognia_task_workspace::WorkspaceOwnerType::Session,
                 owner_ref: Some("session-test".into()),
                 environment_kind: cognia_task_workspace::WorkspaceEnvironmentKind::Managed,
                 base: cognia_task_workspace::WorkspaceBaseSpec::WorkingState,
-                roots: vec![cognia_task_workspace::WorkspaceBundleRootRequest {
+                roots: vec![cognia_task_workspace::WorkspaceBundleRootInput {
                     logical_root_id: "root-1".into(),
                     role: cognia_task_workspace::WorkspaceRootRole::Primary,
                     source_root: workspace.path().to_string_lossy().into_owned(),
@@ -807,11 +823,11 @@ mod tests {
         assert_eq!(run.state, RunState::Failed);
         assert_eq!(
             service
-                .get_bundle(&bundle.bundle_id)
+                .get_workspace_bundle(&bundle.bundle_id)
                 .unwrap()
                 .unwrap()
                 .state,
-            cognia_task_workspace::WorkspaceBundleState::Active
+            cognia_task_workspace::WorkspaceState::Active
         );
     }
 

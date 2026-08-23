@@ -8409,6 +8409,62 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_bundle_acquire": {
+      "type": "object",
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_begin": {
+      "type": "object",
+      "required": [
+        "bundleId",
+        "logicalRootId",
+        "input"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        },
+        "logicalRootId": {
+          "type": "string",
+          "example": ""
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_get": {
+      "type": "object",
+      "required": [
+        "bundleId"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "task_workspace_export_resource_manifest": {
       "type": "object",
       "required": [
@@ -8534,6 +8590,94 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_managed_archive": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_managed_delete": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_managed_get": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_managed_list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "task_workspace_managed_permanent": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_managed_pin": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "pinned"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        },
+        "pinned": {
+          "type": "boolean",
+          "example": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_managed_restore": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_pin": {
       "type": "object",
       "required": [
@@ -8550,7 +8694,31 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_policy_get": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "task_workspace_policy_set": {
+      "type": "object",
+      "required": [
+        "policy"
+      ],
+      "properties": {
+        "policy": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_prune": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "task_workspace_reconcile": {
       "type": "object",
       "properties": {},
       "additionalProperties": false

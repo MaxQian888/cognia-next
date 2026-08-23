@@ -4446,6 +4446,18 @@
     "task_workspace_begin": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "task_workspace_bundle_acquire": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_bundle_begin": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_bundle_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_bundle_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
     "task_workspace_export_resource_manifest": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -4473,14 +4485,44 @@
     "task_workspace_list_runs": {
       "$ref": "#/$defs/LegacyList"
     },
+    "task_workspace_managed_archive": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_managed_delete": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "task_workspace_managed_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_managed_list": {
+      "$ref": "#/$defs/LegacyList"
+    },
+    "task_workspace_managed_permanent": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_managed_pin": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_managed_restore": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
     "task_workspace_pin": {
       "$ref": "#/$defs/LegacyResult"
     },
     "task_workspace_prune": {
       "$ref": "#/$defs/LegacyResult"
     },
+    "task_workspace_policy_get": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
+    "task_workspace_policy_set": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
     "task_workspace_record_tool_event": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "task_workspace_reconcile": {
+      "$ref": "#/$defs/LegacyRecord"
     },
     "task_workspace_resolve_conflict": {
       "$ref": "#/$defs/TaskWorkspaceApplyOutcome"
