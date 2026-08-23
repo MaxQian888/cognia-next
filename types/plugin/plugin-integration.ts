@@ -35,6 +35,8 @@ export interface IntegrationEventTypeDef {
 
 export interface IntegrationActionDef {
   id: string
+  /** Stable semantic identity used only when multiple providers declare equivalent behavior. */
+  operationId?: string
   label: string
   description?: string
   /** Named export resolved from the plugin's main module. */

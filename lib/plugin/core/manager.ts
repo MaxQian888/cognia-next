@@ -5233,6 +5233,15 @@ export class PluginManager {
       }
     }
 
+    // External services are a control-plane composition over existing provider
+    // contributions. Register them only after provider bridges so discovery
+    // never exposes a service whose native runtime failed to activate.
+    if (plugin.manifest.services?.length) {
+      const { registerExternalServicesForPlugin } =
+        await import("@/lib/plugin/bridge/external-services-bridge")
+      registerExternalServicesForPlugin(pluginId, plugin.manifest)
+    }
+
     // Phase B of the LSP reuse work — `manifest.lspServers[]`. Kept
     // outside the map because the registry awaits the binary-policy
     // gate per entry and spawns each server through an injected
@@ -5545,6 +5554,16 @@ export class PluginManager {
     // plus the 6 bridges whose disable cleanup was never wired before.
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       await MODULE_BRIDGE_CAPABILITIES[cap].unregister(pluginId)
+    }
+    // The service catalog is host-owned and must disappear with the plugin;
+    // provider-native persistent connections are suspended separately.
+    try {
+      const { unregisterExternalServicesForPlugin } =
+        await import("@/lib/plugin/bridge/external-services-bridge")
+      unregisterExternalServicesForPlugin(pluginId)
+    } catch {
+      // Best effort during early teardown; no provider execution is routed
+      // without a live service catalog entry.
     }
     // Drop runtime-registered AI providers (ctx.ai.registerProvider). The
     // module-bridge teardown above only covers the DECLARATIVE
