@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "connecting": "Creating…",
+    "create": "Create connection",
+    "pause": "Pause",
+    "resume": "Resume"
+  },
+  "availability": {
+    "preview": "Preview",
+    "supported": "Supported",
+    "vendor-pending": "Vendor pending"
+  },
+  "available": { "title": "Available services" },
+  "connections": {
+    "empty": "No external service connections yet.",
+    "provider": "Provider: {provider}",
+    "title": "Connections"
+  },
+  "description": "Install provider definitions separately from external accounts, then review capabilities, risk, scope, and surfaces before enabling them.",
+  "flow": {
+    "ariaLabel": "External service lifecycle",
+    "connect": "Connect",
+    "discover": "Discover",
+    "enable": "Enable",
+    "install": "Install",
+    "manage": "Manage",
+    "validate": "Validate"
+  },
+  "status": {
+    "blocked": "Blocked",
+    "connected": "Connected",
+    "degraded": "Degraded",
+    "needs-auth": "Needs authentication",
+    "pending": "Pending review",
+    "suspended": "Suspended"
+  },
+  "surface": { "chat": "Chat", "inbox": "Inbox", "workflow": "Workflow" },
+  "title": "External services",
+  "website": {
+    "connect": "Connect website",
+    "connected": "Website connection created",
+    "description": "Creates an isolated browser profile. Passwords, OTP, CAPTCHA, and payment confirmation stay in human takeover.",
+    "domains": "Allowed domains",
+    "domainsHint": "Comma-separated public domains. Redirects outside this set are blocked.",
+    "domainsPlaceholder": "example.com, app.example.com",
+    "failed": "Could not create website connection: {reason}",
+    "loginUrl": "Login start URL",
+    "loginUrlPlaceholder": "https://example.com/login",
+    "name": "Service name",
+    "namePlaceholder": "Example Admin",
+    "title": "Connect a website",
+    "uploads": "Allow uploads",
+    "uploadsHint": "Uploads remain limited to explicitly authorized paths."
+  }
+}

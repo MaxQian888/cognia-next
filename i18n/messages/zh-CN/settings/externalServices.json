@@ -1,0 +1,56 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "connecting": "正在创建…",
+    "create": "创建连接",
+    "pause": "暂停",
+    "resume": "恢复"
+  },
+  "availability": {
+    "preview": "预览",
+    "supported": "支持",
+    "vendor-pending": "等待厂商批准"
+  },
+  "available": { "title": "可用服务" },
+  "connections": {
+    "empty": "还没有外部服务连接。",
+    "provider": "Provider：{provider}",
+    "title": "连接"
+  },
+  "description": "将 provider 定义与外部账户分开安装，并在启用前审阅能力、风险、范围和可见入口。",
+  "flow": {
+    "ariaLabel": "外部服务生命周期",
+    "connect": "连接",
+    "discover": "发现",
+    "enable": "启用",
+    "install": "安装",
+    "manage": "管理",
+    "validate": "校验"
+  },
+  "status": {
+    "blocked": "已阻止",
+    "connected": "已连接",
+    "degraded": "已降级",
+    "needs-auth": "需要认证",
+    "pending": "等待审阅",
+    "suspended": "已暂停"
+  },
+  "surface": { "chat": "Chat", "inbox": "Inbox", "workflow": "Workflow" },
+  "title": "外部服务",
+  "website": {
+    "connect": "连接网站",
+    "connected": "已创建网站连接",
+    "description": "创建隔离的浏览器 profile。密码、OTP、验证码和支付确认始终由用户接管。",
+    "domains": "允许的域名",
+    "domainsHint": "使用逗号分隔的公网域名；跳转到集合外的域名会被阻止。",
+    "domainsPlaceholder": "example.com, app.example.com",
+    "failed": "无法创建网站连接：{reason}",
+    "loginUrl": "登录起始 URL",
+    "loginUrlPlaceholder": "https://example.com/login",
+    "name": "服务名称",
+    "namePlaceholder": "示例管理后台",
+    "title": "连接网站",
+    "uploads": "允许上传",
+    "uploadsHint": "上传仍仅限于明确授权的路径。"
+  }
+}

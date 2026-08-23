@@ -53,6 +53,7 @@ import {
   ClipboardCheckIcon,
   KeyboardIcon,
   RadarIcon,
+  CableIcon,
 } from "lucide-react"
 
 import type { CapabilityId, HostProfile } from "@/lib/platform/capabilities"
@@ -102,6 +103,7 @@ export type SettingsSectionId =
   | "a2ui"
   | "plugins"
   | "connections"
+  | "services"
   | "data"
   | "workflows"
   | "scheduled-tasks"
@@ -415,6 +417,13 @@ export const SETTINGS_NAV: NavItem[] = [
     // IM connector adapters run wherever the connector runtime does — the
     // desktop, or the cloud brain a companion is paired to (ADR-0059 F4).
     requires: ["connector-runtime"],
+  },
+  {
+    id: "services",
+    labelKey: "externalServices",
+    descriptionKey: "externalServices",
+    group: "extensions",
+    icon: CableIcon,
   },
   // === Interface ===
   {
@@ -1425,6 +1434,17 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
     "消息平台",
     "机器人",
     "适配器",
+  ],
+  services: [
+    "external services",
+    "saas",
+    "website",
+    "openapi",
+    "mcp",
+    "integration",
+    "connector",
+    "外部服务",
+    "网站连接",
   ],
   webhooks: ["webhook", "outbound", "standard webhooks", "signing", "egress", "出站", "签名"],
   gateway: [

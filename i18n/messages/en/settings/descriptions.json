@@ -15,6 +15,7 @@
   "characters": "Reusable personas with their own model and skills.",
   "companion": "Mobile companion server — bind mode (loopback / LAN), QR pairing, paired devices, and revocation.",
   "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
+  "externalServices": "Connect SaaS, websites, APIs, MCP servers, and local apps through one governed service catalog.",
   "conversation": "Auto titles and the conversation timeline minimap",
   "data": "Export, import or wipe local IndexedDB data.",
   "desktop": "Tauri-only window, autostart and tray behavior.",

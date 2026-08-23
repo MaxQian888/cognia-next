@@ -218,6 +218,11 @@ const ConnectionsSection = dynamic(
   () => import("./connections/connections-section").then((m) => m.ConnectionsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
+const ExternalServicesSection = dynamic(
+  () =>
+    import("./external-services/external-services-section").then((m) => m.ExternalServicesSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const NetworkSection = dynamic(
   () => import("./network/network-section").then((m) => m.NetworkSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -594,6 +599,8 @@ function SectionContent({
       return <PluginsSection onClose={onClose} />
     case "connections":
       return <ConnectionsSection />
+    case "services":
+      return <ExternalServicesSection />
     case "data":
       return <DataSection />
     case "workflows":

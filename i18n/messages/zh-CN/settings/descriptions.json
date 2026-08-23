@@ -15,6 +15,7 @@
   "characters": "复用的角色，可独立配置模型与技能。",
   "companion": "移动端伴侣服务器 — 绑定模式（仅本机 / 局域网）、扫码配对、已配对设备列表与吊销。",
   "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
+  "externalServices": "通过统一且受控的服务目录连接 SaaS、网站、API、MCP 服务和本地应用。",
   "conversation": "自动标题与对话时间线缩略图",
   "data": "导出、导入或清空本地 IndexedDB 数据。",
   "desktop": "Tauri 专属的窗口、自启与托盘行为。",
