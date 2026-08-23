@@ -123,6 +123,62 @@ describe("OpenAPI compiler", () => {
     ).toThrow(new OpenApiCompileError("external-ref-origin-not-approved"))
   })
 
+  it("resolves pre-fetched same-origin and approved cross-origin documents", () => {
+    const compiled = compileOpenApiDocument(
+      {
+        openapi: "3.2.0",
+        info: { title: "External refs", version: "1" },
+        servers: [{ url: "https://api.example.test" }],
+        paths: {
+          "/items": {
+            post: {
+              operationId: "createItem",
+              requestBody: {
+                required: true,
+                content: {
+                  "application/json": {
+                    schema: { $ref: "https://schemas.example.test/common.yaml#/$defs/Item" },
+                  },
+                },
+              },
+              responses: { "204": { description: "ok" } },
+            },
+          },
+        },
+      },
+      {
+        sourceUrl: "https://api.example.test/openapi.json",
+        approvedExternalOrigins: ["https://schemas.example.test"],
+        externalDocuments: {
+          "https://schemas.example.test/common.yaml": {
+            $defs: {
+              Item: {
+                type: "object",
+                required: ["name"],
+                properties: { name: { type: "string" } },
+              },
+            },
+          },
+        },
+      }
+    )
+
+    expect((compiled.operations[0].inputSchema.properties as Record<string, unknown>).body).toEqual(
+      expect.objectContaining({ required: ["name"] })
+    )
+  })
+
+  it("rejects credentials embedded in server URLs", () => {
+    expect(() =>
+      compileOpenApiDocument({
+        openapi: "3.0.3",
+        info: { title: "Unsafe", version: "1" },
+        servers: [{ url: "https://token@example.test" }],
+        paths: {},
+      })
+    ).toThrow(expect.objectContaining({ code: "credentials-in-server-url" }))
+  })
+
   it("rejects cyclic local references instead of recursing indefinitely", () => {
     expect(() =>
       compileOpenApiDocument({

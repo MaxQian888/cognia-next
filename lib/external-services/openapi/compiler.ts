@@ -67,6 +67,8 @@ export interface CompiledOpenApiProvider {
 export interface CompileOpenApiOptions {
   sourceUrl?: string
   approvedExternalOrigins?: string[]
+  /** Pre-fetched external documents keyed by absolute URL without a fragment. */
+  externalDocuments?: Record<string, string | UnknownRecord>
   riskOverrides?: OpenApiRiskOverride[]
   maxBytes?: number
 }
@@ -153,6 +155,23 @@ function resolveRefs(
       throw new OpenApiCompileError("external-ref-origin-not-approved", url.origin)
     }
     externalRefs.add(url.href)
+    const documentUrl = new URL(url.href)
+    const fragment = documentUrl.hash
+    documentUrl.hash = ""
+    const externalSource = options.externalDocuments?.[documentUrl.href]
+    if (externalSource !== undefined) {
+      if (stack.includes(url.href)) throw new OpenApiCompileError("cyclic-ref", url.href)
+      const externalRoot = parseSource(externalSource, options.maxBytes ?? MAX_SPEC_BYTES)
+      const target = fragment ? readLocalRef(externalRoot, fragment) : externalRoot
+      return resolveRefs(
+        target,
+        externalRoot,
+        { ...options, sourceUrl: documentUrl.href },
+        externalRefs,
+        [...stack, url.href],
+        visited
+      )
+    }
     return { ...value, $ref: url.href }
   }
   return Object.fromEntries(
@@ -293,6 +312,9 @@ function compileOrigins(document: UnknownRecord, sourceUrl?: string): string[] {
       url = new URL(server.url, sourceUrl)
     } catch {
       throw new OpenApiCompileError("invalid-server-url", server.url)
+    }
+    if (url.username || url.password) {
+      throw new OpenApiCompileError("credentials-in-server-url", url.origin)
     }
     if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) {
       throw new OpenApiCompileError("insecure-server-origin", url.origin)

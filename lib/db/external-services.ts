@@ -151,9 +151,34 @@ export async function putOpenApiImport(row: OpenApiImportRow): Promise<OpenApiIm
   if (!row.id || !row.serviceId || !row.providerId || !row.documentFingerprint) {
     throw new Error("OpenAPI import identity is incomplete")
   }
-  if (row.document.length > 2 * 1024 * 1024) throw new Error("OpenAPI document exceeds 2 MiB")
+  const externalBytes = Object.values(row.externalDocuments ?? {}).reduce(
+    (total, document) => total + document.length,
+    0
+  )
+  if (row.document.length > 2 * 1024 * 1024 || externalBytes > 8 * 1024 * 1024) {
+    throw new Error("OpenAPI document exceeds the import size limit")
+  }
   await getDb().openApiImports.put(row)
   return row
+}
+
+export async function putOpenApiImportConnection(
+  row: OpenApiImportRow,
+  connection: ServiceConnection
+): Promise<void> {
+  assertConnection(connection)
+  if (connection.providerRef.kind !== "openapi" || connection.providerRef.importId !== row.id) {
+    throw new Error("OpenAPI connection does not reference its import")
+  }
+  const db = getDb()
+  await db.transaction("rw", [db.openApiImports, db.serviceConnections], async () => {
+    await putOpenApiImport(row)
+    await db.serviceConnections.put(connection)
+  })
+}
+
+export async function listOpenApiImports(): Promise<OpenApiImportRow[]> {
+  return getDb().openApiImports.orderBy("updatedAt").reverse().toArray()
 }
 
 export async function getOpenApiImport(id: string): Promise<OpenApiImportRow | undefined> {

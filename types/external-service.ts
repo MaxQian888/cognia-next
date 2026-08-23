@@ -89,6 +89,8 @@ export interface OpenApiImportRow {
   sourceUrl?: string
   /** Original JSON/YAML. Credentials are never accepted in this document. */
   document: string
+  /** Reviewed external `$ref` documents, keyed by absolute URL without fragments. */
+  externalDocuments?: Record<string, string>
   documentFingerprint: string
   approvedOrigins: string[]
   approvedExternalRefOrigins: string[]
