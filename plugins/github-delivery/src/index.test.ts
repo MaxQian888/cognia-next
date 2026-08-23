@@ -37,6 +37,18 @@ describe("GitHub Delivery v3 official plugin", () => {
     })
     expect(githubIntegration.healthProvider).toEqual({ handler: "checkGithubHealth" })
     expect(githubIntegration.actions).toHaveLength(13)
+    expect(
+      githubIntegration.actions.every((action) => action.operationId === `github.${action.id}`)
+    ).toBe(true)
+    expect(githubPlugin.manifest.services?.[0]).toMatchObject({
+      id: "github",
+      fallbackPolicy: "confirm",
+      providers: [
+        expect.objectContaining({ id: "api", kind: "integration" }),
+        expect.objectContaining({ id: "web", kind: "browser" }),
+      ],
+    })
+    expect(githubPlugin.manifest.browserSiteProviders?.[0].operations).toHaveLength(13)
     expect(githubPlugin.manifest.activationEvents).toBeUndefined()
     expect(githubPlugin.manifest.runtimeCompatibility).toMatchObject({
       tauri: { availability: "supported" },

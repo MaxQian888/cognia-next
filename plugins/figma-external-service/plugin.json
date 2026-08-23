@@ -1,0 +1,128 @@
+{
+  "id": "figma-external-service",
+  "name": "Figma External Service",
+  "description": "Reference external-service plugin for Figma MCP, Skills, resources, prompts, Code Connect, and assets.",
+  "version": "1.0.0",
+  "type": "frontend",
+  "main": "src/index.ts",
+  "author": "Cognia Official",
+  "license": "MIT",
+  "engines": { "cognia": ">=0.1.0" },
+  "capabilities": ["mcp-server-preset"],
+  "mcpServerPresets": [
+    {
+      "id": "figma-remote",
+      "name": "Figma Remote",
+      "description": "Figma's remote MCP server. Connection remains vendor-pending until Cognia is admitted to Figma's MCP Catalog.",
+      "icon": "🎨",
+      "transport": "http",
+      "config": { "url": "https://mcp.figma.com/mcp" },
+      "runtime": "both",
+      "docsUrl": "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/",
+      "tags": ["design", "figma", "remote"],
+      "provisioning": {
+        "mode": "managed",
+        "serviceId": "figma",
+        "providerId": "remote",
+        "installScope": "account",
+        "connectMode": "explicit"
+      },
+      "toolRiskRules": [
+        { "pattern": "get_*", "risk": "read" },
+        { "pattern": "list_*", "risk": "read" },
+        { "pattern": "search_*", "risk": "read" },
+        { "pattern": "whoami", "risk": "read" },
+        { "pattern": "download_assets", "risk": "read", "operationId": "figma.assets.download" },
+        {
+          "pattern": "add_code_connect_map",
+          "risk": "write",
+          "operationId": "figma.code-connect.add"
+        },
+        {
+          "pattern": "send_code_connect_mappings",
+          "risk": "write",
+          "operationId": "figma.code-connect.send"
+        },
+        { "pattern": "create_new_file", "risk": "write", "operationId": "figma.file.create" },
+        { "pattern": "generate_diagram", "risk": "write", "operationId": "figma.diagram.generate" },
+        {
+          "pattern": "generate_figma_design",
+          "risk": "write",
+          "operationId": "figma.design.generate"
+        },
+        { "pattern": "upload_assets", "risk": "write", "operationId": "figma.assets.upload" },
+        { "pattern": "use_figma", "risk": "destructive", "operationId": "figma.canvas.mutate" },
+        { "pattern": "weave_run_tool", "risk": "write", "operationId": "figma.weave.run" },
+        {
+          "pattern": "weave_cancel_tool_run",
+          "risk": "destructive",
+          "operationId": "figma.weave.cancel"
+        }
+      ]
+    },
+    {
+      "id": "figma-desktop",
+      "name": "Figma Desktop",
+      "description": "Local MCP endpoint exposed by the Figma desktop app in Dev Mode.",
+      "icon": "🎨",
+      "transport": "http",
+      "config": { "url": "http://127.0.0.1:3845/mcp" },
+      "runtime": "both",
+      "docsUrl": "https://developers.figma.com/docs/figma-mcp-server/local-server-installation/",
+      "tags": ["design", "figma", "local"],
+      "provisioning": {
+        "mode": "managed",
+        "serviceId": "figma",
+        "providerId": "desktop",
+        "installScope": "account",
+        "connectMode": "explicit"
+      },
+      "toolRiskRules": [
+        { "pattern": "get_*", "risk": "read" },
+        {
+          "pattern": "add_code_connect_map",
+          "risk": "write",
+          "operationId": "figma.code-connect.add"
+        },
+        {
+          "pattern": "send_code_connect_mappings",
+          "risk": "write",
+          "operationId": "figma.code-connect.send"
+        }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "id": "figma",
+      "label": "Figma",
+      "description": "Design context, canvas editing, Code Connect, assets, resources, and prompts through interchangeable reviewed MCP providers.",
+      "icon": "🎨",
+      "skillIds": [
+        "figma-use",
+        "figma-design-to-code",
+        "figma-code-connect",
+        "figma-generate-diagram"
+      ],
+      "fallbackPolicy": "never",
+      "providers": [
+        {
+          "id": "remote",
+          "kind": "mcp",
+          "contributionId": "figma-remote",
+          "priority": 100,
+          "surfaces": ["chat", "workflow"],
+          "availability": "vendor-pending"
+        },
+        {
+          "id": "desktop",
+          "kind": "mcp",
+          "contributionId": "figma-desktop",
+          "priority": 90,
+          "surfaces": ["chat", "workflow"],
+          "availability": "supported"
+        }
+      ]
+    }
+  ]
+}

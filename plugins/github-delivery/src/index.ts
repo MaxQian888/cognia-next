@@ -638,6 +638,7 @@ export const githubIntegration: PluginIntegrationDef = {
   ],
   actions: actionDefinitions.map((action) => ({
     id: action.id,
+    operationId: `github.${action.id}`,
     label: action.id,
     handler: action.handler,
     risk: action.risk,
@@ -705,6 +706,48 @@ export const manifest: PluginManifest = {
     },
   },
   integrations: [githubIntegration],
+  browserSiteProviders: [
+    {
+      id: "github-web",
+      label: "GitHub Web",
+      description: "Explicit-confirmation fallback through an isolated github.com browser profile.",
+      allowedDomains: ["github.com"],
+      loginStartUrl: "https://github.com/login",
+      persistentProfile: true,
+      allowUploads: true,
+      allowDownloads: true,
+      operations: actionDefinitions.map((action) => ({
+        id: `web-${action.id}`,
+        operationId: `github.${action.id}`,
+        label: action.id,
+        risk: action.risk,
+      })),
+    },
+  ],
+  services: [
+    {
+      id: "github",
+      label: "GitHub",
+      description: "GitHub API, verified webhooks, Inbox events, and an explicit Browser fallback.",
+      fallbackPolicy: "confirm",
+      providers: [
+        {
+          id: "api",
+          kind: "integration",
+          contributionId: "github",
+          priority: 100,
+          surfaces: ["chat", "workflow", "inbox"],
+        },
+        {
+          id: "web",
+          kind: "browser",
+          contributionId: "github-web",
+          priority: 10,
+          surfaces: ["chat", "workflow"],
+        },
+      ],
+    },
+  ],
   workflowKindAliases,
   dexie: {
     tables: [

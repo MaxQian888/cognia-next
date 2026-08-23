@@ -45,6 +45,7 @@ import contextInspectorManifest from "@/plugins/context-inspector/plugin.json"
 import uiSurfaceReferenceManifest from "@/plugins/ui-surface-reference/plugin.json"
 import sreAgentManifest from "@/plugins/sre-agent/plugin.json"
 import githubDeliveryManifest from "@/plugins/github-delivery/plugin.json"
+import figmaExternalServiceManifest from "@/plugins/figma-external-service/plugin.json"
 
 // Static imports for built-in plugin modules
 import clipboardToolsModule from "@/plugins/clipboard-tools/src/index"
@@ -88,6 +89,7 @@ import contextInspectorModule from "@/plugins/context-inspector/src/index"
 import * as uiSurfaceReferenceModule from "@/plugins/ui-surface-reference/src/index"
 import sreAgentModule from "@/plugins/sre-agent/src/index"
 import * as githubDeliveryModule from "@/plugins/github-delivery/src/index"
+import figmaExternalServiceModule from "@/plugins/figma-external-service/src/index"
 
 export interface BrowserBuiltinRegistryEntry {
   manifest: PluginManifest
@@ -426,6 +428,14 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
     compatibilityDiagnostics: [],
     load: async () => resolvePluginModule(githubDeliveryModule),
     moduleExports: githubDeliveryModule as unknown as Record<string, unknown>,
+  },
+  {
+    // Protocol-conformance reference: all Figma-specific endpoints, Skills,
+    // availability, and risk overlays remain in the plugin manifest.
+    manifest: builtinManifest(figmaExternalServiceManifest, figmaExternalServiceModule),
+    path: "builtin://figma-external-service",
+    compatibilityDiagnostics: [],
+    load: async () => resolvePluginModule(figmaExternalServiceModule),
   },
   {
     manifest: builtinManifest(petDailyQuestsManifest, petDailyQuestsModule),

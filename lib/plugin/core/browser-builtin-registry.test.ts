@@ -48,6 +48,7 @@ describe("browser-builtin-registry", () => {
       "cognia-work-mode",
       "cognia-workflow-ai",
       "cognia-workspace-tools",
+      "figma-external-service",
       "github-delivery",
       "pet-daily-quests",
       "ripgrep-tools",

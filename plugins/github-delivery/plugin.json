@@ -260,6 +260,7 @@
       "actions": [
         {
           "id": "openPr",
+          "operationId": "github.openPr",
           "label": "openPr",
           "handler": "openPr",
           "risk": "write",
@@ -294,6 +295,7 @@
         },
         {
           "id": "closePr",
+          "operationId": "github.closePr",
           "label": "closePr",
           "handler": "closePr",
           "risk": "destructive",
@@ -317,6 +319,7 @@
         },
         {
           "id": "mergePr",
+          "operationId": "github.mergePr",
           "label": "mergePr",
           "handler": "mergePr",
           "risk": "destructive",
@@ -350,6 +353,7 @@
         },
         {
           "id": "reviewPr",
+          "operationId": "github.reviewPr",
           "label": "reviewPr",
           "handler": "reviewPr",
           "risk": "write",
@@ -380,6 +384,7 @@
         },
         {
           "id": "reviewPrInline",
+          "operationId": "github.reviewPrInline",
           "label": "reviewPrInline",
           "handler": "reviewPrInline",
           "risk": "write",
@@ -416,6 +421,7 @@
         },
         {
           "id": "commentPr",
+          "operationId": "github.commentPr",
           "label": "commentPr",
           "handler": "commentPr",
           "risk": "write",
@@ -442,6 +448,7 @@
         },
         {
           "id": "commentIssue",
+          "operationId": "github.commentIssue",
           "label": "commentIssue",
           "handler": "commentIssue",
           "risk": "write",
@@ -468,6 +475,7 @@
         },
         {
           "id": "labelIssue",
+          "operationId": "github.labelIssue",
           "label": "labelIssue",
           "handler": "labelIssue",
           "risk": "write",
@@ -497,6 +505,7 @@
         },
         {
           "id": "closeIssue",
+          "operationId": "github.closeIssue",
           "label": "closeIssue",
           "handler": "closeIssue",
           "risk": "destructive",
@@ -524,6 +533,7 @@
         },
         {
           "id": "createRelease",
+          "operationId": "github.createRelease",
           "label": "createRelease",
           "handler": "createRelease",
           "risk": "destructive",
@@ -561,6 +571,7 @@
         },
         {
           "id": "generateChangelog",
+          "operationId": "github.generateChangelog",
           "label": "generateChangelog",
           "handler": "generateChangelog",
           "risk": "read",
@@ -586,6 +597,7 @@
         },
         {
           "id": "pushTag",
+          "operationId": "github.pushTag",
           "label": "pushTag",
           "handler": "pushTag",
           "risk": "destructive",
@@ -611,6 +623,7 @@
         },
         {
           "id": "runIssueLoop",
+          "operationId": "github.runIssueLoop",
           "label": "runIssueLoop",
           "handler": "runIssueLoop",
           "risk": "write",
@@ -662,6 +675,117 @@
         "eventTypeHeader": "x-github-event"
       },
       "allowedOrigins": ["https://api.github.com"]
+    }
+  ],
+  "browserSiteProviders": [
+    {
+      "id": "github-web",
+      "label": "GitHub Web",
+      "description": "Explicit-confirmation fallback through an isolated github.com browser profile.",
+      "allowedDomains": ["github.com"],
+      "loginStartUrl": "https://github.com/login",
+      "persistentProfile": true,
+      "allowUploads": true,
+      "allowDownloads": true,
+      "operations": [
+        { "id": "web-openPr", "operationId": "github.openPr", "label": "openPr", "risk": "write" },
+        {
+          "id": "web-closePr",
+          "operationId": "github.closePr",
+          "label": "closePr",
+          "risk": "destructive"
+        },
+        {
+          "id": "web-mergePr",
+          "operationId": "github.mergePr",
+          "label": "mergePr",
+          "risk": "destructive"
+        },
+        {
+          "id": "web-reviewPr",
+          "operationId": "github.reviewPr",
+          "label": "reviewPr",
+          "risk": "write"
+        },
+        {
+          "id": "web-reviewPrInline",
+          "operationId": "github.reviewPrInline",
+          "label": "reviewPrInline",
+          "risk": "write"
+        },
+        {
+          "id": "web-commentPr",
+          "operationId": "github.commentPr",
+          "label": "commentPr",
+          "risk": "write"
+        },
+        {
+          "id": "web-commentIssue",
+          "operationId": "github.commentIssue",
+          "label": "commentIssue",
+          "risk": "write"
+        },
+        {
+          "id": "web-labelIssue",
+          "operationId": "github.labelIssue",
+          "label": "labelIssue",
+          "risk": "write"
+        },
+        {
+          "id": "web-closeIssue",
+          "operationId": "github.closeIssue",
+          "label": "closeIssue",
+          "risk": "destructive"
+        },
+        {
+          "id": "web-createRelease",
+          "operationId": "github.createRelease",
+          "label": "createRelease",
+          "risk": "destructive"
+        },
+        {
+          "id": "web-generateChangelog",
+          "operationId": "github.generateChangelog",
+          "label": "generateChangelog",
+          "risk": "read"
+        },
+        {
+          "id": "web-pushTag",
+          "operationId": "github.pushTag",
+          "label": "pushTag",
+          "risk": "destructive"
+        },
+        {
+          "id": "web-runIssueLoop",
+          "operationId": "github.runIssueLoop",
+          "label": "runIssueLoop",
+          "risk": "write"
+        }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "id": "github",
+      "label": "GitHub",
+      "description": "GitHub API, verified webhooks, Inbox events, and an explicit Browser fallback.",
+      "fallbackPolicy": "confirm",
+      "providers": [
+        {
+          "id": "api",
+          "kind": "integration",
+          "contributionId": "github",
+          "priority": 100,
+          "surfaces": ["chat", "workflow", "inbox"]
+        },
+        {
+          "id": "web",
+          "kind": "browser",
+          "contributionId": "github-web",
+          "priority": 10,
+          "surfaces": ["chat", "workflow"]
+        }
+      ]
     }
   ],
   "workflowKindAliases": {
