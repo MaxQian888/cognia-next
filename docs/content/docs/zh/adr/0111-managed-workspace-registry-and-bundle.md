@@ -7,11 +7,15 @@ description: 在复用现有 Task Workspace patch 引擎的前提下，统一 wo
 
 ## 状态
 
-提议（2026-08-07）。修订 ADR-0086 与 ADR-0108。
+提议、部分实现（2026-08-23）。修订 ADR-0086 与 ADR-0108。
 
-## 当前 rollout 修订（2026-08-13）
+ADR-0111 **尚未接受**。只有“验证”章节的端到端矩阵全部通过后才能接受，其中包括后台隔离、两种 handoff、archive/restore、imported discovery 与真实 Tauri smoke。
 
-Registry storage/state transition、bundle、typed base spec、sensitive grant、scheduler isolation 与 AgentTeam Task Workspace lease 均已实现。Legacy AgentTeam allocator/reconciler 仅为已记录的一发布周期 kill switch 与 Git reconciliation path 保留；consumer telemetry 未确认 fallback 为零前不得删除。Rollout 顺序仍为 ADR-0111 migration、ADR-0086 GA、再到 ADR-0113 canary。
+## Rollout 更正（2026-08-23）
+
+2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、Tauri 命令，以及第一版统一 inventory 页面。
+
+Rollout 仍未完成：尚未证明所有可写 agent 入口都经过 Registry Bundle；startup reconciliation/adoption、PR checkout resolution、selective/branch handoff、聚合 Source Control、header/new-chat 控件、定时 cleanup/history 与验收 E2E 矩阵仍是开放项。在这些 consumer 与测试闭环前，不得移除 legacy allocator 或 live-tree fallback，也不得宣称迁移完成。详见 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`。
 
 ## 背景
 

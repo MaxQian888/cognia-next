@@ -7,11 +7,30 @@ description: Unify worktree ownership, base-ref selection, cross-root atomic app
 
 ## Status
 
-Proposed (2026-08-07). Amends ADR-0086 and ADR-0108.
+Proposed, partially implemented (2026-08-23). Amends ADR-0086 and ADR-0108.
 
-## Current rollout amendment (2026-08-13)
+ADR-0111 is **not accepted**. Acceptance requires the end-to-end matrix in
+Verification to pass, including background isolation, both handoff modes,
+archive/restore, imported discovery, and real Tauri smoke coverage.
 
-Registry storage/state transitions, bundles, typed base specs, sensitive grants, scheduler isolation, and AgentTeam Task Workspace leases are implemented. The legacy AgentTeam allocator/reconciler remains only for the documented one-release kill-switch and Git reconciliation path; it must not be deleted until consumer telemetry confirms zero fallback use. Rollout order remains ADR-0111 migration, ADR-0086 GA, then ADR-0113 canary.
+## Rollout correction (2026-08-23)
+
+The 2026-08-13 statement that Registry storage, bundles, scheduler isolation,
+and AgentTeam leases were implemented was inaccurate. The current tree now has
+durable Registry and Bundle rows, signed atomic Git creation, transactional
+multi-root acquisition (including non-Git shadows), canonical session bindings,
+repository configuration validation, lifecycle policy persistence/capacity
+enforcement, archive/restore/delete, protected permanent/imported
+classification, Tauri commands, and a first unified inventory surface.
+
+The rollout is still incomplete: all writable agent entry points are not yet
+proven to acquire Registry Bundles; startup reconciliation/adoption, PR checkout
+resolution, selective and branch handoff, aggregated Source Control, header/new
+chat controls, cleanup scheduling/history, and the acceptance E2E matrix remain
+open. No legacy allocator or live-tree fallback may be removed or described as
+migrated until those consumers and tests are closed. See the dated
+implementation audit in
+`docs/research/workspace-worktree-implementation-audit-2026-08-23.md`.
 
 ## Context
 
