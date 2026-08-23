@@ -49,6 +49,7 @@ import { makeCliPluginToolHandle } from "../subagent-dispatch"
 import type { AgentRpcService, AgentRpcServiceContext } from "./server"
 import { AgentRpcHostError } from "./server"
 import { AssetStoreError, createAssetStore, type AssetStore } from "./asset-store"
+import { createTraceBridge, redactSpan, type TraceBridge } from "./trace-bridge"
 import {
   AgentDefinitionStoreError,
   createAgentDefinitionStore,
@@ -276,6 +277,8 @@ export interface AgentRuntimeServiceOptions {
   agentDefinitions?: AgentDefinitionStore
   /** Injected in tests; defaults to the content-addressed store under `home`. */
   assets?: AssetStore
+  /** Injected in tests; defaults to a bridge over `@cognia/agent-trace`. */
+  traces?: TraceBridge
   runTurn?: typeof runUnifiedTurn
   createLease?: () => ProviderSessionLease
   mintSessionId?: (now?: number, random?: number) => string
@@ -321,8 +324,29 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const createCommands = new Map<string, Promise<Record<string, unknown>>>()
   const traceSubscriptions = new Map<
     string,
-    { sessionId?: string; context: AgentRpcServiceContext; createdAt: number }
+    {
+      sessionId?: string
+      context: AgentRpcServiceContext
+      createdAt: number
+      includeContent: boolean
+    }
   >()
+  const traceBridge: TraceBridge = options.traces ?? createTraceBridge()
+  // Real spans, not audit rows: one `trace/event` per finished span, redacted
+  // unless that subscriber explicitly asked for content.
+  const detachSpanListener = traceBridge.onSpan((span) => {
+    for (const [subscriptionId, subscription] of traceSubscriptions) {
+      if (subscription.sessionId && subscription.sessionId !== span.sessionId) continue
+      void subscription.context
+        .emit("trace/event", {
+          subscriptionId,
+          span: redactSpan(span, subscription.includeContent) as unknown as Record<string, unknown>,
+        })
+        .catch(() => {
+          traceSubscriptions.delete(subscriptionId)
+        })
+    }
+  })
   const compactionSnapshots = new Map<string, CompactionSnapshot>()
   let configuredMcpServers: McpServer[] | null = null
   let closing = false
@@ -1258,12 +1282,14 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           )
         }
         const subscriptionId = randomUUID()
+        const includeContent = params.includeContent === true
         traceSubscriptions.set(subscriptionId, {
           ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
           context,
           createdAt: now(),
+          includeContent,
         })
-        return result({ subscriptionId, redacted: true })
+        return result({ subscriptionId, redacted: !includeContent })
       }
       case "trace/unsubscribe": {
         const subscriptionId = requireString(params, "subscriptionId")
@@ -1272,16 +1298,23 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       }
       case "trace/export": {
         const format = typeof params.format === "string" ? params.format : "json"
-        if (format !== "json") {
+        if (format !== "json" && format !== "otlp-json") {
           throw structured("unsupported_capability", `trace format ${format} is not supported`)
         }
-        return result({
-          format,
-          redacted: true,
-          ...auditStore.exportTrace(
-            typeof params.sessionId === "string" ? params.sessionId : undefined
-          ),
-        })
+        const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined
+        const exported = traceBridge.export({ ...(sessionId ? { sessionId } : {}), format })
+        // The audit rows stay available alongside the spans; they answer a
+        // different question (which method ran, and how it ended) and callers
+        // relied on them before spans existed.
+        return result(
+          format === "otlp-json"
+            ? { redacted: true, ...exported }
+            : {
+                redacted: true,
+                ...exported,
+                audit: auditStore.exportTrace(sessionId),
+              }
+        )
       }
       case "audit/query":
         return result(
@@ -1490,6 +1523,16 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       runId: recovery?.runId ?? `run-pending:${session.id}`,
       attemptId: `attempt-pending:${session.id}`,
     }
+    const traceSpanId = traceBridge.begin({
+      operationName: "invoke_agent",
+      providerName: `cognia.agent-rpc`,
+      surface: "agent-rpc",
+      sessionId: session.id,
+      spanKind: "server",
+      ...(session.config.model ? { requestModel: session.config.model } : {}),
+      ...(session.agentBinding ? { agentId: session.agentBinding.agentId } : {}),
+      inputPreview: prompt,
+    })
     const turn = (async () => {
       try {
         const turnParams: UnifiedTurnParams = {
@@ -1552,7 +1595,23 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           state.suspendedTurn = null
           state.recoveryRequired = false
         })
+        traceBridge.finish(traceSpanId, {
+          ...(runResult.status !== "completed"
+            ? {
+                errorType: runResult.status,
+                ...(runResult.error?.message ? { errorMessage: runResult.error.message } : {}),
+              }
+            : {}),
+          ...(runResult.text ? { outputPreview: runResult.text } : {}),
+          metadata: { runId: runResult.runId, turnId: runResult.turnId, status: runResult.status },
+        })
         return outcomeFrom(runResult)
+      } catch (error) {
+        traceBridge.finish(traceSpanId, {
+          errorType: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        })
+        throw error
       } finally {
         session.busy = false
         session.status =
@@ -1710,6 +1769,8 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
 
   async function close(): Promise<void> {
     if (closing) return
+    detachSpanListener()
+    traceBridge.close()
     closing = true
     await Promise.all([...sessions.values()].map((session) => closeSession(session)))
     if (registeredTools.size > 0 || registeredHooks.size > 0) {
@@ -1875,12 +1936,11 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     } catch {
       // Audit I/O must never change the outcome of the operation being observed.
     }
-    for (const [subscriptionId, subscription] of traceSubscriptions) {
-      if (subscription.sessionId && subscription.sessionId !== entry.sessionId) continue
-      void subscription.context.emit("trace/event", { subscriptionId, span: entry }).catch(() => {
-        traceSubscriptions.delete(subscriptionId)
-      })
-    }
+    // Audit rows are deliberately NOT fanned out on `trace/event` any more.
+    // They record which method ran, not a span: no trace id, no parent, no
+    // duration tree. Mixing them into the span stream left a subscriber unable
+    // to tell one from the other. They stay on `audit/query` and in the JSON
+    // trace export's `audit` block.
   }
 
   return {

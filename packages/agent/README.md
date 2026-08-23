@@ -214,6 +214,28 @@ Compaction returns a boundary only when the live runtime captured a real
 pre-compaction snapshot. Undo is intentionally live-host-only and single-use;
 it is never simulated after a host restart.
 
+## Traces
+
+`client.traces.subscribe()` streams real `AgentTraceSpan`s from
+`@cognia/agent-trace` — trace id, parent, duration, usage — not the audit rows
+that used to be delivered under the same name. `trace/export` returns them as
+JSON or as OTLP JSON (`format: "otlp-json"`).
+
+Content is off by default. A span carries no prompt or completion preview unless
+the subscriber passes `includeContent: true`, and that opt-in buys visibility,
+not an exemption: every preview still passes the host's PII gate, and one that
+fails is dropped with `metadata.inputPreviewBlocked` saying why. Exports never
+carry content at all.
+
+```ts
+await using traces = await client.traces.subscribe({ sessionId, includeContent: true })
+for await (const span of traces) console.log(span.operationName, span.durationMs)
+```
+
+Audit rows remain available on `client.audit.query()` and in the JSON export's
+`audit` block. They answer a different question — which method ran and how it
+ended — and are no longer mixed into the span stream.
+
 ## Licensing
 
 `@cognia/agent` is **Apache-2.0**. The host — `cognia-agent`, shipped in the

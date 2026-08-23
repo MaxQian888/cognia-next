@@ -197,9 +197,23 @@ export interface TraceSubscription extends AsyncIterable<Record<string, unknown>
   unsubscribe(): Promise<void>
 }
 
+export interface TraceSubscribeOptions {
+  sessionId?: string
+  /**
+   * Include prompt and tool previews on the spans.
+   *
+   * Off by default. Turning it on does not bypass the host's PII gate — a
+   * preview that fails it is dropped and the span says so.
+   */
+  includeContent?: boolean
+}
+
 export interface TraceApi {
-  subscribe(sessionId?: string): Promise<TraceSubscription>
-  export(options?: { sessionId?: string; format?: string }): Promise<Record<string, unknown>>
+  subscribe(options?: string | TraceSubscribeOptions): Promise<TraceSubscription>
+  export(options?: {
+    sessionId?: string
+    format?: "json" | "otlp-json"
+  }): Promise<Record<string, unknown>>
 }
 
 /**
@@ -1281,11 +1295,19 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
       },
     },
     traces: {
-      async subscribe(sessionId) {
+      async subscribe(subscribeOptions) {
         assertUsable()
+        const normalized: TraceSubscribeOptions =
+          typeof subscribeOptions === "string"
+            ? { sessionId: subscribeOptions }
+            : (subscribeOptions ?? {})
+        const sessionId = normalized.sessionId
         const response = await connection.call(
           "trace/subscribe",
-          { ...(sessionId ? { sessionId } : {}) },
+          {
+            ...(sessionId ? { sessionId } : {}),
+            ...(normalized.includeContent === true ? { includeContent: true } : {}),
+          },
           { timeoutMs: requestTimeoutMs }
         )
         const subscriptionId = response.subscriptionId

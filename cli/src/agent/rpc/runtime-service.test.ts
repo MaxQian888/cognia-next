@@ -616,13 +616,10 @@ describe("createAgentRuntimeService", () => {
     await service.handle("session/state", { sessionId: "session-1" }, context as never)
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(context.emit).toHaveBeenCalledWith(
-      "trace/event",
-      expect.objectContaining({
-        subscriptionId: subscription.subscriptionId,
-        span: expect.objectContaining({ method: "session/state", result: "ok" }),
-      })
-    )
+    // Audit rows no longer masquerade as spans on the trace stream.
+    const traceEvents = context.emit.mock.calls.filter(([method]) => method === "trace/event")
+    expect(traceEvents).toHaveLength(0)
+    void subscription
     const audit = await service.handle(
       "audit/query",
       { sessionId: "session-1", limit: 100 },
@@ -1235,8 +1232,20 @@ describe("createAgentRuntimeService", () => {
       subscriptionId: string
     }
     await service.handle("session/create", {}, context as never)
-    const beforeRelease = context.emit.mock.calls.filter(([method]) => method === "trace/event")
-    expect(beforeRelease.length).toBeGreaterThan(0)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "go", commandId: "run-1" },
+      context as never
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    const delivered = context.emit.mock.calls.filter(([method]) => method === "trace/event")
+    expect(delivered.length).toBeGreaterThan(0)
+    // Redacted by default: no prompt or completion text on the wire.
+    const span = (delivered[0]![1] as { span: Record<string, unknown> }).span
+    expect(span).toMatchObject({ operationName: "invoke_agent", surface: "agent-rpc" })
+    expect(span.inputPreview).toBeUndefined()
+    expect(span.outputPreview).toBeUndefined()
+    expect(span.metadata).toMatchObject({ redacted: true })
 
     await expect(
       service.handle(
@@ -1247,8 +1256,86 @@ describe("createAgentRuntimeService", () => {
     ).resolves.toEqual({ ok: true })
 
     context.emit.mockClear()
-    await service.handle("session/list", {}, context as never)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "again", commandId: "run-2" },
+      context as never
+    )
+    await new Promise((resolve) => setImmediate(resolve))
     expect(context.emit.mock.calls.filter(([method]) => method === "trace/event")).toHaveLength(0)
+    await service.close()
+  })
+
+  it("hands content to a subscriber that opted in, through the PII gate", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("trace/subscribe", { includeContent: true }, context as never)
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "summarise the changelog", commandId: "run-1" },
+      context as never
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    const delivered = context.emit.mock.calls.filter(([method]) => method === "trace/event")
+    const span = (delivered.at(-1)![1] as { span: Record<string, unknown> }).span
+    expect(span.inputPreview).toBe("summarise the changelog")
+    await service.close()
+  })
+
+  it("drops a preview that fails the PII gate even when content was requested", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("trace/subscribe", { includeContent: true }, context as never)
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "turn/run",
+      {
+        sessionId: "session-1",
+        input: "mail alice@example.com about the release",
+        commandId: "run-1",
+      },
+      context as never
+    )
+    await new Promise((resolve) => setImmediate(resolve))
+    const delivered = context.emit.mock.calls.filter(([method]) => method === "trace/event")
+    const span = (delivered.at(-1)![1] as { span: Record<string, unknown> }).span
+    expect(span.inputPreview).toBeUndefined()
+    expect(span.metadata).toMatchObject({ inputPreviewBlocked: "pii-gate" })
+    await service.close()
+  })
+
+  it("exports spans as JSON and as OTLP JSON", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await service.handle("session/create", {}, context as never)
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "go", commandId: "run-1" },
+      context as never
+    )
+
+    const json = (await service.handle(
+      "trace/export",
+      { sessionId: "session-1", format: "json" },
+      context as never
+    )) as { format: string; spans: unknown[]; redacted: boolean; audit: unknown }
+    expect(json).toMatchObject({ format: "json", redacted: true })
+    expect(json.spans.length).toBeGreaterThan(0)
+    expect(json.audit).toBeDefined()
+
+    const otlp = (await service.handle(
+      "trace/export",
+      { sessionId: "session-1", format: "otlp-json" },
+      context as never
+    )) as { format: string; resourceSpans?: unknown[] }
+    expect(otlp.format).toBe("otlp-json")
+    expect(Array.isArray(otlp.resourceSpans)).toBe(true)
+    await service.close()
+  })
+
+  it("refuses an unknown trace export format rather than silently using JSON", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    await expect(
+      service.handle("trace/export", { format: "csv" } as never, context as never)
+    ).rejects.toMatchObject({ structuredError: { code: "unsupported_capability" } })
     await service.close()
   })
 

@@ -637,7 +637,14 @@ export const rpcMethodSchemas = {
     result: objectResult,
   },
   "trace/subscribe": {
-    params: v.looseObject({ sessionId: v.optional(nonEmptyString) }),
+    params: v.looseObject({
+      sessionId: v.optional(nonEmptyString),
+      /**
+       * Opt in to prompt and tool previews. Off by default, and even when on
+       * every preview still passes the PII gate before it leaves the host.
+       */
+      includeContent: v.optional(v.boolean()),
+    }),
     result: objectResult,
   },
   "trace/unsubscribe": {
@@ -647,7 +654,8 @@ export const rpcMethodSchemas = {
   "trace/export": {
     params: v.looseObject({
       sessionId: v.optional(nonEmptyString),
-      format: v.optional(nonEmptyString),
+      /** `json` (default) or `otlp-json`. */
+      format: v.optional(v.picklist(["json", "otlp-json"])),
     }),
     result: objectResult,
   },

@@ -73,6 +73,8 @@ export type SpanSurface =
   | "retrieval"
   | "embedding"
   | "plugin"
+  /** Turns and tool calls driven over the Agent SDK's RPC host (ADR-0142). */
+  | "agent-rpc"
 
 /** OTel span kind — `client`/`server` mark the two sides of a process hop. */
 export type SpanKind = "internal" | "client" | "server"
