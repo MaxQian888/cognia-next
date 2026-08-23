@@ -5333,6 +5333,22 @@ export interface McpServer {
    * User-created MCP rows leave this field undefined.
    */
   pluginId?: string
+  /** Host-managed plugin/service identity. Absent for manual server rows. */
+  managedBy?: {
+    pluginId: string
+    serviceId: string
+    providerId: string
+    contributionId: string
+    sourceVersion: string
+    specFingerprint: string
+  }
+  /** Reviewed risk policy copied from the contributing service package. */
+  toolRiskRules?: Array<{
+    pattern: string
+    risk: "read" | "write" | "destructive"
+    operationId?: string
+    selectors?: Array<{ kind: string; jsonPointer: string }>
+  }>
   /** Bare tool names denied whenever this server is attached to an agent run. */
   disallowedTools?: string[]
   /**
@@ -5397,9 +5413,19 @@ export interface McpCapabilityCacheRow {
   id: string
   serverId: string
   fingerprint: string
-  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>
+  tools: Array<{
+    name: string
+    description?: string
+    inputSchema?: unknown
+    outputSchema?: unknown
+    _meta?: Record<string, unknown>
+  }>
   resources: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
-  prompts: Array<{ name: string; description?: string }>
+  prompts: Array<{
+    name: string
+    description?: string
+    arguments?: Array<{ name: string; description?: string; required?: boolean }>
+  }>
   expiresAt: number
   updatedAt: number
 }

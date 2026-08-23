@@ -50,6 +50,13 @@ function fixtureOpen(delayMs = 0) {
   let active = 0
   let maximum = 0
   const callTool = jest.fn(async () => ({ content: [{ type: "text", text: "ok" }] }))
+  const readResource = jest.fn(async () => ({
+    contents: [{ uri: "issue://1", mimeType: "text/plain", text: "Issue 1" }],
+  }))
+  const getPrompt = jest.fn(async () => ({
+    description: "Review",
+    messages: [{ role: "user" as const, content: { type: "text", text: "Review it" } }],
+  }))
   const close = jest.fn(async () => undefined)
   const open = jest.fn(async () => {
     active += 1
@@ -62,12 +69,14 @@ function fixtureOpen(delayMs = 0) {
         listTools: async () => ({ tools: [{ name: "do" }] }),
         listResources: async () => ({ resources: [] }),
         listPrompts: async () => ({ prompts: [] }),
+        readResource,
+        getPrompt,
       },
       transport: {},
       close,
     }
   })
-  return { open: open as never, callTool, close, maximum: () => maximum }
+  return { open: open as never, callTool, readResource, getPrompt, close, maximum: () => maximum }
 }
 
 describe("MCP Runtime Gateway", () => {
@@ -145,6 +154,25 @@ describe("MCP Runtime Gateway", () => {
       })
     ).rejects.toThrow("side effect failed")
     expect(fixture.callTool).toHaveBeenCalledTimes(1)
+  })
+
+  it("reads resources and resolves prompt templates through the shared lease", async () => {
+    const fixture = fixtureOpen()
+    const gateway = new McpRuntimeGateway({ open: fixture.open })
+    const input = { scopeId: "chat-1", server: server(), surface: "chat" as const }
+
+    await expect(gateway.readResource({ ...input, uri: "issue://1" })).resolves.toEqual({
+      contents: [{ uri: "issue://1", mimeType: "text/plain", text: "Issue 1" }],
+    })
+    await expect(
+      gateway.getPrompt({ ...input, promptName: "review", arguments: { id: "1" } })
+    ).resolves.toEqual({
+      description: "Review",
+      messages: [{ role: "user", content: { type: "text", text: "Review it" } }],
+    })
+    expect(fixture.open).toHaveBeenCalledTimes(1)
+    expect(fixture.readResource).toHaveBeenCalledWith({ uri: "issue://1" })
+    expect(fixture.getPrompt).toHaveBeenCalledWith({ name: "review", arguments: { id: "1" } })
   })
 
   it("aborts the upstream SDK request when the tool deadline expires", async () => {

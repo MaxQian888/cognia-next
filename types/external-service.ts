@@ -14,6 +14,8 @@ export interface ExternalCapability {
   operationId?: string
   kind: ExternalCapabilityKind
   risk: ExternalServiceRisk
+  /** False means the host assigned fail-closed defaults to an undisclosed capability. */
+  policyKnown?: boolean
   inputSchema?: JsonSchema
   outputSchema?: JsonSchema
   /** Host-extracted resource identifiers used to constrain durable grants. */

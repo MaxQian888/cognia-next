@@ -71,6 +71,23 @@ export interface RuntimeInvokeInput {
   clientInfo?: McpClientInfo
 }
 
+export interface RuntimeReadResourceInput extends Omit<
+  RuntimeInvokeInput,
+  "toolName" | "args" | "deadlineMs"
+> {
+  uri: string
+  deadlineMs?: number
+}
+
+export interface RuntimeGetPromptInput extends Omit<
+  RuntimeInvokeInput,
+  "toolName" | "args" | "deadlineMs"
+> {
+  promptName: string
+  arguments?: Record<string, string>
+  deadlineMs?: number
+}
+
 export interface RuntimeDiscoveryResult {
   tools: McpCapabilityCacheRow["tools"]
   resources: McpCapabilityCacheRow["resources"]
@@ -185,6 +202,72 @@ export class McpRuntimeGateway {
     }
   }
 
+  async readResource(input: RuntimeReadResourceInput): Promise<{
+    contents: Array<{
+      uri: string
+      mimeType?: string
+      text?: string
+      blob?: string
+      _meta?: Record<string, unknown>
+    }>
+  }> {
+    const startedAt = this.now()
+    try {
+      const lease = await this.getLease({ ...input, toolName: "resources/read" })
+      const result = await withTimeout(
+        lease.opened.client.readResource({ uri: input.uri }),
+        Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
+        input.signal,
+        "MCP resource read timed out"
+      )
+      void auditOutbound(input, startedAt, this.now(), undefined, "call", "resources/read")
+      return { contents: result.contents ?? [] }
+    } catch (error) {
+      this.recordOperationError(error)
+      void auditOutbound(
+        input,
+        startedAt,
+        this.now(),
+        classifyError(error, "resource-read-failed"),
+        "call",
+        "resources/read"
+      )
+      throw error
+    }
+  }
+
+  async getPrompt(input: RuntimeGetPromptInput): Promise<{
+    description?: string
+    messages: Array<{ role: "user" | "assistant"; content: unknown }>
+  }> {
+    const startedAt = this.now()
+    try {
+      const lease = await this.getLease({ ...input, toolName: "prompts/get" })
+      const result = await withTimeout(
+        lease.opened.client.getPrompt({
+          name: input.promptName,
+          arguments: input.arguments,
+        }),
+        Math.min(input.deadlineMs ?? this.toolTimeoutMs, this.toolTimeoutMs),
+        input.signal,
+        "MCP prompt retrieval timed out"
+      )
+      void auditOutbound(input, startedAt, this.now(), undefined, "call", "prompts/get")
+      return { description: result.description, messages: result.messages ?? [] }
+    } catch (error) {
+      this.recordOperationError(error)
+      void auditOutbound(
+        input,
+        startedAt,
+        this.now(),
+        classifyError(error, "prompt-get-failed"),
+        "call",
+        "prompts/get"
+      )
+      throw error
+    }
+  }
+
   async discover(
     input: Omit<RuntimeInvokeInput, "toolName" | "args" | "deadlineMs">
   ): Promise<RuntimeDiscoveryResult> {
@@ -195,6 +278,7 @@ export class McpRuntimeGateway {
       const cached = await readCapabilityCache(cacheId, this.now())
       if (cached) {
         this.bumpMetric("capabilityCacheHits")
+        await projectManagedCapabilities(input.server, cached)
         void auditOutbound(input, startedAt, this.now(), undefined, "discover", "capabilities/list")
         return { ...cached, cacheHit: true }
       }
@@ -218,11 +302,18 @@ export class McpRuntimeGateway {
         fingerprint,
         tools: tools.tools ?? [],
         resources: resources.resources ?? [],
-        prompts: (prompts.prompts ?? []).map(({ name, description }) => ({ name, description })),
+        prompts: (prompts.prompts ?? []).map(
+          ({ name, description, arguments: promptArguments }) => ({
+            name,
+            description,
+            arguments: promptArguments,
+          })
+        ),
         expiresAt: this.now() + this.capabilityTtlMs,
         updatedAt: this.now(),
       }
       await writeCapabilityCache(row)
+      await projectManagedCapabilities(input.server, row)
       void auditOutbound(input, startedAt, this.now(), undefined, "discover", "capabilities/list")
       return { tools: row.tools, resources: row.resources, prompts: row.prompts, cacheHit: false }
     } catch (error) {
@@ -334,6 +425,7 @@ export class McpRuntimeGateway {
               toolName: input.toolName,
               fingerprint: fingerprintMcpDefinition(input.server),
               onToolsChanged: () => this.invalidateCapabilities(input.server.id),
+              onCapabilitiesChanged: () => this.invalidateCapabilities(input.server.id),
             }),
             this.connectTimeoutMs,
             input.signal,
@@ -453,6 +545,21 @@ async function writeCapabilityCache(row: McpCapabilityCacheRow): Promise<void> {
     )
   } catch {
     // Persistence is best-effort in CLI/tests; the scoped connection is still valid.
+  }
+}
+
+async function projectManagedCapabilities(
+  server: McpServer,
+  row: Pick<McpCapabilityCacheRow, "tools" | "resources" | "prompts">
+): Promise<void> {
+  if (!server.managedBy) return
+  try {
+    const { projectManagedMcpCapabilities } = await import("@/lib/external-services/providers/mcp")
+    projectManagedMcpCapabilities(server, row)
+  } catch {
+    // The service may be disabled while discovery is completing. Its native
+    // MCP cache stays valid, but no catalog route is published without a live
+    // service contribution.
   }
 }
 

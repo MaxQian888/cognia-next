@@ -40,4 +40,19 @@ export interface PluginMcpServerPresetDef {
   docsUrl?: string
   /** Tags for filtering the gallery (e.g. ["web", "browser"]). */
   tags?: string[]
+  /** Optional host-managed lifecycle; omitted presets remain manual templates. */
+  provisioning?: {
+    mode: "template" | "managed"
+    serviceId?: string
+    providerId?: string
+    installScope?: "account"
+    connectMode?: "explicit"
+  }
+  /** Reviewed tool-risk overlay. Unmatched discovered tools remain ask/deny. */
+  toolRiskRules?: Array<{
+    pattern: string
+    risk: "read" | "write" | "destructive"
+    operationId?: string
+    selectors?: Array<{ kind: string; jsonPointer: string }>
+  }>
 }

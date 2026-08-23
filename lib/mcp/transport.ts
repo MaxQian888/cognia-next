@@ -41,16 +41,38 @@ export interface McpClientLike {
     structuredContent?: unknown
   }>
   listTools(): Promise<{
-    tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>
+    tools?: Array<{
+      name: string
+      description?: string
+      inputSchema?: unknown
+      outputSchema?: unknown
+      _meta?: Record<string, unknown>
+    }>
   }>
   listResources(): Promise<{
     resources?: Array<{ uri: string; name?: string; description?: string; mimeType?: string }>
+  }>
+  readResource(params: { uri: string }): Promise<{
+    contents?: Array<{
+      uri: string
+      mimeType?: string
+      text?: string
+      blob?: string
+      _meta?: Record<string, unknown>
+    }>
   }>
   listPrompts(): Promise<{
     prompts?: Array<{
       name: string
       description?: string
       arguments?: Array<{ name: string; description?: string; required?: boolean }>
+    }>
+  }>
+  getPrompt(params: { name: string; arguments?: Record<string, string> }): Promise<{
+    description?: string
+    messages?: Array<{
+      role: "user" | "assistant"
+      content: unknown
     }>
   }>
   setNotificationHandler?(schema: unknown, handler: () => void | Promise<void>): void
@@ -90,6 +112,8 @@ export interface OpenMcpOptions {
   fingerprint?: string
   /** Capability cache invalidation hook for notifications/tools/list_changed. */
   onToolsChanged?: () => void | Promise<void>
+  /** Invalidate tools/resources/prompts after any list_changed notification. */
+  onCapabilitiesChanged?: () => void | Promise<void>
 }
 
 /** How the spawned stdio child's stderr is wired. Matches the SDK's IOType. */
@@ -162,13 +186,19 @@ async function loadSdk(): Promise<{
   ) => McpClientLike
   ctors: McpTransportCtors
   toolsListChangedSchema?: unknown
+  resourcesListChangedSchema?: unknown
+  promptsListChangedSchema?: unknown
 }> {
   const [
     { Client },
     { StdioClientTransport },
     { StreamableHTTPClientTransport },
     { SSEClientTransport },
-    { ToolListChangedNotificationSchema },
+    {
+      ToolListChangedNotificationSchema,
+      ResourceListChangedNotificationSchema,
+      PromptListChangedNotificationSchema,
+    },
   ] = await Promise.all([
     import("@modelcontextprotocol/sdk/client/index.js"),
     import("@modelcontextprotocol/sdk/client/stdio.js"),
@@ -184,6 +214,8 @@ async function loadSdk(): Promise<{
       Sse: SSEClientTransport as never,
     },
     toolsListChangedSchema: ToolListChangedNotificationSchema,
+    resourcesListChangedSchema: ResourceListChangedNotificationSchema,
+    promptsListChangedSchema: PromptListChangedNotificationSchema,
   }
 }
 
@@ -267,11 +299,24 @@ export async function createMcpConnection(
         config: (await (deps.resolveConfig ?? resolveMcpSecrets)(server.config)) as never,
       }
     : server
-  const { Client, ctors, toolsListChangedSchema } = await (deps.load ?? loadSdk)()
+  const {
+    Client,
+    ctors,
+    toolsListChangedSchema,
+    resourcesListChangedSchema,
+    promptsListChangedSchema,
+  } = await (deps.load ?? loadSdk)()
   const info = opts.clientInfo ?? DEFAULT_CLIENT_INFO
   const client = new Client({ name: info.name, version: info.version }, { capabilities: {} })
-  if (opts.onToolsChanged && toolsListChangedSchema && client.setNotificationHandler) {
-    client.setNotificationHandler(toolsListChangedSchema, opts.onToolsChanged)
+  const onCapabilitiesChanged = opts.onCapabilitiesChanged ?? opts.onToolsChanged
+  if (onCapabilitiesChanged && client.setNotificationHandler) {
+    for (const schema of [
+      toolsListChangedSchema,
+      resourcesListChangedSchema,
+      promptsListChangedSchema,
+    ]) {
+      if (schema) client.setNotificationHandler(schema, onCapabilitiesChanged)
+    }
   }
   const remote = effectiveServer.transport !== "stdio"
   const allowPrivateNetwork =
