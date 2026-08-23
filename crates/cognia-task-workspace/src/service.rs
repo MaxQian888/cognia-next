@@ -7,12 +7,12 @@ use crate::{
     },
     store::WorkspaceStore,
     tracking::resolve_tracking_policy,
-    BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle, IsolationKind,
-    ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventEvidence, ResourceEventKind,
-    ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState, TransferChunk,
-    TransferRegistry, UploadHandle, WatchManager, WorkspaceBaseSpec, WorkspaceOwnerType,
-    WorkspaceRecord, WorkspaceRegistry, WorkspaceSourceBinding, WorkspaceState,
+    AcquireWorkspaceBundle, BeginTaskRun, ChangeKind, ContributionOrigin, DownloadHandle,
+    IsolationKind, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventEvidence,
+    ResourceEventKind, ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun,
+    TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState,
+    TransferChunk, TransferRegistry, UploadHandle, WatchManager, WorkspaceBaseSpec,
+    WorkspaceOwnerType, WorkspaceRecord, WorkspaceRegistry, WorkspaceSourceBinding, WorkspaceState,
 };
 use parking_lot::Mutex;
 use std::{
@@ -61,6 +61,21 @@ struct UploadOwner {
     run_id: String,
     path: String,
     existed: bool,
+}
+
+struct InspectedBundleRoot {
+    logical_root_id: String,
+    role: crate::WorkspaceRootRole,
+    source_root: PathBuf,
+    repository_root: Option<PathBuf>,
+    git_common_dir: Option<PathBuf>,
+    isolation: IsolationKind,
+}
+
+struct BundleAcquiredRoot {
+    record: WorkspaceRecord,
+    source_root: PathBuf,
+    execution_root: PathBuf,
 }
 
 impl TaskWorkspaceService {
@@ -237,7 +252,7 @@ impl TaskWorkspaceService {
             None
         };
         if reusable.is_none() {
-            self.enforce_managed_workspace_capacity()?;
+            self.enforce_managed_workspace_capacity(1)?;
         }
         let (
             baseline,
@@ -488,6 +503,179 @@ impl TaskWorkspaceService {
         self.store.lock().list_workspace_bundles()
     }
 
+    /// Provision every writable root as one transactionally acquired bundle.
+    pub fn acquire_workspace_bundle(
+        &self,
+        input: AcquireWorkspaceBundle,
+    ) -> Result<crate::WorkspaceBundle, String> {
+        if input.owner_type == WorkspaceOwnerType::Imported {
+            return Err("imported environments can only be registered by reconciliation".into());
+        }
+        if input.environment_kind == crate::WorkspaceEnvironmentKind::Imported {
+            return Err("imported environments cannot be provisioned".into());
+        }
+        let inspected = input
+            .roots
+            .iter()
+            .map(inspect_bundle_root)
+            .collect::<Result<Vec<_>, _>>()?;
+        let requests = inspected
+            .iter()
+            .map(|root| crate::RootRequest {
+                logical_root_id: root.logical_root_id.clone(),
+                role: root.role,
+                source_root: root.source_root.to_string_lossy().into_owned(),
+                isolation: root.isolation,
+                git_common_dir: root
+                    .git_common_dir
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
+            })
+            .collect::<Vec<_>>();
+        let now = now_ms();
+        let (mut bundle, groups) = crate::plan_bundle_composition(
+            input.owner_type,
+            input.owner_ref.clone(),
+            &requests,
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+        self.enforce_managed_workspace_capacity(groups.len() as u32)?;
+
+        let mut acquired = Vec::with_capacity(groups.len());
+        for group in &groups {
+            let logical_id = group
+                .logical_root_ids
+                .first()
+                .ok_or_else(|| "bundle planner returned an empty physical group".to_string())?;
+            let root = inspected
+                .iter()
+                .find(|root| &root.logical_root_id == logical_id)
+                .ok_or_else(|| {
+                    format!("bundle root disappeared during provisioning: {logical_id}")
+                })?;
+            let source_root = root.repository_root.as_deref().unwrap_or(&root.source_root);
+            let workspace_id = group
+                .workspace_id
+                .clone()
+                .ok_or_else(|| "bundle planner omitted workspace identity".to_string())?;
+            let execution_root = self
+                .execution_dir
+                .join("bundles")
+                .join(storage_key(&bundle.bundle_id))
+                .join(storage_key(&workspace_id));
+            let provisioned = (|| {
+                let (mut baseline, blobs) =
+                    capture_with_policy(source_root, &crate::ResourceTrackingPolicy::default())?;
+                baseline.generated_entries.clear();
+                let record = self
+                    .registry
+                    .insert_reserved(
+                        workspace_id,
+                        input.owner_type,
+                        input.owner_ref.clone(),
+                        source_root.to_string_lossy().into_owned(),
+                        root.git_common_dir
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned()),
+                        input.base.clone(),
+                        root.isolation,
+                        execution_root.to_string_lossy().into_owned(),
+                        now,
+                    )
+                    .map_err(|error| error.to_string())?;
+                let record = self
+                    .registry
+                    .set_environment_kind(&record.workspace_id, input.environment_kind)
+                    .map_err(|error| error.to_string())?;
+                if let Err(error) = create_execution(
+                    source_root,
+                    &execution_root,
+                    &input.base,
+                    &baseline,
+                    &blobs,
+                    record.locked_by.as_deref(),
+                ) {
+                    self.discard_managed_workspace(&record, now);
+                    return Err(error);
+                }
+                let record = match self.registry.transition(
+                    &record.workspace_id,
+                    record.owner_type,
+                    record.owner_ref.as_deref(),
+                    WorkspaceState::Active,
+                    now,
+                ) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        self.rollback_managed_execution(
+                            Some(&record.workspace_id),
+                            source_root,
+                            &execution_root,
+                            root.isolation,
+                            now,
+                        );
+                        return Err(error.to_string());
+                    }
+                };
+                self.lifecycle.emit(
+                    crate::lifecycle::WorktreeLifecycleKind::Created,
+                    &record,
+                    None,
+                    None,
+                );
+                Ok(BundleAcquiredRoot {
+                    record,
+                    source_root: source_root.to_path_buf(),
+                    execution_root,
+                })
+            })();
+            match provisioned {
+                Ok(root) => acquired.push(root),
+                Err(error) => {
+                    self.rollback_acquired_bundle_roots(&acquired, now);
+                    return Err(error);
+                }
+            }
+        }
+
+        bundle.environment_kind = input.environment_kind;
+        bundle.state = WorkspaceState::Active;
+        for lease in &mut bundle.leases {
+            let acquired_root = acquired
+                .iter()
+                .find(|root| root.record.workspace_id == lease.workspace_id)
+                .ok_or_else(|| {
+                    format!("missing acquired root for lease {}", lease.logical_root_id)
+                })?;
+            let logical_root = inspected
+                .iter()
+                .find(|root| root.logical_root_id == lease.logical_root_id)
+                .ok_or_else(|| format!("missing logical root {}", lease.logical_root_id))?;
+            let relative = logical_root
+                .repository_root
+                .as_deref()
+                .and_then(|repository_root| {
+                    logical_root.source_root.strip_prefix(repository_root).ok()
+                });
+            lease.alias_path = relative
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(|path| acquired_root.execution_root.join(path))
+                .unwrap_or_else(|| acquired_root.execution_root.clone())
+                .to_string_lossy()
+                .into_owned();
+        }
+        if let Err(error) = self.store.lock().put_workspace_bundle(&bundle) {
+            let store = self.store.lock();
+            let _ = store.delete_bundle_leases(&bundle.bundle_id);
+            let _ = store.delete_workspace_bundle(&bundle.bundle_id);
+            drop(store);
+            self.rollback_acquired_bundle_roots(&acquired, now);
+            return Err(error);
+        }
+        Ok(bundle)
+    }
+
     pub fn workspace_lifecycle_policy(&self) -> crate::WorkspaceLifecyclePolicy {
         self.registry.policy()
     }
@@ -511,7 +699,7 @@ impl TaskWorkspaceService {
         Ok(policy)
     }
 
-    fn enforce_managed_workspace_capacity(&self) -> Result<(), String> {
+    fn enforce_managed_workspace_capacity(&self, requested: u32) -> Result<(), String> {
         let policy = self.registry.policy();
         let active_managed = self
             .registry
@@ -526,13 +714,25 @@ impl TaskWorkspaceService {
                     )
             })
             .count() as u32;
-        if active_managed >= policy.active_directory_cap {
+        if active_managed.saturating_add(requested) > policy.active_directory_cap {
             return Err(format!(
-                "managed workspace capacity reached ({active_managed}/{}); archive an environment or raise the limit in Workspace settings",
+                "managed workspace capacity reached ({active_managed}+{requested}/{}); archive an environment or raise the limit in Workspace settings",
                 policy.active_directory_cap
             ));
         }
         Ok(())
+    }
+
+    fn rollback_acquired_bundle_roots(&self, roots: &[BundleAcquiredRoot], now: i64) {
+        for root in roots.iter().rev() {
+            self.rollback_managed_execution(
+                Some(&root.record.workspace_id),
+                &root.source_root,
+                &root.execution_root,
+                root.record.isolation_kind,
+                now,
+            );
+        }
     }
 
     pub fn set_managed_workspace_pinned(
@@ -2020,6 +2220,58 @@ fn inspect_workspace_source(source_root: &Path) -> Result<InspectedWorkspaceSour
     })
 }
 
+fn inspect_bundle_root(
+    input: &crate::WorkspaceBundleRootInput,
+) -> Result<InspectedBundleRoot, String> {
+    validate_id("logicalRootId", &input.logical_root_id)?;
+    let source_path = Path::new(&input.source_root);
+    if workspace_path_contains_symlink(source_path)? {
+        return Err(format!(
+            "bundle source must not contain a symlink: {}",
+            source_path.display()
+        ));
+    }
+    let source_root = source_path.canonicalize().map_err(|error| {
+        format!(
+            "canonicalize bundle root {}: {error}",
+            source_path.display()
+        )
+    })?;
+    if !source_root.is_dir() {
+        return Err(format!(
+            "bundle root is not a directory: {}",
+            source_root.display()
+        ));
+    }
+    if let Ok(repository) = git2::Repository::discover(&source_root) {
+        let repository_root = repository
+            .workdir()
+            .ok_or_else(|| "bundle roots cannot use bare Git repositories".to_string())?
+            .canonicalize()
+            .map_err(|error| format!("canonicalize bundle Git root: {error}"))?;
+        let git_common_dir = repository
+            .commondir()
+            .canonicalize()
+            .map_err(|error| format!("canonicalize bundle Git common dir: {error}"))?;
+        return Ok(InspectedBundleRoot {
+            logical_root_id: input.logical_root_id.clone(),
+            role: input.role,
+            source_root,
+            repository_root: Some(repository_root),
+            git_common_dir: Some(git_common_dir),
+            isolation: IsolationKind::GitWorktree,
+        });
+    }
+    Ok(InspectedBundleRoot {
+        logical_root_id: input.logical_root_id.clone(),
+        role: input.role,
+        source_root,
+        repository_root: None,
+        git_common_dir: None,
+        isolation: IsolationKind::Shadow,
+    })
+}
+
 fn workspace_path_contains_symlink(path: &Path) -> Result<bool, String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -3432,6 +3684,144 @@ mod tests {
     }
 
     #[test]
+    fn acquires_multi_repository_and_shadow_roots_as_one_bundle() {
+        let data = TempDir::new().unwrap();
+        let primary = TempDir::new().unwrap();
+        git2::Repository::init(primary.path()).unwrap();
+        seed_git_repository(primary.path());
+        let package = primary.path().join("packages/app");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("package.txt"), "package\n").unwrap();
+
+        let second = TempDir::new().unwrap();
+        git2::Repository::init(second.path()).unwrap();
+        seed_git_repository(second.path());
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "notes\n").unwrap();
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-bundle".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "primary".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: primary.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "package".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: package.to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "second".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: second.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "notes".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: shadow.path().to_string_lossy().into_owned(),
+                    },
+                ],
+            })
+            .unwrap();
+
+        assert_eq!(bundle.state, WorkspaceState::Active);
+        assert_eq!(bundle.leases.len(), 4);
+        let physical_ids = bundle
+            .leases
+            .iter()
+            .map(|lease| lease.workspace_id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(physical_ids.len(), 3);
+        let primary_lease = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "primary")
+            .unwrap();
+        let package_lease = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "package")
+            .unwrap();
+        assert_eq!(primary_lease.workspace_id, package_lease.workspace_id);
+        assert!(Path::new(&package_lease.alias_path)
+            .join("package.txt")
+            .is_file());
+        let notes_lease = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "notes")
+            .unwrap();
+        assert!(Path::new(&notes_lease.alias_path)
+            .join("notes.txt")
+            .is_file());
+        assert_eq!(service.list_managed_workspaces().unwrap().len(), 3);
+        assert_eq!(
+            service
+                .get_workspace_bundle(&bundle.bundle_id)
+                .unwrap()
+                .unwrap(),
+            bundle
+        );
+    }
+
+    #[test]
+    fn bundle_acquisition_rolls_back_every_root_when_one_leg_fails() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "notes\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let error = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-rollback".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::LocalHead,
+                roots: vec![
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "git".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: repository.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "shadow".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: shadow.path().to_string_lossy().into_owned(),
+                    },
+                ],
+            })
+            .unwrap_err();
+
+        assert!(error.contains("non-Git workspaces only support the workingState base"));
+        assert!(service.list_managed_workspaces().unwrap().is_empty());
+        assert!(service.list_workspace_bundles().unwrap().is_empty());
+        let inventory = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["worktree", "list", "--porcelain"])
+            .output()
+            .unwrap();
+        let inventory = String::from_utf8(inventory.stdout).unwrap();
+        assert_eq!(
+            inventory
+                .lines()
+                .filter(|line| line.starts_with("worktree "))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn lifecycle_policy_persists_and_blocks_creation_at_capacity() {
         let data = TempDir::new().unwrap();
         let workspace = TempDir::new().unwrap();
@@ -3453,7 +3843,7 @@ mod tests {
             let error = service
                 .begin_run(input(&workspace, "task-capacity-2", "run-capacity-2"))
                 .unwrap_err();
-            assert!(error.contains("managed workspace capacity reached (1/1)"));
+            assert!(error.contains("managed workspace capacity reached (1+1/1)"));
             assert!(error.contains("Workspace settings"));
         }
 

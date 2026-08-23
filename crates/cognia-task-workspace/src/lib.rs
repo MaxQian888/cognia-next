@@ -45,14 +45,15 @@ pub use transfer::{
     DownloadHandle, TransferChunk, TransferRegistry, UploadHandle, MAX_TRANSFER_CHUNK_BYTES,
 };
 pub use types::{
-    AppliedFile, ApplyOutcome, BeginTaskRun, ChangeKind, ConflictResolution, ContributionOrigin,
-    IsolationKind, PatchConflict, PatchFile, PatchHunk, PatchSelection, PatchSet, PatchState,
-    PruneOutcome, ResourceCaptureClass, ResourceChange, ResourceEvent, ResourceEventCounts,
-    ResourceEventEvidence, ResourceKind, ResourceTimelineCompleteness, ResourceTrackingPolicy,
-    RunState, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
-    TaskWorkspaceState, WorkspaceBaseKind, WorkspaceBaseSpec, WorkspaceBundle,
-    WorkspaceBundleOutcome, WorkspaceEnvironmentKind, WorkspaceLifecyclePolicy, WorkspaceOwnerType,
-    WorkspaceRecord, WorkspaceRootLease, WorkspaceRootRole, WorkspaceSourceBinding, WorkspaceState,
+    AcquireWorkspaceBundle, AppliedFile, ApplyOutcome, BeginTaskRun, ChangeKind,
+    ConflictResolution, ContributionOrigin, IsolationKind, PatchConflict, PatchFile, PatchHunk,
+    PatchSelection, PatchSet, PatchState, PruneOutcome, ResourceCaptureClass, ResourceChange,
+    ResourceEvent, ResourceEventCounts, ResourceEventEvidence, ResourceKind,
+    ResourceTimelineCompleteness, ResourceTrackingPolicy, RunState, TaskResourceManifest,
+    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceState, WorkspaceBaseKind,
+    WorkspaceBaseSpec, WorkspaceBundle, WorkspaceBundleOutcome, WorkspaceBundleRootInput,
+    WorkspaceEnvironmentKind, WorkspaceLifecyclePolicy, WorkspaceOwnerType, WorkspaceRecord,
+    WorkspaceRootLease, WorkspaceRootRole, WorkspaceSourceBinding, WorkspaceState,
 };
 pub use watcher::{
     ResourceEventChange, ResourceEventKind, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,

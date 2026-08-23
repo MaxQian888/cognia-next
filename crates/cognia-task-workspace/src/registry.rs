@@ -468,6 +468,28 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Classify a Cognia-owned row as session-managed or permanent.
+    pub fn set_environment_kind(
+        &self,
+        workspace_id: &str,
+        environment_kind: WorkspaceEnvironmentKind,
+    ) -> Result<WorkspaceRecord, RegistryError> {
+        if environment_kind == WorkspaceEnvironmentKind::Imported {
+            return Err(RegistryError::NotImported(workspace_id.to_string()));
+        }
+        let store = self.store.lock();
+        let mut record = store
+            .get_workspace(workspace_id)
+            .map_err(RegistryError::Store)?
+            .ok_or_else(|| RegistryError::NotFound(workspace_id.to_string()))?;
+        if record.owner_type == WorkspaceOwnerType::Imported {
+            return Err(RegistryError::NotImported(workspace_id.to_string()));
+        }
+        record.environment_kind = environment_kind;
+        store.put_workspace(&record).map_err(RegistryError::Store)?;
+        Ok(record)
+    }
+
     /// Remove a Cognia-owned workspace. Refuses if the lock reason does not
     /// match. Callers must have separately transitioned the workspace to
     /// `Removing` first — this call finalizes it to `Removed` and deletes

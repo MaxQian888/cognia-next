@@ -52,6 +52,18 @@ export interface WorkspaceRootLease {
   aliasPath: string
 }
 
+export interface AcquireWorkspaceBundle {
+  ownerType: Exclude<WorkspaceOwnerType, "imported">
+  ownerRef: string | null
+  environmentKind: Exclude<WorkspaceEnvironmentKind, "imported">
+  base: WorkspaceBaseSpec
+  roots: Array<{
+    logicalRootId: string
+    role: "primary" | "additional"
+    sourceRoot: string
+  }>
+}
+
 export interface WorkspaceBundle {
   bundleId: string
   environmentKind: WorkspaceEnvironmentKind

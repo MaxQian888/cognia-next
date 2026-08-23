@@ -1,13 +1,13 @@
 //! Shared task-workspace command surface for desktop and headless runtimes.
 
 use cognia_task_workspace::{
-    ApplyOutcome, BeginTaskRun, ConflictResolution, DownloadHandle, PatchSelection, PatchSet,
-    PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind, ResourceRead,
-    ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest, TaskResourceSummary,
-    TaskRun, TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,
-    TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
-    WorkspaceLifecyclePolicy, WorkspaceRecord, WorktreeLifecycleEvent,
-    WorktreeLifecycleKind, WorktreeLifecycleSink,
+    AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, ConflictResolution, DownloadHandle,
+    PatchSelection, PatchSet, PruneOutcome, ResourceChange, ResourceEvent, ResourceEventKind,
+    ResourceRead, ResourceTrackingPolicy, RunState, ServiceConfig, TaskResourceManifest,
+    TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
+    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
+    WorkspaceLifecyclePolicy, WorkspaceRecord, WorktreeLifecycleEvent, WorktreeLifecycleKind,
+    WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -221,9 +221,7 @@ pub fn task_workspace_list(session_id: Option<String>) -> Result<Vec<TaskWorkspa
 }
 
 #[tauri::command]
-pub fn task_workspace_managed_get(
-    workspace_id: String,
-) -> Result<Option<WorkspaceRecord>, String> {
+pub fn task_workspace_managed_get(workspace_id: String) -> Result<Option<WorkspaceRecord>, String> {
     service()?.get_managed_workspace(&workspace_id)
 }
 
@@ -240,6 +238,13 @@ pub fn task_workspace_bundle_get(bundle_id: String) -> Result<Option<WorkspaceBu
 #[tauri::command]
 pub fn task_workspace_bundle_list() -> Result<Vec<WorkspaceBundle>, String> {
     service()?.list_workspace_bundles()
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_acquire(
+    input: AcquireWorkspaceBundle,
+) -> Result<WorkspaceBundle, String> {
+    blocking(move |service| service.acquire_workspace_bundle(input)).await
 }
 
 #[tauri::command]

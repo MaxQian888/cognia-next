@@ -629,6 +629,28 @@ pub struct WorkspaceRootLease {
     pub alias_path: String,
 }
 
+/// One logical root requested for transactional bundle acquisition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleRootInput {
+    pub logical_root_id: String,
+    pub role: WorkspaceRootRole,
+    pub source_root: String,
+}
+
+/// Filesystem-bound request to provision every writable root for one task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquireWorkspaceBundle {
+    pub owner_type: WorkspaceOwnerType,
+    pub owner_ref: Option<String>,
+    #[serde(default)]
+    pub environment_kind: WorkspaceEnvironmentKind,
+    #[serde(default)]
+    pub base: WorkspaceBaseSpec,
+    pub roots: Vec<WorkspaceBundleRootInput>,
+}
+
 /// A collection of `WorkspaceRootLease`s acquired atomically for one execution.
 ///
 /// The Registry acquires a Bundle in one call; on failure it rolls back every

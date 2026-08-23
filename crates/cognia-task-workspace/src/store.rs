@@ -1110,7 +1110,8 @@ impl WorkspaceStore {
             .connection
             .prepare(
                 "SELECT bundle_id, workspace_id, logical_root_id, role, alias_path
-                   FROM workspace_root_leases WHERE bundle_id=?1 ORDER BY created_at ASC",
+                   FROM workspace_root_leases WHERE bundle_id=?1
+                   ORDER BY created_at ASC, rowid ASC",
             )
             .map_err(|error| format!("prepare list_bundle_leases: {error}"))?;
         let rows = statement
@@ -1129,6 +1130,16 @@ impl WorkspaceStore {
             )
             .map(|_| ())
             .map_err(|error| format!("delete leases {bundle_id}: {error}"))
+    }
+
+    pub fn delete_workspace_bundle(&self, bundle_id: &str) -> Result<(), String> {
+        self.connection
+            .execute(
+                "DELETE FROM workspace_bundles WHERE bundle_id=?1",
+                [bundle_id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("delete workspace bundle {bundle_id}: {error}"))
     }
 
     /// Record a sensitive-path grant. Idempotent: replaces any existing

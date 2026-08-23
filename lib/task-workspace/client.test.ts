@@ -13,6 +13,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
+  acquireWorkspaceBundle,
   applyTaskWorkspace,
   beginTaskWorkspaceTurn,
   exportTaskResourceManifest,
@@ -147,6 +148,24 @@ describe("task workspace client", () => {
       ["task_workspace_policy_set", { policy }],
       ["task_workspace_managed_pin", { workspaceId: "ws-1", pinned: true }],
     ])
+  })
+
+  it("acquires all writable roots through the canonical bundle command", async () => {
+    const input = {
+      ownerType: "session" as const,
+      ownerRef: "session-1",
+      environmentKind: "managed" as const,
+      base: { kind: "workingState" as const },
+      roots: [
+        { logicalRootId: "primary", role: "primary" as const, sourceRoot: "/repo" },
+        { logicalRootId: "notes", role: "additional" as const, sourceRoot: "/notes" },
+      ],
+    }
+    call.mockResolvedValueOnce({ bundleId: "bundle-1", leases: [] })
+
+    await acquireWorkspaceBundle(input)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_acquire", { input })
   })
 
   it("restores a historical content-addressed snapshot", async () => {

@@ -3,6 +3,7 @@ import { recordTaskWorkspaceOutcome } from "@/lib/code-adoption/outcome"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { projectTaskWorkspaceRun } from "./projection"
 import type {
+  AcquireWorkspaceBundle,
   ApplyOutcome,
   DownloadHandle,
   PatchSelection,
@@ -183,6 +184,10 @@ export function getWorkspaceBundle(bundleId: string): Promise<WorkspaceBundle | 
 
 export function listWorkspaceBundles(): Promise<WorkspaceBundle[]> {
   return transport.call("task_workspace_bundle_list")
+}
+
+export function acquireWorkspaceBundle(input: AcquireWorkspaceBundle): Promise<WorkspaceBundle> {
+  return transport.call("task_workspace_bundle_acquire", { input })
 }
 
 export function getWorkspaceLifecyclePolicy(): Promise<WorkspaceLifecyclePolicy> {
