@@ -55,6 +55,8 @@ export async function createMcpServer(
     trust?: McpServerTrust
     /** Optional plugin origin tag (§A-6). Set by the plugin manager only. */
     pluginId?: string
+    managedBy?: McpServer["managedBy"]
+    toolRiskRules?: McpServer["toolRiskRules"]
     /** Bare MCP tool names denied whenever this server is selected. */
     disallowedTools?: string[]
     /** Glob deny rules expanded against the server's discovered tools. */
@@ -81,6 +83,8 @@ export async function createMcpServer(
     // Tag the row only when explicitly provided so user-created rows stay
     // structurally identical to pre-port serialized data.
     ...(partial.pluginId !== undefined ? { pluginId: partial.pluginId } : {}),
+    ...(partial.managedBy !== undefined ? { managedBy: partial.managedBy } : {}),
+    ...(partial.toolRiskRules !== undefined ? { toolRiskRules: partial.toolRiskRules } : {}),
     ...(partial.disallowedTools !== undefined
       ? { disallowedTools: normalizeDisallowedTools(partial.disallowedTools) }
       : {}),
@@ -130,6 +134,11 @@ export async function updateMcpServer(
       | "appsEnabled"
       | "disallowedTools"
       | "disallowedToolPatterns"
+      | "pluginId"
+      | "managedBy"
+      | "toolRiskRules"
+      | "trust"
+      | "origin"
     >
   >
 ): Promise<void> {

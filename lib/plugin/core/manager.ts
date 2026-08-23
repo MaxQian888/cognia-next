@@ -3477,6 +3477,11 @@ export class PluginManager {
       advancePluginActivationProgress(pluginId, "contributions")
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
+      if (plugin.manifest.services?.length) {
+        const { reconcilePluginExternalServiceConnections } =
+          await import("@/lib/external-services/lifecycle")
+        await reconcilePluginExternalServiceConnections(pluginId, plugin.manifest)
+      }
 
       // Phase 6/7 — hooks.
       advancePluginActivationProgress(pluginId, "hooks")
@@ -3520,6 +3525,8 @@ export class PluginManager {
       // tool / preset / character-attachment state into the next enable.
       try {
         await this.unregisterPluginContributions(pluginId)
+        const { suspendPluginExternalServices } = await import("@/lib/external-services/lifecycle")
+        await suspendPluginExternalServices(pluginId)
       } catch (rollbackError) {
         loggers.manager.warn(
           `[plugin:${pluginId}] rollback after failed enable also failed:`,
@@ -3619,6 +3626,8 @@ export class PluginManager {
     }
 
     if (plugin.status === "suspended") {
+      const { suspendPluginExternalServices } = await import("@/lib/external-services/lifecycle")
+      await suspendPluginExternalServices(pluginId)
       store.setPluginStatus?.(pluginId, "disabled")
       await this.syncBackendStatus(pluginId, "disabled")
       await this.setActualState(pluginId, "inactive", { dirty: undefined, lastError: undefined })
@@ -3661,6 +3670,8 @@ export class PluginManager {
 
         // Unregister contributions after runtime deactivation.
         await this.unregisterPluginContributions(pluginId)
+        const { suspendPluginExternalServices } = await import("@/lib/external-services/lifecycle")
+        await suspendPluginExternalServices(pluginId)
 
         // Drop plugin-provided i18n bundles so the merged messages object no
         // longer surfaces `plugin.<id>.*` keys after disable.
@@ -3923,6 +3934,12 @@ export class PluginManager {
         // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
         // direct uninstall from "installed" state). Idempotent.
         unregisterPluginI18n(pluginId)
+
+        // External accounts are terminal plugin-owned state: unlike disable,
+        // uninstall removes connections, grants, provider caches, credentials,
+        // managed MCP rows, integration accounts, and browser profiles.
+        const { purgePluginExternalServices } = await import("@/lib/external-services/lifecycle")
+        await purgePluginExternalServices(pluginId)
 
         // Remove files via Tauri
         await invoke("plugin_uninstall", {

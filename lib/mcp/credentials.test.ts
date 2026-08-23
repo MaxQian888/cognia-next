@@ -1,7 +1,12 @@
 import type { KeyringStore } from "@/lib/credentials/keyring-store"
 import type { McpServer } from "@cognia/agent-config-types"
 
-import { externalizeMcpSecrets, redactMcpServerForExport, resolveMcpSecrets } from "./credentials"
+import {
+  deleteMcpCredentials,
+  externalizeMcpSecrets,
+  redactMcpServerForExport,
+  resolveMcpSecrets,
+} from "./credentials"
 
 function memoryStore(): KeyringStore {
   const values = new Map<string, string>()
@@ -109,5 +114,17 @@ describe("MCP credential externalization", () => {
       args: ["--api-key", { secretRef: "mcp/mcp_a/args/1" }, "--verbose"],
     })
     expect(result.references).toEqual(["mcp/mcp_a/args/1"])
+  })
+
+  it("deletes every referenced credential during terminal cleanup", async () => {
+    const store = memoryStore()
+    const externalized = await externalizeMcpSecrets(
+      base({ command: "tool", env: { API_KEY: "secret" }, args: ["--token", "other"] }),
+      store
+    )
+    await expect(deleteMcpCredentials(externalized.server, store)).resolves.toBe(2)
+    await expect(resolveMcpSecrets(externalized.server.config, store)).rejects.toThrow(
+      /unavailable/
+    )
   })
 })

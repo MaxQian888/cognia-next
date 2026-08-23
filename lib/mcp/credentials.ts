@@ -229,3 +229,13 @@ export async function resolveMcpSecrets(
 ): Promise<Record<string, unknown>> {
   return (await resolveValue(config, store)) as Record<string, unknown>
 }
+
+/** Erase every keyring value referenced by a server before terminal deletion. */
+export async function deleteMcpCredentials(
+  server: McpServer,
+  store: KeyringStore = createMcpCredentialStore()
+): Promise<number> {
+  const references = redactMcpServerForExport(server).references
+  await Promise.all(references.map((reference) => store.delete(reference)))
+  return references.length
+}
