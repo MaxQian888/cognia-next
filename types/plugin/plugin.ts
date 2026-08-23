@@ -72,6 +72,11 @@ import type { PluginContextPanelDef } from "./plugin-context-panel"
 import type { PluginExtensionDef } from "./plugin-extension"
 import type { PluginIdeManifest } from "./plugin-ide"
 import type { PluginIntegrationDef, PluginIntegrationsAPI } from "./plugin-integration"
+import type {
+  BrowserSiteProviderDef,
+  PluginOpenApiProviderDef,
+  PluginServiceDef,
+} from "./plugin-service"
 // Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
 // source it from this module, the documented source of truth.
 export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
@@ -786,6 +791,12 @@ export interface PluginManifest {
    * resources, webhook events, typed actions, and optional Inbox projections.
    */
   integrations?: PluginIntegrationDef[]
+  /** Unified external-service identities that compose semantic and browser providers. */
+  services?: PluginServiceDef[]
+  /** Declarative HTTP API providers referenced by `services[].providers`. */
+  openApiProviders?: PluginOpenApiProviderDef[]
+  /** Domain-scoped browser providers referenced by `services[].providers`. */
+  browserSiteProviders?: BrowserSiteProviderDef[]
   /** One-major compatibility aliases resolved only while this plugin is enabled. */
   workflowKindAliases?: Record<string, string>
 
