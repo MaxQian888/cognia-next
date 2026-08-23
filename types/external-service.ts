@@ -16,6 +16,8 @@ export interface ExternalCapability {
   risk: ExternalServiceRisk
   inputSchema?: JsonSchema
   outputSchema?: JsonSchema
+  /** Host-extracted resource identifiers used to constrain durable grants. */
+  scopeSelectors?: Array<{ kind: string; jsonPointer: string }>
   surfaces: ExternalServiceSurface[]
 }
 
@@ -58,6 +60,8 @@ export interface CapabilityGrant {
   resourceScopes?: CapabilityGrantResourceScope[]
   workflowId?: string
   sessionId?: string
+  /** Destructive operations never inherit an ordinary write grant. */
+  allowDestructive?: boolean
   expiresAt?: string
   createdAt: string
   updatedAt: string
