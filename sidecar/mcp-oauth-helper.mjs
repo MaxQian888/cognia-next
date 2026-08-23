@@ -627,10 +627,20 @@ function readStdin() {
   })
 }
 
-// Entry point — skipped when imported by tests.
-const isMain =
-  import.meta.url === `file://${process.argv[1]}` ||
-  process.argv[1]?.endsWith("mcp-oauth-helper.mjs")
+// Entry point — skipped when imported by tests or by a role in the Bun
+// multi-call executable. In a standalone bundle import.meta.url and argv[1]
+// can both resolve inside /$bunfs, which otherwise makes this helper steal the
+// role's stdin and terminate the whole sidecar after handling the first frame.
+export function isMcpOauthHelperEntry({ role, importUrl, argvPath }) {
+  if (role) return false
+  return importUrl === `file://${argvPath}` || argvPath?.endsWith("mcp-oauth-helper.mjs")
+}
+
+const isMain = isMcpOauthHelperEntry({
+  role: process.env.COGNIA_ROLE,
+  importUrl: import.meta.url,
+  argvPath: process.argv[1],
+})
 if (isMain) {
   const mode = process.argv[2] ?? "authenticate"
   readStdin()

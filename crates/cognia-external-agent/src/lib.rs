@@ -6,8 +6,8 @@
 
 pub mod command_resolver;
 pub mod commands;
-pub mod dsh_runtime;
 pub mod container_backend;
+pub mod dsh_runtime;
 pub mod exec_backend;
 pub mod kube_backend;
 pub mod presets;

@@ -80,8 +80,19 @@ describe("buildToolHostMcpServers", () => {
     expect(tools.args).toEqual([])
     expect(envOf(tools)).toMatchObject({
       COGNIA_ROLE: "tool-bridge",
-      COGNIA_SIDECAR_SCRIPT: "/repo/sidecar/bridge.mjs",
     })
+    expect(envOf(tools)).not.toHaveProperty("COGNIA_SIDECAR_SCRIPT")
+  })
+
+  it("does not resolve an adjacent bridge script for embedded packaged roles", () => {
+    const [tools] = buildToolHostMcpServers({
+      endpoint: "/tmp/th.sock",
+      token: "tok",
+      packaged: true,
+      execPath: "/opt/cognia/cognia-agent",
+    }) as StdioServer[]
+    expect(tools.command).toBe("/opt/cognia/cognia-agent")
+    expect(tools.args).toEqual([])
   })
 
   it("keeps the token out of argv — it is only ever an env value", () => {

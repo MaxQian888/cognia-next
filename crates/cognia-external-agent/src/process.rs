@@ -10,13 +10,13 @@
 //! lock on the manager — this mirrors the native Claude sidecar reader in
 //! `claude/sidecar.rs` instead of the old 50ms drain loop.
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine as _;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{oneshot, watch, Mutex, RwLock};
@@ -404,9 +404,12 @@ impl ExternalAgentProcessManager {
                         match reader.read(&mut buffer).await {
                             Ok(0) | Err(_) => break,
                             Ok(read) => {
-                                log::trace!("External agent {} stdout: {} raw bytes", stdout_id, read);
-                                stdout_sink
-                                    .stdout_raw(&stdout_id, &BASE64.encode(&buffer[..read]));
+                                log::trace!(
+                                    "External agent {} stdout: {} raw bytes",
+                                    stdout_id,
+                                    read
+                                );
+                                stdout_sink.stdout_raw(&stdout_id, &BASE64.encode(&buffer[..read]));
                             }
                         }
                     }

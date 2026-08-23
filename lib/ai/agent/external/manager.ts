@@ -34,6 +34,24 @@ import type {
   AcpPermissionResponse,
   AcpElicitationResponse,
   AcpAuthMethod,
+  AcpTerminalAuthState,
+  AcpListProvidersResponse,
+  AcpSetProviderRequest,
+  AcpSetProviderResponse,
+  AcpDisableProviderRequest,
+  AcpDisableProviderResponse,
+  AcpStartNesRequest,
+  AcpStartNesResponse,
+  AcpSuggestNesRequest,
+  AcpSuggestNesResponse,
+  AcpCloseNesRequest,
+  AcpCloseNesResponse,
+  AcpDidOpenDocumentNotification,
+  AcpDidChangeDocumentNotification,
+  AcpDidCloseDocumentNotification,
+  AcpDidSaveDocumentNotification,
+  AcpDidFocusDocumentNotification,
+  AcpDynamicMcpConnectionState,
   AcpSessionModelState,
   AcpConfigOption,
 } from "@/types/agent/external-agent"
@@ -253,6 +271,7 @@ export class ExternalAgentManager {
   private config: Required<ExternalAgentManagerConfig>
   private instances: Map<string, ExternalAgentInstance> = new Map()
   private adapters: Map<string, ProtocolAdapter> = new Map()
+  private nesSessions = new Map<string, Set<string>>()
   private delegationRules: ExternalAgentDelegationRule[] = []
   private healthCheckTimer?: ReturnType<typeof setInterval>
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
@@ -779,6 +798,140 @@ export class ExternalAgentManager {
     await adapter.authenticate(methodId, credentials)
   }
 
+  getTerminalAuthState(agentId: string): AcpTerminalAuthState | undefined {
+    return this.adapters.get(agentId)?.getTerminalAuthState?.()
+  }
+
+  async cancelTerminalAuthentication(agentId: string): Promise<void> {
+    await this.adapters.get(agentId)?.cancelTerminalAuthentication?.()
+  }
+
+  getDynamicMcpConnections(agentId: string): AcpDynamicMcpConnectionState[] {
+    return this.adapters.get(agentId)?.getDynamicMcpConnections?.() ?? []
+  }
+
+  async listProviders(agentId: string): Promise<AcpListProvidersResponse> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.listProviders)
+      throw new Error("Agent does not support ACP provider configuration")
+    return adapter.listProviders()
+  }
+
+  async setProvider(
+    agentId: string,
+    request: AcpSetProviderRequest,
+    options: { confirmedCredentialTransmission?: boolean } = {}
+  ): Promise<AcpSetProviderResponse> {
+    if (
+      request.headers &&
+      Object.keys(request.headers).length > 0 &&
+      options.confirmedCredentialTransmission !== true
+    ) {
+      throw new Error("Explicit confirmation is required before transmitting provider credentials")
+    }
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.setProvider) throw new Error("Agent does not support ACP provider configuration")
+    return adapter.setProvider(request, options)
+  }
+
+  async disableProvider(
+    agentId: string,
+    request: AcpDisableProviderRequest
+  ): Promise<AcpDisableProviderResponse> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.disableProvider)
+      throw new Error("Agent does not support ACP provider configuration")
+    return adapter.disableProvider(request)
+  }
+
+  async startNes(agentId: string, request: AcpStartNesRequest): Promise<AcpStartNesResponse> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.startNes) throw new Error("Agent does not support ACP NES")
+    const response = await adapter.startNes(request)
+    const sessions = this.nesSessions.get(agentId) ?? new Set<string>()
+    sessions.add(response.sessionId)
+    this.nesSessions.set(agentId, sessions)
+    return response
+  }
+
+  async suggestNes(agentId: string, request: AcpSuggestNesRequest): Promise<AcpSuggestNesResponse> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.suggestNes) throw new Error("Agent does not support ACP NES")
+    return adapter.suggestNes(request)
+  }
+
+  async closeNes(agentId: string, request: AcpCloseNesRequest): Promise<AcpCloseNesResponse> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.closeNes) throw new Error("Agent does not support ACP NES")
+    const response = await adapter.closeNes(request)
+    const sessions = this.nesSessions.get(agentId)
+    sessions?.delete(request.sessionId)
+    if (sessions?.size === 0) this.nesSessions.delete(agentId)
+    return response
+  }
+
+  private publishNesDocumentNotification(
+    publish: (adapter: ProtocolAdapter, sessionId: string) => void
+  ): void {
+    for (const [agentId, sessions] of this.nesSessions) {
+      const adapter = this.adapters.get(agentId)
+      if (!adapter) continue
+      for (const sessionId of sessions) publish(adapter, sessionId)
+    }
+  }
+
+  publishDidOpenDocument(notification: Omit<AcpDidOpenDocumentNotification, "sessionId">): void {
+    this.publishNesDocumentNotification((adapter, sessionId) =>
+      adapter.didOpenDocument?.({ ...notification, sessionId })
+    )
+  }
+
+  publishDidChangeDocument(
+    notification: Omit<AcpDidChangeDocumentNotification, "sessionId">
+  ): void {
+    this.publishNesDocumentNotification((adapter, sessionId) =>
+      adapter.didChangeDocument?.({ ...notification, sessionId })
+    )
+  }
+
+  publishDidCloseDocument(notification: Omit<AcpDidCloseDocumentNotification, "sessionId">): void {
+    this.publishNesDocumentNotification((adapter, sessionId) =>
+      adapter.didCloseDocument?.({ ...notification, sessionId })
+    )
+  }
+
+  publishDidSaveDocument(notification: Omit<AcpDidSaveDocumentNotification, "sessionId">): void {
+    this.publishNesDocumentNotification((adapter, sessionId) =>
+      adapter.didSaveDocument?.({ ...notification, sessionId })
+    )
+  }
+
+  publishDidFocusDocument(notification: Omit<AcpDidFocusDocumentNotification, "sessionId">): void {
+    this.publishNesDocumentNotification((adapter, sessionId) =>
+      adapter.didFocusDocument?.({ ...notification, sessionId })
+    )
+  }
+
+  didOpenDocument(agentId: string, notification: AcpDidOpenDocumentNotification): void {
+    this.adapters.get(agentId)?.didOpenDocument?.(notification)
+  }
+
+  didChangeDocument(agentId: string, notification: AcpDidChangeDocumentNotification): void {
+    this.adapters.get(agentId)?.didChangeDocument?.(notification)
+  }
+
+  didCloseDocument(agentId: string, notification: AcpDidCloseDocumentNotification): void {
+    this.adapters.get(agentId)?.didCloseDocument?.(notification)
+  }
+
+  didSaveDocument(agentId: string, notification: AcpDidSaveDocumentNotification): void {
+    this.adapters.get(agentId)?.didSaveDocument?.(notification)
+  }
+
+  didFocusDocument(agentId: string, notification: AcpDidFocusDocumentNotification): void {
+    this.adapters.get(agentId)?.didFocusDocument?.(notification)
+  }
+
   /**
    * Log out of an agent's authenticated session (ACP v1 `logout`). The inverse
    * of {@link authenticate}; no-ops on adapters that don't support it.
@@ -799,6 +952,9 @@ export class ExternalAgentManager {
     } else {
       await adapter?.closeSession(sessionId)
     }
+    const sessions = this.nesSessions.get(agentId)
+    sessions?.delete(sessionId)
+    if (sessions?.size === 0) this.nesSessions.delete(agentId)
   }
 
   /**
@@ -1284,9 +1440,13 @@ export class ExternalAgentManager {
   }
 
   /**
-   * Add and connect to an external agent
+   * Add an external agent and connect it when enabled unless the caller is
+   * restoring runtime state without permission to start external processes.
    */
-  async addAgent(config: ExternalAgentConfig): Promise<ExternalAgentInstance> {
+  async addAgent(
+    config: ExternalAgentConfig,
+    options: { connect?: boolean } = {}
+  ): Promise<ExternalAgentInstance> {
     if (this.instances.has(config.id)) {
       throw new Error(`Agent already exists: ${config.id}`)
     }
@@ -1367,8 +1527,8 @@ export class ExternalAgentManager {
     this.adapters.set(hydratedConfig.id, adapter)
     this.emitLifecycleEvent(hydratedConfig.id, instance)
 
-    // Connect if enabled
-    if (hydratedConfig.enabled) {
+    // Connect if enabled unless the caller explicitly requested registration only.
+    if (hydratedConfig.enabled && options.connect !== false) {
       await this.connect(hydratedConfig.id)
     }
 
@@ -1396,6 +1556,7 @@ export class ExternalAgentManager {
 
     this.instances.delete(agentId)
     this.eventListeners.delete(agentId)
+    this.nesSessions.delete(agentId)
     this.capabilityCommandSignatures.delete(agentId)
 
     externalAgentManagerLogger.info("Removed external agent", { agentId })
@@ -1701,6 +1862,7 @@ export class ExternalAgentManager {
   async disconnect(agentId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
+    this.nesSessions.delete(agentId)
 
     if (adapter) {
       this.intentionalProcessStops.add(agentId)

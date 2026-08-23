@@ -1,6 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
 
+import { isAgentSessionBinding, type AgentSessionBinding } from "@/packages/agent/src/types"
+
 export interface DurableRpcSessionState {
   schemaVersion: 1
   tags: string[]
@@ -22,7 +24,7 @@ export interface DurableRpcSessionState {
    * and a session must keep reporting the version it actually ran even after
    * the agent has been updated many times.
    */
-  agentBinding: Record<string, unknown> | null
+  agentBinding: AgentSessionBinding | null
 }
 
 export interface DurableRpcSuspendedTurn {
@@ -77,7 +79,7 @@ export function createDurableRpcStateStore(
           : {},
         suspendedTurn: isSuspendedTurn(parsed.suspendedTurn) ? parsed.suspendedTurn : null,
         recoveryRequired: parsed.recoveryRequired === true,
-        agentBinding: isRecord(parsed.agentBinding) ? parsed.agentBinding : null,
+        agentBinding: isAgentSessionBinding(parsed.agentBinding) ? parsed.agentBinding : null,
       }
     } catch {
       return emptyState()

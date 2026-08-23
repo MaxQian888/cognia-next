@@ -5,7 +5,8 @@ import { readFileSync } from "node:fs"
 
 import { ACP_V1_CONTRACT, validateAcpV1Coverage } from "./lib/acp-v1-contract.mjs"
 
-const metaPath = new URL("../../protocol/acp/v1/meta.json", import.meta.url)
+const stableMetaPath = new URL("../../protocol/acp/v1/meta.json", import.meta.url)
+const previewMetaPath = new URL("../../protocol/acp/v1/meta.unstable.json", import.meta.url)
 const acpClientSource = readFileSync(
   new URL("../../lib/ai/agent/external/acp-client.ts", import.meta.url),
   "utf8"
@@ -21,8 +22,10 @@ const serverHandlerSource = readFileSync(
 const packageManifest = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8")
 )
-const metaBytes = readFileSync(metaPath)
-const metaSha256 = createHash("sha256").update(metaBytes).digest("hex")
+const stableMetaBytes = readFileSync(stableMetaPath)
+const previewMetaBytes = readFileSync(previewMetaPath)
+const stableMetaSha256 = createHash("sha256").update(stableMetaBytes).digest("hex")
+const previewMetaSha256 = createHash("sha256").update(previewMetaBytes).digest("hex")
 
 if (packageManifest.dependencies?.[ACP_V1_CONTRACT.sdk.package] !== ACP_V1_CONTRACT.sdk.version) {
   throw new Error(
@@ -30,9 +33,15 @@ if (packageManifest.dependencies?.[ACP_V1_CONTRACT.sdk.package] !== ACP_V1_CONTR
   )
 }
 
-if (metaSha256 !== ACP_V1_CONTRACT.schema.metaSha256) {
+if (stableMetaSha256 !== ACP_V1_CONTRACT.schema.stable.metaSha256) {
   throw new Error(
-    `ACP v1 meta checksum drift: expected ${ACP_V1_CONTRACT.schema.metaSha256}, received ${metaSha256}`
+    `ACP v1 stable meta checksum drift: expected ${ACP_V1_CONTRACT.schema.stable.metaSha256}, received ${stableMetaSha256}`
+  )
+}
+
+if (previewMetaSha256 !== ACP_V1_CONTRACT.schema.preview.metaSha256) {
+  throw new Error(
+    `ACP v1 preview meta checksum drift: expected ${ACP_V1_CONTRACT.schema.preview.metaSha256}, received ${previewMetaSha256}`
   )
 }
 
@@ -61,5 +70,5 @@ if (ACP_V1_CONTRACT.reserved.v2.advertised) {
 }
 
 console.log(
-  `ACP v1 contract OK (schema ${ACP_V1_CONTRACT.schema.version}, SDK ${ACP_V1_CONTRACT.sdk.version})`
+  `ACP v1 contract OK (schema ${ACP_V1_CONTRACT.schema.stable.version}, SDK ${ACP_V1_CONTRACT.sdk.version})`
 )

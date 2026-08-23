@@ -381,6 +381,9 @@ export const rpcMethodSchemas = {
           agentId: nonEmptyString,
           version: v.pipe(v.number(), v.integer(), v.minValue(1)),
           definitionDigest: nonEmptyString,
+          compositionPresetId: v.optional(nonEmptyString),
+          compositionDigest: v.optional(nonEmptyString),
+          executionFingerprint: v.optional(nonEmptyString),
         })
       ),
     }),

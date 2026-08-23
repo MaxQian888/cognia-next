@@ -1,7 +1,22 @@
 /**
  * @jest-environment node
  */
-import { stringWidth, truncateToWidth } from "./width"
+import { resolveBunTextUtils, stringWidth, truncateToWidth } from "./width"
+
+describe("resolveBunTextUtils", () => {
+  it("selects only callable Bun capabilities", () => {
+    const nativeWidth = jest.fn(() => 7)
+    const resolved = resolveBunTextUtils({
+      stringWidth: nativeWidth,
+      sliceAnsi: "not-callable" as never,
+    })
+
+    expect(resolved?.stringWidth?.("content")).toBe(7)
+    expect(nativeWidth).toHaveBeenCalledWith("content")
+    expect(resolved?.sliceAnsi).toBeUndefined()
+    expect(resolveBunTextUtils(undefined)).toBeUndefined()
+  })
+})
 
 describe("stringWidth", () => {
   it("counts ASCII as one column each", () => {

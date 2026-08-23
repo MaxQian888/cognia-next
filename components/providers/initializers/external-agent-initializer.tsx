@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-dynamic-mcp-controller"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-client"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
 import { rehydrateExternalAgent } from "@/lib/ai/agent/external/rehydrate"
@@ -17,6 +19,7 @@ export function ExternalAgentInitializer() {
 
   useEffect(() => {
     let isActive = true
+    setAcpDynamicMcpHostController(createAcpDynamicMcpHostController())
     const shouldContinue = () => isActive
 
     // One-time startup rehydration. Runs every persisted agent in PARALLEL so a
@@ -62,6 +65,7 @@ export function ExternalAgentInitializer() {
     return () => {
       isActive = false
       unsubscribe()
+      setAcpDynamicMcpHostController(undefined)
     }
   }, [])
 

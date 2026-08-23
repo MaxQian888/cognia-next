@@ -22,15 +22,20 @@ interface FakeInstance {
 }
 
 const agentsInManager = new Map<string, FakeInstance>()
-const addAgentMock = jest.fn(async (config: ExternalAgentConfig) => {
-  const inst: FakeInstance = {
-    config,
-    connectionStatus: "disconnected",
-    validity: { executable: true },
+const addAgentMock = jest.fn(
+  async (config: ExternalAgentConfig, options: { connect?: boolean } = {}) => {
+    const inst: FakeInstance = {
+      config,
+      connectionStatus: "disconnected",
+      validity: { executable: true },
+    }
+    agentsInManager.set(config.id, inst)
+    if (config.enabled && options.connect !== false) {
+      await connectMock(config.id)
+    }
+    return inst
   }
-  agentsInManager.set(config.id, inst)
-  return inst
-})
+)
 const connectMock = jest.fn(async (id: string) => {
   const inst = agentsInManager.get(id)
   if (inst) inst.connectionStatus = "connected"
@@ -189,7 +194,7 @@ describe("startExternalAgentRehydration", () => {
     registryListener?.({ kind: "register", protocols: ["plug:demo"], pluginId: "plug" })
     await flush()
 
-    expect(addAgentMock).toHaveBeenCalledWith(
+    expect(addAgentMock.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({ id: "p1", protocol: "plug:demo" })
     )
     dispose()

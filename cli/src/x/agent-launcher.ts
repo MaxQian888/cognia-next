@@ -8,6 +8,7 @@
  */
 
 import { spawn, type SpawnOptions } from "node:child_process"
+import { constants as osConstants } from "node:os"
 
 import type { SupportedAgent } from "./detect-cli"
 
@@ -39,6 +40,32 @@ export interface AgentLaunchConfig {
 export interface AgentLaunchDeps {
   /** Injectable process spawner for testing. Returns exit code. */
   spawnAgent?: (cmd: string, args: string[], options: SpawnOptions) => Promise<number>
+  /** Bun-native subprocess runtime. Null explicitly selects the Node fallback. */
+  bunRuntime?: BunAgentLaunchRuntime | null
+}
+
+interface BunInheritedSubprocess {
+  exited: Promise<number>
+  signalCode: string | number | null
+  kill(signal?: NodeJS.Signals): void
+}
+
+export interface BunAgentLaunchRuntime {
+  spawn(
+    command: string[],
+    options: {
+      cwd: string
+      env: NodeJS.ProcessEnv
+      stdin: "inherit"
+      stdout: "inherit"
+      stderr: "inherit"
+    }
+  ): BunInheritedSubprocess
+}
+
+function defaultBunRuntime(): BunAgentLaunchRuntime | undefined {
+  const runtime = (globalThis as { Bun?: Partial<BunAgentLaunchRuntime> }).Bun
+  return typeof runtime?.spawn === "function" ? (runtime as BunAgentLaunchRuntime) : undefined
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -138,7 +165,55 @@ export async function launchAgent(
     return deps.spawnAgent(agentConfig.command, agentConfig.args, options)
   }
 
+  const bunRuntime =
+    deps.bunRuntime === undefined ? defaultBunRuntime() : (deps.bunRuntime ?? undefined)
+  if (bunRuntime) {
+    return spawnAndWaitBun(agentConfig.command, agentConfig.args, mergedEnv, config.cwd, bunRuntime)
+  }
+
   return spawnAndWait(agentConfig.command, agentConfig.args, options)
+}
+
+async function spawnAndWaitBun(
+  cmd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  runtime: BunAgentLaunchRuntime
+): Promise<number> {
+  let child: BunInheritedSubprocess
+  try {
+    child = runtime.spawn([cmd, ...args], {
+      cwd,
+      env,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Failed to start ${cmd}: ${message}`)
+  }
+
+  const forwardSignal = (signal: NodeJS.Signals) => child.kill(signal)
+  process.on("SIGINT", forwardSignal)
+  process.on("SIGTERM", forwardSignal)
+  process.on("SIGWINCH", forwardSignal)
+  try {
+    const code = await child.exited
+    if (child.signalCode !== null) {
+      const signal = child.signalCode
+      return 128 + (typeof signal === "number" ? signal : (signalNumber(signal) ?? 1))
+    }
+    return code
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Failed to run ${cmd}: ${message}`)
+  } finally {
+    process.removeListener("SIGINT", forwardSignal)
+    process.removeListener("SIGTERM", forwardSignal)
+    process.removeListener("SIGWINCH", forwardSignal)
+  }
 }
 
 /**
@@ -180,13 +255,7 @@ function spawnAndWait(cmd: string, args: string[], options: SpawnOptions): Promi
 
 /** Map common signal names to their numeric code. */
 function signalNumber(signal: string): number | undefined {
-  const map: Record<string, number> = {
-    SIGHUP: 1,
-    SIGINT: 2,
-    SIGQUIT: 3,
-    SIGTERM: 15,
-  }
-  return map[signal]
+  return osConstants.signals[signal as keyof typeof osConstants.signals]
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@
  */
 
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/client"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import type {
   Session as OcSession,
   Message as OcMessage,
@@ -30,6 +31,7 @@ import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/utils"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { isExternalAgentAlreadyRunningError } from "./spawn-reclaim"
 import {
   isExplicitlyUnsupportedCapabilityError,
@@ -115,6 +117,18 @@ function toBase64(input: string): string {
   return btoa(binary)
 }
 
+/**
+ * Inspect the provider-visible prompt before attachment content is encoded into
+ * data URIs. Text-like base64 files are decoded so the text PII detector cannot
+ * be bypassed by transport encoding.
+ */
+export function hasNoLeakingOpenCodePromptInput(
+  message: ExternalAgentMessage,
+  metadata?: Record<string, unknown>
+): boolean {
+  return hasNoLeakingExternalAgentPromptInput(message, metadata)
+}
+
 /** Map an OpenCode AssistantMessage `tokens` object to canonical token usage. */
 function mapOpenCodeTokens(
   tokens?: {
@@ -154,7 +168,7 @@ function mapOpenCodeTokens(
  * URL, the local path, or a `data:` URI for inline base64. Text blocks are
  * handled separately by the caller.
  */
-function buildOpenCodeFileParts(
+export function buildOpenCodeFileParts(
   content: ExternalAgentContent[]
 ): Array<{ type: "file"; mime: string; filename?: string; url: string }> {
   const parts: Array<{ type: "file"; mime: string; filename?: string; url: string }> = []
@@ -265,6 +279,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     { tokenUsage?: ExternalAgentTokenUsage; error?: string; finishReason?: string }
   > = new Map()
   private sessionModels: Map<string, AcpSessionModelState> = new Map()
+  private sessionModelOverrides: Map<string, string> = new Map()
   private sessionConfigOptions: Map<string, AcpConfigOption[]> = new Map()
   private availableAgents: Array<{ id: string; name?: string; description?: string }> = []
   private availableCommands: Array<{
@@ -744,6 +759,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     this._sessions.delete(sessionId)
     this.sessionSystemPrompts.delete(sessionId)
     this.sessionModels.delete(sessionId)
+    this.sessionModelOverrides.delete(sessionId)
     this.sessionConfigOptions.delete(sessionId)
   }
 
@@ -759,8 +775,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     return sessions.map((s) => ({
       sessionId: s.id,
       title: s.title,
-      createdAt: s.time?.created ? new Date(s.time.created * 1000).toISOString() : undefined,
-      updatedAt: s.time?.updated ? new Date(s.time.updated * 1000).toISOString() : undefined,
+      createdAt: s.time?.created ? new Date(s.time.created).toISOString() : undefined,
+      updatedAt: s.time?.updated ? new Date(s.time.updated).toISOString() : undefined,
     }))
   }
 
@@ -823,14 +839,21 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       .map((c) => (c as { type: "text"; text: string }).text)
       .join("\n")
 
+    const systemPrompt = options?.systemPrompt ?? this.sessionSystemPrompts.get(sessionId)
+    const model = this.resolveModel(sessionId, options)
+    const agent =
+      typeof options?.context?.custom?.agent === "string" ? options.context.custom.agent : undefined
+
+    if (!hasNoLeakingOpenCodePromptInput(message, { systemPrompt, model, agent })) {
+      throw new Error("OpenCode outbound prompt blocked by the PII gate")
+    }
+
     type OcTextPartInput = { type: "text"; text: string }
     type OcFilePartInput = { type: "file"; mime: string; filename?: string; url: string }
     const parts: Array<OcTextPartInput | OcFilePartInput> = [
       { type: "text" as const, text: textContent },
     ]
-    for (const filePart of buildOpenCodeFileParts(message.content)) {
-      parts.push(filePart)
-    }
+    for (const filePart of buildOpenCodeFileParts(message.content)) parts.push(filePart)
 
     const promptBody: {
       parts: Array<OcTextPartInput | OcFilePartInput>
@@ -839,22 +862,13 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       agent?: string
     } = {
       parts,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      ...(model ? { model } : {}),
+      ...(agent ? { agent } : {}),
     }
 
-    const systemPrompt = options?.systemPrompt ?? this.sessionSystemPrompts.get(sessionId)
-    if (systemPrompt) {
-      promptBody.system = systemPrompt
-    }
-
-    // Model override
-    const model = this.resolveModel(options)
-    if (model) {
-      promptBody.model = model
-    }
-
-    // Agent override
-    if (options?.context?.custom?.agent) {
-      promptBody.agent = options.context.custom.agent as string
+    if (!hasNoLeakingPiiDeep(promptBody)) {
+      throw new Error("OpenCode outbound prompt blocked by the PII gate")
     }
 
     const abortController = new AbortController()
@@ -868,6 +882,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       }
     }
 
+    let asyncPromptAccepted = false
     try {
       // Subscribe to the event stream BEFORE sending the prompt. The SSE stream
       // has no replay, so opening it first guarantees we don't miss the early
@@ -877,17 +892,35 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       })) as OcEventStream
 
       // Send the prompt asynchronously (non-blocking; the server responds 204).
-      await this.client.session.promptAsync({
-        path: { id: sessionId },
-        body: promptBody,
-      })
+      unwrap(
+        await this.client.session.promptAsync({
+          path: { id: sessionId },
+          body: promptBody,
+        })
+      )
+      asyncPromptAccepted = true
 
       // Translate and forward the streamed events for this session.
       yield* this.streamSessionEvents(sessionId, events, abortController.signal)
       donePayload = { success: true }
-    } catch (_error) {
+    } catch (error) {
       if (abortController.signal.aborted) {
         donePayload = { success: false, stopReason: "cancelled" }
+        return
+      }
+
+      // Once promptAsync has been accepted, retrying through session.prompt
+      // would execute the same user turn twice. Surface the stream failure and
+      // leave recovery to an explicit resume/retry by the caller.
+      if (asyncPromptAccepted) {
+        yield {
+          type: "error",
+          sessionId,
+          timestamp: new Date(),
+          error: error instanceof Error ? error.message : String(error),
+          recoverable: true,
+        }
+        donePayload = { success: false }
         return
       }
 
@@ -1048,17 +1081,20 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     }
   }
 
-  async setSessionModel(_sessionId: string, modelId: string): Promise<void> {
-    // NOTE: OpenCode model selection is global (server `config`), not per-session.
-    // This sets the server default; per-turn overrides flow through the prompt
-    // body `model` field (see `resolveModel` / `prompt`).
-    try {
-      await this.client.config.update({
-        body: { model: modelId },
-      })
-    } catch (error: unknown) {
-      log.warn("Failed to set model:", toLogContext(error))
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    const [providerID, modelID] = modelId.split("/", 2)
+    if (!providerID || !modelID) {
+      throw new Error("OpenCode model must use provider/model format")
     }
+
+    const state = this.sessionModels.get(sessionId)
+    if (state) {
+      this.sessionModels.set(sessionId, { ...state, currentModelId: modelId })
+    }
+    this.sessionModelOverrides.set(sessionId, modelId)
+    const options = this.sessionConfigOptions.get(sessionId)
+    const modelOption = options?.find((option) => option.id === "model")
+    if (modelOption) modelOption.currentValue = modelId
   }
 
   getSessionModels(sessionId: string): AcpSessionModelState | undefined {
@@ -1144,6 +1180,11 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
     configId: string,
     value: string | boolean
   ): Promise<AcpConfigOption[]> {
+    if (configId === "model" && typeof value === "string") {
+      await this.setSessionModel(sessionId, value)
+      return this.sessionConfigOptions.get(sessionId) ?? []
+    }
+
     try {
       await this.client.config.update({
         body: { [configId]: value },
@@ -1167,6 +1208,7 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   getAuthMethods(): import("@/types/agent/external-agent").AcpAuthMethod[] {
     if (!this.providerInfo) return []
     return this.providerInfo.connected.map((id) => ({
+      type: "agent",
       id,
       name: this.providerInfo!.all.find((p) => p.id === id)?.name ?? id,
       description: `OpenCode provider: ${id}`,
@@ -2386,8 +2428,8 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
       id: ocSession.id,
       agentId: this._config?.id ?? "opencode",
       status: "active",
-      createdAt: ocSession.time?.created ? new Date(ocSession.time.created * 1000) : now,
-      lastActivityAt: ocSession.time?.updated ? new Date(ocSession.time.updated * 1000) : now,
+      createdAt: ocSession.time?.created ? new Date(ocSession.time.created) : now,
+      lastActivityAt: ocSession.time?.updated ? new Date(ocSession.time.updated) : now,
       metadata: {
         title: ocSession.title,
         parentID: ocSession.parentID,
@@ -2414,12 +2456,19 @@ export class OpenCodeClientAdapter extends BaseProtocolAdapter {
   }
 
   private resolveModel(
+    sessionId: string,
     options?: ExternalAgentExecutionOptions
   ): { providerID: string; modelID: string } | undefined {
     const ctxModel = options?.context?.custom?.model as
       { providerID: string; modelID: string } | undefined
     if (ctxModel?.providerID && ctxModel?.modelID) {
       return ctxModel
+    }
+
+    const sessionModel = this.sessionModelOverrides.get(sessionId)
+    if (sessionModel?.includes("/")) {
+      const [providerID, modelID] = sessionModel.split("/", 2)
+      if (providerID && modelID) return { providerID, modelID }
     }
 
     const metaModel = this._config?.metadata?.model as string | undefined

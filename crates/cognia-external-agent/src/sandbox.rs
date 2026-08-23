@@ -394,13 +394,8 @@ pub fn wrap_with_sandbox(
     }
     host.ensure_dir(&tool_host_dir);
 
-    let args = build_sandbox_launcher_args(
-        &config.command,
-        &config.args,
-        &cwd,
-        &home,
-        &tool_host_dir,
-    );
+    let args =
+        build_sandbox_launcher_args(&config.command, &config.args, &cwd, &home, &tool_host_dir);
 
     Ok(ExternalAgentSpawnConfig {
         command: launcher.to_string_lossy().into_owned(),
@@ -489,7 +484,10 @@ mod tests {
             launcher_file_name("windows"),
             "cognia-external-agent-launcher.exe"
         );
-        assert_eq!(launcher_file_name("macos"), "cognia-external-agent-launcher");
+        assert_eq!(
+            launcher_file_name("macos"),
+            "cognia-external-agent-launcher"
+        );
     }
 
     #[test]
@@ -538,7 +536,9 @@ mod tests {
     #[test]
     fn claude_json_roots_are_files_not_directories() {
         assert!(is_state_file_root(Path::new("/home/dev/.claude.json")));
-        assert!(is_state_file_root(Path::new("/home/dev/.claude.json.backup")));
+        assert!(is_state_file_root(Path::new(
+            "/home/dev/.claude.json.backup"
+        )));
         assert!(!is_state_file_root(Path::new("/home/dev/.claude")));
     }
 
@@ -598,7 +598,10 @@ mod tests {
         assert_eq!(wrapped.command, "/opt/launcher");
         assert_eq!(wrapped.id, "agent-1");
         assert_eq!(wrapped.cwd.as_deref(), Some("/work/project"));
-        assert_eq!(wrapped.env.get("ANTHROPIC_API_KEY").map(String::as_str), Some("secret"));
+        assert_eq!(
+            wrapped.env.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("secret")
+        );
         // The real agent survives after the `--` separator.
         let separator = wrapped.args.iter().position(|arg| arg == "--").unwrap();
         assert_eq!(&wrapped.args[separator + 1..], ["pi", "--mode", "rpc"]);

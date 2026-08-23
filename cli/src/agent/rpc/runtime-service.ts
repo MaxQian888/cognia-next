@@ -100,7 +100,9 @@ import {
   type RpcMethodMap,
 } from "@/packages/agent/src/protocol"
 import type { HandoffEnvelope } from "@/packages/agent/src/handoff-envelope"
-import type { AgentWorkerManifestV1 } from "@/packages/agent/src/types"
+import type { AgentSessionBinding, AgentWorkerManifestV1 } from "@/packages/agent/src/types"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
+import { resolveTurnComposition } from "@/lib/agent/composition/resolve-turn-composition"
 import { createRpcAuditStore, type RpcAuditEntry } from "./observability"
 
 const SUPPORTED_METHODS = [
@@ -222,15 +224,7 @@ const MAX_REPLAY_EVENTS = 10_000
 const MAX_TRACE_SUBSCRIPTIONS = 64
 const TRACE_SUBSCRIPTION_TTL_MS = 60 * 60_000
 const MAX_RETAINED_COMMAND_RESULTS = 1_024
-
-/** What a session records about the agent definition it was created from. */
-export interface AgentSessionBinding {
-  agentId: string
-  version: number
-  definitionDigest: string
-  compositionPresetId: string
-  executionFingerprint: string
-}
+const AGENT_COMMAND_RECEIPT_SCOPE = ".agent-definition-command-receipts"
 
 interface CompactionSnapshot {
   sessionId: string
@@ -260,6 +254,8 @@ interface HostedSession {
    * Absent for sessions created without an agent reference.
    */
   agentBinding?: AgentSessionBinding
+  /** Immutable definition resolved by the frozen binding. */
+  agentDefinition?: AgentDefinitionV1
   status: "idle" | "running" | "waiting" | "recovery_required" | "closed"
   abortController: AbortController | null
   activeRun: Promise<unknown> | null
@@ -328,6 +324,11 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const registeredHooks = new Map<string, { pluginId: string }>()
   const deletedCommands = new Map<string, Record<string, unknown>>()
   const createCommands = new Map<string, Promise<Record<string, unknown>>>()
+  const agentCommands = new Map(
+    Object.entries(durableState.read(AGENT_COMMAND_RECEIPT_SCOPE).commandResults).map(
+      ([key, value]) => [key, Promise.resolve(value)] as const
+    )
+  )
   const traceSubscriptions = new Map<
     string,
     {
@@ -402,18 +403,26 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     if (existing) return existing
     const opened = store.open(sessionId, { writable: false, allowForeignWorkspace: true })
     if (!opened.ok) throw structured(opened.error.code, opened.error.message, opened.error)
-    const runtimeConfig: ResolvedConfig = {
-      ...config,
-      cwd: opened.value.manifest.workspace || config.cwd,
-      ...(opened.value.manifest.runtimeBinding?.backend
-        ? { agentBackend: opened.value.manifest.runtimeBinding.backend }
-        : {}),
-      ...(opened.value.manifest.runtimeBinding?.model
-        ? { model: opened.value.manifest.runtimeBinding.model }
-        : {}),
-    }
-    opened.value.close()
     const persisted = durableState.read(sessionId)
+    const agentDefinition = persisted.agentBinding
+      ? withDefinitionErrors(() =>
+          agentStore.get(persisted.agentBinding!.agentId, persisted.agentBinding!.version)
+        )
+      : undefined
+    const runtimeConfig = lowerAgentDefinitionConfig(
+      {
+        ...config,
+        cwd: opened.value.manifest.workspace || config.cwd,
+        ...(opened.value.manifest.runtimeBinding?.backend
+          ? { agentBackend: opened.value.manifest.runtimeBinding.backend }
+          : {}),
+        ...(opened.value.manifest.runtimeBinding?.model
+          ? { model: opened.value.manifest.runtimeBinding.model }
+          : {}),
+      },
+      agentDefinition
+    )
+    opened.value.close()
     const unresolvedCount =
       Object.keys(persisted.pendingPermissions).length +
       Object.keys(persisted.pendingElicitations).length +
@@ -446,9 +455,8 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       currentRunId: null,
       currentAttemptId: null,
       durableState,
-      ...(persisted.agentBinding
-        ? { agentBinding: persisted.agentBinding as unknown as AgentSessionBinding }
-        : {}),
+      ...(persisted.agentBinding ? { agentBinding: persisted.agentBinding } : {}),
+      ...(agentDefinition ? { agentDefinition } : {}),
     }
     if (persisted.sandboxPolicy) {
       setActiveSandboxPolicy(sessionId, persisted.sandboxPolicy as SandboxResourcePolicy)
@@ -591,11 +599,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         return result({ roots: store.tree() })
       case "agent/create":
         return result(
-          withDefinitionErrors(() =>
-            agentStore.create({
-              ...(params.definition as Record<string, unknown>),
-              ...(typeof params.agentId === "string" ? { agentId: params.agentId } : {}),
-            } as never)
+          await runAgentCommand(method, params, () =>
+            withDefinitionErrors(() =>
+              agentStore.create({
+                ...(params.definition as Record<string, unknown>),
+                ...(typeof params.agentId === "string" ? { agentId: params.agentId } : {}),
+              } as never)
+            )
           )
         )
       case "agent/get":
@@ -615,21 +625,27 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         })
       case "agent/update":
         return result(
-          withDefinitionErrors(() =>
-            agentStore.update(
-              requireString(params, "agentId"),
-              params.expectedVersion as number,
-              params.changes as never
+          await runAgentCommand(method, params, () =>
+            withDefinitionErrors(() =>
+              agentStore.update(
+                requireString(params, "agentId"),
+                params.expectedVersion as number,
+                params.changes as never
+              )
             )
           )
         )
       case "agent/archive":
         return result(
-          withDefinitionErrors(() => agentStore.archive(requireString(params, "agentId")))
+          await runAgentCommand(method, params, () =>
+            withDefinitionErrors(() => agentStore.archive(requireString(params, "agentId")))
+          )
         )
       case "agent/restore":
         return result(
-          withDefinitionErrors(() => agentStore.restore(requireString(params, "agentId")))
+          await runAgentCommand(method, params, () =>
+            withDefinitionErrors(() => agentStore.restore(requireString(params, "agentId")))
+          )
         )
       case "asset/put":
         return result(
@@ -1437,6 +1453,34 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     }
   }
 
+  async function runAgentCommand<T>(
+    method: string,
+    params: Record<string, unknown>,
+    operation: () => T | Promise<T>
+  ): Promise<T> {
+    const key = `${method}:${commandIdFrom(params)}`
+    const existing = agentCommands.get(key)
+    if (existing) return (await existing) as T
+
+    const pending = Promise.resolve().then(operation)
+    agentCommands.set(key, pending)
+    evictOldest(agentCommands)
+    try {
+      const value = await pending
+      durableState.update(AGENT_COMMAND_RECEIPT_SCOPE, (state) => {
+        state.commandResults[key] = value
+        const keys = Object.keys(state.commandResults)
+        for (const stale of keys.slice(0, -MAX_RETAINED_COMMAND_RESULTS)) {
+          delete state.commandResults[stale]
+        }
+      })
+      return value
+    } catch (error) {
+      agentCommands.delete(key)
+      throw error
+    }
+  }
+
   async function createSessionOnce(
     params: Record<string, unknown>,
     commandId: string,
@@ -1467,24 +1511,35 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     const handoffWorkspace = handoff
       ? await options.workerDispatch!.resolveHandoffWorkspace(handoff, commandId)
       : undefined
-    const config: ResolvedConfig = {
-      ...base,
-      ...(handoffWorkspace
-        ? { cwd: handoffWorkspace }
-        : typeof params.cwd === "string"
-          ? { cwd: params.cwd }
+    const config = lowerAgentDefinitionConfig(
+      {
+        ...base,
+        ...(handoffWorkspace
+          ? { cwd: handoffWorkspace }
+          : typeof params.cwd === "string"
+            ? { cwd: params.cwd }
+            : {}),
+        ...(typeof params.model === "string" ? { model: params.model } : {}),
+        ...(typeof params.permissionMode === "string"
+          ? { permissionMode: params.permissionMode as ResolvedConfig["permissionMode"] }
           : {}),
-      ...(typeof params.model === "string" ? { model: params.model } : {}),
-      ...(typeof params.permissionMode === "string"
-        ? { permissionMode: params.permissionMode as ResolvedConfig["permissionMode"] }
-        : {}),
-      // The definition lowers onto the existing config surface rather than
-      // introducing a parallel authority: its runtime binding is the same
-      // `AgentExecutionPolicy` reference the composition resolver already reads.
-      ...(definition?.runtimeBindingRef ? { agentBackend: definition.runtimeBindingRef } : {}),
-    }
+      },
+      definition
+    )
     const id = uniqueSessionId()
     const spec = resolveSessionExecutionSpec(config, { sessionId: id, runId: id })
+    const resolvedComposition = definition
+      ? await resolveTurnComposition({
+          selection: definition.composition as AgentCompositionSelectionV1,
+          systemPrompt: config.systemPrompt,
+          tools: definition.toolRefs.map((tool) => ({
+            name: tool.name,
+            schema: tool.inputSchema,
+            visibility: definition.composition.toolPresentation === "code" ? "code" : "native",
+          })),
+          executionFingerprint: spec.executionFingerprint,
+        })
+      : undefined
     const created = requireStore(
       store.create(id, {
         cwd: config.cwd,
@@ -1515,18 +1570,20 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       currentAttemptId: null,
       durableState,
       ...(handoff ? { workerHandoff: handoff } : {}),
+      ...(definition ? { agentDefinition: definition } : {}),
     }
     if (Array.isArray(params.tags) && params.tags.length > 0) {
       durableState.update(id, (state) => {
         state.tags = [...new Set((params.tags as string[]).map((tag) => tag.trim()))]
       })
     }
-    const agentBinding = definition
+    const agentBinding: AgentSessionBinding | undefined = definition
       ? {
           agentId: definition.agentId,
           version: definition.version,
           definitionDigest: definition.definitionDigest,
           compositionPresetId: definition.composition.presetId,
+          compositionDigest: resolvedComposition!.compositionDigest,
           executionFingerprint: spec.executionFingerprint,
         }
       : undefined
@@ -1625,6 +1682,15 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           home: options.home,
           store,
           providerSession: session.lease,
+          ...(session.agentDefinition
+            ? {
+                compositionSelection: session.agentDefinition
+                  .composition as AgentCompositionSelectionV1,
+              }
+            : {}),
+          ...(session.agentDefinition?.output
+            ? { outputSchema: session.agentDefinition.output.schema }
+            : {}),
           ...(recovery?.runId && recovery.turnId
             ? {
                 recoveryIdentity: {
@@ -2065,6 +2131,23 @@ async function ensureExtensibilityRuntime(): Promise<void> {
   const initialized = await ensurePluginRuntime()
   if (!initialized.ok) {
     throw structured("runtime_error", initialized.error ?? "plugin runtime failed to initialize")
+  }
+}
+
+/** Project an immutable definition onto the CLI's existing config authority. */
+function lowerAgentDefinitionConfig(
+  config: ResolvedConfig,
+  definition?: AgentDefinitionV1
+): ResolvedConfig {
+  if (!definition) return config
+  const appended = definition.instructions?.append
+  const runtimeBindingRef = definition.runtimeBindingRef ?? definition.composition.runtimeBindingRef
+  return {
+    ...config,
+    ...(appended
+      ? { systemPrompt: config.systemPrompt ? `${config.systemPrompt}\n\n${appended}` : appended }
+      : {}),
+    ...(runtimeBindingRef ? { agentBackend: runtimeBindingRef } : {}),
   }
 }
 

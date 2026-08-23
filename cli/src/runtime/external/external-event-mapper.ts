@@ -19,6 +19,68 @@ import type {
 import type { TuiAction } from "../../tui/state/types"
 import type { CanonicalAgentEvent } from "@cognia/agent-config-types/agent-execution"
 
+function contentBlockEvent(
+  event: Extract<
+    ExternalAgentEvent,
+    { type: "content_block_start" | "content_block_delta" | "compaction_summary_chunk" }
+  >
+): CanonicalAgentEvent {
+  const block = event.type === "compaction_summary_chunk" ? event.content : event.block
+  const value = block as unknown as Record<string, unknown>
+  const type = typeof value.type === "string" ? value.type : "unknown"
+  const partId =
+    event.type === "compaction_summary_chunk"
+      ? `compaction:${event.compactionId}`
+      : `${event.messageId ?? event.sessionId ?? "external"}:${type}`
+  if (type === "resource_link" && typeof value.uri === "string") {
+    return {
+      kind: "content-part",
+      partId,
+      operation: "upsert",
+      part: {
+        type: "file",
+        name: typeof value.name === "string" ? value.name : value.uri,
+        uri: value.uri,
+        ...(typeof value.mimeType === "string" ? { mediaType: value.mimeType } : {}),
+      },
+    }
+  }
+  if (type === "resource" && value.resource && typeof value.resource === "object") {
+    const resource = value.resource as Record<string, unknown>
+    if (typeof resource.uri === "string") {
+      return {
+        kind: "content-part",
+        partId,
+        operation: "upsert",
+        part: {
+          type: "file",
+          name: resource.uri.split("/").pop() || resource.uri,
+          uri: resource.uri,
+          ...(typeof resource.mimeType === "string" ? { mediaType: resource.mimeType } : {}),
+          ...(typeof resource.text === "string" ? { preview: resource.text.slice(0, 16_384) } : {}),
+        },
+      }
+    }
+  }
+  const summary =
+    type === "text" && typeof value.text === "string" ? value.text : `${type} ACP content block`
+  return {
+    kind: "content-part",
+    partId,
+    operation: "upsert",
+    part: {
+      type: "custom",
+      customType: `acp:${type}`,
+      summary,
+      // Preserve annotations and non-binary metadata, but never copy image or
+      // audio bodies into the durable TUI event log.
+      data: Object.fromEntries(
+        Object.entries(value).filter(([key]) => key !== "data" && key !== "blob")
+      ),
+    },
+  }
+}
+
 export interface ExternalEventMapperOptions {
   onPermissionRequest?: (event: ExternalAgentPermissionRequestEvent) => void
   /**
@@ -62,6 +124,38 @@ export function externalAgentEventToCanonicalFallback(
         delta: event.text,
         ...(event.messageId ? { messageId: event.messageId } : {}),
         ...(typeof event.done === "boolean" ? { done: event.done } : {}),
+      }
+    case "content_block_start":
+    case "content_block_delta":
+    case "compaction_summary_chunk":
+      return contentBlockEvent(event)
+    case "compaction_update":
+      return event.compaction.status === "completed"
+        ? { kind: "compact", trigger: "auto" }
+        : {
+            kind: "informational",
+            content: `ACP compaction ${event.compaction.compactionId}: ${event.compaction.status}`,
+            level: event.compaction.status === "failed" ? "warning" : "info",
+          }
+    case "nes_suggestion":
+      return {
+        kind: "content-part",
+        partId: `nes:${event.nesSessionId}:${event.suggestion.id}`,
+        operation: "upsert",
+        part: {
+          type: "custom",
+          customType: "acp:nes-suggestion",
+          summary: "ACP next edit suggestion",
+          data: event.suggestion,
+        },
+      }
+    case "nes_closed":
+      return {
+        kind: "informational",
+        content: event.reason
+          ? `ACP next edit session closed: ${event.reason}`
+          : "ACP next edit session closed",
+        level: "info",
       }
     case "tool_use_delta":
       return {

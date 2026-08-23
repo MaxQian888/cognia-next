@@ -238,10 +238,84 @@ describe("OpenCodeV2ClientAdapter", () => {
       /incompatible OpenCode V2 service/i
     )
 
+    discoverMock.mockResolvedValueOnce({
+      endpoint: "http://127.0.0.1:4096",
+      version: "2.0.0-beta.2",
+      headers: {},
+    })
+    await expect(new OpenCodeV2ClientAdapter().connect(config())).rejects.toThrow(
+      /pinned preview contract/i
+    )
+
     const client = fakeClient()
     client.v2.health.get.mockResolvedValueOnce({ data: { healthy: false } })
     createOpencodeClientMock.mockReturnValue(client)
     await expect(new OpenCodeV2ClientAdapter().connect(config())).rejects.toThrow(/health/i)
+  })
+
+  it("waits for session idleness instead of ending on the first completed step", async () => {
+    const client = fakeClient()
+    let resolveWait!: (value: { data: undefined }) => void
+    client.v2.session.wait.mockReturnValueOnce(
+      new Promise<{ data: undefined }>((resolve) => {
+        resolveWait = resolve
+      })
+    )
+    client.v2.session.events.mockResolvedValueOnce({
+      stream: (async function* () {
+        yield {
+          type: "session.next.step.ended",
+          properties: {
+            timestamp: 1,
+            sessionID: "s1",
+            assistantMessageID: "a1",
+            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+        }
+        yield {
+          type: "session.next.text.delta",
+          properties: {
+            timestamp: 2,
+            sessionID: "s1",
+            assistantMessageID: "a1",
+            delta: "after first step",
+          },
+        }
+        yield {
+          type: "session.next.step.ended",
+          properties: {
+            timestamp: 3,
+            sessionID: "s1",
+            assistantMessageID: "a1",
+            tokens: { input: 2, output: 3, reasoning: 1, cache: { read: 1, write: 0 } },
+          },
+        }
+        resolveWait({ data: undefined })
+      })(),
+    })
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const session = await adapter.createSession()
+
+    const events: ExternalAgentEvent[] = []
+    for await (const event of adapter.prompt(session.id, userMessage())) events.push(event)
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "message_delta",
+          delta: { type: "text", text: "after first step" },
+        }),
+        expect.objectContaining({
+          type: "done",
+          success: true,
+          tokenUsage: expect.objectContaining({ totalTokens: 6 }),
+        }),
+      ])
+    )
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1)
+    expect(client.v2.session.wait).toHaveBeenCalledWith({ sessionID: session.id })
   })
 
   it("maps V2 session events and waits for asynchronous compaction completion", async () => {
@@ -334,6 +408,81 @@ describe("OpenCodeV2ClientAdapter", () => {
     expect(adapter.connectionStatus).toBe("disconnected")
     expect(await adapter.healthCheck()).toBe(false)
     await expect(adapter.createSession()).rejects.toThrow(/not connected/i)
+  })
+
+  it("blocks PII-bearing prompts before the V2 prompt endpoint is called", async () => {
+    const client = fakeClient()
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const session = await adapter.createSession()
+
+    const message = userMessage()
+    message.content = [{ type: "text", text: "email alice@example.com" }]
+    await expect(
+      adapter.prompt(session.id, message)[Symbol.asyncIterator]().next()
+    ).rejects.toThrow(/PII gate/i)
+    expect(client.v2.session.prompt).not.toHaveBeenCalled()
+  })
+
+  it("blocks PII in base64 text-file attachments before the V2 prompt endpoint is called", async () => {
+    const client = fakeClient()
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const session = await adapter.createSession()
+    const message = userMessage()
+    message.content.push({
+      type: "file",
+      path: "/tmp/contacts.txt",
+      mimeType: "text/plain",
+      encoding: "base64",
+      content: Buffer.from("alice@example.com", "utf-8").toString("base64"),
+    })
+
+    await expect(
+      adapter.prompt(session.id, message)[Symbol.asyncIterator]().next()
+    ).rejects.toThrow(/PII gate/i)
+    expect(client.v2.session.prompt).not.toHaveBeenCalled()
+  })
+
+  it("forwards URL and inline image attachments through the V2 prompt contract", async () => {
+    const client = fakeClient()
+    createOpencodeClientMock.mockReturnValue(client)
+    const adapter = new OpenCodeV2ClientAdapter()
+    await adapter.connect(config())
+    const session = await adapter.createSession()
+    const message = userMessage()
+    message.content = [
+      { type: "text", text: "inspect these" },
+      {
+        type: "image",
+        source: { type: "url", url: "https://example.com/image.png", mediaType: "image/png" },
+        alt: "remote image",
+      },
+      {
+        type: "image",
+        source: { type: "base64", data: "QUJD", mediaType: "image/jpeg" },
+        alt: "inline image",
+      },
+    ]
+
+    for await (const _event of adapter.prompt(session.id, message)) {
+      // Drain the public event stream so the prompt request is submitted.
+    }
+
+    expect(client.v2.session.prompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: {
+          text: "inspect these",
+          files: [
+            { uri: "https://example.com/image.png", name: "remote image" },
+            { uri: "data:image/jpeg;base64,QUJD", name: "inline image" },
+          ],
+        },
+      }),
+      undefined
+    )
   })
 
   it("handles health request errors and rejects an invalid V2 session probe", async () => {
@@ -431,16 +580,6 @@ describe("OpenCodeV2ClientAdapter", () => {
       ],
       [{ type: "session.next.compaction.started", properties: common }, "progress"],
       [{ type: "session.next.compaction.ended", properties: common }, "progress"],
-      [
-        {
-          type: "session.next.step.ended",
-          properties: {
-            ...common,
-            tokens: { input: 2, output: 3, reasoning: 1, cache: { read: 4, write: 5 } },
-          },
-        },
-        "done",
-      ],
     ]
     for (const [event, expectedType] of cases) {
       expect(mapEvent(adapter, event)[0]?.type).toBe(expectedType)
@@ -613,7 +752,12 @@ describe("OpenCodeV2ClientAdapter", () => {
       if (event.type === "done") break
     }
     expect(client.v2.session.prompt).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: { text: "first\nsecond" } }),
+      expect.objectContaining({
+        prompt: expect.objectContaining({
+          text: "first\nsecond",
+          files: [{ uri: "data:image/png;base64,AA==" }],
+        }),
+      }),
       { signal: controller.signal }
     )
     expect(client.v2.session.interrupt).toHaveBeenCalledWith({ sessionID: session.id })
@@ -717,18 +861,7 @@ describe("OpenCodeV2ClientAdapter", () => {
         type: "session.next.step.ended",
         properties: { tokens: { cache: { read: "bad", write: "bad" } } },
       })
-    ).toEqual([
-      expect.objectContaining({
-        type: "done",
-        tokenUsage: {
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
-      }),
-    ])
+    ).toEqual([])
     expect(mapEvent(adapter, null as unknown as Record<string, unknown>)).toEqual([])
   })
 

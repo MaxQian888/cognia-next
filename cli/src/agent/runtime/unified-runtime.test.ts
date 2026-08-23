@@ -128,6 +128,27 @@ describe("backend selection", () => {
     expect(result.capabilities).toContain("subagents.native")
   })
 
+  it("passes an output contract to the provider session and returns its structured value", async () => {
+    const fsx = createMemoryFs()
+    const schema = { type: "object", properties: { summary: { type: "string" } } }
+    const createSession = jest.fn((_sessionParams: AgentSessionParams): AgentSession => ({
+      sessionId: "fake",
+      async send() {
+        return {
+          text: "done",
+          messageId: "message-1",
+          a2uiSurfaces: {},
+          a2uiSurfaceOrder: [],
+          structuredOutput: { summary: "shipped" },
+        }
+      },
+      async close() {},
+    }))
+    const { result } = await runUnifiedTurn(params(fsx, { outputSchema: schema, createSession }))
+    expect(createSession.mock.calls[0]?.[0].outputSchema).toEqual(schema)
+    expect(result.structuredOutput).toEqual({ summary: "shipped" })
+  })
+
   it("warns about an unmet preference without failing", async () => {
     const fsx = createMemoryFs()
     const { result } = await runUnifiedTurn(

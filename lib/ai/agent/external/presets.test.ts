@@ -2,6 +2,7 @@ import {
   EXTERNAL_AGENT_PRESETS,
   BUILTIN_EXECUTABLE_PRESET_IDS,
   getAvailablePresets,
+  getRunnablePresets,
   getPresetConfig,
   createAgentFromPreset,
   isFromPreset,
@@ -32,6 +33,7 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     expect(EXTERNAL_AGENT_PRESETS.pi).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["pi-rpc"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.droid).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS["opencode-acp"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.custom).toBeNull()
   })
 
@@ -52,6 +54,19 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
     // Gates `--backend pi-rpc` and the teammate runtime picker: a preset that
     // names a real binary but is missing here is silently unselectable.
     expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("pi-rpc")
+  })
+
+  it("offers the official OpenCode ACP command as an executable preset", () => {
+    const preset = EXTERNAL_AGENT_PRESETS["opencode-acp"]!
+    expect(preset).toEqual(
+      expect.objectContaining({
+        protocol: "acp",
+        transport: "stdio",
+        process: { command: "opencode", args: ["acp"] },
+        supportTier: "executable",
+      })
+    )
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toContain("opencode-acp")
   })
 
   it("each preset carries adapter/surface metadata", () => {
@@ -93,6 +108,10 @@ describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
     )
   })
 
+  it("keeps the stale OpenCode V2 preview contract documented-only", () => {
+    expect(EXTERNAL_AGENT_PRESETS["opencode-v2-preview"]?.supportTier).toBe("documented-only")
+  })
+
   it("only lists ids that resolve to a real preset config", () => {
     for (const id of BUILTIN_EXECUTABLE_PRESET_IDS) {
       expect(getPresetConfig(id)).not.toBeNull()
@@ -113,6 +132,12 @@ describe("getAvailablePresets", () => {
     expect(ids).toContain("pi")
     expect(ids).toContain("droid")
     expect(ids).not.toContain("custom")
+  })
+
+  it("keeps documented-only presets discoverable but out of runnable choices", () => {
+    expect(getAvailablePresets()).toContain("opencode-v2-preview")
+    expect(getRunnablePresets()).not.toContain("opencode-v2-preview")
+    expect(getRunnablePresets()).toContain("opencode-acp")
   })
 })
 

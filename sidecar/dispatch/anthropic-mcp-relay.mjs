@@ -21,6 +21,14 @@ function encodeRelayConfig(entry) {
   ).toString("base64url")
 }
 
+export function isPackagedRuntime(probe) {
+  const runtime = probe ?? {
+    pkg: process.pkg,
+    bunStandalone: Boolean(globalThis.Bun?.isStandaloneExecutable),
+  }
+  return Boolean(runtime.pkg) || runtime.bunStandalone === true
+}
+
 /**
  * Convert Anthropic-managed remote entries to SDK-managed stdio relays. The
  * Agent SDK retains lifecycle/reconnect ownership, while the relay owns the
@@ -32,7 +40,7 @@ export function guardAnthropicRemoteMcpServers(
   {
     nodeExecutable = process.execPath,
     scriptPath = relayScriptPath(),
-    packaged = Boolean(process.pkg),
+    packaged = isPackagedRuntime(),
   } = {}
 ) {
   if (!servers || typeof servers !== "object") return {}

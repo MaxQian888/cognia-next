@@ -8,6 +8,28 @@ const TARGETS = {
   "win32-x64": { packageDir: "agent-host-win32-x64", executable: "cognia-agent.exe" },
 }
 
+const REQUIRED_RESOURCES = [
+  "sidecar/pi-extension/cognia-pi-extension.ts",
+  "sidecar/pi-extension/integrity.json",
+  "tree-sitter.wasm",
+  "grammars/tree-sitter-python.wasm",
+  "grammars/tree-sitter-rust.wasm",
+  "grammars/tree-sitter-tsx.wasm",
+  "grammars/tree-sitter-typescript.wasm",
+]
+
+function requireFile(root, file, purpose) {
+  if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    throw new Error(`missing ${path.relative(root, file)}; ${purpose}`)
+  }
+}
+
+function requireExecutable(root, file, targetName) {
+  if (targetName !== "win32-x64" && (fs.statSync(file).mode & 0o111) === 0) {
+    throw new Error(`${path.relative(root, file)} is not executable`)
+  }
+}
+
 export function verifyAgentHostPackage(root, targetName) {
   const target = TARGETS[targetName]
   if (!target) throw new Error(`unknown agent host target: ${targetName}`)
@@ -18,23 +40,29 @@ export function verifyAgentHostPackage(root, targetName) {
     throw new Error(`${target.packageDir} must expose ${relativeExecutable}`)
   }
   const executable = path.join(packageRoot, relativeExecutable)
-  if (!fs.statSync(executable, { throwIfNoEntry: false })?.isFile()) {
-    throw new Error(
-      `missing ${path.relative(root, executable)}; run pnpm cli:build:binary and pnpm agent:host:package -- ${targetName}`
+  requireFile(
+    root,
+    executable,
+    `run pnpm cli:build:binary and pnpm agent:host:package -- ${targetName}`
+  )
+  requireExecutable(root, executable, targetName)
+
+  for (const [helperBaseName, purpose] of [
+    ["cognia-external-agent-launcher", "external agent dispatch requires its native launcher"],
+    ["cognia-task-workspace-worker", "worker dispatch requires Task Workspace"],
+  ]) {
+    const helperName = `${helperBaseName}${targetName === "win32-x64" ? ".exe" : ""}`
+    const helper = path.join(packageRoot, "bin", helperName)
+    requireFile(root, helper, purpose)
+    requireExecutable(root, helper, targetName)
+  }
+
+  for (const relativeResource of REQUIRED_RESOURCES) {
+    requireFile(
+      root,
+      path.join(packageRoot, "bin", relativeResource),
+      "the Bun standalone host requires its adjacent runtime resources"
     )
-  }
-  if (targetName !== "win32-x64" && (fs.statSync(executable).mode & 0o111) === 0) {
-    throw new Error(`${path.relative(root, executable)} is not executable`)
-  }
-  const helperName = targetName === "win32-x64"
-    ? "cognia-task-workspace-worker.exe"
-    : "cognia-task-workspace-worker"
-  const helper = path.join(packageRoot, "bin", helperName)
-  if (!fs.statSync(helper, { throwIfNoEntry: false })?.isFile()) {
-    throw new Error(`missing ${path.relative(root, helper)}; worker dispatch requires Task Workspace`)
-  }
-  if (targetName !== "win32-x64" && (fs.statSync(helper).mode & 0o111) === 0) {
-    throw new Error(`${path.relative(root, helper)} is not executable`)
   }
   return executable
 }

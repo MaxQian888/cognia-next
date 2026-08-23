@@ -230,7 +230,12 @@ impl SpawnPolicy {
         mut config: ExternalAgentSpawnConfig,
     ) -> Result<ValidatedSpawn, PolicyViolation> {
         self.validate_command(&config.command, &config.args)?;
-        config.cwd = match config.cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        config.cwd = match config
+            .cwd
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+        {
             None => Some(self.validate_cwd(None)?),
             Some(requested) => Some(
                 Path::new(requested)
@@ -374,7 +379,11 @@ fn is_dsh_launcher_invocation(args: &[String], workspaces_dir: &Path) -> bool {
         (Some(launcher), Some(composition)) if args.len() == 2 => (launcher, composition),
         _ => return false,
     };
-    if Path::new(launcher).file_name().map(|f| f != "launcher.mjs").unwrap_or(true) {
+    if Path::new(launcher)
+        .file_name()
+        .map(|f| f != "launcher.mjs")
+        .unwrap_or(true)
+    {
         return false;
     }
     if Path::new(composition)
@@ -809,7 +818,9 @@ mod tests {
         assert!(validated.config.env.contains_key("COGNIA_TOOLHOST_TOKEN"));
         assert!(!validated.config.env.contains_key("LD_PRELOAD"));
         assert!(!validated.config.env.contains_key("NODE_OPTIONS"));
-        assert!(validated.dropped_env_keys.contains(&"LD_PRELOAD".to_string()));
+        assert!(validated
+            .dropped_env_keys
+            .contains(&"LD_PRELOAD".to_string()));
     }
 
     /// The whole point of the desktop variant: a real project directory outside
@@ -841,7 +852,15 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("nested");
 
         let mut cfg = config("pi", &[]);
-        cfg.cwd = Some(tmp.path().join("a").join("..").join("a").join("b").display().to_string());
+        cfg.cwd = Some(
+            tmp.path()
+                .join("a")
+                .join("..")
+                .join("a")
+                .join("b")
+                .display()
+                .to_string(),
+        );
         let validated = p.validate_desktop(cfg).expect("desktop validate");
         assert_eq!(
             PathBuf::from(validated.config.cwd.expect("cwd")),

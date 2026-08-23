@@ -33,6 +33,7 @@ import type {
   AgentStructuredError,
 } from "@cognia/agent-config-types/agent-run-result"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 
 import { resolveHome } from "../../config/load"
 import type { ResolvedConfig } from "../../config/schema"
@@ -109,6 +110,10 @@ export interface UnifiedTurnParams {
   maxSteps?: number
 
   home?: string
+  /** Definition-owned selection lowered through the existing composition resolver. */
+  compositionSelection?: AgentCompositionSelectionV1
+  /** Definition-owned JSON Schema lowered through the provider's structured-output path. */
+  outputSchema?: Record<string, unknown>
 
   /**
    * Override how this turn's `SendOptions` are resolved. The ONLY supported
@@ -316,6 +321,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
   let text = ""
   let usage: AgentRunUsage | undefined
   let nativeSessionId: string | undefined
+  let structuredOutput: unknown
   let failure: AgentStructuredError | undefined
   let attempt = params.recoveryIdentity?.attempt ?? 0
 
@@ -384,8 +390,23 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
           },
         })
         text = captured.text
+        structuredOutput = captured.structuredOutput
         if (captured.usage) {
           usage = normalizeUsage(captured.usage as unknown as Record<string, unknown>)
+        }
+        if (params.outputSchema && captured.structuredOutput === undefined) {
+          failure = {
+            code: "provider_error",
+            message: "the turn completed without the required structured output",
+          }
+          emitter.emit({
+            kind: "failure",
+            code: failure.code,
+            message: failure.message,
+            retryable: false,
+          })
+          emitter.emit({ kind: "lifecycle", phase: "ended" })
+          break
         }
         emitter.emit({ kind: "lifecycle", phase: "ended" })
         if (attempt > 0) {
@@ -510,6 +531,7 @@ export async function runUnifiedTurn(params: UnifiedTurnParams): Promise<Unified
     attemptId: mintAttemptId(turnId, attempt),
     ...(nativeSessionId ? { nativeSessionId } : {}),
     text,
+    ...(structuredOutput !== undefined ? { structuredOutput } : {}),
     ...(usage ? { usage } : {}),
     backend: backend.id,
     model: params.config.model ?? "unknown",
@@ -556,6 +578,8 @@ function buildSession(
     ...(params.transcriptFs ? { transcriptFs: params.transcriptFs } : {}),
     ...(params.subscribePluginTools ? { subscribePluginTools: params.subscribePluginTools } : {}),
     ...(params.resolveMcpServers ? { resolveMcpServers: params.resolveMcpServers } : {}),
+    ...(params.compositionSelection ? { compositionSelection: params.compositionSelection } : {}),
+    ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
   }
   if (backend.kind === "external") {
     return (params.createExternalSession ?? createExternalAgentSession)(base)

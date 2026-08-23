@@ -26,6 +26,7 @@
 import { supportsExternalAgents } from "./agent-transport"
 import { loggers } from "@cognia/logging"
 import { truncateForLog } from "@cognia/logging/truncate"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import {
   spawnExternalAgent,
   sendToExternalAgent,
@@ -79,7 +80,7 @@ const COMPACTION_COMPLETION_TIMEOUT_MS = 120_000
 // ============================================================================
 
 // Wire-format ground truth: verified against `codex app-server generate-json-schema
-// --out <dir>` (codex-cli 0.145.0). Key invariants encoded below:
+// --out <dir>` (codex-cli 0.149.0). Key invariants encoded below:
 // - `approvalPolicy` (AskForApproval) is kebab-case: "untrusted" | "on-request" |
 //   "never" (or a `{ granular: … }` object we don't emit).
 // - THE SANDBOX HAS TWO DIFFERENT SHAPES, and conflating them is a hard
@@ -101,6 +102,8 @@ type CodexUserInput =
   | { type: "text"; text: string }
   | { type: "image"; url: string }
   | { type: "localImage"; path: string }
+  | { type: "audio"; url: string }
+  | { type: "localAudio"; path: string }
 
 /** Approval decision enums (camelCase on the wire). */
 type CodexCommandDecision = "accept" | "acceptForSession" | "decline" | "cancel"
@@ -439,7 +442,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }>("initialize", {
         clientInfo: { name: "cognia", title: "Cognia", version: "1.0.0" },
         // `experimentalApi` opts into experimental methods/fields — required for
-        // `item/tool/requestUserInput` (marked EXPERIMENTAL in the 0.144.4 schema).
+        // `item/tool/requestUserInput` (still experimental in the 0.149.0 schema).
         // Unknown experimental notifications fall through the default branch.
         capabilities: {
           experimentalApi: true,
@@ -679,6 +682,17 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     if (!this.processId || !supportsExternalAgents()) {
       throw new Error("No active Codex app-server connection")
     }
+
+    let outboundPayload: unknown
+    try {
+      outboundPayload = JSON.parse(message)
+    } catch {
+      throw new Error("Codex app-server outbound payload is not valid JSON")
+    }
+    if (!hasNoLeakingPiiDeep(outboundPayload)) {
+      throw new Error("Codex app-server outbound payload blocked by the PII gate")
+    }
+
     await sendToExternalAgent(this.processId, message)
   }
 
@@ -705,7 +719,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     )
     if (sandbox) params.sandbox = sandbox
     // `developerInstructions` is the native system-prompt channel (verified in
-    // the 0.141 schema) — carrying it here supersedes the first-turn text
+    // the 0.149.0 schema) — carrying it here supersedes the first-turn text
     // prepend, which stays as the fallback for resumed/forked threads only.
     const systemPrompt = resolveSystemPromptText(metadata)
     if (systemPrompt) params.developerInstructions = systemPrompt
@@ -854,7 +868,7 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
   // Session extension (thread/list, thread/resume, thread/fork, thread/delete)
   //
   // The app-server implements the full thread-persistence surface (verified in
-  // the 0.141 schema). Support is probed per method and cached like the ACP
+  // the 0.149.0 schema). Support is probed per method and cached like the ACP
   // adapter: a `-32601` marks the method unsupported for this connection and
   // throws the shared typed error so manager gating behaves identically.
   // --------------------------------------------------------------------------
@@ -932,7 +946,14 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
     options?: SessionCreateOptions
   ): Promise<ExternalAgentSession> {
     const metadata = this.buildSessionMetadata(options)
-    const params: Record<string, unknown> = { threadId: sessionId }
+    const params: Record<string, unknown> = {
+      threadId: sessionId,
+      approvalPolicy: this.approvalPolicyFor(
+        (options?.permissionMode || "default") as AcpPermissionMode
+      ),
+    }
+    const cwd = readString(metadata.cwd) || this._config?.process?.cwd
+    if (cwd) params.cwd = cwd
     const model = readString(metadata.selectedModel)
     if (model) params.model = model
     const sandbox = this.sandboxModeParam(
@@ -940,6 +961,10 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       (options?.permissionMode || "default") as AcpPermissionMode
     )
     if (sandbox) params.sandbox = sandbox
+    const systemPrompt = resolveSystemPromptText(metadata)
+    if (systemPrompt) params.developerInstructions = systemPrompt
+    const config = withCodexMcpServers(undefined, options?.mcpServers)
+    if (config) params.config = config
 
     const result = await this.callSessionExtension<{
       thread?: { id?: string }
@@ -1329,9 +1354,26 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
           type: "text",
           text: "[image attachment omitted: base64 not supported by Codex input]",
         }
+      case "audio":
+        // `ExternalAgentMessage` audio is an explicit user attachment. The
+        // outbound gate validates its data-URL metadata, but encoded speech is
+        // opaque; automated callers must transcribe and redact before building
+        // the user message rather than treating this adapter as a scanner.
+        return {
+          type: "audio",
+          url: content.data.startsWith("data:")
+            ? content.data
+            : `data:${content.mimeType};base64,${content.data}`,
+        }
       case "file": {
         if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(content.path)) {
           return { type: "localImage", path: content.path }
+        }
+        if (
+          content.mimeType?.startsWith("audio/") ||
+          /\.(aac|flac|m4a|mp3|ogg|opus|wav)$/i.test(content.path)
+        ) {
+          return { type: "localAudio", path: content.path }
         }
         return { type: "text", text: `File: ${content.path}` }
       }
@@ -1371,11 +1413,44 @@ export class CodexAppServerAdapter extends BaseProtocolAdapter {
       }
       return
     }
+    if (method === "warning") {
+      log.warn("Codex app-server warning", {
+        threadId: readString(p.threadId),
+        message: readString(p.message),
+      })
+      return
+    }
+    if (method === "deprecationNotice") {
+      log.warn("Codex app-server deprecation notice", {
+        summary: readString(p.summary),
+        details: readString(p.details),
+      })
+      return
+    }
+    if (method === "configWarning") {
+      log.warn("Codex app-server configuration warning", {
+        summary: readString(p.summary),
+        path: readString(p.path),
+      })
+      return
+    }
 
     const sessionId = this.resolveSessionId(p)
     if (!sessionId) return
 
     switch (method) {
+      case "error": {
+        const turnError = readObject(p.error)
+        this.emit(sessionId, {
+          type: "error",
+          sessionId,
+          timestamp: new Date(),
+          error: readString(turnError?.message) ?? "Codex turn failed",
+          code: mapCodexErrorCode(turnError?.codexErrorInfo),
+          recoverable: p.willRetry === true,
+        })
+        return
+      }
       case "turn/started": {
         const turnId = readString(readObject(p.turn)?.id)
         if (turnId) this.activeTurns.set(sessionId, turnId)

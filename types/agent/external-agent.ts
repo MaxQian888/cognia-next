@@ -11,6 +11,44 @@
 // ============================================================================
 
 import type { ExternalAgentCapabilityProfileV1 } from "@cognia/agent-config-types/external-agent-capability"
+import type {
+  AgentCapabilities as SdkAcpAgentCapabilities,
+  Annotations as SdkAcpAnnotations,
+  AuthMethodAgent as SdkAcpAuthMethodAgent,
+  AuthMethodTerminal as SdkAcpAuthMethodTerminal,
+  ClientCapabilities as SdkAcpClientCapabilities,
+  CompactionStatus as SdkAcpCompactionStatus,
+  CompactionSummaryChunk as SdkAcpCompactionSummaryChunk,
+  CompactionUpdate as SdkAcpCompactionUpdate,
+  ConnectMcpRequest as SdkAcpConnectMcpRequest,
+  ConnectMcpResponse as SdkAcpConnectMcpResponse,
+  CloseNesRequest as SdkAcpCloseNesRequest,
+  CloseNesResponse as SdkAcpCloseNesResponse,
+  DisableProviderRequest as SdkAcpDisableProviderRequest,
+  DisableProviderResponse as SdkAcpDisableProviderResponse,
+  ContentBlock as SdkAcpContentBlock,
+  DidChangeDocumentNotification as SdkAcpDidChangeDocumentNotification,
+  DidCloseDocumentNotification as SdkAcpDidCloseDocumentNotification,
+  DidFocusDocumentNotification as SdkAcpDidFocusDocumentNotification,
+  DidOpenDocumentNotification as SdkAcpDidOpenDocumentNotification,
+  DidSaveDocumentNotification as SdkAcpDidSaveDocumentNotification,
+  DisconnectMcpRequest as SdkAcpDisconnectMcpRequest,
+  DisconnectMcpResponse as SdkAcpDisconnectMcpResponse,
+  ListProvidersResponse as SdkAcpListProvidersResponse,
+  MessageMcpNotification as SdkAcpMessageMcpNotification,
+  MessageMcpRequest as SdkAcpMessageMcpRequest,
+  MessageMcpResponse as SdkAcpMessageMcpResponse,
+  McpServerAcp as SdkAcpMcpServerAcp,
+  NesSuggestion as SdkAcpNesSuggestion,
+  ProviderInfo as SdkAcpProviderInfo,
+  SetProviderRequest as SdkAcpSetProviderRequest,
+  SetProviderResponse as SdkAcpSetProviderResponse,
+  StartNesRequest as SdkAcpStartNesRequest,
+  StartNesResponse as SdkAcpStartNesResponse,
+  SuggestNesRequest as SdkAcpSuggestNesRequest,
+  SuggestNesResponse as SdkAcpSuggestNesResponse,
+  ToolKind as SdkAcpToolKind,
+} from "@agentclientprotocol/sdk"
 
 /**
  * Supported external agent protocols
@@ -481,86 +519,29 @@ export interface AcpMcpServerSse {
 }
 
 /**
+ * Preview ACP-channel MCP transport. The host must attach a dynamic MCP
+ * controller and explicitly enable the feature before this configuration can
+ * cross the wire.
+ */
+export type AcpMcpServerAcp = SdkAcpMcpServerAcp
+
+/**
  * Union of all MCP server configurations
  */
-export type AcpMcpServerConfig = AcpMcpServerStdio | AcpMcpServerHttp | AcpMcpServerSse
+export type AcpMcpServerConfig =
+  AcpMcpServerStdio | AcpMcpServerHttp | AcpMcpServerSse | AcpMcpServerAcp
 
 /**
  * ACP Client capabilities for initialization
  * @see https://agentclientprotocol.com/protocol/initialization#client-capabilities
  */
-export interface AcpClientCapabilities {
-  /** File system capabilities */
-  fs?: {
-    /** Client can read text files */
-    readTextFile?: boolean
-    /** Client can write text files */
-    writeTextFile?: boolean
-  }
-  /** Terminal capability - all terminal/* methods available */
-  terminal?: boolean
-  /** Session-level client features. */
-  session?: {
-    configOptions?: {
-      /** Client can render and update boolean config options. */
-      boolean?: Record<string, never>
-    }
-  }
-  /** Client can receive experimental identified plan updates/removals. */
-  plan?: Record<string, never>
-  /** Feature-gated schema 1.20.0 elicitation extension. */
-  elicitation?: {
-    form?: Record<string, never>
-    url?: Record<string, never>
-  }
-  /** Custom capabilities via _meta */
-  _meta?: Record<string, unknown>
-}
+export type AcpClientCapabilities = SdkAcpClientCapabilities
 
 /**
  * ACP Agent capabilities from initialization response
  * @see https://agentclientprotocol.com/protocol/initialization#agent-capabilities
  */
-export interface AcpAgentCapabilities {
-  /** Agent supports loading existing sessions */
-  loadSession?: boolean
-  /** Prompt content type capabilities */
-  promptCapabilities?: {
-    /** Agent accepts images in prompts */
-    image?: boolean
-    /** Agent accepts audio in prompts */
-    audio?: boolean
-    /** Agent accepts embedded context/resources */
-    embeddedContext?: boolean
-  }
-  /** MCP transport capabilities */
-  mcpCapabilities?: {
-    /** Agent supports HTTP MCP transport */
-    http?: boolean
-    /** Agent supports SSE MCP transport (deprecated) */
-    sse?: boolean
-  }
-  /** Session capabilities */
-  sessionCapabilities?: {
-    /** Fork session support (unstable) */
-    fork?: Record<string, unknown>
-    /** Resume session support */
-    resume?: Record<string, unknown>
-    /** Close session support (`session/close`) */
-    close?: Record<string, unknown>
-    /** Delete session support (`session/delete`) */
-    delete?: Record<string, unknown>
-    /** List sessions support (`session/list`) */
-    list?: Record<string, unknown>
-    /** Additional workspace roots on session lifecycle requests. */
-    additionalDirectories?: Record<string, unknown>
-  }
-  /** Authentication capabilities */
-  auth?: {
-    /** Agent supports `logout` */
-    logout?: boolean
-  }
-}
+export type AcpAgentCapabilities = SdkAcpAgentCapabilities
 
 /**
  * ACP Client/Agent info for initialization
@@ -577,16 +558,71 @@ export interface AcpImplementationInfo {
 /**
  * ACP Authentication method
  */
-export interface AcpAuthMethod {
-  /** Auth method ID */
-  id: string
-  /** Auth method name */
-  name: string
-  /** Description */
-  description?: string
-  /** Custom metadata for auth */
-  _meta?: Record<string, unknown>
+export type AcpAgentAuthMethod = SdkAcpAuthMethodAgent & { type: "agent" }
+export type AcpTerminalAuthMethod = SdkAcpAuthMethodTerminal & { type: "terminal" }
+export type AcpAuthMethod = AcpAgentAuthMethod | AcpTerminalAuthMethod
+
+export interface AcpTerminalAuthState {
+  methodId: string
+  terminalId?: string
+  status: "starting" | "running" | "reconnecting" | "completed" | "failed" | "cancelled"
+  exitCode?: number | null
+  error?: string
 }
+
+// Preview wire contracts stay SDK-owned. Runtime advertisement is controlled
+// independently by AcpFeatureProfile; importing a type never enables a feature.
+export type AcpProviderInfo = SdkAcpProviderInfo
+export type AcpListProvidersResponse = SdkAcpListProvidersResponse
+export type AcpSetProviderRequest = SdkAcpSetProviderRequest
+export type AcpSetProviderResponse = SdkAcpSetProviderResponse
+export type AcpDisableProviderRequest = SdkAcpDisableProviderRequest
+export type AcpDisableProviderResponse = SdkAcpDisableProviderResponse
+export type AcpConnectMcpRequest = SdkAcpConnectMcpRequest
+export type AcpConnectMcpResponse = SdkAcpConnectMcpResponse
+export type AcpDisconnectMcpRequest = SdkAcpDisconnectMcpRequest
+export type AcpDisconnectMcpResponse = SdkAcpDisconnectMcpResponse
+export type AcpMessageMcpRequest = SdkAcpMessageMcpRequest
+export type AcpMessageMcpResponse = SdkAcpMessageMcpResponse
+export type AcpMessageMcpNotification = SdkAcpMessageMcpNotification
+export interface AcpDynamicMcpConnectionState {
+  connectionId: string
+  serverId: string
+  sessionId?: string
+  status: "connecting" | "connected" | "disconnecting" | "closed" | "failed"
+  error?: string
+}
+export interface AcpDynamicMcpHostController {
+  connect(
+    request: AcpConnectMcpRequest,
+    context: {
+      sessionId: string
+      signal: AbortSignal
+      notify: (notification: AcpMessageMcpNotification) => void
+    }
+  ): Promise<AcpConnectMcpResponse>
+  message(
+    request: AcpMessageMcpRequest | AcpMessageMcpNotification,
+    context: { sessionId: string; signal?: AbortSignal; notification: boolean }
+  ): Promise<AcpMessageMcpResponse | void>
+  disconnect(
+    request: AcpDisconnectMcpRequest,
+    context: { sessionId: string; signal?: AbortSignal }
+  ): Promise<AcpDisconnectMcpResponse | void>
+}
+export type AcpStartNesRequest = SdkAcpStartNesRequest
+export type AcpStartNesResponse = SdkAcpStartNesResponse
+export type AcpSuggestNesRequest = SdkAcpSuggestNesRequest
+export type AcpSuggestNesResponse = SdkAcpSuggestNesResponse
+export type AcpCloseNesRequest = SdkAcpCloseNesRequest
+export type AcpCloseNesResponse = SdkAcpCloseNesResponse
+export type AcpNesSuggestion = SdkAcpNesSuggestion
+export type AcpDidOpenDocumentNotification = SdkAcpDidOpenDocumentNotification
+export type AcpDidChangeDocumentNotification = SdkAcpDidChangeDocumentNotification
+export type AcpDidCloseDocumentNotification = SdkAcpDidCloseDocumentNotification
+export type AcpDidSaveDocumentNotification = SdkAcpDidSaveDocumentNotification
+export type AcpDidFocusDocumentNotification = SdkAcpDidFocusDocumentNotification
+export type AcpCompactionStatus = SdkAcpCompactionStatus
 
 /**
  * ACP Capability flags (legacy, for backward compatibility)
@@ -650,55 +686,39 @@ export type AcpSessionUpdateType =
   | "usage_update"
   // Session metadata (title/updatedAt) update (ACP v1 SessionInfoUpdate).
   | "session_info_update"
+  | "compaction_update"
+  | "compaction_summary_chunk"
 
 /**
  * ACP Tool call status
  */
 export type AcpToolCallStatus =
-  "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "error"
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "failed"
+  // Receive-only compatibility values; stable ACP never emits these.
+  | "cancelled"
+  | "error"
 
 /**
  * ACP Tool call kind
  */
+export type AcpStableToolCallKind = SdkAcpToolKind
 export type AcpToolCallKind =
+  | AcpStableToolCallKind
+  // Receive-only compatibility values used by older/vendor adapters.
   | "file_read"
   | "file_write"
-  | "read"
   | "write"
-  | "execute"
   | "terminal"
   | "browser"
   | "mcp"
-  | "switch_mode"
-  | "other"
 
 /**
  * ACP Content block for session updates
  */
-export interface AcpContentBlock {
-  type: "text" | "image" | "audio" | "resource" | "resource_link" | "content"
-  text?: string
-  data?: string
-  mimeType?: string
-  uri?: string
-  /** Resource name (for resource_link) */
-  name?: string
-  /** Resource title (for resource_link) */
-  title?: string
-  /** Resource description (for resource_link) */
-  description?: string
-  /** Resource size in bytes (for resource_link) */
-  size?: number
-  resource?: {
-    uri: string
-    mimeType?: string
-    text?: string
-    blob?: string
-  }
-  content?: AcpContentBlock
-  /** Content annotations */
-  annotations?: AcpContentAnnotations
-}
+export type AcpContentBlock = SdkAcpContentBlock
 
 /**
  * ACP Agent message chunk update
@@ -706,6 +726,8 @@ export interface AcpContentBlock {
 export interface AcpAgentMessageChunkUpdate {
   sessionUpdate: "agent_message_chunk"
   content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
 }
 
 /**
@@ -714,6 +736,8 @@ export interface AcpAgentMessageChunkUpdate {
 export interface AcpUserMessageChunkUpdate {
   sessionUpdate: "user_message_chunk"
   content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
 }
 
 /**
@@ -726,6 +750,8 @@ export interface AcpUserMessageChunkUpdate {
 export interface AcpThoughtMessageChunkUpdate {
   sessionUpdate: "agent_thought_chunk" | "thought_message_chunk"
   content: AcpContentBlock
+  messageId?: string | null
+  _meta?: Record<string, unknown> | null
 }
 
 /**
@@ -758,6 +784,8 @@ export interface AcpToolCallUpdate {
   sessionUpdate: "tool_call"
   toolCallId: string
   title: string
+  /** Preview programmatic tool name; ignored unless negotiated. */
+  name?: string | null
   kind: AcpToolCallKind
   status: AcpToolCallStatus
   /** Content produced by the tool call */
@@ -778,6 +806,8 @@ export interface AcpToolCallStatusUpdate {
   toolCallId: string
   status?: AcpToolCallStatus
   title?: string
+  /** Preview programmatic tool name; ignored unless negotiated. */
+  name?: string | null
   kind?: AcpToolCallKind
   content?: AcpToolCallContent[]
   /** File locations affected by this tool call */
@@ -812,6 +842,14 @@ export interface AcpPlanContentUpdate {
 export interface AcpPlanRemovedUpdate {
   sessionUpdate: "plan_removed"
   planId: string
+}
+
+export type AcpCompactionUpdate = SdkAcpCompactionUpdate & {
+  sessionUpdate: "compaction_update"
+}
+
+export type AcpCompactionSummaryChunk = SdkAcpCompactionSummaryChunk & {
+  sessionUpdate: "compaction_summary_chunk"
 }
 
 /**
@@ -1011,7 +1049,6 @@ export interface AcpTerminalCreateParams {
 export interface AcpTerminalOutputParams {
   sessionId: string
   terminalId: string
-  outputByteLimit?: number
   _meta?: Record<string, unknown>
 }
 
@@ -1056,14 +1093,7 @@ export interface AcpPermissionOutcome {
 /**
  * Annotations on content blocks
  */
-export interface AcpContentAnnotations {
-  /** Intended audience */
-  audience?: ("user" | "assistant")[]
-  /** Priority level */
-  priority?: number
-  /** Custom annotation data */
-  _meta?: Record<string, unknown>
-}
+export type AcpContentAnnotations = SdkAcpAnnotations
 
 /**
  * Audio content block
@@ -1120,6 +1150,8 @@ export type AcpSessionUpdate =
   | AcpConfigOptionsUpdate
   | AcpUsageUpdate
   | AcpSessionInfoUpdate
+  | AcpCompactionUpdate
+  | AcpCompactionSummaryChunk
 
 /**
  * ACP session/update notification params
@@ -1583,7 +1615,17 @@ export type ExternalAgentMessageRole = "user" | "assistant" | "system" | "tool"
  * Content block types
  */
 export type ExternalAgentContentType =
-  "text" | "image" | "file" | "tool_use" | "tool_result" | "thinking" | "commentary" | "error"
+  | "text"
+  | "image"
+  | "audio"
+  | "resource"
+  | "resource_link"
+  | "file"
+  | "tool_use"
+  | "tool_result"
+  | "thinking"
+  | "commentary"
+  | "error"
 
 /**
  * Text content block
@@ -1591,6 +1633,7 @@ export type ExternalAgentContentType =
 export interface ExternalAgentTextContent {
   type: "text"
   text: string
+  annotations?: AcpContentAnnotations | null
 }
 
 /**
@@ -1605,6 +1648,36 @@ export interface ExternalAgentImageContent {
     mediaType: string
   }
   alt?: string
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentAudioContent {
+  type: "audio"
+  data: string
+  mimeType: string
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentResourceContent {
+  type: "resource"
+  resource: {
+    uri: string
+    mimeType?: string | null
+    text?: string
+    blob?: string
+  }
+  annotations?: AcpContentAnnotations | null
+}
+
+export interface ExternalAgentResourceLinkContent {
+  type: "resource_link"
+  uri: string
+  name: string
+  title?: string | null
+  description?: string | null
+  mimeType?: string | null
+  size?: number | null
+  annotations?: AcpContentAnnotations | null
 }
 
 /**
@@ -1670,6 +1743,9 @@ export interface ExternalAgentErrorContent {
 export type ExternalAgentContent =
   | ExternalAgentTextContent
   | ExternalAgentImageContent
+  | ExternalAgentAudioContent
+  | ExternalAgentResourceContent
+  | ExternalAgentResourceLinkContent
   | ExternalAgentFileContent
   | ExternalAgentToolUseContent
   | ExternalAgentToolResultContent
@@ -1728,6 +1804,10 @@ export type ExternalAgentEventType =
   | "mode_update"
   | "usage_update"
   | "session_info_update"
+  | "compaction_update"
+  | "compaction_summary_chunk"
+  | "nes_suggestion"
+  | "nes_closed"
   | "progress"
   | "error"
   | "done"
@@ -1779,6 +1859,7 @@ export interface ExternalAgentMessageDeltaEvent extends ExternalAgentEventBase {
     type: "text" | "thinking"
     text: string
   }
+  content?: AcpContentBlock
 }
 
 /**
@@ -1788,6 +1869,28 @@ export interface ExternalAgentMessageEndEvent extends ExternalAgentEventBase {
   type: "message_end"
   messageId?: string
   tokenUsage?: ExternalAgentTokenUsage
+}
+
+export interface ExternalAgentContentBlockStartEvent extends ExternalAgentEventBase {
+  type: "content_block_start"
+  messageId?: string
+  block: AcpContentBlock
+  role?: "user" | "assistant"
+  channel?: "message" | "thought"
+}
+
+export interface ExternalAgentContentBlockDeltaEvent extends ExternalAgentEventBase {
+  type: "content_block_delta"
+  messageId?: string
+  block: AcpContentBlock
+  role?: "user" | "assistant"
+  channel?: "message" | "thought"
+}
+
+export interface ExternalAgentContentBlockEndEvent extends ExternalAgentEventBase {
+  type: "content_block_end"
+  messageId?: string
+  block?: AcpContentBlock
 }
 
 /**
@@ -1887,6 +1990,8 @@ export interface ExternalAgentElicitationCompleteEvent extends ExternalAgentEven
 export interface ExternalAgentThinkingEvent extends ExternalAgentEventBase {
   type: "thinking"
   thinking: string
+  messageId?: string
+  content?: AcpContentBlock
 }
 
 /**
@@ -1970,6 +2075,29 @@ export interface ExternalAgentSessionInfoUpdateEvent extends ExternalAgentEventB
   updatedAt?: string | null
 }
 
+export interface ExternalAgentCompactionUpdateEvent extends ExternalAgentEventBase {
+  type: "compaction_update"
+  compaction: AcpCompactionUpdate
+}
+
+export interface ExternalAgentCompactionSummaryChunkEvent extends ExternalAgentEventBase {
+  type: "compaction_summary_chunk"
+  compactionId: string
+  content: AcpContentBlock
+}
+
+export interface ExternalAgentNesSuggestionEvent extends ExternalAgentEventBase {
+  type: "nes_suggestion"
+  nesSessionId: string
+  suggestion: AcpNesSuggestion
+}
+
+export interface ExternalAgentNesClosedEvent extends ExternalAgentEventBase {
+  type: "nes_closed"
+  nesSessionId: string
+  reason?: string
+}
+
 /**
  * Tool call update event (enhanced with diff, locations, etc.)
  * @see https://agentclientprotocol.com/protocol/tool-calls
@@ -2045,6 +2173,9 @@ export type ExternalAgentEvent =
   | ExternalAgentMessageStartEvent
   | ExternalAgentMessageDeltaEvent
   | ExternalAgentMessageEndEvent
+  | ExternalAgentContentBlockStartEvent
+  | ExternalAgentContentBlockDeltaEvent
+  | ExternalAgentContentBlockEndEvent
   | ExternalAgentToolUseStartEvent
   | ExternalAgentToolUseDeltaEvent
   | ExternalAgentToolUseEndEvent
@@ -2062,6 +2193,10 @@ export type ExternalAgentEvent =
   | ExternalAgentModeUpdateEvent
   | ExternalAgentUsageUpdateEvent
   | ExternalAgentSessionInfoUpdateEvent
+  | ExternalAgentCompactionUpdateEvent
+  | ExternalAgentCompactionSummaryChunkEvent
+  | ExternalAgentNesSuggestionEvent
+  | ExternalAgentNesClosedEvent
   | ExternalAgentProgressEvent
   | ExternalAgentErrorEvent
   | ExternalAgentDoneEvent

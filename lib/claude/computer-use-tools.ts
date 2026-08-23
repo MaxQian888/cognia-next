@@ -118,7 +118,7 @@ export function applyComputerUseTools(input: ApplyComputerUseInput): ApplyComput
   // `ctx.forceTier: "perCall"` on every Tauri dispatch when the
   // operator chose `requireConsent: true`. Without this the Rust
   // CallContext.force_tier field was wired but never received a value
-  // from the chat path (the Claude Code SDK ignores
+  // from the chat path (the Claude Agent SDK ignores
   // `opts.anthropicTools` so the field on that surface is dead).
   if (input.sessionId && character.computerUseSettings) {
     setActiveComputerUseSettings(input.sessionId, character.computerUseSettings)

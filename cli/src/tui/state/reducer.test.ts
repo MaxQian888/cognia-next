@@ -2317,6 +2317,7 @@ describe("tuiReducer — backend lifecycle", () => {
     name: "GitHub Copilot CLI",
     method: {
       kind: "npm" as const,
+      ownership: "user-managed" as const,
       label: "npm",
       display: "npm install -g @github/copilot",
       command: "npm",

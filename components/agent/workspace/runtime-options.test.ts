@@ -21,6 +21,10 @@ describe("runtime-options", () => {
     expect(runtimeLabelKey("claude")).toBe("claude")
   })
 
+  it("maps the OpenCode ACP runtime to its own label", () => {
+    expect(runtimeLabelKey("opencode-acp")).toBe("opencodeAcp")
+  })
+
   // This module documents itself as the shared source "so the two surfaces can
   // never drift" — but its only importer used to be this test. members.tsx kept
   // a byte-for-byte copy and teammate-config-dialog.tsx hard-coded 5 of the 13

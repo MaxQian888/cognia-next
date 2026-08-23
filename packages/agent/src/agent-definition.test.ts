@@ -65,6 +65,31 @@ describe("validateAgentDefinitionInput", () => {
     }
   })
 
+  it("refuses undeclared composition fields that could persist credentials", () => {
+    const errors = validateAgentDefinitionInput(
+      input({ composition: { presetId: "coding", apiKey: "sk-live-xyz" } as never })
+    )
+    expect(errors.join(" ")).toContain("composition.apiKey is not supported")
+  })
+
+  it("rejects unknown composition axis values before host lowering", () => {
+    const errors = validateAgentDefinitionInput(
+      input({
+        composition: {
+          presetId: "coding",
+          authority: "root",
+          orchestration: "magic",
+        } as never,
+      })
+    )
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("composition.authority must be one of"),
+        expect.stringContaining("composition.orchestration must be one of"),
+      ])
+    )
+  })
+
   it("allows ordinary metadata", () => {
     expect(validateAgentDefinitionInput(input({ metadata: { team: "infra", tier: 2 } }))).toEqual(
       []

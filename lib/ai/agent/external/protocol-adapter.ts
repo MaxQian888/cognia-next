@@ -18,6 +18,31 @@ import type {
   AcpElicitationResponse,
   AcpPermissionMode,
   AcpAuthMethod,
+  AcpTerminalAuthState,
+  AcpListProvidersResponse,
+  AcpSetProviderRequest,
+  AcpSetProviderResponse,
+  AcpDisableProviderRequest,
+  AcpDisableProviderResponse,
+  AcpConnectMcpRequest,
+  AcpConnectMcpResponse,
+  AcpDisconnectMcpRequest,
+  AcpDisconnectMcpResponse,
+  AcpMessageMcpRequest,
+  AcpMessageMcpResponse,
+  AcpMessageMcpNotification,
+  AcpDynamicMcpConnectionState,
+  AcpStartNesRequest,
+  AcpStartNesResponse,
+  AcpSuggestNesRequest,
+  AcpSuggestNesResponse,
+  AcpCloseNesRequest,
+  AcpCloseNesResponse,
+  AcpDidOpenDocumentNotification,
+  AcpDidChangeDocumentNotification,
+  AcpDidCloseDocumentNotification,
+  AcpDidSaveDocumentNotification,
+  AcpDidFocusDocumentNotification,
   AcpImplementationInfo,
   AcpAgentCapabilities,
   AcpSessionModelState,
@@ -229,6 +254,37 @@ export interface ProtocolAdapter {
    * Optional: Authenticate with the agent (ACP)
    */
   authenticate?: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
+
+  /** Current governed PTY run for an ACP terminal authentication method. */
+  getTerminalAuthState?: () => AcpTerminalAuthState | undefined
+
+  /** Cancel an in-flight ACP terminal authentication process. */
+  cancelTerminalAuthentication?: () => Promise<void>
+
+  /** Preview provider configuration. Available only when negotiated. */
+  listProviders?: () => Promise<AcpListProvidersResponse>
+  setProvider?: (
+    request: AcpSetProviderRequest,
+    options?: { confirmedCredentialTransmission?: boolean }
+  ) => Promise<AcpSetProviderResponse>
+  disableProvider?: (request: AcpDisableProviderRequest) => Promise<AcpDisableProviderResponse>
+
+  /** Preview dynamic MCP lifecycle, scoped to this ACP connection. */
+  connectMcp?: (request: AcpConnectMcpRequest) => Promise<AcpConnectMcpResponse>
+  messageMcp?: (request: AcpMessageMcpRequest) => Promise<AcpMessageMcpResponse>
+  notifyMcpMessage?: (notification: AcpMessageMcpNotification) => void
+  disconnectMcp?: (request: AcpDisconnectMcpRequest) => Promise<AcpDisconnectMcpResponse>
+  getDynamicMcpConnections?: () => AcpDynamicMcpConnectionState[]
+
+  /** Preview NES and document synchronization lifecycle. */
+  startNes?: (request: AcpStartNesRequest) => Promise<AcpStartNesResponse>
+  suggestNes?: (request: AcpSuggestNesRequest) => Promise<AcpSuggestNesResponse>
+  closeNes?: (request: AcpCloseNesRequest) => Promise<AcpCloseNesResponse>
+  didOpenDocument?: (notification: AcpDidOpenDocumentNotification) => void
+  didChangeDocument?: (notification: AcpDidChangeDocumentNotification) => void
+  didCloseDocument?: (notification: AcpDidCloseDocumentNotification) => void
+  didSaveDocument?: (notification: AcpDidSaveDocumentNotification) => void
+  didFocusDocument?: (notification: AcpDidFocusDocumentNotification) => void
 
   /**
    * Optional: Log out of the agent's authenticated session (ACP v1 `logout`).

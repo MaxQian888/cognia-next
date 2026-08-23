@@ -99,8 +99,8 @@ import {
 import { getExternalAgentEcosystemAdapter } from "@/lib/ai/agent/external/ecosystem-adapters"
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import {
-  getAvailablePresets,
   getPresetConfig,
+  getRunnablePresets,
   type ExternalAgentPresetId,
 } from "@/lib/ai/agent/external/presets"
 import { protocolAdapterRegistry } from "@/lib/ai/agent/external/protocol-adapter"
@@ -343,14 +343,13 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
     setSelectedPreset(presetId as ExternalAgentPresetId | "")
     if (presetId && presetId !== "custom") {
       // getPresetConfig is dynamic-aware (plugin-contributed presets too),
-      // matching how the dropdown is built from getAvailablePresets().
+      // matching how the dropdown is built from getRunnablePresets().
       const preset = getPresetConfig(presetId)
       if (preset) {
         const presetPort = preset.metadata?.port
         setFormData((current) => ({
           ...current,
-          name:
-            presetId === "opencode-v2-preview" ? tSettings("opencodeV2PresetName") : preset.name,
+          name: preset.name,
           protocol: preset.protocol,
           transport: preset.transport,
           command: preset.process?.command || "",
@@ -446,7 +445,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                   <SelectValue placeholder={tManager("selectPresetOrConfigureManually")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {getAvailablePresets().map((presetId) => {
+                  {getRunnablePresets().map((presetId) => {
                     // Route through `getPresetConfig` so plugin-contributed
                     // presets (registered via the §A-3 dynamic overlay)
                     // resolve identically to the four builtin entries.
@@ -455,11 +454,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     return (
                       <SelectItem key={presetId} value={presetId}>
                         <div className="flex items-center gap-2">
-                          <span>
-                            {presetId === "opencode-v2-preview"
-                              ? tSettings("opencodeV2PresetName")
-                              : preset.name}
-                          </span>
+                          <span>{preset.name}</span>
                           <span className="text-xs text-muted-foreground">
                             ({preset.tags.join(", ")})
                           </span>
@@ -492,13 +487,7 @@ function AddAgentDialog({ open, onOpenChange, onAdd }: AddAgentDialogProps) {
                     </a>
                   )}
                 </div>
-                {currentPreset.setupHint && (
-                  <p>
-                    {selectedPreset === "opencode-v2-preview"
-                      ? tSettings("opencodeV2PresetSetupHint")
-                      : currentPreset.setupHint}
-                  </p>
-                )}
+                {currentPreset.setupHint && <p>{currentPreset.setupHint}</p>}
                 {relatedOfficialSurfaces.length > 0 && (
                   <div className="space-y-1">
                     <p className="font-medium">{tManager("otherOfficialSurfaces")}</p>
@@ -966,6 +955,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
     planStep,
     planDocument,
     configOptions,
+    richContentBlocks = [],
+    compactionUpdates = [],
+    nesSuggestions = [],
     addAgent,
     removeAgent,
     connect,
@@ -1604,6 +1596,9 @@ export function ExternalAgentManager({ className }: ExternalAgentManagerProps) {
                     : tDiag("none"),
                 })}
               </p>
+              <p>{tDiag("richContentBlocks", { count: richContentBlocks.length })}</p>
+              <p>{tDiag("compactionUpdates", { count: compactionUpdates.length })}</p>
+              <p>{tDiag("nesSuggestions", { count: nesSuggestions.length })}</p>
               <p>
                 {tDiag("sessionSupport", {
                   list: listSupport?.state || tDiag("unknown"),

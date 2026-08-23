@@ -185,6 +185,18 @@ describe("getExternalAgentExecutionBlock", () => {
     expect(getExternalAgentExecutionBlock(cfg, false)).toBeNull()
   })
 
+  it("does not recommend launching the incompatible legacy OpenCode V2 service", () => {
+    const cfg = baseConfig({
+      protocol: "opencode-v2" as never,
+      transport: "sse" as never,
+      metadata: {},
+    })
+    const block = getExternalAgentExecutionBlock(cfg, false)
+    expect(block?.code).toBe("transport_blocked")
+    expect(block?.reason).toMatch(/documented-only/i)
+    expect(block?.reason).not.toContain("opencode2 service start")
+  })
+
   it("blocks documented-only ecosystem surfaces", () => {
     const cfg = baseConfig({
       metadata: {

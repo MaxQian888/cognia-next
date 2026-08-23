@@ -3,10 +3,24 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { agentReadTextFile, agentWriteTextFile, createCliAgentHost } from "./host-branch"
+import {
+  agentReadTextFile,
+  agentWriteTextFile,
+  createCliAgentHost,
+  getAcpHostCapabilities,
+} from "./host-branch"
 
 describe("CLI external-agent host branch", () => {
-  it("routes invoke/listen to the Node backend and advertises fs without terminals", async () => {
+  it("reports the CLI host and its durable elicitation overlay", () => {
+    expect(getAcpHostCapabilities()).toMatchObject({
+      kind: "cli",
+      terminal: process.platform !== "win32",
+      terminalAuth: process.platform !== "win32",
+      elicitation: { form: true, url: true, durableInteraction: true },
+    })
+  })
+
+  it("routes invoke/listen to the Node backend and advertises PTYs only off Windows", async () => {
     const handlers = new Map<string, (payload: unknown) => void>()
     const backend = {
       invoke: jest.fn().mockResolvedValue("ok"),
@@ -15,16 +29,18 @@ describe("CLI external-agent host branch", () => {
         return () => handlers.delete(event)
       }),
     }
-    const host = createCliAgentHost(backend)
+    const host = createCliAgentHost(backend, "darwin")
     expect(host.supportsExternalAgents()).toBe(true)
     expect(host.supportsAgentFs()).toBe(true)
-    expect(host.supportsAgentTerminal()).toBe(false)
+    expect(host.supportsAgentTerminal()).toBe(true)
     await expect(host.agentInvoke("check_command_exists", { command: "codex" })).resolves.toBe("ok")
     const handler = jest.fn()
     const off = await host.agentListen("external-agent://stdout", handler)
     handlers.get("external-agent://stdout")?.({ agentId: "a", data: "x" })
     expect(handler).toHaveBeenCalledWith({ agentId: "a", data: "x" })
     off()
+
+    expect(createCliAgentHost(backend, "win32").supportsAgentTerminal()).toBe(false)
   })
 
   it("reads and writes ACP text files through node fs", async () => {

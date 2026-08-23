@@ -28,7 +28,27 @@ const STABLE_METHODS = new Set<string>([
   "$/cancel_request",
 ])
 
-const FEATURE_GATED_METHODS = new Set<string>(["elicitation/create", "elicitation/complete"])
+const FEATURE_GATED_METHODS = new Set<string>([
+  "elicitation/create",
+  "elicitation/complete",
+  "providers/list",
+  "providers/set",
+  "providers/disable",
+  "mcp/connect",
+  "mcp/message",
+  "mcp/disconnect",
+  "session/fork",
+  "nes/start",
+  "nes/suggest",
+  "nes/accept",
+  "nes/reject",
+  "nes/close",
+  "document/didOpen",
+  "document/didChange",
+  "document/didClose",
+  "document/didSave",
+  "document/didFocus",
+])
 
 const LEGACY_METHODS = new Set(["session/set_model", "session/fork", "terminal/write"])
 

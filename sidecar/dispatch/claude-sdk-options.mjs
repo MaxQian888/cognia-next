@@ -268,6 +268,7 @@ const PLAIN_KEYS = [
   "sessionId",
   "continue",
   "resumeSessionAt",
+  "resumeDropsTurn",
   "persistSession",
   "title",
   "enableFileCheckpointing",

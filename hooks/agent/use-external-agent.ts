@@ -29,6 +29,22 @@ import type {
   AcpPermissionMode,
   AcpSessionModelState,
   AcpAuthMethod,
+  AcpTerminalAuthState,
+  AcpListProvidersResponse,
+  AcpSetProviderRequest,
+  AcpSetProviderResponse,
+  AcpDisableProviderRequest,
+  AcpDisableProviderResponse,
+  AcpStartNesRequest,
+  AcpStartNesResponse,
+  AcpSuggestNesRequest,
+  AcpSuggestNesResponse,
+  AcpCloseNesRequest,
+  AcpCloseNesResponse,
+  AcpDynamicMcpConnectionState,
+  AcpContentBlock,
+  AcpCompactionUpdate,
+  AcpNesSuggestion,
   AcpConfigOption,
   ExternalAgentLastRunSnapshot,
   ExternalAgentPlanDocument,
@@ -153,6 +169,12 @@ export interface UseExternalAgentState {
   lastResult: ExternalAgentResult | null
   /** Session config options (ACP spec) */
   configOptions: AcpConfigOption[]
+  /** Structured ACP blocks retained alongside the legacy text stream. */
+  richContentBlocks: AcpContentBlock[]
+  /** Preview compaction state received from the active session. */
+  compactionUpdates: AcpCompactionUpdate[]
+  /** Preview NES suggestions received from the active session. */
+  nesSuggestions: AcpNesSuggestion[]
   /** Validity snapshot for the currently active agent */
   activeAgentValidity: ExternalAgentValiditySnapshot | null
   /** Durable last-run snapshot for the active agent */
@@ -249,6 +271,20 @@ export interface UseExternalAgentActions {
   isAuthenticationRequired: () => boolean
   /** Authenticate with the agent */
   authenticate: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
+  /** Inspect the active ACP terminal-auth subprocess, if one exists. */
+  getTerminalAuthState: () => AcpTerminalAuthState | undefined
+  /** Cancel the active ACP terminal-auth subprocess. */
+  cancelTerminalAuthentication: () => Promise<void>
+  listProviders: () => Promise<AcpListProvidersResponse>
+  setProvider: (
+    request: AcpSetProviderRequest,
+    options?: { confirmedCredentialTransmission?: boolean }
+  ) => Promise<AcpSetProviderResponse>
+  disableProvider: (request: AcpDisableProviderRequest) => Promise<AcpDisableProviderResponse>
+  startNes: (request: AcpStartNesRequest) => Promise<AcpStartNesResponse>
+  suggestNes: (request: AcpSuggestNesRequest) => Promise<AcpSuggestNesResponse>
+  closeNes: (request: AcpCloseNesRequest) => Promise<AcpCloseNesResponse>
+  getDynamicMcpConnections: () => AcpDynamicMcpConnectionState[]
   /** Set a session config option */
   setConfigOption: (configId: string, value: string | boolean) => Promise<AcpConfigOption[]>
   /** Get session config options */
@@ -368,6 +404,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [planDocument, setPlanDocument] = useState<ExternalAgentPlanDocument | null>(null)
   const [streamingResponse, setStreamingResponse] = useState("")
   const [configOptions, setConfigOptions] = useState<AcpConfigOption[]>([])
+  const [richContentBlocks, setRichContentBlocks] = useState<AcpContentBlock[]>([])
+  const [compactionUpdates, setCompactionUpdates] = useState<AcpCompactionUpdate[]>([])
+  const [nesSuggestions, setNesSuggestions] = useState<AcpNesSuggestion[]>([])
   const [lastResult, setLastResult] = useState<ExternalAgentResult | null>(null)
   const [activeAgentValidity, setActiveAgentValidity] =
     useState<ExternalAgentValiditySnapshot | null>(null)
@@ -709,6 +748,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setPlanEntries([])
         setPlanStep(null)
         setPlanDocument(null)
+        setRichContentBlocks([])
+        setCompactionUpdates([])
+        setNesSuggestions([])
         return
       }
 
@@ -717,6 +759,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
       setPlanStep(null)
       setPlanDocument(null)
       setConfigOptions([])
+      setRichContentBlocks([])
+      setCompactionUpdates([])
+      setNesSuggestions([])
 
       const manager = await getManager()
 
@@ -754,6 +799,18 @@ export function useExternalAgent(): UseExternalAgentReturn {
                 : opt
             )
           )
+        }
+        if (event.type === "content_block_start" || event.type === "content_block_delta") {
+          setRichContentBlocks((current) => [...current.slice(-99), event.block])
+        }
+        if (event.type === "compaction_update") {
+          setCompactionUpdates((current) => [...current.slice(-19), event.compaction])
+        }
+        if (event.type === "compaction_summary_chunk") {
+          setRichContentBlocks((current) => [...current.slice(-99), event.content])
+        }
+        if (event.type === "nes_suggestion") {
+          setNesSuggestions((current) => [...current.slice(-19), event.suggestion])
         }
       })
 
@@ -1699,6 +1756,70 @@ export function useExternalAgent(): UseExternalAgentReturn {
     [getManager, activeAgentId]
   )
 
+  const getTerminalAuthState = useCallback((): AcpTerminalAuthState | undefined => {
+    if (!activeAgentId || !managerRef.current) return undefined
+    return managerRef.current.getTerminalAuthState(activeAgentId)
+  }, [activeAgentId])
+
+  const cancelTerminalAuthentication = useCallback(async (): Promise<void> => {
+    if (!activeAgentId) return
+    const manager = await getManager()
+    await manager.cancelTerminalAuthentication(activeAgentId)
+  }, [activeAgentId, getManager])
+
+  const listProviders = useCallback(async (): Promise<AcpListProvidersResponse> => {
+    if (!activeAgentId) throw new Error("No active agent selected")
+    return (await getManager()).listProviders(activeAgentId)
+  }, [activeAgentId, getManager])
+
+  const setProvider = useCallback(
+    async (
+      request: AcpSetProviderRequest,
+      options?: { confirmedCredentialTransmission?: boolean }
+    ): Promise<AcpSetProviderResponse> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      return (await getManager()).setProvider(activeAgentId, request, options)
+    },
+    [activeAgentId, getManager]
+  )
+
+  const disableProvider = useCallback(
+    async (request: AcpDisableProviderRequest): Promise<AcpDisableProviderResponse> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      return (await getManager()).disableProvider(activeAgentId, request)
+    },
+    [activeAgentId, getManager]
+  )
+
+  const startNes = useCallback(
+    async (request: AcpStartNesRequest): Promise<AcpStartNesResponse> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      return (await getManager()).startNes(activeAgentId, request)
+    },
+    [activeAgentId, getManager]
+  )
+
+  const suggestNes = useCallback(
+    async (request: AcpSuggestNesRequest): Promise<AcpSuggestNesResponse> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      return (await getManager()).suggestNes(activeAgentId, request)
+    },
+    [activeAgentId, getManager]
+  )
+
+  const closeNes = useCallback(
+    async (request: AcpCloseNesRequest): Promise<AcpCloseNesResponse> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      return (await getManager()).closeNes(activeAgentId, request)
+    },
+    [activeAgentId, getManager]
+  )
+
+  const getDynamicMcpConnections = useCallback((): AcpDynamicMcpConnectionState[] => {
+    if (!activeAgentId || !managerRef.current) return []
+    return managerRef.current.getDynamicMcpConnections(activeAgentId)
+  }, [activeAgentId])
+
   // Set config option
   const setConfigOption = useCallback(
     async (configId: string, value: string | boolean): Promise<AcpConfigOption[]> => {
@@ -1776,6 +1897,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
     streamingResponse,
     lastResult,
     configOptions,
+    richContentBlocks,
+    compactionUpdates,
+    nesSuggestions,
     activeAgentValidity,
     activeLastRunSnapshot,
     activeBenchmarkCapabilities,
@@ -1813,6 +1937,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
     getAuthMethods,
     isAuthenticationRequired,
     authenticate,
+    getTerminalAuthState,
+    cancelTerminalAuthentication,
+    listProviders,
+    setProvider,
+    disableProvider,
+    startNes,
+    suggestNes,
+    closeNes,
+    getDynamicMcpConnections,
     setConfigOption,
     getConfigOptions,
     getAgentTools,

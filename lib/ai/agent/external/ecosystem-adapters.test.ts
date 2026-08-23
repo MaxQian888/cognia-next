@@ -41,6 +41,17 @@ describe("EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS", () => {
     const bridged = surfaces.find((s) => s.presetId === "pi")!
     expect(bridged.protocol).toBe("acp")
     expect(bridged.process?.args).toContain("pi-acp")
+    expect(bridged.setupHint).toContain("Pi >= 0.80.4")
+    expect(bridged.setupHint).toContain("Node.js >= 22")
+  })
+
+  it("describes current Gemini and Copilot authentication choices accurately", () => {
+    const gemini = findExternalAgentSurfaceByPresetId("gemini-cli")!.surface
+    expect(gemini.envVarHint).toContain("API key, Vertex AI, gateway, or enterprise")
+    expect(gemini.envVarHint).not.toContain("Requires GOOGLE_API_KEY")
+
+    const copilot = findExternalAgentSurfaceByPresetId("copilot-cli")!.surface
+    expect(copilot.envVarHint).toContain("fine-grained PAT")
   })
 
   it("gives every surface a stable shape", () => {
@@ -92,7 +103,7 @@ describe("new ACP agent surfaces", () => {
     {
       presetId: "droid",
       command: "droid",
-      args: ["exec", "--output-format", "acp"],
+      args: ["exec", "--output-format", "acp-daemon"],
     },
   ]
 

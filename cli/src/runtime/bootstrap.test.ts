@@ -7,7 +7,10 @@ import path from "node:path"
 import { transport as installedTransport } from "@/lib/tauri"
 
 import {
+  adaptBunSubprocess,
   bootstrapSidecar,
+  isPackaged,
+  resolveBunSpawn,
   resolveSidecarScript,
   resolveSpawnTarget,
   type SpawnFn,
@@ -83,6 +86,15 @@ describe("resolveSidecarScript", () => {
 })
 
 describe("resolveSpawnTarget", () => {
+  it("recognizes Bun standalone executables as packaged runtimes", () => {
+    expect(isPackaged({ pkg: undefined, bunStandalone: true })).toBe(true)
+    expect(isPackaged({ pkg: undefined, bunStandalone: false })).toBe(false)
+  })
+
+  it("keeps recognizing legacy pkg executables during the transition", () => {
+    expect(isPackaged({ pkg: {}, bunStandalone: false })).toBe(true)
+  })
+
   it("self-execs the binary with COGNIA_ROLE=sidecar when packaged", () => {
     const t = resolveSpawnTarget("/dist/sidecar/claude-host.mjs", { PATH: "/usr/bin" }, true)
     expect(t.command).toBe(process.execPath)
@@ -104,7 +116,82 @@ describe("resolveSpawnTarget", () => {
   })
 })
 
+describe("resolveBunSpawn", () => {
+  it("selects only a callable Bun spawn capability", () => {
+    const spawn = jest.fn(() => ({ native: true }))
+    const resolved = resolveBunSpawn({ spawn: spawn as never })
+
+    expect(
+      resolved?.(["command"], {
+        cwd: "/workspace",
+        env: {},
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+      })
+    ).toEqual({ native: true })
+    expect(spawn).toHaveBeenCalledTimes(1)
+    expect(resolveBunSpawn({ spawn: "not-callable" as never })).toBeUndefined()
+    expect(resolveBunSpawn(undefined)).toBeUndefined()
+  })
+})
+
+describe("adaptBunSubprocess", () => {
+  it("keeps Bun's native stdin pipe writable and flushes every protocol frame", async () => {
+    const write = jest.fn()
+    const flush = jest.fn()
+    const end = jest.fn()
+    const kill = jest.fn()
+    const unref = jest.fn()
+    let resolveExit!: (code: number) => void
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve
+    })
+    const child = adaptBunSubprocess({
+      stdin: { write, flush, end },
+      stdout: new ReadableStream<Uint8Array>(),
+      exited,
+      kill,
+      unref,
+    })
+    const onExit = jest.fn()
+    child.on("exit", onExit)
+
+    child.stdin?.write('{"type":"send"}\n')
+    expect(write).toHaveBeenCalledWith('{"type":"send"}\n')
+    expect(flush).toHaveBeenCalledTimes(1)
+    expect(onExit).not.toHaveBeenCalled()
+
+    resolveExit(0)
+    await exited
+    await Promise.resolve()
+    expect(onExit).toHaveBeenCalledWith(0)
+    child.kill()
+    expect(end).toHaveBeenCalledTimes(1)
+    expect(kill).toHaveBeenCalled()
+    expect(unref).toHaveBeenCalled()
+  })
+})
+
 describe("bootstrapSidecar", () => {
+  it("does not require an adjacent sidecar script in a standalone executable", async () => {
+    const f = fakeChild()
+    let spawnedScript = ""
+    const spawn: SpawnFn = (script) => {
+      spawnedScript = script
+      setImmediate(() => f.stdout.write(JSON.stringify({ type: "ready" }) + "\n"))
+      return f.child
+    }
+    const boot = await bootstrapSidecar({
+      spawn,
+      packaged: true,
+      execPath: "/dist/cognia-agent",
+      cwd: "/workspace",
+    })
+    expect(spawnedScript).toBe("/dist/cognia-agent")
+    await boot.shutdown()
+  })
+
   it("installs the StdioTransport process-wide and resolves on ready", async () => {
     const f = fakeChild()
     const spawn: SpawnFn = () => {

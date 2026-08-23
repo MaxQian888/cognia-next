@@ -9,7 +9,7 @@ jest.mock("next-intl", () => ({
 }))
 
 jest.mock("@/lib/ai/agent/external/presets", () => ({
-  getAvailablePresets: jest.fn(() => ["claude-code", "codex"]),
+  getRunnablePresets: jest.fn(() => ["claude-code", "codex"]),
   getPresetDisplayInfo: jest.fn((id: string) => ({
     name: id === "claude-code" ? "Claude Code" : "Codex",
     description: "",

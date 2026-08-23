@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, Webview};
+use tauri::{AppHandle, Manager, Webview, WebviewWindow};
 
 use crate::cli_bridge::SharedState;
 
@@ -200,7 +200,9 @@ async fn inspect(
     let script = format!(
         "(async()=>JSON.stringify(await window.__cogniaAgentDebug.inspect({reference},{operation},{args})))()"
     );
-    let value = eval_json(&webview, &script).await.map_err(eval_error)?;
+    let value = eval_json_async(&webview, &script)
+        .await
+        .map_err(eval_error)?;
     Ok(Json(json!({
         "ok": true,
         "window": request.window,
@@ -218,7 +220,9 @@ async fn act(State(state): State<SharedState>, Json(request): Json<ActRequest>) 
     let script = format!(
         "(async()=>{{const result=await window.__cogniaAgentDebug.act({reference},{action},{args});const snapshot=window.__cogniaAgentDebug.snapshot({{includeText:false}});return JSON.stringify({{result,snapshot}});}})()"
     );
-    let value = eval_json(&webview, &script).await.map_err(eval_error)?;
+    let value = eval_json_async(&webview, &script)
+        .await
+        .map_err(eval_error)?;
     Ok(Json(
         json!({ "ok": true, "window": request.window, "act": value }),
     ))
@@ -245,7 +249,9 @@ async fn evaluate(
     let script = format!(
         "(async()=>{{const value=await (0,eval)({expression});return JSON.stringify(window.__cogniaAgentDebug.serialize(value));}})()"
     );
-    let value = eval_json(&webview, &script).await.map_err(eval_error)?;
+    let value = eval_json_async(&webview, &script)
+        .await
+        .map_err(eval_error)?;
     Ok(Json(
         json!({ "ok": true, "window": request.window, "value": value }),
     ))
@@ -316,10 +322,7 @@ async fn screenshot(
                 format!("webview window not found: {}", query.window),
             )
         })?;
-    let position = window.outer_position().map_err(internal_error)?;
-    let size = window.outer_size().map_err(internal_error)?;
-    let scale = window.scale_factor().map_err(internal_error)?;
-    let region = logical_region(position.x, position.y, size.width, size.height, scale)?;
+    let region = webview_window_region(&window)?;
     let capture = tokio::task::spawn_blocking(move || {
         crate::automation::platform::shared::screenshot::capture_global_region(
             region,
@@ -327,11 +330,49 @@ async fn screenshot(
         )
     })
     .await
-    .map_err(internal_error)?
     .map_err(internal_error)?;
+    let capture = match capture {
+        Ok(capture) => capture,
+        Err(error) if screenshot_needs_recenter(&error) => {
+            window.show().map_err(internal_error)?;
+            window.unminimize().map_err(internal_error)?;
+            window
+                .set_position(tauri::LogicalPosition::new(0.0, 0.0))
+                .map_err(internal_error)?;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let region = webview_window_region(&window)?;
+            tokio::task::spawn_blocking(move || {
+                crate::automation::platform::shared::screenshot::capture_global_region(
+                    region,
+                    crate::automation::types::ImageFormat::Png,
+                )
+            })
+            .await
+            .map_err(internal_error)?
+            .map_err(internal_error)?
+        }
+        Err(error) => return Err(internal_error(error)),
+    };
     Ok(Json(
         json!({ "ok": true, "window": query.window, "screenshot": capture }),
     ))
+}
+
+fn webview_window_region(
+    window: &WebviewWindow,
+) -> Result<crate::automation::types::Rect, (StatusCode, Json<Value>)> {
+    let position = window.outer_position().map_err(internal_error)?;
+    let size = window.outer_size().map_err(internal_error)?;
+    let scale = window.scale_factor().map_err(internal_error)?;
+    logical_region(position.x, position.y, size.width, size.height, scale)
+}
+
+fn screenshot_needs_recenter(error: &crate::automation::types::AutomationError) -> bool {
+    matches!(
+        error,
+        crate::automation::types::AutomationError::BackendError { message }
+            if message == "capture region falls outside every monitor"
+    )
 }
 
 async fn logs(Query(query): Query<LogsQuery>) -> ApiResult {
@@ -395,6 +436,57 @@ fn unwrap_js_string(raw: String) -> String {
     serde_json::from_str::<String>(&raw).unwrap_or(raw)
 }
 
+fn async_eval_start_script(request_id: &str, expression: &str) -> String {
+    let request_id = serde_json::to_string(request_id).expect("request id is serializable");
+    format!(
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults||(window.__cogniaAgentDebugAsyncResults=Object.create(null));results[id]={{status:\"pending\"}};Promise.resolve().then(async()=>{{try{{results[id]={{status:\"fulfilled\",value:await ({expression})}}}}catch(error){{results[id]={{status:\"rejected\",error:String((error&&(error.stack||error.message))||error)}}}}}});return JSON.stringify({{status:\"started\"}})}})()"
+    )
+}
+
+fn async_eval_poll_script(request_id: &str) -> String {
+    let request_id = serde_json::to_string(request_id).expect("request id is serializable");
+    format!(
+        "(()=>{{const id={request_id};const results=window.__cogniaAgentDebugAsyncResults;const result=results&&results[id];if(!result)return JSON.stringify({{status:\"missing\"}});if(result.status===\"pending\")return JSON.stringify(result);delete results[id];return JSON.stringify(result)}})()"
+    )
+}
+
+async fn eval_json_async(webview: &Webview, expression: &str) -> Result<Value, String> {
+    let request_id = uuid::Uuid::new_v4().simple().to_string();
+    let start = eval_json(webview, &async_eval_start_script(&request_id, expression)).await?;
+    if start["status"] != "started" {
+        return Err("webview async evaluation did not start".to_string());
+    }
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("webview async evaluation timed out".to_string());
+        }
+        let result = eval_json(webview, &async_eval_poll_script(&request_id)).await?;
+        match result["status"].as_str() {
+            Some("pending") => tokio::time::sleep(Duration::from_millis(25)).await,
+            Some("fulfilled") => {
+                let raw = result["value"].as_str().ok_or_else(|| {
+                    "webview async evaluation returned a non-string result".to_string()
+                })?;
+                return serde_json::from_str(raw).map_err(|error| {
+                    format!("invalid JSON from async webview evaluation: {error}")
+                });
+            }
+            Some("rejected") => {
+                return Err(result["error"]
+                    .as_str()
+                    .unwrap_or("webview async evaluation failed")
+                    .to_string());
+            }
+            Some("missing") => {
+                return Err("webview async evaluation result disappeared".to_string());
+            }
+            _ => return Err("webview async evaluation returned an invalid state".to_string()),
+        }
+    }
+}
+
 fn validate_ref(reference: &str) -> Result<(), (StatusCode, Json<Value>)> {
     let Some((generation, element)) = reference
         .strip_prefix('g')
@@ -415,7 +507,7 @@ fn validate_ref(reference: &str) -> Result<(), (StatusCode, Json<Value>)> {
 }
 
 fn validate_action(action: &str) -> Result<(), (StatusCode, Json<Value>)> {
-    const ACTIONS: [&str; 16] = [
+    const ACTIONS: &[&str] = &[
         "click",
         "dblclick",
         "focus",
@@ -594,9 +686,29 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_actions() {
-        assert!(validate_action("fill").is_ok());
-        assert!(validate_action("setInputFiles").is_ok());
+    fn validates_supported_actions_and_rejects_unknown_ones() {
+        for action in [
+            "click",
+            "dblclick",
+            "focus",
+            "blur",
+            "hover",
+            "fill",
+            "type",
+            "press",
+            "check",
+            "uncheck",
+            "select",
+            "scrollIntoView",
+            "dispatchEvent",
+            "dragTo",
+            "setInputFiles",
+        ] {
+            assert!(
+                validate_action(action).is_ok(),
+                "action {action} should be supported"
+            );
+        }
         assert!(validate_action("remove").is_err());
     }
 
@@ -622,12 +734,36 @@ mod tests {
     }
 
     #[test]
+    fn recenters_only_offscreen_window_screenshot_failures() {
+        use crate::automation::types::AutomationError;
+
+        assert!(screenshot_needs_recenter(&AutomationError::BackendError {
+            message: "capture region falls outside every monitor".into(),
+        }));
+        assert!(!screenshot_needs_recenter(&AutomationError::BackendError {
+            message: "monitor capture failed".into(),
+        }));
+    }
+
+    #[test]
     fn unwraps_wry_string_results_once() {
         assert_eq!(
             unwrap_js_string("\"{\\\"ok\\\":true}\"".to_string()),
             "{\"ok\":true}"
         );
         assert_eq!(unwrap_js_string("true".to_string()), "true");
+    }
+
+    #[test]
+    fn async_eval_scripts_start_and_collect_promise_results() {
+        let start = async_eval_start_script("request-1", "work()");
+        assert!(start.contains("Promise.resolve"));
+        assert!(start.contains("await (work())"));
+        assert!(start.contains("request-1"));
+
+        let poll = async_eval_poll_script("request-1");
+        assert!(poll.contains("delete results[id]"));
+        assert!(poll.contains("request-1"));
     }
 
     #[test]

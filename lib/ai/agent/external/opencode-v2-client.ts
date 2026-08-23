@@ -1,4 +1,5 @@
 import type { OpencodeClient, SessionV2Info } from "@opencode-ai/sdk/v2/client"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { discoverOpenCodeV2ViaSidecar } from "@/lib/claude/feature-call"
 import type {
@@ -10,15 +11,17 @@ import type {
   ExternalAgentExecutionOptions,
   ExternalAgentMessage,
   ExternalAgentSession,
+  ExternalAgentTokenUsage,
 } from "@/types/agent/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { buildOpenCodeFileParts, hasNoLeakingOpenCodePromptInput } from "./opencode-client"
 import {
   isExplicitlyUnsupportedCapabilityError,
   type ExternalAgentCompactionCapability,
   type ExternalAgentCompactionOptions,
 } from "./session-capabilities"
 
-const SUPPORTED_SERVICE_VERSION = /^2\./
+const PINNED_PREVIEW_SERVICE_VERSION = "2.0.0-beta.1"
 
 type SdkResult<T> = {
   data?: T
@@ -101,6 +104,21 @@ function messageText(message: ExternalAgentMessage): string {
     .join("\n")
 }
 
+function stepTokenUsage(data: Record<string, unknown> | undefined): ExternalAgentTokenUsage {
+  const tokens = readRecord(data?.tokens)
+  const cache = readRecord(tokens?.cache)
+  const input = typeof tokens?.input === "number" ? tokens.input : 0
+  const output = typeof tokens?.output === "number" ? tokens.output : 0
+  const reasoning = typeof tokens?.reasoning === "number" ? tokens.reasoning : 0
+  return {
+    promptTokens: input,
+    completionTokens: output,
+    totalTokens: input + output + reasoning,
+    cacheReadTokens: typeof cache?.read === "number" ? cache.read : undefined,
+    cacheWriteTokens: typeof cache?.write === "number" ? cache.write : undefined,
+  }
+}
+
 export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
   readonly protocol = "opencode-v2"
 
@@ -115,9 +133,9 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     this.nativeCompactionUnsupported = false
     try {
       const discovery = await discoverOpenCodeV2ViaSidecar()
-      if (!SUPPORTED_SERVICE_VERSION.test(discovery.version)) {
+      if (discovery.version !== PINNED_PREVIEW_SERVICE_VERSION) {
         throw new Error(
-          `Incompatible OpenCode V2 service ${discovery.version}; start a compatible 2.x beta with \`opencode2 service start\`.`
+          `Incompatible OpenCode V2 service ${discovery.version}; Cognia's pinned preview contract requires ${PINNED_PREVIEW_SERVICE_VERSION}. Current OpenCode V2 builds use a different protocol surface.`
         )
       }
       const { createOpencodeClient } = await import("@opencode-ai/sdk/v2/client")
@@ -240,6 +258,24 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
     if (!session) throw new Error(`Session not found: ${sessionId}`)
     this.updateSession(sessionId, { status: "executing" })
 
+    if (!hasNoLeakingOpenCodePromptInput(message)) {
+      this.updateSession(sessionId, { status: "active" })
+      throw new Error("OpenCode V2 outbound prompt blocked by the PII gate")
+    }
+
+    const files = buildOpenCodeFileParts(message.content).map((file) => ({
+      uri: file.url,
+      ...(file.filename ? { name: file.filename } : {}),
+    }))
+    const prompt = {
+      text: messageText(message),
+      ...(files.length > 0 ? { files } : {}),
+    }
+    if (!hasNoLeakingPiiDeep(prompt)) {
+      this.updateSession(sessionId, { status: "active" })
+      throw new Error("OpenCode V2 outbound prompt blocked by the PII gate")
+    }
+
     const subscription = await client.v2.session.events({ sessionID: sessionId })
     const stream = subscription.stream
     const onAbort = () => void this.cancel(sessionId)
@@ -250,16 +286,63 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
           {
             sessionID: sessionId,
             id: message.id,
-            prompt: { text: messageText(message) },
+            prompt,
             delivery: "queue",
           },
           options?.signal ? { signal: options.signal } : undefined
         )
       )
-      for await (const raw of stream) {
-        const mapped = this.mapEvent(sessionId, raw)
-        for (const event of mapped) yield event
-        if (mapped.some((event) => event.type === "done")) break
+      const iterator = stream[Symbol.asyncIterator]()
+      let completion: Promise<{ kind: "complete" }> | undefined
+      let tokenUsage: ExternalAgentTokenUsage | undefined
+      let terminalEventEmitted = false
+      const waitForIdle = () => {
+        completion ??= (async () => {
+          unwrap(await client.v2.session.wait({ sessionID: sessionId }))
+          return { kind: "complete" as const }
+        })()
+        return completion
+      }
+
+      try {
+        while (true) {
+          const nextEvent = iterator.next().then((result) => ({ kind: "event" as const, result }))
+          const next = completion ? await Promise.race([nextEvent, completion]) : await nextEvent
+          if (next.kind === "complete") break
+          if (next.result.done) {
+            await waitForIdle()
+            break
+          }
+
+          const raw = next.result.value
+          const event = readRecord(raw)
+          const eventType = readString(event?.type)
+          const eventData = readRecord(event?.properties) ?? readRecord(event?.data)
+          if (eventType === "session.next.step.ended") {
+            tokenUsage = stepTokenUsage(eventData)
+            void waitForIdle()
+            continue
+          }
+
+          const mapped = this.mapEvent(sessionId, raw)
+          for (const event of mapped) yield event
+          if (mapped.some((event) => event.type === "done")) {
+            terminalEventEmitted = true
+            break
+          }
+        }
+      } finally {
+        await iterator.return?.()
+      }
+      if (!terminalEventEmitted) {
+        yield {
+          type: "done",
+          sessionId,
+          timestamp: new Date(),
+          success: true,
+          stopReason: "end_turn",
+          ...(tokenUsage ? { tokenUsage } : {}),
+        }
       }
     } finally {
       options?.signal?.removeEventListener("abort", onAbort)
@@ -539,29 +622,8 @@ export class OpenCodeV2ClientAdapter extends BaseProtocolAdapter {
             success: false,
           },
         ]
-      case "session.next.step.ended": {
-        const tokens = readRecord(data?.tokens)
-        const cache = readRecord(tokens?.cache)
-        const input = typeof tokens?.input === "number" ? tokens.input : 0
-        const output = typeof tokens?.output === "number" ? tokens.output : 0
-        const reasoning = typeof tokens?.reasoning === "number" ? tokens.reasoning : 0
-        return [
-          {
-            type: "done",
-            sessionId,
-            timestamp,
-            success: true,
-            stopReason: "end_turn",
-            tokenUsage: {
-              promptTokens: input,
-              completionTokens: output,
-              totalTokens: input + output + reasoning,
-              cacheReadTokens: typeof cache?.read === "number" ? cache.read : undefined,
-              cacheWriteTokens: typeof cache?.write === "number" ? cache.write : undefined,
-            },
-          },
-        ]
-      }
+      case "session.next.step.ended":
+        return []
       default:
         return []
     }

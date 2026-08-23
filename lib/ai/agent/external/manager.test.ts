@@ -239,6 +239,10 @@ class MockAdapter {
     return this.authRequired
   }
   async authenticate() {}
+  getTerminalAuthState() {
+    return { methodId: "terminal", status: "running" as const }
+  }
+  async cancelTerminalAuthentication() {}
   getAcpInitializationMetadata() {
     return this.acpInit?.() ?? {}
   }
@@ -334,6 +338,15 @@ describe("addAgent / removeAgent / connect", () => {
     expect(m.getAgent("agent-1")).toBeDefined()
     expect(m.getConnectedAgents().length).toBe(1)
     expect(m.hasConnectedAgents()).toBe(true)
+  })
+
+  it("registers an enabled agent without connecting when requested", async () => {
+    const m = freshManager()
+    const instance = await m.addAgent(buildBaseConfig(), { connect: false })
+
+    expect(instance.connectionStatus).toBe("disconnected")
+    expect(m.getAgent("agent-1")).toBeDefined()
+    expect(currentMock.connectImpl).not.toHaveBeenCalled()
   })
 
   it("retries a connection when the managed process exits during startup", async () => {
@@ -504,6 +517,93 @@ describe("Capability helpers (unsupported / ok / error)", () => {
     expect(m.isAuthenticationRequired("agent-1")).toBe(false)
     ;(currentMock as unknown as { authenticate: undefined }).authenticate = undefined
     await expect(m.authenticate("agent-1", "id")).rejects.toThrow()
+  })
+
+  it("projects and cancels terminal authentication through the adapter", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    expect(m.getTerminalAuthState("agent-1")).toEqual({
+      methodId: "terminal",
+      status: "running",
+    })
+    await expect(m.cancelTerminalAuthentication("agent-1")).resolves.toBeUndefined()
+    expect(m.getTerminalAuthState("ghost")).toBeUndefined()
+  })
+
+  it("requires explicit confirmation before provider credentials can leave Cognia", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await expect(
+      m.setProvider("agent-1", {
+        providerId: "private",
+        apiType: "openai_compatible",
+        baseUrl: "https://provider.example/v1",
+        headers: { Authorization: "Bearer secret" },
+      } as never)
+    ).rejects.toThrow(/Explicit confirmation/)
+  })
+
+  it("routes Project Editor document lifecycle only to active NES sessions", async () => {
+    const startNes = jest.fn(async () => ({ sessionId: "nes-1" }))
+    const closeNes = jest.fn(async () => ({}))
+    const didOpenDocument = jest.fn()
+    const didChangeDocument = jest.fn()
+    const didSaveDocument = jest.fn()
+    const didFocusDocument = jest.fn()
+    const didCloseDocument = jest.fn()
+    Object.assign(currentMock, {
+      startNes,
+      closeNes,
+      didOpenDocument,
+      didChangeDocument,
+      didSaveDocument,
+      didFocusDocument,
+      didCloseDocument,
+    })
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.startNes("agent-1", { workspaceUri: "file:///repo" })
+
+    m.publishDidOpenDocument({
+      uri: "file:///repo/a.ts",
+      languageId: "typescript",
+      version: 1,
+      text: "x",
+    })
+    m.publishDidChangeDocument({
+      uri: "file:///repo/a.ts",
+      version: 2,
+      contentChanges: [{ text: "y" }],
+    })
+    m.publishDidSaveDocument({ uri: "file:///repo/a.ts" })
+    m.publishDidFocusDocument({
+      uri: "file:///repo/a.ts",
+      version: 2,
+      position: { line: 0, character: 0 },
+      visibleRange: {
+        start: { line: 0, character: 0 },
+        end: { line: 1, character: 0 },
+      },
+    })
+    m.publishDidCloseDocument({ uri: "file:///repo/a.ts" })
+
+    expect(didOpenDocument).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "nes-1" }))
+    expect(didChangeDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "nes-1", version: 2 })
+    )
+    expect(didSaveDocument).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "nes-1" }))
+    expect(didFocusDocument).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "nes-1" }))
+    expect(didCloseDocument).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "nes-1" }))
+
+    await m.closeNes("agent-1", { sessionId: "nes-1" } as never)
+    didOpenDocument.mockClear()
+    m.publishDidOpenDocument({
+      uri: "file:///repo/b.ts",
+      languageId: "typescript",
+      version: 1,
+      text: "z",
+    })
+    expect(didOpenDocument).not.toHaveBeenCalled()
   })
 
   it("respondToPermission throws when agent missing", async () => {

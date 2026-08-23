@@ -303,6 +303,28 @@ describe("createAgentSession", () => {
     expect(sendOptions.toolExecutionTimeoutMs).toBe(45_000)
   })
 
+  it("injects a definition output schema through the native SDK output format", async () => {
+    const capture = jest.fn().mockResolvedValue(result("ok"))
+    const schema = { type: "object", properties: { summary: { type: "string" } } }
+    const session = createAgentSession({
+      config: cfg(),
+      sessionId: "s_structured",
+      home: HOME,
+      outputSchema: schema,
+      bootstrap: jest
+        .fn()
+        .mockResolvedValue({ transport: {}, shutdown: jest.fn() } as unknown as SidecarBootstrap),
+      resolveOptions: async () => ({ model: "m", provider: "anthropic" }) as never,
+      capture,
+      transcriptFs: memFs().fsx,
+    })
+    await session.send("hi", { gate: createPermissionGate({ yes: true }) })
+    expect((capture.mock.calls[0][2] as SendOptions).claudeAgentSdk?.outputFormat).toEqual({
+      type: "json_schema",
+      schema,
+    })
+  })
+
   it("passes multimodal content (from buildContent) to capture, not the raw string", async () => {
     const capture = jest.fn().mockResolvedValue(result("ok"))
     const blocks = [

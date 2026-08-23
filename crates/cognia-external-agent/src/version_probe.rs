@@ -153,7 +153,9 @@ pub async fn probe_runtime_version(runtime_id: &str) -> Result<RuntimeVersionPro
 
     let Some(resolved) = super::command_resolver::resolve_command_path(command) else {
         return Ok(RuntimeVersionProbe {
-            detail: Some(format!("{command} is not on PATH or any known install root")),
+            detail: Some(format!(
+                "{command} is not on PATH or any known install root"
+            )),
             ..RuntimeVersionProbe::default()
         });
     };

@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process"
-import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -14,6 +13,8 @@ import {
   dshPlatformKey,
 } from "@/lib/ai/agent/external/dsh-runtime-install"
 import type { DshProfileId, DshRuntimeChannel } from "@/types/agent/dsh-runtime-channel"
+
+import { createRuntimeHasher, hashHex } from "../crypto-hasher"
 
 /**
  * Installs the Cognia-owned DeepSeek Harness runtime into an isolated home.
@@ -68,7 +69,7 @@ export function dshHomeFor(dataRoot: string): string {
 }
 
 function sha256(data: string | Buffer): string {
-  return createHash("sha256").update(data).digest("hex")
+  return hashHex("sha256", data)
 }
 
 /**
@@ -78,7 +79,7 @@ function sha256(data: string | Buffer): string {
  * bytes between two files cannot produce the same digest.
  */
 export function computeCompositionDigest(dir: string): string {
-  const hash = createHash("sha256")
+  const hash = createRuntimeHasher("sha256")
   for (const name of COMPOSITION_DIGEST_FILES) {
     const content = fs.readFileSync(path.join(dir, name))
     hash.update(name).update("\0").update(String(content.length)).update("\0").update(content)

@@ -12,7 +12,7 @@ describe("modelPresetOptions", () => {
       modelPresetOptions()
         .map((option) => option.id)
         .sort()
-    ).toEqual(anthropic?.models.map((model) => model.id).sort())
+    ).toEqual(anthropic?.models?.map((model) => model.id).sort())
   })
 
   it("leads with the catalog's default", () => {

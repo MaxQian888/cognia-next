@@ -65,6 +65,14 @@ function streamOf<T>(items: T[]): AsyncStream<T> {
   }
 }
 
+function failingStream(error: Error): AsyncStream<never> {
+  return {
+    stream: (async function* () {
+      throw error
+    })(),
+  }
+}
+
 /** A fully-populated fake OpencodeClient where every call resolves `{ data }`. */
 function makeFakeClient(overrides: Record<string, unknown> = {}) {
   const ok = (data: unknown) => jest.fn().mockResolvedValue({ data })
@@ -1066,6 +1074,25 @@ describe("OpenCodeClientAdapter — session + delegating ops", () => {
     await expect(a.closeSession("s1")).resolves.toBeUndefined()
   })
 
+  it("maps OpenCode millisecond timestamps without scaling them again", async () => {
+    const created = 1_750_000_000_000
+    const updated = 1_750_000_060_000
+    client.session.create.mockResolvedValueOnce({
+      data: { id: "s-ms", title: "milliseconds", time: { created, updated } },
+    })
+    client.session.list.mockResolvedValueOnce({
+      data: [{ id: "s-ms", title: "milliseconds", time: { created, updated } }],
+    })
+
+    const session = await a.createSession()
+    const [listed] = await a.listSessions()
+
+    expect(session.createdAt.toISOString()).toBe(new Date(created).toISOString())
+    expect(session.lastActivityAt.toISOString()).toBe(new Date(updated).toISOString())
+    expect(listed.createdAt).toBe(new Date(created).toISOString())
+    expect(listed.updatedAt).toBe(new Date(updated).toISOString())
+  })
+
   it("responds to permission requests via the SDK endpoint", async () => {
     await a.respondToPermission("s1", {
       requestId: "perm1",
@@ -1285,9 +1312,11 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     expect(options.some((o) => o.category === "_agent")).toBe(true)
     expect(a.getSessionModels(session.id)).toBeDefined()
 
-    // setConfigOption round-trips through config.update + refresh.
+    // Model config is session-scoped and must not mutate the server default.
+    client.config.update.mockClear()
     await a.setConfigOption(session.id, "model", "anthropic/claude-x")
-    expect(client.config.update).toHaveBeenCalled()
+    expect(client.config.update).not.toHaveBeenCalled()
+    expect(a.getSessionModels(session.id)?.currentModelId).toBe("anthropic/claude-x")
     // No "mode" category exists → setSessionMode is a no-op.
     await expect(a.setSessionMode(session.id, "default")).resolves.toBeUndefined()
   })
@@ -1331,6 +1360,29 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     )
   })
 
+  it("keeps setSessionModel scoped to the session instead of mutating global config", async () => {
+    const client = richClient()
+    client.event.subscribe = jest.fn().mockResolvedValue(streamOf([]))
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const a = new OpenCodeClientAdapter()
+    await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
+    const session = await a.createSession()
+    client.config.update.mockClear()
+
+    await a.setSessionModel(session.id, "anthropic/claude-x")
+    await collect(a.prompt(session.id, textMessage("hi")))
+
+    expect(client.config.update).not.toHaveBeenCalled()
+    expect(a.getSessionModels(session.id)?.currentModelId).toBe("anthropic/claude-x")
+    expect(client.session.promptAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          model: { providerID: "anthropic", modelID: "claude-x" },
+        }),
+      })
+    )
+  })
+
   it("falls back to a synchronous prompt and emits events from the message", async () => {
     const client = makeFakeClient()
     client.event.subscribe = jest.fn().mockResolvedValue(streamOf([]))
@@ -1365,6 +1417,69 @@ describe("OpenCodeClientAdapter — capabilities, config, fallback", () => {
     )
     expect(client.session.prompt).toHaveBeenCalled()
   })
+
+  it("does not resubmit an accepted async prompt when the event stream fails", async () => {
+    const client = makeFakeClient()
+    client.event.subscribe = jest.fn().mockResolvedValue(failingStream(new Error("stream lost")))
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const a = new OpenCodeClientAdapter()
+    await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
+    const session = await a.createSession()
+
+    const out = await collect(a.prompt(session.id, textMessage("hi")))
+
+    expect(client.session.promptAsync).toHaveBeenCalledTimes(1)
+    expect(client.session.prompt).not.toHaveBeenCalled()
+    expect(out).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "error", error: "stream lost" }),
+        expect.objectContaining({ type: "done", success: false }),
+      ])
+    )
+  })
+
+  it("blocks PII-bearing prompts before either OpenCode prompt endpoint is called", async () => {
+    const client = makeFakeClient()
+    mockCreateOpencodeClient.mockReturnValue(client)
+    const a = new OpenCodeClientAdapter()
+    await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
+    const session = await a.createSession()
+
+    await expect(
+      collect(a.prompt(session.id, textMessage("email alice@example.com")))
+    ).rejects.toThrow(/PII gate/i)
+    expect(client.session.promptAsync).not.toHaveBeenCalled()
+    expect(client.session.prompt).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { encoding: "utf-8" as const, content: "alice@example.com" },
+    {
+      encoding: "base64" as const,
+      content: Buffer.from("alice@example.com", "utf-8").toString("base64"),
+    },
+  ])(
+    "blocks PII in $encoding text-file attachments before sending",
+    async ({ encoding, content }) => {
+      const client = makeFakeClient()
+      mockCreateOpencodeClient.mockReturnValue(client)
+      const a = new OpenCodeClientAdapter()
+      await a.connect(buildConfig({ network: { endpoint: "http://x" } }))
+      const session = await a.createSession()
+      const message = textMessage("inspect the attachment")
+      message.content.push({
+        type: "file",
+        path: "/tmp/contacts.txt",
+        mimeType: "text/plain",
+        encoding,
+        content,
+      })
+
+      await expect(collect(a.prompt(session.id, message))).rejects.toThrow(/PII gate/i)
+      expect(client.session.promptAsync).not.toHaveBeenCalled()
+      expect(client.session.prompt).not.toHaveBeenCalled()
+    }
+  )
 
   it("emits an error event when both async and sync prompts fail", async () => {
     const client = makeFakeClient()

@@ -858,6 +858,11 @@ export async function getSidecarStatus(): Promise<{ ready: boolean }> {
   return transport.call<{ ready: boolean }>("claude_sidecar_status")
 }
 
+/** Start the desktop Agent Host and resolve after its ready handshake. */
+export async function ensureSidecarReady(): Promise<{ ready: boolean }> {
+  return transport.call<{ ready: boolean }>("agent_start")
+}
+
 export async function setApiKey(key: string | null): Promise<void> {
   await transport.call("claude_set_api_key", { key })
 }

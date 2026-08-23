@@ -13,9 +13,9 @@
  * the agent's conversation for changes that do not alter what the session means.
  */
 
-import { createHash } from "node:crypto"
-
 import type { McpServer, SendOptions } from "@cognia/agent-config-types"
+
+import { hashHex } from "../runtime/crypto-hasher"
 
 export interface ContextVersionInput {
   sendOptions: SendOptions
@@ -86,5 +86,5 @@ export function contextVersionProjection(input: ContextVersionInput): Record<str
 /** Hash the projection into a short, comparable context version. */
 export function hashContextVersion(input: ContextVersionInput): string {
   const json = JSON.stringify(contextVersionProjection(input))
-  return createHash("sha256").update(json).digest("hex").slice(0, 16)
+  return hashHex("sha256", json).slice(0, 16)
 }

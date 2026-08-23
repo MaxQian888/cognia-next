@@ -1,7 +1,7 @@
 {
   "$schema": "./agent-sdk-surface.schema.json",
   "schemaVersion": 1,
-  "sdkVersion": "0.3.220",
+  "sdkVersion": "0.3.227",
   "generatedBy": "pnpm check:sdk-surface:write",
   "surface": {
     "options": {
@@ -18,28 +18,32 @@
         "capability": "subagents.native"
       },
       "agentProgressSummaries": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "observability.child"
       },
       "agents": {
         "status": "supported",
         "capability": "subagents.native"
       },
       "allowDangerouslySkipPermissions": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "permissions.set-mode"
       },
       "allowedTools": {
         "status": "supported",
         "capability": "tools.ordinary"
       },
       "betas": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "beta-features"
       },
       "canUseTool": {
         "status": "supported",
         "capability": "permissions.interrupt-resume"
       },
       "continue": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.resume"
       },
       "cwd": {
         "status": "supported",
@@ -62,7 +66,8 @@
         "capability": "thinking"
       },
       "enableFileCheckpointing": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "checkpoint"
       },
       "env": {
         "status": "supported",
@@ -77,7 +82,8 @@
         "note": "argv for the spawned runtime"
       },
       "extraArgs": {
-        "status": "planned"
+        "status": "supported",
+        "note": "restricted to the reviewed content-free allowlist at the sidecar boundary"
       },
       "fallbackModel": {
         "status": "supported",
@@ -96,14 +102,16 @@
         "capability": "hooks.lifecycle"
       },
       "includeHookEvents": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "hooks.lifecycle"
       },
       "includePartialMessages": {
         "status": "supported",
         "capability": "streaming"
       },
       "loadTimeoutMs": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "context-management"
       },
       "managedSettings": {
         "status": "host-only",
@@ -130,13 +138,16 @@
         "capability": "set-model"
       },
       "onElicitation": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "input.elicitation"
       },
       "onUserDialog": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "input.dialog"
       },
       "outputFormat": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "output.structured"
       },
       "pathToClaudeCodeExecutable": {
         "status": "host-only",
@@ -147,38 +158,52 @@
         "capability": "permissions.set-mode"
       },
       "permissionPromptToolName": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "permissions.interrupt-resume"
       },
       "persistSession": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.store"
       },
       "planModeInstructions": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "context-management"
       },
       "plugins": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "plugins.native"
       },
       "promptSuggestions": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "observability.child"
       },
       "resume": {
         "status": "supported",
         "capability": "session.resume"
       },
+      "resumeDropsTurn": {
+        "status": "supported",
+        "capability": "session.resume"
+      },
       "resumeSessionAt": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.resume"
       },
       "sandbox": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "sandbox.native"
       },
       "sessionId": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
       },
       "sessionStore": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.store"
       },
       "sessionStoreFlush": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.store"
       },
       "settingSources": {
         "status": "supported",
@@ -188,7 +213,8 @@
         "status": "planned"
       },
       "skills": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "skills.native"
       },
       "spawnClaudeCodeProcess": {
         "status": "host-only",
@@ -203,30 +229,36 @@
         "capability": "mcp"
       },
       "supportedDialogKinds": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "input.dialog"
       },
       "systemPrompt": {
         "status": "supported",
         "capability": "context-management"
       },
       "taskBudget": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "context-management"
       },
       "thinking": {
         "status": "supported",
         "capability": "thinking"
       },
       "title": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "session.manage"
       },
       "toolAliases": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "tools.ordinary"
       },
       "toolConfig": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "tools.ordinary"
       },
       "tools": {
-        "status": "planned"
+        "status": "supported",
+        "capability": "tools.ordinary"
       }
     },
     "queryMethods": {

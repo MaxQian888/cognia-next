@@ -572,4 +572,56 @@ describe("externalAgentEventToActions", () => {
       )
     ).toEqual({ kind: "activity", phase: "requesting", detail: "Working" })
   })
+
+  it("preserves rich ACP blocks, compaction, and NES without durable binary bodies", () => {
+    expect(
+      externalAgentEventToCanonicalFallback(
+        event({
+          type: "content_block_delta",
+          messageId: "message-1",
+          block: {
+            type: "image",
+            data: "base64-secret-body",
+            mimeType: "image/png",
+            annotations: { audience: ["user"] },
+          },
+        })
+      )
+    ).toEqual({
+      kind: "content-part",
+      partId: "message-1:image",
+      operation: "upsert",
+      part: {
+        type: "custom",
+        customType: "acp:image",
+        summary: "image ACP content block",
+        data: {
+          type: "image",
+          mimeType: "image/png",
+          annotations: { audience: ["user"] },
+        },
+      },
+    })
+    expect(
+      externalAgentEventToCanonicalFallback(
+        event({
+          type: "compaction_update",
+          compaction: {
+            sessionUpdate: "compaction_update",
+            compactionId: "c1",
+            status: "completed",
+          },
+        })
+      )
+    ).toEqual({ kind: "compact", trigger: "auto" })
+    expect(
+      externalAgentEventToCanonicalFallback(
+        event({
+          type: "nes_suggestion",
+          nesSessionId: "nes-1",
+          suggestion: { id: "suggestion-1", operations: [] },
+        })
+      )
+    ).toMatchObject({ kind: "content-part", partId: "nes:nes-1:suggestion-1" })
+  })
 })

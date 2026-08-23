@@ -63,6 +63,32 @@ const IDLE_TIMEOUT_SECS: u64 = 90;
 /// larger than the events channel's 64 KiB but still bounds a hostile peer.
 const MAX_WS_FRAME_BYTES: usize = 256 * 1024;
 
+/// Bound persisted replay state while retaining enough ordered updates for a
+/// long interactive session. Older entries are removed from the front.
+const SESSION_HISTORY_CAP: usize = 2_048;
+const SESSION_HISTORY_BYTES_CAP: usize = 8 * 1024 * 1024;
+
+fn serialized_size(value: &Value) -> usize {
+    serde_json::to_vec(value).map_or(0, |bytes| bytes.len())
+}
+
+fn push_bounded_history(entry: &mut SessionEntry, update: Value) {
+    entry.history_bytes = entry.history_bytes.saturating_add(serialized_size(&update));
+    entry.history.push(update);
+    while entry.history.len() > SESSION_HISTORY_CAP
+        || entry.history_bytes > SESSION_HISTORY_BYTES_CAP
+    {
+        if entry.history.is_empty() {
+            entry.history_bytes = 0;
+            break;
+        }
+        let removed = entry.history.remove(0);
+        entry.history_bytes = entry
+            .history_bytes
+            .saturating_sub(serialized_size(&removed));
+    }
+}
+
 /// Coerce a JSON-RPC response `id` back to the `u64` this server minted for a
 /// server→client request. We always send numeric ids, but a strict-but-quirky
 /// client may echo them stringified (`"5"`); accept that too rather than
@@ -90,6 +116,23 @@ fn normalize_workspace_path(path: &str) -> Result<String, &'static str> {
         return Err("workspace path is outside the registered workspace roots");
     }
     Ok(normalized)
+}
+
+fn normalize_additional_directories(params: &Value) -> Result<Option<Vec<String>>, &'static str> {
+    match params.get("additionalDirectories") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(paths)) => {
+            let mut normalized = Vec::with_capacity(paths.len());
+            for path in paths {
+                let Some(path) = path.as_str() else {
+                    return Err("additionalDirectories must contain only paths");
+                };
+                normalized.push(normalize_workspace_path(path)?);
+            }
+            Ok(Some(normalized))
+        }
+        Some(_) => Err("additionalDirectories must be an array"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -173,6 +216,8 @@ struct AcpConnection {
     authorization_capabilities: Option<Vec<String>>,
     sessions: ConnectionSessions,
     initialized: bool,
+    negotiated_protocol_version: Option<u64>,
+    client_capabilities: Value,
     /// Next id for server→client requests (`session/request_permission`).
     next_out_id: u64,
     /// Outstanding server→client permission requests:
@@ -196,9 +241,19 @@ impl AcpConnection {
             authorization_capabilities,
             sessions: ConnectionSessions::new(),
             initialized: false,
+            negotiated_protocol_version: None,
+            client_capabilities: Value::Null,
             next_out_id: 1,
             pending_permissions: HashMap::new(),
         }
+    }
+
+    fn client_allows_session_update(&self, update: &Value) -> bool {
+        update.get("sessionUpdate").and_then(Value::as_str) != Some("plan")
+            || self
+                .client_capabilities
+                .get("plan")
+                .is_some_and(Value::is_object)
     }
 
     /// Run one companion RPC through the shared dispatch surface, flattening
@@ -238,6 +293,58 @@ impl AcpConnection {
         }
     }
 
+    fn append_history(&mut self, session_id: &str, update: Value) {
+        if let Some(entry) = self.sessions.get_mut(session_id) {
+            push_bounded_history(entry, update);
+        }
+    }
+
+    async fn persist_history(&mut self, session_id: &str) {
+        let Some(entry) = self.sessions.get_mut(session_id) else {
+            return;
+        };
+        let history = entry.history.clone();
+        let updated_at = chrono::Utc::now().to_rfc3339();
+        let update_result = update_catalog(
+            session_id.to_string(),
+            self.account_id.clone(),
+            self.scope.clone(),
+            move |catalog| {
+                catalog.history = history;
+                catalog.updated_at = updated_at;
+            },
+        )
+        .await;
+        if let Err(error) = update_result {
+            log::warn!("ACP session history persistence failed: {error}");
+        }
+    }
+
+    async fn deny_session_permissions(&mut self, session_id: &str) {
+        let pending: Vec<(u64, String)> = self
+            .pending_permissions
+            .iter()
+            .filter(|(_, (pending_session_id, _))| pending_session_id == session_id)
+            .map(|(id, (_, request_id))| (*id, request_id.clone()))
+            .collect();
+        for (id, request_id) in pending {
+            self.pending_permissions.remove(&id);
+            if let Err(message) = self
+                .dispatch(
+                    "claude_approve",
+                    json!({
+                        "session_id": session_id,
+                        "request_id": request_id,
+                        "decision": "deny",
+                    }),
+                )
+                .await
+            {
+                log::warn!("ACP permission cleanup failed: {message}");
+            }
+        }
+    }
+
     /// Handle one inbound JSON-RPC message; returns the outbound messages to
     /// write to the socket (responses, notifications, server→client requests).
     async fn handle_message(&mut self, raw: &str) -> Vec<Value> {
@@ -251,6 +358,13 @@ impl AcpConnection {
                 )];
             }
         };
+        if msg.jsonrpc.as_deref() != Some("2.0") {
+            return vec![types::rpc_error(
+                msg.id.as_ref().unwrap_or(&Value::Null),
+                rpc_error_code::INVALID_REQUEST,
+                "jsonrpc must equal \"2.0\"",
+            )];
+        }
 
         if msg.is_response() {
             return self.handle_permission_response(&msg).await;
@@ -274,10 +388,7 @@ impl AcpConnection {
 
     async fn handle_request(&mut self, id: &Value, method: &str, params: &Value) -> Vec<Value> {
         match method {
-            "initialize" => {
-                self.initialized = true;
-                vec![types::rpc_response(id, types::initialize_result())]
-            }
+            "initialize" => self.handle_initialize(id, params),
             _ if !self.initialized => vec![types::rpc_error(
                 id,
                 rpc_error_code::INVALID_REQUEST,
@@ -307,6 +418,43 @@ impl AcpConnection {
         }
     }
 
+    fn handle_initialize(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+        if self.initialized {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_REQUEST,
+                "initialize may only be called once",
+            )];
+        }
+        let Some(protocol_version) = params.get("protocolVersion").and_then(Value::as_u64) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "initialize requires an integer `protocolVersion`",
+            )];
+        };
+        if protocol_version == 0 {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "protocolVersion must be at least 1",
+            )];
+        }
+        if let Some(capabilities) = params.get("clientCapabilities") {
+            if !capabilities.is_null() && !capabilities.is_object() {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    "clientCapabilities must be an object",
+                )];
+            }
+            self.client_capabilities = capabilities.clone();
+        }
+        self.negotiated_protocol_version = Some(types::ACP_PROTOCOL_VERSION);
+        self.initialized = true;
+        vec![types::rpc_response(id, types::initialize_result())]
+    }
+
     async fn handle_session_new(&mut self, id: &Value, params: &Value) -> Vec<Value> {
         let Some(cwd) = params.get("cwd").and_then(Value::as_str) else {
             return vec![types::rpc_error(
@@ -325,36 +473,30 @@ impl AcpConnection {
                 )]
             }
         };
-        let additional_directories = match params.get("additionalDirectories") {
-            None | Some(Value::Null) => Vec::new(),
-            Some(Value::Array(paths)) => {
-                let mut normalized = Vec::with_capacity(paths.len());
-                for path in paths {
-                    let Some(path) = path.as_str() else {
-                        return vec![types::rpc_error(
-                            id,
-                            rpc_error_code::INVALID_PARAMS,
-                            "additionalDirectories must contain only paths",
-                        )];
-                    };
-                    match normalize_workspace_path(path) {
-                        Ok(path) => normalized.push(path),
-                        Err(message) => {
-                            return vec![types::rpc_error(
-                                id,
-                                rpc_error_code::INVALID_PARAMS,
-                                message,
-                            )]
-                        }
-                    }
-                }
-                normalized
-            }
-            Some(_) => {
+        let additional_directories = match normalize_additional_directories(params) {
+            Ok(paths) => paths.unwrap_or_default(),
+            Err(message) => {
                 return vec![types::rpc_error(
                     id,
                     rpc_error_code::INVALID_PARAMS,
-                    "additionalDirectories must be an array",
+                    message,
+                )]
+            }
+        };
+        if params.get("mcpServers").is_none() {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/new requires `mcpServers`",
+            )];
+        }
+        let mcp_servers = match types::parse_mcp_servers(params.get("mcpServers")) {
+            Ok(servers) => servers,
+            Err(message) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    &message,
                 )]
             }
         };
@@ -362,6 +504,7 @@ impl AcpConnection {
         let entry = SessionEntry {
             cwd: Some(cwd.clone()),
             additional_directories: additional_directories.clone(),
+            mcp_servers: mcp_servers.clone(),
             ..Default::default()
         };
         self.sessions.insert(&session_id, entry);
@@ -378,6 +521,7 @@ impl AcpConnection {
             sdk_session_id: None,
             cwd,
             additional_directories,
+            history: Vec::new(),
             title: None,
             created_at: now.clone(),
             updated_at: now,
@@ -441,8 +585,18 @@ impl AcpConnection {
         {
             return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
         }
-        entry.selected_mode_id = Some(mode_id);
-        vec![types::rpc_response(id, Value::Null)]
+        entry.selected_mode_id = Some(mode_id.clone());
+        let update = types::SessionUpdate::CurrentModeUpdate {
+            current_mode_id: mode_id,
+        };
+        if let Ok(history_update) = serde_json::to_value(&update) {
+            self.append_history(session_id, history_update);
+            self.persist_history(session_id).await;
+        }
+        vec![
+            types::rpc_response(id, Value::Null),
+            types::session_update_notification(session_id, &update),
+        ]
     }
 
     async fn handle_session_set_config_option(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -503,10 +657,18 @@ impl AcpConnection {
             return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
         }
         entry.selected_model_id = Some(model_id.clone());
-        vec![types::rpc_response(
-            id,
-            json!({ "configOptions": types::session_config_options(&model_id) }),
-        )]
+        let config_options = types::session_config_options(&model_id);
+        let update = types::SessionUpdate::ConfigOptionUpdate {
+            config_options: config_options.clone(),
+        };
+        if let Ok(history_update) = serde_json::to_value(&update) {
+            self.append_history(session_id, history_update);
+            self.persist_history(session_id).await;
+        }
+        vec![
+            types::rpc_response(id, json!({ "configOptions": config_options })),
+            types::session_update_notification(session_id, &update),
+        ]
     }
 
     async fn handle_session_set_model(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -617,7 +779,12 @@ impl AcpConnection {
         )]
     }
 
-    async fn restore_catalog_session(&mut self, id: &Value, params: &Value) -> Vec<Value> {
+    async fn restore_catalog_session(
+        &mut self,
+        id: &Value,
+        params: &Value,
+        replay_history: bool,
+    ) -> Vec<Value> {
         let Some(session_id) = params.get("sessionId").and_then(Value::as_str) else {
             return vec![types::rpc_error(
                 id,
@@ -625,21 +792,110 @@ impl AcpConnection {
                 "session lifecycle request requires `sessionId`",
             )];
         };
+        let Some(requested_cwd) = params.get("cwd").and_then(Value::as_str) else {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session load/resume requires `cwd`",
+            )];
+        };
+        let requested_cwd = match normalize_workspace_path(requested_cwd) {
+            Ok(cwd) => cwd,
+            Err(message) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    message,
+                )]
+            }
+        };
+        if replay_history && params.get("mcpServers").is_none() {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session/load requires `mcpServers`",
+            )];
+        }
+        let additional_directories = match normalize_additional_directories(params) {
+            Ok(paths) => paths.unwrap_or_default(),
+            Err(message) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    message,
+                )]
+            }
+        };
+        let mcp_servers = match types::parse_mcp_servers(params.get("mcpServers")) {
+            Ok(servers) => servers,
+            Err(message) => {
+                return vec![types::rpc_error(
+                    id,
+                    rpc_error_code::INVALID_PARAMS,
+                    &message,
+                )]
+            }
+        };
         if self.sessions.contains(session_id) {
-            let entry = self.sessions.get_mut(session_id).unwrap();
-            return vec![types::rpc_response(
+            let (history, selected_mode_id, selected_model_id) = {
+                let entry = self.sessions.get_mut(session_id).unwrap();
+                if entry.cwd.as_deref() != Some(requested_cwd.as_str()) {
+                    return vec![types::rpc_error(
+                        id,
+                        rpc_error_code::INVALID_PARAMS,
+                        "session cwd does not match the active session",
+                    )];
+                }
+                entry.additional_directories = additional_directories.clone();
+                entry.mcp_servers = mcp_servers.clone();
+                (
+                    entry.history.clone(),
+                    entry.selected_mode_id.clone(),
+                    entry.selected_model_id.clone(),
+                )
+            };
+            if let Err(error) = update_catalog(
+                session_id.to_string(),
+                self.account_id.clone(),
+                self.scope.clone(),
+                {
+                    let additional_directories = additional_directories.clone();
+                    move |catalog| {
+                        catalog.lifecycle = "active".to_string();
+                        catalog.additional_directories = additional_directories;
+                    }
+                },
+            )
+            .await
+            {
+                return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
+            }
+            let mut messages = if replay_history {
+                history
+                    .iter()
+                    .filter(|update| self.client_allows_session_update(update))
+                    .map(|update| {
+                        types::rpc_notification(
+                            "session/update",
+                            json!({ "sessionId": session_id, "update": update }),
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            messages.push(types::rpc_response(
                 id,
                 types::session_state_result(
-                    entry
-                        .selected_mode_id
+                    selected_mode_id
                         .as_deref()
                         .unwrap_or(types::DEFAULT_MODE_ID),
-                    entry
-                        .selected_model_id
+                    selected_model_id
                         .as_deref()
                         .unwrap_or(types::DEFAULT_MODEL_ID),
                 ),
-            )];
+            ));
+            return messages;
         }
         let legacy_resume = lookup_resume_info(session_id);
         let catalog = match lookup_catalog(
@@ -667,13 +923,9 @@ impl AcpConnection {
                 AcpCatalogEntry {
                     session_id: session_id.to_string(),
                     sdk_session_id: info.sdk_session_id,
-                    cwd: params
-                        .get("cwd")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or(info.cwd)
-                        .unwrap_or_else(|| "/".to_string()),
+                    cwd: info.cwd.unwrap_or_else(|| requested_cwd.clone()),
                     additional_directories: Vec::new(),
+                    history: Vec::new(),
                     title: None,
                     created_at: now.clone(),
                     updated_at: now,
@@ -692,16 +944,26 @@ impl AcpConnection {
                 )]
             }
         };
+        if requested_cwd != catalog.cwd {
+            return vec![types::rpc_error(
+                id,
+                rpc_error_code::INVALID_PARAMS,
+                "session cwd does not match the persisted session",
+            )];
+        }
         let resume = legacy_resume
             .and_then(|info| info.sdk_session_id)
             .or_else(|| catalog.sdk_session_id.clone());
         let selected_model_id = catalog.selected_model_id.clone();
         let selected_mode_id = catalog.selected_mode_id.clone();
+        let history = catalog.history.clone();
         self.sessions.insert(
             session_id,
             SessionEntry {
                 cwd: Some(catalog.cwd),
-                additional_directories: catalog.additional_directories,
+                additional_directories: additional_directories.clone(),
+                mcp_servers,
+                history: history.clone(),
                 sdk_session_id: resume.clone(),
                 resume_session_id: resume,
                 selected_mode_id: selected_mode_id.clone(),
@@ -713,14 +975,31 @@ impl AcpConnection {
             session_id.to_string(),
             self.account_id.clone(),
             self.scope.clone(),
-            |entry| entry.lifecycle = "active".to_string(),
+            move |entry| {
+                entry.lifecycle = "active".to_string();
+                entry.additional_directories = additional_directories;
+            },
         )
         .await
         {
             self.sessions.remove(session_id);
             return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)];
         }
-        vec![types::rpc_response(
+        let mut messages = if replay_history {
+            history
+                .iter()
+                .filter(|update| self.client_allows_session_update(update))
+                .map(|update| {
+                    types::rpc_notification(
+                        "session/update",
+                        json!({ "sessionId": session_id, "update": update }),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        messages.push(types::rpc_response(
             id,
             types::session_state_result(
                 selected_mode_id
@@ -730,11 +1009,12 @@ impl AcpConnection {
                     .as_deref()
                     .unwrap_or(types::DEFAULT_MODEL_ID),
             ),
-        )]
+        ));
+        messages
     }
 
     async fn handle_session_resume(&mut self, id: &Value, params: &Value) -> Vec<Value> {
-        self.restore_catalog_session(id, params).await
+        self.restore_catalog_session(id, params, false).await
     }
 
     async fn handle_session_close(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -745,6 +1025,9 @@ impl AcpConnection {
                 "session/close requires `sessionId`",
             )];
         };
+        if self.sessions.contains(session_id) {
+            self.persist_history(session_id).await;
+        }
         let Some(entry) = self.sessions.remove(session_id) else {
             return vec![types::rpc_error(
                 id,
@@ -753,6 +1036,7 @@ impl AcpConnection {
             )];
         };
         let mut messages = Vec::new();
+        self.deny_session_permissions(session_id).await;
         if let Some(pending) = entry.pending_prompt {
             let _ = self
                 .dispatch("claude_interrupt", json!({ "session_id": session_id }))
@@ -786,40 +1070,27 @@ impl AcpConnection {
                 "session/delete requires `sessionId`",
             )];
         };
-        let catalog = match lookup_catalog(
-            session_id.to_string(),
-            self.account_id.clone(),
-            self.scope.clone(),
-        )
-        .await
-        {
-            Ok(catalog) => catalog,
-            Err(error) => {
-                return vec![types::rpc_error(id, rpc_error_code::INTERNAL_ERROR, &error)]
-            }
-        };
-        if catalog.is_none() {
-            return vec![types::rpc_error(
-                id,
-                rpc_error_code::INVALID_PARAMS,
-                &format!("unknown session \"{session_id}\""),
-            )];
-        }
-        let pending = self
-            .sessions
-            .remove(session_id)
-            .and_then(|entry| entry.pending_prompt);
+        let active_entry = self.sessions.remove(session_id);
         let mut messages = Vec::new();
-        if let Some(pending) = pending {
+        self.deny_session_permissions(session_id).await;
+        if let Some(pending) = active_entry
+            .as_ref()
+            .and_then(|entry| entry.pending_prompt.as_ref())
+        {
+            let _ = self
+                .dispatch("claude_interrupt", json!({ "session_id": session_id }))
+                .await;
             messages.push(types::rpc_error(
                 &pending.rpc_id,
                 rpc_error_code::REQUEST_CANCELLED,
                 "request cancelled because the session was deleted",
             ));
         }
-        let _ = self
-            .dispatch("claude_close_session", json!({ "session_id": session_id }))
-            .await;
+        if active_entry.is_some() {
+            let _ = self
+                .dispatch("claude_close_session", json!({ "session_id": session_id }))
+                .await;
+        }
         if let Err(error) = remove_catalog(
             session_id.to_string(),
             self.account_id.clone(),
@@ -835,7 +1106,7 @@ impl AcpConnection {
     }
 
     async fn handle_session_load(&mut self, id: &Value, params: &Value) -> Vec<Value> {
-        self.restore_catalog_session(id, params).await
+        self.restore_catalog_session(id, params, true).await
     }
 
     async fn handle_session_prompt(&mut self, id: &Value, params: &Value) -> Vec<Value> {
@@ -860,7 +1131,14 @@ impl AcpConnection {
         };
 
         // Validate session + single-turn invariant, and collect send options.
-        let (cwd, additional_directories, resume_session_id, selected_mode_id, selected_model_id) = {
+        let (
+            cwd,
+            additional_directories,
+            mcp_servers,
+            resume_session_id,
+            selected_mode_id,
+            selected_model_id,
+        ) = {
             let Some(entry) = self.sessions.get_mut(&session_id) else {
                 return vec![types::rpc_error(
                     id,
@@ -878,6 +1156,7 @@ impl AcpConnection {
             (
                 entry.cwd.clone(),
                 entry.additional_directories.clone(),
+                entry.mcp_servers.clone(),
                 entry.resume_session_id.take(),
                 entry.selected_mode_id.clone(),
                 entry.selected_model_id.clone(),
@@ -893,6 +1172,12 @@ impl AcpConnection {
                 "additionalDirectories".to_string(),
                 json!(additional_directories),
             );
+        }
+        if mcp_servers
+            .as_object()
+            .is_some_and(|servers| !servers.is_empty())
+        {
+            options.insert("mcpServers".to_string(), mcp_servers);
         }
         if let Some(resume) = resume_session_id {
             options.insert("resumeSessionId".to_string(), json!(resume));
@@ -928,6 +1213,18 @@ impl AcpConnection {
                 rpc_error_code::INTERNAL_ERROR,
                 &message,
             )];
+        }
+
+        if let Some(blocks) = prompt.as_array() {
+            for block in blocks {
+                if let Ok(update) = serde_json::to_value(types::SessionUpdate::UserMessageChunk {
+                    content: block.clone(),
+                    message_id: Some(id.to_string()),
+                }) {
+                    self.append_history(&session_id, update);
+                }
+            }
+            self.persist_history(&session_id).await;
         }
 
         // Park the request; the EventBus branch resolves it at turn end.
@@ -966,6 +1263,7 @@ impl AcpConnection {
         {
             log::warn!("companion-api acp: claude_interrupt failed: {message}");
         }
+        self.deny_session_permissions(&session_id).await;
         Vec::new()
     }
 
@@ -1079,7 +1377,18 @@ impl AcpConnection {
         for action in outbound {
             match action {
                 AcpOutbound::Update(update) => {
-                    messages.push(types::session_update_notification(&session_id, &update));
+                    // The original ACP prompt blocks are the replay authority.
+                    // Sidecar runtimes may echo them as SDK user messages; send
+                    // those live but do not persist a duplicate replay entry.
+                    if !matches!(&update, types::SessionUpdate::UserMessageChunk { .. }) {
+                        if let Ok(history_update) = serde_json::to_value(&update) {
+                            self.append_history(&session_id, history_update);
+                        }
+                    }
+                    let update_value = serde_json::to_value(&update).unwrap_or(Value::Null);
+                    if self.client_allows_session_update(&update_value) {
+                        messages.push(types::session_update_notification(&session_id, &update));
+                    }
                 }
                 AcpOutbound::PermissionRequest {
                     request_id,
@@ -1105,11 +1414,29 @@ impl AcpConnection {
                     ));
                 }
                 AcpOutbound::TurnEnded(reason) => {
+                    let info = types::SessionUpdate::SessionInfoUpdate {
+                        title: None,
+                        updated_at: Some(chrono::Utc::now().to_rfc3339()),
+                    };
+                    if let Ok(history_update) = serde_json::to_value(&info) {
+                        self.append_history(&session_id, history_update);
+                    }
+                    self.persist_history(&session_id).await;
+                    messages.push(types::session_update_notification(&session_id, &info));
                     if let Some(msg) = self.resolve_pending(&session_id, reason, None) {
                         messages.push(msg);
                     }
                 }
                 AcpOutbound::TurnFailed(message) => {
+                    let info = types::SessionUpdate::SessionInfoUpdate {
+                        title: None,
+                        updated_at: Some(chrono::Utc::now().to_rfc3339()),
+                    };
+                    if let Ok(history_update) = serde_json::to_value(&info) {
+                        self.append_history(&session_id, history_update);
+                    }
+                    self.persist_history(&session_id).await;
+                    messages.push(types::session_update_notification(&session_id, &info));
                     if let Some(msg) =
                         self.resolve_pending(&session_id, StopReason::EndTurn, Some(message))
                     {
@@ -1182,6 +1509,7 @@ impl AcpConnection {
             entry.pending_prompt = None;
         }
         for session_id in self.sessions.prompted_session_ids() {
+            self.deny_session_permissions(&session_id).await;
             let _ = self
                 .dispatch("claude_interrupt", json!({ "session_id": session_id }))
                 .await;
@@ -1401,9 +1729,30 @@ mod tests {
 
     async fn initialize(conn: &mut AcpConnection) {
         let out = conn
-            .handle_message(r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#)
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+            )
             .await;
         assert_eq!(out[0]["result"]["protocolVersion"], 1);
+    }
+
+    #[test]
+    fn gates_plan_updates_on_the_client_plan_capability() {
+        let mut conn = test_conn();
+        let plan = json!({ "sessionUpdate": "plan", "entries": [] });
+        let text = json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": "ok" }
+        });
+
+        assert!(!conn.client_allows_session_update(&plan));
+        assert!(conn.client_allows_session_update(&text));
+        for unsupported in [Value::Null, Value::Bool(false)] {
+            conn.client_capabilities = json!({ "plan": unsupported });
+            assert!(!conn.client_allows_session_update(&plan));
+        }
+        conn.client_capabilities = json!({ "plan": {} });
+        assert!(conn.client_allows_session_update(&plan));
     }
 
     async fn new_session(conn: &mut AcpConnection) -> String {
@@ -1416,7 +1765,7 @@ mod tests {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "session/new",
-            "params": { "cwd": cwd },
+            "params": { "cwd": cwd, "mcpServers": [] },
         })
         .to_string();
         let out = conn.handle_message(&message).await;
@@ -1427,12 +1776,38 @@ mod tests {
     async fn initialize_returns_capabilities() {
         let mut conn = test_conn();
         let out = conn
-            .handle_message(r#"{"jsonrpc":"2.0","id":5,"method":"initialize","params":{}}"#)
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":5,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":true}}}}"#,
+            )
             .await;
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["id"], 5);
         assert_eq!(out[0]["result"]["agentInfo"]["name"], "cognia");
         assert_eq!(out[0]["result"]["agentCapabilities"]["loadSession"], true);
+        assert_eq!(conn.negotiated_protocol_version, Some(1));
+        assert_eq!(conn.client_capabilities["fs"]["readTextFile"], true);
+        assert_eq!(out[0]["result"]["authMethods"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn initialize_validates_params_and_is_single_use() {
+        let mut conn = test_conn();
+        let missing = conn
+            .handle_message(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+            .await;
+        assert_eq!(missing[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
+        assert!(!conn.initialized);
+
+        initialize(&mut conn).await;
+        let repeated = conn
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":1}}"#,
+            )
+            .await;
+        assert_eq!(
+            repeated[0]["error"]["code"],
+            rpc_error_code::INVALID_REQUEST
+        );
     }
 
     #[tokio::test]
@@ -1462,6 +1837,62 @@ mod tests {
                     .to_string()
             )
         );
+    }
+
+    #[tokio::test]
+    async fn session_new_retains_stdio_mcp_and_rejects_network_transports() {
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let cwd = std::env::current_dir()
+            .expect("current dir")
+            .to_string_lossy()
+            .to_string();
+        crate::files::set_allowed_roots(vec![cwd.clone()]);
+        let created = conn
+            .handle_message(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "session/new",
+                    "params": {
+                        "cwd": cwd,
+                        "mcpServers": [{
+                            "name": "files",
+                            "command": "/usr/bin/files-mcp",
+                            "args": ["--root", "/repo"],
+                            "env": [{ "name": "TOKEN", "value": "secret" }],
+                        }],
+                    },
+                })
+                .to_string(),
+            )
+            .await;
+        let session_id = created[0]["result"]["sessionId"].as_str().unwrap();
+        assert_eq!(
+            conn.sessions.get_mut(session_id).unwrap().mcp_servers["files"]["command"],
+            "/usr/bin/files-mcp"
+        );
+
+        let rejected = conn
+            .handle_message(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/new",
+                    "params": {
+                        "cwd": std::env::current_dir().unwrap(),
+                        "mcpServers": [{
+                            "type": "http",
+                            "name": "remote",
+                            "url": "https://example.com/mcp",
+                            "headers": [],
+                        }],
+                    },
+                })
+                .to_string(),
+            )
+            .await;
+        assert_eq!(rejected[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
     }
 
     #[tokio::test]
@@ -1499,7 +1930,7 @@ mod tests {
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "session/new",
-                    "params": { "cwd": cwd },
+                    "params": { "cwd": cwd, "mcpServers": [] },
                 })
                 .to_string(),
             )
@@ -1630,9 +2061,17 @@ mod tests {
         assert!(closed[0]["result"].is_object());
         assert!(!conn.sessions.contains(&session_id));
 
-        let resume = format!(
-            r#"{{"jsonrpc":"2.0","id":4,"method":"session/resume","params":{{"sessionId":"{session_id}"}}}}"#
-        );
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let resume = json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/resume",
+            "params": { "sessionId": session_id, "cwd": cwd },
+        })
+        .to_string();
         let resumed = conn.handle_message(&resume).await;
         assert_eq!(
             resumed[0]["result"]["configOptions"][0]["category"],
@@ -1645,6 +2084,8 @@ mod tests {
         );
         let deleted = conn.handle_message(&delete).await;
         assert!(deleted[0]["result"].is_object());
+        let deleted_again = conn.handle_message(&delete).await;
+        assert!(deleted_again[0]["result"].is_object());
         let listed = conn
             .handle_message(r#"{"jsonrpc":"2.0","id":6,"method":"session/list","params":{}}"#)
             .await;
@@ -1653,6 +2094,58 @@ mod tests {
             .unwrap()
             .iter()
             .any(|session| session["sessionId"] == session_id));
+    }
+
+    #[tokio::test]
+    async fn load_replays_persisted_history_before_result_but_resume_does_not() {
+        super::super::registry::reset_catalog_for_tests();
+        let mut conn = test_conn();
+        initialize(&mut conn).await;
+        let session_id = new_session(&mut conn).await;
+        let update = serde_json::to_value(types::SessionUpdate::UserMessageChunk {
+            content: json!({ "type": "text", "text": "remember me" }),
+            message_id: Some("m1".into()),
+        })
+        .unwrap();
+        conn.append_history(&session_id, update);
+        conn.persist_history(&session_id).await;
+
+        let close = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "session/close",
+            "params": { "sessionId": session_id },
+        })
+        .to_string();
+        conn.handle_message(&close).await;
+
+        let load = json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "session/load",
+            "params": { "sessionId": session_id, "cwd": std::env::current_dir().unwrap(), "mcpServers": [] },
+        })
+        .to_string();
+        let loaded = conn.handle_message(&load).await;
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0]["method"], "session/update");
+        assert_eq!(
+            loaded[0]["params"]["update"]["sessionUpdate"],
+            "user_message_chunk"
+        );
+        assert_eq!(loaded[1]["id"], 11);
+
+        conn.handle_message(&close).await;
+        let resume = json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "session/resume",
+            "params": { "sessionId": session_id, "cwd": std::env::current_dir().unwrap() },
+        })
+        .to_string();
+        let resumed = conn.handle_message(&resume).await;
+        assert_eq!(resumed.len(), 1);
+        assert_eq!(resumed[0]["id"], 12);
     }
 
     #[tokio::test]
@@ -1739,9 +2232,13 @@ mod tests {
             .unwrap()
             .iter()
             .any(|session| session["sessionId"] == session_id));
-        let resume = format!(
-            r#"{{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{{"sessionId":"{session_id}"}}}}"#
-        );
+        let resume = json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/resume",
+            "params": { "sessionId": session_id, "cwd": std::env::current_dir().unwrap() },
+        })
+        .to_string();
         let denied = other_account.handle_message(&resume).await;
         assert_eq!(denied[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
 
@@ -1767,6 +2264,22 @@ mod tests {
         let mut conn = test_conn();
         let out = conn.handle_message("{nope").await;
         assert_eq!(out[0]["error"]["code"], rpc_error_code::PARSE_ERROR);
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_version_is_required_but_meta_and_unknown_fields_are_tolerated() {
+        let mut conn = test_conn();
+        let invalid = conn
+            .handle_message(r#"{"id":1,"method":"initialize","params":{"protocolVersion":1}}"#)
+            .await;
+        assert_eq!(invalid[0]["error"]["code"], rpc_error_code::INVALID_REQUEST);
+
+        let valid = conn
+            .handle_message(
+                r#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":1,"_meta":{"trace":"x"},"futureField":true}}"#,
+            )
+            .await;
+        assert_eq!(valid[0]["result"]["protocolVersion"], 1);
     }
 
     #[tokio::test]
@@ -1836,9 +2349,16 @@ mod tests {
     async fn session_load_unknown_session_errors() {
         let mut conn = test_conn();
         initialize(&mut conn).await;
+        let cwd = std::env::current_dir().unwrap();
         let out = conn
             .handle_message(
-                r#"{"jsonrpc":"2.0","id":4,"method":"session/load","params":{"sessionId":"missing-load"}}"#,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "session/load",
+                    "params": { "sessionId": "missing-load", "cwd": cwd, "mcpServers": [] },
+                })
+                .to_string(),
             )
             .await;
         assert_eq!(out[0]["error"]["code"], rpc_error_code::INVALID_PARAMS);
@@ -1848,22 +2368,33 @@ mod tests {
     async fn session_load_restores_resume_target() {
         let mut conn = test_conn();
         initialize(&mut conn).await;
+        let cwd = std::env::current_dir()
+            .expect("current dir")
+            .to_string_lossy()
+            .to_string();
+        crate::files::set_allowed_roots(vec![cwd.clone()]);
         record_resume_info(
             "acp-load-1",
             ResumeInfo {
-                cwd: Some("/old".into()),
+                cwd: Some(cwd.clone()),
                 sdk_session_id: Some("sdk-77".into()),
             },
         );
         let out = conn
             .handle_message(
-                r#"{"jsonrpc":"2.0","id":4,"method":"session/load","params":{"sessionId":"acp-load-1"}}"#,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "session/load",
+                    "params": { "sessionId": "acp-load-1", "cwd": cwd, "mcpServers": [] },
+                })
+                .to_string(),
             )
             .await;
         assert!(out[0].get("error").is_none());
         let entry = conn.sessions.get_mut("acp-load-1").unwrap();
         assert_eq!(entry.resume_session_id, Some("sdk-77".to_string()));
-        assert_eq!(entry.cwd, Some("/old".to_string()));
+        assert_eq!(entry.cwd, Some(cwd));
     }
 
     #[tokio::test]
@@ -1932,9 +2463,13 @@ mod tests {
             "event": { "type": "result", "subtype": "success" },
         });
         let out = conn.handle_event_payload(&payload).await;
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0]["id"], 2);
-        assert_eq!(out[0]["result"]["stopReason"], "end_turn");
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0]["params"]["update"]["sessionUpdate"],
+            "session_info_update"
+        );
+        assert_eq!(out[1]["id"], 2);
+        assert_eq!(out[1]["result"]["stopReason"], "end_turn");
     }
 
     #[tokio::test]
@@ -1954,7 +2489,7 @@ mod tests {
             "event": { "type": "result", "subtype": "error", "is_error": true, "result": "x" },
         });
         let out = conn.handle_event_payload(&payload).await;
-        assert_eq!(out[0]["result"]["stopReason"], "cancelled");
+        assert_eq!(out[1]["result"]["stopReason"], "cancelled");
     }
 
     #[tokio::test]
@@ -1973,8 +2508,8 @@ mod tests {
             "error": "provider 500",
         });
         let out = conn.handle_event_payload(&payload).await;
-        assert_eq!(out[0]["error"]["code"], rpc_error_code::INTERNAL_ERROR);
-        assert_eq!(out[0]["error"]["message"], "provider 500");
+        assert_eq!(out[1]["error"]["code"], rpc_error_code::INTERNAL_ERROR);
+        assert_eq!(out[1]["error"]["message"], "provider 500");
     }
 
     #[tokio::test]

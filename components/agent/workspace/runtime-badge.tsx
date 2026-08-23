@@ -43,6 +43,7 @@ const RUNTIME_CLASSES: Record<TeammateRuntime, string> = {
   // they must read as related but not interchangeable.
   "pi-rpc": "bg-teal-600/20 text-teal-800 dark:text-teal-200 ring-teal-600/40",
   droid: "bg-green-500/15 text-green-700 dark:text-green-300 ring-green-500/30",
+  "opencode-acp": "bg-cyan-600/20 text-cyan-800 dark:text-cyan-200 ring-cyan-600/40",
   "opencode-server": "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 ring-cyan-500/30",
   "opencode-remote": "bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30",
 }

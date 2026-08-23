@@ -286,7 +286,29 @@ export interface AgentSessionBinding {
   version: number
   definitionDigest: string
   compositionPresetId?: string
+  compositionDigest?: string
   executionFingerprint?: string
+}
+
+/** Runtime validator for bindings restored from a host's durable state. */
+export function isAgentSessionBinding(value: unknown): value is AgentSessionBinding {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const binding = value as Record<string, unknown>
+  if (typeof binding.agentId !== "string" || binding.agentId.length === 0) return false
+  if (
+    typeof binding.version !== "number" ||
+    !Number.isSafeInteger(binding.version) ||
+    binding.version < 1
+  ) {
+    return false
+  }
+  if (typeof binding.definitionDigest !== "string" || binding.definitionDigest.length === 0) {
+    return false
+  }
+  return ["compositionPresetId", "compositionDigest", "executionFingerprint"].every(
+    (key) =>
+      binding[key] === undefined || (typeof binding[key] === "string" && binding[key].length > 0)
+  )
 }
 
 export interface SessionSummary {

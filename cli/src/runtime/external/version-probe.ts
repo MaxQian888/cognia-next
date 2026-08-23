@@ -16,7 +16,6 @@
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
-import { createHash } from "node:crypto"
 
 import { findRuntimeById } from "@/lib/ai/agent/external/runtime-catalog"
 
@@ -26,6 +25,7 @@ import {
   resolveAgentSearchPath,
   type AgentPathRuntime,
 } from "./agent-path"
+import { hashHex } from "../crypto-hasher"
 
 /** Commands that run *another* package rather than being the runtime itself. */
 const PACKAGE_RUNNERS = new Set(["npx", "pnpx", "bunx", "uvx"])
@@ -53,6 +53,13 @@ const ABSENT: RuntimeVersionProbe = {
 export interface ProbeRuntimeVersionDeps {
   runtime?: AgentPathRuntime
   spawnFn?: typeof spawn
+}
+
+/** Keep partial test/runtime env bags inside this repo's strict Node env contract. */
+export function normalizeProbeNodeEnv(value: string | undefined): NodeJS.ProcessEnv["NODE_ENV"] {
+  return value === "development" || value === "test" || value === "production"
+    ? value
+    : "production"
 }
 
 /** Resolve a bare command against the enriched search path, as the spawn does. */
@@ -96,7 +103,7 @@ function truncate(text: string): string {
 
 function digestOf(file: string): string | null {
   try {
-    return createHash("sha256").update(fs.readFileSync(file)).digest("hex")
+    return hashHex("sha256", fs.readFileSync(file))
   } catch {
     return null
   }
@@ -147,7 +154,11 @@ export async function probeRuntimeVersion(
 
     const child = spawnFn(executablePath, [...entry.versionProbe!.args], {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...runtime.env, PATH: resolveAgentSearchPath(runtime) } as NodeJS.ProcessEnv,
+      env: {
+        ...runtime.env,
+        NODE_ENV: normalizeProbeNodeEnv(runtime.env.NODE_ENV ?? process.env.NODE_ENV),
+        PATH: resolveAgentSearchPath(runtime),
+      },
       // Own group, so the timeout kill takes the whole tree: `npx` forks
       // `node`, and killing only the parent leaves it running.
       detached: process.platform !== "win32",

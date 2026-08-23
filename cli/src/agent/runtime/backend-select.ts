@@ -43,7 +43,7 @@ import {
   type ExternalAgentCapabilityId,
 } from "@cognia/agent-config-types/external-agent-capability"
 
-import { getAvailablePresets, getPresetConfig } from "@/lib/ai/agent/external/presets"
+import { getPresetConfig, getRunnablePresets } from "@/lib/ai/agent/external/presets"
 import { preflightExternalAgent } from "@/lib/ai/agent/external/capability-preflight"
 import { externalAgentSandboxSupportsPlatform } from "@/lib/ai/agent/external/security-policy"
 
@@ -103,7 +103,7 @@ export interface BackendSelectOptions {
   prefers?: readonly AgentCapabilityId[]
   /** Injected registry lookups (tests, plugin-contributed presets). */
   lookupPreset?: typeof getPresetConfig
-  listPresets?: typeof getAvailablePresets
+  listPresets?: typeof getRunnablePresets
 }
 
 export interface BackendSelectResult extends SelectedBackend {
@@ -171,7 +171,7 @@ export function selectBackend(
   options: BackendSelectOptions = {}
 ): { ok: true; backend: BackendSelectResult } | { ok: false; error: AgentStructuredError } {
   const lookupPreset = options.lookupPreset ?? getPresetConfig
-  const listPresets = options.listPresets ?? getAvailablePresets
+  const listPresets = options.listPresets ?? getRunnablePresets
   const requested = options.requested?.trim()
 
   let candidate: SelectedBackend
@@ -192,6 +192,16 @@ export function selectBackend(
           code: "usage_error",
           message: `unknown backend "${requested}" (available: ${available})`,
           detail: { requested, available },
+        },
+      }
+    }
+    if (preset.supportTier === "documented-only") {
+      return {
+        ok: false,
+        error: {
+          code: "usage_error",
+          message: `backend "${requested}" is documented-only and cannot be executed`,
+          detail: { requested, supportTier: preset.supportTier },
         },
       }
     }

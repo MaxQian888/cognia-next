@@ -742,6 +742,18 @@ describe("ExternalAgentManager", () => {
     )
   })
 
+  it("offers OpenCode ACP but not the documented-only legacy V2 preset", async () => {
+    mockUseExternalAgent.mockReturnValue(baseHookValue())
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    expect(await screen.findByRole("option", { name: /OpenCode \(ACP\)/i })).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: /OpenCode V2 legacy preview contract/i })
+    ).not.toBeInTheDocument()
+  })
+
   it("exposes A2A as a selectable (no longer 'coming soon') protocol and adds it", async () => {
     const hook = baseHookValue()
     mockUseExternalAgent.mockReturnValue(hook)

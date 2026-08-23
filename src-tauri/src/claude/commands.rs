@@ -375,6 +375,26 @@ pub async fn agent_status(state: State<'_, SidecarState>) -> Result<SidecarStatu
     claude_sidecar_status_impl(&state).await
 }
 
+/// Start the Agent Host without sending model work and resolve only after its
+/// ready handshake. Recovery uses this explicit lifecycle command before its
+/// read-only status probe; ordinary send paths retain their lazy spawn.
+pub async fn agent_start_with_host(
+    host: Arc<dyn SidecarHost>,
+    state: SidecarState,
+) -> Result<SidecarStatus, String> {
+    spawn_sidecar(host, state.clone()).await?;
+    state.wait_until_ready().await?;
+    Ok(SidecarStatus { ready: true })
+}
+
+#[tauri::command]
+pub async fn agent_start(
+    app: AppHandle,
+    state: State<'_, SidecarState>,
+) -> Result<SidecarStatus, String> {
+    agent_start_with_host(Arc::new(TauriSidecarHost(app)), state.inner().clone()).await
+}
+
 /// Ensure the sidecar is running, then push a user message to it.
 ///
 /// `prompt` may be a string or an array of content blocks (text + image)
@@ -1108,6 +1128,69 @@ mod tests {
 
     fn parse(json_str: &str) -> SendOptions {
         serde_json::from_str(json_str).expect("valid SendOptions JSON")
+    }
+
+    #[tokio::test]
+    async fn agent_start_with_host_waits_until_the_sidecar_is_ready() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("ready-host.mjs");
+        std::fs::write(
+            &script,
+            concat!(
+                "setTimeout(() => process.stdout.write(JSON.stringify({type:'ready'})+'\\n'), 50);\n",
+                "process.stdin.resume();\n",
+            ),
+        )
+        .expect("write ready script");
+
+        let node = crate::external_agent::command_resolver::resolve_command_path("node")
+            .expect("node path after availability probe");
+        let host = RecordingSidecarHost::with_script_and_node(script, node);
+        let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
+
+        let status = agent_start_with_host(host, state.clone())
+            .await
+            .expect("agent_start must wait for the ready frame");
+
+        assert!(status.ready);
+        assert!(state.is_ready().await);
+        assert_eq!(state.restart_count(), 1);
+        super::super::sidecar::kill_sidecar(state).await;
+    }
+
+    #[tokio::test]
+    async fn agent_start_with_host_reports_an_exit_before_ready() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("exiting-host.mjs");
+        std::fs::write(&script, "process.exit(0);\n").expect("write exiting script");
+        let node = crate::external_agent::command_resolver::resolve_command_path("node")
+            .expect("node path after availability probe");
+        let host = RecordingSidecarHost::with_script_and_node(script, node);
+        let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
+
+        let error = agent_start_with_host(host, state)
+            .await
+            .expect_err("a sidecar that exits without ready must fail startup");
+
+        assert_eq!(error, "sidecar exited before becoming ready");
     }
 
     /// R7 acceptance: `claude_send_with_host` on a host-generic (recording)

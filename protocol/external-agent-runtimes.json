@@ -97,7 +97,7 @@
       "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": true },
-      "docsUrl": "https://docs.github.com/copilot"
+      "docsUrl": "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server"
     },
     {
       "runtimeId": "kiro-cli",
@@ -112,7 +112,7 @@
       "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://kiro.dev/docs/"
+      "docsUrl": "https://kiro.dev/docs/cli/acp/"
     },
     {
       "runtimeId": "qwen-code",
@@ -146,7 +146,7 @@
       "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://github.com/parallel-web/pi"
+      "docsUrl": "https://pi.dev/docs/latest/rpc"
     },
     {
       "runtimeId": "pi-acp",
@@ -165,7 +165,7 @@
       },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://github.com/parallel-web/pi"
+      "docsUrl": "https://github.com/svkozak/pi-acp"
     },
     {
       "runtimeId": "droid",
@@ -176,7 +176,7 @@
       "transport": "stdio",
       "platforms": ["darwin", "linux"],
       "systemCommand": "droid",
-      "launchArgs": ["exec", "--output-format", "acp"],
+      "launchArgs": ["exec", "--output-format", "acp-daemon"],
       "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
@@ -195,7 +195,7 @@
       "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
       "distributions": [],
       "sandbox": { "required": true, "windowsExceptionEligible": false },
-      "docsUrl": "https://cursor.com/docs/cli"
+      "docsUrl": "https://cursor.com/docs/cli/acp"
     },
     {
       "runtimeId": "opencode",
@@ -213,6 +213,22 @@
       "docsUrl": "https://opencode.ai/docs/server/"
     },
     {
+      "runtimeId": "opencode-acp",
+      "presetIds": ["opencode-acp"],
+      "displayName": "OpenCode (ACP)",
+      "ownership": "system",
+      "protocol": "acp",
+      "transport": "stdio",
+      "platforms": ["darwin", "linux"],
+      "systemCommand": "opencode",
+      "launchArgs": ["acp"],
+      "versionProbe": { "args": ["--version"], "parser": "semver-anywhere", "timeoutMs": 10000 },
+      "supportedRange": ">=1.18.14",
+      "distributions": [],
+      "sandbox": { "required": true, "windowsExceptionEligible": false },
+      "docsUrl": "https://opencode.ai/docs/acp/"
+    },
+    {
       "runtimeId": "opencode-remote",
       "presetIds": ["opencode-remote"],
       "displayName": "OpenCode (remote server)",
@@ -227,7 +243,7 @@
     {
       "runtimeId": "opencode-v2-service",
       "presetIds": ["opencode-v2-preview"],
-      "displayName": "OpenCode V2 local service (Preview)",
+      "displayName": "OpenCode V2 legacy preview contract",
       "ownership": "remote",
       "protocol": "opencode-v2",
       "transport": "sse",

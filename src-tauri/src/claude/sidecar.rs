@@ -314,6 +314,37 @@ impl SidecarState {
         self.inner.lock().await.ready
     }
 
+    /// Wait for the live child to announce its ready frame.
+    ///
+    /// `spawn` intentionally returns once the process and reader tasks exist so
+    /// send paths can queue work immediately. Boot/recovery callers need a
+    /// stronger contract: they must not mark the subsystem healthy until the
+    /// host has completed initialization. This method observes the same state
+    /// the stdout reader updates and shares the watchdog's deadline.
+    pub async fn wait_until_ready(&self) -> Result<(), String> {
+        tokio::time::timeout(SIDECAR_READY_TIMEOUT, async {
+            loop {
+                {
+                    let guard = self.inner.lock().await;
+                    if guard.ready {
+                        return Ok(());
+                    }
+                    if guard.child.is_none() {
+                        return Err("sidecar exited before becoming ready".to_string());
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .map_err(|_| {
+            format!(
+                "sidecar did not become ready within {}s",
+                SIDECAR_READY_TIMEOUT.as_secs()
+            )
+        })?
+    }
+
     /// Liveness snapshot for the unified managed-process registry
     /// (`crate::process_registry`). `Some((pid, ready))` while a child is
     /// alive (`pid` is `None` only if the OS already reaped it), `None` when

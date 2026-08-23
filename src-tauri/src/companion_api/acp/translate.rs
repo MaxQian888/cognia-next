@@ -117,6 +117,7 @@ fn translate_sdk_event(event: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> 
         Some("assistant") => translate_assistant(event, turn),
         Some("user") => translate_user(event),
         Some("result") => translate_result(event, turn),
+        Some("system") => translate_system(event),
         _ => Vec::new(),
     }
 }
@@ -139,6 +140,10 @@ fn translate_stream_event(event: &Value, turn: &mut TurnState) -> Vec<AcpOutboun
                     turn.saw_text_delta = true;
                     vec![AcpOutbound::Update(SessionUpdate::AgentMessageChunk {
                         content: text_content(text),
+                        message_id: event
+                            .get("uuid")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })]
                 }
                 Some("thinking_delta") => {
@@ -147,6 +152,10 @@ fn translate_stream_event(event: &Value, turn: &mut TurnState) -> Vec<AcpOutboun
                     };
                     vec![AcpOutbound::Update(SessionUpdate::AgentThoughtChunk {
                         content: text_content(thinking),
+                        message_id: event
+                            .get("uuid")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                     })]
                 }
                 _ => Vec::new(),
@@ -203,6 +212,10 @@ fn translate_assistant(event: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> 
                     if !text.is_empty() {
                         out.push(AcpOutbound::Update(SessionUpdate::AgentMessageChunk {
                             content: text_content(text),
+                            message_id: message
+                                .and_then(|value| value.get("id"))
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
                         }));
                     }
                 }
@@ -232,7 +245,31 @@ fn translate_assistant(event: &Value, turn: &mut TurnState) -> Vec<AcpOutbound> 
             _ => {}
         }
     }
+    if let Some(usage) = usage_to_update(message.and_then(|value| value.get("usage"))) {
+        out.push(AcpOutbound::Update(usage));
+    }
     out
+}
+
+fn usage_to_update(usage: Option<&Value>) -> Option<SessionUpdate> {
+    let usage = usage?;
+    let size = ["context_window", "contextWindow", "context_window_size"]
+        .iter()
+        .find_map(|key| usage.get(key).and_then(Value::as_u64))?;
+    let used = [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .iter()
+    .filter_map(|key| usage.get(key).and_then(Value::as_u64))
+    .sum();
+    Some(SessionUpdate::UsageUpdate {
+        used,
+        size,
+        cost: None,
+    })
 }
 
 /// Build a `tool_call` update from a `tool_use` block, deduplicating by id.
@@ -249,7 +286,30 @@ fn tool_use_to_update(block: &Value, turn: &mut TurnState, status: &str) -> Opti
         kind: tool_kind(name).to_string(),
         status: status.to_string(),
         raw_input: block.get("input").cloned(),
+        locations: tool_locations(name, block.get("input")),
     })
+}
+
+fn tool_locations(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    let input = input?;
+    let path = ["file_path", "path", "notebook_path"]
+        .iter()
+        .find_map(|key| input.get(key).and_then(Value::as_str))?;
+    if !matches!(
+        tool_name,
+        "Read" | "Edit" | "Write" | "MultiEdit" | "NotebookRead" | "NotebookEdit"
+    ) {
+        return None;
+    }
+    let mut location = serde_json::json!({ "path": path });
+    if let Some(line) = input
+        .get("line")
+        .or_else(|| input.get("start_line"))
+        .and_then(Value::as_u64)
+    {
+        location["line"] = serde_json::json!(line);
+    }
+    Some(serde_json::json!([location]))
 }
 
 /// Project a `TodoWrite` tool_use into an ACP `plan` update.
@@ -282,18 +342,58 @@ fn todo_write_to_plan(block: &Value) -> Option<SessionUpdate> {
 
 /// `SDKUserMessage` — carries `tool_result` blocks closing tool calls.
 fn translate_user(event: &Value) -> Vec<AcpOutbound> {
-    let Some(blocks) = event
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .and_then(Value::as_array)
-    else {
+    let content = event.get("message").and_then(|m| m.get("content"));
+    let message_id = event
+        .get("uuid")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if let Some(text) = content.and_then(Value::as_str) {
+        return vec![AcpOutbound::Update(SessionUpdate::UserMessageChunk {
+            content: text_content(text),
+            message_id,
+        })];
+    }
+    let Some(blocks) = content.and_then(Value::as_array) else {
         return Vec::new();
     };
 
     let mut out = Vec::new();
     for block in blocks {
-        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
-            continue;
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    out.push(AcpOutbound::Update(SessionUpdate::UserMessageChunk {
+                        content: text_content(text),
+                        message_id: message_id.clone(),
+                    }));
+                }
+                continue;
+            }
+            Some("file") => {
+                if let Some(source) = block.get("source") {
+                    if source.get("type").and_then(Value::as_str) == Some("base64") {
+                        if let (Some(blob), Some(mime_type)) = (
+                            source.get("data").and_then(Value::as_str),
+                            source.get("media_type").and_then(Value::as_str),
+                        ) {
+                            out.push(AcpOutbound::Update(SessionUpdate::UserMessageChunk {
+                                content: serde_json::json!({
+                                    "type": "resource",
+                                    "resource": {
+                                        "uri": format!("cognia://message/{}/file", message_id.as_deref().unwrap_or("unknown")),
+                                        "mimeType": mime_type,
+                                        "blob": blob,
+                                    },
+                                }),
+                                message_id: message_id.clone(),
+                            }));
+                        }
+                    }
+                }
+                continue;
+            }
+            Some("tool_result") => {}
+            _ => continue,
         }
         let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
             continue;
@@ -313,6 +413,47 @@ fn translate_user(event: &Value) -> Vec<AcpOutbound> {
             status: if is_error { "failed" } else { "completed" }.to_string(),
             content,
             raw_output: block.get("content").cloned(),
+        }));
+    }
+    out
+}
+
+fn translate_system(event: &Value) -> Vec<AcpOutbound> {
+    if event.get("subtype").and_then(Value::as_str) != Some("init") {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Some(commands) = event.get("slash_commands").and_then(Value::as_array) {
+        let available_commands = commands
+            .iter()
+            .filter_map(|command| {
+                if let Some(name) = command.as_str() {
+                    return Some(serde_json::json!({
+                        "name": name.trim_start_matches('/'),
+                        "description": format!("Run /{}", name.trim_start_matches('/')),
+                    }));
+                }
+                let name = command.get("name").and_then(Value::as_str)?;
+                Some(serde_json::json!({
+                    "name": name.trim_start_matches('/'),
+                    "description": command
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Run agent command"),
+                }))
+            })
+            .collect();
+        out.push(AcpOutbound::Update(
+            SessionUpdate::AvailableCommandsUpdate { available_commands },
+        ));
+    }
+    if let Some(mode) = event
+        .get("permissionMode")
+        .or_else(|| event.get("permission_mode"))
+        .and_then(Value::as_str)
+    {
+        out.push(AcpOutbound::Update(SessionUpdate::CurrentModeUpdate {
+            current_mode_id: mode.to_string(),
         }));
     }
     out
@@ -436,6 +577,7 @@ mod tests {
             out,
             vec![AcpOutbound::Update(SessionUpdate::AgentMessageChunk {
                 content: text_content("hel"),
+                message_id: None,
             })]
         );
         assert!(turn.saw_text_delta);
@@ -459,6 +601,7 @@ mod tests {
             out,
             vec![AcpOutbound::Update(SessionUpdate::AgentThoughtChunk {
                 content: text_content("hmm"),
+                message_id: None,
             })]
         );
         assert!(!turn.saw_text_delta);
@@ -491,6 +634,7 @@ mod tests {
                 kind: "execute".into(),
                 status: "pending".into(),
                 raw_input: Some(json!({ "command": "ls" })),
+                locations: None,
             })]
         );
     }
@@ -554,6 +698,7 @@ mod tests {
                 kind: "fetch".into(),
                 status: "in_progress".into(),
                 raw_input: Some(json!({ "query": "x" })),
+                locations: None,
             })]
         );
     }

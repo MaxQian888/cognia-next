@@ -22,9 +22,9 @@ export const A2UI_EVENT = "a2ui://dispatch"
 
 /** Inbound message types written to the sidecar's stdin. */
 export type InboundMessage =
-  | { type: "send"; sessionId: string; prompt: unknown; options?: unknown }
-  | { type: "interrupt"; sessionId: string }
-  | { type: "compact"; sessionId: string; focus?: string }
+  | { type: "send"; sessionId: string; prompt: unknown; options?: unknown; commandId?: string }
+  | { type: "interrupt"; sessionId: string; commandId?: string }
+  | { type: "compact"; sessionId: string; focus?: string; commandId?: string }
   | { type: "set_mode"; sessionId: string; mode: string }
   | {
       type: "permission_response"
@@ -63,7 +63,7 @@ export type InboundMessage =
       params?: unknown
       sendOptions?: unknown
     }
-  | { type: "close"; sessionId: string }
+  | { type: "close"; sessionId: string; commandId?: string }
 
 /**
  * Outbound messages the sidecar writes to stdout, one JSON object per line.
@@ -94,11 +94,15 @@ export interface OutboundMessage {
 /** Tauri command names the agent loop issues, mapped to inbound messages. */
 export const COMMAND = {
   SEND: "claude_send",
+  AGENT_SEND: "agent_send",
   INTERRUPT: "claude_interrupt",
+  AGENT_INTERRUPT: "agent_interrupt",
   COMPACT: "claude_compact",
+  AGENT_COMPACT: "agent_compact",
   SET_MODE: "claude_set_mode",
   APPROVE: "claude_approve",
   CLOSE: "claude_close_session",
+  AGENT_CLOSE: "agent_close_session",
   TOOL_RESULT_DECISION: "claude_tool_result_decision",
   PLUGIN_TOOL_RESPONSE: "claude_plugin_tool_response",
   SESSION_CONTROL: "claude_session_control",
@@ -118,21 +122,32 @@ export function commandToInbound(
   args: Record<string, unknown> = {}
 ): InboundMessage | null {
   switch (name) {
-    case COMMAND.SEND: {
+    case COMMAND.SEND:
+    case COMMAND.AGENT_SEND: {
       const msg: InboundMessage = {
         type: "send",
         sessionId: String(args.sessionId),
         prompt: args.prompt,
       }
       if (args.options !== undefined) msg.options = args.options
+      if (typeof args.commandId === "string" && args.commandId) msg.commandId = args.commandId
       return msg
     }
     case COMMAND.INTERRUPT:
-      return { type: "interrupt", sessionId: String(args.sessionId) }
-    case COMMAND.COMPACT: {
+    case COMMAND.AGENT_INTERRUPT:
+      return {
+        type: "interrupt",
+        sessionId: String(args.sessionId),
+        ...(typeof args.commandId === "string" && args.commandId
+          ? { commandId: args.commandId }
+          : {}),
+      }
+    case COMMAND.COMPACT:
+    case COMMAND.AGENT_COMPACT: {
       const msg: InboundMessage = { type: "compact", sessionId: String(args.sessionId) }
       const focus = args.focus
       if (typeof focus === "string" && focus.trim().length > 0) msg.focus = focus.trim()
+      if (typeof args.commandId === "string" && args.commandId) msg.commandId = args.commandId
       return msg
     }
     case COMMAND.SET_MODE: {
@@ -162,7 +177,14 @@ export function commandToInbound(
       }
     }
     case COMMAND.CLOSE:
-      return { type: "close", sessionId: String(args.sessionId) }
+    case COMMAND.AGENT_CLOSE:
+      return {
+        type: "close",
+        sessionId: String(args.sessionId),
+        ...(typeof args.commandId === "string" && args.commandId
+          ? { commandId: args.commandId }
+          : {}),
+      }
     case COMMAND.TOOL_RESULT_DECISION:
       return {
         type: "tool_result_decision",

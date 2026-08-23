@@ -1,7 +1,17 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 
-import { __TESTING__, guardAnthropicRemoteMcpServers } from "./anthropic-mcp-relay.mjs"
+import {
+  __TESTING__,
+  guardAnthropicRemoteMcpServers,
+  isPackagedRuntime,
+} from "./anthropic-mcp-relay.mjs"
+
+test("recognizes Bun standalone executables as packaged relay runtimes", () => {
+  assert.equal(isPackagedRuntime({ pkg: undefined, bunStandalone: true }), true)
+  assert.equal(isPackagedRuntime({ pkg: undefined, bunStandalone: false }), false)
+  assert.equal(isPackagedRuntime({ pkg: {}, bunStandalone: false }), true)
+})
 
 test("routes remote Anthropic MCP through a guarded stdio relay without argv secrets", () => {
   const servers = guardAnthropicRemoteMcpServers(

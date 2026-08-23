@@ -79,6 +79,7 @@ describe("pickInstallMethod", () => {
 describe("runInstall", () => {
   const method: InstallMethod = {
     kind: "npm",
+    ownership: "user-managed",
     label: "npm",
     display: "npm install -g @openai/codex",
     command: "npm",
@@ -202,6 +203,7 @@ describe("runInstall", () => {
     const result = await runInstall({
       method: {
         kind: "npm",
+        ownership: "user-managed",
         label: "node",
         display: "node -e",
         command: process.execPath,

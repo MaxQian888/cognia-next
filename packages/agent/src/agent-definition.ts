@@ -15,11 +15,11 @@ export const AGENT_DEFINITION_SCHEMA_VERSION = 1 as const
  */
 export interface AgentCompositionSelection {
   presetId: string
-  authority?: string
-  toolPresentation?: string
-  orchestration?: string
-  engagement?: string
-  autonomy?: string
+  authority?: "plan" | "default" | "acceptEdits" | "bypassPermissions"
+  toolPresentation?: "native" | "code" | "both"
+  orchestration?: "direct" | "subagent" | "team" | "workflow" | "verified-fresh-agent"
+  engagement?: "inline" | "background" | "human"
+  autonomy?: "observe" | "suggest" | "confirm" | "act" | "autopilot"
   /** Team id for `team` orchestration, workflow id for `workflow`. */
   orchestrationRef?: string
   /** Reference to an existing `AgentExecutionPolicy` binding, never a runtime. */
@@ -114,6 +114,25 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/i
  * rather than redacted later.
  */
 const SECRET_KEY_PATTERN = /(^|[._-])(api[._-]?key|secret|token|password|passwd|credential|bearer)/i
+const COMPOSITION_KEYS = new Set<keyof AgentCompositionSelection>([
+  "presetId",
+  "authority",
+  "toolPresentation",
+  "orchestration",
+  "engagement",
+  "autonomy",
+  "orchestrationRef",
+  "runtimeBindingRef",
+  "legacyModeId",
+])
+const COMPOSITION_AXIS_VALUES: Partial<Record<keyof AgentCompositionSelection, readonly string[]>> =
+  {
+    authority: ["plan", "default", "acceptEdits", "bypassPermissions"],
+    toolPresentation: ["native", "code", "both"],
+    orchestration: ["direct", "subagent", "team", "workflow", "verified-fresh-agent"],
+    engagement: ["inline", "background", "human"],
+    autonomy: ["observe", "suggest", "confirm", "act", "autopilot"],
+  }
 
 /** The exact object `definitionDigest` covers. */
 export function definitionDigestPayload(
@@ -185,8 +204,25 @@ export function validateAgentDefinitionInput(value: unknown): string[] {
   if (value.agentId !== undefined && !ID_PATTERN.test(String(value.agentId))) {
     errors.push("agentId must match [a-z0-9][a-z0-9._-]{0,127}")
   }
-  if (!isRecord(value.composition) || typeof value.composition.presetId !== "string") {
+  if (
+    !isRecord(value.composition) ||
+    typeof value.composition.presetId !== "string" ||
+    value.composition.presetId.trim().length === 0
+  ) {
     errors.push("composition must carry a presetId")
+  } else {
+    for (const [key, member] of Object.entries(value.composition)) {
+      if (!COMPOSITION_KEYS.has(key as keyof AgentCompositionSelection)) {
+        errors.push(`composition.${key} is not supported`)
+      } else if (typeof member !== "string") {
+        errors.push(`composition.${key} must be a string`)
+      } else {
+        const allowed = COMPOSITION_AXIS_VALUES[key as keyof AgentCompositionSelection]
+        if (allowed && !allowed.includes(member)) {
+          errors.push(`composition.${key} must be one of ${allowed.join("|")}`)
+        }
+      }
+    }
   }
   if (value.instructions !== undefined) {
     if (!isRecord(value.instructions)) {

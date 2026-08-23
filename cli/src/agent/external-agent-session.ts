@@ -28,6 +28,8 @@ import {
   type AgentCapabilityResult,
   type ExternalAgentManager,
 } from "@/lib/ai/agent/external/manager"
+import { createAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-dynamic-mcp-controller"
+import { setAcpDynamicMcpHostController } from "@/lib/ai/agent/external/acp-client"
 import {
   createAgentFromPreset,
   getPresetConfig,
@@ -466,7 +468,16 @@ function actionToCanonicalEvent(action: TuiAction): CanonicalAgentEvent {
  * differs. Cognia's own tools ride an authenticated MCP bridge attached beside
  * the user's MCP servers, with Cognia — not the agent — deciding what may run.
  */
+let cliDynamicMcpControllerInstalled = false
+
+function ensureCliDynamicMcpController(): void {
+  if (cliDynamicMcpControllerInstalled) return
+  setAcpDynamicMcpHostController(createAcpDynamicMcpHostController())
+  cliDynamicMcpControllerInstalled = true
+}
+
 export function createExternalAgentSession(params: ExternalAgentSessionParams): AgentSession {
+  ensureCliDynamicMcpController()
   const backend = params.config.agentBackend ?? "builtin"
   if (backend === "builtin" || !getPresetConfig(backend)) {
     throw new Error(

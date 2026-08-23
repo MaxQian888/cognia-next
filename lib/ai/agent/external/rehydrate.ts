@@ -88,7 +88,10 @@ export async function rehydrateExternalAgent(
 
   if (!runtimeInstance && isRehydratableProtocol(config.protocol)) {
     try {
-      runtimeInstance = await manager.addAgent(config)
+      // Startup recovery must register first and connect only after applying
+      // the global auto-connect policy below. Calling addAgent without this
+      // override would start every enabled external process immediately.
+      runtimeInstance = await manager.addAgent(config, { connect: false })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (!message.includes("Agent already exists")) {

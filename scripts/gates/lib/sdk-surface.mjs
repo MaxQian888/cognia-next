@@ -288,7 +288,9 @@ export function extractHookEvents(source) {
   const close = source.indexOf("]", open)
   if (open === -1 || close === -1) throw new Error("sdk.d.ts: malformed HOOK_EVENTS array")
 
-  return [...source.slice(open, close).matchAll(/"([^"]+)"/g)].map((m) => m[1])
+  return [...source.slice(open, close).matchAll(/(?:"([^"]+)"|'([^']+)')/g)].map(
+    (m) => m[1] ?? m[2]
+  )
 }
 
 /**

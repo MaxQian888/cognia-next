@@ -38,6 +38,13 @@ pub struct SessionEntry {
     pub cwd: Option<String>,
     /// Ordered additional workspace roots negotiated for the session.
     pub additional_directories: Vec<String>,
+    /// Stable ACP MCP declarations projected into the sidecar map shape.
+    pub mcp_servers: Value,
+    /// Ordered stable ACP updates retained for `session/load` replay.
+    pub history: Vec<Value>,
+    /// Approximate serialized size of `history`, used to enforce the replay
+    /// byte ceiling without rescanning the entire stream for every chunk.
+    pub history_bytes: usize,
     /// Parked prompt awaiting turn completion (at most one per session).
     pub pending_prompt: Option<PendingPrompt>,
     /// Sidecar SDK session id once observed (drives resume).
@@ -153,6 +160,7 @@ pub struct AcpCatalogEntry {
     pub sdk_session_id: Option<String>,
     pub cwd: String,
     pub additional_directories: Vec<String>,
+    pub history: Vec<Value>,
     pub title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -185,6 +193,7 @@ fn to_store_row(entry: &AcpCatalogEntry) -> crate::agent_session_store::AcpSessi
         config_values: serde_json::json!({
             "mode": entry.selected_mode_id,
             "model": entry.selected_model_id,
+            "history": entry.history,
         }),
         lifecycle: entry.lifecycle.clone(),
     }
@@ -200,6 +209,12 @@ fn from_store_row(
         sdk_session_id: row.sdk_session_id,
         cwd: row.cwd,
         additional_directories: row.additional_directories,
+        history: row
+            .config_values
+            .get("history")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
         title: row.title,
         created_at: row.created_at,
         updated_at: row.updated_at,

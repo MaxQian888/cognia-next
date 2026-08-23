@@ -39,6 +39,7 @@ import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 import { agentInvoke, agentListen } from "./agent-transport"
 import { mapPiEvent, piStatsToTokenUsage, type PiEvent, type PiSessionStats } from "./pi-rpc-events"
+import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { PI_TOOL_POLICY_ENV, encodePiToolPolicy, resolvePiToolPolicy } from "./pi-permission"
 import { PiRpcPeer, type PiFrameError } from "./pi-rpc-peer"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
@@ -808,16 +809,20 @@ export class PiRpcClientAdapter extends BaseProtocolAdapter {
       throw new Error(`Pi session ${sessionId} already has a turn in flight`)
     }
 
+    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+      throw new PiOutboundBlockedError()
+    }
+    const prompt = messageToPiPrompt(message)
+
     const queue = new EventQueue()
     record.queues.add(queue)
     record.busy = true
     record.lastUsedAt = Date.now()
 
-    const text = messageToText(message)
     try {
       // The response only means Pi ACCEPTED the prompt. Completion is
       // `agent_settled`, which arrives later on the event stream.
-      await record.peer.sendCommand("prompt", { message: text }, options?.timeout ?? 60000)
+      await record.peer.sendCommand("prompt", prompt, options?.timeout ?? 60000)
     } catch (error) {
       record.busy = false
       record.queues.delete(queue)
@@ -1436,11 +1441,28 @@ function qualifyModel(model: { id?: string; provider?: string }): string {
   return model.provider ? `${model.provider}/${model.id ?? ""}` : (model.id ?? "")
 }
 
-function messageToText(message: ExternalAgentMessage): string {
-  return message.content
-    .map((block) => (block.type === "text" ? block.text : ""))
+function messageToPiPrompt(message: ExternalAgentMessage): {
+  message: string
+  images?: Array<{ type: "image"; data: string; mimeType: string }>
+} {
+  const text = message.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .filter(Boolean)
     .join("\n")
+  const images = message.content.flatMap((block) => {
+    if (block.type !== "image") return []
+    if (block.source.type !== "base64" || !block.source.data) {
+      throw new Error("Pi RPC image prompts require base64 image data")
+    }
+    return [
+      {
+        type: "image" as const,
+        data: block.source.data,
+        mimeType: block.source.mediaType,
+      },
+    ]
+  })
+  return { message: text, ...(images.length > 0 ? { images } : {}) }
 }
 
 /**

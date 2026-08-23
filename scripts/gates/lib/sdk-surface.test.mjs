@@ -109,6 +109,11 @@ test("extractHookEvents reads the readonly tuple", () => {
   assert.deepEqual(extractHookEvents(FIXTURE), ["PreToolUse", "PostToolUse", "Stop"])
 })
 
+test("extractHookEvents accepts the SDK's single-quoted readonly tuple", () => {
+  const source = "export declare const HOOK_EVENTS: readonly ['PreToolUse', 'PostToolUseFailure'];"
+  assert.deepEqual(extractHookEvents(source), ["PreToolUse", "PostToolUseFailure"])
+})
+
 test("extractExports covers functions, classes and types", () => {
   const exports = extractExports(FIXTURE)
   for (const name of [

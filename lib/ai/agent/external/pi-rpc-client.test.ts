@@ -959,6 +959,56 @@ describe("PiRpcClientAdapter — streaming", () => {
     return { adapter, events, iterator, agentId: "agent-1:sess-1" }
   }
 
+  it("blocks a user turn containing PII before it reaches Pi", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const leakingMessage: ExternalAgentMessage = {
+      id: "m-pii",
+      role: "user",
+      content: [{ type: "text", text: "Email alice.smith@example.com" }],
+      timestamp: new Date(),
+    }
+
+    await expect(
+      adapter.prompt("sess-1", leakingMessage)[Symbol.asyncIterator]().next()
+    ).rejects.toBeInstanceOf(PiOutboundBlockedError)
+    expect(host.lastCommand("prompt")).toBeUndefined()
+  })
+
+  it("forwards base64 image blocks through Pi's native RPC image field", async () => {
+    const host = createFakeHost()
+    const adapter = await connected(host)
+    await adapter.createSession({ cwd: "/w" })
+    const imageMessage: ExternalAgentMessage = {
+      id: "m-image",
+      role: "user",
+      content: [
+        { type: "text", text: "describe this" },
+        {
+          type: "image",
+          source: { type: "base64", data: "aW1hZ2U=", mediaType: "image/png" },
+        },
+      ],
+      timestamp: new Date(),
+    }
+    const iterator = (async () => {
+      for await (const _event of adapter.prompt("sess-1", imageMessage)) {
+        // Drain the turn to release its queue.
+      }
+    })()
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(host.lastCommand("prompt")).toMatchObject({
+      message: "describe this",
+      images: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+    })
+    replyTo(host, "prompt", null)
+    host.emitStdout("agent-1:sess-1", JSON.stringify({ type: "agent_settled" }) + "\n")
+    await iterator
+  })
+
   it("carries the turn's usage ON the done event, not after it", async () => {
     // `attachUsage` used to be fired with `void` AFTER `done` was pushed.
     // `prompt()` returns on `done` and `execute()` reads `tokenUsage` off it,

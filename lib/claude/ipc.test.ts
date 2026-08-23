@@ -29,6 +29,7 @@ import {
   defaultExportDir,
   deleteMessage,
   ensureDir,
+  ensureSidecarReady,
   compactSession,
   getSidecarStatus,
   hasApiKey,
@@ -459,6 +460,12 @@ describe("Claude session commands", () => {
   it("getSidecarStatus returns the parsed boolean", async () => {
     callSpy.mockResolvedValueOnce({ ready: true })
     await expect(getSidecarStatus()).resolves.toEqual({ ready: true })
+  })
+
+  it("ensureSidecarReady starts the Agent Host and returns its ready status", async () => {
+    callSpy.mockResolvedValueOnce({ ready: true })
+    await expect(ensureSidecarReady()).resolves.toEqual({ ready: true })
+    expect(callSpy).toHaveBeenCalledWith("agent_start")
   })
 
   it("setApiKey forwards the key (string or null)", async () => {

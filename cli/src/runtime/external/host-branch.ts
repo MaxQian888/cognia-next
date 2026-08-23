@@ -2,6 +2,7 @@ import { constants } from "node:fs"
 import { open, realpath, stat, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 
+import type { AcpHostCapabilities } from "@/lib/ai/agent/external/acp-feature-profile"
 import { NodeExternalAgentBackend } from "./node-backend"
 
 interface CliExternalAgentBackend {
@@ -9,11 +10,15 @@ interface CliExternalAgentBackend {
   listen<T>(event: string, handler: (payload: T) => void): () => void
 }
 
-export function createCliAgentHost(backend: CliExternalAgentBackend) {
+export function createCliAgentHost(
+  backend: CliExternalAgentBackend,
+  platform: NodeJS.Platform = process.platform
+) {
+  const supportsPty = platform !== "win32"
   return {
     supportsExternalAgents: (): boolean => true,
     supportsAgentFs: (): boolean => true,
-    supportsAgentTerminal: (): boolean => false,
+    supportsAgentTerminal: (): boolean => supportsPty,
     agentInvoke: <T>(name: string, args: Record<string, unknown>): Promise<T> =>
       backend.invoke<T>(name, args),
     agentListen: async <T>(event: string, handler: (payload: T) => void): Promise<() => void> =>
@@ -28,6 +33,27 @@ export const supportsAgentFs = defaultHost.supportsAgentFs
 export const supportsAgentTerminal = defaultHost.supportsAgentTerminal
 export const agentInvoke = defaultHost.agentInvoke
 export const agentListen = defaultHost.agentListen
+
+/** CLI capability provider consumed through the agent-transport build alias. */
+export function getAcpHostCapabilities(): AcpHostCapabilities {
+  const supportsPty = process.platform !== "win32"
+  return {
+    kind: "cli",
+    fs: { read: true, write: true },
+    terminal: supportsPty,
+    terminalAuth: supportsPty,
+    elicitation: { form: true, url: true, durableInteraction: true },
+    preview: {
+      compaction: true,
+      providers: true,
+      dynamicMcp: true,
+      nes: false,
+      identifiedPlans: true,
+      previewToolNames: true,
+      sessionFork: true,
+    },
+  }
+}
 
 function isWithinRoot(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate)

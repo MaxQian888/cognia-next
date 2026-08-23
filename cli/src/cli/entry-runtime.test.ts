@@ -1,7 +1,21 @@
 /**
  * @jest-environment node
  */
-import { runProcessEntrypoint, type EntrypointProcess } from "./entry-runtime"
+import {
+  normalizeProcessExitCode,
+  runProcessEntrypoint,
+  type EntrypointProcess,
+} from "./entry-runtime"
+
+describe("normalizeProcessExitCode", () => {
+  it("normalizes Node's numeric-string exit code without hiding invalid values", () => {
+    expect(normalizeProcessExitCode(undefined)).toBe(0)
+    expect(normalizeProcessExitCode(null)).toBe(0)
+    expect(normalizeProcessExitCode(7)).toBe(7)
+    expect(normalizeProcessExitCode("9")).toBe(9)
+    expect(normalizeProcessExitCode("not-an-exit-code")).toBe(1)
+  })
+})
 
 describe("runProcessEntrypoint", () => {
   it("terminates immediately when boot fails, even if other handles are still live", async () => {
@@ -37,6 +51,22 @@ describe("runProcessEntrypoint", () => {
 
     expect(proc.exitCode).toBe(7)
     expect(proc.exit).not.toHaveBeenCalled()
+  })
+
+  it("forces a successful Bun standalone process to terminate after cleanup", async () => {
+    const proc: EntrypointProcess = {
+      stderr: { write: jest.fn() },
+      exit: jest.fn((): never => {
+        throw new Error("process-exit:0")
+      }),
+      exitCode: undefined,
+    }
+
+    await expect(
+      runProcessEntrypoint(async () => 0, proc, { forceExitOnSuccess: true })
+    ).rejects.toThrow("process-exit:0")
+    expect(proc.exitCode).toBe(0)
+    expect(proc.exit).toHaveBeenCalledWith(0)
   })
 
   it("formats non-Error fatal values before terminating", async () => {

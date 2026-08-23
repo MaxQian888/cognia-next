@@ -6,6 +6,7 @@ import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execut
 import { computeSequenceDigest } from "@cognia/agent-config-types/canonical-session"
 import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude/plugin-tool-ipc"
 import { computeToolSchemaDigest } from "@/packages/agent/src/agent-definition"
+import { contentDigest } from "@/packages/agent/src/digest"
 import type { PluginTool } from "@/types/plugin"
 import {
   __resetSandboxPolicyBridgeForTesting,
@@ -1551,6 +1552,59 @@ describe("createAgentRuntimeService", () => {
     await service.close()
   })
 
+  it("replays durable command receipts for agent mutations across a restart", async () => {
+    const first = makeService(emittingTurn(0), () => "session-1")
+    const created = await first.handle(
+      "agent/create",
+      { definition: AGENT, agentId: "receipted", commandId: "create-agent-once" },
+      context as never
+    )
+    await first.close()
+
+    const restarted = makeService(emittingTurn(0), () => "session-1")
+    await expect(
+      restarted.handle(
+        "agent/create",
+        {
+          definition: { ...AGENT, name: "Must not replace the receipt" },
+          agentId: "different-agent",
+          commandId: "create-agent-once",
+        },
+        context as never
+      )
+    ).resolves.toEqual(created)
+    expect(await restarted.handle("agent/list", {}, context as never)).toMatchObject({
+      agents: [expect.objectContaining({ agentId: "receipted" })],
+    })
+
+    const updated = await restarted.handle(
+      "agent/update",
+      {
+        agentId: "receipted",
+        expectedVersion: 1,
+        changes: { ...AGENT, name: "Version 2" },
+        commandId: "update-agent-once",
+      },
+      context as never
+    )
+    await expect(
+      restarted.handle(
+        "agent/update",
+        {
+          agentId: "receipted",
+          expectedVersion: 2,
+          changes: { ...AGENT, name: "Must not become version 3" },
+          commandId: "update-agent-once",
+        },
+        context as never
+      )
+    ).resolves.toEqual(updated)
+    expect(
+      await restarted.handle("agent/versions", { agentId: "receipted" }, context as never)
+    ).toEqual({ agentId: "receipted", versions: [1, 2] })
+    await restarted.close()
+  })
+
   it("freezes the resolved agent version into the session it creates", async () => {
     let next = 0
     const ids = ["session-a", "session-b"]
@@ -1570,6 +1624,9 @@ describe("createAgentRuntimeService", () => {
       agentId: "frozen",
       version: 1,
       definitionDigest: v1.definitionDigest,
+      compositionPresetId: "coding",
+      compositionDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      executionFingerprint: expect.any(String),
     })
 
     const v2 = (await service.handle(
@@ -1606,6 +1663,47 @@ describe("createAgentRuntimeService", () => {
       context as never
     )) as { agentBinding: Record<string, unknown> }
     expect(created.agentBinding).toMatchObject({ version: 1 })
+    await service.close()
+  })
+
+  it("lowers appended instructions and composition selection into every turn", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    const outputSchema = { type: "object", properties: { summary: { type: "string" } } }
+    await service.handle(
+      "agent/create",
+      {
+        agentId: "lowered",
+        definition: {
+          ...AGENT,
+          composition: { presetId: "coding", authority: "plan", autonomy: "suggest" },
+          instructions: { append: "Always include verification evidence." },
+          output: { schema: outputSchema, schemaDigest: contentDigest(outputSchema) },
+        },
+      },
+      context as never
+    )
+    await service.handle(
+      "session/create",
+      { agent: { agentId: "lowered" }, commandId: "create-lowered" },
+      context as never
+    )
+    await service.handle(
+      "turn/run",
+      { sessionId: "session-1", input: "ship", commandId: "run-lowered" },
+      context as never
+    )
+
+    const lowered = runTurn.mock.calls[0]?.[0] as UnifiedTurnParams & {
+      compositionSelection?: Record<string, unknown>
+    }
+    expect(lowered.config.systemPrompt).toBe("Always include verification evidence.")
+    expect(lowered.compositionSelection).toEqual({
+      presetId: "coding",
+      authority: "plan",
+      autonomy: "suggest",
+    })
+    expect(lowered.outputSchema).toEqual(outputSchema)
     await service.close()
   })
 

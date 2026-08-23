@@ -8,7 +8,6 @@
  */
 import nodeFs from "node:fs/promises"
 import path from "node:path"
-import { createHash } from "node:crypto"
 
 import {
   parseGithubPluginRef,
@@ -16,6 +15,8 @@ import {
   type GithubPluginRef,
 } from "@/lib/plugin/package/github-source"
 import type { PluginManifest } from "@/types/plugin"
+
+import { createRuntimeHasher } from "../runtime/crypto-hasher"
 
 const GITHUB_API = "https://api.github.com"
 
@@ -152,7 +153,7 @@ export async function installFromGithubRef(
 export function bundleFingerprint(
   files: Array<{ rel: string; content: string | Uint8Array }>
 ): string {
-  const hash = createHash("sha256")
+  const hash = createRuntimeHasher("sha256")
   for (const f of [...files].sort((a, b) => a.rel.localeCompare(b.rel))) {
     hash.update(f.rel)
     hash.update("\0")

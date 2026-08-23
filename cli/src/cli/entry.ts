@@ -12,7 +12,7 @@
  */
 
 import { selectRole } from "./role"
-import { runProcessEntrypoint } from "./entry-runtime"
+import { normalizeProcessExitCode, runProcessEntrypoint } from "./entry-runtime"
 
 async function boot(): Promise<number> {
   const role = selectRole(process.env)
@@ -36,6 +36,35 @@ async function boot(): Promise<number> {
     await runMcpRelayRole()
     return 0
   }
+  if (role === "webclone") {
+    const { runWebcloneRunner } = await import("../../../sidecar/webclone/dist/runner.js")
+    await runWebcloneRunner()
+    return normalizeProcessExitCode(process.exitCode)
+  }
+  if (role === "run-code") {
+    const { runSandboxChild } =
+      await import("../../../sidecar/builtin-tools/run-code/sandbox-child.mjs")
+    runSandboxChild()
+    return 0
+  }
+  if (role === "claude-probe") {
+    const { resolveEmbeddedClaudeExecutable } =
+      await import("../../../sidecar/dispatch/claude-executable.mjs")
+    const executable = resolveEmbeddedClaudeExecutable()
+    if (!executable) throw new Error("embedded Claude executable is unavailable")
+    const { spawnSync } = await import("node:child_process")
+    const probe = spawnSync(executable, ["--version"], { stdio: "inherit" })
+    if (probe.error) throw probe.error
+    return probe.status ?? 1
+  }
+  if (role === "codegraph-probe") {
+    const { getParser } = await import("../../../sidecar/builtin-tools/code/parser.mjs")
+    const parser = await getParser("typescript")
+    const tree = parser.parse("const answer: number = 42")
+    const ok = Boolean(tree.rootNode?.namedChildren?.length)
+    process.stdout.write(`${JSON.stringify({ ok })}\n`)
+    return ok ? 0 : 1
+  }
 
   // MUST be first on the CLI path: installs a synchronous IndexedDB on the
   // global before any `@/lib` module (and the eager Dexie databases they
@@ -45,4 +74,14 @@ async function boot(): Promise<number> {
   return main(process.argv.slice(2))
 }
 
-void runProcessEntrypoint(boot)
+void runProcessEntrypoint(boot, process, {
+  // Bun 1.4 can retain an already-killed native subprocess handle even after a
+  // CLI command has completed and reports no active resources. Dedicated
+  // roles intentionally return from boot while stdin/IPC keeps their protocol
+  // loop alive, so only the public CLI may terminate at this boundary.
+  forceExitOnSuccess:
+    selectRole(process.env) === "cli" &&
+    Boolean(
+      (globalThis as { Bun?: { isStandaloneExecutable?: boolean } }).Bun?.isStandaloneExecutable
+    ),
+})

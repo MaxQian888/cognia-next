@@ -360,7 +360,7 @@ describe("binding a saved configuration to a runtime", () => {
     return {
       metadata: undefined,
       protocol: "acp",
-      process: { command: "droid", args: ["exec", "--output-format", "acp"] },
+      process: { command: "droid", args: ["exec", "--output-format", "acp-daemon"] },
       ...overrides,
     } as Parameters<typeof findRuntimeForConfig>[0]
   }

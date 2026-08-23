@@ -103,6 +103,7 @@ export {
   isAgentWorkerManifestV1,
 } from "./worker-manifest"
 export type { AgentWorkerExecutionProfileV1, AgentWorkerManifestV1 } from "./worker-manifest"
+export { isAgentSessionBinding } from "./types"
 export type {
   AgentEventEnvelope,
   AgentInput,

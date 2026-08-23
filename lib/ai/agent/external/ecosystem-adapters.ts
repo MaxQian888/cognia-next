@@ -222,7 +222,8 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         defaultPermissionMode: "default",
         tags: ["coding", "google", "gemini"],
         docsUrl: "https://github.com/google-gemini/gemini-cli",
-        envVarHint: "Requires GOOGLE_API_KEY environment variable",
+        envVarHint:
+          "Authenticate Gemini CLI with a Gemini API key, Vertex AI, gateway, or enterprise Code Assist credentials; GOOGLE_API_KEY is one supported path, not a universal requirement.",
         setupHint:
           "Launches Gemini CLI in its current ACP mode (`gemini --acp`); the deprecated `--experimental-acp` alias is intentionally not used.",
         process: {
@@ -253,7 +254,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "github", "copilot"],
         docsUrl: "https://docs.github.com/copilot/reference/copilot-cli-reference/acp-server",
         envVarHint:
-          "Authenticates via COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN (PAT with Copilot Requests permission), or run `copilot` once and use /login.",
+          "Authenticates via COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN (fine-grained PAT with Copilot Requests permission), or run `copilot` once and use /login.",
         setupHint:
           "Requires the GitHub Copilot CLI on PATH (`npm install -g @github/copilot`, Node 22+). ACP support is public preview and may change.",
         process: {
@@ -370,7 +371,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
         tags: ["coding", "pi", "community-adapter", "experimental"],
         docsUrl: "https://github.com/svkozak/pi-acp",
         setupHint:
-          "Requires the Pi agent (`npm install -g @earendil-works/pi-coding-agent`) with provider keys configured in Pi's own settings (~/.pi/agent/settings.json). Pi has no native ACP support yet; the third-party pi-acp adapter bridges ACP to `pi --mode rpc`.",
+          "Requires Pi >= 0.80.4 (`npm install -g @earendil-works/pi-coding-agent`) and Node.js >= 22, with provider keys configured in Pi's own settings (~/.pi/agent/settings.json). Pi has no native ACP support yet; the third-party pi-acp adapter bridges ACP to `pi --mode rpc`.",
         limitationNote:
           "pi-acp is a community adapter, not an official Pi surface — behavior may lag Pi releases.",
         process: {
@@ -406,7 +407,7 @@ export const EXTERNAL_AGENT_ECOSYSTEM_ADAPTERS: Record<
           "Install the Factory Droid CLI (`curl -fsSL https://app.factory.ai/cli | sh`) and ensure `droid` is on PATH, or use the full binary path.",
         process: {
           command: "droid",
-          args: ["exec", "--output-format", "acp"],
+          args: ["exec", "--output-format", "acp-daemon"],
         },
         icon: "factory",
       },

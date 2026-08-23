@@ -12,6 +12,13 @@ describe("selectRole", () => {
     expect(selectRole({ COGNIA_ROLE: "mcp-relay" })).toBe("mcp-relay")
   })
 
+  it("routes compiled subprocess workers through dedicated roles", () => {
+    expect(selectRole({ COGNIA_ROLE: "webclone" })).toBe("webclone")
+    expect(selectRole({ COGNIA_ROLE: "run-code" })).toBe("run-code")
+    expect(selectRole({ COGNIA_ROLE: "claude-probe" })).toBe("claude-probe")
+    expect(selectRole({ COGNIA_ROLE: "codegraph-probe" })).toBe("codegraph-probe")
+  })
+
   it("defaults to 'cli' when COGNIA_ROLE is unset", () => {
     expect(selectRole({})).toBe("cli")
   })

@@ -7,10 +7,21 @@ import { EXTERNAL_AGENT_RUNTIMES } from "@/lib/ai/agent/external/runtime-catalog
 import type { AgentPathRuntime } from "./agent-path"
 import {
   isPackageRunner,
+  normalizeProbeNodeEnv,
   probeRuntimeVersion,
   resolveProbeExecutable,
   type ProbeRuntimeVersionDeps,
 } from "./version-probe"
+
+describe("normalizeProbeNodeEnv", () => {
+  it("preserves supported modes and fails closed to production", () => {
+    expect(normalizeProbeNodeEnv("test")).toBe("test")
+    expect(normalizeProbeNodeEnv("development")).toBe("development")
+    expect(normalizeProbeNodeEnv("production")).toBe("production")
+    expect(normalizeProbeNodeEnv("custom")).toBe("production")
+    expect(normalizeProbeNodeEnv(undefined)).toBe("production")
+  })
+})
 
 const runtime: AgentPathRuntime = {
   platform: "linux",

@@ -17,6 +17,8 @@ describe("ACP v1 wire codec", () => {
     expect(classifyAcpV1Method("session/update")).toBe("stable")
     expect(classifyAcpV1Method("$/cancel_request")).toBe("stable")
     expect(classifyAcpV1Method("elicitation/create")).toBe("feature_gated")
+    expect(classifyAcpV1Method("mcp/connect")).toBe("feature_gated")
+    expect(classifyAcpV1Method("nes/suggest")).toBe("feature_gated")
     expect(classifyAcpV1Method("session/set_model")).toBe("legacy")
     expect(classifyAcpV1Method("vendor/future_method")).toBe("future")
   })

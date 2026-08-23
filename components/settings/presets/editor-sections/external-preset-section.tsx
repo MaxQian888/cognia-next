@@ -3,7 +3,7 @@
 /**
  * Preset editor: External agent preset section.
  *
- * Single-select picker over `lib/ai/agent/external/presets.ts:getAvailablePresets()`
+ * Single-select picker over `lib/ai/agent/external/presets.ts:getRunnablePresets()`
  * — the built-in five-tier list (`claude-code` / `codex` / `gemini-cli` /
  * `cursor-cli` / `custom`) extended with any plugin overlay entries the
  * `external-agent-preset` capability has registered. Selected id lands on
@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SettingsCard } from "@/components/settings/common/settings-section"
-import { getAvailablePresets, getPresetDisplayInfo } from "@/lib/ai/agent/external/presets"
+import { getPresetDisplayInfo, getRunnablePresets } from "@/lib/ai/agent/external/presets"
 
 import type { PresetEditorState } from "../preset-editor-state"
 
@@ -48,7 +48,7 @@ export function ExternalPresetSection({
   onPatchMulti,
 }: ExternalPresetSectionProps) {
   const t = useTranslations("presets.editor.sections.externalPreset")
-  const ids = useMemo(() => getAvailablePresets(), [])
+  const ids = useMemo(() => getRunnablePresets(), [])
   const current = state.externalAgentPresetId ?? NONE_VALUE
   const selectedSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds])
 

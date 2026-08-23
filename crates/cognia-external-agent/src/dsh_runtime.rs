@@ -121,7 +121,10 @@ pub fn host_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             return Ok(candidate);
         }
     }
-    if let Some(root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()) {
+    if let Some(root) = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+    {
         let candidate = root.join("runtime").join(RUNTIME_DIR);
         if candidate.is_dir() {
             return Ok(candidate);
@@ -161,8 +164,8 @@ fn hex(bytes: impl AsRef<[u8]>) -> String {
 pub fn compute_composition_digest(dir: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     for name in COMPOSITION_DIGEST_FILES {
-        let content = std::fs::read(dir.join(name))
-            .map_err(|e| format!("cannot read {name}: {e}"))?;
+        let content =
+            std::fs::read(dir.join(name)).map_err(|e| format!("cannot read {name}: {e}"))?;
         hasher.update(name.as_bytes());
         hasher.update(b"\0");
         hasher.update(content.len().to_string().as_bytes());
@@ -227,8 +230,11 @@ fn has_native_toolchain() -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&path)
-        .any(|dir| ["cc", "gcc", "clang"].iter().any(|bin| dir.join(bin).exists()))
+    std::env::split_paths(&path).any(|dir| {
+        ["cc", "gcc", "clang"]
+            .iter()
+            .any(|bin| dir.join(bin).exists())
+    })
 }
 
 /// Gather everything the shared verdict function needs.
@@ -299,7 +305,14 @@ pub async fn stage_install(
     if !output.status.success() {
         let _ = std::fs::remove_dir_all(&staging);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: String = stderr.chars().rev().take(2000).collect::<String>().chars().rev().collect();
+        let tail: String = stderr
+            .chars()
+            .rev()
+            .take(2000)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         return Err(format!(
             "npm install failed; the previous runtime was left in place. {tail}"
         ));

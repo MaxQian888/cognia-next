@@ -16,9 +16,18 @@ describe("externalProtocolOptions", () => {
       "codex-app-server",
       "dsh-sdk",
       "opencode",
-      "opencode-v2",
       "pi-rpc",
     ])
+  })
+
+  it("keeps the documented-only OpenCode V2 protocol out of new-config choices", () => {
+    expect(values()).not.toContain("opencode-v2")
+    expect(externalProtocolOptions("opencode-v2")[0]).toEqual({
+      value: "opencode-v2",
+      label: "OpenCode V2 (Preview)",
+      selectable: false,
+      reasonKey: "legacyProtocolUnavailable",
+    })
   })
 
   it("no longer offers protocols nothing can speak", () => {
@@ -47,7 +56,7 @@ describe("externalProtocolOptions", () => {
       selectable: false,
       reasonKey: "legacyProtocolUnavailable",
     })
-    expect(options).toHaveLength(8)
+    expect(options).toHaveLength(7)
   })
 
   /**
@@ -95,7 +104,7 @@ describe("externalProtocolOptions", () => {
   })
 
   it("does not duplicate a current value that is already a built-in", () => {
-    expect(values("acp")).toHaveLength(7)
+    expect(values("acp")).toHaveLength(6)
     expect(values("acp").filter((v) => v === "acp")).toHaveLength(1)
   })
 

@@ -3,26 +3,34 @@ import test from "node:test"
 
 import { ACP_V1_CONTRACT, validateAcpV1Coverage } from "./lib/acp-v1-contract.mjs"
 
-test("pins the stable ACP v1 schema and SDK artifacts", () => {
+test("pins the stable and preview ACP v1.21 schema plus SDK 1.4 artifacts", () => {
   assert.equal(ACP_V1_CONTRACT.protocolVersion, 1)
-  assert.equal(ACP_V1_CONTRACT.schema.version, "1.20.0")
+  assert.equal(ACP_V1_CONTRACT.schema.stable.version, "1.21.0")
   assert.equal(
-    ACP_V1_CONTRACT.schema.sha256,
-    "92c1dfcda10dd47e99127500a3763da2b471f9ac61e12b9bf0430c32cf953796"
+    ACP_V1_CONTRACT.schema.stable.sha256,
+    "caf62ff962ada396878372ced11efb2c6764e59d90919a38583c319948931a42"
   )
-  assert.equal(ACP_V1_CONTRACT.sdk.version, "1.3.0")
+  assert.equal(
+    ACP_V1_CONTRACT.schema.preview.sha256,
+    "7f77702b34e0a0558e77220e9007bf8ee161a976bb8ac5021aba1b7e7b2c5708"
+  )
+  assert.equal(ACP_V1_CONTRACT.sdk.version, "1.4.0")
   assert.equal(
     ACP_V1_CONTRACT.sdk.integrity,
-    "sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ=="
+    "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg=="
   )
 })
 
-test("keeps stable, feature-gated, and compatibility methods separate", () => {
+test("keeps stable, preview-gated, and receive-only compatibility paths separate", () => {
   assert.ok(ACP_V1_CONTRACT.stable.clientToAgent.includes("session/list"))
-  assert.ok(ACP_V1_CONTRACT.featureGated.agentToClient.includes("elicitation/create"))
+  assert.ok(ACP_V1_CONTRACT.stable.agentToClient.includes("elicitation/create"))
+  assert.ok(ACP_V1_CONTRACT.preview.clientToAgent.includes("providers/list"))
+  assert.ok(ACP_V1_CONTRACT.preview.agentToClient.includes("mcp/connect"))
+  assert.ok(ACP_V1_CONTRACT.preview.updates.includes("compaction_update"))
   assert.ok(ACP_V1_CONTRACT.compatibility.agentMethods.includes("session/set_model"))
-  assert.ok(!ACP_V1_CONTRACT.stable.agentToClient.includes("elicitation/create"))
+  assert.ok(!ACP_V1_CONTRACT.stable.clientToAgent.includes("providers/list"))
   assert.ok(!ACP_V1_CONTRACT.stable.clientToAgent.includes("session/set_model"))
+  assert.equal(ACP_V1_CONTRACT.reserved.v2.advertised, false)
 })
 
 test("reports every missing stable method and update without accepting aliases", () => {

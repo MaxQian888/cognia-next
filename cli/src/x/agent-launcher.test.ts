@@ -149,6 +149,88 @@ describe("buildAgentConfig", () => {
 })
 
 describe("launchAgent", () => {
+  it("uses Bun.spawn with inherited stdio for the external agent", async () => {
+    const calls: Array<{ command: string[]; options: Record<string, unknown> }> = []
+    const exitCode = await launchAgent(
+      {
+        agent: "codex",
+        gatewayBaseUrl: "http://localhost",
+        gatewayApiKey: "k",
+        cwd: "/workspace",
+        binaryPath: "/opt/homebrew/bin/codex",
+      },
+      {
+        bunRuntime: {
+          spawn(command, options) {
+            calls.push({ command, options })
+            return {
+              exited: Promise.resolve(0),
+              signalCode: null,
+              kill: jest.fn(),
+            }
+          },
+        },
+      }
+    )
+
+    expect(exitCode).toBe(0)
+    expect(calls).toEqual([
+      {
+        command: ["/opt/homebrew/bin/codex"],
+        options: expect.objectContaining({
+          cwd: "/workspace",
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+        }),
+      },
+    ])
+  })
+
+  it("maps a Bun subprocess signal to a conventional exit code", async () => {
+    const exitCode = await launchAgent(
+      {
+        agent: "claude",
+        gatewayBaseUrl: "http://localhost",
+        gatewayApiKey: "k",
+        cwd: "/workspace",
+      },
+      {
+        bunRuntime: {
+          spawn: () => ({
+            exited: Promise.resolve(143),
+            signalCode: "SIGTERM",
+            kill: jest.fn(),
+          }),
+        },
+      }
+    )
+
+    expect(exitCode).toBe(143)
+  })
+
+  it("maps SIGKILL using the host signal number", async () => {
+    const exitCode = await launchAgent(
+      {
+        agent: "claude",
+        gatewayBaseUrl: "http://localhost",
+        gatewayApiKey: "k",
+        cwd: "/workspace",
+      },
+      {
+        bunRuntime: {
+          spawn: () => ({
+            exited: Promise.resolve(137),
+            signalCode: "SIGKILL",
+            kill: jest.fn(),
+          }),
+        },
+      }
+    )
+
+    expect(exitCode).toBe(137)
+  })
+
   it("calls spawnAgent with correct parameters", async () => {
     let capturedCmd = ""
     let capturedArgs: string[] = []

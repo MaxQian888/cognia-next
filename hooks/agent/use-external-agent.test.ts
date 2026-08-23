@@ -189,6 +189,15 @@ interface FakeManager {
   getAuthMethods: jest.Mock
   isAuthenticationRequired: jest.Mock
   authenticate: jest.Mock
+  getTerminalAuthState: jest.Mock
+  cancelTerminalAuthentication: jest.Mock
+  listProviders: jest.Mock
+  setProvider: jest.Mock
+  disableProvider: jest.Mock
+  startNes: jest.Mock
+  suggestNes: jest.Mock
+  closeNes: jest.Mock
+  getDynamicMcpConnections: jest.Mock
   setConfigOption: jest.Mock
   getConfigOptions: jest.Mock
   getAgentTools: jest.Mock
@@ -234,6 +243,15 @@ function makeManager(): FakeManager {
     getAuthMethods: jest.fn(() => ({ status: "ok", data: [] })),
     isAuthenticationRequired: jest.fn(() => false),
     authenticate: jest.fn(async () => undefined),
+    getTerminalAuthState: jest.fn(() => undefined),
+    cancelTerminalAuthentication: jest.fn(async () => undefined),
+    listProviders: jest.fn(async () => ({ providers: [] })),
+    setProvider: jest.fn(async () => ({})),
+    disableProvider: jest.fn(async () => ({})),
+    startNes: jest.fn(async () => ({ sessionId: "nes-1" })),
+    suggestNes: jest.fn(async () => ({ suggestions: [] })),
+    closeNes: jest.fn(async () => ({})),
+    getDynamicMcpConnections: jest.fn(() => []),
     setConfigOption: jest.fn(async () => []),
     getConfigOptions: jest.fn(() => ({ status: "ok", data: [] })),
     getAgentTools: jest.fn(() => ({})),
@@ -826,6 +844,35 @@ describe("useExternalAgent core actions", () => {
     })
     await flush()
     expect(result.current.planDocument).toBeNull()
+  })
+
+  it("retains rich blocks, compaction updates, and NES suggestions", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation(
+      (_agentId: string, callback: (event: Record<string, unknown>) => void) => {
+        listener = callback
+        return () => undefined
+      }
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    act(() => {
+      listener?.({ type: "content_block_delta", block: { type: "resource_link", uri: "x" } })
+      listener?.({
+        type: "compaction_update",
+        compaction: { compactionId: "c1", status: "completed" },
+      })
+      listener?.({
+        type: "nes_suggestion",
+        suggestion: { id: "n1", operations: [] },
+      })
+    })
+
+    expect(result.current.richContentBlocks).toEqual([{ type: "resource_link", uri: "x" }])
+    expect(result.current.compactionUpdates).toEqual([{ compactionId: "c1", status: "completed" }])
+    expect(result.current.nesSuggestions).toEqual([{ id: "n1", operations: [] }])
   })
 
   it("execute requires an active agent", async () => {

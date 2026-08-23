@@ -27,6 +27,7 @@ import type {
   AcpCapabilities,
 } from "@/types/agent/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { hasNoLeakingPiiDeep } from "@cognia/redact"
 import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { readServerSentEvents } from "@/lib/network/sse-reader"
@@ -175,7 +176,7 @@ interface AgentCard {
 
 /** Per-session A2A context (the contextId threads a multi-turn conversation). */
 interface A2aSessionCtx {
-  contextId: string
+  contextId?: string
   taskId?: string
 }
 
@@ -422,8 +423,8 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
       lastActivityAt: now,
     }
     this._sessions.set(id, session)
-    // A fresh A2A contextId threads this session's multi-turn conversation.
-    this.sessionCtx.set(id, { contextId: this.generateSessionId() })
+    // The agent owns context creation; reuse the opaque contextId it returns.
+    this.sessionCtx.set(id, {})
     return session
   }
 
@@ -437,10 +438,13 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
     message: ExternalAgentMessage,
     options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
-    const ctx = this.sessionCtx.get(sessionId) ?? { contextId: this.generateSessionId() }
+    const ctx = this.sessionCtx.get(sessionId) ?? {}
     this.sessionCtx.set(sessionId, ctx)
 
     try {
+      if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+        throw new Error("A2A outbound payload blocked by the PII gate")
+      }
       const isV1 = this.protocolVersion === "1.0"
       const parts = buildA2aParts(message, isV1)
 
@@ -449,7 +453,7 @@ export class A2aClientAdapter extends BaseProtocolAdapter {
         messageId: this.generateMessageId(),
         role: isV1 ? "ROLE_USER" : "user",
         parts,
-        contextId: ctx.contextId,
+        ...(ctx.contextId ? { contextId: ctx.contextId } : {}),
         ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
       }
       if (!hasNoLeakingPiiDeep(a2aMessage)) {

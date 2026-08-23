@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
+
+import { hashHex } from "../../runtime/crypto-hasher"
 
 export interface AssetRecord {
   assetId: string
@@ -115,7 +116,7 @@ export function createAssetStore(options: {
           { byteLength: bytes.byteLength, maxBytes }
         )
       }
-      const digest = `sha256-${createHash("sha256").update(bytes).digest("hex")}`
+      const digest = `sha256-${hashHex("sha256", bytes)}`
       const assetId = idFor(digest)
       const record: AssetRecord = {
         assetId,
@@ -150,7 +151,7 @@ export function createAssetStore(options: {
         )
       }
       const bytes = fs.readFileSync(sourcePath)
-      const digest = `sha256-${createHash("sha256").update(bytes).digest("hex")}`
+      const digest = `sha256-${hashHex("sha256", bytes)}`
       const assetId = idFor(digest)
       const record: AssetRecord = {
         assetId,
@@ -189,7 +190,7 @@ export function createAssetStore(options: {
       }
       if (record.sourcePath) {
         // Registered paths are not copied, so the file can change underneath us.
-        const digest = `sha256-${createHash("sha256").update(fs.readFileSync(target)).digest("hex")}`
+        const digest = `sha256-${hashHex("sha256", fs.readFileSync(target))}`
         if (digest !== record.digest) {
           throw new AssetStoreError(
             "unreadable",

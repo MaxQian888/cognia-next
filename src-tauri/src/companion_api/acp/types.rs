@@ -250,10 +250,7 @@ pub fn session_state_result(current_mode_id: &str, current_model_id: &str) -> Va
 // ACP: session/prompt content blocks → cognia SendContent blocks
 // ---------------------------------------------------------------------------
 
-/// Convert ACP prompt content blocks into the sidecar `SendContent` shape
-/// (`lib/claude/types.ts`): text blocks stay text; base64 images become
-/// `{type:"image", source:{type:"base64", media_type, data}}`; resources and
-/// resource links degrade to text so no content is silently dropped.
+/// Convert ACP prompt content blocks into the sidecar `SendContent` shape.
 ///
 /// Returns an error string when the prompt is empty or malformed.
 pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
@@ -285,16 +282,8 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
                         "type": "image",
                         "source": { "type": "base64", "media_type": mime, "data": data },
                     }));
-                } else if let Some(uri) = block.get("uri").and_then(Value::as_str) {
-                    // A URL-sourced image is real embedded content: forward it as
-                    // an image with a `url` source (honored by both the ai-sdk
-                    // and Anthropic dispatch paths) rather than a text label.
-                    out.push(json!({
-                        "type": "image",
-                        "source": { "type": "url", "url": uri },
-                    }));
                 } else {
-                    return Err("image block missing both `data` and `uri`".to_string());
+                    return Err("image block missing required `data`".to_string());
                 }
             }
             "resource_link" => {
@@ -328,8 +317,7 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
                         "source": { "type": "base64", "media_type": mime, "data": blob },
                     }));
                 } else {
-                    // No inline content at all — degrade to a text reference.
-                    out.push(json!({ "type": "text", "text": format!("[resource] {uri}") }));
+                    return Err("resource block must contain `text` or `blob`".to_string());
                 }
             }
             other => {
@@ -338,6 +326,88 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
         }
     }
     Ok(Value::Array(out))
+}
+
+/// Validate stable ACP MCP declarations and project stdio servers to the
+/// sidecar's `mcpServers` map. Network transports remain unavailable until
+/// the active runtime exposes a governed implementation.
+pub fn parse_mcp_servers(value: Option<&Value>) -> Result<Value, String> {
+    let Some(value) = value else {
+        return Ok(json!({}));
+    };
+    if value.is_null() {
+        return Ok(json!({}));
+    }
+    let servers = value
+        .as_array()
+        .ok_or_else(|| "mcpServers must be an array".to_string())?;
+    let mut out = serde_json::Map::new();
+    for server in servers {
+        let object = server
+            .as_object()
+            .ok_or_else(|| "each MCP server must be an object".to_string())?;
+        let name = object
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| "MCP server requires a non-empty `name`".to_string())?;
+        if out.contains_key(name) {
+            return Err(format!("duplicate MCP server name \"{name}\""));
+        }
+        let server_type = object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("stdio");
+        if server_type != "stdio" {
+            return Err(format!(
+                "MCP transport \"{server_type}\" is not supported by this host"
+            ));
+        }
+        let command = object
+            .get("command")
+            .and_then(Value::as_str)
+            .filter(|command| !command.is_empty())
+            .ok_or_else(|| format!("stdio MCP server \"{name}\" requires `command`"))?;
+        let args = object
+            .get("args")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("stdio MCP server \"{name}\" requires `args`"))?;
+        if args.iter().any(|arg| !arg.is_string()) {
+            return Err(format!(
+                "stdio MCP server \"{name}\" args must contain only strings"
+            ));
+        }
+        let env = object
+            .get("env")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("stdio MCP server \"{name}\" requires `env`"))?;
+        let mut env_map = serde_json::Map::new();
+        for variable in env {
+            let variable = variable.as_object().ok_or_else(|| {
+                format!("stdio MCP server \"{name}\" env entries must be objects")
+            })?;
+            let env_name = variable
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| format!("stdio MCP server \"{name}\" env entry requires `name`"))?;
+            let env_value = variable
+                .get("value")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("stdio MCP server \"{name}\" env entry requires `value`"))?;
+            env_map.insert(env_name.to_string(), json!(env_value));
+        }
+        out.insert(
+            name.to_string(),
+            json!({
+                "type": "stdio",
+                "command": command,
+                "args": args,
+                "env": env_map,
+            }),
+        );
+    }
+    Ok(Value::Object(out))
 }
 
 // ---------------------------------------------------------------------------
@@ -350,11 +420,20 @@ pub fn prompt_blocks_to_send_content(prompt: &Value) -> Result<Value, String> {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "sessionUpdate", rename_all = "snake_case")]
 pub enum SessionUpdate {
+    UserMessageChunk {
+        content: Value,
+        #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
+    },
     AgentMessageChunk {
         content: Value,
+        #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
     },
     AgentThoughtChunk {
         content: Value,
+        #[serde(rename = "messageId", skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
     },
     ToolCall {
         #[serde(rename = "toolCallId")]
@@ -364,6 +443,8 @@ pub enum SessionUpdate {
         status: String,
         #[serde(rename = "rawInput", skip_serializing_if = "Option::is_none")]
         raw_input: Option<Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        locations: Option<Value>,
     },
     ToolCallUpdate {
         #[serde(rename = "toolCallId")]
@@ -376,6 +457,30 @@ pub enum SessionUpdate {
     },
     Plan {
         entries: Vec<Value>,
+    },
+    AvailableCommandsUpdate {
+        #[serde(rename = "availableCommands")]
+        available_commands: Vec<Value>,
+    },
+    CurrentModeUpdate {
+        #[serde(rename = "currentModeId")]
+        current_mode_id: String,
+    },
+    ConfigOptionUpdate {
+        #[serde(rename = "configOptions")]
+        config_options: Value,
+    },
+    SessionInfoUpdate {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(rename = "updatedAt", skip_serializing_if = "Option::is_none")]
+        updated_at: Option<String>,
+    },
+    UsageUpdate {
+        used: u64,
+        size: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cost: Option<Value>,
     },
 }
 
@@ -613,28 +718,18 @@ mod tests {
             { "type": "resource_link", "uri": "file:///a.rs" },
             // text resource → inlined verbatim as text.
             { "type": "resource", "resource": { "uri": "file:///b.rs", "text": "fn main() {}" } },
-            // image-by-uri → structured image with a url source (embedded content).
-            { "type": "image", "uri": "https://x/y.png", "mimeType": "image/png" },
             // binary resource with a blob → forwarded as a document block.
             { "type": "resource", "resource": { "uri": "file:///c.pdf", "blob": "JVBERi0=", "mimeType": "application/pdf" } },
-            // resource with neither text nor blob → honest text reference.
-            { "type": "resource", "resource": { "uri": "file:///d.bin" } },
         ]);
         let out = prompt_blocks_to_send_content(&blocks).unwrap();
         let arr = out.as_array().unwrap();
         assert_eq!(arr[0]["text"], "[resource] file:///a.rs");
         assert!(arr[1]["text"].as_str().unwrap().contains("fn main() {}"));
-        // image-by-uri is no longer a text label — it is real embedded content.
-        assert_eq!(arr[2]["type"], "image");
-        assert_eq!(arr[2]["source"]["type"], "url");
-        assert_eq!(arr[2]["source"]["url"], "https://x/y.png");
         // blob resource → document with a base64 source.
-        assert_eq!(arr[3]["type"], "document");
-        assert_eq!(arr[3]["source"]["type"], "base64");
-        assert_eq!(arr[3]["source"]["media_type"], "application/pdf");
-        assert_eq!(arr[3]["source"]["data"], "JVBERi0=");
-        // empty resource still degrades to a text reference.
-        assert_eq!(arr[4]["text"], "[resource] file:///d.bin");
+        assert_eq!(arr[2]["type"], "document");
+        assert_eq!(arr[2]["source"]["type"], "base64");
+        assert_eq!(arr[2]["source"]["media_type"], "application/pdf");
+        assert_eq!(arr[2]["source"]["data"], "JVBERi0=");
     }
 
     #[test]
@@ -646,12 +741,48 @@ mod tests {
         assert!(prompt_blocks_to_send_content(&json!([{ "type": "image" }])).is_err());
         assert!(prompt_blocks_to_send_content(&json!([{ "type": "resource_link" }])).is_err());
         assert!(prompt_blocks_to_send_content(&json!([{ "type": "resource" }])).is_err());
+        assert!(prompt_blocks_to_send_content(&json!([{
+            "type": "image", "uri": "https://x/y.png", "mimeType": "image/png"
+        }]))
+        .is_err());
+        assert!(prompt_blocks_to_send_content(&json!([{
+            "type": "resource", "resource": { "uri": "file:///d.bin" }
+        }]))
+        .is_err());
+    }
+
+    #[test]
+    fn mcp_servers_accept_only_complete_stdio_entries() {
+        let parsed = parse_mcp_servers(Some(&json!([{
+            "name": "files",
+            "command": "/usr/bin/files-mcp",
+            "args": ["--root", "/repo"],
+            "env": [{ "name": "TOKEN", "value": "secret" }],
+        }])))
+        .unwrap();
+        assert_eq!(parsed["files"]["type"], "stdio");
+        assert_eq!(parsed["files"]["command"], "/usr/bin/files-mcp");
+        assert_eq!(parsed["files"]["args"][0], "--root");
+        assert_eq!(parsed["files"]["env"]["TOKEN"], "secret");
+
+        assert!(parse_mcp_servers(Some(&json!([{
+            "type": "http", "name": "remote", "url": "https://example.com/mcp", "headers": []
+        }])))
+        .unwrap_err()
+        .contains("not supported"));
+        assert!(parse_mcp_servers(Some(&json!([{
+            "name": "missing", "command": "/bin/x", "args": [], "env": []
+        }, {
+            "name": "missing", "command": "/bin/y", "args": [], "env": []
+        }])))
+        .is_err());
     }
 
     #[test]
     fn session_update_serializes_with_discriminator() {
         let update = SessionUpdate::AgentMessageChunk {
             content: text_content("hi"),
+            message_id: Some("m1".into()),
         };
         let v = serde_json::to_value(&update).unwrap();
         assert_eq!(v["sessionUpdate"], "agent_message_chunk");
@@ -663,6 +794,7 @@ mod tests {
             kind: "execute".into(),
             status: "pending".into(),
             raw_input: Some(json!({"command": "ls"})),
+            locations: None,
         };
         let v = serde_json::to_value(&tool).unwrap();
         assert_eq!(v["sessionUpdate"], "tool_call");

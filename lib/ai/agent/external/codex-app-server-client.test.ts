@@ -423,6 +423,35 @@ describe("CodexAppServerAdapter", () => {
       expect(errorMsg).toBe("model overloaded")
     })
 
+    it("maps the app-server error notification before turn completion", async () => {
+      const adapter = await connectedAdapter()
+      const session = await adapter.createSession()
+      const it = iterator(adapter, session.id, userMessage("hi"))
+      const first = it.next()
+      feed("error", {
+        threadId: "thr_1",
+        turnId: "turn_1",
+        willRetry: true,
+        error: {
+          message: "response stream disconnected",
+          codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } },
+        },
+      })
+      feed("turn/completed", { threadId: "thr_1", turn: { id: "turn_1", status: "completed" } })
+
+      let observed: { error: string; code?: string; recoverable?: boolean } | undefined
+      let r = await first
+      while (!r.done) {
+        if (r.value.type === "error") observed = r.value
+        r = await it.next()
+      }
+      expect(observed).toMatchObject({
+        error: "response stream disconnected",
+        code: "response_stream_disconnected",
+        recoverable: true,
+      })
+    })
+
     it("maps an interrupted turn to a cancelled done WITHOUT an error event", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession()
@@ -696,7 +725,12 @@ describe("CodexAppServerAdapter", () => {
         },
       })
       const adapter = await connectedAdapter()
-      const session = await adapter.resumeSession("thr_res", { systemPrompt: "You are helpful." })
+      const session = await adapter.resumeSession("thr_res", {
+        cwd: "/repo",
+        systemPrompt: "You are helpful.",
+        permissionMode: "acceptEdits",
+        mcpServers: [{ name: "workspace", command: "workspace-mcp", args: ["--stdio"] }],
+      })
       expect(session.id).toBe("thr_res")
       expect(session.messages).toHaveLength(3)
       expect(session.messages?.[0]).toMatchObject({ role: "user" })
@@ -708,6 +742,18 @@ describe("CodexAppServerAdapter", () => {
       expect(session.metadata?.selectedModel).toBe("gpt-5.2-codex")
       expect(session.metadata?.reasoningEffort).toBe("high")
       expect(adapter.getSessionExtensionSupport()["session/resume"].state).toBe("supported")
+      const resume = lastWritten((m) => m.method === "thread/resume")!
+      expect(resume.params).toMatchObject({
+        threadId: "thr_res",
+        cwd: "/repo",
+        approvalPolicy: "on-request",
+        developerInstructions: "You are helpful.",
+        config: {
+          mcp_servers: {
+            workspace: { type: "stdio", command: "workspace-mcp", args: ["--stdio"] },
+          },
+        },
+      })
 
       // The next turn must not re-send the system prompt as a text prepend.
       const it = iterator(adapter, session.id, userMessage("continue"))
@@ -718,6 +764,18 @@ describe("CodexAppServerAdapter", () => {
       const turn = lastWritten((m) => m.method === "turn/start")!
       const input = (turn.params as { input: Array<{ text?: string }> }).input
       expect(input[0].text).toBe("continue")
+    })
+
+    it("blocks PII-bearing resume options before they reach the app-server", async () => {
+      const adapter = await connectedAdapter()
+
+      await expect(
+        adapter.resumeSession("thr_res", {
+          systemPrompt: "Contact alice@example.com before continuing.",
+        })
+      ).rejects.toThrow(/PII gate/i)
+
+      expect(lastWritten((message) => message.method === "thread/resume")).toBeUndefined()
     })
 
     it("forks a thread into a new session copying source metadata", async () => {
@@ -1791,6 +1849,34 @@ describe("CodexAppServerAdapter", () => {
   })
 
   describe("status notifications + lifecycle", () => {
+    it("logs user-facing warning, deprecation, and config-warning notifications", async () => {
+      await connectedAdapter()
+      const warnSpy = jest.spyOn(loggers.agent, "warn").mockImplementation(() => {})
+      try {
+        feed("warning", { threadId: "thr_1", message: "retrying with fallback" })
+        feed("deprecationNotice", {
+          summary: "thread/rollback is deprecated",
+          details: "Use revert",
+        })
+        feed("configWarning", { summary: "Invalid config", path: "/work/.codex/config.toml" })
+
+        expect(warnSpy).toHaveBeenCalledWith("Codex app-server warning", {
+          threadId: "thr_1",
+          message: "retrying with fallback",
+        })
+        expect(warnSpy).toHaveBeenCalledWith("Codex app-server deprecation notice", {
+          summary: "thread/rollback is deprecated",
+          details: "Use revert",
+        })
+        expect(warnSpy).toHaveBeenCalledWith("Codex app-server configuration warning", {
+          summary: "Invalid config",
+          path: "/work/.codex/config.toml",
+        })
+      } finally {
+        warnSpy.mockRestore()
+      }
+    })
+
     it("applies an MCP startup-status notification and notifies listeners", async () => {
       const adapter = await connectedAdapter()
       const seen: unknown[] = []
@@ -1871,7 +1957,7 @@ describe("CodexAppServerAdapter", () => {
   })
 
   describe("input mapping + model selection", () => {
-    it("maps image / file content and passes the selected model on turn/start", async () => {
+    it("maps image, audio, and file content and passes the selected model on turn/start", async () => {
       const adapter = await connectedAdapter()
       const session = await adapter.createSession({ cwd: "/repo" })
       await adapter.setSessionModel(session.id, "gpt-5.2-codex")
@@ -1886,7 +1972,12 @@ describe("CodexAppServerAdapter", () => {
             source: { type: "url", url: "https://img/x.png", mediaType: "image/png" },
           },
           { type: "image", source: { type: "base64", data: "abc", mediaType: "image/png" } },
+          { type: "audio", data: "YWJj", mimeType: "audio/wav" },
+          { type: "audio", data: "data:audio/ogg;base64,ZGVm", mimeType: "audio/ogg" },
           { type: "file", path: "/repo/pic.png" },
+          { type: "file", path: "/repo/voice.wav", mimeType: "audio/wav" },
+          { type: "file", path: "/repo/voice.bin", mimeType: "audio/mpeg" },
+          { type: "file", path: "/repo/voice.mp3" },
           { type: "file", path: "/repo/notes.txt" },
         ],
         timestamp: new Date(),
@@ -1898,12 +1989,27 @@ describe("CodexAppServerAdapter", () => {
       while (!r.done) r = await it.next()
 
       const turn = lastWritten((m) => m.method === "turn/start")!
-      const params = turn.params as { input: Array<{ type: string }>; model?: string; cwd?: string }
+      const params = turn.params as {
+        input: Array<{ type: string; url?: string; path?: string }>
+        model?: string
+        cwd?: string
+      }
       expect(params.model).toBe("gpt-5.2-codex")
       expect(params.cwd).toBe("/repo")
       const inputTypes = params.input.map((i) => i.type)
       expect(inputTypes).toContain("image") // url image
       expect(inputTypes).toContain("localImage") // image file path
+      expect(params.input).toContainEqual({
+        type: "audio",
+        url: "data:audio/wav;base64,YWJj",
+      })
+      expect(params.input).toContainEqual({
+        type: "audio",
+        url: "data:audio/ogg;base64,ZGVm",
+      })
+      expect(params.input).toContainEqual({ type: "localAudio", path: "/repo/voice.wav" })
+      expect(params.input).toContainEqual({ type: "localAudio", path: "/repo/voice.bin" })
+      expect(params.input).toContainEqual({ type: "localAudio", path: "/repo/voice.mp3" })
       // base64 image + non-image file fall back to text items
       expect(params.input.filter((i) => i.type === "text").length).toBeGreaterThanOrEqual(2)
     })

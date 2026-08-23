@@ -129,6 +129,8 @@ export interface RunAndCaptureResult {
    * on the text channel / when no event arrived.
    */
   sdkSessionId?: string
+  /** Parsed SDK structured output when a JSON-schema output format was requested. */
+  structuredOutput?: unknown
 }
 
 /**
@@ -615,6 +617,9 @@ async function captureAssistantReplyCore(
     // SDK-issued session id (sdk_session_id event) — surfaced on the result so
     // headless multi-turn drivers can persist it for resume.
     let capturedSdkSessionId = ""
+    let capturedStructuredOutput: unknown
+    let hasCapturedStructuredOutput = false
+    let capturedResultSubtype = ""
 
     // ── Best-effort typed-event emitter (plugin Agent SDK `runStreamed`). ──
     const emitEvent = (event: CaptureStreamEvent, source: "raw" | "envelope" = "raw") => {
@@ -937,7 +942,22 @@ async function captureAssistantReplyCore(
         // the model's exact output blocks. Fall back to the SDK result's
         // `.result` string if the assistant blocks were empty (rare).
         const text = assembledText.trim() || evt.result?.result?.trim() || ""
-        if (!text && surfaceAcc.surfaces.size === 0 && toolCallsById.size === 0) {
+        const terminalResult = evt.result as
+          { structured_output?: unknown; subtype?: string } | undefined
+        const terminalHasStructuredOutput = Boolean(
+          terminalResult &&
+          Object.prototype.hasOwnProperty.call(terminalResult, "structured_output")
+        )
+        const hasStructuredOutput = terminalHasStructuredOutput || hasCapturedStructuredOutput
+        const structuredOutput = terminalHasStructuredOutput
+          ? terminalResult?.structured_output
+          : capturedStructuredOutput
+        if (
+          !text &&
+          !hasStructuredOutput &&
+          surfaceAcc.surfaces.size === 0 &&
+          toolCallsById.size === 0
+        ) {
           // Genuine no-content turn: no text, no A2UI surfaces, AND no tool
           // calls. Older contract: error out. Two outcomes are NOT errors:
           //   • surface-only turns (assistant called a2ui_create_surface but
@@ -957,7 +977,7 @@ async function captureAssistantReplyCore(
         }
         const id = lastMessageId || evt.result?.uuid || crypto.randomUUID()
         const usage = evt.result ? (extractUsage(evt.result) ?? undefined) : undefined
-        const resultSubtype = (evt.result as { subtype?: string } | undefined)?.subtype
+        const resultSubtype = terminalResult?.subtype ?? capturedResultSubtype
         finishOk({
           text,
           messageId: id,
@@ -966,6 +986,7 @@ async function captureAssistantReplyCore(
           ...(usage ? { usage } : {}),
           ...(resultSubtype ? { resultSubtype } : {}),
           ...(capturedSdkSessionId ? { sdkSessionId: capturedSdkSessionId } : {}),
+          ...(hasStructuredOutput ? { structuredOutput } : {}),
         })
         return
       }
@@ -1205,6 +1226,15 @@ async function captureAssistantReplyCore(
           // usage block simply emits nothing.
           const usage = extractUsage(inner as unknown as Parameters<typeof extractUsage>[0])
           if (usage && cap?.onEvent) emitEvent({ type: "usage", usage })
+          const sdkResult = inner as typeof inner & {
+            subtype?: string
+            structured_output?: unknown
+          }
+          if (sdkResult.subtype) capturedResultSubtype = sdkResult.subtype
+          if (Object.prototype.hasOwnProperty.call(sdkResult, "structured_output")) {
+            hasCapturedStructuredOutput = true
+            capturedStructuredOutput = sdkResult.structured_output
+          }
         }
       }
     }

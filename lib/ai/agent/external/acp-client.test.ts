@@ -62,7 +62,9 @@ jest.mock("@/lib/utils", () => ({
 import { isTauri } from "@/lib/utils"
 import {
   acpTerminalCreate,
+  acpTerminalKill,
   acpTerminalOutput,
+  acpTerminalRelease,
   acpTerminalWaitForExit,
   acpTerminalWrite,
   cleanupSessionTerminals,
@@ -74,8 +76,10 @@ import { platformStreamingFetch } from "@/lib/network/platform-streaming-fetch"
 import { createPlatformWebSocket } from "@/lib/network/platform-websocket"
 import {
   AcpClientAdapter,
+  buildAcpPromptBlocks,
   buildSpawnArgs,
   createAcpClient,
+  setAcpDynamicMcpHostController,
   SUPPORTED_ACP_PROTOCOL_VERSIONS,
   LATEST_ACP_PROTOCOL_VERSION,
   RAPID_EXIT_THRESHOLD_MS,
@@ -83,6 +87,8 @@ import {
 } from "./acp-client"
 import type {
   ExternalAgentConfig,
+  ExternalAgentContent,
+  ExternalAgentMessage,
   AcpPermissionResponse,
   ExternalAgentEvent,
 } from "@/types/agent/external-agent"
@@ -93,7 +99,9 @@ import { agentReadTextFile, agentWriteTextFile } from "./agent-transport"
 const mockIsTauri = isTauri as jest.Mock
 const mockTerminalWrite = acpTerminalWrite as jest.Mock
 const mockTerminalCreate = acpTerminalCreate as jest.Mock
+const mockTerminalKill = acpTerminalKill as jest.Mock
 const mockTerminalOutput = acpTerminalOutput as jest.Mock
+const mockTerminalRelease = acpTerminalRelease as jest.Mock
 const mockTerminalWaitForExit = acpTerminalWaitForExit as jest.Mock
 const mockCleanupSessionTerminals = cleanupSessionTerminals as jest.Mock
 const mockListen = listen as jest.Mock
@@ -101,11 +109,96 @@ const mockInvoke = invoke as jest.Mock
 const mockAgentReadTextFile = agentReadTextFile as jest.Mock
 const mockAgentWriteTextFile = agentWriteTextFile as jest.Mock
 
+describe("buildAcpPromptBlocks", () => {
+  const message = (content: ExternalAgentMessage["content"]): ExternalAgentMessage => ({
+    id: "m",
+    role: "user",
+    content,
+    timestamp: new Date(),
+  })
+
+  it("keeps text and named resource links as baseline content", () => {
+    expect(
+      buildAcpPromptBlocks(
+        message([
+          { type: "text", text: "hello" },
+          {
+            type: "resource_link",
+            uri: "file:///workspace/readme.md",
+            name: "readme.md",
+            annotations: { audience: ["assistant"], lastModified: "2026-08-23T00:00:00Z" },
+          },
+        ]),
+        {}
+      )
+    ).toEqual([
+      { type: "text", text: "hello" },
+      {
+        type: "resource_link",
+        uri: "file:///workspace/readme.md",
+        name: "readme.md",
+        annotations: { audience: ["assistant"], lastModified: "2026-08-23T00:00:00Z" },
+      },
+    ])
+  })
+
+  const unsupportedCapabilityCases: Array<[ExternalAgentContent, string]> = [
+    [{ type: "image", source: { type: "base64", data: "AA==", mediaType: "image/png" } }, "image"],
+    [{ type: "audio", data: "AA==", mimeType: "audio/wav" }, "audio"],
+    [
+      {
+        type: "resource",
+        resource: {
+          uri: "file:///workspace/data.bin",
+          mimeType: "application/octet-stream",
+          blob: "AA==",
+        },
+      },
+      "embeddedContext",
+    ],
+  ]
+
+  it.each(unsupportedCapabilityCases)(
+    "rejects %s when the agent capability is absent",
+    (content, capability) => {
+      expect(() => buildAcpPromptBlocks(message([content]), {})).toThrow(
+        new RegExp(`prompt capability.*${capability}`, "i")
+      )
+    }
+  )
+
+  it("preserves rich blocks when every matching capability is negotiated", () => {
+    expect(
+      buildAcpPromptBlocks(
+        message([
+          { type: "image", source: { type: "base64", data: "AA==", mediaType: "image/png" } },
+          { type: "audio", data: "AQ==", mimeType: "audio/wav" },
+          {
+            type: "resource",
+            resource: { uri: "file:///workspace/note.txt", mimeType: "text/plain", text: "note" },
+          },
+        ]),
+        { promptCapabilities: { image: true, audio: true, embeddedContext: true } }
+      )
+    ).toEqual([
+      { type: "image", data: "AA==", mimeType: "image/png" },
+      { type: "audio", data: "AQ==", mimeType: "audio/wav" },
+      {
+        type: "resource",
+        resource: { uri: "file:///workspace/note.txt", mimeType: "text/plain", text: "note" },
+      },
+    ])
+  })
+})
+
 afterEach(() => {
+  setAcpDynamicMcpHostController(undefined)
   mockIsTauri.mockReturnValue(false)
   mockTerminalWrite.mockClear()
   mockTerminalCreate.mockClear()
+  mockTerminalKill.mockClear()
   mockTerminalOutput.mockClear()
+  mockTerminalRelease.mockClear()
   mockTerminalWaitForExit.mockClear()
   mockCleanupSessionTerminals.mockClear()
   mockListen.mockReset()
@@ -577,6 +670,7 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
     await a.cancel("s")
 
     await expect(pending).resolves.toEqual({ outcome: { outcome: "cancelled" } })
+    expect(session.status).toBe("executing")
   })
 
   it("rejects a nested permission request with -32800 when its request is cancelled", async () => {
@@ -652,7 +746,68 @@ describe("AcpClientAdapter — permission-mode auto-resolution", () => {
   })
 })
 
-describe("AcpClientAdapter — ACP v1 feature-gated elicitation", () => {
+describe("AcpClientAdapter — ACP v1.21 terminal authentication", () => {
+  function terminalAuthInternals(adapter: AcpClientAdapter) {
+    return adapter as unknown as {
+      _config: ExternalAgentConfig
+      _authMethods: Array<Record<string, unknown>>
+      teardownTransport: jest.Mock<Promise<void>, []>
+      connect: jest.Mock<Promise<void>, [ExternalAgentConfig]>
+      sendRequest: jest.Mock
+    }
+  }
+
+  it("runs terminal auth in the governed PTY and reconnects without calling authenticate", async () => {
+    mockIsTauri.mockReturnValue(true)
+    const adapter = new AcpClientAdapter()
+    const internals = terminalAuthInternals(adapter)
+    internals._config = stdioConfig()
+    internals._authMethods = [
+      { type: "terminal", id: "login", name: "Login", args: ["auth"], env: { AUTH_UI: "1" } },
+    ]
+    internals.teardownTransport = jest.fn<Promise<void>, []>(async () => undefined)
+    internals.connect = jest.fn<Promise<void>, [ExternalAgentConfig]>(async () => undefined)
+    internals.sendRequest = jest.fn()
+
+    await adapter.authenticate("login")
+
+    expect(mockTerminalCreate).toHaveBeenCalledWith(
+      "acp-auth:agent",
+      "node",
+      ["--stdio", "auth"],
+      undefined,
+      expect.objectContaining({ AUTH_UI: "1" }),
+      1024 * 1024
+    )
+    expect(mockTerminalWaitForExit).toHaveBeenCalledWith("terminal-1")
+    expect(mockTerminalRelease).toHaveBeenCalledWith("terminal-1")
+    expect(internals.sendRequest).not.toHaveBeenCalled()
+    expect(internals.connect).toHaveBeenCalledWith(internals._config)
+    expect(adapter.getTerminalAuthState()).toMatchObject({
+      methodId: "login",
+      terminalId: "terminal-1",
+      status: "completed",
+      exitCode: 0,
+    })
+  })
+
+  it("can cancel a running terminal authentication", async () => {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { terminalAuthState: Record<string, unknown> }).terminalAuthState = {
+      methodId: "login",
+      terminalId: "terminal-1",
+      status: "running",
+    }
+
+    await adapter.cancelTerminalAuthentication()
+
+    expect(mockTerminalKill).toHaveBeenCalledWith("terminal-1")
+    expect(mockTerminalRelease).toHaveBeenCalledWith("terminal-1")
+    expect(adapter.getTerminalAuthState()?.status).toBe("cancelled")
+  })
+})
+
+describe("AcpClientAdapter — ACP v1 stable elicitation", () => {
   function elicitationInternals(a: AcpClientAdapter) {
     return a as unknown as {
       _config?: ExternalAgentConfig
@@ -672,6 +827,7 @@ describe("AcpClientAdapter — ACP v1 feature-gated elicitation", () => {
   }
 
   it("emits a form request and resolves it through respondToElicitation", async () => {
+    mockIsTauri.mockReturnValue(true)
     const a = new AcpClientAdapter()
     seedSession(a, "s1", "default")
     const internals = elicitationInternals(a)
@@ -709,7 +865,7 @@ describe("AcpClientAdapter — ACP v1 feature-gated elicitation", () => {
     await expect(response).resolves.toEqual({ action: "accept", content: { enabled: true } })
   })
 
-  it("rejects elicitation when the extension was not explicitly enabled", async () => {
+  it("rejects elicitation when the current host cannot back it", async () => {
     const a = new AcpClientAdapter()
     elicitationInternals(a)._config = stdioConfig()
     await expect(
@@ -992,6 +1148,42 @@ describe("AcpClientAdapter — outbound PII gate", () => {
       )
     ).rejects.toThrow(/PII gate/i)
   })
+
+  it("blocks PII hidden in a base64 text attachment before session/prompt", async () => {
+    const a = new AcpClientAdapter()
+    const sendPromptRequest = jest.fn()
+    ;(a as unknown as { _sessions: Map<string, unknown> })._sessions.set("s", {
+      id: "s",
+      agentId: "agent",
+      status: "active",
+      messages: [],
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+    })
+    ;(
+      a as unknown as {
+        _agentCapabilities: { promptCapabilities: { embeddedContext: boolean } }
+      }
+    )._agentCapabilities = { promptCapabilities: { embeddedContext: true } }
+    ;(a as unknown as { sendPromptRequest: jest.Mock }).sendPromptRequest = sendPromptRequest
+    const message: ExternalAgentMessage = {
+      id: "m-base64-pii",
+      role: "user",
+      timestamp: new Date(),
+      content: [
+        {
+          type: "file",
+          path: "/tmp/contacts.txt",
+          mimeType: "text/plain",
+          encoding: "base64",
+          content: Buffer.from("alice@example.com", "utf-8").toString("base64"),
+        },
+      ],
+    }
+
+    await expect(a.prompt("s", message)[Symbol.asyncIterator]().next()).rejects.toThrow(/PII gate/i)
+    expect(sendPromptRequest).not.toHaveBeenCalled()
+  })
 })
 
 describe("AcpClientAdapter — orphaned process reclaim", () => {
@@ -1074,7 +1266,7 @@ describe("AcpClientAdapter — orphaned process reclaim", () => {
 // the `jsonrpc:"2.0"` field, an inbound response resolves the pending request,
 // and an inbound server→client request gets a response written back.
 describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
-  function connectWithStdio(): {
+  function connectWithStdio(config: ExternalAgentConfig = stdioConfig()): {
     adapter: AcpClientAdapter
     sent: Array<Record<string, unknown>>
     feed: (frame: Record<string, unknown>) => void
@@ -1112,13 +1304,17 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
               },
             })
           )
+        } else if (msg.method === "session/new") {
+          queueMicrotask(() =>
+            feed({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "session-1" } })
+          )
         }
       }
       return undefined
     })
 
     const adapter = new AcpClientAdapter()
-    const connected = adapter.connect(stdioConfig())
+    const connected = adapter.connect(config)
     return { adapter, sent, feed, connected }
   }
 
@@ -1132,9 +1328,15 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
     expect(init.params).toMatchObject({
       clientCapabilities: {
         session: { configOptions: { boolean: {} } },
-        plan: {},
+        fs: { readTextFile: true, writeTextFile: true },
+        terminal: true,
+        auth: { terminal: true },
+        elicitation: { form: {}, url: {} },
       },
     })
+    expect(
+      (init.params as { clientCapabilities: Record<string, unknown> }).clientCapabilities
+    ).not.toHaveProperty("plan")
     expect(adapter.isConnected()).toBe(true)
     await adapter.disconnect()
   })
@@ -1147,6 +1349,75 @@ describe("AcpClientAdapter — JsonRpcPeer integration over stdio", () => {
     const reply = sent.find((m) => m.id === 77)
     expect(reply).toBeDefined()
     expect((reply!.error as { code: number }).code).toBe(-32601)
+    await adapter.disconnect()
+  })
+
+  it("routes preview ACP-channel MCP through the attached host controller", async () => {
+    const controller = {
+      connect: jest.fn(async () => ({ connectionId: "mcp-connection-1" })),
+      message: jest.fn(async () => ({ jsonrpc: "2.0", result: { tools: [] } })),
+      disconnect: jest.fn(async () => ({})),
+    }
+    setAcpDynamicMcpHostController(controller)
+    const config = stdioConfig()
+    config.metadata = { acpPreviewFeatures: { dynamicMcp: true } }
+    const { adapter, sent, feed, connected } = connectWithStdio(config)
+    await connected
+    await adapter.createSession({
+      cwd: "/workspace",
+      mcpServers: [{ name: "Cognia MCP", serverId: "server-1" }],
+    })
+
+    feed({ jsonrpc: "2.0", id: 91, method: "mcp/connect", params: { serverId: "server-1" } })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(controller.connect).toHaveBeenCalledWith(
+      { serverId: "server-1" },
+      expect.objectContaining({ sessionId: "session-1" })
+    )
+    expect(sent.find((message) => message.id === 91)).toMatchObject({
+      result: { connectionId: "mcp-connection-1" },
+    })
+    expect(adapter.getDynamicMcpConnections()).toEqual([
+      expect.objectContaining({
+        connectionId: "mcp-connection-1",
+        sessionId: "session-1",
+        status: "connected",
+      }),
+    ])
+
+    feed({
+      jsonrpc: "2.0",
+      id: 92,
+      method: "mcp/message",
+      params: { connectionId: "mcp-connection-1", method: "tools/list" },
+    })
+    feed({
+      jsonrpc: "2.0",
+      id: 93,
+      method: "mcp/disconnect",
+      params: { connectionId: "mcp-connection-1" },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(controller.message).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "tools/list" }),
+      expect.objectContaining({ sessionId: "session-1", notification: false })
+    )
+    expect(controller.disconnect).toHaveBeenCalled()
+    expect(adapter.getDynamicMcpConnections()).toEqual([])
+    await adapter.disconnect()
+  })
+
+  it("rejects ACP-channel MCP unless both the preview flag and controller are present", async () => {
+    const config = stdioConfig()
+    config.metadata = { acpPreviewFeatures: { dynamicMcp: true } }
+    const { adapter, connected } = connectWithStdio(config)
+    await connected
+    await expect(
+      adapter.createSession({
+        cwd: "/workspace",
+        mcpServers: [{ name: "Cognia MCP", serverId: "server-1" }],
+      })
+    ).rejects.toThrow(/attached host controller/i)
     await adapter.disconnect()
   })
 })
@@ -1918,6 +2189,108 @@ describe("AcpClientAdapter — ACP v1 session updates", () => {
       content: { type: "text", text: "hi" },
     }) as { messageId: string }
     expect(user.messageId).toBe(`${first.messageId}:user`)
+  })
+
+  it("preserves an agent-owned messageId and rich content block", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    const event = handleUpdate(a, "s1", {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "agent-message-7",
+      content: {
+        type: "resource_link",
+        uri: "file:///workspace/result.md",
+        name: "result.md",
+        annotations: { priority: 0.8, lastModified: "2026-08-23T00:00:00Z" },
+      },
+    })
+
+    expect(event).toMatchObject({
+      type: "content_block_delta",
+      messageId: "agent-message-7",
+      role: "assistant",
+      channel: "message",
+      block: {
+        type: "resource_link",
+        name: "result.md",
+        annotations: { priority: 0.8 },
+      },
+    })
+  })
+
+  it("applies preview compaction patch and summary-chunk semantics", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "compaction_update",
+        compactionId: "compact-1",
+        status: "in_progress",
+        _meta: { source: "agent" },
+      })
+    ).toMatchObject({ type: "compaction_update" })
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "compaction_summary_chunk",
+        compactionId: "compact-1",
+        content: { type: "text", text: "Summary" },
+      })
+    ).toMatchObject({ type: "compaction_summary_chunk", compactionId: "compact-1" })
+    handleUpdate(a, "s1", {
+      sessionUpdate: "compaction_update",
+      compactionId: "compact-1",
+      status: "completed",
+      error: null,
+    })
+
+    expect(sessionMeta(a, "s1")?.compactions).toEqual({
+      "compact-1": {
+        compactionId: "compact-1",
+        status: "completed",
+        summary: [{ type: "text", text: "Summary" }],
+        _meta: { source: "agent" },
+      },
+    })
+  })
+
+  it("ignores preview compaction updates when the negotiated profile disables them", () => {
+    const a = new AcpClientAdapter()
+    seedSession(a, "s1", "default")
+    ;(a as unknown as { featureProfile: Record<string, unknown> }).featureProfile = {
+      preview: { compaction: { advertised: false } },
+    }
+
+    expect(
+      handleUpdate(a, "s1", {
+        sessionUpdate: "compaction_update",
+        compactionId: "compact-1",
+        status: "in_progress",
+      })
+    ).toBeNull()
+    expect(sessionMeta(a, "s1")?.compactions).toBeUndefined()
+  })
+
+  it("rejects preview provider and NES methods when their host feature is disabled", async () => {
+    const adapter = new AcpClientAdapter()
+    await expect(adapter.listProviders()).rejects.toThrow(/preview feature "providers"/)
+    await expect(adapter.startNes({} as never)).rejects.toThrow(/preview feature "nes"/)
+  })
+
+  it("enforces provider credential confirmation at the final adapter boundary", async () => {
+    const adapter = new AcpClientAdapter()
+    ;(adapter as unknown as { featureProfile: Record<string, unknown> }).featureProfile = {
+      preview: { providers: { advertised: true } },
+    }
+    setAgentCaps(adapter, { providers: {} })
+    await expect(
+      adapter.setProvider({
+        providerId: "provider-1",
+        apiType: "openai",
+        baseUrl: "https://provider.example.com",
+        headers: { Authorization: "Bearer secret" },
+      })
+    ).rejects.toThrow(/explicit confirmation/i)
   })
 
   it("applies and emits session_info_update title", () => {

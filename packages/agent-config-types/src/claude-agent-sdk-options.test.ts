@@ -71,6 +71,18 @@ describe("validateClaudeAgentSdkOptions", () => {
       ).toBe(true)
     })
 
+    it("requires resumeDropsTurn to guard a truncating resume", () => {
+      expect(errorsOf({ ...base, resumeDropsTurn: "prompt-1" }, { resume: "s" })).toMatch(
+        /resumeDropsTurn requires resumeSessionAt/
+      )
+      expect(
+        validateClaudeAgentSdkOptions(
+          { ...base, resumeSessionAt: "entry-1", resumeDropsTurn: "prompt-1" },
+          { resume: "s" }
+        ).ok
+      ).toBe(true)
+    })
+
     it("refuses a fork with no parent", () => {
       expect(errorsOf(base, { forkSession: true })).toMatch(/there is nothing to fork from/)
       expect(validateClaudeAgentSdkOptions(base, { forkSession: true, resume: "s-1" }).ok).toBe(

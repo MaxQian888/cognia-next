@@ -92,6 +92,7 @@ const installOption: BackendInstallOption = {
   name: "GitHub Copilot CLI",
   method: {
     kind: "npm",
+    ownership: "user-managed",
     label: "npm",
     display: "npm install -g @github/copilot",
     command: "npm",

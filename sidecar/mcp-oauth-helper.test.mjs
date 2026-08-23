@@ -10,7 +10,21 @@ import {
   runFlow,
   prepareHeadlessFlow,
   completeHeadlessFlow,
+  isMcpOauthHelperEntry,
 } from "./mcp-oauth-helper.mjs"
+
+test("bundled sidecar imports never auto-run the OAuth helper", () => {
+  const bundledUrl = "file:///$bunfs/root/mcp-oauth-helper.mjs"
+  const bundledArgv = "/$bunfs/root/mcp-oauth-helper.mjs"
+  assert.equal(
+    isMcpOauthHelperEntry({ role: "sidecar", importUrl: bundledUrl, argvPath: bundledArgv }),
+    false
+  )
+  assert.equal(
+    isMcpOauthHelperEntry({ role: undefined, importUrl: bundledUrl, argvPath: bundledArgv }),
+    true
+  )
+})
 
 test("parseCallback extracts code/state/error", () => {
   assert.deepEqual(parseCallback("/callback?code=abc&state=xy"), {

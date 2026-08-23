@@ -108,6 +108,12 @@ export interface ClaudeAgentSdkOptionsV1 {
   continue?: boolean
   /** Message uuid to resume *at*, for partial replay. */
   resumeSessionAt?: string
+  /**
+   * Prompt uuid for the turn intentionally discarded by `resumeSessionAt`.
+   * The SDK rejects the truncating resume when unrelated entries would also
+   * be dropped, allowing callers to recover without silently losing history.
+   */
+  resumeDropsTurn?: string
   persistSession?: boolean
   title?: string
   sessionStore?: ClaudeAgentSdkSessionStoreRef
@@ -335,6 +341,9 @@ export function validateClaudeAgentSdkOptions(
   }
   if (opts.resumeSessionAt && resumeSignals.length === 0) {
     errors.push("claudeAgentSdk.resumeSessionAt needs a session to resume (resume or sessionId)")
+  }
+  if (opts.resumeDropsTurn && !opts.resumeSessionAt) {
+    errors.push("claudeAgentSdk.resumeDropsTurn requires resumeSessionAt")
   }
   if (flat.forkSession && !flat.resume) {
     errors.push("forkSession requires resume — there is nothing to fork from")

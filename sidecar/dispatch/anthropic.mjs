@@ -49,6 +49,7 @@ import { createSessionTaskStore } from "../builtin-tools/core/tasks.mjs"
 import { createStderrLogSink, buildMcpLogEvent } from "./mcp-log.mjs"
 import { createMcpAutoReconnector } from "./mcp-auto-reconnect.mjs"
 import { guardAnthropicRemoteMcpServers } from "./anthropic-mcp-relay.mjs"
+import { applyEmbeddedClaudeExecutable } from "./claude-executable.mjs"
 import {
   applyClaudeAgentSdkOptions,
   buildSdkInteractionCallbacks,
@@ -729,6 +730,7 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   }
 
   options = enforceAnthropicToolSurface(options, sendOptions)
+  options = applyEmbeddedClaudeExecutable(options)
 
   // Strip undefined/null so the SDK uses its defaults instead of choking on
   // `null.type` lookups.

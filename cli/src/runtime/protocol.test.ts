@@ -10,6 +10,41 @@ describe("commandToInbound", () => {
     ).toEqual({ type: "send", sessionId: "s1", prompt: "hi", options: { model: "m" } })
   })
 
+  it("maps canonical agent_send with its idempotency key", () => {
+    expect(
+      commandToInbound("agent_send", {
+        sessionId: "s1",
+        prompt: "hi",
+        options: { execution: { specVersion: 2, runtimeAdapter: "ai-sdk" } },
+        commandId: "cmd-1",
+      })
+    ).toEqual({
+      type: "send",
+      sessionId: "s1",
+      prompt: "hi",
+      options: { execution: { specVersion: 2, runtimeAdapter: "ai-sdk" } },
+      commandId: "cmd-1",
+    })
+  })
+
+  it("maps canonical lifecycle aliases without losing their idempotency keys", () => {
+    expect(commandToInbound("agent_interrupt", { sessionId: "s1", commandId: "cmd-2" })).toEqual({
+      type: "interrupt",
+      sessionId: "s1",
+      commandId: "cmd-2",
+    })
+    expect(
+      commandToInbound("agent_compact", {
+        sessionId: "s1",
+        focus: "  keep this  ",
+        commandId: "cmd-3",
+      })
+    ).toEqual({ type: "compact", sessionId: "s1", focus: "keep this", commandId: "cmd-3" })
+    expect(
+      commandToInbound("agent_close_session", { sessionId: "s1", commandId: "cmd-4" })
+    ).toEqual({ type: "close", sessionId: "s1", commandId: "cmd-4" })
+  })
+
   it("omits options when undefined", () => {
     const msg = commandToInbound(COMMAND.SEND, { sessionId: "s1", prompt: "hi" })
     expect(msg).toEqual({ type: "send", sessionId: "s1", prompt: "hi" })

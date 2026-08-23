@@ -97,6 +97,7 @@ import {
   getAvailablePresets,
   getPresetConfig,
   getPresetDisplayInfo,
+  getRunnablePresets,
   isFromPreset,
   resolvePreferredCodexExecutablePresetId,
 } from "@/lib/ai/agent/external/presets"
@@ -105,6 +106,7 @@ import {
   supportedPermissionModes,
 } from "@/lib/ai/agent/external/permission-modes"
 import { extensionPolicyArgs, type PiExtensionPolicy } from "@/lib/ai/agent/external/pi-rpc-client"
+import type { AcpPreviewFeature } from "@/lib/ai/agent/external/acp-feature-profile"
 import type {
   ExternalAgentConnectionStatus,
   CreateExternalAgentInput,
@@ -620,7 +622,7 @@ function AgentEditorDialog({
                   <SelectValue placeholder={t("selectPresetOrCustom")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {getAvailablePresets().map((presetId) => {
+                  {getRunnablePresets().map((presetId) => {
                     const preset = getPresetConfig(presetId)
                     if (!preset) return null
                     return (
@@ -1362,7 +1364,7 @@ function PresetGalleryCard({ disabled, onPick }: PresetGalleryCardProps) {
                     size="sm"
                     variant="outline"
                     onClick={() => onPick(id)}
-                    disabled={disabled}
+                    disabled={disabled || config.supportTier === "documented-only"}
                     data-testid={`preset-pick-${id}`}
                   >
                     {t("useThisPreset")}
@@ -1390,6 +1392,73 @@ interface AgentDetailProps {
   onDisconnect: () => void
   onEdit: () => void
   onDelete: () => void
+}
+
+const ACP_PREVIEW_FEATURES: readonly AcpPreviewFeature[] = [
+  "compaction",
+  "providers",
+  "dynamicMcp",
+  "nes",
+  "identifiedPlans",
+  "previewToolNames",
+  "sessionFork",
+]
+
+function AcpFeatureSettings({
+  agent,
+  applyUpdate,
+}: {
+  agent: LifecycleExternalAgentConfig
+  applyUpdate: (updates: UpdateExternalAgentInput) => Promise<void>
+}) {
+  const t = useTranslations("externalAgent.settings")
+  const preview =
+    agent.metadata?.acpPreviewFeatures && typeof agent.metadata.acpPreviewFeatures === "object"
+      ? (agent.metadata.acpPreviewFeatures as Partial<Record<AcpPreviewFeature, boolean>>)
+      : {}
+  const updateMetadata = (next: Record<string, unknown>) =>
+    applyUpdate({ metadata: { ...(agent.metadata ?? {}), ...next } })
+
+  return (
+    <div className="space-y-3 rounded-md border p-3" data-testid="acp-feature-settings">
+      <div>
+        <p className="text-sm font-medium">{t("acpFeatureSettingsTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("acpFeatureSettingsDescription")}</p>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <Label htmlFor={`acp-elicitation-${agent.id}`} className="text-sm font-normal">
+          {t("acpStableElicitation")}
+        </Label>
+        <Switch
+          id={`acp-elicitation-${agent.id}`}
+          checked={agent.metadata?.acpElicitationEnabled !== false}
+          onCheckedChange={(checked) => {
+            void updateMetadata({ acpElicitationEnabled: checked })
+          }}
+        />
+      </div>
+      <Separator />
+      <p className="text-xs font-medium text-muted-foreground">{t("acpPreviewFeatures")}</p>
+      {ACP_PREVIEW_FEATURES.map((feature) => (
+        <div key={feature} className="flex items-center justify-between gap-3">
+          <Label htmlFor={`acp-preview-${agent.id}-${feature}`} className="text-sm font-normal">
+            {t(`acpPreview.${feature}`)}
+          </Label>
+          <Switch
+            id={`acp-preview-${agent.id}-${feature}`}
+            checked={preview[feature] === true}
+            onCheckedChange={(checked) => {
+              void updateMetadata({
+                acpPreviewFeatures: { ...preview, [feature]: checked },
+                ...(feature === "providers" ? { acpProviderController: checked } : {}),
+                ...(feature === "nes" ? { acpNesController: checked } : {}),
+              })
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /**
@@ -1524,6 +1593,7 @@ function AgentDetail({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {agent.protocol === "acp" && <AcpFeatureSettings agent={agent} applyUpdate={applyUpdate} />}
         {agent.metadata?.providerUndoWarningAcknowledged === true && (
           <div className="flex items-center justify-between gap-3 rounded-md border p-3">
             <div>
@@ -1706,6 +1776,7 @@ function RailItem({
 
 export function ExternalAgentSettings() {
   const t = useTranslations("externalAgent.settings")
+  const tRuntimes = useTranslations("externalAgent.runtimes")
   const tCommon = useTranslations("common")
   const tErrors = useTranslations("externalAgent.lifecycleErrors")
 
@@ -1950,7 +2021,7 @@ export function ExternalAgentSettings() {
               />
               <RailItem
                 icon={Boxes}
-                label={t("runtimes.title")}
+                label={tRuntimes("title")}
                 active={view.kind === "runtimes"}
                 onClick={() => setView({ kind: "runtimes" })}
                 dataTestId="nav-runtimes"

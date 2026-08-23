@@ -111,9 +111,8 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "context-management": {
           "level": "unsupported",
@@ -261,7 +260,7 @@
     },
     "codex-app-server": {
       "label": "OpenAI Codex app-server (thread/turn/item JSON-RPC)",
-      "note": "Rows follow the 0.141 app-server schema driven by `codex-app-server-client.ts`.",
+      "note": "Rows describe the Cognia core subset revalidated against the codex-cli 0.149.0 generated app-server schema; optional methods remain probed at runtime.",
       "capabilities": {
         "streaming": {
           "level": "native",
@@ -328,9 +327,8 @@
           "evidence": "protocol-spec"
         },
         "beta-features": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "unknown",
+          "evidence": "none"
         },
         "rate-limit-handling": {
           "level": "unknown",
@@ -389,13 +387,12 @@
           "evidence": "none"
         },
         "input.elicitation": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "input.dialog": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "plugins.native": {
           "level": "unsupported",
@@ -736,8 +733,8 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",
@@ -928,9 +925,8 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "context-management": {
           "level": "unsupported",
@@ -938,8 +934,8 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",
@@ -1039,9 +1035,8 @@
           "reasonKey": "noProtocolSlot"
         },
         "commands.dynamic": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "sandbox.native": {
           "level": "unsupported",
@@ -1080,8 +1075,8 @@
       }
     },
     "opencode-v2": {
-      "label": "OpenCode V2 local-service preview protocol",
-      "note": "Preview surface; only what `opencode-v2-client.ts` actually drives is asserted.",
+      "label": "OpenCode V2 legacy local-service preview protocol",
+      "note": "Capabilities describe Cognia's exact pinned 2.0.0-beta.1 preview contract, not the incompatible current V2 branch.",
       "capabilities": {
         "streaming": {
           "level": "native",
@@ -1134,9 +1129,8 @@
           "reasonKey": "agentOwned"
         },
         "thinking": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "context-management": {
           "level": "unsupported",
@@ -1144,8 +1138,8 @@
           "reasonKey": "agentOwned"
         },
         "images": {
-          "level": "unknown",
-          "evidence": "none"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "beta-features": {
           "level": "unsupported",
@@ -1245,9 +1239,8 @@
           "reasonKey": "noProtocolSlot"
         },
         "commands.dynamic": {
-          "level": "unsupported",
-          "evidence": "protocol-spec",
-          "reasonKey": "noProtocolSlot"
+          "level": "native",
+          "evidence": "adapter-code"
         },
         "sandbox.native": {
           "level": "unsupported",
@@ -1529,6 +1522,22 @@
           "level": "unsupported",
           "evidence": "protocol-spec",
           "reasonKey": "committedRepliesOnly"
+        },
+        "images": {
+          "level": "unsupported",
+          "evidence": "adapter-code",
+          "reasonKey": "attachmentStoreUnavailable"
+        }
+      }
+    },
+    "pi": {
+      "protocol": "acp",
+      "note": "The community pi-acp bridge accepts mcpServers but does not attach them to Pi.",
+      "capabilities": {
+        "mcp": {
+          "level": "unsupported",
+          "evidence": "protocol-spec",
+          "reasonKey": "noPerSessionMcpServers"
         }
       }
     },
@@ -1546,7 +1555,7 @@
   "capabilityNotes": {
     "thinking": "For an external agent this asks whether the HOST can set the thinking / reasoning level, which is the only question any surface acts on. An agent that merely streams thought chunks (every ACP agent) does not satisfy it -- there is nothing to configure.",
     "mcp": "Whether Cognia can attach an MCP server for a session. ACP carries them on `session/new`; Codex has no per-session parameter and reaches the same outcome through a per-thread config override (`equivalent`); the rest have no channel.",
-    "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising `loadSession`, so the row is `unknown` and the handshake answers it.",
+    "session.resume": "Reopening a prior session. On ACP this is gated on the agent advertising stable `sessionCapabilities.resume`, with legacy `loadSession` as a fallback, so the row is `unknown` and the handshake answers it.",
     "compaction": "ACP has no compaction method: the only route is a `/compact` or `/compress` the agent chose to advertise, which is a per-session live fact. Pi and Codex have native methods.",
     "hooks.lifecycle": "No external protocol models Cognia's lifecycle hooks, so every row is `unknown`. Whether the hooks run is a HOST fact: the renderer wraps every external turn, the CLI does not."
   }

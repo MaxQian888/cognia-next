@@ -1,4 +1,5 @@
 import type { WorkerWorkspaceClient } from "../worker/workspace-client"
+import type { collectWorkerDaemonGarbage, startWorkerDaemon } from "../worker/daemon"
 import type { OutputSink } from "./output"
 import { parseArgv } from "./args"
 import { workerCommand } from "./worker-command"
@@ -153,13 +154,15 @@ describe("workerCommand daemon", () => {
   }
 
   it("starts a background daemon and prints the pid it claimed", async () => {
-    const start = jest.fn(async () => ({
-      started: true,
-      alreadyRunning: false,
-      pid: 4242,
-      profile: "default",
-      logFile: "/home/.cognia/worker/default/daemon.log",
-    }))
+    const start = jest
+      .fn<ReturnType<typeof startWorkerDaemon>, Parameters<typeof startWorkerDaemon>>()
+      .mockResolvedValue({
+        started: true,
+        alreadyRunning: false,
+        pid: 4242,
+        profile: "default",
+        logFile: "/home/.cognia/worker/default/daemon.log",
+      })
     const harness = deps({ daemon: { start } })
 
     const code = await workerCommand(
@@ -173,13 +176,15 @@ describe("workerCommand daemon", () => {
   })
 
   it("exits non-zero when a daemon already owns the profile", async () => {
-    const start = jest.fn(async () => ({
-      started: false,
-      alreadyRunning: true,
-      pid: 99,
-      profile: "build-box",
-      logFile: "/log",
-    }))
+    const start = jest
+      .fn<ReturnType<typeof startWorkerDaemon>, Parameters<typeof startWorkerDaemon>>()
+      .mockResolvedValue({
+        started: false,
+        alreadyRunning: true,
+        pid: 99,
+        profile: "build-box",
+        logFile: "/log",
+      })
     const harness = deps({ daemon: { start } })
 
     const code = await workerCommand(
@@ -194,13 +199,15 @@ describe("workerCommand daemon", () => {
   it("passes an abort signal only to a foreground daemon", async () => {
     // The foreground process is the one the OS supervisor signals; the launcher
     // returns immediately and must not install handlers it will never use.
-    const start = jest.fn(async () => ({
-      started: true,
-      alreadyRunning: false,
-      pid: 1,
-      profile: "default",
-      logFile: "/log",
-    }))
+    const start = jest
+      .fn<ReturnType<typeof startWorkerDaemon>, Parameters<typeof startWorkerDaemon>>()
+      .mockResolvedValue({
+        started: true,
+        alreadyRunning: false,
+        pid: 1,
+        profile: "default",
+        logFile: "/log",
+      })
     const harness = deps({ daemon: { start } })
 
     await workerCommand(
@@ -261,7 +268,12 @@ describe("workerCommand daemon", () => {
   })
 
   it("reclaims disk under the CLI home", async () => {
-    const gc = jest.fn(() => ({ removedLogs: ["/log.1"], removedWorkspaces: [] }))
+    const gc = jest
+      .fn<
+        ReturnType<typeof collectWorkerDaemonGarbage>,
+        Parameters<typeof collectWorkerDaemonGarbage>
+      >()
+      .mockReturnValue({ removedLogs: ["/log.1"], removedWorkspaces: [] })
     const harness = deps({ daemon: { gc } })
 
     const code = await workerCommand(

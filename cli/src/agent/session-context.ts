@@ -25,6 +25,7 @@ import {
 } from "@/lib/claude/build-options"
 import type { SendContent, SendOptions, SessionKind, McpServer } from "@cognia/agent-config-types"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 
 import { buildAttachmentContent, type BuiltAttachmentContent } from "./attachments/build"
 import { type ResolvedConfig } from "../config/schema"
@@ -146,6 +147,8 @@ export interface CliContextAssemblerParams {
   resolveAgentMode?: () => Promise<AgentModeConfig | null>
   fetchTwin?: typeof defaultFetchTwinContext
   onResolvedExecutionSpec?: (spec: ResolvedAgentExecutionSpec) => void
+  /** Definition-owned composition selection for SDK-created sessions. */
+  compositionSelection?: AgentCompositionSelectionV1
   /**
    * The user's merged lifecycle-hook config, injected into `sendOptions.hooks`
    * so the sidecar registers them as SDK-native hooks. See
@@ -273,6 +276,7 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
       now: now(),
     })
     ctx.onResolvedExecutionSpec = params.onResolvedExecutionSpec
+    ctx.compositionSelection = params.compositionSelection
     const sendOptions = withCliDisabledMcpTools(
       withCliAutoApprovedTools(await resolveOptions(ctx), resolveApprovedTools()),
       resolveDisabledMcpTools()

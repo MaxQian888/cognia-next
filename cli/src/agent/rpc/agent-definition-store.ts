@@ -67,8 +67,9 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/i
  * definitions on read. Archived versions stay readable forever, because
  * sessions reference them.
  *
- * Everything is written 0600 into a 0700 directory through a temp-file rename,
- * so a crash mid-write leaves either the old file or the new one.
+ * Everything is written 0600 into a 0700 directory. Mutable state uses a
+ * temp-file rename; immutable versions use an atomic hard-link commit so an
+ * existing version can never be replaced.
  */
 export function createAgentDefinitionStore(options: {
   home: string
@@ -88,35 +89,75 @@ export function createAgentDefinitionStore(options: {
 
   function writeAtomic(target: string, contents: string, exclusive: boolean): void {
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 })
-    if (exclusive && fs.existsSync(target)) {
-      throw new AgentDefinitionStoreError("already_exists", `${target} already exists`)
-    }
     const temporary = `${target}.${process.pid}.${now()}.tmp`
-    // `wx` on the temp file, then rename: the rename is the commit point, so a
-    // reader never observes a partially written definition.
-    const handle = fs.openSync(temporary, "wx", 0o600)
     try {
-      fs.writeSync(handle, contents)
-      fs.fsyncSync(handle)
-    } finally {
-      fs.closeSync(handle)
-    }
-    if (exclusive && fs.existsSync(target)) {
+      const handle = fs.openSync(temporary, "wx", 0o600)
+      try {
+        fs.writeSync(handle, contents)
+        fs.fsyncSync(handle)
+      } finally {
+        fs.closeSync(handle)
+      }
+      if (!exclusive) {
+        fs.renameSync(temporary, target)
+        return
+      }
+
+      // POSIX rename replaces an existing destination, so check-then-rename is
+      // not a compare-and-swap. Creating a hard link is the commit point:
+      // exactly one writer can create `target`, while every loser gets EEXIST.
+      try {
+        fs.linkSync(temporary, target)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          throw new AgentDefinitionStoreError("already_exists", `${target} already exists`)
+        }
+        throw error
+      }
       fs.rmSync(temporary, { force: true })
-      throw new AgentDefinitionStoreError("already_exists", `${target} already exists`)
+    } catch (error) {
+      fs.rmSync(temporary, { force: true })
+      throw error
     }
-    fs.renameSync(temporary, target)
   }
 
   function readState(agentId: string): AgentState {
+    const target = path.join(agentDir(agentId), "state.json")
+    let raw: string
     try {
-      const parsed = JSON.parse(
-        fs.readFileSync(path.join(agentDir(agentId), "state.json"), "utf8")
-      ) as AgentState
-      return typeof parsed?.archivedAt === "string" ? { archivedAt: parsed.archivedAt } : {}
-    } catch {
-      return {}
+      raw = fs.readFileSync(target, "utf8")
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+      throw new AgentDefinitionStoreError(
+        "invalid_definition",
+        `cannot read state for agent ${agentId}`,
+        { agentId }
+      )
     }
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new AgentDefinitionStoreError(
+        "invalid_definition",
+        `stored state for agent ${agentId} is not valid JSON`,
+        { agentId }
+      )
+    }
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      ("archivedAt" in parsed && typeof parsed.archivedAt !== "string")
+    ) {
+      throw new AgentDefinitionStoreError(
+        "invalid_definition",
+        `stored state for agent ${agentId} failed validation`,
+        { agentId }
+      )
+    }
+    return "archivedAt" in parsed ? { archivedAt: parsed.archivedAt as string } : {}
   }
 
   function writeState(agentId: string, state: AgentState): void {

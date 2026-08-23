@@ -16,6 +16,16 @@ interface FakeInstance {
   validity?: { executable: boolean; blockingReason?: string }
 }
 
+const setAcpDynamicMcpHostControllerMock = jest.fn()
+const dynamicMcpController = { connect: jest.fn(), message: jest.fn(), disconnect: jest.fn() }
+jest.mock("@/lib/ai/agent/external/acp-client", () => ({
+  setAcpDynamicMcpHostController: (...args: unknown[]) =>
+    setAcpDynamicMcpHostControllerMock(...args),
+}))
+jest.mock("@/lib/ai/agent/external/acp-dynamic-mcp-controller", () => ({
+  createAcpDynamicMcpHostController: () => dynamicMcpController,
+}))
+
 const agentsInManager = new Map<string, FakeInstance>()
 const addAgentMock = jest.fn(async (config: ExternalAgentConfig) => {
   const inst: FakeInstance = {
@@ -112,6 +122,15 @@ beforeEach(() => {
 // --------------------------------------------------------------------------
 
 describe("ExternalAgentInitializer", () => {
+  it("attaches and detaches the governed dynamic MCP controller", async () => {
+    const view = render(<ExternalAgentInitializer />)
+    await waitFor(() =>
+      expect(setAcpDynamicMcpHostControllerMock).toHaveBeenCalledWith(dynamicMcpController)
+    )
+    view.unmount()
+    expect(setAcpDynamicMcpHostControllerMock).toHaveBeenLastCalledWith(undefined)
+  })
+
   it("rehydrates and auto-connects every executable agent (in parallel)", async () => {
     storeState.getAllAgents = () => [makeAgent({ id: "a1" }), makeAgent({ id: "a2" })]
 

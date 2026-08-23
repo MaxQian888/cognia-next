@@ -6,7 +6,7 @@ import {
   supportsNativeSteering,
 } from "./backend-select"
 
-type Preset = { name?: string; protocol?: string }
+type Preset = { name?: string; protocol?: string; supportTier?: "executable" | "documented-only" }
 
 function registry(presets: Record<string, Preset>) {
   return {
@@ -25,6 +25,11 @@ const PRESETS = registry({
   codex: { name: "Codex CLI", protocol: "codex-app-server" },
   "claude-code": { name: "Claude Code", protocol: "acp" },
   "opencode-server": { name: "OpenCode (managed)", protocol: "opencode" },
+  "opencode-v2-preview": {
+    name: "OpenCode V2 legacy preview",
+    protocol: "opencode-v2",
+    supportTier: "documented-only",
+  },
   mystery: { name: "Mystery Agent" },
 })
 
@@ -52,6 +57,14 @@ describe("selectBackend — resolution", () => {
       kind: "external",
       displayName: "Codex CLI",
     })
+  })
+
+  it("rejects a documented-only backend even when it resolves", () => {
+    const result = selectBackend({ ...PRESETS, requested: "opencode-v2-preview" })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe("usage_error")
+    expect(result.error.message).toContain("documented-only")
   })
 
   it("never silently substitutes — an unknown backend is a usage error listing the valid ids", () => {

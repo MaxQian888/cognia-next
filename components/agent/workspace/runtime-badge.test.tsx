@@ -13,6 +13,7 @@ const messages = {
         claudeCode: "Claude Code",
         geminiCli: "Gemini",
         cursorCli: "Cursor",
+        opencodeAcp: "OpenCode (ACP)",
       },
     },
   },
@@ -61,6 +62,11 @@ describe("RuntimeBadge", () => {
   it("renders the Cursor label", () => {
     renderBadge("cursor-cli")
     expect(screen.getByText("Cursor")).toBeInTheDocument()
+  })
+
+  it("renders the OpenCode ACP label", () => {
+    renderBadge("opencode-acp")
+    expect(screen.getByText("OpenCode (ACP)")).toBeInTheDocument()
   })
 
   it("hides text when iconOnly is true but keeps the title attribute", () => {

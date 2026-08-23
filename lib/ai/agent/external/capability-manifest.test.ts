@@ -77,9 +77,19 @@ describe("the shipped manifest", () => {
     expect(manifest.protocols["codex-app-server"].capabilities.mcp.level).toBe("equivalent")
     expect(manifest.protocols.opencode.capabilities.mcp.level).toBe("unsupported")
     expect(manifest.protocols["pi-rpc"].capabilities.mcp.level).toBe("unsupported")
+    expect(manifest.protocols["pi-rpc"].capabilities.images.level).toBe("native")
     // Only the native Codex app-server enumerates models without a session.
     expect(manifest.protocols["codex-app-server"].capabilities["models.list"].level).toBe("native")
     expect(manifest.protocols.acp.capabilities["models.list"].level).toBe("unsupported")
+
+    // Both OpenCode adapters expose reasoning events and command discovery;
+    // stable maps file parts and V2 maps PromptInput.files.
+    for (const protocol of ["opencode", "opencode-v2"] as const) {
+      expect(manifest.protocols[protocol].capabilities.thinking.level).toBe("native")
+      expect(manifest.protocols[protocol].capabilities.images.level).toBe("native")
+      expect(manifest.protocols[protocol].capabilities["commands.dynamic"].level).toBe("native")
+    }
+    expect(manifest.protocols.acp.capabilities.thinking.level).toBe("native")
   })
 
   it("answers steering per protocol, and lets the adapter layer tighten it", () => {
@@ -133,6 +143,13 @@ describe("presetCapabilityLayer", () => {
     expect(layer.layer).toBe("refinement")
     expect(layer.cells.streaming?.level).toBe("unsupported")
     expect(layer.cells["tools.ordinary"]?.level).toBe("unsupported")
+    expect(layer.cells.images?.level).toBe("unsupported")
+  })
+
+  it("does not inherit generic per-session MCP support for the Pi ACP bridge", () => {
+    const layer = presetCapabilityLayer("pi")
+    expect(layer.layer).toBe("refinement")
+    expect(layer.cells.mcp?.level).toBe("unsupported")
   })
 })
 

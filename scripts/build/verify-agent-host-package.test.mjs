@@ -14,15 +14,33 @@ function fixture(target, executable) {
     path.join(packageRoot, "package.json"),
     JSON.stringify({ bin: { "cognia-agent": `bin/${executable}` } })
   )
-  const helper = path.join(
-    packageRoot,
-    "bin",
-    target === "win32-x64"
-      ? "cognia-task-workspace-worker.exe"
-      : "cognia-task-workspace-worker"
-  )
-  fs.writeFileSync(helper, "workspace helper")
-  if (target !== "win32-x64") fs.chmodSync(helper, 0o755)
+  for (const helperName of [
+    "cognia-external-agent-launcher",
+    "cognia-task-workspace-worker",
+  ]) {
+    const helper = path.join(
+      packageRoot,
+      "bin",
+      target === "win32-x64" ? `${helperName}.exe` : helperName
+    )
+    fs.writeFileSync(helper, `${helperName} helper`)
+    if (target !== "win32-x64") fs.chmodSync(helper, 0o755)
+  }
+
+  const resources = {
+    "sidecar/pi-extension/cognia-pi-extension.ts": "extension",
+    "sidecar/pi-extension/integrity.json": "{}",
+    "tree-sitter.wasm": "tree-sitter",
+    "grammars/tree-sitter-python.wasm": "python",
+    "grammars/tree-sitter-rust.wasm": "rust",
+    "grammars/tree-sitter-tsx.wasm": "tsx",
+    "grammars/tree-sitter-typescript.wasm": "typescript",
+  }
+  for (const [relativePath, contents] of Object.entries(resources)) {
+    const resource = path.join(packageRoot, "bin", relativePath)
+    fs.mkdirSync(path.dirname(resource), { recursive: true })
+    fs.writeFileSync(resource, contents)
+  }
   return { root, packageRoot }
 }
 
@@ -66,6 +84,32 @@ test("blocks packing a worker host without the Task Workspace helper", () => {
     fs.chmodSync(executable, 0o755)
     fs.rmSync(path.join(packageRoot, "bin", "cognia-task-workspace-worker"))
     assert.throws(() => verifyAgentHostPackage(root, "darwin-arm64"), /Task Workspace/)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("blocks packing a host without the external agent launcher", () => {
+  const { root, packageRoot } = fixture("darwin-arm64", "cognia-agent")
+  try {
+    const executable = path.join(packageRoot, "bin", "cognia-agent")
+    fs.writeFileSync(executable, "host")
+    fs.chmodSync(executable, 0o755)
+    fs.rmSync(path.join(packageRoot, "bin", "cognia-external-agent-launcher"))
+    assert.throws(() => verifyAgentHostPackage(root, "darwin-arm64"), /external agent/)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("blocks packing a host with an incomplete parser grammar set", () => {
+  const { root, packageRoot } = fixture("linux-x64", "cognia-agent")
+  try {
+    const executable = path.join(packageRoot, "bin", "cognia-agent")
+    fs.writeFileSync(executable, "host")
+    fs.chmodSync(executable, 0o755)
+    fs.rmSync(path.join(packageRoot, "bin/grammars/tree-sitter-rust.wasm"))
+    assert.throws(() => verifyAgentHostPackage(root, "linux-x64"), /tree-sitter-rust\.wasm/)
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }

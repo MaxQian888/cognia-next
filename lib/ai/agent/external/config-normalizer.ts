@@ -561,7 +561,7 @@ export function getExternalAgentExecutionBlock(
     return {
       code: "transport_blocked",
       reason:
-        "OpenCode V2 local-service discovery requires the desktop runtime. Start the service with `opencode2 service start`, then reconnect from Cognia desktop.",
+        "The legacy OpenCode V2 preview contract is documented-only and incompatible with current OpenCode V2 builds. Use stable OpenCode HTTP/SSE or ACP.",
     }
   }
   const ecosystemReadiness = getExternalAgentEcosystemReadiness(

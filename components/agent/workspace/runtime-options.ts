@@ -31,6 +31,7 @@ export const RUNTIME_LABEL_KEYS: Record<TeammateRuntime, string> = {
   pi: "pi",
   "pi-rpc": "piRpc",
   droid: "droid",
+  "opencode-acp": "opencodeAcp",
   "opencode-server": "opencodeServer",
   "opencode-remote": "opencodeRemote",
 }

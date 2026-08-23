@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import fs, { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -32,7 +32,10 @@ describe("createAgentDefinitionStore", () => {
     store = createAgentDefinitionStore({ home, now: () => (clock += 1_000) })
   })
 
-  afterEach(() => rmSync(home, { recursive: true, force: true }))
+  afterEach(() => {
+    jest.restoreAllMocks()
+    rmSync(home, { recursive: true, force: true })
+  })
 
   it("creates version 1 with a slug id and a content digest", () => {
     const created = store.create(definition())
@@ -87,6 +90,20 @@ describe("createAgentDefinitionStore", () => {
       detail: { expectedVersion: 1, actualVersion: 2 },
     })
     expect(store.versions("cas")).toEqual([1, 2])
+  })
+
+  it("reports an atomic conflict when another process commits the same version", () => {
+    store.create(definition({ agentId: "raced" }))
+    jest.spyOn(fs, "linkSync").mockImplementationOnce(() => {
+      const error = new Error("destination exists") as NodeJS.ErrnoException
+      error.code = "EEXIST"
+      throw error
+    })
+
+    expect(() => store.update("raced", 1, definition({ name: "Loser" }))).toThrow(
+      expect.objectContaining({ code: "version_conflict" })
+    )
+    expect(store.versions("raced")).toEqual([1])
   })
 
   it("keeps every earlier version readable after an update", () => {
@@ -203,6 +220,16 @@ describe("createAgentDefinitionStore", () => {
     parsed.name = "Someone Else"
     writeFileSync(file, JSON.stringify(parsed))
     expect(() => store.get("tampered")).toThrow(
+      expect.objectContaining({ code: "invalid_definition" })
+    )
+  })
+
+  it("rejects corrupt archive state instead of silently treating the agent as active", () => {
+    store.create(definition({ agentId: "corrupt-state" }))
+    store.archive("corrupt-state")
+    writeFileSync(path.join(home, "agents", "corrupt-state", "state.json"), "not-json")
+
+    expect(() => store.get("corrupt-state")).toThrow(
       expect.objectContaining({ code: "invalid_definition" })
     )
   })

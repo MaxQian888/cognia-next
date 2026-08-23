@@ -87,8 +87,8 @@ export interface ToolHostMcpParams {
  */
 export function buildToolHostMcpServers(params: ToolHostMcpParams): AcpMcpServerConfig[] {
   const packaged = params.packaged ?? isPackaged()
-  const script = params.script ?? resolveToolBridgeScript()
   const execPath = params.execPath ?? process.execPath
+  const script = params.script ?? (packaged ? execPath : resolveToolBridgeScript())
   const servers = params.servers ?? [COGNIA_TOOLS_SERVER, COGNIA_PLUGIN_TOOLS_SERVER]
   return servers.map((name) => {
     // ACP models env as a name/value LIST, not a record.
@@ -96,12 +96,7 @@ export function buildToolHostMcpServers(params: ToolHostMcpParams): AcpMcpServer
       { name: TOOL_HOST_ENV.socket, value: params.endpoint },
       { name: TOOL_HOST_ENV.token, value: params.token },
       { name: TOOL_HOST_ENV.server, value: name },
-      ...(packaged
-        ? [
-            { name: "COGNIA_ROLE", value: "tool-bridge" },
-            { name: "COGNIA_SIDECAR_SCRIPT", value: script },
-          ]
-        : []),
+      ...(packaged ? [{ name: "COGNIA_ROLE", value: "tool-bridge" }] : []),
     ]
     return {
       name,

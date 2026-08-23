@@ -257,13 +257,12 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     render(<ExternalAgentSettings />)
     const gallery = screen.getByTestId("preset-gallery-card")
     expect(gallery).toBeInTheDocument()
-    // Documented-only presets are hidden by default; supported and preview
-    // presets remain discoverable.
+    // Documented-only presets are hidden by default.
     expect(within(gallery).getByTestId("preset-card-codex")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-claude-code")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-gemini-cli")).toBeInTheDocument()
     expect(within(gallery).getByTestId("preset-card-cursor-cli")).toBeInTheDocument()
-    expect(within(gallery).getByTestId("preset-card-opencode-v2-preview")).toBeInTheDocument()
+    expect(within(gallery).queryByTestId("preset-card-opencode-v2-preview")).not.toBeInTheDocument()
   })
 
   it("renders agent brand icons in preset cards and configured-agent rows", () => {
@@ -455,27 +454,16 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     expect(screen.queryByTestId("codex-options-section")).not.toBeInTheDocument()
   })
 
-  it("creates the OpenCode V2 preview without persisting an endpoint or process", async () => {
+  it("shows the legacy OpenCode V2 contract as documented-only and prevents selection", async () => {
     const user = userEvent.setup()
     render(<ExternalAgentSettings />)
     await act(async () => {
-      await user.click(screen.getByTestId("preset-pick-opencode-v2-preview"))
+      await user.click(screen.getByRole("switch", { name: /show experimental/i }))
     })
-    expect(screen.queryByText(/server endpoint/i)).not.toBeInTheDocument()
-    await act(async () => {
-      await user.click(screen.getByRole("button", { name: /^add$/i }))
-    })
-    const input = createConfigMock.mock.calls[0][0]
-    expect(input).toMatchObject({
-      protocol: "opencode-v2",
-      transport: "sse",
-      metadata: {
-        preview: true,
-        localServiceDiscovery: true,
-      },
-    })
-    expect(input.process).toBeUndefined()
-    expect(input.network).toBeUndefined()
+    const card = await screen.findByTestId("preset-card-opencode-v2-preview")
+    expect(within(card).getByText("documented-only")).toBeInTheDocument()
+    expect(within(card).getByTestId("preset-pick-opencode-v2-preview")).toBeDisabled()
+    expect(createConfigMock).not.toHaveBeenCalled()
   })
 
   it("restores the provider undo warning for the selected agent", async () => {
@@ -490,6 +478,25 @@ describe("ExternalAgentSettings — preset onboarding", () => {
     })
     expect(updateConfigMock).toHaveBeenCalledWith("agent-2", {
       metadata: { providerUndoWarningAcknowledged: false },
+    })
+  })
+
+  it("persists ACP preview capabilities independently in agent metadata", async () => {
+    const user = userEvent.setup()
+    render(<ExternalAgentSettings />)
+    await act(async () => {
+      await user.click(screen.getByTestId("agent-row-agent-2"))
+    })
+    const detail = await screen.findByTestId("agent-detail-agent-2")
+    expect(within(detail).getByTestId("acp-feature-settings")).toBeInTheDocument()
+    await act(async () => {
+      await user.click(within(detail).getByLabelText(/dynamic mcp/i))
+    })
+    expect(updateConfigMock).toHaveBeenCalledWith("agent-2", {
+      metadata: {
+        providerUndoWarningAcknowledged: true,
+        acpPreviewFeatures: { dynamicMcp: true },
+      },
     })
   })
 

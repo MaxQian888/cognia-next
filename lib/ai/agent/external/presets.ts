@@ -35,6 +35,7 @@ export type ExternalAgentPresetId =
   | "pi"
   | "pi-rpc"
   | "droid"
+  | "opencode-acp"
   | "opencode-server"
   | "opencode-remote"
   | "opencode-v2-preview"
@@ -164,16 +165,31 @@ const OPENCODE_REMOTE_PRESET: ExternalAgentPresetConfig = {
   tags: ["opencode", "sdk", "remote"],
 }
 
+const OPENCODE_ACP_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode (ACP)",
+  description: "Run OpenCode through its official ACP stdio server.",
+  protocol: "acp",
+  transport: "stdio",
+  process: { command: "opencode", args: ["acp"] },
+  setupHint:
+    "Requires OpenCode v1.18.14 or newer on PATH; authenticate with `opencode auth login`.",
+  docsUrl: "https://opencode.ai/docs/acp/",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "acp", "stdio", "local"],
+}
+
 const OPENCODE_V2_PREVIEW_PRESET: ExternalAgentPresetConfig = {
-  name: "OpenCode V2 local service (Preview)",
+  name: "OpenCode V2 legacy preview contract",
   description:
-    "Connect to a compatible, already-running OpenCode V2 local service. Cognia never starts or stops it.",
+    "Documents Cognia's pinned legacy preview contract; current OpenCode V2 builds are not compatible.",
   protocol: "opencode-v2",
   transport: "sse",
   metadata: { preview: true, localServiceDiscovery: true },
-  setupHint: "Beta preview. Start the compatible service yourself with `opencode2 service start`.",
+  setupHint:
+    "Not executable against current OpenCode V2 builds. Use stable OpenCode HTTP/SSE or ACP until the preview client is regenerated.",
   docsUrl: "https://opencode.ai/v2/docs/build/client",
-  supportTier: "executable",
+  supportTier: "documented-only",
   defaultPermissionMode: "default",
   tags: ["opencode", "v2", "beta", "preview", "local-service"],
 }
@@ -273,6 +289,7 @@ export const EXTERNAL_AGENT_PRESETS: Record<
   pi: buildPresetConfig("pi"),
   "pi-rpc": buildPresetConfig("pi-rpc"),
   droid: buildPresetConfig("droid"),
+  "opencode-acp": OPENCODE_ACP_PRESET,
   "opencode-server": OPENCODE_SERVER_PRESET,
   "opencode-remote": OPENCODE_REMOTE_PRESET,
   "opencode-v2-preview": OPENCODE_V2_PREVIEW_PRESET,
@@ -448,6 +465,17 @@ export function getAvailablePresets(): string[] {
   )
   const dynamic = Array.from(dynamicPresets.keys()).filter((id) => !builtins.includes(id as never))
   return [...builtins, ...dynamic]
+}
+
+/**
+ * Presets that may be selected for execution. Documented-only entries remain
+ * discoverable through {@link getAvailablePresets} for guidance surfaces, but
+ * must never enter a launch picker or CLI backend list.
+ */
+export function getRunnablePresets(): string[] {
+  return getAvailablePresets().filter(
+    (id) => getPresetConfig(id)?.supportTier !== "documented-only"
+  )
 }
 
 /**

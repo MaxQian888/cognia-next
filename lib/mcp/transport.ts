@@ -58,12 +58,20 @@ interface McpClientOptions {
 
 /** The slice of the SDK `Client` callers use. */
 export interface McpClientLike {
+  fallbackNotificationHandler?: (notification: {
+    method: string
+    params?: Record<string, unknown>
+  }) => Promise<void>
   connect(transport: unknown): Promise<void>
   request?<T>(
     request: { method: string; params?: Record<string, unknown> },
     resultSchema: unknown,
     options?: { signal?: AbortSignal; timeout?: number }
   ): Promise<T>
+  notification?(
+    notification: { method: string; params?: Record<string, unknown> },
+    options?: { signal?: AbortSignal }
+  ): Promise<void>
   callTool(
     params: { name: string; arguments?: Record<string, unknown> },
     resultSchema?: unknown,

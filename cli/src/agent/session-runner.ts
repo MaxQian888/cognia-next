@@ -23,6 +23,7 @@ import { setSessionMode as defaultSetSessionMode } from "@/lib/claude/ipc"
 import type { SendOptions } from "@cognia/agent-config-types"
 import type { AgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 import type { ResolvedAgentExecutionSpec } from "@cognia/agent-config-types/agent-execution"
+import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 
 /** A concrete permission mode value (excludes `undefined`). */
 type PermissionModeValue = NonNullable<SendOptions["permissionMode"]>
@@ -82,6 +83,10 @@ export interface AgentSessionParams {
   home?: string
   bootstrap?: (cwd: string) => Promise<SidecarBootstrap>
   resolveOptions?: (ctx: BuildOptionsContext) => Promise<SendOptions>
+  /** Definition-owned composition selection, forwarded to the shared resolver. */
+  compositionSelection?: AgentCompositionSelectionV1
+  /** Definition-owned JSON Schema, lowered onto the native SDK output format. */
+  outputSchema?: Record<string, unknown>
   /** Resolve one CLI-dispatched child with actor-specific transport overrides. */
   resolveSubagentOptions?: (actorRef: string, ctx: BuildOptionsContext) => Promise<SendOptions>
   /** Provide an actor-scoped permission script for one CLI-dispatched child. */
@@ -267,6 +272,7 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     ...(params.onResolvedExecutionSpec
       ? { onResolvedExecutionSpec: params.onResolvedExecutionSpec }
       : {}),
+    ...(params.compositionSelection ? { compositionSelection: params.compositionSelection } : {}),
   })
 
   let boot: SidecarBootstrap | null = null
@@ -299,6 +305,12 @@ export function createAgentSession(params: AgentSessionParams): AgentSession {
     // A `/mode` switch applied to the LIVE sidecar session must survive a later
     // local read of the cached options.
     if (sendOptionsOverrideMode) session.sendOptions.permissionMode = sendOptionsOverrideMode
+    if (params.outputSchema) {
+      session.sendOptions.claudeAgentSdk = {
+        ...session.sendOptions.claudeAgentSdk,
+        outputFormat: { type: "json_schema", schema: params.outputSchema },
+      }
+    }
     return session
   }
 

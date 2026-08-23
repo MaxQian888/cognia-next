@@ -1,16 +1,25 @@
 {
   "protocolVersion": 1,
   "schema": {
-    "version": "1.20.0",
-    "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.20.0/schema.json",
-    "sha256": "92c1dfcda10dd47e99127500a3763da2b471f9ac61e12b9bf0430c32cf953796",
-    "metaUrl": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.20.0/meta.json",
-    "metaSha256": "e0bf36f8123b2544b499174197fdc371ec49a1b4572a35114513d56492741599"
+    "stable": {
+      "version": "1.21.0",
+      "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.21.0/schema.json",
+      "sha256": "caf62ff962ada396878372ced11efb2c6764e59d90919a38583c319948931a42",
+      "metaUrl": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.21.0/meta.json",
+      "metaSha256": "061edb6efa8fb2aa2792459a86ec7268de5fe665bba48b2ffe7939df01481f88"
+    },
+    "preview": {
+      "version": "1.21.0",
+      "url": "https://github.com/agentclientprotocol/agent-client-protocol/releases/download/schema-v1.21.0/schema.unstable.json",
+      "sha256": "7f77702b34e0a0558e77220e9007bf8ee161a976bb8ac5021aba1b7e7b2c5708",
+      "metaUrl": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/schema-v1.21.0/schema/v1/meta.unstable.json",
+      "metaSha256": "3026898232badf413624010d1343e20bef853e6705c62d6b56387cf9de6b0543"
+    }
   },
   "sdk": {
     "package": "@agentclientprotocol/sdk",
-    "version": "1.3.0",
-    "integrity": "sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ=="
+    "version": "1.4.0",
+    "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg=="
   },
   "stable": {
     "clientToAgent": [
@@ -37,7 +46,9 @@
       "terminal/output",
       "terminal/release",
       "terminal/wait_for_exit",
-      "terminal/kill"
+      "terminal/kill",
+      "elicitation/create",
+      "elicitation/complete"
     ],
     "protocol": ["$/cancel_request"],
     "updates": [
@@ -52,15 +63,54 @@
       "config_option_update",
       "usage_update",
       "session_info_update"
+    ],
+    "clientCapabilities": ["auth", "elicitation", "fs", "session", "terminal"],
+    "agentCapabilities": [
+      "auth",
+      "loadSession",
+      "mcpCapabilities",
+      "promptCapabilities",
+      "sessionCapabilities"
     ]
   },
-  "featureGated": {
-    "agentToClient": ["elicitation/create", "elicitation/complete"]
+  "preview": {
+    "clientToAgent": [
+      "providers/list",
+      "providers/set",
+      "providers/disable",
+      "mcp/message",
+      "session/fork",
+      "nes/start",
+      "nes/suggest",
+      "nes/accept",
+      "nes/reject",
+      "nes/close",
+      "document/didOpen",
+      "document/didChange",
+      "document/didClose",
+      "document/didSave",
+      "document/didFocus"
+    ],
+    "agentToClient": ["mcp/connect", "mcp/message", "mcp/disconnect"],
+    "protocol": [],
+    "updates": ["plan_update", "plan_removed", "compaction_update", "compaction_summary_chunk"],
+    "clientCapabilities": ["nes", "plan", "positionEncodings", "session.compaction"],
+    "agentCapabilities": ["nes", "positionEncoding", "providers", "sessionCapabilities.fork"],
+    "featureFlags": [
+      "compaction",
+      "providers",
+      "dynamicMcp",
+      "nes",
+      "identifiedPlans",
+      "previewToolNames",
+      "sessionFork"
+    ]
   },
   "compatibility": {
-    "agentMethods": ["session/set_model", "session/fork"],
+    "agentMethods": ["session/set_model"],
     "clientMethods": ["terminal/write"],
-    "updates": ["thought_message_chunk", "config_options_update"]
+    "updates": ["thought_message_chunk", "config_options_update"],
+    "toolKinds": ["file_read", "file_write", "write", "terminal", "browser", "mcp"]
   },
   "reserved": {
     "v2": {

@@ -19,6 +19,7 @@
 import { isHeadlessHost } from "@/lib/platform/detect"
 import { isPathUnderRoot } from "@/lib/sandbox/policy-bridge"
 import { isTauri } from "@/lib/utils"
+import type { AcpHostCapabilities } from "./acp-feature-profile"
 
 /** Whether this host can spawn/drive external agent processes at all. */
 export function supportsExternalAgents(): boolean {
@@ -33,6 +34,32 @@ export function supportsAgentFs(): boolean {
 /** Whether the ACP terminal capability is available (desktop-only). */
 export function supportsAgentTerminal(): boolean {
   return isTauri()
+}
+
+/** Runtime-owned ACP capability truth shared through the CLI build alias. */
+export function getAcpHostCapabilities(): AcpHostCapabilities {
+  const desktop = isTauri()
+  const headless = isHeadlessHost()
+  return {
+    kind: desktop ? "desktop" : "headless",
+    fs: { read: desktop || headless, write: desktop || headless },
+    terminal: desktop,
+    terminalAuth: desktop,
+    elicitation: {
+      form: desktop,
+      url: desktop,
+      durableInteraction: desktop,
+    },
+    preview: {
+      compaction: true,
+      providers: desktop || headless,
+      dynamicMcp: desktop || headless,
+      nes: desktop,
+      identifiedPlans: true,
+      previewToolNames: true,
+      sessionFork: true,
+    },
+  }
 }
 
 /** Invoke a process-plane command on whichever host is present. */

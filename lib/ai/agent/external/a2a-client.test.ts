@@ -435,6 +435,37 @@ describe("A2aClientAdapter", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
+  it("blocks PII hidden in a base64 text attachment before the A2A network request", async () => {
+    const fetchImpl = jest.fn().mockResolvedValueOnce(v1CardResponse(false))
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+    const message: ExternalAgentMessage = {
+      id: "base64-pii",
+      role: "user",
+      timestamp: new Date(),
+      content: [
+        {
+          type: "file",
+          path: "contacts.txt",
+          mimeType: "text/plain",
+          encoding: "base64",
+          content: Buffer.from("alice@example.com", "utf-8").toString("base64"),
+        },
+      ],
+    }
+
+    const events = (await collect(a.prompt(session.id, message))) as Array<{
+      type: string
+      error?: string
+    }>
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "error", error: expect.stringMatching(/PII gate/i) })
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
   it("negotiates A2A 1.0 from the Agent Card and sends its canonical JSON-RPC shape", async () => {
     const card = v1CardResponse(false)
     const sendRes = {
@@ -467,8 +498,60 @@ describe("A2aClientAdapter", () => {
         message: { role: "ROLE_USER", parts: [{ text: "hello" }] },
       },
     })
+    expect(body.params.message).not.toHaveProperty("contextId")
     expect(events[0]).toMatchObject({ type: "message_delta", delta: { text: "v1 reply" } })
     expect(events.at(-1)).toMatchObject({ type: "done", success: true })
+  })
+
+  it("reuses the server-issued A2A context on subsequent turns", async () => {
+    const firstReply = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          message: {
+            messageId: "reply-1",
+            contextId: "server-context",
+            role: "ROLE_AGENT",
+            parts: [{ text: "first reply" }],
+          },
+        },
+      }),
+    } as unknown as Response
+    const secondReply = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: 2,
+        result: {
+          message: {
+            messageId: "reply-2",
+            contextId: "server-context",
+            role: "ROLE_AGENT",
+            parts: [{ text: "second reply" }],
+          },
+        },
+      }),
+    } as unknown as Response
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(v1CardResponse(false))
+      .mockResolvedValueOnce(firstReply)
+      .mockResolvedValueOnce(secondReply)
+    const a = new A2aClientAdapter({ fetchImpl })
+    await a.connect(makeConfig())
+    const session = await a.createSession()
+
+    await collect(a.prompt(session.id, userMessage("first")))
+    await collect(a.prompt(session.id, userMessage("second")))
+
+    const firstBody = JSON.parse(fetchImpl.mock.calls[1][1].body as string)
+    const secondBody = JSON.parse(fetchImpl.mock.calls[2][1].body as string)
+    expect(firstBody.params.message).not.toHaveProperty("contextId")
+    expect(secondBody.params.message).toMatchObject({ contextId: "server-context" })
   })
 
   it("uses A2A 1.0 streaming and cancellation method names", async () => {

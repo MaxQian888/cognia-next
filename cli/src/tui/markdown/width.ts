@@ -5,13 +5,40 @@
  * table with Chinese cells lines up in a monospace terminal — `String.length`
  * (UTF-16 code units) under-counts wide glyphs and leaves the columns ragged.
  *
- * A compact approximation of `wcwidth` / Unicode East_Asian_Width=W|F. It is
- * deliberately self-contained (no `string-width` dependency) to keep the CLI's
- * esbuild bundle lean; the ranges cover everything the agent realistically
- * emits in a table cell.
+ * The standalone Bun runtime uses Bun's native terminal-width primitives. The
+ * compact `wcwidth` approximation below remains as the Node/Jest fallback so
+ * this module stays portable without adding a `string-width` dependency.
  */
 
 import { graphemeSegments } from "../text/graphemes"
+
+interface BunTextUtils {
+  stringWidth(text: string): number
+  sliceAnsi(
+    text: string,
+    start?: number,
+    end?: number,
+    options?: { ellipsis?: string; ambiguousIsNarrow?: boolean }
+  ): string
+}
+
+export function resolveBunTextUtils(
+  runtime: Partial<BunTextUtils> | undefined
+): Partial<BunTextUtils> | undefined {
+  if (!runtime) return undefined
+  return {
+    ...(typeof runtime.stringWidth === "function"
+      ? { stringWidth: runtime.stringWidth.bind(runtime) }
+      : {}),
+    ...(typeof runtime.sliceAnsi === "function"
+      ? { sliceAnsi: runtime.sliceAnsi.bind(runtime) }
+      : {}),
+  }
+}
+
+const bunTextUtils = resolveBunTextUtils(
+  (globalThis as typeof globalThis & { Bun?: Partial<BunTextUtils> }).Bun
+)
 
 const ANSI_SEQUENCE =
   /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b[()#][\s\S]|\x1b[0-~]/g
@@ -59,8 +86,7 @@ function isEmoji(cp: number): boolean {
   )
 }
 
-/** Display width of `text` in terminal columns. */
-export function stringWidth(text: string): number {
+function fallbackStringWidth(text: string): number {
   let width = 0
   for (const { segment } of graphemeSegments(text.replace(ANSI_SEQUENCE, ""))) {
     // Keycap sequences use an ASCII base plus U+20E3, but terminals paint the
@@ -76,6 +102,11 @@ export function stringWidth(text: string): number {
   return width
 }
 
+/** Display width of `text` in terminal columns. */
+export function stringWidth(text: string): number {
+  return bunTextUtils?.stringWidth?.(text) ?? fallbackStringWidth(text)
+}
+
 /**
  * Truncate `text` to at most `max` display columns, appending `…` when cut.
  * Display-width aware (a wide glyph counts as two columns) via
@@ -86,6 +117,9 @@ export function stringWidth(text: string): number {
 export function truncateToWidth(text: string, max: number): string {
   if (stringWidth(text) <= max) return text
   if (max <= 1) return "…"
+  if (bunTextUtils?.sliceAnsi) {
+    return bunTextUtils.sliceAnsi(text, 0, max, { ellipsis: "…" })
+  }
   let out = ""
   let w = 0
   for (const { segment } of graphemeSegments(text)) {

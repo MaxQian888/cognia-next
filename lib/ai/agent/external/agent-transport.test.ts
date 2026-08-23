@@ -31,6 +31,7 @@ import {
   agentListen,
   agentReadTextFile,
   agentWriteTextFile,
+  getAcpHostCapabilities,
   supportsAgentFs,
   supportsAgentTerminal,
   supportsExternalAgents,
@@ -58,6 +59,11 @@ describe("capability predicates", () => {
     expect(supportsExternalAgents()).toBe(false)
     expect(supportsAgentFs()).toBe(false)
     expect(supportsAgentTerminal()).toBe(false)
+    expect(getAcpHostCapabilities()).toMatchObject({
+      kind: "headless",
+      fs: { read: false, write: false },
+      terminal: false,
+    })
   })
 
   it("tauri: everything supported", () => {
@@ -65,6 +71,11 @@ describe("capability predicates", () => {
     expect(supportsExternalAgents()).toBe(true)
     expect(supportsAgentFs()).toBe(true)
     expect(supportsAgentTerminal()).toBe(true)
+    expect(getAcpHostCapabilities()).toMatchObject({
+      kind: "desktop",
+      terminal: true,
+      elicitation: { durableInteraction: true },
+    })
   })
 
   it("headless: agents + fs, but NOT terminal", () => {
@@ -72,6 +83,11 @@ describe("capability predicates", () => {
     expect(supportsExternalAgents()).toBe(true)
     expect(supportsAgentFs()).toBe(true)
     expect(supportsAgentTerminal()).toBe(false)
+    expect(getAcpHostCapabilities()).toMatchObject({
+      kind: "headless",
+      terminal: false,
+      elicitation: { durableInteraction: false },
+    })
   })
 })
 

@@ -59,15 +59,19 @@ test("plain fields are copied onto the SDK options", () => {
       version: 1,
       title: "my session",
       persistSession: true,
+      resumeSessionAt: "entry-1",
+      resumeDropsTurn: "prompt-1",
       loadTimeoutMs: 5000,
       includeHookEvents: true,
       betas: ["context-1m-2025-08-07"],
       outputFormat: { type: "json_schema", schema: { type: "object" } },
     },
-    {}
+    { resume: "session-1" }
   )
   assert.equal(options.title, "my session")
   assert.equal(options.persistSession, true)
+  assert.equal(options.resumeSessionAt, "entry-1")
+  assert.equal(options.resumeDropsTurn, "prompt-1")
   assert.equal(options.loadTimeoutMs, 5000)
   assert.equal(options.includeHookEvents, true)
   assert.deepEqual(options.betas, ["context-1m-2025-08-07"])

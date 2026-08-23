@@ -194,6 +194,53 @@ describe("runAndCaptureAssistantReply", () => {
     expect(usageEvent?.usage.inputTokens).toBe(1000)
   })
 
+  it("returns structured output from an in-stream SDK result without requiring prose", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire({
+      type: "event",
+      sessionId: SESSION,
+      event: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        structured_output: { summary: "shipped" },
+        uuid: "uuid-result-1",
+        session_id: SESSION,
+      },
+    } as unknown as ClaudeEvent)
+    fire(sessionEnded())
+
+    await expect(promise).resolves.toMatchObject({
+      text: "",
+      structuredOutput: { summary: "shipped" },
+      resultSubtype: "success",
+    })
+  })
+
+  it("prefers structured output carried by the terminal result envelope", async () => {
+    const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, { timeoutMs: 1_000 })
+    await flushUntilSubscribed()
+    fire({
+      type: "session_ended",
+      sessionId: SESSION,
+      result: {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "",
+        structured_output: { summary: "terminal" },
+        uuid: "uuid-result-2",
+        session_id: SESSION,
+      },
+    } as unknown as ClaudeEvent)
+
+    await expect(promise).resolves.toMatchObject({
+      text: "",
+      structuredOutput: { summary: "terminal" },
+    })
+  })
+
   it("emits a partial usage event from an assistant message's own usage", async () => {
     const events: Array<{ type: string; partial?: boolean; usage?: { inputTokens?: number } }> = []
     const promise = runAndCaptureAssistantReply(SESSION, "hi", undefined, {

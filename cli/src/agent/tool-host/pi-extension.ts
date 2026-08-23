@@ -14,10 +14,11 @@
  *   3. a `sidecar/` dir walked up from this module (in-repo / dev)
  */
 
-import { createHash } from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+
+import { hashHex } from "../../runtime/crypto-hasher"
 
 const EXTENSION_RELATIVE = path.join("sidecar", "pi-extension", "cognia-pi-extension.ts")
 const INTEGRITY_RELATIVE = path.join("sidecar", "pi-extension", "integrity.json")
@@ -73,7 +74,7 @@ export function resolvePiExtensionScript(opts: ResolvePiExtensionOptions = {}): 
 
 /** SHA-256 of a file's bytes, lowercase hex. */
 export function digestFile(file: string, read: (p: string) => Buffer = fs.readFileSync): string {
-  return createHash("sha256").update(read(file)).digest("hex")
+  return hashHex("sha256", read(file))
 }
 
 export interface PiExtensionIntegrity {

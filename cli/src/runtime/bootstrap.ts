@@ -10,6 +10,7 @@
 import { spawn as nodeSpawn } from "node:child_process"
 import path from "node:path"
 import fs from "node:fs"
+import { Readable } from "node:stream"
 import { fileURLToPath } from "node:url"
 
 import { setTransport } from "@/lib/tauri"
@@ -28,6 +29,33 @@ export interface SpawnedChild {
   kill(signal?: NodeJS.Signals): void
 }
 
+interface BunSubprocessLike {
+  stdin: {
+    write(chunk: string): unknown
+    flush?(): unknown
+    end?(): unknown
+  }
+  stdout: ReadableStream<Uint8Array>
+  exited: Promise<number>
+  kill(signal?: NodeJS.Signals): void
+  unref?(): void
+}
+
+type BunSpawn = (
+  command: string[],
+  options: {
+    cwd: string
+    env: Record<string, string | undefined>
+    stdin: "pipe"
+    stdout: "pipe"
+    stderr: "inherit"
+  }
+) => BunSubprocessLike
+
+export function resolveBunSpawn(runtime: { spawn?: BunSpawn } | undefined): BunSpawn | undefined {
+  return typeof runtime?.spawn === "function" ? runtime.spawn.bind(runtime) : undefined
+}
+
 export type SpawnFn = (
   script: string,
   options: { cwd: string; env: NodeJS.ProcessEnv }
@@ -44,6 +72,10 @@ export interface BootstrapOptions {
   spawn?: SpawnFn
   /** How long to wait for the `ready` line. */
   readyTimeoutMs?: number
+  /** Standalone-runtime override used by artifact tests. */
+  packaged?: boolean
+  /** Executable override paired with `packaged`. */
+  execPath?: string
 }
 
 export interface SidecarBootstrap {
@@ -102,9 +134,20 @@ export function resolveSidecarScript(
   )
 }
 
-/** True when running inside a `@yao-pkg/pkg` binary (it sets `process.pkg`). */
-export function isPackaged(): boolean {
-  return Boolean((process as { pkg?: unknown }).pkg)
+export interface PackagedRuntimeProbe {
+  pkg?: unknown
+  bunStandalone?: boolean
+}
+
+/** True when running inside either supported standalone executable runtime. */
+export function isPackaged(probe?: PackagedRuntimeProbe): boolean {
+  const runtime = probe ?? {
+    pkg: (process as { pkg?: unknown }).pkg,
+    bunStandalone: Boolean(
+      (globalThis as { Bun?: { isStandaloneExecutable?: boolean } }).Bun?.isStandaloneExecutable
+    ),
+  }
+  return Boolean(runtime.pkg) || runtime.bunStandalone === true
 }
 
 /** How to spawn the sidecar process: as a self-exec in a binary, else `node`. */
@@ -138,12 +181,77 @@ export function resolveSpawnTarget(
 }
 
 const realSpawn: SpawnFn = (script, options) => {
-  const { command, args, env } = resolveSpawnTarget(script, options.env, isPackaged())
+  const packaged = isPackaged()
+  const { command, args, env } = resolveSpawnTarget(script, options.env, packaged)
+  const bunSpawn = resolveBunSpawn((globalThis as { Bun?: { spawn?: BunSpawn } }).Bun)
+  if (packaged && bunSpawn) {
+    return adaptBunSubprocess(
+      bunSpawn([command, ...args], {
+        cwd: options.cwd,
+        env,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "inherit",
+      })
+    )
+  }
   return nodeSpawn(command, args, {
     cwd: options.cwd,
     env: env as NodeJS.ProcessEnv,
     stdio: ["pipe", "pipe", "pipe"],
   }) as unknown as SpawnedChild
+}
+
+/** Adapt Bun's native subprocess without letting its piped stdin close early. */
+export function adaptBunSubprocess(child: BunSubprocessLike): SpawnedChild {
+  const exitHandlers: Array<(code: number | null) => void> = []
+  const errorHandlers: Array<(error: Error) => void> = []
+  const stdinErrorHandlers: Array<(error: Error) => void> = []
+  const stdout = Readable.fromWeb(child.stdout)
+  void child.exited
+    .then((code) => {
+      for (const handler of exitHandlers) handler(code)
+    })
+    .catch((error) => {
+      const normalized = error instanceof Error ? error : new Error(String(error))
+      for (const handler of errorHandlers) handler(normalized)
+    })
+
+  return {
+    stdin: {
+      write(chunk) {
+        try {
+          child.stdin.write(chunk)
+          child.stdin.flush?.()
+        } catch (error) {
+          const normalized = error instanceof Error ? error : new Error(String(error))
+          for (const handler of stdinErrorHandlers) handler(normalized)
+        }
+      },
+      on(_event, handler) {
+        stdinErrorHandlers.push(handler)
+      },
+    },
+    stdout,
+    on(event, handler) {
+      if (event === "exit") {
+        exitHandlers.push(handler as (code: number | null) => void)
+      } else {
+        errorHandlers.push(handler as (error: Error) => void)
+      }
+      return this
+    },
+    kill(signal) {
+      try {
+        child.stdin.end?.()
+      } catch {
+        // The child may already have closed its end of the pipe.
+      }
+      stdout.destroy()
+      child.kill(signal)
+      child.unref?.()
+    },
+  }
 }
 
 /** Adapt a spawned child to the transport's {@link SidecarHandle}. */
@@ -191,8 +299,10 @@ function toHandle(child: SpawnedChild): SidecarHandle {
 /** Spawn the sidecar, install the StdioTransport, and await readiness. */
 export async function bootstrapSidecar(opts: BootstrapOptions = {}): Promise<SidecarBootstrap> {
   const env = opts.env ?? process.env
-  const script = opts.scriptPath ?? resolveSidecarScript(env)
-  const cwd = opts.cwd ?? path.dirname(script)
+  const packaged = opts.packaged ?? isPackaged()
+  const execPath = opts.execPath ?? process.execPath
+  const script = opts.scriptPath ?? (packaged ? execPath : resolveSidecarScript(env))
+  const cwd = opts.cwd ?? (packaged ? process.cwd() : path.dirname(script))
   const spawn = opts.spawn ?? realSpawn
 
   const child = spawn(script, { cwd, env })

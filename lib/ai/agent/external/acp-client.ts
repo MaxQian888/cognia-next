@@ -13,6 +13,7 @@ import {
   agentListen,
   agentReadTextFile,
   agentWriteTextFile,
+  getAcpHostCapabilities,
   supportsAgentFs,
   supportsAgentTerminal,
   supportsExternalAgents,
@@ -34,11 +35,17 @@ import {
   acpTerminalWrite,
 } from "@/lib/native/external-agent"
 import { BaseProtocolAdapter, type SessionCreateOptions } from "./protocol-adapter"
+import { hasNoLeakingExternalAgentPromptInput } from "./outbound-prompt-pii"
 import { JsonRpcPeer, JsonRpcMethodError } from "./json-rpc-peer"
 import { ACP_PROTOCOL_REGISTRY, classifyAcpV1Method, validateAcpV1Envelope } from "./acp-wire-codec"
 import { normalizeAcpElicitationRequest, validateAcpElicitationResponse } from "./acp-elicitation"
 import { spawnReclaimingOrphan } from "./spawn-reclaim"
 import { buildAgentEnv } from "./env-builder"
+import {
+  resolveAcpFeatureProfile,
+  type AcpFeatureProfile,
+  type AcpPreviewEnablement,
+} from "./acp-feature-profile"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
@@ -53,6 +60,7 @@ import type {
   NewSessionResponse as SdkNewSessionResponse,
   PromptRequest as SdkPromptRequest,
   PromptResponse as SdkPromptResponse,
+  ContentBlock as SdkContentBlock,
 } from "@agentclientprotocol/sdk"
 
 const log = loggers.agent
@@ -82,8 +90,17 @@ function normalizeMcpServers(servers?: AcpMcpServerConfig[]): AcpMcpServerConfig
     if ("type" in server && (server.type === "http" || server.type === "sse")) {
       return { ...server, headers: server.headers ?? [] }
     }
+    if ("serverId" in server) {
+      return { ...server }
+    }
     return { ...server, env: server.env ?? [] }
   })
+}
+
+function isAcpChannelMcpServer(
+  server: AcpMcpServerConfig
+): server is Extract<AcpMcpServerConfig, { serverId: string }> {
+  return "serverId" in server
 }
 
 import type {
@@ -101,6 +118,32 @@ import type {
   AcpAgentCapabilities,
   AcpImplementationInfo,
   AcpAuthMethod,
+  AcpTerminalAuthState,
+  AcpListProvidersResponse,
+  AcpSetProviderRequest,
+  AcpSetProviderResponse,
+  AcpDisableProviderRequest,
+  AcpDisableProviderResponse,
+  AcpStartNesRequest,
+  AcpStartNesResponse,
+  AcpSuggestNesRequest,
+  AcpSuggestNesResponse,
+  AcpCloseNesRequest,
+  AcpCloseNesResponse,
+  AcpDidOpenDocumentNotification,
+  AcpDidChangeDocumentNotification,
+  AcpDidCloseDocumentNotification,
+  AcpDidSaveDocumentNotification,
+  AcpDidFocusDocumentNotification,
+  AcpConnectMcpRequest,
+  AcpConnectMcpResponse,
+  AcpDisconnectMcpRequest,
+  AcpDisconnectMcpResponse,
+  AcpMessageMcpRequest,
+  AcpMessageMcpResponse,
+  AcpMessageMcpNotification,
+  AcpDynamicMcpConnectionState,
+  AcpDynamicMcpHostController,
   AcpSessionUpdate,
   AcpMcpServerConfig,
   AcpSessionModelState,
@@ -124,6 +167,19 @@ import type {
   ExternalAgentSessionExtensionSupport,
   ExternalAgentExtensionSupportStatus,
 } from "@/types/agent/external-agent"
+
+let dynamicMcpHostController: AcpDynamicMcpHostController | undefined
+
+/**
+ * Attach the host-owned MCP gateway used by preview ACP-channel MCP servers.
+ * Passing `undefined` disables the feature immediately; the client will not
+ * advertise or accept dynamic MCP operations without a live controller.
+ */
+export function setAcpDynamicMcpHostController(
+  controller: AcpDynamicMcpHostController | undefined
+): void {
+  dynamicMcpHostController = controller
+}
 
 // ============================================================================
 // ACP Protocol Types (JSON-RPC based)
@@ -205,16 +261,144 @@ interface AcpSessionListItem {
  * ACP session/prompt request params
  * @see https://agentclientprotocol.com/protocol/prompt-turn
  */
-type AcpPromptParams = Omit<SdkPromptRequest, "prompt"> & { prompt: AcpPromptContentBlock[] }
+type AcpPromptParams = Omit<SdkPromptRequest, "prompt"> & { prompt: SdkContentBlock[] }
 
 /**
  * ACP prompt content block types
  */
-type AcpPromptContentBlock =
-  | { type: "text"; text: string }
-  | { type: "image"; data?: string; uri?: string; mimeType: string }
-  | { type: "resource_link"; uri: string }
-  | { type: "resource"; resource: { uri: string; mimeType?: string; text?: string; blob?: string } }
+function resourceName(uri: string): string {
+  const withoutQuery = uri.split(/[?#]/, 1)[0]
+  return withoutQuery.split(/[\\/]/).filter(Boolean).at(-1) ?? uri
+}
+
+function requirePromptCapability(
+  capabilities: AcpAgentCapabilities,
+  capability: "image" | "audio" | "embeddedContext"
+): void {
+  if (capabilities.promptCapabilities?.[capability] !== true) {
+    throw new Error(`Agent does not advertise ACP prompt capability '${capability}'`)
+  }
+}
+
+/** Translate Cognia transcript content to schema-valid ACP prompt blocks. */
+export function buildAcpPromptBlocks(
+  message: ExternalAgentMessage,
+  capabilities: AcpAgentCapabilities,
+  files?: ExternalAgentExecutionOptions["files"]
+): SdkContentBlock[] {
+  const blocks: SdkContentBlock[] = []
+
+  for (const content of message.content) {
+    switch (content.type) {
+      case "text":
+        blocks.push({ type: "text", text: content.text, annotations: content.annotations })
+        break
+      case "image":
+        if (content.source.type === "base64") {
+          requirePromptCapability(capabilities, "image")
+          blocks.push({
+            type: "image",
+            data: content.source.data ?? "",
+            mimeType: content.source.mediaType,
+            annotations: content.annotations,
+          })
+        } else {
+          const uri = content.source.url ?? ""
+          blocks.push({
+            type: "resource_link",
+            uri,
+            name: content.alt || resourceName(uri),
+            mimeType: content.source.mediaType,
+            annotations: content.annotations,
+          })
+        }
+        break
+      case "audio":
+        requirePromptCapability(capabilities, "audio")
+        blocks.push({
+          type: "audio",
+          data: content.data,
+          mimeType: content.mimeType,
+          annotations: content.annotations,
+        })
+        break
+      case "resource": {
+        requirePromptCapability(capabilities, "embeddedContext")
+        const resource = content.resource
+        if (resource.text !== undefined) {
+          blocks.push({
+            type: "resource",
+            resource: {
+              uri: resource.uri,
+              mimeType: resource.mimeType,
+              text: resource.text,
+            },
+            annotations: content.annotations,
+          })
+        } else if (resource.blob !== undefined) {
+          blocks.push({
+            type: "resource",
+            resource: {
+              uri: resource.uri,
+              mimeType: resource.mimeType,
+              blob: resource.blob,
+            },
+            annotations: content.annotations,
+          })
+        } else {
+          throw new Error("ACP embedded resource must contain text or blob data")
+        }
+        break
+      }
+      case "resource_link":
+        blocks.push({
+          type: "resource_link",
+          uri: content.uri,
+          name: content.name,
+          title: content.title,
+          description: content.description,
+          mimeType: content.mimeType,
+          size: content.size,
+          annotations: content.annotations,
+        })
+        break
+      case "file": {
+        const uri = content.path.startsWith("file://") ? content.path : `file://${content.path}`
+        if (content.content !== undefined) {
+          requirePromptCapability(capabilities, "embeddedContext")
+          blocks.push({
+            type: "resource",
+            resource: {
+              uri,
+              mimeType: content.mimeType ?? "text/plain",
+              text: content.content,
+            },
+          })
+        } else {
+          blocks.push({ type: "resource_link", uri, name: resourceName(uri) })
+        }
+        break
+      }
+      default:
+        blocks.push({ type: "text", text: JSON.stringify(content) })
+    }
+  }
+
+  for (const file of files ?? []) {
+    const uri = file.path.startsWith("file://") ? file.path : `file://${file.path}`
+    if (file.content !== undefined) {
+      requirePromptCapability(capabilities, "embeddedContext")
+      blocks.unshift({
+        type: "resource",
+        resource: { uri, mimeType: "text/plain", text: file.content },
+      })
+    } else {
+      blocks.unshift({ type: "resource_link", uri, name: resourceName(uri) })
+    }
+  }
+
+  return blocks
+}
 
 /**
  * ACP session/prompt response result
@@ -284,19 +468,33 @@ function normalizeAgentCapabilities(
             : undefined,
         }
       : undefined,
-    auth: value.auth ? { logout: value.auth.logout != null } : undefined,
+    auth: value.auth ? { logout: value.auth.logout != null ? {} : undefined } : undefined,
   }
 }
 
 function normalizeAuthMethods(
   methods: AcpInitializeResult["authMethods"]
 ): AcpAuthMethod[] | undefined {
-  return methods?.map((method) => ({
-    id: method.id,
-    name: method.name,
-    description: method.description ?? undefined,
-    _meta: method._meta ?? undefined,
-  }))
+  return methods?.map((method) => {
+    if ("type" in method && method.type === "terminal") {
+      return {
+        type: "terminal",
+        id: method.id,
+        name: method.name,
+        description: method.description ?? undefined,
+        args: method.args,
+        env: method.env,
+        _meta: method._meta ?? undefined,
+      }
+    }
+    return {
+      type: "agent",
+      id: method.id,
+      name: method.name,
+      description: method.description ?? undefined,
+      _meta: method._meta ?? undefined,
+    }
+  })
 }
 
 // ============================================================================
@@ -407,6 +605,109 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
   // follow-up request to a session, so retain ownership locally and fail closed
   // before a request can operate on another session's terminal.
   private terminalSessions: Map<string, string> = new Map()
+  private featureProfile?: AcpFeatureProfile
+  private terminalAuthState?: AcpTerminalAuthState
+  private dynamicMcpConnections = new Map<string, AcpDynamicMcpConnectionState>()
+  private dynamicMcpServerSessions = new Map<string, string>()
+
+  getDynamicMcpConnections(): AcpDynamicMcpConnectionState[] {
+    return [...this.dynamicMcpConnections.values()].map((connection) => ({ ...connection }))
+  }
+
+  private assertDynamicMcpServersSupported(servers: AcpMcpServerConfig[]): void {
+    const dynamicServers = servers.filter(isAcpChannelMcpServer)
+    if (dynamicServers.length === 0) return
+    const profile = this.featureProfile ?? this.resolveFeatureProfile()
+    if (!profile.preview.dynamicMcp.advertised || !dynamicMcpHostController) {
+      throw new Error(
+        "ACP-channel MCP requires the dynamicMcp preview flag and an attached host controller"
+      )
+    }
+    const ids = new Set<string>()
+    for (const server of dynamicServers) {
+      if (!server.serverId || ids.has(server.serverId)) {
+        throw new Error(`ACP-channel MCP serverId must be non-empty and unique: ${server.serverId}`)
+      }
+      ids.add(server.serverId)
+    }
+  }
+
+  private registerDynamicMcpServers(sessionId: string, servers: AcpMcpServerConfig[]): void {
+    for (const [serverId, owner] of this.dynamicMcpServerSessions) {
+      if (owner === sessionId) this.dynamicMcpServerSessions.delete(serverId)
+    }
+    for (const server of servers.filter(isAcpChannelMcpServer)) {
+      const owner = this.dynamicMcpServerSessions.get(server.serverId)
+      if (owner && owner !== sessionId) {
+        throw new Error(`ACP-channel MCP serverId ${server.serverId} already belongs to ${owner}`)
+      }
+      this.dynamicMcpServerSessions.set(server.serverId, sessionId)
+    }
+  }
+
+  private async cleanupDynamicMcpConnections(sessionId?: string): Promise<void> {
+    const controller = dynamicMcpHostController
+    for (const connection of [...this.dynamicMcpConnections.values()]) {
+      if (sessionId && connection.sessionId !== sessionId) continue
+      connection.status = "disconnecting"
+      if (controller) {
+        await controller
+          .disconnect(
+            { connectionId: connection.connectionId },
+            { sessionId: connection.sessionId ?? "" }
+          )
+          .catch((error) =>
+            log.warn("Failed to disconnect ACP-channel MCP connection", {
+              connectionId: connection.connectionId,
+              error,
+            })
+          )
+      }
+      this.dynamicMcpConnections.delete(connection.connectionId)
+    }
+    if (sessionId) {
+      for (const [serverId, owner] of this.dynamicMcpServerSessions) {
+        if (owner === sessionId) this.dynamicMcpServerSessions.delete(serverId)
+      }
+    }
+  }
+
+  private resolveFeatureProfile(): AcpFeatureProfile {
+    const metadata = this._config?.metadata
+    const preview =
+      metadata?.acpPreviewFeatures && typeof metadata.acpPreviewFeatures === "object"
+        ? (metadata.acpPreviewFeatures as AcpPreviewEnablement)
+        : undefined
+    const host = getAcpHostCapabilities()
+    const durableInteraction =
+      host.elicitation.durableInteraction || metadata?.acpDurableInteractionController === true
+    return resolveAcpFeatureProfile({
+      role: "client",
+      host: {
+        ...host,
+        fs: { read: supportsAgentFs(), write: supportsAgentFs() },
+        terminalAuth: host.terminal && this._config?.transport === "stdio",
+        elicitation: {
+          form: host.elicitation.form || durableInteraction,
+          url: host.elicitation.url || durableInteraction,
+          durableInteraction,
+        },
+        preview: {
+          ...host.preview,
+          providers: host.preview.providers && metadata?.acpProviderController === true,
+          dynamicMcp: host.preview.dynamicMcp && dynamicMcpHostController !== undefined,
+          nes: host.preview.nes && metadata?.acpNesController === true,
+        },
+      },
+      elicitationEnabled:
+        metadata?.acpElicitationEnabled === false
+          ? false
+          : metadata?.acpElicitationEnabled === true
+            ? true
+            : undefined,
+      preview,
+    })
+  }
 
   /**
    * Connect to an ACP agent
@@ -529,6 +830,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     this._sessions.clear()
     this.terminalSessions.clear()
+    await this.cleanupDynamicMcpConnections()
+    this.dynamicMcpServerSessions.clear()
     for (const [, pending] of this.pendingPermissions) {
       clearTimeout(pending.timeout)
       pending.resolve({ outcome: { outcome: "cancelled" } })
@@ -537,6 +840,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.cancelPendingElicitations()
     this.peer?.rejectAll("Disconnected")
     this.peer = undefined
+    this.featureProfile = undefined
     this.clearSessionExtensionSupportCache()
   }
 
@@ -955,24 +1259,8 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * @see https://agentclientprotocol.com/protocol/initialization
    */
   private async initialize(): Promise<AcpInitializeResult> {
-    // fs is host-backed on desktop AND the headless brain; the terminal
-    // capability stays desktop-only (no headless acp_terminal_* arms).
-    const clientCapabilities: AcpClientCapabilities = {
-      session: { configOptions: { boolean: {} } },
-      plan: {},
-      ...(this._config?.metadata?.acpElicitationEnabled === true
-        ? { elicitation: { form: {}, url: {} } }
-        : {}),
-      ...(supportsAgentFs()
-        ? {
-            fs: {
-              readTextFile: true,
-              writeTextFile: true,
-            },
-            ...(supportsAgentTerminal() ? { terminal: true } : {}),
-          }
-        : {}),
-    }
+    this.featureProfile = this.resolveFeatureProfile()
+    const clientCapabilities: AcpClientCapabilities = this.featureProfile.clientCapabilities
     const params: AcpInitializeParams = {
       protocolVersion: LATEST_ACP_PROTOCOL_VERSION,
       clientCapabilities,
@@ -1030,6 +1318,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       )
     }
 
+    if (method.type === "terminal") {
+      await this.authenticateWithTerminal(method)
+      return
+    }
+
     // Per the ACP spec the request body is `AuthenticateRequest = { methodId }`
     // (https://agentclientprotocol.com/protocol/initialization#authentication).
     // The legacy `method` key was non-conformant — spec-strict agents (Claude
@@ -1042,6 +1335,86 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     })
 
     log.info("Authenticated with agent", { method: methodId })
+  }
+
+  getTerminalAuthState(): AcpTerminalAuthState | undefined {
+    return this.terminalAuthState ? { ...this.terminalAuthState } : undefined
+  }
+
+  async cancelTerminalAuthentication(): Promise<void> {
+    const state = this.terminalAuthState
+    if (!state?.terminalId || (state.status !== "starting" && state.status !== "running")) {
+      return
+    }
+    await acpTerminalKill(state.terminalId)
+    await acpTerminalRelease(state.terminalId).catch(() => undefined)
+    this.terminalAuthState = { ...state, status: "cancelled" }
+  }
+
+  private async authenticateWithTerminal(
+    method: Extract<AcpAuthMethod, { type: "terminal" }>
+  ): Promise<void> {
+    const config = this._config
+    if (!config?.process || config.transport !== "stdio") {
+      throw new Error("Terminal authentication requires a configured stdio agent process")
+    }
+    const profile = this.featureProfile ?? this.resolveFeatureProfile()
+    if (!profile.clientCapabilities.auth?.terminal) {
+      throw new Error("Terminal authentication is unavailable on this host")
+    }
+
+    this.terminalAuthState = { methodId: method.id, status: "starting" }
+    await this.teardownTransport()
+    const env = await buildAgentEnv(config, {
+      ...(config.process.env ?? {}),
+      ...(method.env ?? {}),
+    })
+    const terminalId = await acpTerminalCreate(
+      `acp-auth:${config.id}`,
+      config.process.command,
+      [...buildSpawnArgs(config.process), ...(method.args ?? [])],
+      config.process.cwd,
+      env,
+      1024 * 1024
+    )
+    this.terminalAuthState = { methodId: method.id, terminalId, status: "running" }
+
+    try {
+      const result = await acpTerminalWaitForExit(terminalId)
+      const exitCode = result.exitStatus?.exitCode ?? null
+      if (this.terminalAuthState?.status === "cancelled") {
+        throw new Error("Terminal authentication was cancelled")
+      }
+      if (exitCode !== 0) {
+        throw new Error(`Terminal authentication exited with code ${exitCode ?? "unknown"}`)
+      }
+      this.terminalAuthState = {
+        methodId: method.id,
+        terminalId,
+        status: "reconnecting",
+        exitCode,
+      }
+      this._connectionStatus = "disconnected"
+      await this.connect(config)
+      this.terminalAuthState = {
+        methodId: method.id,
+        terminalId,
+        status: "completed",
+        exitCode,
+      }
+    } catch (error) {
+      this.terminalAuthState = {
+        methodId: method.id,
+        terminalId,
+        status: this.terminalAuthState?.status === "cancelled" ? "cancelled" : "failed",
+        error: error instanceof Error ? error.message : String(error),
+      }
+      throw error
+    } finally {
+      await acpTerminalRelease(terminalId).catch((error) =>
+        log.warn("Failed to release ACP authentication terminal", { error })
+      )
+    }
   }
 
   /**
@@ -1177,10 +1550,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     const additionalDirectories = this.resolveAdditionalDirectories(options)
     const cwd = this.resolveSessionCwd(options)
+    const mcpServers = normalizeMcpServers(options?.mcpServers)
+    this.assertDynamicMcpServersSupported(mcpServers)
     // Build session params according to ACP spec
     const params: AcpNewSessionParams = {
       cwd,
-      mcpServers: normalizeMcpServers(options?.mcpServers),
+      mcpServers,
       ...(additionalDirectories ? { additionalDirectories } : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
@@ -1231,6 +1606,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
+    this.registerDynamicMcpServers(session.id, mcpServers)
 
     log.info("Created session", { sessionId: session.id })
     return session
@@ -1272,6 +1648,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     this.cancelPendingElicitations(sessionId)
 
     this.turnMessageId.delete(sessionId)
+    await this.cleanupDynamicMcpConnections(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
@@ -1307,6 +1684,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
     }
     this.cancelPendingElicitations(sessionId)
+    await this.cleanupDynamicMcpConnections(sessionId)
     await this.cleanupNativeSessionTerminals(sessionId)
     this.forgetSessionTerminals(sessionId)
     this._sessions.delete(sessionId)
@@ -1355,6 +1733,99 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     log.info("Logged out of agent")
   }
 
+  private requirePreviewFeature(feature: "providers" | "nes"): void {
+    const profile = this.featureProfile ?? this.resolveFeatureProfile()
+    if (!profile.preview[feature].advertised) {
+      throw new Error(`ACP preview feature \"${feature}\" is disabled or unavailable on this host`)
+    }
+    if (feature === "providers" && !this._agentCapabilities?.providers) {
+      throw new Error("Agent did not advertise ACP provider configuration")
+    }
+    if (feature === "nes" && !this._agentCapabilities?.nes) {
+      throw new Error("Agent did not advertise ACP NES")
+    }
+  }
+
+  async listProviders(): Promise<AcpListProvidersResponse> {
+    this.requirePreviewFeature("providers")
+    return this.sendRequest<AcpListProvidersResponse>("providers/list", {})
+  }
+
+  async setProvider(
+    request: AcpSetProviderRequest,
+    options: { confirmedCredentialTransmission?: boolean } = {}
+  ): Promise<AcpSetProviderResponse> {
+    this.requirePreviewFeature("providers")
+    if (
+      request.headers &&
+      Object.keys(request.headers).length > 0 &&
+      options.confirmedCredentialTransmission !== true
+    ) {
+      throw new Error("Explicit confirmation is required before transmitting provider credentials")
+    }
+    return this.sendRequest<AcpSetProviderResponse>(
+      "providers/set",
+      request as unknown as Record<string, unknown>
+    )
+  }
+
+  async disableProvider(request: AcpDisableProviderRequest): Promise<AcpDisableProviderResponse> {
+    this.requirePreviewFeature("providers")
+    return this.sendRequest<AcpDisableProviderResponse>(
+      "providers/disable",
+      request as unknown as Record<string, unknown>
+    )
+  }
+
+  async startNes(request: AcpStartNesRequest): Promise<AcpStartNesResponse> {
+    this.requirePreviewFeature("nes")
+    return this.sendRequest<AcpStartNesResponse>(
+      "nes/start",
+      request as unknown as Record<string, unknown>
+    )
+  }
+
+  async suggestNes(request: AcpSuggestNesRequest): Promise<AcpSuggestNesResponse> {
+    this.requirePreviewFeature("nes")
+    return this.sendRequest<AcpSuggestNesResponse>(
+      "nes/suggest",
+      request as unknown as Record<string, unknown>
+    )
+  }
+
+  async closeNes(request: AcpCloseNesRequest): Promise<AcpCloseNesResponse> {
+    this.requirePreviewFeature("nes")
+    return this.sendRequest<AcpCloseNesResponse>(
+      "nes/close",
+      request as unknown as Record<string, unknown>
+    )
+  }
+
+  didOpenDocument(notification: AcpDidOpenDocumentNotification): void {
+    this.requirePreviewFeature("nes")
+    this.sendNotification("document/didOpen", notification as unknown as Record<string, unknown>)
+  }
+
+  didChangeDocument(notification: AcpDidChangeDocumentNotification): void {
+    this.requirePreviewFeature("nes")
+    this.sendNotification("document/didChange", notification as unknown as Record<string, unknown>)
+  }
+
+  didCloseDocument(notification: AcpDidCloseDocumentNotification): void {
+    this.requirePreviewFeature("nes")
+    this.sendNotification("document/didClose", notification as unknown as Record<string, unknown>)
+  }
+
+  didSaveDocument(notification: AcpDidSaveDocumentNotification): void {
+    this.requirePreviewFeature("nes")
+    this.sendNotification("document/didSave", notification as unknown as Record<string, unknown>)
+  }
+
+  didFocusDocument(notification: AcpDidFocusDocumentNotification): void {
+    this.requirePreviewFeature("nes")
+    this.sendNotification("document/didFocus", notification as unknown as Record<string, unknown>)
+  }
+
   /**
    * Send a prompt to the agent (streaming)
    */
@@ -1366,6 +1837,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     const session = this._sessions.get(sessionId)
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`)
+    }
+    if (!hasNoLeakingExternalAgentPromptInput(message, { sessionId })) {
+      throw new Error("ACP outbound payload blocked by the PII gate")
     }
 
     // Update session status
@@ -1379,6 +1853,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     let resolveNext: (() => void) | null = null
     let isDone = false
     let error: Error | null = null
+    let cancellationSent = false
 
     // Register event listener for this session
     const listener = (event: ExternalAgentEvent) => {
@@ -1399,56 +1874,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
     this.addEventListener(sessionId, listener)
 
-    const promptBlocks: AcpPromptContentBlock[] = message.content.map((content) => {
-      switch (content.type) {
-        case "text":
-          return { type: "text", text: content.text }
-        case "image":
-          if (content.source.type === "base64") {
-            return {
-              type: "image",
-              data: content.source.data,
-              mimeType: content.source.mediaType,
-            }
-          }
-          return {
-            type: "image",
-            uri: content.source.url,
-            mimeType: content.source.mediaType,
-          }
-        case "file": {
-          const uri = content.path.startsWith("file://") ? content.path : `file://${content.path}`
-          if (content.content) {
-            return {
-              type: "resource",
-              resource: {
-                uri,
-                mimeType: content.mimeType,
-                text: content.content,
-              },
-            }
-          }
-          return { type: "resource_link", uri }
-        }
-        default:
-          return { type: "text", text: JSON.stringify(content) }
-      }
-    })
-
-    if (options?.files?.length) {
-      const fileBlocks = options.files.map((file) => {
-        const uri = file.path.startsWith("file://") ? file.path : `file://${file.path}`
-        return {
-          type: "resource",
-          resource: {
-            uri,
-            mimeType: file.content ? "text/plain" : undefined,
-            text: file.content,
-          },
-        } satisfies AcpPromptContentBlock
-      })
-      promptBlocks.unshift(...fileBlocks)
-    }
+    const promptBlocks = buildAcpPromptBlocks(
+      message,
+      this._agentCapabilities ?? {},
+      options?.files
+    )
 
     const promptParams: AcpPromptParams = {
       sessionId,
@@ -1475,9 +1905,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
 
         // Check for abort signal
-        if (options?.signal?.aborted) {
+        if (options?.signal?.aborted && !cancellationSent) {
+          cancellationSent = true
           await this.cancel(sessionId)
-          break
         }
       }
 
@@ -1588,7 +2018,11 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         this.pendingPermissions.delete(requestId)
       }
     }
-    this.updateSession(sessionId, { status: "idle" })
+    this.cancelPendingElicitations(sessionId)
+    await this.cleanupNativeSessionTerminals(sessionId)
+    this.forgetSessionTerminals(sessionId)
+    // Keep the turn executing until the authoritative session/prompt response
+    // arrives. Agents may legally stream late updates after session/cancel.
   }
 
   /**
@@ -1795,10 +2229,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
 
     const additionalDirectories = this.resolveAdditionalDirectories(options)
     const cwd = this.resolveSessionCwd(options)
+    const mcpServers = normalizeMcpServers(options?.mcpServers)
+    this.assertDynamicMcpServersSupported(mcpServers)
     const params = {
       sessionId,
       cwd,
-      mcpServers: normalizeMcpServers(options?.mcpServers),
+      mcpServers,
       ...(additionalDirectories ? { additionalDirectories } : {}),
       _meta: this.buildSessionRequestMeta(options),
     }
@@ -1823,6 +2259,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this._sessions.set(session.id, session)
+    this.registerDynamicMcpServers(session.id, mcpServers)
     return session
   }
 
@@ -1945,10 +2382,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     try {
       const additionalDirectories = this.resolveAdditionalDirectories(options)
       const cwd = this.resolveSessionCwd(options)
+      const mcpServers = normalizeMcpServers(options?.mcpServers)
+      this.assertDynamicMcpServersSupported(mcpServers)
       const result = await this.sendRequest<AcpNewSessionResult>(method, {
         sessionId,
         cwd,
-        mcpServers: normalizeMcpServers(options?.mcpServers),
+        mcpServers,
         ...(additionalDirectories ? { additionalDirectories } : {}),
         _meta: this.buildSessionRequestMeta(options),
       } as Record<string, unknown>)
@@ -1978,6 +2417,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(forkedSession.id, forkedSession)
+      this.registerDynamicMcpServers(forkedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
       return forkedSession
     } catch (error) {
@@ -2004,9 +2444,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
   }
 
-  /**
-   * Resume a session (ACP extension / unstable)
-   */
+  /** Resume a session through stable `session/resume`, with legacy `session/load` fallback. */
   async resumeSession(
     sessionId: string,
     options?: SessionCreateOptions
@@ -2058,10 +2496,12 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     try {
       const additionalDirectories = this.resolveAdditionalDirectories(options)
       const cwd = this.resolveSessionCwd(options)
+      const mcpServers = normalizeMcpServers(options?.mcpServers)
+      this.assertDynamicMcpServersSupported(mcpServers)
       const result = await this.sendRequest<AcpNewSessionResult>(method, {
         sessionId,
         cwd,
-        mcpServers: normalizeMcpServers(options?.mcpServers),
+        mcpServers,
         ...(additionalDirectories ? { additionalDirectories } : {}),
         _meta: this.buildSessionRequestMeta(options),
       } as Record<string, unknown>)
@@ -2086,6 +2526,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         },
       }
       this._sessions.set(resumedSession.id, resumedSession)
+      this.registerDynamicMcpServers(resumedSession.id, mcpServers)
       this.setExtensionSupport(method, "supported", "ok")
       return resumedSession
     } catch (error) {
@@ -2325,6 +2766,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         )
       case "elicitation/create":
         return this.handleElicitationRequest(requestId, params, signal)
+      case "mcp/connect":
+        return this.handleDynamicMcpConnect(params as unknown as AcpConnectMcpRequest, signal)
+      case "mcp/message":
+        return this.handleDynamicMcpMessage(
+          params as unknown as AcpMessageMcpRequest,
+          signal,
+          false
+        )
+      case "mcp/disconnect":
+        return this.handleDynamicMcpDisconnect(params as unknown as AcpDisconnectMcpRequest, signal)
       case "terminal/create":
         return this.handleTerminalCreate(params as unknown as AcpTerminalCreateParams)
       case "terminal/output":
@@ -2357,17 +2808,98 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
   }
 
+  private assertDynamicMcpController(): AcpDynamicMcpHostController {
+    const profile = this.featureProfile ?? this.resolveFeatureProfile()
+    if (!profile.preview.dynamicMcp.advertised || !dynamicMcpHostController) {
+      throw new JsonRpcMethodError(-32601, "Dynamic MCP is not enabled by this ACP host")
+    }
+    return dynamicMcpHostController
+  }
+
+  private async handleDynamicMcpConnect(
+    request: AcpConnectMcpRequest,
+    signal: AbortSignal
+  ): Promise<AcpConnectMcpResponse> {
+    const controller = this.assertDynamicMcpController()
+    const sessionId = this.dynamicMcpServerSessions.get(request.serverId)
+    if (!sessionId) {
+      throw new JsonRpcMethodError(-32602, `Unknown ACP-channel MCP server: ${request.serverId}`)
+    }
+    const response = await controller.connect(request, {
+      sessionId,
+      signal,
+      notify: (notification) =>
+        this.sendNotification("mcp/message", notification as unknown as Record<string, unknown>),
+    })
+    if (!response?.connectionId || this.dynamicMcpConnections.has(response.connectionId)) {
+      throw new JsonRpcMethodError(
+        -32603,
+        "Dynamic MCP controller returned an invalid connectionId"
+      )
+    }
+    this.dynamicMcpConnections.set(response.connectionId, {
+      connectionId: response.connectionId,
+      serverId: request.serverId,
+      sessionId,
+      status: "connected",
+    })
+    return response
+  }
+
+  private async handleDynamicMcpMessage(
+    request: AcpMessageMcpRequest | AcpMessageMcpNotification,
+    signal: AbortSignal | undefined,
+    notification: boolean
+  ): Promise<AcpMessageMcpResponse | void> {
+    const controller = this.assertDynamicMcpController()
+    const connection = this.dynamicMcpConnections.get(request.connectionId)
+    if (!connection || connection.status !== "connected" || !connection.sessionId) {
+      throw new JsonRpcMethodError(
+        -32602,
+        `Unknown ACP-channel MCP connection: ${request.connectionId}`
+      )
+    }
+    return controller.message(request, {
+      sessionId: connection.sessionId,
+      signal,
+      notification,
+    })
+  }
+
+  private async handleDynamicMcpDisconnect(
+    request: AcpDisconnectMcpRequest,
+    signal?: AbortSignal
+  ): Promise<AcpDisconnectMcpResponse | void> {
+    const controller = this.assertDynamicMcpController()
+    const connection = this.dynamicMcpConnections.get(request.connectionId)
+    if (!connection || !connection.sessionId) {
+      // Disconnect is idempotent: a connection already gone is settled.
+      return {}
+    }
+    connection.status = "disconnecting"
+    try {
+      return await controller.disconnect(request, {
+        sessionId: connection.sessionId,
+        signal,
+      })
+    } finally {
+      this.dynamicMcpConnections.delete(request.connectionId)
+    }
+  }
+
   private async handleElicitationRequest(
     requestId: number | string,
     params: Record<string, unknown> | undefined,
     signal: AbortSignal
   ): Promise<Omit<AcpElicitationResponse, "requestId">> {
-    if (this._config?.metadata?.acpElicitationEnabled !== true) {
-      throw new JsonRpcMethodError(-32601, "Elicitation is not enabled")
-    }
     const normalized = normalizeAcpElicitationRequest(requestId, params)
     if (!normalized.ok) {
       throw new JsonRpcMethodError(-32602, `Invalid elicitation request: ${normalized.reason}`)
+    }
+    const elicitation = (this.featureProfile ?? this.resolveFeatureProfile()).clientCapabilities
+      .elicitation
+    if (!elicitation?.[normalized.request.mode]) {
+      throw new JsonRpcMethodError(-32601, `Elicitation ${normalized.request.mode} is not enabled`)
     }
     if (normalized.request.sessionId && !this._sessions.has(normalized.request.sessionId)) {
       return { action: "cancel" }
@@ -2664,7 +3196,7 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     this.assertTerminalOwnership(params.sessionId, params.terminalId)
-    const result = await acpTerminalOutput(params.terminalId, params.outputByteLimit)
+    const result = await acpTerminalOutput(params.terminalId)
     return result
   }
 
@@ -2744,6 +3276,14 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
    * Handle a JSON-RPC notification
    */
   private handleNotification(notification: JsonRpcNotification): void {
+    if (notification.method === "mcp/message") {
+      void this.handleDynamicMcpMessage(
+        notification.params as unknown as AcpMessageMcpNotification,
+        undefined,
+        true
+      ).catch((error) => log.warn("ACP-channel MCP notification failed", { error }))
+      return
+    }
     if (notification.method === "elicitation/complete") {
       const elicitationId = notification.params?.elicitationId
       if (typeof elicitationId !== "string" || !this.knownUrlElicitations.has(elicitationId)) return
@@ -2780,50 +3320,92 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
     }
 
     switch (update.sessionUpdate) {
-      case "agent_message_chunk":
+      case "agent_message_chunk": {
+        const messageId = update.messageId ?? this.currentTurnMessageId(sessionId)
+        if (update.content.type !== "text") {
+          return {
+            type: "content_block_delta",
+            sessionId,
+            timestamp,
+            messageId,
+            block: update.content,
+            role: "assistant",
+            channel: "message",
+          }
+        }
         return {
           type: "message_delta",
           sessionId,
           timestamp,
-          messageId: this.currentTurnMessageId(sessionId),
+          messageId,
           delta: {
             type: "text",
-            text: update.content?.text || "",
+            text: update.content.text,
           },
+          content: update.content,
         }
+      }
 
       // Canonical ACP v1 reasoning chunk; `thought_message_chunk` is the
       // tolerated legacy alias for the same payload.
       case "agent_thought_chunk":
-      case "thought_message_chunk":
+      case "thought_message_chunk": {
+        const messageId = update.messageId ?? this.currentTurnMessageId(sessionId)
+        if (update.content.type !== "text") {
+          return {
+            type: "content_block_delta",
+            sessionId,
+            timestamp,
+            messageId,
+            block: update.content,
+            role: "assistant",
+            channel: "thought",
+          }
+        }
         return {
           type: "thinking",
           sessionId,
           timestamp,
-          thinking: update.content?.text || "",
+          messageId,
+          thinking: update.content.text,
+          content: update.content,
         }
+      }
 
-      case "user_message_chunk":
+      case "user_message_chunk": {
+        const messageId = update.messageId ?? `${this.currentTurnMessageId(sessionId)}:user`
+        if (update.content.type !== "text") {
+          return {
+            type: "content_block_delta",
+            sessionId,
+            timestamp,
+            messageId,
+            block: update.content,
+            role: "user",
+            channel: "message",
+          }
+        }
         return {
           type: "message_delta",
           sessionId,
           timestamp,
-          // A distinct-but-stable id keeps an echoed user message from
-          // coalescing into the agent's reply within the same turn.
-          messageId: `${this.currentTurnMessageId(sessionId)}:user`,
+          messageId,
           delta: {
             type: "text",
-            text: update.content?.text || "",
+            text: update.content.text,
           },
+          content: update.content,
         }
+      }
 
-      case "tool_call":
+      case "tool_call": {
+        const previewToolNames = this.featureProfile?.preview.previewToolNames.advertised === true
         return {
           type: "tool_use_start",
           sessionId,
           timestamp,
           toolUseId: update.toolCallId,
-          toolName: update.title,
+          toolName: previewToolNames && update.name ? update.name : update.title,
           title: update.title,
           kind: update.kind,
           rawInput: update.rawInput,
@@ -2833,13 +3415,16 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
             ...(update.locations ? { locations: update.locations } : {}),
           },
         }
+      }
 
       case "tool_call_update": {
         // Extract text content from the union type
         const extractToolCallText = (): string => {
           if (!update.content?.length) return ""
           const first = update.content[0]
-          if (first.type === "content") return first.content?.text || ""
+          if (first.type === "content" && first.content?.type === "text") {
+            return first.content.text
+          }
           if (first.type === "diff") return `Diff: ${first.path}`
           if (first.type === "terminal") return `Terminal: ${first.terminalId}`
           return ""
@@ -2927,6 +3512,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
         }
 
       case "plan_update": {
+        if (this.featureProfile && !this.featureProfile.preview.identifiedPlans.advertised) {
+          return null
+        }
         const plan = update.plan
         const planSession = this._sessions.get(sessionId)
         const plans = {
@@ -2960,6 +3548,9 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
       }
 
       case "plan_removed": {
+        if (this.featureProfile && !this.featureProfile.preview.identifiedPlans.advertised) {
+          return null
+        }
         const planSession = this._sessions.get(sessionId)
         if (planSession) {
           const plans = {
@@ -3002,6 +3593,75 @@ export class AcpClientAdapter extends BaseProtocolAdapter {
           step: -1,
           totalSteps: 0,
           removed: true,
+        }
+      }
+
+      case "compaction_update": {
+        if (this.featureProfile && !this.featureProfile.preview.compaction.advertised) {
+          return null
+        }
+        const compactionSession = this._sessions.get(sessionId)
+        const compactions = {
+          ...((compactionSession?.metadata?.compactions as
+            Record<string, Record<string, unknown>> | undefined) ?? {}),
+        }
+        const previous = compactions[update.compactionId] ?? {}
+        const next: Record<string, unknown> = {
+          ...previous,
+          compactionId: update.compactionId,
+          status: update.status,
+        }
+        if ("summary" in update) {
+          if (update.summary === null || update.summary?.length === 0) delete next.summary
+          else next.summary = update.summary
+        }
+        if ("error" in update) {
+          if (update.error === null) delete next.error
+          else next.error = update.error
+        }
+        if ("_meta" in update) {
+          if (update._meta === null) delete next._meta
+          else next._meta = update._meta
+        }
+        compactions[update.compactionId] = next
+        if (compactionSession) {
+          compactionSession.metadata = { ...compactionSession.metadata, compactions }
+        }
+        return {
+          type: "compaction_update",
+          sessionId,
+          timestamp,
+          compaction: update,
+        }
+      }
+
+      case "compaction_summary_chunk": {
+        if (this.featureProfile && !this.featureProfile.preview.compaction.advertised) {
+          return null
+        }
+        const compactionSession = this._sessions.get(sessionId)
+        const compactions = {
+          ...((compactionSession?.metadata?.compactions as
+            Record<string, Record<string, unknown>> | undefined) ?? {}),
+        }
+        const previous = compactions[update.compactionId] ?? {
+          compactionId: update.compactionId,
+          status: "in_progress",
+        }
+        const summary = Array.isArray(previous.summary) ? previous.summary : []
+        compactions[update.compactionId] = {
+          ...previous,
+          summary: [...summary, update.content],
+        }
+        if (compactionSession) {
+          compactionSession.metadata = { ...compactionSession.metadata, compactions }
+        }
+        return {
+          type: "compaction_summary_chunk",
+          sessionId,
+          timestamp,
+          compactionId: update.compactionId,
+          content: update.content,
         }
       }
 

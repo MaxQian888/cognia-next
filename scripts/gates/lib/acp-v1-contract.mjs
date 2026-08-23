@@ -13,8 +13,8 @@ function valuesForCompatibility(key) {
   return []
 }
 
-function valuesForFeatureGated(key) {
-  return ACP_V1_CONTRACT.featureGated[key] ?? []
+function valuesForPreview(key) {
+  return ACP_V1_CONTRACT.preview[key] ?? []
 }
 
 export function validateAcpV1Coverage(coverage) {
@@ -25,7 +25,7 @@ export function validateAcpV1Coverage(coverage) {
   for (const key of COVERAGE_KEYS) {
     const actual = new Set(coverage[key] ?? [])
     const stable = new Set(ACP_V1_CONTRACT.stable[key])
-    const nonStable = new Set([...valuesForCompatibility(key), ...valuesForFeatureGated(key)])
+    const nonStable = new Set([...valuesForCompatibility(key), ...valuesForPreview(key)])
 
     missing[key] = [...stable].filter((value) => !actual.has(value))
     unstableOrLegacy[key] = [...actual].filter((value) => nonStable.has(value))

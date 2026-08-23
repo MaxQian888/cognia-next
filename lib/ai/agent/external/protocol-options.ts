@@ -36,6 +36,8 @@ const PROTOCOL_LABELS: Record<BuiltinExecutableExternalAgentProtocol, string> = 
   a2a: "A2A (Agent-to-Agent)",
 }
 
+const DOCUMENTED_ONLY_PROTOCOLS = new Set<BuiltinExecutableExternalAgentProtocol>(["opencode-v2"])
+
 export interface ExternalProtocolOption {
   value: string
   /** Brand/technical name. Never translated. */
@@ -63,9 +65,9 @@ export interface ExternalProtocolOption {
  * see what the stored config says and change it, but cannot re-choose it.
  */
 export function externalProtocolOptions(current?: string): ExternalProtocolOption[] {
-  const options: ExternalProtocolOption[] = BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.map(
-    (value) => ({ value, label: PROTOCOL_LABELS[value], selectable: true })
-  )
+  const options: ExternalProtocolOption[] = BUILTIN_EXECUTABLE_EXTERNAL_AGENT_PROTOCOLS.filter(
+    (value) => !DOCUMENTED_ONLY_PROTOCOLS.has(value)
+  ).map((value) => ({ value, label: PROTOCOL_LABELS[value], selectable: true }))
   for (const { protocol } of listPluginProtocolAdapters()) {
     if (options.some((option) => option.value === protocol)) continue
     options.push({
@@ -84,7 +86,12 @@ export function externalProtocolOptions(current?: string): ExternalProtocolOptio
   // whose plugin is disabled or gone, or a hand-edited id. Shown so the stored
   // value survives the dialog opening, refused so it cannot be re-picked.
   return [
-    { value: current, label: current, selectable: false, reasonKey: "legacyProtocolUnavailable" },
+    {
+      value: current,
+      label: PROTOCOL_LABELS[current as BuiltinExecutableExternalAgentProtocol] ?? current,
+      selectable: false,
+      reasonKey: "legacyProtocolUnavailable",
+    },
     ...options,
   ]
 }
