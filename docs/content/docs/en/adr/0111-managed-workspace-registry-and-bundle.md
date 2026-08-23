@@ -21,13 +21,18 @@ durable Registry and Bundle rows, signed atomic Git creation, transactional
 multi-root acquisition (including non-Git shadows), canonical session bindings,
 repository configuration validation, lifecycle policy persistence/capacity
 enforcement, archive/restore/delete, protected permanent/imported
-classification, Tauri commands, and a first unified inventory surface.
+classification, startup import plus explicit adoption, provider-neutral PR base
+resolution, Tauri/Companion commands, canonical scheduled-chat bundle leases,
+new-chat/header controls, and unified Overview/Environments/Source Control
+views. The manual Worktree panel now consumes Registry ownership and refuses
+removal of owned or imported rows.
 
 The rollout is still incomplete: all writable agent entry points are not yet
-proven to acquire Registry Bundles; startup reconciliation/adoption, PR checkout
-resolution, selective and branch handoff, aggregated Source Control, header/new
-chat controls, cleanup scheduling/history, and the acceptance E2E matrix remain
-open. No legacy allocator or live-tree fallback may be removed or described as
+proven to acquire Registry Bundles; Agent Team still constructs its legacy
+allocator, persisted multi-root Selective Apply and Continue Branch handoff are
+open, generated headless catalogs lag the canonical protocol, and cleanup
+scheduling/history, grant UX, grouped delivery, and the acceptance E2E matrix
+remain open. No legacy allocator or live-tree fallback may be described as
 migrated until those consumers and tests are closed. See the dated
 implementation audit in
 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`.

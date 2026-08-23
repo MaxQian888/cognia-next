@@ -46,6 +46,9 @@ controls, and a clear path from isolated changes back to Local or a PR.
 | Registry-backed chat          | Worktree chat acquires a persisted bundle and replaces live Project roots and `additionalDirectories` with lease aliases   | Focused route/session bundle tests                                        |
 | Pull request bases            | Provider-neutral PR checkout resolution returns a fetch ref and immutable SHA; Rust fetches and verifies the resolved head | GitHub provider, Rust base, and session bundle tests                      |
 | Import and adoption           | Startup reconcile registers external worktrees as Imported without mutation; explicit Adopt establishes signed ownership   | Restart, foreign-lock, interrupted-lock retry, and capacity tests         |
+| Scheduled canonical binding   | Scheduled chat borrows the persisted bundle and replaces live additional directories with Registry aliases                 | Full scheduler executor suite (74 tests)                                  |
+| Unified management views      | `/workspace` exposes Overview, Environments, and the existing multi-root Source Control panel                              | Focused workspace overview suite (9 tests)                                |
+| Protected manual inventory    | Manual Worktree inventory joins Git rows with Registry ownership and disables removal for owned/imported paths             | Focused Worktree panel suite (17 tests)                                   |
 | Host transport                | Tauri and Companion runtime contracts cover inventory, bundles, lifecycle, policy, pin, permanent, and adoption            | Crate/TypeScript transport tests; generated headless catalogs remain open |
 
 The implementation also corrected a persistence defect discovered by the new
@@ -55,36 +58,34 @@ pin or state update.
 
 ## Remaining product gaps
 
-| Priority | Gap                                                                                                          | Required closure evidence                                               |
-| -------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| P0       | Picker/header actions are implemented, but the complete review/publish/handoff flow lacks a real Tauri smoke | Tauri picker → run → review → handoff → archive smoke                   |
-| P0       | Scheduler, Agent Team, connectors, and every writable agent path are not yet proven Registry-only            | Wiring audit plus tests showing live roots remain untouched             |
-| P0       | Selective Apply is not yet wired as one persisted Bundle transaction                                         | Fault-injected precheck/apply/compensate integration test               |
-| P0       | Continue Branch in Local is absent                                                                           | Occupied-branch rejection, multi-repo rollback, and non-Git apply test  |
-| P1       | `/workspace` is not yet the full Overview/Environments/Source Control aggregation                            | Multi-repository state matrix and UI smoke                              |
-| P1       | Manual Worktree panel does not yet consume the complete Registry inventory                                   | Protected force-removal test                                            |
-| P1       | Daily cleanup, snapshot expiry, blob-budget enforcement, and cleanup history are not scheduled               | Clock-controlled retention integration tests                            |
-| P1       | Sensitive grants exist in Rust but lack the complete interactive/background product flow                     | Audited grant UI and fail-closed background E2E                         |
-| P1       | Generated CLI/headless/OpenAPI catalogs lag the canonical Companion contract                                 | Regenerate after unrelated undeclared app routes stop blocking the gate |
-| P1       | Branch/push/draft-PR delivery-unit aggregation is absent                                                     | One branch/PR per repo test without atomicity claims                    |
+| Priority | Gap                                                                                                                  | Required closure evidence                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| P0       | Picker/header actions are implemented, but the complete review/publish/handoff flow lacks a real Tauri smoke         | Tauri picker → run → review → handoff → archive smoke                   |
+| P0       | Agent Team, connectors, non-chat scheduler executors, and every writable agent path are not yet proven Registry-only | Wiring audit plus tests showing live roots remain untouched             |
+| P0       | Selective Apply is not yet wired as one persisted Bundle transaction                                                 | Fault-injected precheck/apply/compensate integration test               |
+| P0       | Continue Branch in Local is absent                                                                                   | Occupied-branch rejection, multi-repo rollback, and non-Git apply test  |
+| P1       | Daily cleanup, snapshot expiry, blob-budget enforcement, and cleanup history are not scheduled                       | Clock-controlled retention integration tests                            |
+| P1       | Sensitive grants exist in Rust but lack the complete interactive/background product flow                             | Audited grant UI and fail-closed background E2E                         |
+| P1       | Generated CLI/headless/OpenAPI catalogs lag the canonical Companion contract                                         | Regenerate after unrelated undeclared app routes stop blocking the gate |
+| P1       | Branch/push/draft-PR delivery-unit aggregation is absent                                                             | One branch/PR per repo test without atomicity claims                    |
 
 ## Acceptance matrix
 
 ADR-0111 may move to Accepted only when every row is green.
 
-| Scenario                                                                  | 2026-08-23 status                                    |
-| ------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Dirty Local → Worktree → selective Apply, unrelated Local files untouched | Not run; Bundle Apply production wiring remains open |
-| Multi-repository + non-Git provisioning                                   | Passes Rust integration test                         |
-| Atomic multi-root handoff                                                 | Not implemented                                      |
-| Scheduled/background run leaves live roots untouched                      | Not proven across all executors                      |
-| Occupied-branch rejection and successful branch handoff recovery          | Not implemented                                      |
-| Archive/restore preserves WIP and releases/rematerializes directories     | Passes Rust integration tests                        |
-| Capacity exhaustion blocks with actionable guidance                       | Passes Rust integration test                         |
-| Permanent/imported environments resist automatic archive/delete           | Passes focused lifecycle and explicit-adoption tests |
-| Detached environment → branch → push → draft PR                           | Not implemented end to end                           |
-| Legacy/external worktree discovery never mutates unknown worktrees        | Passes restart reconcile and explicit-adoption tests |
-| Real Tauri smoke of picker → run → review → handoff → archive             | Not run                                              |
+| Scenario                                                                  | 2026-08-23 status                                     |
+| ------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Dirty Local → Worktree → selective Apply, unrelated Local files untouched | Not run; Bundle Apply production wiring remains open  |
+| Multi-repository + non-Git provisioning                                   | Passes Rust integration test                          |
+| Atomic multi-root handoff                                                 | Not implemented                                       |
+| Scheduled/background run leaves live roots untouched                      | Scheduled canonical chat passes; other executors open |
+| Occupied-branch rejection and successful branch handoff recovery          | Not implemented                                       |
+| Archive/restore preserves WIP and releases/rematerializes directories     | Passes Rust integration tests                         |
+| Capacity exhaustion blocks with actionable guidance                       | Passes Rust integration test                          |
+| Permanent/imported environments resist automatic archive/delete           | Passes focused lifecycle and explicit-adoption tests  |
+| Detached environment → branch → push → draft PR                           | Not implemented end to end                            |
+| Legacy/external worktree discovery never mutates unknown worktrees        | Passes restart reconcile and explicit-adoption tests  |
+| Real Tauri smoke of picker → run → review → handoff → archive             | Not run                                               |
 
 ## Verification evidence
 
@@ -97,6 +98,8 @@ Checks completed during the 2026-08-23 implementation:
   binding, workspace configuration, environment inventory, chat picker/header,
   PR resolution, and Companion transport passed. The final adoption slice ran
   20 focused frontend tests.
+- The scheduler executor suite passed 74 tests; Workspace management tabs
+  passed 9 tests; the protected Worktree inventory passed 17 tests.
 - `pnpm typecheck` passed.
 - `pnpm i18n:build`, `pnpm i18n:build:check`, and `pnpm lint:i18n` passed.
 - A Tauri `cargo check -p cognia-next` passed after bundle command wiring. The
@@ -112,14 +115,12 @@ smoke remain acceptance gates rather than inferred successes.
 
 ## Recommended closure order
 
-1. Route Scheduler, Agent Team, connectors, and every remaining writable path
-   through `AcquireWorkspaceBundle`; remove live-root fallback only after parity
-   tests exist.
+1. Route Agent Team, connectors, non-chat scheduler executors, and every
+   remaining writable path through `AcquireWorkspaceBundle`; remove live-root
+   fallback only after parity tests exist.
 2. Wire persisted Bundle Selective Apply and Continue Branch in Local.
-3. Complete multi-repository Source Control aggregation and manual panel
-   protection.
-4. Add grouped branch/push/draft-PR delivery units.
-5. Schedule retention cleanup/history and finish grant UX.
-6. Regenerate and verify the CLI/headless/OpenAPI catalogs after the unrelated
+3. Add grouped branch/push/draft-PR delivery units.
+4. Schedule retention cleanup/history and finish grant UX.
+5. Regenerate and verify the CLI/headless/OpenAPI catalogs after the unrelated
    route declarations are repaired.
-7. Run the full acceptance matrix and only then mark ADR-0111 Accepted.
+6. Run the full acceptance matrix and only then mark ADR-0111 Accepted.
