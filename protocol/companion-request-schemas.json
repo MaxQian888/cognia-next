@@ -5606,6 +5606,48 @@
     "mcp_server_stop": {
       "type": "object"
     },
+    "mcp_set_enabled": {
+      "type": "object",
+      "required": [
+        "id",
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mcp_set_tool_rules": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Full replacement list of exact tool names denied on this server. Sent whole rather than as a delta: a delta applied against a stale mirror would silently re-allow a tool denied on another device."
+        },
+        "disallowedToolPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Full replacement list of glob patterns denied on this server. At least one of the two lists must be present; the host arm rejects a call carrying neither."
+        }
+      }
+    },
     "memory_forget": {
       "type": "object",
       "required": [
@@ -7623,8 +7665,7 @@
     "session_attach": {
       "type": "object",
       "required": [
-        "sessionId",
-        "deviceId"
+        "sessionId"
       ],
       "properties": {
         "sessionId": {
@@ -7632,7 +7673,105 @@
         },
         "deviceId": {
           "type": "string",
-          "description": "This device's id, so the host can refcount watchers."
+          "deprecated": true,
+          "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach — and collect another device's approval prompts — under a borrowed id."
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "control"
+          ],
+          "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` — the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
+        },
+        "attention": {
+          "enum": [
+            "foreground",
+            "background",
+            "unknown"
+          ],
+          "description": "Whether the user is looking at this device right now. Self-asserted and deliberately not server-bound: it only suppresses a duplicate notification for a prompt already on screen, so lying costs the liar a missing or duplicate alert and nothing else. Absent reads as `unknown`, which suppresses nothing."
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_attachment_upload_abort": {
+      "type": "object",
+      "required": [
+        "uploadId"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_attachment_upload_chunk": {
+      "type": "object",
+      "required": [
+        "uploadId",
+        "offset",
+        "dataBase64"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Where this chunk starts. Must equal the bytes the host already holds; a mismatch is refused with the true write head so the client re-syncs in one round trip rather than restarting the file. A chunk entirely below the write head is a no-op, which is what makes a retry after a lost response safe."
+        },
+        "dataBase64": {
+          "type": "string",
+          "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned — the RPC body ceiling is what bounds it, not the file."
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_attachment_upload_commit": {
+      "type": "object",
+      "required": [
+        "uploadId"
+      ],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "session_attachment_upload_init": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "name",
+        "mediaType",
+        "size",
+        "hash"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Session the attachment will be sent into. Written onto the upload row and re-checked when the message that references it is submitted, so a committed upload can never be redirected into another conversation."
+        },
+        "name": {
+          "type": "string",
+          "description": "File name. Also the type gate for documents, which are routed by extension."
+        },
+        "mediaType": {
+          "type": "string",
+          "description": "Declared MIME type. A claim: the host sniffs the magic bytes at commit and refuses a declared image whose bytes are not one."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total byte length. The commit refuses anything that disagrees with what actually arrived."
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the whole file, lowercase hex. Verified at commit, and the dedupe key: re-initing the same content on the same session resumes the existing upload instead of opening a second one."
         }
       },
       "additionalProperties": false
@@ -7640,15 +7779,16 @@
     "session_detach": {
       "type": "object",
       "required": [
-        "sessionId",
-        "deviceId"
+        "sessionId"
       ],
       "properties": {
         "sessionId": {
           "type": "string"
         },
         "deviceId": {
-          "type": "string"
+          "type": "string",
+          "deprecated": true,
+          "description": "Ignored. The host releases the authenticated caller's own lease; a device may not detach another."
         }
       },
       "additionalProperties": false

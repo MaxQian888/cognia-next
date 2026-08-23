@@ -6,11 +6,20 @@ import {
   supportsHostFeatureOperation,
   type HostFeatureManifest,
 } from "./host-feature-manifest"
+import {
+  ATTACHMENT_UPLOAD_CHUNK_BYTES,
+  COMPOSER_MAX_ATTACHMENTS,
+  COMPOSER_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chat/attachments/prepare"
 
 describe("host feature manifest", () => {
   it("advertises HostState v1 through the existing manifest on execution hosts", () => {
     const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
 
+    expect(manifest.features["session.remote-control"]).toEqual({
+      version: 1,
+      operations: ["session_attach", "session_detach"],
+    })
     expect(manifest.features["session.state-sync"]).toEqual({
       version: 1,
       operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
@@ -27,12 +36,46 @@ describe("host feature manifest", () => {
   })
 
   it("does not advertise HostState from non-authoritative web or mobile clients", () => {
-    expect(
-      buildLocalHostFeatureManifest({ platform: "web" }).features["session.state-sync"]
-    ).toBeUndefined()
-    expect(
-      buildLocalHostFeatureManifest({ platform: "mobile" }).features["session.state-sync"]
-    ).toBeUndefined()
+    for (const platform of ["web", "mobile"] as const) {
+      const features = buildLocalHostFeatureManifest({ platform }).features
+      expect(features["session.state-sync"]).toBeUndefined()
+      // Same reason: a thin client hosts no sessions, so it has no attachments
+      // to lease and nothing to route a decision to.
+      expect(features["session.remote-control"]).toBeUndefined()
+    }
+  })
+
+  it("advertises attachment upload, with the ceilings the desktop composer enforces", () => {
+    for (const platform of ["tauri", "headless"] as const) {
+      const manifest = buildLocalHostFeatureManifest({ platform })
+      expect(manifest.features["session.attachment-upload"]).toEqual({
+        version: 1,
+        operations: [
+          "session_attachment_upload_init",
+          "session_attachment_upload_chunk",
+          "session_attachment_upload_commit",
+          "session_attachment_upload_abort",
+        ],
+      })
+      // Chunk sizing is the init response's answer, not the manifest's — one
+      // authority, and the only one that can refuse a chunk.
+      const limits = manifest.limits
+      expect(Math.ceil(ATTACHMENT_UPLOAD_CHUNK_BYTES / 3) * 4).toBeLessThan(limits.rpcJsonBodyBytes)
+      expect(limits.attachmentMaxBytes).toBe(COMPOSER_MAX_ATTACHMENT_BYTES)
+      expect(limits.attachmentMaxPerMessage).toBe(COMPOSER_MAX_ATTACHMENTS)
+      // Published in `<input accept>` form so a client can hand it straight to
+      // a picker rather than re-deriving the list and drifting from the Host.
+      expect(limits.attachmentAcceptTypes).toContain("image/*")
+      expect(limits.attachmentAcceptTypes).toContain(".pdf")
+    }
+  })
+
+  it("does not advertise attachment upload on a thin client, which hosts no sessions", () => {
+    for (const platform of ["web", "mobile"] as const) {
+      expect(
+        buildLocalHostFeatureManifest({ platform }).features["session.attachment-upload"]
+      ).toBeUndefined()
+    }
   })
 
   it("advertises the ADR-0131 inbox relay on every connector host, never on thin clients", () => {
@@ -43,7 +86,9 @@ describe("host feature manifest", () => {
         operations: [...INBOX_RELAY_HOST_OPERATIONS],
       })
       for (const operation of INBOX_RELAY_HOST_OPERATIONS) {
-        expect(supportsHostFeatureOperation(manifest, "connectors.inbox-relay", operation)).toBe(true)
+        expect(supportsHostFeatureOperation(manifest, "connectors.inbox-relay", operation)).toBe(
+          true
+        )
       }
       // The relay round-trips through parse: a v2 client must accept it.
       expect(parseHostFeatureManifest(manifest)?.features["connectors.inbox-relay"]).toBeDefined()

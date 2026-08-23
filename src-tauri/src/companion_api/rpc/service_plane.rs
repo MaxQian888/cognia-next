@@ -812,8 +812,12 @@ pub(super) async fn dispatch(
             let source_url: String = required_aliased(&args, "source_url", "sourceUrl")?;
             let headers: Option<std::collections::HashMap<String, String>> =
                 optional(&args, "headers")?;
+            // Absent means "use the 7-day default"; an explicit `0` means
+            // "never expires, LRU only". Both must reach the cache, so this
+            // stays an Option rather than being defaulted here.
+            let ttl_ms: Option<u64> = optional_aliased(&args, "ttl_ms", "ttlMs")?;
             let attachment = crate::connectors::attachments::fetch_attachment(
-                adapter_id, remote_ref, source_url, headers,
+                adapter_id, remote_ref, source_url, headers, ttl_ms,
             )
             .await
             .map_err(RpcError::internal)?;

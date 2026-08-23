@@ -47,11 +47,11 @@ const E2E_SPEC = path.join(REPO_ROOT, "tests", "e2e", "mobile", "outbound-queue.
 const E2E_GENERIC_DRAIN_EXCLUSIONS: ReadonlyMap<string, string> = new Map([
   [
     "host_state_submit",
-    // HostStateProtocolV1 rows are `protocol: "host-state-v1"`, not legacy
+    // HostStateProtocol rows are `protocol: "host-state"`, not legacy
     // RPC. Their drain path (`lib/queue/outbound-queue.ts:dispatchOne`) is
     // gated by `canDispatch` on a negotiated `host_state_submit` host
     // operation (`components/providers/companion-outbound-runner-provider.tsx`)
-    // and requires a receipt-shaped `HostStateSubmitResponseV1` whose single
+    // and requires a receipt-shaped `HostStateSubmitResponse` whose single
     // result echoes the row's `actionId`, else it throws
     // `host_state_malformed_response`. The mobile e2e harness never
     // negotiates HostState (the mock V2 server serves no

@@ -74,13 +74,20 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
   "external_agent_update",
-  // HostStateProtocolV1 — the same durable queue now carries attached-client
+  // HostStateProtocol — the same durable queue now carries attached-client
   // session intents from Web, Mobile, Desktop, and TUI adapters.
   "host_state_submit",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]
 
+/**
+ * `"failed"` is **never written**. `recordFailure` is the only writer of a
+ * post-dispatch status and it stores `decideNextAttempt`'s verdict, which is
+ * `"pending"` (retry scheduled) or `"deadlettered"` (out of retries). The
+ * member survives so rows persisted by a build that did write it still parse;
+ * nothing may treat it as a lane the queue can enter.
+ */
 export type MobileOutboundStatus =
   "pending" | "sending" | "sent" | "failed" | "deadlettered" | "rejected" | "conflicted"
 
@@ -115,8 +122,16 @@ export interface MobileOutboundJobRow {
    *   "Trigger workflow Daily Digest"
    */
   label?: string
+  /**
+   * When `claimNext` flipped this row to `sending`.
+   *
+   * Lets a startup reclaim tell a claim abandoned by a killed process from one
+   * a concurrently running dispatcher is still awaiting. Absent on rows claimed
+   * before this field existed, which are treated as abandoned.
+   */
+  claimedAt?: number
   /** Absent on v25-v167 rows, which are interpreted as legacy RPC jobs. */
-  protocol?: "legacy-rpc" | "host-state-v1"
+  protocol?: "legacy-rpc" | "host-state"
   channel?: string
   hostGeneration?: number
   clientId?: string

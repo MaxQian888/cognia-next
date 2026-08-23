@@ -155,7 +155,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(err.contains("connectors bind failed"), "unexpected error: {err}");
+        assert!(
+            err.contains("connectors bind failed"),
+            "unexpected error: {err}"
+        );
         let still_empty = slot.lock().await.is_none();
         assert!(still_empty, "a failed bind must not leave a handle behind");
         drop(occupied);

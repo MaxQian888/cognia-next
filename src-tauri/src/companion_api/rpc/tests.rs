@@ -730,6 +730,130 @@ fn scheduled_task_agent_control_is_payload_sensitive_and_fail_closed() {
     ));
 }
 
+/// Attaching is two operations wearing one command name, and the manifest can
+/// only declare one capability. The baseline is the read capability every
+/// paired device holds; asking for control escalates to Remote Control.
+///
+/// Before this, `session_attach` declared `workspace.write` outright, so a
+/// read-only device could not register as a watcher at all — which is why the
+/// plan's observe mode had no way to exist.
+#[test]
+fn attaching_escalates_to_remote_control_only_when_control_is_asked_for() {
+    let descriptor =
+        crate::companion_api::command_manifest::descriptor("session_attach").expect("registered");
+    assert_eq!(
+        descriptor.capability, "host.observe",
+        "the baseline must be readable by any paired device, or observe attach cannot exist"
+    );
+    // Anything that is not a literal `observe` is a control request, because
+    // that is exactly how `readAttachMode` in desktop-write-source.ts reads it.
+    // A gate that escalated only on a literal `"control"` authorized a
+    // mode-less body as a read and then let the handler treat it as control.
+    for args in [
+        json!({ "mode": "control" }),
+        json!({}),
+        json!({ "mode": "CONTROL" }),
+        json!({ "mode": true }),
+    ] {
+        assert_eq!(
+            payload_required_capability("session_attach", &args),
+            Some("workspace.write"),
+            "the gate must read the absent/unrecognized mode the way the handler does: {args}"
+        );
+    }
+    assert_eq!(
+        payload_required_capability("session_attach", &json!({ "mode": "observe" })),
+        None,
+        "observing stays at the baseline every paired device holds"
+    );
+    // Detaching releases the caller's own lease and can never be riskier than
+    // holding it, so it stays at the baseline whatever the payload says.
+    assert_eq!(
+        payload_required_capability("session_detach", &json!({ "mode": "control" })),
+        None
+    );
+}
+
+/// Attaching happens on every viewer open and again on every renewal. An
+/// interactive approval — an owner-only, explicitly-confirmed, 10-minute admin
+/// lease — cannot be part of that loop; declaring one meant every attach
+/// answered `interactive_approval_required` before it reached the handler.
+#[test]
+fn attaching_needs_no_step_up_lease() {
+    for name in ["session_attach", "session_detach"] {
+        let descriptor =
+            crate::companion_api::command_manifest::descriptor(name).expect("registered");
+        assert_eq!(
+            descriptor.approval,
+            crate::companion_api::command_manifest::CommandApproval::None,
+            "{name} runs on every viewer open and every renewal; a step-up lease cannot gate it"
+        );
+    }
+}
+
+/// Attachment upload is the byte path into a session, so every arm carries the
+/// Remote Control capability rather than the observe baseline `session_attach`
+/// starts from — staging a file the Host will hand to a model is the same
+/// elevation as sending the message that names it.
+///
+/// No step-up lease, for the same reason attach has none: a 10 MB file is
+/// hundreds of chunk calls, and an owner-confirmed admin lease in that loop
+/// would answer `interactive_approval_required` on the first one.
+#[test]
+fn attachment_upload_carries_remote_control_without_a_step_up_lease() {
+    for name in [
+        "session_attachment_upload_init",
+        "session_attachment_upload_chunk",
+        "session_attachment_upload_commit",
+        "session_attachment_upload_abort",
+    ] {
+        let descriptor =
+            crate::companion_api::command_manifest::descriptor(name).expect("registered");
+        assert_eq!(
+            descriptor.capability, "workspace.write",
+            "{name} moves bytes the Host will hand to a model"
+        );
+        assert_eq!(
+            descriptor.approval,
+            crate::companion_api::command_manifest::CommandApproval::None,
+            "{name} runs hundreds of times per file; a step-up lease cannot gate it"
+        );
+    }
+}
+
+/// Every arm binds to the authenticated caller. Without the injection a device
+/// could append to — or resolve — an upload it does not own by naming its id.
+#[test]
+fn attachment_upload_arms_receive_the_server_bound_caller() {
+    for name in [
+        "session_attachment_upload_init",
+        "session_attachment_upload_chunk",
+        "session_attachment_upload_commit",
+        "session_attachment_upload_abort",
+    ] {
+        let args = inject_caller_device_id(name, json!({ "callerDeviceId": "spoofed" }), "real");
+        assert_eq!(
+            args.get("callerDeviceId").and_then(Value::as_str),
+            Some("real"),
+            "{name} must not honour a self-asserted caller"
+        );
+    }
+}
+
+/// Every arm reserves an idempotency slot, so a chunk replayed after a lost
+/// response returns the cached answer instead of being applied twice.
+#[test]
+fn every_attachment_upload_arm_is_a_write() {
+    for name in [
+        "session_attachment_upload_init",
+        "session_attachment_upload_chunk",
+        "session_attachment_upload_commit",
+        "session_attachment_upload_abort",
+    ] {
+        assert!(!READ_ONLY_COMMANDS_SET.contains(name), "{name} writes");
+    }
+}
+
 #[test]
 fn service_scope_is_authorized_for_internal_control_plane_commands() {
     for command in [
@@ -3236,7 +3360,7 @@ fn host_feature_manifest_rejects_client_reported_grants_without_an_authority_sna
 }
 
 #[test]
-fn caller_device_grants_only_touch_the_manifest_command() {
+fn caller_device_grants_only_touch_the_commands_that_authorize_on_them() {
     let state = test_state();
     let out = inject_caller_device_grants(
         "character_upsert",
@@ -3246,6 +3370,28 @@ fn caller_device_grants_only_touch_the_manifest_command() {
         None,
     );
     assert_eq!(out["callerDeviceGrants"], json!(["spoofed"]));
+}
+
+/// `attachSession` reads `callerDeviceGrants` as the authority on whether a
+/// control attachment may be granted. While only the manifest was injected the
+/// attach arm read an absent field as "no grants" and downgraded every
+/// controller to an observer, so no device ever held a control lease.
+#[test]
+fn session_attach_receives_a_server_bound_grant_snapshot() {
+    let state = test_state();
+    let out = inject_caller_device_grants(
+        "session_attach",
+        json!({ "sessionId": "s-1", "callerDeviceGrants": ["spoofed"] }),
+        &state,
+        "dev-observer",
+        None,
+    );
+
+    // Overwritten, not merged — and empty rather than absent, which is what
+    // fails every per-action check closed instead of open.
+    assert_eq!(out["callerDeviceGrants"], json!([]));
+    // The manifest's opaque host id is not the attach arm's business.
+    assert!(out.get("authoritativeHostId").is_none());
 }
 
 #[test]

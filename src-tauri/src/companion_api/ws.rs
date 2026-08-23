@@ -175,6 +175,60 @@ fn upgrade_events_ws(
 // Socket handler
 // ---------------------------------------------------------------------------
 
+/// Everything one live device socket owns for as long as it is connected: the
+/// `/metrics` gauge, the host admin lease, and this connection's event-plane
+/// lease.
+///
+/// The lease is the reason this is a type rather than two inline calls.
+/// Liveness used to be a refcount inside `PushTokenRegistry` that nothing
+/// outside its own unit tests ever incremented, so `has_websocket` was
+/// permanently false and every push fanned out to *every* paired device,
+/// including the ones already watching the event stream. Releasing on `Drop`
+/// covers every exit path out of `handle_socket`, of which there are seven.
+///
+/// The lease is per-connection, not per-device: a phone holding both a LAN
+/// WebSocket and a WebRTC channel keeps streaming when either one closes, and
+/// an attachment bound to the closed one loses control while the other's
+/// attachment keeps it (see `companion_api::event_leases`).
+struct WsPresenceGuard {
+    device_id: String,
+    lease: super::event_leases::EventStreamLeaseGuard,
+}
+
+impl WsPresenceGuard {
+    fn open(_state: &SharedState, device_id: &str) -> Self {
+        crate::companion_api::metrics::ws_client_connected();
+        Self {
+            device_id: device_id.to_owned(),
+            lease: super::event_leases::EventStreamLeaseGuard::open(
+                device_id,
+                super::event_leases::EventStreamTransport::Ws,
+            ),
+        }
+    }
+
+    /// The Host is about to send history. Until the replay boundary the device
+    /// has an incomplete view of the run, so it must not be handed control of
+    /// one — the lease reports `replaying`, which `session_attach` refuses.
+    fn note_replaying(&self) {
+        self.lease
+            .advance(super::event_leases::EventStreamState::Replaying);
+    }
+
+    /// The `stream_ready` marker went out: backlog drained, live frames next.
+    fn note_ready(&self) {
+        self.lease
+            .advance(super::event_leases::EventStreamState::Ready);
+    }
+}
+
+impl Drop for WsPresenceGuard {
+    fn drop(&mut self) {
+        crate::companion_api::metrics::ws_client_disconnected();
+        super::admin_lease::revoke_device(&self.device_id);
+    }
+}
+
 /// Drive the WebSocket connection for one client.
 async fn handle_socket(
     mut socket: WebSocket,
@@ -214,20 +268,8 @@ async fn handle_socket(
         }
     };
 
-    // Gauge for /metrics (D9): decremented on every exit path via Drop.
-    struct WsMetricGuard {
-        device_id: String,
-    }
-    impl Drop for WsMetricGuard {
-        fn drop(&mut self) {
-            crate::companion_api::metrics::ws_client_disconnected();
-            super::admin_lease::revoke_device(&self.device_id);
-        }
-    }
-    crate::companion_api::metrics::ws_client_connected();
-    let _ws_metric_guard = WsMetricGuard {
-        device_id: device_id.clone(),
-    };
+    let ws_presence_guard = WsPresenceGuard::open(&state, &device_id);
+    ws_presence_guard.note_replaying();
 
     // 2. Send replay frames, grouped into same-channel batches.
     let visible_replay: Vec<EventFrame> = replay
@@ -254,6 +296,7 @@ async fn handle_socket(
     {
         return;
     }
+    ws_presence_guard.note_ready();
 
     // 3. Enter the live-streaming loop.
     let heartbeat_interval = Duration::from_secs(HEARTBEAT_SECS);
@@ -571,6 +614,52 @@ mod tests {
         let frame = receiver.recv().await.expect("frame must arrive");
         assert_eq!(frame.event_type, "claude://message");
         let _ = state; // keep state alive
+    }
+
+    /// The wiring that makes `broadcast_to_offline`'s suppression real. The
+    /// liveness calls used to be reachable only from `push.rs`'s own tests, so
+    /// a backgrounded-device check that looked correct in isolation never fired
+    /// in production.
+    ///
+    /// Note *when* the device counts as reachable in-band: not on upgrade, but
+    /// after the replay boundary. A socket still draining backlog has not shown
+    /// the user the frame a push would be about.
+    #[test]
+    fn a_socket_marks_the_device_online_only_once_replay_finishes() {
+        let (state, _bus) = test_state_with_bus();
+        let device = "device-ws-ready";
+        assert!(!super::super::event_leases::has_ready_stream(device));
+
+        let guard = WsPresenceGuard::open(&state, device);
+        guard.note_replaying();
+        assert!(
+            !super::super::event_leases::has_ready_stream(device),
+            "a replaying socket is behind the host; pushing to it is still correct"
+        );
+
+        guard.note_ready();
+        assert!(super::super::event_leases::has_ready_stream(device));
+
+        drop(guard);
+        assert!(!super::super::event_leases::has_ready_stream(device));
+    }
+
+    /// A phone on both LAN and WebRTC holds two streams. Closing one must not
+    /// declare it offline and start pushing to it while the other still streams.
+    #[test]
+    fn a_second_socket_keeps_the_device_online_until_the_last_one_closes() {
+        let (state, _bus) = test_state_with_bus();
+        let device = "device-ws-two";
+        let first = WsPresenceGuard::open(&state, device);
+        let second = WsPresenceGuard::open(&state, device);
+        first.note_ready();
+        second.note_ready();
+
+        drop(first);
+        assert!(super::super::event_leases::has_ready_stream(device));
+
+        drop(second);
+        assert!(!super::super::event_leases::has_ready_stream(device));
     }
 
     #[test]

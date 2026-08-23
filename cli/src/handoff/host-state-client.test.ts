@@ -1,4 +1,4 @@
-import type { HostStateAppliedActionV1 } from "@cognia/agent-config-types/host-state"
+import type { HostStateAppliedAction } from "@cognia/agent-config-types/host-state"
 
 import {
   flushAttachedHostStateOutbox,
@@ -12,20 +12,19 @@ const endpoint = { baseUrl: "http://127.0.0.1:1234", devToken: "secret" }
 
 function writableStatus(hostId = "host-a", hostGeneration = 3) {
   return {
-    protocolVersion: 1 as const,
     hostId,
     hostGeneration,
     hostSeq: 7,
     leaseExpiresAt: 100,
     pendingDispatch: 0,
     pendingBroadcast: 0,
+    recovery: "ready" as const,
   }
 }
 
 describe("local HostState attach client", () => {
   it("reuses loopback dev-token auth for snapshots and events", async () => {
-    const event: HostStateAppliedActionV1 = {
-      protocolVersion: 1,
+    const event: HostStateAppliedAction = {
       channel: "cognia://target/target-a/sessions/session-a",
       hostId: "host-a",
       hostGeneration: 2,
@@ -39,13 +38,13 @@ describe("local HostState attach client", () => {
         json: async () => ({
           ok: true,
           result: {
-            protocolVersion: 1,
             hostId: "host-a",
             hostGeneration: 2,
             hostSeq: 5,
             leaseExpiresAt: 100,
             pendingDispatch: 0,
             pendingBroadcast: 0,
+            recovery: "ready",
           },
         }),
       })
@@ -56,7 +55,6 @@ describe("local HostState attach client", () => {
     const client = createLocalHostStateClient(endpoint, { fetch: fetcher as typeof fetch })
 
     await client.status({
-      protocolVersion: 1,
       accountId: "local-default",
       runtimeTargetId: "target-a",
     })
@@ -71,7 +69,7 @@ describe("local HostState attach client", () => {
       fetch: jest.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }) as never,
     })
     await expect(
-      client.status({ protocolVersion: 1, accountId: "local-default", runtimeTargetId: "target-a" })
+      client.status({ accountId: "local-default", runtimeTargetId: "target-a" })
     ).rejects.toThrow("host_state_bridge_malformed")
   })
 
@@ -106,8 +104,7 @@ describe("local HostState attach client", () => {
   })
 
   it("re-snapshots instead of skipping a truncated HostState replay window", async () => {
-    const event: HostStateAppliedActionV1 = {
-      protocolVersion: 1,
+    const event: HostStateAppliedAction = {
       channel: "cognia://target/target-a/sessions/session-a",
       hostId: "host-a",
       hostGeneration: 2,
@@ -144,7 +141,6 @@ describe("local HostState attach client", () => {
       writeFile: (file: string, value: string) => files.set(file, value),
     }
     const record: AttachedHostStateRecord = {
-      protocolVersion: 1,
       accountId: "account-a",
       runtimeTargetId: "target-a",
       hostId: "host-a",
@@ -162,7 +158,6 @@ describe("local HostState attach client", () => {
       expect.objectContaining({ action, status: "pending" }),
     ])
     const submit = jest.fn().mockResolvedValue({
-      protocolVersion: 1,
       results: [
         {
           actionId: action.actionId,
@@ -196,7 +191,6 @@ describe("local HostState attach client", () => {
       writeFile: (file: string, value: string) => files.set(file, value),
     }
     const record: AttachedHostStateRecord = {
-      protocolVersion: 1,
       accountId: "account-a",
       runtimeTargetId: "target-a",
       hostId: "host-a",
@@ -240,7 +234,6 @@ describe("local HostState attach client", () => {
       writeFile: (file: string, value: string) => files.set(file, value),
     }
     const record: AttachedHostStateRecord = {
-      protocolVersion: 1,
       accountId: "account-a",
       runtimeTargetId: "target-a",
       hostId: "host-a",

@@ -4,6 +4,7 @@
   "notifBody": "{count} 条消息排队中。回到网络后会自动重发。",
   "notifChannel": "cognia",
   "notifTitle": "cognia 离线发送中",
+  "queueNeedsAttention": "{count} 条操作需要你处理",
   "queuePending": "{count} 条待发送",
   "staleWarning": "{count} 条消息超过 30 分钟未送达。"
 }

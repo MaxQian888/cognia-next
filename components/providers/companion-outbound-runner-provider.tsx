@@ -120,7 +120,7 @@ export function CompanionOutboundRunnerProvider({
       enforceMobile: false,
       scope,
       canDispatch: (row) =>
-        row.protocol !== "host-state-v1" ||
+        row.protocol !== "host-state" ||
         getRuntimeSnapshot().host?.operations.includes("host_state_submit") === true,
     })
     const kick = () => {

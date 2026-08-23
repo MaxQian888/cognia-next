@@ -31,7 +31,9 @@
       "@cognia/memory": ["packages/memory/src/index.ts"],
       "@cognia/memory/*": ["packages/memory/src/*"],
       "@cognia/ocr": ["packages/ocr/src/index.ts"],
-      "@cognia/ocr/*": ["packages/ocr/src/*"]
+      "@cognia/ocr/*": ["packages/ocr/src/*"],
+      "@cognia/security-findings": ["packages/security-findings/src/index.ts"],
+      "@cognia/security-findings/*": ["packages/security-findings/src/*"]
     }
   }
 }

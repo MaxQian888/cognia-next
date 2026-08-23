@@ -91,6 +91,11 @@ export function runtimeHostSnapshotFromManifest(
     compatible: true,
     operations: [...new Set(gatedOperations)],
     grants: [...new Set(grants)],
+    // Carried through rather than dropped: the ceilings are the only part of
+    // the manifest a client needs to shape its UI to, and discarding them left
+    // the companion shell with no way to learn them at all — the desktop's
+    // remote-host store, which does keep the manifest, is empty on a phone.
+    ...(manifest.limits ? { limits: manifest.limits } : {}),
   }
 }
 
@@ -109,6 +114,7 @@ function freezeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
         ...snapshot.host,
         operations: Object.freeze([...snapshot.host.operations]),
         grants: Object.freeze([...snapshot.host.grants]),
+        ...(snapshot.host.limits ? { limits: Object.freeze({ ...snapshot.host.limits }) } : {}),
       })
     : undefined
   return Object.freeze({ ...snapshot, host })
@@ -126,7 +132,11 @@ function runtimeSnapshotsEqual(left: RuntimeSnapshot, right: RuntimeSnapshot): b
   }
   return (
     arraysEqual(left.host?.operations, right.host?.operations) &&
-    arraysEqual(left.host?.grants, right.host?.grants)
+    arraysEqual(left.host?.grants, right.host?.grants) &&
+    // Cheap and exact: the limits object is a flat record of scalars plus one
+    // string array, and a host that republishes different ceilings has to
+    // reach every subscriber.
+    JSON.stringify(left.host?.limits ?? null) === JSON.stringify(right.host?.limits ?? null)
   )
 }
 

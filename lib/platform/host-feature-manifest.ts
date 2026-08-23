@@ -1,4 +1,9 @@
+import { getDocumentAcceptExtensions } from "@cognia/document/support-matrix"
 import { APP_VERSION } from "@/lib/app-version"
+import {
+  COMPOSER_MAX_ATTACHMENTS,
+  COMPOSER_MAX_ATTACHMENT_BYTES,
+} from "@/lib/chat/attachments/prepare"
 import { getCommandManifest } from "@/lib/tauri/command-descriptors"
 import type { Platform } from "./detect"
 
@@ -25,6 +30,8 @@ export const HOST_FEATURE_IDS = [
   "source-control.git",
   "twin.runtime",
   "session.state-sync",
+  "session.remote-control",
+  "session.attachment-upload",
   "connectors.inbox-relay",
 ] as const
 
@@ -49,6 +56,20 @@ export interface HostFeatureLimits {
   skillMaxResourceBytes: number
   skillUploadChunkBytes: number
   mcpRequestBodyBytes: number
+  /** Ceiling for one attachment. */
+  attachmentMaxBytes?: number
+  /** How many attachments one message may carry. */
+  attachmentMaxPerMessage?: number
+  /**
+   * What the Host will accept, in `<input accept>` form (`image/*` plus the
+   * document extensions `lib/document` can extract).
+   *
+   * Published rather than assumed so a mobile plus-menu can hide the entries
+   * this Host cannot take — a camera button that stages a HEIC the Host refuses
+   * is worse than no camera button, because the refusal arrives after the user
+   * has already chosen the photo.
+   */
+  attachmentAcceptTypes?: string[]
   maxConcurrentProxyCalls: number
   maxHostStateSnapshotBytes?: number
   maxHostStateActionBatch?: number
@@ -109,6 +130,9 @@ const DEFAULT_LIMITS: HostFeatureLimits = Object.freeze({
   maxHostStateActionBatch: 50,
   maxPendingHostStateActions: 1000,
   hostStateReplayRetentionMs: 24 * 60 * 60 * 1000,
+  attachmentMaxBytes: COMPOSER_MAX_ATTACHMENT_BYTES,
+  attachmentMaxPerMessage: COMPOSER_MAX_ATTACHMENTS,
+  attachmentAcceptTypes: ["image/*", ...getDocumentAcceptExtensions("chat")],
 })
 
 /**
@@ -196,6 +220,31 @@ export function buildLocalHostFeatureManifest({
     features["session.state-sync"] = {
       version: 1,
       operations: ["host_state_snapshot", "host_state_submit", "host_state_status"],
+    }
+    // Lease-backed attach. Its presence is what tells a client that
+    // `session_attach` understands `mode`, binds the attachment to a real
+    // event-plane lease, and answers with the mode it granted plus the
+    // `supportedActions` this caller may submit. Without it the client is
+    // talking to a Host whose attach is an unbounded registration: it must
+    // assume control (the old implicit behaviour) and cannot show why it was
+    // refused, because nothing tells it.
+    features["session.remote-control"] = {
+      version: 1,
+      operations: ["session_attach", "session_detach"],
+    }
+    // Chunked attachment upload. Its presence is what tells a client it may
+    // stage a file at all: without it `message.enqueue` reaches a Host that
+    // carries the refs into a prompt it cannot resolve, so the model is told
+    // about a screenshot it never sees. The client shows the paperclip only
+    // when this feature is advertised, and sizes its chunks from `limits`.
+    features["session.attachment-upload"] = {
+      version: 1,
+      operations: [
+        "session_attachment_upload_init",
+        "session_attachment_upload_chunk",
+        "session_attachment_upload_commit",
+        "session_attachment_upload_abort",
+      ],
     }
     features["twin.runtime"] = {
       version: 1,

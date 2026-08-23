@@ -208,7 +208,7 @@ import {
   type AttachedHostConnection,
 } from "../../handoff/host-state-client"
 import { canonicalEnvelopeToActions } from "../state/event-mapper"
-import type { AllowedHostStateIntentV1 } from "@cognia/agent-config-types/host-state"
+import type { AllowedHostStateIntent } from "@cognia/agent-config-types/host-state"
 
 // Register the feature-command clusters (Cognia runtime, MCP, plugins, skills)
 // on top of the core catalog. Idempotent — safe at module load.
@@ -759,7 +759,7 @@ export function App({
       )
   }, [attachHost, home])
   const submitAttachedIntent = useCallback(
-    async (intent: AllowedHostStateIntentV1) => {
+    async (intent: AllowedHostStateIntent) => {
       const connection = attachedHostConnectionRef.current
       if (!connection) return null
       const action = queueAttachedHostStateAction(connection.record, intent, { home })
@@ -1868,6 +1868,10 @@ export function App({
           type: "BACKEND_INSTALL_START",
           name: option.name,
           display: option.method.display,
+          // Carried so the page can say whether Cognia will own what this
+          // installs. Every current method is a handoff to the user's own
+          // package manager.
+          ownership: option.method.ownership,
         })
         const run = runInstallFn ?? defaultRunInstall
         const controller = new AbortController()

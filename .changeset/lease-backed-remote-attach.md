@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Remote sessions: attaching a phone to a desktop session is now a lease bound to a real event stream. A device is handed control only when it holds the Remote Control grant **and** its event stream has finished replaying, so a half-connected phone can no longer be given a decision it never received the frame for — it attaches as an observer instead, and the badge now says whether that is a missing grant or a reconnect in progress. While one device is driving a session, another can no longer steer, interrupt, or answer a prompt behind its back; drafts, messages and follow-ups still queue from anywhere. Attaching also reports which actions this device may actually take, so a read-only view no longer offers a composer whose every button would be refused. WebRTC peers finally count as present, so a phone on WebRTC stops getting a push notification for a prompt already on its screen, and a suspended or revoked device stops counting the moment its authority ends.

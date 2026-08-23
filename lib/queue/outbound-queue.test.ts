@@ -61,7 +61,6 @@ describe("createOutboundRunner", () => {
 
   it("retains HostState conflict receipts instead of marking them sent", async () => {
     const call = jest.fn().mockResolvedValue({
-      protocolVersion: 1,
       results: [
         {
           actionId: "host-action-1",
@@ -78,7 +77,6 @@ describe("createOutboundRunner", () => {
     })
     const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
     await enqueueHostStateAction({
-      protocolVersion: 1,
       channel: "cognia://target/desktop-studio/sessions/s1",
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
@@ -112,10 +110,9 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
       scope,
-      canDispatch: (row) => row.protocol !== "host-state-v1",
+      canDispatch: (row) => row.protocol !== "host-state",
     })
     await enqueueHostStateAction({
-      protocolVersion: 1,
       channel: "cognia://target/desktop-studio/sessions/s1",
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
@@ -157,7 +154,6 @@ describe("createOutboundRunner", () => {
     const call = jest.fn().mockRejectedValue(new Error("stale_host_generation"))
     const runner = createOutboundRunner({ dispatcher: { call }, enforceMobile: false, scope })
     await enqueueHostStateAction({
-      protocolVersion: 1,
       channel: "cognia://target/desktop-studio/sessions/s1",
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
@@ -228,8 +224,8 @@ describe("createOutboundRunner", () => {
     await runner.stop()
   })
 
-  it("keeps pending, sending, retry, and dead-letter rows isolated by Host and resumes A only on A", async () => {
-    const statuses = ["pending", "sending", "failed", "deadlettered"] as const
+  it("keeps pending, sending, and dead-letter rows isolated by Host and resumes A only on A", async () => {
+    const statuses = ["pending", "sending", "deadlettered"] as const
     for (const targetId of ["host-a", "host-b"]) {
       for (const status of statuses) {
         await getDb().mobileOutboundQueue.put({
@@ -239,9 +235,9 @@ describe("createOutboundRunner", () => {
           command: "connector_send",
           payload: { targetId, status },
           status,
-          attempts: status === "failed" ? 1 : 0,
           createdAt: status === "pending" ? 1 : 2,
           nextAttemptAt: status === "pending" ? 0 : 10_000,
+          attempts: 0,
           idempotencyKey: `${targetId}-${status}-key`,
         })
       }
@@ -267,9 +263,15 @@ describe("createOutboundRunner", () => {
     await runnerA.kick()
     expect(callA).toHaveBeenCalledTimes(1)
     expect((await getDb().mobileOutboundQueue.get("host-a-pending"))?.status).toBe("sent")
-    expect((await getDb().mobileOutboundQueue.get("host-a-sending"))?.status).toBe("sending")
-    expect((await getDb().mobileOutboundQueue.get("host-a-failed"))?.status).toBe("failed")
+    // Reclaimed, not dispatched: the row carries no `claimedAt`, so no live
+    // dispatcher owns it and `releaseStaleClaims` frees the channel head it was
+    // holding. Its backoff (`nextAttemptAt: 10_000`) keeps it out of this drain.
+    expect((await getDb().mobileOutboundQueue.get("host-a-sending"))?.status).toBe("pending")
     expect((await getDb().mobileOutboundQueue.get("host-a-deadlettered"))?.status).toBe(
+      "deadlettered"
+    )
+    // Host B's row is untouched by Host A's reclaim — the sweep is scoped.
+    expect((await getDb().mobileOutboundQueue.get("host-b-deadlettered"))?.status).toBe(
       "deadlettered"
     )
     await Promise.all([runnerA.stop(), runnerB.stop()])

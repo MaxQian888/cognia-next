@@ -34998,12 +34998,12 @@ paths:
               required:
                 - id
                 - enabled
+              additionalProperties: false
               properties:
                 id:
                   type: string
                 enabled:
                   type: boolean
-              additionalProperties: false
       responses:
         "200":
           description: Command completed.
@@ -35102,6 +35102,7 @@ paths:
               type: object
               required:
                 - id
+              additionalProperties: false
               properties:
                 id:
                   type: string
@@ -35109,11 +35110,14 @@ paths:
                   type: array
                   items:
                     type: string
+                  description: "Full replacement list of exact tool names denied on this server. Sent whole rather than as a delta: a
+                    delta applied against a stale mirror would silently re-allow a tool denied on another device."
                 disallowedToolPatterns:
                   type: array
                   items:
                     type: string
-              additionalProperties: false
+                  description: Full replacement list of glob patterns denied on this server. At least one of the two lists must be
+                    present; the host arm rejects a call carrying neither.
       responses:
         "200":
           description: Command completed.
@@ -52541,7 +52545,7 @@ paths:
       operationId: internalRpcSessionAttach
       tags:
         - headless-rpc
-      summary: session_attach (workspace.write)
+      summary: session_attach (host.observe)
       description: "Loopback service-token command. Target: execution; risk: high."
       x-cognia-request-schema-source: contract
       parameters:
@@ -52554,13 +52558,31 @@ paths:
               type: object
               required:
                 - sessionId
-                - deviceId
               properties:
                 sessionId:
                   type: string
                 deviceId:
                   type: string
-                  description: This device's id, so the host can refcount watchers.
+                  deprecated: true
+                  description: "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired
+                    device attach — and collect another device's approval prompts — under a borrowed id."
+                mode:
+                  enum:
+                    - observe
+                    - control
+                  description: What the attachment is for. `observe` needs only the read capability every paired device holds; `control`
+                    additionally requires Remote Control AND a caught-up event stream on this device, and is what makes
+                    the host route this session's decisions here. Absent means `control` — the mode every existing
+                    client was implicitly asking for. The response reports the mode actually granted, which may be
+                    narrower.
+                attention:
+                  enum:
+                    - foreground
+                    - background
+                    - unknown
+                  description: "Whether the user is looking at this device right now. Self-asserted and deliberately not server-bound: it
+                    only suppresses a duplicate notification for a prompt already on screen, so lying costs the liar a
+                    missing or duplicate alert and nothing else. Absent reads as `unknown`, which suppresses nothing."
               additionalProperties: false
       responses:
         "200":
@@ -52652,12 +52674,359 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
-  /internal/_rpc/session_detach:
+  /internal/_rpc/session_attachment_upload_abort:
     post:
-      operationId: internalRpcSessionDetach
+      operationId: internalRpcSessionAttachmentUploadAbort
       tags:
         - headless-rpc
-      summary: session_detach (workspace.write)
+      summary: session_attachment_upload_abort (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+              properties:
+                uploadId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: "null"
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/session_attachment_upload_chunk:
+    post:
+      operationId: internalRpcSessionAttachmentUploadChunk
+      tags:
+        - headless-rpc
+      summary: session_attachment_upload_chunk (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+                - offset
+                - dataBase64
+              properties:
+                uploadId:
+                  type: string
+                offset:
+                  type: integer
+                  minimum: 0
+                  description: Where this chunk starts. Must equal the bytes the host already holds; a mismatch is refused with the true
+                    write head so the client re-syncs in one round trip rather than restarting the file. A chunk
+                    entirely below the write head is a no-op, which is what makes a retry after a lost response safe.
+                dataBase64:
+                  type: string
+                  description: Chunk payload, base64. Size it from the `chunkSize` the init response returned — the RPC body ceiling is
+                    what bounds it, not the file.
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: lib/companion/desktop-write-source.ts attachmentUploadChunk
+                required:
+                  - receivedBytes
+                  - complete
+                properties:
+                  receivedBytes:
+                    type: integer
+                  complete:
+                    type: boolean
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/session_attachment_upload_commit:
+    post:
+      operationId: internalRpcSessionAttachmentUploadCommit
+      tags:
+        - headless-rpc
+      summary: session_attachment_upload_commit (workspace.write)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - uploadId
+              properties:
+                uploadId:
+                  type: string
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: lib/companion/desktop-write-source.ts attachmentUploadCommit
+                required:
+                  - ref
+                  - name
+                  - mediaType
+                  - size
+                  - hash
+                properties:
+                  ref:
+                    type: string
+                  name:
+                    type: string
+                  mediaType:
+                    type: string
+                  size:
+                    type: integer
+                  hash:
+                    type: string
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/session_attachment_upload_init:
+    post:
+      operationId: internalRpcSessionAttachmentUploadInit
+      tags:
+        - headless-rpc
+      summary: session_attachment_upload_init (workspace.write)
       description: "Loopback service-token command. Target: execution; risk: high."
       x-cognia-request-schema-source: contract
       parameters:
@@ -52670,12 +53039,158 @@ paths:
               type: object
               required:
                 - sessionId
-                - deviceId
+                - name
+                - mediaType
+                - size
+                - hash
+              properties:
+                sessionId:
+                  type: string
+                  description: Session the attachment will be sent into. Written onto the upload row and re-checked when the message that
+                    references it is submitted, so a committed upload can never be redirected into another conversation.
+                name:
+                  type: string
+                  description: File name. Also the type gate for documents, which are routed by extension.
+                mediaType:
+                  type: string
+                  description: "Declared MIME type. A claim: the host sniffs the magic bytes at commit and refuses a declared image whose
+                    bytes are not one."
+                size:
+                  type: integer
+                  minimum: 1
+                  description: Total byte length. The commit refuses anything that disagrees with what actually arrived.
+                hash:
+                  type: string
+                  pattern: ^[0-9a-f]{64}$
+                  description: "SHA-256 of the whole file, lowercase hex. Verified at commit, and the dedupe key: re-initing the same
+                    content on the same session resumes the existing upload instead of opening a second one."
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: lib/companion/desktop-write-source.ts attachmentUploadInit
+                required:
+                  - uploadId
+                  - chunkSize
+                  - resumeOffset
+                  - complete
+                  - ref
+                properties:
+                  uploadId:
+                    type: string
+                  chunkSize:
+                    type: integer
+                  resumeOffset:
+                    type: integer
+                  complete:
+                    type: boolean
+                  ref:
+                    type:
+                      - string
+                      - "null"
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/session_detach:
+    post:
+      operationId: internalRpcSessionDetach
+      tags:
+        - headless-rpc
+      summary: session_detach (host.observe)
+      description: "Loopback service-token command. Target: execution; risk: low."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
               properties:
                 sessionId:
                   type: string
                 deviceId:
                   type: string
+                  deprecated: true
+                  description: Ignored. The host releases the authenticated caller's own lease; a device may not detach another.
               additionalProperties: false
       responses:
         "200":
@@ -59006,6 +59521,489 @@ paths:
               schema:
                 $ref: "#/components/schemas/RpcError"
       x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_host_configure:
+    post:
+      operationId: internalRpcTerminalHostConfigure
+      tags:
+        - headless-rpc
+      summary: terminal_host_configure (host.admin)
+      description: "Loopback service-token command. Target: host-admin; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - settings
+              properties:
+                settings:
+                  type: object
+                  required:
+                    - allowRemoteAccess
+                    - startAtLogin
+                    - diagnostics
+                    - maxSessions
+                    - maxRemoteSessionsPerDevice
+                    - replayBytesPerSession
+                    - totalReplayBytes
+                  properties:
+                    allowRemoteAccess:
+                      type: boolean
+                    startAtLogin:
+                      type: boolean
+                    diagnostics:
+                      type: boolean
+                    maxSessions:
+                      type: integer
+                      minimum: 1
+                    maxRemoteSessionsPerDevice:
+                      type: integer
+                      minimum: 1
+                    replayBytesPerSession:
+                      type: integer
+                      minimum: 1
+                    totalReplayBytes:
+                      type: integer
+                      minimum: 1
+                  additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is
+                  skipped for the remote arms — provisioning a device descriptor has no remote path.
+                required:
+                  - running
+                  - endpoint
+                  - settings
+                properties:
+                  running:
+                    type: boolean
+                  endpoint:
+                    type: string
+                  settings:
+                    type: object
+                    x-cognia-wire-source: crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal
+                      host's own settings file, not part of AppSettings.
+                    required:
+                      - allowRemoteAccess
+                      - startAtLogin
+                      - diagnostics
+                      - maxSessions
+                      - maxRemoteSessionsPerDevice
+                      - replayBytesPerSession
+                      - totalReplayBytes
+                    properties:
+                      allowRemoteAccess:
+                        type: boolean
+                      startAtLogin:
+                        type: boolean
+                      diagnostics:
+                        type: boolean
+                      maxSessions:
+                        type: integer
+                        minimum: 1
+                      maxRemoteSessionsPerDevice:
+                        type: integer
+                        minimum: 1
+                      replayBytesPerSession:
+                        type: integer
+                        minimum: 1
+                      totalReplayBytes:
+                        type: integer
+                        minimum: 1
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_host_status:
+    post:
+      operationId: internalRpcTerminalHostStatus
+      tags:
+        - headless-rpc
+      summary: terminal_host_status (terminal.open)
+      description: "Loopback service-token command. Target: host-admin; risk: low."
+      x-cognia-request-schema-source: contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is
+                  skipped for the remote arms — provisioning a device descriptor has no remote path.
+                required:
+                  - running
+                  - endpoint
+                  - settings
+                properties:
+                  running:
+                    type: boolean
+                  endpoint:
+                    type: string
+                  settings:
+                    type: object
+                    x-cognia-wire-source: crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal
+                      host's own settings file, not part of AppSettings.
+                    required:
+                      - allowRemoteAccess
+                      - startAtLogin
+                      - diagnostics
+                      - maxSessions
+                      - maxRemoteSessionsPerDevice
+                      - replayBytesPerSession
+                      - totalReplayBytes
+                    properties:
+                      allowRemoteAccess:
+                        type: boolean
+                      startAtLogin:
+                        type: boolean
+                      diagnostics:
+                        type: boolean
+                      maxSessions:
+                        type: integer
+                        minimum: 1
+                      maxRemoteSessionsPerDevice:
+                        type: integer
+                        minimum: 1
+                      replayBytesPerSession:
+                        type: integer
+                        minimum: 1
+                      totalReplayBytes:
+                        type: integer
+                        minimum: 1
+                    additionalProperties: false
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
+  /internal/_rpc/terminal_host_sync_profiles:
+    post:
+      operationId: internalRpcTerminalHostSyncProfiles
+      tags:
+        - headless-rpc
+      summary: terminal_host_sync_profiles (terminal.open)
+      description: "Loopback service-token command. Target: execution; risk: high."
+      x-cognia-request-schema-source: contract
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profiles:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - profileId
+                      - request
+                    properties:
+                      profileId:
+                        type: string
+                        minLength: 1
+                      request:
+                        type: object
+                        required:
+                          - shell
+                          - rows
+                          - cols
+                        properties:
+                          shell:
+                            type: string
+                          args:
+                            type: array
+                            items:
+                              type: string
+                          cwd:
+                            type:
+                              - string
+                              - "null"
+                          env:
+                            type: object
+                            additionalProperties:
+                              type: string
+                            example: {}
+                          rows:
+                            type: integer
+                            minimum: 1
+                          cols:
+                            type: integer
+                            minimum: 1
+                          projectId:
+                            type:
+                              - string
+                              - "null"
+                          extensionId:
+                            type:
+                              - string
+                              - "null"
+                          enableShellIntegration:
+                            type: boolean
+                          forceUtf8:
+                            type: boolean
+                          skipUserProfile:
+                            type: boolean
+                          sandboxed:
+                            type: boolean
+                          sandboxNetwork:
+                            type:
+                              - boolean
+                              - "null"
+                          profileId:
+                            type:
+                              - string
+                              - "null"
+                        additionalProperties: false
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: Command completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-cognia-wire-source: rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.
+                required:
+                  - installed
+                properties:
+                  installed:
+                    type: integer
+                    minimum: 0
+                additionalProperties: false
+        "202":
+          description: Command is still running under the durable operation ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalRpcRunningResponse"
+        "400":
+          description: The request or command arguments are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "401":
+          description: Authentication failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "403":
+          description: Capability, transport, or policy authorization failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "404":
+          description: The command is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "409":
+          description: The idempotency key conflicts with an existing operation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "415":
+          description: The request body is not JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "422":
+          description: The JSON request body does not match the endpoint shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "428":
+          description: A valid signed policy is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "429":
+          description: The principal exceeded its command rate limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "500":
+          description: The canonical dispatch failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+        "503":
+          description: The durable security store is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpcError"
+      x-cognia-response-schema-source: contract
   /internal/_rpc/terminal_kill:
     post:
       operationId: internalRpcTerminalKill
@@ -59256,6 +60254,7 @@ paths:
                     - lastActivityAt
                     - currentController
                     - attachedClients
+                    - participants
                     - alive
                     - sandboxed
                     - integrationCapabilities
@@ -59298,6 +60297,32 @@ paths:
                     attachedClients:
                       type: integer
                       minimum: 0
+                    participants:
+                      type: array
+                      items:
+                        type: object
+                        x-cognia-wire-source: cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no
+                          skip_serializing_if, so it is always present and null for the local desktop.
+                        required:
+                          - clientId
+                          - deviceId
+                          - local
+                          - role
+                        properties:
+                          clientId:
+                            type: string
+                          deviceId:
+                            type:
+                              - string
+                              - "null"
+                          local:
+                            type: boolean
+                          role:
+                            type: string
+                            enum:
+                              - controller
+                              - viewer
+                        additionalProperties: false
                     alive:
                       type: boolean
                     sandboxed:
@@ -59464,6 +60489,7 @@ paths:
                     - lastActivityAt
                     - currentController
                     - attachedClients
+                    - participants
                     - alive
                     - sandboxed
                     - integrationCapabilities
@@ -59506,6 +60532,32 @@ paths:
                     attachedClients:
                       type: integer
                       minimum: 0
+                    participants:
+                      type: array
+                      items:
+                        type: object
+                        x-cognia-wire-source: cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no
+                          skip_serializing_if, so it is always present and null for the local desktop.
+                        required:
+                          - clientId
+                          - deviceId
+                          - local
+                          - role
+                        properties:
+                          clientId:
+                            type: string
+                          deviceId:
+                            type:
+                              - string
+                              - "null"
+                          local:
+                            type: boolean
+                          role:
+                            type: string
+                            enum:
+                              - controller
+                              - viewer
+                        additionalProperties: false
                     alive:
                       type: boolean
                     sandboxed:
@@ -63934,6 +64986,10 @@ components:
           - secret_store_set
           - send_to_external_agent
           - session_attach
+          - session_attachment_upload_abort
+          - session_attachment_upload_chunk
+          - session_attachment_upload_commit
+          - session_attachment_upload_init
           - session_detach
           - session_list
           - session_timeline
@@ -63988,6 +65044,9 @@ components:
           - team_task_move
           - terminal_complete_paths
           - terminal_exec
+          - terminal_host_configure
+          - terminal_host_status
+          - terminal_host_sync_profiles
           - terminal_kill
           - terminal_kill_port
           - terminal_list_all
@@ -64135,10 +65194,10 @@ x-cognia-generated:
     - protocol/headless-command-dispositions.json
     - src-tauri/src/companion_api/rpc.rs
     - scripts/build/companion-request-schema-contracts.mjs
-  internalCommandCount: 496
-  generatedRequestSchemaCount: 496
+  internalCommandCount: 505
+  generatedRequestSchemaCount: 505
   runtimeInferredRequestSchemaCount: 64
-  contractRequestSchemaCount: 432
+  contractRequestSchemaCount: 441
   genericRequestSchemaCount: 0
-  generatedResponseSchemaCount: 496
+  generatedResponseSchemaCount: 505
   loopbackOnly: true

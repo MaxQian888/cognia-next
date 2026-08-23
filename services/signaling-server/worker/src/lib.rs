@@ -43,7 +43,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 /// Parse the comma-separated `SIGNALING_ALLOWED_ORIGINS` env var into a list.
 /// Unset / blank yields an empty list (same-origin only).
 fn allowed_origins(env: &Env) -> Result<Vec<String>> {
-    let origins = env
+    let origins: Vec<String> = env
         .var("SIGNALING_ALLOWED_ORIGINS")
         .map(|v| {
             v.to_string()

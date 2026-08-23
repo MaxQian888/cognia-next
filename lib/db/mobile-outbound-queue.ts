@@ -6,12 +6,11 @@
 
 import { nanoid } from "nanoid"
 import {
-  HOST_STATE_PROTOCOL_VERSION,
-  isHostStateActionV1,
+  isHostStateAction,
   sessionStateChannel,
-  type AllowedHostStateIntentV1,
-  type HostStateActionOutcomeV1,
-  type HostStateActionV1,
+  type AllowedHostStateIntent,
+  type HostStateActionOutcome,
+  type HostStateAction,
 } from "@cognia/agent-config-types/host-state"
 
 import type {
@@ -52,7 +51,7 @@ export const HOST_STATE_CLIENT_ID_STORAGE_KEY = "cognia-host-state-client-id"
 
 export interface EnqueueHostStateIntentInput {
   sessionId: string
-  action: AllowedHostStateIntentV1
+  action: AllowedHostStateIntent
   /** Required only for revision-checked intents; defaults to the confirmed channel revision. */
   baseRevision?: number
   nowMs?: number
@@ -87,12 +86,12 @@ export async function enqueueHostStateIntentIfAvailable(
     const rows = await db.mobileOutboundQueue
       .filter(
         (row) =>
-          row.protocol === "host-state-v1" &&
+          row.protocol === "host-state" &&
           row.accountId === scope.accountId &&
           row.targetId === scope.targetId
       )
       .toArray()
-    const active = rows.filter((row) => ["pending", "sending", "failed"].includes(row.status))
+    const active = rows.filter((row) => IN_FLIGHT_STATUSES.includes(row.status))
     if (active.length >= MAX_PENDING_HOST_STATE_ACTIONS) {
       throw new Error("host_state_outbox_full")
     }
@@ -107,8 +106,7 @@ export async function enqueueHostStateIntentIfAvailable(
             : highest,
         0
       ) + 1
-    const action: HostStateActionV1 = {
-      protocolVersion: HOST_STATE_PROTOCOL_VERSION,
+    const action: HostStateAction = {
       channel,
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
@@ -124,7 +122,7 @@ export async function enqueueHostStateIntentIfAvailable(
       createdAt: now,
       action: input.action,
     }
-    if (!isHostStateActionV1(action)) throw new Error("host_state_invalid_action")
+    if (!isHostStateAction(action)) throw new Error("host_state_invalid_action")
     const row = hostStateQueueRow(action)
     await db.mobileOutboundQueue.add(row)
     return row
@@ -165,16 +163,16 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
 
 /** Persist a HostState intent before any optimistic UI is rendered. */
 export async function enqueueHostStateAction(
-  action: HostStateActionV1
+  action: HostStateAction
 ): Promise<MobileOutboundJobRow> {
-  if (!isHostStateActionV1(action)) throw new Error("host_state_invalid_action")
+  if (!isHostStateAction(action)) throw new Error("host_state_invalid_action")
   const queue = getDb().mobileOutboundQueue
   const pending = await queue
     .where("status")
-    .anyOf("pending", "sending", "failed")
+    .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
     .filter(
       (row) =>
-        row.protocol === "host-state-v1" &&
+        row.protocol === "host-state" &&
         row.accountId === action.accountId &&
         row.targetId === action.runtimeTargetId
     )
@@ -185,15 +183,15 @@ export async function enqueueHostStateAction(
   return enqueue({ ...hostStateQueueInput(action) })
 }
 
-function hostStateQueueInput(action: HostStateActionV1): EnqueueInput {
+function hostStateQueueInput(action: HostStateAction): EnqueueInput {
   return {
     id: action.actionId,
     idempotencyKey: action.actionId,
     accountId: action.accountId,
     targetId: action.runtimeTargetId,
     command: "host_state_submit",
-    payload: { protocolVersion: HOST_STATE_PROTOCOL_VERSION, actions: [action] },
-    protocol: "host-state-v1",
+    payload: { actions: [action] },
+    protocol: "host-state",
     channel: action.channel,
     hostGeneration: action.hostGeneration,
     clientId: action.clientId,
@@ -204,7 +202,7 @@ function hostStateQueueInput(action: HostStateActionV1): EnqueueInput {
   }
 }
 
-function hostStateQueueRow(action: HostStateActionV1): MobileOutboundJobRow {
+function hostStateQueueRow(action: HostStateAction): MobileOutboundJobRow {
   const input = hostStateQueueInput(action)
   return {
     id: action.actionId,
@@ -217,7 +215,7 @@ function hostStateQueueRow(action: HostStateActionV1): MobileOutboundJobRow {
     createdAt: action.createdAt,
     nextAttemptAt: action.createdAt,
     idempotencyKey: action.actionId,
-    protocol: "host-state-v1",
+    protocol: "host-state",
     channel: action.channel,
     hostGeneration: action.hostGeneration,
     clientId: action.clientId,
@@ -241,7 +239,7 @@ async function hostStateSubmitNegotiated(): Promise<boolean> {
   )
 }
 
-function requiresHostStateBaseRevision(action: AllowedHostStateIntentV1): boolean {
+function requiresHostStateBaseRevision(action: AllowedHostStateIntent): boolean {
   return [
     "session.rename",
     "session.archive",
@@ -271,9 +269,34 @@ function randomHostStateId(): string {
 }
 
 /**
+ * Statuses that still owe the Host a dispatch. A row in one of these holds its
+ * place in its channel's order; anything else has reached an end the user can
+ * see and act on, and must not freeze the session behind it.
+ *
+ * `"failed"` is deliberately absent even though {@link MobileOutboundStatus}
+ * still names it: `recordFailure` is the only writer of a post-dispatch status
+ * and it stores `decideNextAttempt`'s verdict, which is `"pending"` (retry
+ * scheduled) or `"deadlettered"` (out of retries) and never `"failed"`. Listing
+ * it here described a lane the queue does not have.
+ */
+const IN_FLIGHT_STATUSES: readonly MobileOutboundStatus[] = ["pending", "sending"]
+
+/**
  * Atomic claim — returns the next ready row and flips status to "sending"
  * so concurrent runners don't dispatch the same job twice. Returns null
  * when nothing is ready.
+ *
+ * **Ordered per channel.** Within one session's channel only the lowest
+ * outstanding `clientSeq` is claimable: a row that is backing off, already
+ * in flight, or failed keeps its successors waiting. Without that, a message
+ * whose first attempt hit a flaky link was overtaken by the follow-up typed
+ * after it — the Host applied them in the wrong order while the client's own
+ * optimistic projection (which *does* sort by `clientSeq`) showed the right
+ * one, so the two silently disagreed until a resync.
+ *
+ * Channels are independent of each other, so one stalled session never blocks
+ * another, and rows with no channel (the legacy RPC jobs) are unordered as
+ * they always were.
  */
 export async function claimNext(
   nowMs: number = Date.now(),
@@ -282,19 +305,44 @@ export async function claimNext(
 ): Promise<MobileOutboundJobRow | null> {
   const db = getDb()
   return db.transaction("rw", db.mobileOutboundQueue, async () => {
-    const ready = await db.mobileOutboundQueue
+    // Through the `status` index, not a table walk: the channel-head rule only
+    // needs the in-flight rows, and a `.filter()` over the whole table
+    // deserializes every `sent` row still waiting on the 24h vacuum on every
+    // poll of a draining queue.
+    const outstanding = await db.mobileOutboundQueue
       .where("status")
-      .equals("pending")
+      .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
+      .filter((row) => row.accountId === scope.accountId && row.targetId === scope.targetId)
+      .toArray()
+
+    // Lowest outstanding sequence per channel — the only row of that channel
+    // anyone may dispatch right now.
+    const channelHead = new Map<string, number>()
+    for (const row of outstanding) {
+      if (!row.channel || typeof row.clientSeq !== "number") continue
+      const current = channelHead.get(row.channel)
+      if (current === undefined || row.clientSeq < current) {
+        channelHead.set(row.channel, row.clientSeq)
+      }
+    }
+
+    const ready = outstanding
+      .filter(
+        (row) => row.status === "pending" && row.nextAttemptAt <= nowMs && !excludedIds.has(row.id)
+      )
       .filter(
         (row) =>
-          row.accountId === scope.accountId &&
-          row.targetId === scope.targetId &&
-          row.nextAttemptAt <= nowMs &&
-          !excludedIds.has(row.id)
+          !row.channel ||
+          typeof row.clientSeq !== "number" ||
+          channelHead.get(row.channel) === row.clientSeq
       )
-      .first()
-    if (!ready) return null
-    const claimed: MobileOutboundJobRow = { ...ready, status: "sending" }
+      // Oldest first, then by id so two rows created in the same millisecond
+      // still claim in a stable order rather than whichever Dexie enumerated.
+      .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+
+    const next = ready[0]
+    if (!next) return null
+    const claimed: MobileOutboundJobRow = { ...next, status: "sending", claimedAt: nowMs }
     await db.mobileOutboundQueue.put(claimed)
     return claimed
   })
@@ -310,15 +358,69 @@ export async function releaseClaim(id: string): Promise<void> {
   await db.transaction("rw", db.mobileOutboundQueue, async () => {
     const row = await db.mobileOutboundQueue.get(id)
     if (row?.status === "sending") {
-      await db.mobileOutboundQueue.update(id, { status: "pending" })
+      await db.mobileOutboundQueue.update(id, { status: "pending", claimedAt: undefined })
     }
+  })
+}
+
+/**
+ * How long a `sending` claim must have sat untouched before a startup reclaim
+ * treats it as abandoned.
+ *
+ * Comfortably longer than any single dispatch: the point is to separate a claim
+ * whose process died from one another live dispatcher is still awaiting, and
+ * only the age of the claim can tell them apart.
+ */
+export const CLAIM_ABANDONED_AFTER_MS = 2 * 60 * 1000
+
+/**
+ * Return abandoned `sending` claims to `pending`. Call once before the runner's
+ * first drain.
+ *
+ * A row still holding `sending` at startup usually belongs to a run that was
+ * killed mid-dispatch. That used to be harmless — `claimNext` looked at
+ * `pending` alone — but a `sending` row is now `IN_FLIGHT`, so it wins its
+ * channel's head and is never claimable, and every later message, draft or
+ * abort for that session queues up behind a row nothing can move.
+ *
+ * "Usually", not "always": a second runner for the same scope can be
+ * constructed while the first is mid-flight, and a blanket reclaim would hand
+ * that row to both at once. `claimedAt` is the discriminator — a claim younger
+ * than {@link CLAIM_ABANDONED_AFTER_MS} is presumed live and left alone. Rows
+ * predating the field carry no stamp and are treated as abandoned, which is the
+ * old behaviour for exactly the rows the old behaviour was written for.
+ *
+ * No retry is consumed and the idempotency key is untouched: a dispatch that
+ * did reach the Host before the process died is recognised as a duplicate.
+ */
+export async function releaseStaleClaims(
+  scope: RuntimeTargetScope,
+  nowMs: number = Date.now(),
+  abandonedAfterMs: number = CLAIM_ABANDONED_AFTER_MS
+): Promise<number> {
+  const db = getDb()
+  return db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const stale = await db.mobileOutboundQueue
+      .where("status")
+      .equals("sending")
+      .filter(
+        (row) =>
+          row.accountId === scope.accountId &&
+          row.targetId === scope.targetId &&
+          (row.claimedAt === undefined || nowMs - row.claimedAt >= abandonedAfterMs)
+      )
+      .toArray()
+    for (const row of stale) {
+      await db.mobileOutboundQueue.update(row.id, { status: "pending", claimedAt: undefined })
+    }
+    return stale.length
   })
 }
 
 export async function markHostStateResult(
   id: string,
   result: {
-    outcome: HostStateActionOutcomeV1
+    outcome: HostStateActionOutcome
     rejection?: { code: string; currentRevision?: number }
   }
 ): Promise<void> {
@@ -406,19 +508,69 @@ export async function vacuumSent(keepMs: number = 24 * 60 * 60 * 1000): Promise<
   })
 }
 
-/** Reset a deadlettered row back to pending so the user can retry manually. */
+/**
+ * Reset a terminal row back to pending so the user can retry manually.
+ *
+ * The retry keeps its `actionId` — and therefore its idempotency key — so a
+ * dispatch that actually reached the Host before the client gave up is
+ * recognised as a duplicate instead of applied twice.
+ *
+ * Its `clientSeq`, though, is re-stamped to the tail of its channel. It has to
+ * be: the row stopped blocking the channel the moment it went terminal, so
+ * everything behind it has already been sent, and re-entering at the old
+ * sequence would put it permanently at the head of a queue whose work is done —
+ * blocking every future action on that session behind a row the Host will never
+ * be asked for again.
+ */
 export async function retryDeadletter(id: string, nowMs: number = Date.now()): Promise<void> {
-  const queue = getDb().mobileOutboundQueue
-  const row = await queue.get(id)
-  if (row?.targetId === LEGACY_MIXED_TARGET_ID) {
-    throw new Error(
-      "A legacy outbound action without an original runtime target cannot be retried."
-    )
-  }
-  await queue.update(id, {
-    status: "pending",
-    attempts: 0,
-    nextAttemptAt: nowMs,
-    lastError: undefined,
+  const db = getDb()
+  await db.transaction("rw", db.mobileOutboundQueue, async () => {
+    const row = await db.mobileOutboundQueue.get(id)
+    if (!row) return
+    if (row.targetId === LEGACY_MIXED_TARGET_ID) {
+      throw new Error(
+        "A legacy outbound action without an original runtime target cannot be retried."
+      )
+    }
+    const clientSeq = row.channel ? await nextClientSeqForChannel(row) : row.clientSeq
+    await db.mobileOutboundQueue.put({
+      ...row,
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: nowMs,
+      lastError: undefined,
+      rejectionCode: undefined,
+      currentRevision: undefined,
+      ...(clientSeq === undefined ? {} : { clientSeq }),
+    })
   })
+}
+
+/**
+ * One past the highest sequence still outstanding on the channel.
+ *
+ * Read through the `status` index, not a table walk. Only OUTSTANDING rows
+ * matter: ordering exists so nothing overtakes a row the Host has not seen yet,
+ * and a `sent` row has no successors waiting on it. Scanning them anyway meant
+ * deserializing every row in the table — a day's worth of `sent` rows awaiting
+ * the 24h vacuum included — while holding the retry's write transaction. It is
+ * also the same basis `enqueueHostStateIntentIfAvailable` stamps a fresh
+ * sequence from, so a retry and a new send now agree on where the tail is.
+ */
+async function nextClientSeqForChannel(row: MobileOutboundJobRow): Promise<number | undefined> {
+  if (typeof row.clientSeq !== "number") return undefined
+  const outstanding = await getDb()
+    .mobileOutboundQueue.where("status")
+    .anyOf(IN_FLIGHT_STATUSES as MobileOutboundStatus[])
+    .filter((candidate) => candidate.channel === row.channel && candidate.clientId === row.clientId)
+    .toArray()
+  const highest = outstanding.reduce(
+    (best, candidate) =>
+      typeof candidate.clientSeq === "number" ? Math.max(best, candidate.clientSeq) : best,
+    // The row being retried is terminal, so it is not in `outstanding`; seeding
+    // with its own sequence keeps the result strictly increasing even when the
+    // channel has drained completely.
+    row.clientSeq
+  )
+  return highest + 1
 }

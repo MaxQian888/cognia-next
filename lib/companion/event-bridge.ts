@@ -12,6 +12,9 @@
  */
 
 import { DEFAULT_ACCOUNT_NAMESPACE } from "@/lib/companion/account-namespace"
+import { detachDevice } from "@/lib/companion/remote-attach-registry"
+import { releaseDeviceAttachmentUploads } from "@/lib/db/session-attachment-uploads"
+import { noteDeviceSeen } from "@/lib/companion/device-presence-registry"
 import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
 import { useAccountStore } from "@/stores/account/account-store"
@@ -41,6 +44,23 @@ interface DeviceSeenPayload {
   account_id?: string
   seen_at_ms: number
 }
+
+/**
+ * `companion://device-lifecycle`, emitted by
+ * `src-tauri/src/companion_api/device_lifecycle.rs` after a pairing is
+ * suspended, revoked or restored. Rust drops the device's event-plane leases
+ * itself; the attach leases live only in this renderer, so nothing but this
+ * handler can release them.
+ */
+interface DeviceLifecyclePayload {
+  deviceId: string
+  tenantId?: string
+  action: string
+  state: string
+}
+
+/** Lifecycle actions that end a device's authority to drive a session. */
+const AUTHORITY_ENDING_ACTIONS: ReadonlySet<string> = new Set(["suspend", "revoke"])
 
 const KNOWN_PLATFORMS: ReadonlySet<DevicePlatform> = new Set(["ios", "android", "web", "unknown"])
 
@@ -73,9 +93,29 @@ export function installCompanionEventBridge(): () => void {
     void handleDeviceSeen(payload)
   })
 
+  // Attach leases are renderer-owned, so a suspension or revocation reaches
+  // them only here. Without this the device kept its control lease for the full
+  // 90s TTL: the Host went on routing `permission_request` frames at a phone
+  // that had just lost the right to answer them, and each one sat until the
+  // 120s approval backstop denied it.
+  const unsubLifecycle = transport.subscribe<DeviceLifecyclePayload>(
+    "companion://device-lifecycle",
+    (payload) => {
+      if (!payload?.deviceId) return
+      if (!AUTHORITY_ENDING_ACTIONS.has(payload.action)) return
+      detachDevice(payload.deviceId)
+      // Its staged attachments go with it. Those bytes exist only so a message
+      // from that device can carry them, and it may no longer send one — a
+      // suspended phone's half-uploaded screenshot would otherwise sit on the
+      // desktop's disk until the 30-minute collector noticed.
+      void releaseDeviceAttachmentUploads(payload.deviceId).catch(() => undefined)
+    }
+  )
+
   return () => {
     unsubPaired()
     unsubSeen()
+    unsubLifecycle()
   }
 }
 
@@ -103,6 +143,9 @@ async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
 async function handleDeviceSeen(payload: DeviceSeenPayload): Promise<void> {
   try {
     assertPayloadAccountMatchesActiveAccount(payload.account_id)
+    // Feeds the presence label. Durable last-seen goes to Dexie below; this is
+    // the in-memory half the paired-devices view reads for "recently active".
+    noteDeviceSeen(payload.device_id, payload.seen_at_ms)
     await touchPairedDevice(payload.device_id, payload.seen_at_ms)
   } catch (err) {
     console.warn("companion event-bridge: touchPairedDevice failed", err)

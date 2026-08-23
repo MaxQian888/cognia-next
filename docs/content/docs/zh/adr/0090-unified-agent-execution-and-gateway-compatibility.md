@@ -494,3 +494,85 @@ Fleet session 与 subagent 携带 `lifecycleConfidence`：
 - Task-tool 启发式结果标为 `inferred`。
 
 消费者可以同时展示两者，但不能把推断生命周期静默呈现为 provider 已确认事实。
+
+## 2026-08-21 修订 —— 外部 Agent 能力单一事实源
+
+`resolveAgentExecutionSpec()` 仍是唯一的执行决策权威。本次修订修的是：当
+`runtimeAdapter: "external"` 时，喂给它的输入本身就是错的。
+
+### 问题
+
+`ResolvedAgentExecutionSpec` v2 携带一套**闭集**能力词汇，由两个内建 runtime 与
+sidecar 共用。外部 Agent 装不进这套词汇：已注册的协议有七个，各有各的答案，而且答案还取决于
+preset、Cognia 适配器实现了哪些可选方法、握手协商出什么、以及宿主环境。v2 契约里没有任何东西能表达
+「这一项我们还没测过」，于是每个需要按协议作答的界面都长出了自己的表：
+
+- `RUNTIME_CAPABILITIES.external` —— 一张表覆盖所有外部 Agent；
+- `cli/src/agent/runtime/backend-select.ts` 里的 `PROTOCOL_CAPABILITIES`；
+- `cli/src/tui/runtime/backend-capabilities.ts` 里的 `externalCapabilities()`；
+- `permission-modes.ts` 里的 `PROTOCOL_PERMISSION_MODE_SUPPORT`。
+
+它们互相矛盾，而且矛盾都是用户会撞上的那种：CLI 声称 OpenCode 支持 `steer`，可它的适配器根本没有
+`steerTurn`，于是 `--requires steer` 在选择阶段被放行、在第一次 steer 时失败；TUI 对所有外部后端都报告
+支持 MCP，包括那四个根本没有按会话传递 MCP 通道的协议；权限表给 DeepSeek Harness SDK 通道列出全部五种模式，
+而它的 `respondToPermission` 直接抛错。
+
+### 决策
+
+在 spec 之外，另立一个**独立版本**的 `ExternalAgentCapabilityProfileV1`
+（`@cognia/agent-config-types/external-agent-capability`）。它是「外部 Agent 能做什么」的权威；
+spec 仍然是「这一回合怎么执行」的权威。二者只通过
+`projectExternalAgentCapabilitiesToSpec()` 相连，而该投影只讲 v2 词汇。不引入
+`specVersion: 3`，也不向闭集追加任何 id。
+
+五个合并层，优先级固定：
+
+1. **protocol** —— `protocol/agent-capabilities.json` 中的完整行；
+2. **refinement** —— preset 与插件声明；
+3. **adapter-methods** —— 适配器真正实现了哪些可选方法；
+4. **live** —— 握手、宿主设施与探测；
+5. **ceiling** —— 平台与策略上限，只做交集。
+
+第 2、3 层只能细化 `unknown` 或收紧，绝不放宽：preset 作者没有资格推翻线协议。第 4 层可以双向覆盖
+—— 它测的是眼前这个 Agent —— 出现矛盾时记录为 `drift` 而非吞掉，因为被实测推翻的清单行需要更新。
+
+`unknown` 是一等状态，且永远无法满足硬要求。正是这个区分让准入变成两阶段：
+
+- **静态预检**（`preflightExternalAgent`）只拒绝已经明确错误的配置 —— 没有适配器的协议，或清单明确记为
+  `unsupported` 的硬要求。`unknown` 放行，因为在这里拒绝会误杀一个还没来得及作答的 Agent。
+- **协商后准入**（`admitNegotiatedExternalAgent`）在握手之后执行，此时 `unknown` 是致命的：
+  「能问的都问过了，仍然不知道」不足以支撑任何承诺。`negotiated` 为 false 的 profile 会被直接拒绝，
+  而且 `resolveAgentExecutionSpec` 自己也会丢弃这种投影，任何调用方都无法绕过。
+
+### 不再静默替身
+
+`dispatchTeammate` 过去在 teammate 的外部 Agent 解析失败时，会给 resolver 传
+`runtime: "claude"`，弹一次警告，然后用内建引擎跑这个任务。冻结下来的 spec 于是记录成内建轨道 ——
+模型、工具、会话存储、成本归属，全都描述了一次用户从未要求过的运行。现在这会抛
+`ExternalRuntimeUnavailableError`。唯一合法的回退是 teammate **显式声明**的回退，而目前并不存在这样的字段。
+
+### 对其他决策的影响
+
+- **§4（兼容性证据）** —— 由外部 profile 解析出的 spec 记 `evidence: "experimental"`，
+  并把 profile digest 作为 `recordRef`。digest 是一份能力答案的身份；profile 本体留在
+  execution handle 上，不去撑大 wire envelope。
+- **ADR-0059 D6 / R11（spawn 策略）** —— 启动侧白名单迁到
+  `protocol/external-agent-security-policy.json`。TypeScript 直接消费；
+  `crates/cognia-external-agent` 保留编译期字面量（安全白名单不能依赖运行时解析 JSON），
+  由 `pnpm audit:agent-capabilities` 保证两边一致。它一上线就抓出三处真实漂移：Rust 拒绝了随包
+  `claude-code` preset 实际启动的 `claude-agent-acp`；带着一条没有任何 preset 引用的 `cline`；
+  两边都没给 OpenCode 可写状态目录 —— 以致 `opencode serve` 无法持久化会话，恢复每次都从头开始。
+- **ADR-0049（沙箱）** —— 平台门禁现在会在用户配置 Agent **之前**显示在设置里，而不是在 spawn 时以异常出现。
+- **ADR-0119（Pi）** —— Pi 的策略与 system prompt 注入没有改动，本来也不是缺陷。变得诚实的是工具宿主：
+  渲染端没有 broker，因此由工具宿主提供的能力如实报 `unsupported` 并给出 `noToolHost`，不再默认存在。
+- **旧协议** —— `http` / `websocket` / `custom` 从来没有注册过适配器。它们保持可读，以便旧配置能显示与迁移，
+  但从所有选择器中移除；此前把它们标成「coming soon」的两个对话框，现在从已注册集合派生选项。
+
+### 明确不做的事
+
+- 不新增通用 A2A executable preset：A2A 需要用户提供 endpoint，仍是手工配置。
+- 不退休 `BackendFeature`。它是 TUI 的展示词汇，与 capability id 并非一一对应 ——
+  `skills` 和 `plugins` 描述的是 Cognia 工具宿主而不是 Agent 本身的能力，把它们映射到
+  `skills.native` / `plugins.native` 只是用一个新的假声明替换旧的。
+- gate 不试图证明插件生命周期行为。启用时注册、禁用时拆除都是运行时事实；用正则声称「已验证」会被当成覆盖率。
+  这部分由测试来钉住。

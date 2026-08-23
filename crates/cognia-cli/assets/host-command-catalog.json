@@ -16874,6 +16874,86 @@
       "outputTyped": true
     },
     {
+      "name": "mcp_set_enabled",
+      "category": "extensions",
+      "resource": "mcp",
+      "target": "client",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "mcp_set_enabled (client.write)",
+      "description": "Loopback service-token command. Target: client; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id",
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "mcp_set_tool_rules",
+      "category": "extensions",
+      "resource": "mcp",
+      "target": "client",
+      "operation": "write",
+      "capability": "client.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "mcp_set_tool_rules (client.write)",
+      "description": "Loopback service-token command. Target: client; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "disallowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full replacement list of exact tool names denied on this server. Sent whole rather than as a delta: a delta applied against a stale mirror would silently re-allow a tool denied on another device."
+          },
+          "disallowedToolPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Full replacement list of glob patterns denied on this server. At least one of the two lists must be present; the host arm rejects a call carrying neither."
+          }
+        }
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "memory_forget",
       "category": "knowledge",
       "resource": "memory",
@@ -27943,18 +28023,17 @@
       "resource": "session",
       "target": "execution",
       "operation": "side-effect",
-      "capability": "workspace.write",
+      "capability": "host.observe",
       "risk": "high",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
-      "summary": "session_attach (workspace.write)",
+      "summary": "session_attach (host.observe)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
-          "sessionId",
-          "deviceId"
+          "sessionId"
         ],
         "properties": {
           "sessionId": {
@@ -27962,7 +28041,23 @@
           },
           "deviceId": {
             "type": "string",
-            "description": "This device's id, so the host can refcount watchers."
+            "deprecated": true,
+            "description": "Ignored. The host binds the attachment to the authenticated caller: trusting this field let any paired device attach — and collect another device's approval prompts — under a borrowed id."
+          },
+          "mode": {
+            "enum": [
+              "observe",
+              "control"
+            ],
+            "description": "What the attachment is for. `observe` needs only the read capability every paired device holds; `control` additionally requires Remote Control AND a caught-up event stream on this device, and is what makes the host route this session's decisions here. Absent means `control` — the mode every existing client was implicitly asking for. The response reports the mode actually granted, which may be narrower."
+          },
+          "attention": {
+            "enum": [
+              "foreground",
+              "background",
+              "unknown"
+            ],
+            "description": "Whether the user is looking at this device right now. Self-asserted and deliberately not server-bound: it only suppresses a duplicate notification for a prompt already on screen, so lying costs the liar a missing or duplicate alert and nothing else. Absent reads as `unknown`, which suppresses nothing."
           }
         },
         "additionalProperties": false
@@ -27983,30 +28078,258 @@
       "outputTyped": true
     },
     {
-      "name": "session_detach",
+      "name": "session_attachment_upload_abort",
       "category": "sessions",
       "resource": "session",
       "target": "execution",
-      "operation": "side-effect",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "session_attachment_upload_abort (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "null"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_attachment_upload_chunk",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "write",
       "capability": "workspace.write",
       "risk": "high",
-      "approval": "interactive",
+      "approval": "none",
       "idempotency": "required",
-      "summary": "session_detach (workspace.write)",
+      "summary": "session_attachment_upload_chunk (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId",
+          "offset",
+          "dataBase64"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Where this chunk starts. Must equal the bytes the host already holds; a mismatch is refused with the true write head so the client re-syncs in one round trip rather than restarting the file. A chunk entirely below the write head is a no-op, which is what makes a retry after a lost response safe."
+          },
+          "dataBase64": {
+            "type": "string",
+            "description": "Chunk payload, base64. Size it from the `chunkSize` the init response returned — the RPC body ceiling is what bounds it, not the file."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadChunk",
+        "required": [
+          "receivedBytes",
+          "complete"
+        ],
+        "properties": {
+          "receivedBytes": {
+            "type": "integer"
+          },
+          "complete": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_attachment_upload_commit",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "session_attachment_upload_commit (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "uploadId"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadCommit",
+        "required": [
+          "ref",
+          "name",
+          "mediaType",
+          "size",
+          "hash"
+        ],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "hash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_attachment_upload_init",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "session_attachment_upload_init (workspace.write)",
       "description": "Loopback service-token command. Target: execution; risk: high.",
       "inputSchemaSource": "contract",
       "inputSchema": {
         "type": "object",
         "required": [
           "sessionId",
-          "deviceId"
+          "name",
+          "mediaType",
+          "size",
+          "hash"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Session the attachment will be sent into. Written onto the upload row and re-checked when the message that references it is submitted, so a committed upload can never be redirected into another conversation."
+          },
+          "name": {
+            "type": "string",
+            "description": "File name. Also the type gate for documents, which are routed by extension."
+          },
+          "mediaType": {
+            "type": "string",
+            "description": "Declared MIME type. A claim: the host sniffs the magic bytes at commit and refuses a declared image whose bytes are not one."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Total byte length. The commit refuses anything that disagrees with what actually arrived."
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the whole file, lowercase hex. Verified at commit, and the dedupe key: re-initing the same content on the same session resumes the existing upload instead of opening a second one."
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadInit",
+        "required": [
+          "uploadId",
+          "chunkSize",
+          "resumeOffset",
+          "complete",
+          "ref"
+        ],
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "chunkSize": {
+            "type": "integer"
+          },
+          "resumeOffset": {
+            "type": "integer"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "session_detach",
+      "category": "sessions",
+      "resource": "session",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "summary": "session_detach (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sessionId"
         ],
         "properties": {
           "sessionId": {
             "type": "string"
           },
           "deviceId": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Ignored. The host releases the authenticated caller's own lease; a device may not detach another."
           }
         },
         "additionalProperties": false
@@ -30743,6 +31066,338 @@
       "outputTyped": true
     },
     {
+      "name": "terminal_host_configure",
+      "category": "development",
+      "resource": "terminal",
+      "target": "host-admin",
+      "operation": "write",
+      "capability": "host.admin",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "terminal_host_configure (host.admin)",
+      "description": "Loopback service-token command. Target: host-admin; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "properties": {
+          "settings": {
+            "type": "object",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+        "required": [
+          "running",
+          "endpoint",
+          "settings"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "x-cognia-wire-source": "crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal host's own settings file, not part of AppSettings.",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_host_status",
+      "category": "development",
+      "resource": "terminal",
+      "target": "host-admin",
+      "operation": "read",
+      "capability": "terminal.open",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "terminal_host_status (terminal.open)",
+      "description": "Loopback service-token command. Target: host-admin; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object"
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "crate::terminal_host_bridge::TerminalHostStatus (serde rename_all = camelCase). `descriptor` is skipped for the remote arms — provisioning a device descriptor has no remote path.",
+        "required": [
+          "running",
+          "endpoint",
+          "settings"
+        ],
+        "properties": {
+          "running": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "settings": {
+            "type": "object",
+            "x-cognia-wire-source": "crate::terminal_host_service::TerminalHostSettings (serde rename_all = camelCase). The terminal host's own settings file, not part of AppSettings.",
+            "required": [
+              "allowRemoteAccess",
+              "startAtLogin",
+              "diagnostics",
+              "maxSessions",
+              "maxRemoteSessionsPerDevice",
+              "replayBytesPerSession",
+              "totalReplayBytes"
+            ],
+            "properties": {
+              "allowRemoteAccess": {
+                "type": "boolean"
+              },
+              "startAtLogin": {
+                "type": "boolean"
+              },
+              "diagnostics": {
+                "type": "boolean"
+              },
+              "maxSessions": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxRemoteSessionsPerDevice": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "replayBytesPerSession": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "totalReplayBytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "terminal_host_sync_profiles",
+      "category": "development",
+      "resource": "terminal",
+      "target": "execution",
+      "operation": "write",
+      "capability": "terminal.open",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "terminal_host_sync_profiles (terminal.open)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "profileId",
+                "request"
+              ],
+              "properties": {
+                "profileId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "request": {
+                  "type": "object",
+                  "required": [
+                    "shell",
+                    "rows",
+                    "cols"
+                  ],
+                  "properties": {
+                    "shell": {
+                      "type": "string"
+                    },
+                    "args": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cwd": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "env": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "example": {}
+                    },
+                    "rows": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "cols": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "projectId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "extensionId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "enableShellIntegration": {
+                      "type": "boolean"
+                    },
+                    "forceUtf8": {
+                      "type": "boolean"
+                    },
+                    "skipUserProfile": {
+                      "type": "boolean"
+                    },
+                    "sandboxed": {
+                      "type": "boolean"
+                    },
+                    "sandboxNetwork": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "profileId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "x-cognia-wire-source": "rpc/terminal.rs `terminal_host_sync_profiles` — how many profiles the device now owns on the host.",
+        "required": [
+          "installed"
+        ],
+        "properties": {
+          "installed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputTyped": true
+    },
+    {
       "name": "terminal_kill",
       "category": "development",
       "resource": "terminal",
@@ -30846,6 +31501,7 @@
             "lastActivityAt",
             "currentController",
             "attachedClients",
+            "participants",
             "alive",
             "sandboxed",
             "integrationCapabilities",
@@ -30905,6 +31561,41 @@
             "attachedClients": {
               "type": "integer",
               "minimum": 0
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no skip_serializing_if, so it is always present and null for the local desktop.",
+                "required": [
+                  "clientId",
+                  "deviceId",
+                  "local",
+                  "role"
+                ],
+                "properties": {
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "local": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "controller",
+                      "viewer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "alive": {
               "type": "boolean"
@@ -31022,6 +31713,7 @@
             "lastActivityAt",
             "currentController",
             "attachedClients",
+            "participants",
             "alive",
             "sandboxed",
             "integrationCapabilities",
@@ -31081,6 +31773,41 @@
             "attachedClients": {
               "type": "integer",
               "minimum": 0
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "x-cognia-wire-source": "cognia_terminal::host::SessionParticipant (serde rename_all = camelCase). `deviceId` carries no skip_serializing_if, so it is always present and null for the local desktop.",
+                "required": [
+                  "clientId",
+                  "deviceId",
+                  "local",
+                  "role"
+                ],
+                "properties": {
+                  "clientId": {
+                    "type": "string"
+                  },
+                  "deviceId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "local": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "controller",
+                      "viewer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "alive": {
               "type": "boolean"
@@ -33144,5 +33871,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "84289445ab749f0c36faa993d5f7ae08d2de36d0d40cda4a33236e2e13cf34fd"
+  "catalogHash": "cd8210516bd046ec5d904064c1d4a5a305f0fb7d53e74f832afe2bda2b7fc0b8"
 }

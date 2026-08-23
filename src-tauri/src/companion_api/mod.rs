@@ -41,6 +41,7 @@ pub mod dispatchers;
 pub mod event_batcher;
 pub mod event_bus;
 pub mod event_channels;
+pub mod event_leases;
 pub mod external_bridge;
 pub mod healthz;
 pub mod host_identity;

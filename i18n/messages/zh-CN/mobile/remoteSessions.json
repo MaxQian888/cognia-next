@@ -11,6 +11,42 @@
   },
   "back": "返回会话列表",
   "detail": {
+    "attachAria": "添加附件",
+    "attachmentRemoveAria": "移除附件",
+    "attachmentTooLarge": "部分文件已跳过——单个文件上限为 {max} MB。",
+    "attachmentTooMany": "一条消息最多只能带 {max} 个附件。",
+    "attachmentUnsupported": "部分文件已跳过——不支持该类型。",
+    "attachmentUploading": "正在上传 {name}",
+    "attachmentsNeedHost": "该桌面端无法接收附件——消息已发送，但未带附件。",
+    "changes": {
+      "collapseDiff": "收起 {path} 的差异",
+      "diffEmpty": "桌面端没有返回该文件的差异内容。",
+      "diffError": "加载差异失败（{reason}）。",
+      "empty": "本回合没有改动任何文件。",
+      "error": "加载改动失败（{reason}）。",
+      "expandDiff": "展开 {path} 的差异",
+      "kinds": {
+        "created": "新增",
+        "deleted": "删除",
+        "modified": "修改",
+        "renamed": "重命名"
+      },
+      "loading": "正在加载改动…",
+      "loadingDiff": "正在加载差异…",
+      "pending": "该回合仍在运行——改动尚未记录。",
+      "renamedFrom": "重命名自 {path}",
+      "runAria": "选择要查看的回合",
+      "runOption": "第 {index} 回合 · {time}",
+      "totals": "{files, plural, other {# 个文件}} · +{additions} −{deletions}",
+      "unavailable": {
+        "binary": "二进制文件——未记录行级差异。",
+        "noTextDiff": "桌面端不会为该类改动保留行级差异。",
+        "sensitive": "已隐藏——该路径包含凭据。",
+        "symlink": "符号链接——未记录行级差异。"
+      },
+      "untracked": "桌面端没有为该会话跟踪工作区，因此没有文件改动可显示。",
+      "withheld": "{count, plural, other {# 个文件没有可查看的差异}}"
+    },
     "collapseTurn": "收起回合详情",
     "composerAria": "追问消息",
     "composerPlaceholder": "发送追问…",
@@ -23,10 +59,32 @@
     "loadingTranscript": "正在加载会话记录…",
     "notFound": "会话不存在或已不可用。",
     "observeOnly": "仅观察",
+    "observeOnlyMissingGrant": "仅观察——此设备未开启远程控制",
+    "observeOnlyReconnecting": "仅观察——正在重新连接会话",
     "offlineHint": "桌面端已离线——重新连接后可继续跟随此会话。",
     "retryTranscript": "重试加载会话记录",
     "sendAria": "发送",
     "streaming": "流式输出中",
+    "tabs": {
+      "changes": "改动",
+      "tests": "测试",
+      "transcript": "会话记录"
+    },
+    "tests": {
+      "conclusions": {
+        "failed": "失败",
+        "inconclusive": "无法判定",
+        "passed": "通过"
+      },
+      "failed": "{count} 个失败",
+      "inconclusiveNote": "测试输出无法解析，因此不给出通过或失败数量。",
+      "loading": "正在加载测试结果…",
+      "noRuns": "该会话还没有任何运行同步到本设备。",
+      "none": "该会话没有任何回合记录过测试运行。",
+      "passed": "{count} 个通过",
+      "progress": "{total} 个测试中通过 {passed} 个",
+      "skipped": "{count} 个跳过"
+    },
     "title": "实时会话"
   },
   "list": {

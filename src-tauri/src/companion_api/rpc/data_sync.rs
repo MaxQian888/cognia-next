@@ -50,6 +50,10 @@ pub(super) const COMMANDS: &[&str] = &[
     "device_capabilities_report",
     "session_attach",
     "session_detach",
+    "session_attachment_upload_init",
+    "session_attachment_upload_chunk",
+    "session_attachment_upload_commit",
+    "session_attachment_upload_abort",
     "goal_pause",
     "goal_resume",
     "goal_stop",
@@ -659,6 +663,14 @@ pub(super) async fn dispatch(
         // `lib/companion/desktop-write-source.ts`. Gated by CONTROL_COMMANDS.
         | "session_attach"
         | "session_detach"
+        // Remote Session Control — chunked attachment upload. The chunk arm is
+        // the only bridged command whose body is dominated by payload rather
+        // than parameters; it is sized against the RPC body ceiling, not the
+        // file (see `limits.attachmentUploadChunkBytes`).
+        | "session_attachment_upload_init"
+        | "session_attachment_upload_chunk"
+        | "session_attachment_upload_commit"
+        | "session_attachment_upload_abort"
         | "goal_pause"
         | "goal_resume"
         | "goal_stop"
@@ -751,9 +763,10 @@ pub(super) async fn dispatch(
             // caller device. Injected server-side (overwriting any
             // client-sent value) so a device can never spoof another's id.
             let args = inject_caller_device_id(name, args, device_id);
+            let args = inject_caller_event_streams(name, args, device_id);
             let args = inject_caller_device_grants(name, args, state, device_id, account_id);
             let args = if super::host_state::COMMANDS.contains(&name) {
-                super::host_state::bind_authority(args, state, account_id)?
+                super::host_state::bind_authority(args, state, account_id, device_id)?
             } else {
                 args
             };

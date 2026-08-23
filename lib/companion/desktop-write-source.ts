@@ -44,6 +44,18 @@ import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
 import {
+  abortAttachmentUpload,
+  appendAttachmentChunk,
+  beginAttachmentUpload,
+  commitAttachmentUpload,
+} from "@/lib/db/session-attachment-uploads"
+import {
+  ATTACH_LEASE_RENEW_INTERVAL_MS,
+  ATTACH_LEASE_TTL_MS,
+  type AttachMode,
+  type EventStreamConnection,
+} from "@/lib/companion/device-presence-registry"
+import {
   handleTeamRunPause,
   handleTeamRunResume,
   handleTeamRunStop,
@@ -143,9 +155,11 @@ import {
   createHostStateService,
   type HostStateService,
 } from "@/lib/sync/host-state-service"
+import { permittedHostStateIntentKinds } from "@cognia/agent-config-types/host-state"
 import type {
-  HostStateSnapshotRequestV1,
-  HostStateSubmitRequestV1,
+  HostStateSnapshotRequest,
+  HostStateSubmitCaller,
+  HostStateSubmitRequest,
 } from "@cognia/agent-config-types/host-state"
 import { isAgentEventEnvelope } from "@cognia/agent-config-types/agent-execution"
 
@@ -353,6 +367,17 @@ export async function dispatchCommand(
       return sessionAttach(payload)
     case "session_detach":
       return sessionDetach(payload)
+    // Remote Session Control — chunked attachment upload (ADR-0005 §4.5). The
+    // bytes of a file staged on a phone reach the Host only through these five
+    // arms; `message.enqueue` carries the ref they mint and nothing else.
+    case "session_attachment_upload_init":
+      return attachmentUploadInit(payload)
+    case "session_attachment_upload_chunk":
+      return attachmentUploadChunk(payload)
+    case "session_attachment_upload_commit":
+      return attachmentUploadCommit(payload)
+    case "session_attachment_upload_abort":
+      return attachmentUploadAbort(payload)
     // Remote Session Control — steer a host /goal self-driving loop. Routes
     // to the existing GoalRuntime transitions (which rotate generationId,
     // fire the turn-driver abort, append the audit event, and emit
@@ -530,7 +555,7 @@ async function hostStateSnapshot(
   bridge?: TauriBridge
 ): Promise<unknown> {
   const service = await resolveHostStateService(payload, bridge)
-  return service.snapshot(stripHostStateInternal(payload) as unknown as HostStateSnapshotRequestV1)
+  return service.snapshot(stripHostStateInternal(payload) as unknown as HostStateSnapshotRequest)
 }
 
 async function hostStateSubmit(
@@ -538,7 +563,36 @@ async function hostStateSubmit(
   bridge?: TauriBridge
 ): Promise<unknown> {
   const service = await resolveHostStateService(payload, bridge)
-  return service.submit(stripHostStateInternal(payload) as unknown as HostStateSubmitRequestV1)
+  return service.submit(
+    stripHostStateInternal(payload) as unknown as HostStateSubmitRequest,
+    hostStateCaller(payload)
+  )
+}
+
+/**
+ * Lift the server-verified caller out of the RPC envelope.
+ *
+ * `rpc/host_state.rs::bind_authority` overwrites both fields from the
+ * DPoP-verified JWT and the SecurityStore, so whatever the client sent is
+ * already gone by the time the payload arrives here. A non-string device id or
+ * a non-array grant list therefore means the request bypassed that binding, and
+ * the service refuses the batch rather than treating it as an ungranted device.
+ */
+function hostStateCaller(payload: Record<string, unknown>): HostStateSubmitCaller {
+  const deviceId = payload.callerDeviceId
+  const grants = payload.callerDeviceGrants
+  return {
+    deviceId: typeof deviceId === "string" ? deviceId : "",
+    // Malformed stays malformed. Coercing a non-array to `[]` here made
+    // `assertCaller`'s array check unreachable, so a request that had skipped
+    // `bind_authority` came back as ordinary per-action `host_state_forbidden`
+    // receipts — exactly the routing bug that check exists to make loud. The
+    // service refuses the batch instead.
+    grants:
+      Array.isArray(grants) && grants.every((entry) => typeof entry === "string")
+        ? (grants as string[])
+        : (grants as HostStateSubmitCaller["grants"]),
+  }
 }
 
 async function hostStateStatus(
@@ -549,27 +603,252 @@ async function hostStateStatus(
   return service.status()
 }
 
+/**
+ * Drop the server-injected authority fields so what reaches the service is the
+ * closed protocol body the client actually constructed. `assertClosedSubmitRequest`
+ * rejects any extra key, so this list must stay in lockstep with what
+ * `rpc/host_state.rs::bind_authority` inserts.
+ */
 function stripHostStateInternal(payload: Record<string, unknown>): Record<string, unknown> {
-  const { authoritativeHostId: _hostId, callerAccountId: _accountId, ...request } = payload
+  const {
+    authoritativeHostId: _hostId,
+    callerAccountId: _accountId,
+    callerDeviceId: _deviceId,
+    callerDeviceGrants: _grants,
+    ...request
+  } = payload
   return request
 }
 
-function sessionAttach(payload: Record<string, unknown>): null {
+/**
+ * The device behind an attach/detach, taken from the verified JWT.
+ *
+ * `rpc.rs::inject_caller_device_id` lists both commands, so `callerDeviceId` is
+ * server-injected and overwrites whatever the client sent. The client's own
+ * `deviceId` field is deliberately ignored: the attach registry decides which
+ * device the Host routes a `permission_request` to, so honouring a self-asserted
+ * id let any paired device collect another device's approval prompts.
+ */
+function callerDeviceIdFor(command: string, payload: Record<string, unknown>): string {
+  const callerDeviceId = payload.callerDeviceId
+  if (typeof callerDeviceId !== "string" || !callerDeviceId) {
+    throw new Error(`${command}.callerDeviceId is required`)
+  }
+  return callerDeviceId
+}
+
+/**
+ * Register a remote watcher and report what it actually got.
+ *
+ * Everything authoritative here is server-injected and any client-sent value is
+ * overwritten before this arm runs: `callerDeviceId` (so a device cannot attach
+ * under a borrowed id and collect another's prompts), `callerEventStreams` (so
+ * it cannot claim to hear a run it has no stream for), and `callerDeviceGrants`
+ * (so it cannot claim Remote Control it was never given). Only `mode` and
+ * `attention` come from the caller, and both can only ever narrow what happens.
+ */
+function sessionAttach(payload: Record<string, unknown>): {
+  mode: string
+  downgradeReason: string | null
+  eventPlane: string
+  leaseTtlMs: number
+  renewIntervalMs: number
+  supportedActions: string[]
+} {
   const sessionId = payload.sessionId as string | undefined
-  const deviceId = payload.deviceId as string | undefined
   if (!sessionId) throw new Error("session_attach.sessionId is required")
-  if (!deviceId) throw new Error("session_attach.deviceId is required")
-  attachSession(sessionId, deviceId)
-  return null
+  const grants = readCallerGrants(payload.callerDeviceGrants)
+  const result = attachSession(sessionId, callerDeviceIdFor("session_attach", payload), {
+    requestedMode: readAttachMode(payload.mode),
+    eventStreams: readEventStreams(payload.callerEventStreams),
+    grants,
+    attention: readAttention(payload.attention),
+  })
+  // The client needs the mode it actually got: asking for control and being
+  // given observe is the difference between a composer and a read-only view.
+  // The TTL travels with it so the renewal cadence is the Host's to change.
+  //
+  // `supportedActions` is the per-session capability answer: which HostState
+  // intents this caller may actually submit here. Derived from the same table
+  // `host_state_submit` authorizes against, so a client can never be shown an
+  // action that would 403 — and an observer is told, rather than left to
+  // discover it one rejected submit at a time. An observer gets none, whatever
+  // it holds: the grants say what it MAY do, the attachment says whether it is
+  // currently the one doing it.
+  return {
+    mode: result.mode,
+    downgradeReason: result.downgradeReason,
+    eventPlane: result.eventPlane,
+    leaseTtlMs: ATTACH_LEASE_TTL_MS,
+    renewIntervalMs: ATTACH_LEASE_RENEW_INTERVAL_MS,
+    supportedActions: result.mode === "control" ? permittedHostStateIntentKinds(grants) : [],
+  }
+}
+
+/** Absent means `control` — see `AttachSessionOptions.requestedMode`. */
+function readAttachMode(raw: unknown): AttachMode {
+  return raw === "observe" ? "observe" : "control"
+}
+
+/**
+ * Server-injected event-plane leases. A malformed or absent value reads as "no
+ * streams", which downgrades the attachment to observe rather than letting a
+ * bad payload confer control.
+ */
+function readEventStreams(raw: unknown): EventStreamConnection[] {
+  if (!Array.isArray(raw)) return []
+  const streams: EventStreamConnection[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue
+    const { leaseId, transport, state, openedAt } = entry as Record<string, unknown>
+    if (typeof leaseId !== "string" || !leaseId) continue
+    if (transport !== "ws" && transport !== "rtc") continue
+    if (state !== "connecting" && state !== "replaying" && state !== "ready") continue
+    streams.push({
+      leaseId,
+      transport,
+      state,
+      openedAt: typeof openedAt === "number" ? openedAt : 0,
+    })
+  }
+  return streams
+}
+
+/** Server-injected capability grants; anything else reads as "no grants". */
+function readCallerGrants(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((grant): grant is string => typeof grant === "string" && grant.length > 0)
+}
+
+/**
+ * Client-reported foreground/background. Unrecognized or absent reads as
+ * `unknown`, which suppresses no notification — the fail-safe direction, since
+ * the cost of a wrong `foreground` is a decision prompt nobody is shown.
+ */
+function readAttention(raw: unknown): "foreground" | "background" | "unknown" {
+  return raw === "foreground" || raw === "background" ? raw : "unknown"
 }
 
 function sessionDetach(payload: Record<string, unknown>): null {
   const sessionId = payload.sessionId as string | undefined
-  const deviceId = payload.deviceId as string | undefined
   if (!sessionId) throw new Error("session_detach.sessionId is required")
-  if (!deviceId) throw new Error("session_detach.deviceId is required")
-  detachSession(sessionId, deviceId)
+  detachSession(sessionId, callerDeviceIdFor("session_detach", payload))
   return null
+}
+
+/**
+ * Open (or rejoin) an attachment upload.
+ *
+ * The session and the device are the two things a client must not be able to
+ * choose: `callerDeviceId` is server-injected, and the session it names is
+ * written into the row so a later chunk cannot re-point the file at a
+ * conversation the device was never attached to. Everything else — the name,
+ * the declared type, the size, the hash — is a claim, and every one of them is
+ * checked again at commit against the bytes that actually arrived.
+ *
+ * Answers `resumeOffset` rather than assuming zero, so a client that lost its
+ * socket (or its process) mid-file continues from the write head instead of
+ * paying for the whole transfer twice.
+ */
+async function attachmentUploadInit(payload: Record<string, unknown>): Promise<{
+  uploadId: string
+  chunkSize: number
+  resumeOffset: number
+  complete: boolean
+  ref: string | null
+}> {
+  const command = "session_attachment_upload_init"
+  const result = await beginAttachmentUpload({
+    sessionId: requiredString(command, payload, "sessionId"),
+    deviceId: callerDeviceIdFor(command, payload),
+    name: requiredString(command, payload, "name"),
+    mediaType: requiredString(command, payload, "mediaType"),
+    size: requiredNumber(command, payload, "size"),
+    hash: requiredString(command, payload, "hash"),
+  })
+  return {
+    uploadId: result.uploadId,
+    chunkSize: result.chunkSize,
+    resumeOffset: result.resumeOffset,
+    complete: result.complete,
+    ref: result.ref ?? null,
+  }
+}
+
+/** Append one chunk. `receivedBytes` comes back so a client that guessed the
+ *  offset wrong can re-sync without restarting the file. */
+async function attachmentUploadChunk(
+  payload: Record<string, unknown>
+): Promise<{ receivedBytes: number; complete: boolean }> {
+  const command = "session_attachment_upload_chunk"
+  return appendAttachmentChunk({
+    uploadId: requiredString(command, payload, "uploadId"),
+    deviceId: callerDeviceIdFor(command, payload),
+    offset: requiredNumber(command, payload, "offset"),
+    bytes: decodeChunk(command, payload.dataBase64),
+  })
+}
+
+/** Seal the upload and mint its ref. */
+async function attachmentUploadCommit(payload: Record<string, unknown>): Promise<{
+  ref: string
+  name: string
+  mediaType: string
+  size: number
+  hash: string
+}> {
+  const command = "session_attachment_upload_commit"
+  return commitAttachmentUpload({
+    uploadId: requiredString(command, payload, "uploadId"),
+    deviceId: callerDeviceIdFor(command, payload),
+  })
+}
+
+/** Discard an upload the client gave up on, freeing its staging slot. */
+async function attachmentUploadAbort(payload: Record<string, unknown>): Promise<null> {
+  const command = "session_attachment_upload_abort"
+  await abortAttachmentUpload({
+    uploadId: requiredString(command, payload, "uploadId"),
+    deviceId: callerDeviceIdFor(command, payload),
+  })
+  return null
+}
+
+function requiredString(command: string, payload: Record<string, unknown>, field: string): string {
+  const value = payload[field]
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${command}.${field} is required`)
+  }
+  return value
+}
+
+function requiredNumber(command: string, payload: Record<string, unknown>, field: string): number {
+  const value = payload[field]
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${command}.${field} is required`)
+  }
+  return value
+}
+
+/**
+ * Decode one base64 chunk.
+ *
+ * Rejects rather than truncates on malformed input: a chunk that silently
+ * decoded to fewer bytes than the client sent would sail past the offset check
+ * and only surface as a hash mismatch at the end of a 10 MB transfer.
+ */
+function decodeChunk(command: string, raw: unknown): Uint8Array {
+  if (typeof raw !== "string" || raw.length === 0) {
+    throw new Error(`${command}.dataBase64 is required`)
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || raw.length % 4 !== 0) {
+    throw new Error(`${command}.dataBase64 is not valid base64`)
+  }
+  const binary =
+    typeof atob === "function" ? atob(raw) : Buffer.from(raw, "base64").toString("binary")
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index)
+  return bytes
 }
 
 async function goalTransition(
@@ -1906,6 +2185,12 @@ async function externalAgentList(): Promise<{ agents: ExternalAgentSummary[] }> 
  * {@link adaptPermissionMode} against the agent's own protocol, so the phone
  * can never persist a mode the backend can't enforce (e.g. `dontAsk` on
  * Codex) — the desktop store is the authority, so the clamp lives here.
+ *
+ * The write itself goes through the lifecycle service rather than the store.
+ * Writing to the store directly persisted the new value and left the runtime
+ * untouched: disabling an agent from a paired device flipped the toggle while
+ * the child process kept running, and re-enabling it did nothing until the
+ * desktop app was restarted.
  */
 async function externalAgentUpdate(
   payload: Record<string, unknown>
@@ -1941,7 +2226,10 @@ async function externalAgentUpdate(
     throw new Error("external_agent_update.patch has no editable fields")
   }
 
-  store.updateAgent(id, updates)
+  const { getExternalAgentLifecycleService } =
+    await import("@/lib/ai/agent/external/lifecycle/service")
+  const lifecycle = await getExternalAgentLifecycleService()
+  await lifecycle.updateConfig(id, updates)
 
   const next = store.getAgent(id)
   return {

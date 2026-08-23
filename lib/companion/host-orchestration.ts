@@ -78,6 +78,39 @@ export interface SwitchCompanionHostInput {
   force?: boolean
 }
 
+/**
+ * Which leg of {@link pairAndActivateCompanionHost} failed.
+ *
+ * Pairing is one button but seven steps — write the device key, upsert the Host
+ * record, register the runtime target, reload the transport, negotiate the Host
+ * feature manifest, run an authoritative sync, rebind Host services — and every
+ * one of them can fail for an unrelated reason with an unrelated remedy. Losing
+ * that distinction is how `/pair` came to report a locked Browser Vault, an
+ * unreachable Host and an incompatible manifest with the single sentence "the
+ * device was registered, but its credential couldn't be saved securely".
+ *
+ * `credential` — the device key could not be stored (locked Vault, quota,
+ * secure-storage refusal). `activate` — the key IS stored and the invitation IS
+ * spent; only bringing the Host online failed, so retrying pairing with a fresh
+ * invitation is the wrong advice.
+ */
+export type CompanionPairPhase = "credential" | "activate"
+
+export class CompanionPairPhaseError extends Error {
+  constructor(
+    readonly phase: CompanionPairPhase,
+    readonly reason: unknown
+  ) {
+    super(reason instanceof Error ? reason.message : String(reason), { cause: reason })
+    this.name = "CompanionPairPhaseError"
+  }
+}
+
+/** The phase tag of a caught pairing error, when it carries one. */
+export function companionPairPhaseOf(error: unknown): CompanionPairPhase | null {
+  return error instanceof CompanionPairPhaseError ? error.phase : null
+}
+
 export interface PairAndActivateCompanionHostInput {
   accountId: string
   platform: CompanionClientPlatform
@@ -119,18 +152,30 @@ export async function pairAndActivateCompanionHost(
     deps.book.getActive(input.accountId),
   ])
   try {
-    await deps.book.saveCredential(key, companionHostCredentialFromConfig(input.config))
-    const record = await deps.book.upsert(
-      companionHostDraftFromConfig(
-        { ...input.config, accountId: input.accountId },
-        input.accountId,
-        existing
+    // Tagged per leg so the caller can tell "the key was never stored" from
+    // "the key is stored and the invitation is spent". See CompanionPairPhase.
+    const record = await inPhase("credential", async () => {
+      await deps.book.saveCredential(key, companionHostCredentialFromConfig(input.config))
+      const saved = await deps.book.upsert(
+        companionHostDraftFromConfig(
+          { ...input.config, accountId: input.accountId },
+          input.accountId,
+          existing
+        )
       )
-    )
-    await deps.registry.upsertCompanionTarget(runtimeTargetInput(record))
-    return await switchCompanionHostNow(
-      { accountId: input.accountId, hostId: record.hostId, platform: input.platform, force: true },
-      deps
+      await deps.registry.upsertCompanionTarget(runtimeTargetInput(saved))
+      return saved
+    })
+    return await inPhase("activate", () =>
+      switchCompanionHostNow(
+        {
+          accountId: input.accountId,
+          hostId: record.hostId,
+          platform: input.platform,
+          force: true,
+        },
+        deps
+      )
     )
   } catch (error) {
     // A re-pair replaces the same stable Host. Restore the previous record and
@@ -167,6 +212,17 @@ export async function pairAndActivateCompanionHost(
     throw error
   } finally {
     ownedRegistry?.close()
+  }
+}
+
+/** Run one leg of pairing, tagging whatever it throws with that leg's name. */
+async function inPhase<T>(phase: CompanionPairPhase, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    throw error instanceof CompanionPairPhaseError
+      ? error
+      : new CompanionPairPhaseError(phase, error)
   }
 }
 

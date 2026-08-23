@@ -80,8 +80,11 @@ export interface PairedDeviceRow {
   /**
    * Remote Session Control capability gate. When `true`, this device may
    * issue *control* RPCs (claude_send / claude_interrupt / claude_approve,
-   * goal_*, automation_consent_respond, session_attach/detach) — i.e. drive
-   * and steer live agent sessions, not just read-only sync. Defaults to
+   * goal_*, automation_consent_respond, and a `mode: "control"`
+   * session_attach) — i.e. drive and steer live agent sessions, not just
+   * read-only sync. Attaching as an *observer* needs only the read capability
+   * every paired device holds, and detaching releases the caller's own lease,
+   * so neither is gated here. Defaults to
    * absent/`false`: a freshly-paired device can observe + sync but cannot
    * control until the owner explicitly enables this from the desktop
    * paired-devices card (biometric-gated). The Rust `ControlAllowList`

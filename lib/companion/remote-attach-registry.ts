@@ -1,30 +1,66 @@
 "use client"
 
 /**
- * Remote Session Control — host-side attach registry + approval backstop.
+ * Remote Session Control — host-side attach façade + approval backstop.
  *
  * When a remote device opens a session viewer it calls the `session_attach`
  * RPC; on close / navigate-away it calls `session_detach`. Both land in
- * `lib/companion/desktop-write-source.ts` which updates this process-global
- * (renderer) registry. `hooks/chat/use-claude-chat.ts` consults
- * `isSessionAttached` so a `permission_request` for a session that is NOT the
- * desktop's foreground session is **routed to the attached remote device**
- * (which already received the frame over `/ws/events` and will call
- * `claude_approve`) instead of being auto-denied with "session not active".
+ * `lib/companion/desktop-write-source.ts`. `hooks/chat/claude-chat-events.ts`
+ * consults `isSessionAttached` so a `permission_request` for a session that is
+ * NOT the desktop's foreground session is **routed to the attached remote
+ * device** (which already received the frame over its event stream and will
+ * call `claude_approve`) instead of being auto-denied with "session not
+ * active".
+ *
+ * The attachment state itself lives in `device-presence-registry.ts`. It used
+ * to live here as a bare `sessionId → Set<deviceId>` map, which had two holes:
+ * nothing ever expired, so a phone that lost its socket kept collecting
+ * approval prompts forever; and `detachDevice` — the only way to clear a
+ * device-level disconnect — was exported but never called from anywhere. Leases
+ * close the first (and `sweepExpiredLeases` now runs off each renewal, so
+ * lapsed entries are removed rather than merely filtered out on read);
+ * `installCompanionEventBridge` closes the second by calling `detachDevice` on
+ * `companion://device-lifecycle`. This module now keeps only what is genuinely
+ * local to approvals: the mode decision, and the backstop timers.
  *
  * Because the sidecar's `canUseTool` has no timeout of its own (see
  * `sidecar/dispatch/anthropic.mjs`), an un-answered approval would hang the
  * turn forever. `armApprovalBackstop` schedules a renderer-side deny that
  * fires only if the remote never responds; `clearApprovalBackstops` cancels it
  * the moment the turn proceeds (next SDK event) or ends.
- *
- * Refcounted by deviceId so two devices watching the same session don't
- * detach each other — a session stays "attached" until the last watcher
- * leaves.
  */
 
-/** sessionId → set of deviceIds currently watching it. */
-const attached = new Map<string, Set<string>>()
+import {
+  __resetDevicePresenceForTests,
+  attachSessionLease,
+  attachedDeviceIds as presenceAttachedDeviceIds,
+  deviceEventStreams,
+  eventPlaneState,
+  hasControlLease,
+  notifiableControllers as presenceNotifiableControllers,
+  readyEventStreamLeaseId,
+  releaseDevice,
+  releaseSessionLease,
+  renewSessionLease,
+  sessionLeaseFor,
+  setDeviceAttention,
+  syncEventStreams,
+  type AttachMode,
+  type DeviceAttention,
+  type EventPlaneState,
+  type EventStreamConnection,
+} from "./device-presence-registry"
+
+/**
+ * The capability a device must hold to take a **control** attachment.
+ *
+ * `workspace.write` is what `GrantKind::Control` — the paired-devices "remote
+ * control" toggle — maps onto. Deliberately NOT `agent.run`: every freshly
+ * paired member device is granted `agent.run` by `insert_default_grants`, so
+ * keying control off it would hand every phone the steering wheel the moment it
+ * paired.
+ */
+export const REMOTE_CONTROL_CAPABILITY = "workspace.write"
 
 /** sessionId → (requestId → backstop timer handle). */
 const backstops = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
@@ -33,45 +69,155 @@ const backstops = new Map<string, Map<string, ReturnType<typeof setTimeout>>>()
  *  it only fires when the remote never answers (e.g. the device dropped). */
 export const DEFAULT_APPROVAL_BACKSTOP_MS = 120_000
 
-/** Record that `deviceId` is now watching `sessionId`. Idempotent. */
-export function attachSession(sessionId: string, deviceId: string): void {
-  if (!sessionId || !deviceId) return
-  let set = attached.get(sessionId)
-  if (!set) {
-    set = new Set()
-    attached.set(sessionId, set)
-  }
-  set.add(deviceId)
+/** Why an attachment that asked for control did not get it. `null` when it did,
+ *  or when it never asked. */
+export type AttachDowngradeReason = "missing-capability" | "event-plane-not-ready"
+
+export interface AttachSessionOptions {
+  /**
+   * What the client asked for. Absent means `control`: that is what every
+   * client did before the mode existed, and silently demoting them to a
+   * read-only view would be a worse default than refusing the ones that turn
+   * out to be unauthorized.
+   */
+  requestedMode?: AttachMode
+  /**
+   * The caller's live event-plane streams, exactly as the RPC boundary
+   * reported them (`callerEventStreams`, minted in
+   * `src-tauri/src/companion_api/event_leases.rs`). Server-bound on purpose: a
+   * self-asserted value would let a device claim it can hear a run it has no
+   * stream for.
+   */
+  eventStreams: readonly EventStreamConnection[]
+  /**
+   * The caller's capability grants, as the RPC boundary read them out of the
+   * SecurityStore. Also server-bound, for the same reason.
+   */
+  grants: readonly string[]
+  /**
+   * Whether the user is actually looking at the device, as the device reports
+   * it. Self-asserted on purpose and deliberately NOT server-bound: it decides
+   * only whether a *notification* is suppressed, never what the device may do,
+   * and no other party can observe it. Lying costs the liar a duplicate alert
+   * or a missing one. Absent means `unknown`, which suppresses nothing.
+   */
+  attention?: DeviceAttention
+  now?: number
 }
 
-/** Record that `deviceId` stopped watching `sessionId`. Drops the session
- *  entry once the last watcher leaves. Idempotent. */
+export interface AttachSessionResult {
+  /** The mode actually granted, which may be narrower than the one asked for. */
+  mode: AttachMode
+  /** Set when `requestedMode` was `control` and the answer is `observe`. */
+  downgradeReason: AttachDowngradeReason | null
+  /** The device's derived event-plane state after this call. */
+  eventPlane: EventPlaneState
+}
+
+/**
+ * Record that `deviceId` is watching `sessionId`, and return the mode it
+ * actually got. Idempotent — re-attaching renews the lease, which is how a
+ * client keeps its attachment alive across the TTL.
+ *
+ * Control needs three things at once, and the caller gets `observe` if any is
+ * missing: the request, the capability, and a caught-up event stream. The third
+ * is the one that is easy to forget — a device that can reach the RPC endpoint
+ * but whose stream is dead or still replaying can *ask* for things without
+ * *hearing* what happens, which is exactly the state in which steering a run is
+ * dangerous.
+ */
+export function attachSession(
+  sessionId: string,
+  deviceId: string,
+  options: AttachSessionOptions
+): AttachSessionResult {
+  const now = options.now ?? Date.now()
+  syncEventStreams({ deviceId, streams: options.eventStreams, at: now })
+  setDeviceAttention(deviceId, options.attention ?? "unknown", now)
+
+  const requested: AttachMode = options.requestedMode ?? "control"
+  const readyLeaseId = readyEventStreamLeaseId(deviceId)
+  const mayControl = options.grants.includes(REMOTE_CONTROL_CAPABILITY)
+  const existing = sessionLeaseFor(sessionId, deviceId, now)
+
+  // A renewal arriving mid-reconnect must not demote a controller. The lease
+  // has a TTL precisely so a device survives network churn without re-earning
+  // its authority; downgrading it here would hand the session to nobody and
+  // make the approval router auto-deny prompts meant for a device that is
+  // seconds from being back. Losing the *capability* is different — that is a
+  // decision someone made, not churn, so it still demotes immediately.
+  if (requested === "control" && mayControl && readyLeaseId === null) {
+    if (existing?.mode === "control") {
+      renewSessionLease({ sessionId, deviceId, at: now })
+      return { mode: "control", downgradeReason: null, eventPlane: eventPlaneState(deviceId) }
+    }
+  }
+
+  let mode: AttachMode = "observe"
+  let downgradeReason: AttachDowngradeReason | null = null
+  if (requested === "control") {
+    if (!mayControl) downgradeReason = "missing-capability"
+    else if (readyLeaseId === null) downgradeReason = "event-plane-not-ready"
+    else mode = "control"
+  }
+
+  // An observer binds to whatever stream it has, so its attachment names a real
+  // channel too. With no stream at all there is nothing to bind to and nothing
+  // to route, so the device holds no attachment: a poll-only client reads the
+  // transcript through `host_state_snapshot` and needs none. Releasing rather
+  // than leaving the old one is what stops a device that dropped every stream
+  // AND lost its control lease from lingering as a watcher forever.
+  const bindTo = mode === "control" ? readyLeaseId : (oldestStreamLeaseId(deviceId) ?? null)
+  if (bindTo !== null) {
+    attachSessionLease({ sessionId, deviceId, mode, eventStreamLeaseId: bindTo, at: now })
+  } else {
+    releaseSessionLease(sessionId, deviceId)
+  }
+
+  return { mode, downgradeReason, eventPlane: eventPlaneState(deviceId) }
+}
+
+function oldestStreamLeaseId(deviceId: string): string | undefined {
+  return deviceEventStreams(deviceId)[0]?.leaseId
+}
+
+/** Record that `deviceId` stopped watching `sessionId`. Idempotent. */
 export function detachSession(sessionId: string, deviceId: string): void {
-  const set = attached.get(sessionId)
-  if (!set) return
-  set.delete(deviceId)
-  if (set.size === 0) attached.delete(sessionId)
+  releaseSessionLease(sessionId, deviceId)
 }
 
 /** Drop `deviceId` from every session it was watching. Use on a device-level
- *  disconnect so stale attachments don't keep approvals pending. */
+ *  disconnect or a revoked grant so stale attachments don't keep approvals
+ *  pending. */
 export function detachDevice(deviceId: string): void {
-  for (const [sessionId, set] of attached) {
-    if (set.delete(deviceId) && set.size === 0) {
-      attached.delete(sessionId)
-    }
-  }
+  releaseDevice(deviceId)
 }
 
-/** True when at least one remote device is watching `sessionId`. */
-export function isSessionAttached(sessionId: string): boolean {
-  const set = attached.get(sessionId)
-  return set !== undefined && set.size > 0
+/**
+ * True when some remote device holds a live **control** lease on `sessionId` —
+ * i.e. when there is somebody who can actually answer a prompt.
+ *
+ * Observers are excluded deliberately. Counting one would hold a decision open
+ * for a device that is only allowed to watch it, and the turn would sit blocked
+ * until the backstop denied it.
+ */
+export function isSessionAttached(sessionId: string, now: number = Date.now()): boolean {
+  return hasControlLease(sessionId, now)
 }
 
-/** The deviceIds currently watching `sessionId` (empty when none). */
-export function attachedDeviceIds(sessionId: string): string[] {
-  return Array.from(attached.get(sessionId) ?? [])
+/** The deviceIds currently watching `sessionId`, in either mode (empty when
+ *  none). Presence, not authority. */
+export function attachedDeviceIds(sessionId: string, now: number = Date.now()): string[] {
+  return presenceAttachedDeviceIds(sessionId, now)
+}
+
+/**
+ * The devices that should be woken by an out-of-band push for a decision on
+ * `sessionId` — control attachments only, minus any device already looking at
+ * a live stream. See `notifiableControllers` for why each exclusion is there.
+ */
+export function approvalPushTargets(sessionId: string, now: number = Date.now()): string[] {
+  return presenceNotifiableControllers(sessionId, now)
 }
 
 /**
@@ -121,6 +267,6 @@ export function __resetRemoteAttachForTests(): void {
   for (const perSession of backstops.values()) {
     for (const timer of perSession.values()) clearTimeout(timer)
   }
-  attached.clear()
   backstops.clear()
+  __resetDevicePresenceForTests()
 }

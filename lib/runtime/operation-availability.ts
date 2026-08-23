@@ -1,3 +1,4 @@
+import type { HostFeatureLimits } from "@/lib/platform/host-feature-manifest"
 import { getCommandDescriptor } from "@/lib/tauri/command-descriptors"
 import type { RuntimeTarget } from "./runtime-target"
 
@@ -11,6 +12,15 @@ export interface HostRuntimeSnapshot {
   operations: readonly string[]
   /** Command-manifest capability grants currently held by this device. */
   grants: readonly string[]
+  /**
+   * Ceilings the host published with its manifest.
+   *
+   * Carried because a client that guesses them discovers the real ones one
+   * refusal at a time — an attachment picker that stages six files against a
+   * host that takes two is worse than one that offers two. Absent for a V1
+   * manifest, and for any host that published no limits.
+   */
+  limits?: HostFeatureLimits
 }
 
 export interface RuntimeSnapshot {

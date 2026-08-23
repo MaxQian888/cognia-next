@@ -183,7 +183,6 @@ describe("App", () => {
     const channel = sessionStateChannel(targetId, sessionId)
     const state = createEmptyHostStateSession(channel, sessionId)
     const queuedAction = {
-      protocolVersion: 1 as const,
       channel,
       accountId: "local-default",
       runtimeTargetId: targetId,
@@ -203,7 +202,6 @@ describe("App", () => {
     }
     jest.mocked(attachLocalHost).mockResolvedValueOnce({
       record: {
-        protocolVersion: 1,
         accountId: "local-default",
         runtimeTargetId: targetId,
         hostId: "host-remote",
@@ -213,7 +211,6 @@ describe("App", () => {
       },
       client: {} as never,
       snapshot: {
-        protocolVersion: 1,
         channel,
         hostId: "host-remote",
         hostGeneration: 2,

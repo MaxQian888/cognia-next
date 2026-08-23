@@ -1120,7 +1120,9 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), 65536).await.unwrap();
-        assert!(std::str::from_utf8(&body).unwrap().contains("error=access_denied"));
+        assert!(std::str::from_utf8(&body)
+            .unwrap()
+            .contains("error=access_denied"));
     }
 
     #[tokio::test]
@@ -1211,7 +1213,9 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = to_bytes(resp.into_body(), 65536).await.unwrap();
-        assert!(std::str::from_utf8(&body).unwrap().contains("error=access_denied"));
+        assert!(std::str::from_utf8(&body)
+            .unwrap()
+            .contains("error=access_denied"));
     }
 
     #[tokio::test]
@@ -1229,7 +1233,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "slug {slug} must be rejected");
+            assert_eq!(
+                resp.status(),
+                StatusCode::NOT_FOUND,
+                "slug {slug} must be rejected"
+            );
         }
         assert!(emitter.events.lock().is_empty());
     }

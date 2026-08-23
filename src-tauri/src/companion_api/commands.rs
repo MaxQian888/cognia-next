@@ -745,7 +745,7 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // approval decision; notify a backgrounded watcher so it doesn't wait
     // out the renderer-side backstop. Emitted by
     // `lib/companion/needs-input-notifier.ts`.
-    register_push_trigger(app, "companion://needs-input");
+    register_push_trigger(app, NEEDS_INPUT_CHANNEL);
     // ADR-0061 P2 — terminal workflow runs (failed always; succeeded /
     // cancelled only when a paired device triggered the run — policy lives
     // in `companion-run-events.ts`). Payload carries ids + status only.
@@ -849,6 +849,24 @@ fn push_data_for_channel(
     channel: &str,
     raw: &serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {
+    // Remote Session Control — a decision prompt says WHERE, never WHAT. The
+    // raw emit carries the tool name so the renderer can log it and the target
+    // device list so this trigger can route; neither may transit APNs/FCM or
+    // land on a lock screen. Everything the client needs to open the right
+    // decision is an id.
+    if channel == NEEDS_INPUT_CHANNEL {
+        let mut out = serde_json::Map::new();
+        for key in ["sessionId", "requestId", "targetId", "href", "dedupeKey"] {
+            if let Some(value) = raw.get(key).and_then(|v| v.as_str()) {
+                out.insert(key.into(), serde_json::Value::String(value.to_string()));
+            }
+        }
+        out.insert(
+            "source".into(),
+            serde_json::Value::String("remote-session".into()),
+        );
+        return out;
+    }
     if channel != AUTOMATION_CONSENT_CHANNEL {
         return raw.clone();
     }
@@ -897,18 +915,57 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
                 data: push_data_for_channel(&channel_name, &raw_data),
             };
 
+            // A channel may name the devices the event is for. `Some(vec![])`
+            // and `None` are different answers: the first means "the Host
+            // computed the audience and it is empty", the second means "this
+            // event is account-wide". Only the second broadcasts.
+            let targets = push_targets_for(&channel_name, &raw_data);
+
             for provider in [
                 super::push::PushProvider::Fcm,
                 super::push::PushProvider::Apns,
             ] {
                 if let Some(d) = dispatchers.for_provider(provider) {
                     let _ = registry
-                        .broadcast_to_offline(provider, &payload, d.as_ref())
+                        .broadcast_to_offline_targets(
+                            provider,
+                            &payload,
+                            d.as_ref(),
+                            targets.as_deref(),
+                        )
                         .await;
                 }
             }
         });
     });
+}
+
+/// The channel this Host emits when a watched session is blocked on a human
+/// decision. Declared here rather than inline because both the trigger
+/// registration and the payload sanitizer must agree on it.
+const NEEDS_INPUT_CHANNEL: &str = "companion://needs-input";
+
+/// Which devices an emit is addressed to, or `None` for an account-wide event.
+///
+/// Only the decision-prompt channel is addressed today. It is addressed because
+/// the Host already knows exactly which device holds the control attachment on
+/// that session — see `notifiableControllers` in
+/// `lib/companion/device-presence-registry.ts`, which is what fills the field.
+fn push_targets_for(
+    channel: &str,
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> Option<Vec<String>> {
+    if channel != NEEDS_INPUT_CHANNEL {
+        return None;
+    }
+    let listed = raw.get("targetDeviceIds")?.as_array()?;
+    Some(
+        listed
+            .iter()
+            .filter_map(|value| value.as_str())
+            .map(str::to_owned)
+            .collect(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2261,6 +2318,57 @@ mod tests {
             push_body_for_channel("no-scheme", &empty_data()),
             "no-scheme"
         );
+    }
+
+    /// A decision prompt must not put the tool name on a lock screen, and the
+    /// routing list must not transit the push provider either.
+    #[test]
+    fn needs_input_push_carries_ids_and_neither_the_tool_name_nor_the_audience() {
+        let mut raw = serde_json::Map::new();
+        raw.insert("sessionId".into(), serde_json::json!("s-1"));
+        raw.insert("requestId".into(), serde_json::json!("req-1"));
+        raw.insert(
+            "href".into(),
+            serde_json::json!("/remote-sessions?session=s-1"),
+        );
+        raw.insert("dedupeKey".into(), serde_json::json!("req-1"));
+        raw.insert("toolName".into(), serde_json::json!("Bash"));
+        raw.insert("input".into(), serde_json::json!("rm -rf /"));
+        raw.insert("targetDeviceIds".into(), serde_json::json!(["dev-a"]));
+
+        let data = push_data_for_channel(NEEDS_INPUT_CHANNEL, &raw);
+
+        assert_eq!(data.get("sessionId").unwrap(), "s-1");
+        assert_eq!(data.get("requestId").unwrap(), "req-1");
+        assert_eq!(data.get("source").unwrap(), "remote-session");
+        assert!(data.get("toolName").is_none());
+        assert!(data.get("input").is_none());
+        assert!(data.get("targetDeviceIds").is_none());
+    }
+
+    /// `None` (broadcast) and `Some(vec![])` (audience computed, and empty) are
+    /// different answers. Collapsing them would turn "no attached device needs
+    /// this" back into "wake every paired phone".
+    #[test]
+    fn needs_input_targets_are_addressed_while_other_channels_broadcast() {
+        let mut raw = serde_json::Map::new();
+        raw.insert(
+            "targetDeviceIds".into(),
+            serde_json::json!(["dev-a", "dev-b"]),
+        );
+        assert_eq!(
+            push_targets_for(NEEDS_INPUT_CHANNEL, &raw),
+            Some(vec!["dev-a".to_string(), "dev-b".to_string()])
+        );
+
+        let mut empty = serde_json::Map::new();
+        empty.insert("targetDeviceIds".into(), serde_json::json!([]));
+        assert_eq!(push_targets_for(NEEDS_INPUT_CHANNEL, &empty), Some(vec![]));
+
+        // An older client that emits no audience at all still broadcasts, so
+        // upgrading the Host never silently stops delivering.
+        assert_eq!(push_targets_for(NEEDS_INPUT_CHANNEL, &empty_data()), None);
+        assert_eq!(push_targets_for("claude://message-added", &raw), None);
     }
 
     /// ADR-0131 — the inbound-IM push says WHO and WHERE, never WHAT. The

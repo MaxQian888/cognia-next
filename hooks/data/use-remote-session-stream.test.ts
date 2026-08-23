@@ -7,6 +7,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { useRemoteSessionStream } from "./use-remote-session-stream"
 import { toast } from "sonner"
 import type { ClaudeEvent } from "@cognia/agent-config-types"
+import { ATTACH_LEASE_RENEW_INTERVAL_MS } from "@/lib/companion/device-presence-registry"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -139,12 +140,94 @@ describe("useRemoteSessionStream", () => {
     await waitFor(() => {
       expect(callMock).toHaveBeenCalledWith("session_attach", {
         sessionId: "sess-1",
-        deviceId: "dev-mobile",
+        // Asks for control and lets the Host narrow it. No `deviceId`: the
+        // Host binds the attachment to the authenticated caller, so sending
+        // one only invited a device to attach under a borrowed id.
+        mode: "control",
+        // Reported so the Host can skip a native push for a prompt this device
+        // is already showing; jsdom reports the document as visible.
+        attention: "foreground",
       })
     })
     expect(listMessagesMock).toHaveBeenCalledWith("sess-1")
     await waitFor(() => expect(result.current.messages).toHaveLength(1))
     expect(result.current.canControl).toBe(true)
+  })
+
+  /**
+   * The Host attaches a device with no live event stream as an observer: it
+   * cannot receive the `permission_request` frame its approval would answer.
+   * Showing a composer in that state offers a control the Host will refuse.
+   */
+  it("downgrades to observe-only when the host grants an observe attachment", async () => {
+    callMock.mockImplementation(async (name: string) =>
+      name === "session_attach"
+        ? { mode: "observe", downgradeReason: "event-plane-not-ready" }
+        : undefined
+    )
+    const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
+    await waitFor(() => expect(result.current.canControl).toBe(false))
+    // The two refusals need different UI: a missing grant is permanent until
+    // someone toggles it on the desktop, a stream that has not caught up clears
+    // itself on reconnect.
+    expect(result.current.attachDowngrade).toBe("event-plane-not-ready")
+  })
+
+  /**
+   * The Host owns the lease cadence. A client renewing on a stale constant
+   * after the Host shortened its TTL would drop its attachment between
+   * renewals, so the reported interval wins over the compiled-in default.
+   */
+  it("adopts the renewal interval the host reports", async () => {
+    jest.useFakeTimers()
+    try {
+      callMock.mockImplementation(async (name: string) =>
+        name === "session_attach"
+          ? { mode: "control", downgradeReason: null, renewIntervalMs: 5_000 }
+          : undefined
+      )
+      renderHook(() => useRemoteSessionStream("sess-1"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      const attachCalls = () =>
+        callMock.mock.calls.filter(([name]: [string]) => name === "session_attach").length
+      const initial = attachCalls()
+
+      await act(async () => {
+        jest.advanceTimersByTime(5_000)
+        await Promise.resolve()
+      })
+      expect(attachCalls()).toBe(initial + 1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  /**
+   * The Host's attachment is a lease that lapses after 90s. Without renewal a
+   * viewer left open would silently stop receiving approval prompts.
+   */
+  it("renews the attachment on an interval so the lease never lapses while open", async () => {
+    jest.useFakeTimers()
+    try {
+      renderHook(() => useRemoteSessionStream("sess-1"))
+      await act(async () => {
+        await Promise.resolve()
+      })
+      const attachCalls = () =>
+        callMock.mock.calls.filter(([name]: [string]) => name === "session_attach").length
+      const initial = attachCalls()
+      expect(initial).toBeGreaterThanOrEqual(1)
+
+      await act(async () => {
+        jest.advanceTimersByTime(ATTACH_LEASE_RENEW_INTERVAL_MS)
+        await Promise.resolve()
+      })
+      expect(attachCalls()).toBe(initial + 1)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("downgrades to observe-only when session_attach is rejected", async () => {
@@ -401,8 +484,11 @@ describe("useRemoteSessionStream", () => {
     sendPromptMock.mockRejectedValueOnce(new Error("network down"))
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
     await waitFor(() => expect(streamHandler).toBeTruthy())
+    // The rejection is the contract: the composer clears its text and its
+    // staged files only when `send` resolves, so swallowing here would empty a
+    // composer for a message that never left the device.
     await act(async () => {
-      await result.current.send("hello")
+      await expect(result.current.send("hello")).rejects.toThrow("network down")
     })
     expect(result.current.status).toBe("idle")
     expect(toastError).toHaveBeenCalled()
@@ -413,7 +499,7 @@ describe("useRemoteSessionStream", () => {
     const { result } = renderHook(() => useRemoteSessionStream("sess-1"))
     await waitFor(() => expect(streamHandler).toBeTruthy())
     await act(async () => {
-      await result.current.send("hello")
+      await expect(result.current.send("hello")).rejects.toMatchObject({ code: "http_403" })
     })
     expect(result.current.canControl).toBe(false)
     expect(toastWarning).toHaveBeenCalled()
@@ -476,9 +562,6 @@ describe("useRemoteSessionStream", () => {
     callMock.mockClear()
     unmount()
     expect(unsubMock).toHaveBeenCalled()
-    expect(callMock).toHaveBeenCalledWith("session_detach", {
-      sessionId: "sess-1",
-      deviceId: "dev-mobile",
-    })
+    expect(callMock).toHaveBeenCalledWith("session_detach", { sessionId: "sess-1" })
   })
 })

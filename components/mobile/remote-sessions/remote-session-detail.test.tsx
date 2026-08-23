@@ -52,6 +52,22 @@ jest.mock("@/hooks/chat/use-message-display", () => ({
   useMessageDisplay: (override: unknown) => messageDisplayMock(override),
 }))
 
+const changesPanelMock = jest.fn()
+jest.mock("./session-changes-panel", () => ({
+  SessionChangesPanel: (props: { sessionId: string }) => {
+    changesPanelMock(props)
+    return <div data-testid="session-changes-panel" />
+  },
+}))
+
+const testsPanelMock = jest.fn()
+jest.mock("./session-tests-panel", () => ({
+  SessionTestsPanel: (props: { sessionId: string }) => {
+    testsPanelMock(props)
+    return <div data-testid="session-tests-panel" />
+  },
+}))
+
 // OfflineBanner pulls usePlatform + network live queries — out of scope here.
 jest.mock("@/components/mobile/offline-banner", () => ({
   OfflineBanner: () => null,
@@ -69,6 +85,7 @@ function baseStream(overrides: Partial<RemoteSessionStream> = {}): RemoteSession
     status: "idle",
     pendingApproval: null,
     canControl: true,
+    attachDowngrade: null,
     sessionEnded: false,
     notFound: false,
     send: jest.fn().mockResolvedValue(undefined),
@@ -198,7 +215,7 @@ describe("<RemoteSessionDetail />", () => {
     render(<RemoteSessionDetail sessionId="s1" />)
     await user.type(screen.getByTestId("remote-composer-input"), "do it")
     await user.click(screen.getByTestId("remote-send"))
-    expect(send).toHaveBeenCalledWith("do it")
+    expect(send).toHaveBeenCalledWith("do it", [], expect.any(Object))
   })
 
   it("recalls previously sent follow-ups with ArrowUp/ArrowDown", async () => {
@@ -249,7 +266,34 @@ describe("<RemoteSessionDetail />", () => {
     streamMock.mockReturnValue(baseStream({ canControl: false }))
     render(<RemoteSessionDetail sessionId="s1" />)
     expect(screen.queryByTestId("remote-composer-input")).not.toBeInTheDocument()
-    expect(screen.getByTestId("remote-observe-only")).toBeInTheDocument()
+    expect(screen.getByTestId("remote-observe-only")).toHaveTextContent(
+      "Observe only"
+    )
+  })
+
+  /**
+   * The two reasons need different actions from the user: a missing grant stays
+   * until someone turns remote control on for this device, while a stream that
+   * has not caught up clears itself on reconnect. An undifferentiated
+   * "Observe only" tells them to do nothing in both cases.
+   */
+  it("says why the session is read-only when the host reported a reason", () => {
+    streamMock.mockReturnValue(
+      baseStream({ canControl: false, attachDowngrade: "missing-capability" })
+    )
+    const { unmount } = render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.getByTestId("remote-observe-only")).toHaveTextContent(
+      "Observe only — remote control is off for this device"
+    )
+    unmount()
+
+    streamMock.mockReturnValue(
+      baseStream({ canControl: false, attachDowngrade: "event-plane-not-ready" })
+    )
+    render(<RemoteSessionDetail sessionId="s1" />)
+    expect(screen.getByTestId("remote-observe-only")).toHaveTextContent(
+      "Observe only — reconnecting to the session"
+    )
   })
 
   it("locks the composer and shows an ended notice when the session ends", () => {
@@ -281,5 +325,81 @@ describe("<RemoteSessionDetail />", () => {
     render(<RemoteSessionDetail sessionId="s1" />)
     expect(screen.getByTestId("remote-send")).toBeDisabled()
     expect(screen.getByTestId("remote-offline-hint")).toBeInTheDocument()
+  })
+
+  describe("tabs", () => {
+    beforeEach(() => {
+      changesPanelMock.mockClear()
+      testsPanelMock.mockClear()
+    })
+
+    it("opens on the transcript and mounts neither work tab", () => {
+      streamMock.mockReturnValue(baseStream())
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      expect(screen.getByTestId("remote-session-tabs")).toBeInTheDocument()
+      expect(screen.getByRole("tab", { name: "Transcript" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+      // Radix unmounts inactive tabs, which is what keeps Changes from firing
+      // three companion RPCs on every session open.
+      expect(changesPanelMock).not.toHaveBeenCalled()
+      expect(testsPanelMock).not.toHaveBeenCalled()
+    })
+
+    it("mounts the changes panel for this session when its tab is opened", async () => {
+      const user = userEvent.setup()
+      streamMock.mockReturnValue(baseStream())
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      await user.click(screen.getByRole("tab", { name: "Changes" }))
+
+      expect(screen.getByTestId("session-changes-panel")).toBeInTheDocument()
+      expect(changesPanelMock).toHaveBeenCalledWith({ sessionId: "s1" })
+      expect(testsPanelMock).not.toHaveBeenCalled()
+    })
+
+    it("mounts the tests panel for this session when its tab is opened", async () => {
+      const user = userEvent.setup()
+      streamMock.mockReturnValue(baseStream())
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      await user.click(screen.getByRole("tab", { name: "Tests" }))
+
+      expect(screen.getByTestId("session-tests-panel")).toBeInTheDocument()
+      expect(testsPanelMock).toHaveBeenCalledWith({ sessionId: "s1" })
+    })
+
+    it("keeps a pending approval and the composer visible on every tab", async () => {
+      const user = userEvent.setup()
+      streamMock.mockReturnValue(
+        baseStream({
+          pendingApproval: {
+            sessionId: "s1",
+            requestId: "r1",
+            toolUseID: "tu1",
+            toolName: "bash",
+            input: {},
+          },
+        })
+      )
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      await user.click(screen.getByRole("tab", { name: "Changes" }))
+
+      // An approval blocks the session, not the transcript — burying it behind
+      // a tab would strand the run waiting on a prompt nobody can see.
+      expect(screen.getByTestId("remote-approval-card")).toBeInTheDocument()
+      expect(screen.getByTestId("remote-composer-input")).toBeInTheDocument()
+    })
+
+    it("offers no tabs at all when the session no longer exists", () => {
+      streamMock.mockReturnValue(baseStream({ notFound: true, canControl: false }))
+      render(<RemoteSessionDetail sessionId="s1" />)
+
+      expect(screen.queryByTestId("remote-session-tabs")).not.toBeInTheDocument()
+      expect(screen.getByTestId("remote-session-not-found")).toBeInTheDocument()
+    })
   })
 })

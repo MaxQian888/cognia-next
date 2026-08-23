@@ -46,7 +46,48 @@ it("uses only healthy v2 operations and explicit device grants", () => {
       .filter((operation) => operation.healthy)
       .map((operation) => operation.name),
     grants: ["agent.run"],
+    limits: manifest.limits,
   })
+})
+
+/**
+ * The ceilings are the only part of the manifest a client shapes its UI to, and
+ * this store is where the companion shell reads it — the desktop's remote-host
+ * store is empty on a phone. Dropping them here left the mobile composer with
+ * no way to learn what the Host would accept, so its attachment picker never
+ * rendered at all.
+ */
+it("carries the host's published ceilings through to the client", () => {
+  const manifest = buildLocalHostFeatureManifest({ platform: "tauri" })
+  const snapshot = runtimeHostSnapshotFromManifest(manifest)
+
+  expect(snapshot.limits?.attachmentMaxPerMessage).toBe(manifest.limits.attachmentMaxPerMessage)
+  expect(snapshot.limits?.attachmentMaxBytes).toBe(manifest.limits.attachmentMaxBytes)
+  expect(snapshot.limits?.attachmentAcceptTypes).toContain("image/*")
+})
+
+it("reaches subscribers when only the ceilings changed", () => {
+  const base = runtimeHostSnapshotFromManifest(buildLocalHostFeatureManifest({ platform: "tauri" }))
+  const listener = jest.fn()
+  const unsubscribe = subscribeRuntimeSnapshot(listener)
+  setRuntimeSnapshot({
+    target: null,
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: base,
+  })
+  listener.mockClear()
+
+  setRuntimeSnapshot({
+    target: null,
+    vaultState: "unlocked",
+    connectionState: "online",
+    host: { ...base, limits: { ...base.limits!, attachmentMaxPerMessage: 2 } },
+  })
+
+  expect(listener).toHaveBeenCalled()
+  expect(getRuntimeSnapshot().host?.limits?.attachmentMaxPerMessage).toBe(2)
+  unsubscribe()
 })
 
 it("withholds HostState submit until the migration stage is authoritative", () => {

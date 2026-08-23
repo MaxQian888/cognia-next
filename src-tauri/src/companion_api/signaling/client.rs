@@ -52,6 +52,26 @@ use crate::companion_api::SharedState;
 /// Reconnect backoff schedule (ms). Index = attempt count (capped). Matches
 /// `SIGNALING_BACKOFF_MS` in `lib/signaling/types.ts`.
 const BACKOFF_MS: &[u64] = &[1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+
+/// Ceiling for a relay that is answering, but answering "no".
+///
+/// A WebSocket handshake refused with an HTTP status is a *configuration*
+/// failure, not an outage: the URL is not a signaling endpoint, or this device
+/// is not allowed on it. Nothing the client does differently in 30 seconds will
+/// change that, and with one task per paired device the 30 s schedule turns a
+/// mis-set `signalingUrl` into a permanent log firehose — which is exactly what
+/// an undeployed `wss://…/signaling` produces today. Backing off to five
+/// minutes keeps the retry alive (a relay deployed later is still picked up)
+/// while making the wrong configuration quiet enough to read past.
+const REJECTED_BACKOFF_MS: u64 = 300_000;
+
+/// How often to re-log an unchanged, repeating failure at `warn`.
+///
+/// The first failure and every tenth after it are loud; the rest drop to
+/// `debug`. Without this the same two lines repeat forever and bury everything
+/// else in the log.
+const REPEAT_LOG_EVERY: usize = 10;
+
 const HEALTHY_RESET_AFTER: Duration = Duration::from_secs(60);
 const MAX_PENDING_REMOTE_ICE: usize = 256;
 const PENDING_REMOTE_ICE_TTL: Duration = Duration::from_secs(30);
@@ -157,6 +177,45 @@ impl ClientHandle {
 // Reconnect loop
 // ---------------------------------------------------------------------------
 
+/// Whether the relay answered and refused, as opposed to being unreachable.
+///
+/// `tokio-tungstenite` renders a rejected upgrade as `HTTP error: <status>`, so
+/// the status is the only thing to go on. 4xx means the endpoint exists and has
+/// decided against us — a wrong path, a relay that is not a relay, a revoked
+/// device — none of which a faster retry fixes. 5xx and transport errors stay on
+/// the normal schedule because those genuinely do clear on their own.
+fn is_permanent_rejection(message: &str) -> bool {
+    let Some(rest) = message.split("HTTP error: ").nth(1) else {
+        return false;
+    };
+    rest.split_whitespace()
+        .next()
+        .and_then(|code| code.parse::<u16>().ok())
+        .is_some_and(|status| (400..500).contains(&status))
+}
+
+/// Delay before reconnect attempt `attempt`, in milliseconds.
+///
+/// **Equal jitter**, not full jitter. The previous implementation computed
+/// `random(1, base)`, which spreads a herd but leaves the *minimum* delay at one
+/// millisecond no matter how many times the connection has failed — so against a
+/// relay that always refuses, roughly one attempt in thirty fired within a
+/// second and the loop never actually calmed down. Halving the base and
+/// jittering the other half keeps the anti-herd spread while making the floor
+/// grow with the attempt count, which is the property a retry schedule is for.
+///
+/// `random_unit` is the caller's raw entropy, taken as a parameter so the
+/// schedule is a pure function and can be pinned by tests.
+fn reconnect_delay_ms(attempt: usize, rejected: bool, random_unit: u64) -> u64 {
+    let base = if rejected {
+        REJECTED_BACKOFF_MS
+    } else {
+        BACKOFF_MS[attempt.min(BACKOFF_MS.len() - 1)]
+    };
+    let half = base / 2;
+    half + (random_unit % half.max(1))
+}
+
 async fn run_with_reconnect(
     config: ClientConfig,
     state: SharedState,
@@ -176,6 +235,10 @@ async fn run_with_reconnect(
     }
 
     let mut attempt = 0usize;
+    // The last failure text, so an unchanged one can be logged quietly. See
+    // REPEAT_LOG_EVERY.
+    let mut last_error: Option<String> = None;
+    let mut repeats = 0usize;
     loop {
         if *cancel_rx.borrow() {
             return;
@@ -184,18 +247,28 @@ async fn run_with_reconnect(
             "device {} (room {})",
             config.device_id, config.rendezvous_id
         );
-        log::info!(
-            "signaling::client[{label}]: connecting to {}",
-            config.signaling_url
-        );
+        if repeats == 0 {
+            log::info!(
+                "signaling::client[{label}]: connecting to {}",
+                config.signaling_url
+            );
+        } else {
+            log::debug!(
+                "signaling::client[{label}]: reconnecting to {} (attempt {attempt})",
+                config.signaling_url
+            );
+        }
         // Each attempt begins from `Offline` — the moment the WSS connection
         // is `subscribed` we'll bump to `Awaiting`.
         config.tier_writer.set(DeviceTier::Offline);
         let session_started = Instant::now();
+        let mut rejected = false;
         match run_one_session(&config, state.clone(), cancel_rx.clone()).await {
             Ok(()) => {
                 log::info!("signaling::client[{label}]: session ended cleanly");
                 attempt = 0;
+                last_error = None;
+                repeats = 0;
                 // Clean shutdown — drop back to Offline pending next connect.
                 config.tier_writer.set(DeviceTier::Offline);
             }
@@ -206,20 +279,36 @@ async fn run_with_reconnect(
                 return;
             }
             Err(e) => {
-                log::warn!("signaling::client[{label}]: session error: {e}");
-                config
-                    .tier_writer
-                    .set_with_error(DeviceTier::Failed, e.to_string());
+                let text = e.to_string();
+                rejected = is_permanent_rejection(&text);
+                if last_error.as_deref() == Some(text.as_str()) {
+                    repeats = repeats.saturating_add(1);
+                } else {
+                    repeats = 0;
+                }
+                if repeats.is_multiple_of(REPEAT_LOG_EVERY) {
+                    if rejected {
+                        log::warn!(
+                            "signaling::client[{label}]: relay refused the connection ({text}); \
+                             check the signaling URL, or turn the WebRTC tier off in \
+                             Settings → Companion if this Host does not need WAN fallback"
+                        );
+                    } else {
+                        log::warn!("signaling::client[{label}]: session error: {text}");
+                    }
+                } else {
+                    log::debug!("signaling::client[{label}]: session error: {text}");
+                }
+                last_error = Some(text.clone());
+                config.tier_writer.set_with_error(DeviceTier::Failed, text);
                 if session_started.elapsed() >= HEALTHY_RESET_AFTER {
                     attempt = 0;
                 }
                 attempt = attempt.saturating_add(1);
             }
         }
-        let idx = attempt.min(BACKOFF_MS.len() - 1);
-        let base = BACKOFF_MS[idx];
-        let jitter = (rand::random::<u64>() % base.max(1)).max(1);
-        let delay = Duration::from_millis(jitter);
+        let delay =
+            Duration::from_millis(reconnect_delay_ms(attempt, rejected, rand::random::<u64>()));
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
             _ = cancel_rx.changed() => {
@@ -1006,6 +1095,75 @@ async fn teardown(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reconnect_delay_never_drops_below_half_the_schedule() {
+        // The bug this pins: the old `random(1, base)` jitter let the *minimum*
+        // delay stay at 1 ms however many times the connection had failed, so a
+        // relay that always refuses was retried in a tight, never-calming loop.
+        for attempt in 1..=8usize {
+            let base = BACKOFF_MS[(attempt).min(BACKOFF_MS.len() - 1)];
+            for entropy in [0u64, 1, u64::MAX / 2, u64::MAX] {
+                let delay = reconnect_delay_ms(attempt, false, entropy);
+                assert!(
+                    delay >= base / 2,
+                    "attempt {attempt} entropy {entropy}: {delay}ms < floor {}ms",
+                    base / 2
+                );
+                assert!(
+                    delay < base,
+                    "attempt {attempt}: {delay}ms >= base {base}ms"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reconnect_delay_still_spreads_within_its_window() {
+        // Equal jitter, not a fixed delay — two different entropy values must
+        // land on different delays or the anti-thundering-herd property is gone.
+        let low = reconnect_delay_ms(3, false, 0);
+        let high = reconnect_delay_ms(3, false, BACKOFF_MS[3] / 2 - 1);
+        assert!(high > low, "expected spread, got {low}ms and {high}ms");
+    }
+
+    #[test]
+    fn reconnect_delay_grows_with_the_attempt_count() {
+        let first = reconnect_delay_ms(1, false, 0);
+        let last = reconnect_delay_ms(BACKOFF_MS.len() + 5, false, 0);
+        assert!(last > first, "{last}ms should exceed {first}ms");
+        assert_eq!(last, BACKOFF_MS[BACKOFF_MS.len() - 1] / 2);
+    }
+
+    #[test]
+    fn a_refused_relay_backs_off_far_further_than_an_unreachable_one() {
+        let refused = reconnect_delay_ms(1, true, 0);
+        let unreachable = reconnect_delay_ms(1, false, 0);
+        assert_eq!(refused, REJECTED_BACKOFF_MS / 2);
+        assert!(refused > unreachable * 10);
+    }
+
+    #[test]
+    fn only_a_4xx_handshake_counts_as_a_refusal() {
+        // The exact text tokio-tungstenite produces for an undeployed relay.
+        assert!(is_permanent_rejection(
+            "websocket: HTTP error: 404 Not Found"
+        ));
+        assert!(is_permanent_rejection("websocket: HTTP error: 401"));
+        assert!(is_permanent_rejection(
+            "websocket: HTTP error: 403 Forbidden"
+        ));
+        // Transient: these do clear on their own, so they keep the fast schedule.
+        assert!(!is_permanent_rejection(
+            "websocket: HTTP error: 502 Bad Gateway"
+        ));
+        assert!(!is_permanent_rejection("websocket: HTTP error: 503"));
+        assert!(!is_permanent_rejection(
+            "websocket: signaling connect timed out"
+        ));
+        assert!(!is_permanent_rejection("websocket: stream ended"));
+        assert!(!is_permanent_rejection("protocol: bad frame"));
+    }
+
     use super::*;
 
     #[test]

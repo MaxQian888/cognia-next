@@ -114,6 +114,24 @@ export class LocalStorageHostRecordStore implements HostRecordStore {
 
 // ── credentials ─────────────────────────────────────────────────────────────
 
+/**
+ * The Browser Vault is not unlocked, so no companion credential can be read or
+ * written on this web client.
+ *
+ * A distinct type rather than a bare `Error` because the pairing flow has to
+ * tell this apart from a storage *failure*: the device really did register with
+ * the Host, and the one-shot invitation really is spent, so "pair again" is the
+ * wrong advice — the user has to unlock their local account first. Matching on
+ * the message text across that module boundary is exactly the kind of coupling
+ * that rots, so the boundary carries a type instead.
+ */
+export class BrowserVaultLockedError extends Error {
+  constructor(message = "Browser Vault must be unlocked to reach companion credentials.") {
+    super(message)
+    this.name = "BrowserVaultLockedError"
+  }
+}
+
 interface VaultSecretAdapter {
   accountId: string
   storeSecret(name: string, value: string): Promise<void>
@@ -187,7 +205,7 @@ export class VaultHostCredentialStore implements HostCredentialStore {
 
   private requireVault(key: CompanionHostKey): VaultSecretAdapter {
     const vault = this.vaultProvider()
-    if (!vault) throw new Error("Browser Vault must be unlocked to reach companion credentials.")
+    if (!vault) throw new BrowserVaultLockedError()
     if (vault.accountId !== key.accountNamespace) {
       throw new Error(
         `Companion credential for account ${key.accountNamespace} cannot be reached from the ${vault.accountId} Vault.`

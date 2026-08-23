@@ -574,3 +574,114 @@ Whether a *remote* host can isolate is still checked per worker against its
 advertised manifest (`evaluateRemoteWorkerPlacement` →
 `task_workspace_unavailable`).
 
+
+## 2026-08-21 amendment — the external-agent capability SSOT
+
+`resolveAgentExecutionSpec()` stays the one execution authority. What this
+amendment fixes is the input it was given for `runtimeAdapter: "external"`.
+
+### The problem
+
+`ResolvedAgentExecutionSpec` v2 carries a **closed** capability vocabulary
+shared with two built-in runtimes and the sidecar. External agents do not fit
+it: there are seven registered protocols, each with its own answer, and the
+answer additionally depends on the preset, on which optional methods Cognia's
+adapter implements, on what the handshake negotiated, and on the host. Nothing
+in the v2 contract can express "we have not measured this yet", so every surface
+that needed a per-protocol answer grew its own table:
+
+- `RUNTIME_CAPABILITIES.external` — one list for every external agent;
+- `PROTOCOL_CAPABILITIES` in `cli/src/agent/runtime/backend-select.ts`;
+- `externalCapabilities()` in `cli/src/tui/runtime/backend-capabilities.ts`;
+- `PROTOCOL_PERMISSION_MODE_SUPPORT` in `permission-modes.ts`.
+
+They disagreed, and the disagreements were the kind users hit: the CLI claimed
+`steer` for OpenCode, whose adapter has no `steerTurn` at all, so a
+`--requires steer` run was admitted and then failed at the first steer. The TUI
+reported MCP as supported on every external backend, including the four with no
+per-session MCP channel. The permission table offered all five modes for the
+DeepSeek Harness SDK transport, whose `respondToPermission` throws.
+
+### The decision
+
+A **separately versioned** `ExternalAgentCapabilityProfileV1` sits beside the
+spec (`@cognia/agent-config-types/external-agent-capability`). It is the
+authority on what an external agent can do; the spec remains the authority on
+how the turn executes, and the profile reaches it only through
+`projectExternalAgentCapabilitiesToSpec()`, which speaks the v2 vocabulary and
+nothing else. No `specVersion: 3`, and no new closed-set ids.
+
+Five merge layers, in fixed precedence:
+
+1. **protocol** — the complete row in `protocol/agent-capabilities.json`;
+2. **refinement** — preset and plugin declarations;
+3. **adapter-methods** — which optional `ProtocolAdapter` methods exist;
+4. **live** — the handshake, host facilities, and probes;
+5. **ceiling** — platform and policy limits; intersect only.
+
+Layers 2 and 3 may fill an `unknown` or tighten, never widen: a preset author
+cannot overrule the wire format. Layer 4 may overwrite in either direction —
+it is measuring the agent in front of us — and a contradiction is recorded as
+`drift` rather than swallowed, because a manifest row a live agent disagrees
+with needs updating.
+
+`unknown` is a first-class level and never satisfies a hard requirement. That
+distinction is what makes the admission two-phase:
+
+- **static preflight** (`preflightExternalAgent`) refuses only what is already
+  definitely wrong — a protocol with no adapter, a `requires` the manifest
+  records as `unsupported`. An `unknown` passes, because refusing it would
+  reject an agent that has not been given the chance to answer.
+- **negotiated admission** (`admitNegotiatedExternalAgent`) runs after the
+  handshake, and `unknown` is fatal there: "we asked everything we can and still
+  do not know" cannot back a promise. A profile whose `negotiated` is false is
+  refused outright, and `resolveAgentExecutionSpec` drops such a projection
+  itself so no caller can opt out.
+
+### No silent substitution
+
+`dispatchTeammate` used to feed the resolver `runtime: "claude"` whenever a
+teammate's external agent failed to resolve, warn once, and run the task on the
+built-in engine. The frozen spec then recorded the built-in rail, so the model,
+the tools, the session store and the cost attribution all described a run the
+user never asked for. That is now an `ExternalRuntimeUnavailableError`. The only
+legitimate fallback is one the teammate DECLARES, and no such field exists yet.
+
+### Consequences for other decisions
+
+- **§4 (compatibility evidence)** — a spec resolved from an external profile
+  records `evidence: "experimental"` with the profile digest as its
+  `recordRef`. The digest is the identity of a capability answer; the profile
+  itself stays on the execution handle rather than growing the wire envelope.
+- **ADR-0059 D6 / R11 (spawn policy)** — the launch-side allowlist moves to
+  `protocol/external-agent-security-policy.json`. TypeScript consumes it;
+  `crates/cognia-external-agent` keeps compiled-in literals (a security
+  allowlist must not depend on runtime JSON parsing) and
+  `pnpm audit:agent-capabilities` fails when the two disagree. It caught three
+  live drifts on introduction: Rust refused the `claude-agent-acp` binary the
+  shipped `claude-code` preset spawns, carried a `cline` entry no preset
+  references, and neither side gave OpenCode a writable state root — so
+  `opencode serve` could not persist a session and resume started over.
+- **ADR-0049 (sandbox)** — the platform gate is now visible in Settings before
+  a user configures an agent, instead of surfacing as a throw at spawn time.
+- **ADR-0119 (Pi)** — Pi's policy and system-prompt injection are unchanged and
+  were never a defect. What is honest now is the tool host: the renderer has no
+  broker, so tool-host-derived capabilities report `unsupported` with
+  `noToolHost` rather than being assumed.
+- **Legacy protocols** — `http` / `websocket` / `custom` have never had a
+  registered adapter. They stay readable so an old config renders and can be
+  migrated, and are excluded from every selector; the two dialogs that offered
+  them as "coming soon" now derive their options from the registered set.
+
+### What is deliberately not done
+
+- No general A2A executable preset: A2A needs a user-supplied endpoint and stays
+  manual configuration.
+- `BackendFeature` is not retired. It is the TUI's display vocabulary and does
+  not map one-to-one onto capability ids — `skills` and `plugins` describe
+  Cognia's tool host, not anything the agent supports, and projecting them onto
+  `skills.native` / `plugins.native` would be a new false claim in place of the
+  old one.
+- The gate does not attempt to prove plugin lifecycle behaviour. Registration on
+  enable and teardown on disable are runtime facts; a regex claiming to have
+  verified them would read as coverage. They are pinned by tests instead.

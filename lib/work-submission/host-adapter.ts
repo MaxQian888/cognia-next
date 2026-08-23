@@ -5,11 +5,11 @@
  * the renderer's acceptance never happens for its turns. The Host is where
  * those turns become real, and this is where they become durable.
  *
- * **The wire protocol is untouched.** `HOST_STATE_PROTOCOL_VERSION` stays 1 and
- * `AllowedHostStateIntentV1` gains nothing: every guard in `host-state.ts`
- * checks `protocolVersion === 1` by strict equality, so a bump would reject
- * every existing client. Instead the Host wraps the `message.enqueue` it
- * already receives.
+ * **The wire protocol is untouched.** `AllowedHostStateIntent` gains nothing:
+ * every guard in `host-state.ts` is a closed shape that rejects any field it
+ * does not know, so smuggling a submission field through an action would fail
+ * the guard outright. Instead the Host wraps the `message.enqueue` it already
+ * receives.
  *
  * ## Why the idempotency key matches the renderer's
  *
@@ -23,7 +23,7 @@
  * counter and the action id is already the dedup key the runtime command uses.
  */
 
-import type { HostStateActionV1 } from "@cognia/agent-config-types/host-state"
+import type { HostStateAction } from "@cognia/agent-config-types/host-state"
 import type { WorkReceiptV1 } from "@cognia/agent-config-types/work-submission"
 import type { SendOptions } from "@cognia/agent-config-types"
 
@@ -60,7 +60,7 @@ export function hostStateSubmissionId(actionId: string): string {
  * message must not be dropped because a ledger insert failed.
  */
 export async function acceptHostStateChatTurn(
-  action: HostStateActionV1,
+  action: HostStateAction,
   deps: HostAdapterDeps = {}
 ): Promise<WorkReceiptV1 | null> {
   if (action.action.kind !== "message.enqueue") return null
@@ -107,7 +107,7 @@ export async function acceptHostStateChatTurn(
 
 /** Freeze the exact options the HostState production path is about to send. */
 export async function bindHostStateChatTurnContext(
-  action: HostStateActionV1,
+  action: HostStateAction,
   sendOptions: SendOptions,
   deps: HostAdapterDeps = {}
 ): Promise<boolean> {

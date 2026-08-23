@@ -1,5 +1,6 @@
 import {
   __resetRemoteAttachForTests,
+  approvalPushTargets,
   armApprovalBackstop,
   attachSession,
   attachedDeviceIds,
@@ -9,6 +10,33 @@ import {
   hasArmedBackstop,
   isSessionAttached,
 } from "./remote-attach-registry"
+import {
+  ATTACH_LEASE_TTL_MS,
+  setDeviceAttention,
+  type EventStreamConnection,
+  type EventStreamState,
+} from "./device-presence-registry"
+import { REMOTE_CONTROL_CAPABILITY } from "./remote-attach-registry"
+
+const T0 = 1_000_000
+
+/** Grants a device holds after the desktop's remote-control toggle is on. */
+const CONTROL_GRANTS = ["host.observe", "agent.run", "workspace.read", REMOTE_CONTROL_CAPABILITY]
+/** What `insert_default_grants` gives every freshly paired member device. */
+const DEFAULT_GRANTS = ["host.observe", "agent.run", "workspace.read"]
+
+function streams(state: EventStreamState = "ready", at = T0): EventStreamConnection[] {
+  return [{ leaseId: `esl_${state}`, transport: "ws", state, openedAt: at }]
+}
+
+/** The ordinary case: a granted device whose stream Rust reported as caught up. */
+function attachLive(sessionId: string, deviceId: string, now = T0) {
+  return attachSession(sessionId, deviceId, {
+    eventStreams: streams("ready", now),
+    grants: CONTROL_GRANTS,
+    now,
+  }).mode
+}
 
 beforeEach(() => {
   __resetRemoteAttachForTests()
@@ -20,50 +48,171 @@ afterEach(() => {
 
 describe("attach registry", () => {
   it("a fresh session is not attached", () => {
-    expect(isSessionAttached("s1")).toBe(false)
-    expect(attachedDeviceIds("s1")).toEqual([])
+    expect(isSessionAttached("s1", T0)).toBe(false)
+    expect(attachedDeviceIds("s1", T0)).toEqual([])
   })
 
   it("attachSession marks the session watched", () => {
-    attachSession("s1", "dev-a")
-    expect(isSessionAttached("s1")).toBe(true)
-    expect(attachedDeviceIds("s1")).toEqual(["dev-a"])
+    expect(attachLive("s1", "dev-a")).toBe("control")
+    expect(isSessionAttached("s1", T0)).toBe(true)
+    expect(attachedDeviceIds("s1", T0)).toEqual(["dev-a"])
   })
 
   it("ignores empty session or device ids", () => {
-    attachSession("", "dev-a")
-    attachSession("s1", "")
-    expect(isSessionAttached("s1")).toBe(false)
+    expect(() => attachLive("", "dev-a")).toThrow()
+    expect(() => attachLive("s1", "")).toThrow()
+    expect(isSessionAttached("s1", T0)).toBe(false)
   })
 
   it("refcounts by device — last watcher leaving detaches", () => {
-    attachSession("s1", "dev-a")
-    attachSession("s1", "dev-b")
+    attachLive("s1", "dev-a")
+    attachLive("s1", "dev-b")
     detachSession("s1", "dev-a")
-    expect(isSessionAttached("s1")).toBe(true)
+    expect(isSessionAttached("s1", T0)).toBe(true)
     detachSession("s1", "dev-b")
-    expect(isSessionAttached("s1")).toBe(false)
+    expect(isSessionAttached("s1", T0)).toBe(false)
   })
 
   it("attach is idempotent per device", () => {
-    attachSession("s1", "dev-a")
-    attachSession("s1", "dev-a")
-    expect(attachedDeviceIds("s1")).toEqual(["dev-a"])
+    attachLive("s1", "dev-a")
+    attachLive("s1", "dev-a")
+    expect(attachedDeviceIds("s1", T0)).toEqual(["dev-a"])
   })
 
   it("detachSession on an unknown session is a no-op", () => {
     expect(() => detachSession("nope", "dev-a")).not.toThrow()
-    expect(isSessionAttached("nope")).toBe(false)
+    expect(isSessionAttached("nope", T0)).toBe(false)
   })
 
   it("detachDevice drops the device from every session", () => {
-    attachSession("s1", "dev-a")
-    attachSession("s2", "dev-a")
-    attachSession("s2", "dev-b")
+    attachLive("s1", "dev-a")
+    attachLive("s2", "dev-a")
+    attachLive("s2", "dev-b")
     detachDevice("dev-a")
-    expect(isSessionAttached("s1")).toBe(false)
-    expect(isSessionAttached("s2")).toBe(true)
-    expect(attachedDeviceIds("s2")).toEqual(["dev-b"])
+    expect(isSessionAttached("s1", T0)).toBe(false)
+    expect(isSessionAttached("s2", T0)).toBe(true)
+    expect(attachedDeviceIds("s2", T0)).toEqual(["dev-b"])
+  })
+
+  /**
+   * The leak this registry was rewritten to close. A phone that dropped its
+   * socket without detaching used to stay attached forever, so the host kept
+   * routing approvals to it and every one of them ran out the 120s backstop.
+   */
+  it("an attachment lapses when nobody renews it", () => {
+    attachLive("s1", "dev-a")
+    expect(isSessionAttached("s1", T0 + ATTACH_LEASE_TTL_MS - 1)).toBe(true)
+    expect(isSessionAttached("s1", T0 + ATTACH_LEASE_TTL_MS)).toBe(false)
+  })
+
+  it("re-attaching renews the lease", () => {
+    attachLive("s1", "dev-a", T0)
+    attachLive("s1", "dev-a", T0 + 30_000)
+    expect(isSessionAttached("s1", T0 + ATTACH_LEASE_TTL_MS + 1)).toBe(true)
+  })
+
+  /**
+   * A device that can answer RPCs but whose event stream is still replaying
+   * cannot have seen the `permission_request` frame its approval would refer
+   * to, so it attaches as an observer and is never handed a decision.
+   */
+  it("attaches as an observer while its event stream is still catching up", () => {
+    const result = attachSession("s1", "dev-a", {
+      eventStreams: streams("replaying"),
+      grants: CONTROL_GRANTS,
+      now: T0,
+    })
+    expect(result).toMatchObject({
+      mode: "observe",
+      downgradeReason: "event-plane-not-ready",
+      eventPlane: "replaying",
+    })
+    // Still watching — but not somebody a decision can be routed to.
+    expect(attachedDeviceIds("s1", T0)).toEqual(["dev-a"])
+    expect(isSessionAttached("s1", T0)).toBe(false)
+    expect(approvalPushTargets("s1", T0)).toEqual([])
+  })
+
+  /**
+   * The grant that must NOT be mistaken for remote control. Every freshly
+   * paired member device gets `agent.run` from `insert_default_grants`, so
+   * keying control off it would hand the wheel to every phone that pairs.
+   */
+  it("refuses control to a default-granted device that never got Remote Control", () => {
+    const result = attachSession("s1", "dev-a", {
+      eventStreams: streams("ready"),
+      grants: DEFAULT_GRANTS,
+      now: T0,
+    })
+    expect(result).toMatchObject({ mode: "observe", downgradeReason: "missing-capability" })
+    expect(isSessionAttached("s1", T0)).toBe(false)
+  })
+
+  it("honours an explicit observe request from a device that could have controlled", () => {
+    const result = attachSession("s1", "dev-a", {
+      requestedMode: "observe",
+      eventStreams: streams("ready"),
+      grants: CONTROL_GRANTS,
+      now: T0,
+    })
+    expect(result).toMatchObject({ mode: "observe", downgradeReason: null })
+    expect(attachedDeviceIds("s1", T0)).toEqual(["dev-a"])
+    expect(isSessionAttached("s1", T0)).toBe(false)
+  })
+
+  /**
+   * A renewal arriving while the stream reconnects must not demote a
+   * controller: the whole point of the TTL is surviving churn. Losing the
+   * capability is not churn and still demotes at once.
+   */
+  it("keeps a controller through a reconnect but not through a revoked grant", () => {
+    expect(attachLive("s1", "dev-a")).toBe("control")
+
+    const midReconnect = attachSession("s1", "dev-a", {
+      eventStreams: [],
+      grants: CONTROL_GRANTS,
+      now: T0 + 30_000,
+    })
+    expect(midReconnect).toMatchObject({ mode: "control", eventPlane: "disconnected" })
+    expect(isSessionAttached("s1", T0 + 30_000)).toBe(true)
+
+    const revoked = attachSession("s1", "dev-a", {
+      eventStreams: [],
+      grants: DEFAULT_GRANTS,
+      now: T0 + 40_000,
+    })
+    expect(revoked).toMatchObject({ mode: "observe", downgradeReason: "missing-capability" })
+    expect(isSessionAttached("s1", T0 + 40_000)).toBe(false)
+  })
+
+  it("holds no attachment at all for a device with no event stream", () => {
+    const result = attachSession("s1", "dev-a", {
+      eventStreams: [],
+      grants: DEFAULT_GRANTS,
+      now: T0,
+    })
+    expect(result.mode).toBe("observe")
+    expect(attachedDeviceIds("s1", T0)).toEqual([])
+  })
+})
+
+describe("approvalPushTargets", () => {
+  it("names the attached controller when it is not already watching", () => {
+    attachLive("s1", "dev-a")
+    setDeviceAttention("dev-a", "background", T0)
+    expect(approvalPushTargets("s1", T0)).toEqual(["dev-a"])
+  })
+
+  it("stays empty for a foreground controller that already has the frame", () => {
+    attachLive("s1", "dev-a")
+    setDeviceAttention("dev-a", "foreground", T0)
+    expect(approvalPushTargets("s1", T0)).toEqual([])
+  })
+
+  it("stays empty once the attachment lapses", () => {
+    attachLive("s1", "dev-a")
+    setDeviceAttention("dev-a", "background", T0)
+    expect(approvalPushTargets("s1", T0 + ATTACH_LEASE_TTL_MS)).toEqual([])
   })
 })
 

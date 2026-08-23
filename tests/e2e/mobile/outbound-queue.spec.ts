@@ -25,8 +25,8 @@
  *
  * Deliberate gaps are enumerated (with a reason) in that suite's
  * `E2E_GENERIC_DRAIN_EXCLUSIONS` — currently only `host_state_submit`, whose
- * `protocol: "host-state-v1"` rows need a negotiated HostState host operation
- * plus an actionId-echoing `HostStateSubmitResponseV1` receipt and therefore
+ * `protocol: "host-state"` rows need a negotiated HostState host operation
+ * plus an actionId-echoing `HostStateSubmitResponse` receipt and therefore
  * cannot run through the generic `{ e2e: true }` → `{}` → "sent" loop below.
  * Adding a kind here that the parity suite excludes fails that suite until
  * the exclusion is removed.
@@ -75,7 +75,7 @@ const COMMAND_KINDS = [
   "memory_forget",
   // External agents (ADR-0056, Wave 4)
   "external_agent_update",
-  // NOTE: `host_state_submit` (HostStateProtocolV1) is intentionally absent —
+  // NOTE: `host_state_submit` (HostStateProtocol) is intentionally absent —
   // see the header comment and `E2E_GENERIC_DRAIN_EXCLUSIONS` in
   // lib/db/mobile-outbound-types.test.ts.
 ] as const

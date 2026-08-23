@@ -785,6 +785,8 @@
         "character_bind_twin",
         "character_delete",
         "character_upsert",
+        "mcp_set_enabled",
+        "mcp_set_tool_rules",
         "message_delete",
         "message_get_by_session",
         "message_send",

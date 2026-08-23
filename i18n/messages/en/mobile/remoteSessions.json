@@ -11,6 +11,42 @@
   },
   "back": "Back to sessions",
   "detail": {
+    "attachAria": "Attach files",
+    "attachmentRemoveAria": "Remove attachment",
+    "attachmentTooLarge": "Some files were skipped — the limit is {max} MB each.",
+    "attachmentTooMany": "Only {max} attachments can ride one message.",
+    "attachmentUnsupported": "Some files were skipped — that type cannot be attached.",
+    "attachmentUploading": "Uploading {name}",
+    "attachmentsNeedHost": "This desktop cannot receive attachments — the message was sent without them.",
+    "changes": {
+      "collapseDiff": "Hide the diff for {path}",
+      "diffEmpty": "The desktop returned no diff body for this file.",
+      "diffError": "Couldn't load this diff ({reason}).",
+      "empty": "This turn changed no files.",
+      "error": "Couldn't load changes ({reason}).",
+      "expandDiff": "Show the diff for {path}",
+      "kinds": {
+        "created": "Added",
+        "deleted": "Deleted",
+        "modified": "Modified",
+        "renamed": "Renamed"
+      },
+      "loading": "Loading changes…",
+      "loadingDiff": "Loading diff…",
+      "pending": "This turn is still running — its changes aren't recorded yet.",
+      "renamedFrom": "Renamed from {path}",
+      "runAria": "Choose which turn to inspect",
+      "runOption": "Turn {index} · {time}",
+      "totals": "{files, plural, one {# file} other {# files}} · +{additions} −{deletions}",
+      "unavailable": {
+        "binary": "Binary file — no line diff was recorded.",
+        "noTextDiff": "The desktop keeps no line diff for this kind of change.",
+        "sensitive": "Withheld — this path holds credentials.",
+        "symlink": "Symbolic link — no line diff was recorded."
+      },
+      "untracked": "The desktop tracked no workspace for this session, so there are no file changes to show.",
+      "withheld": "{count, plural, one {# file has no viewable diff} other {# files have no viewable diff}}"
+    },
     "collapseTurn": "Collapse turn details",
     "composerAria": "Follow-up message",
     "composerPlaceholder": "Send a follow-up…",
@@ -23,10 +59,32 @@
     "loadingTranscript": "Loading transcript…",
     "notFound": "Session not found or no longer available.",
     "observeOnly": "Observe only",
+    "observeOnlyMissingGrant": "Observe only — remote control is off for this device",
+    "observeOnlyReconnecting": "Observe only — reconnecting to the session",
     "offlineHint": "Desktop is offline — reconnect to resume following this session.",
     "retryTranscript": "Retry transcript",
     "sendAria": "Send",
     "streaming": "Streaming",
+    "tabs": {
+      "changes": "Changes",
+      "tests": "Tests",
+      "transcript": "Transcript"
+    },
+    "tests": {
+      "conclusions": {
+        "failed": "Failed",
+        "inconclusive": "Inconclusive",
+        "passed": "Passed"
+      },
+      "failed": "{count} failed",
+      "inconclusiveNote": "The test output could not be parsed, so no pass or fail count is claimed.",
+      "loading": "Loading test results…",
+      "noRuns": "No runs for this session have reached this device yet.",
+      "none": "No turn in this session recorded a test run.",
+      "passed": "{count} passed",
+      "progress": "{passed}/{total} tests passed",
+      "skipped": "{count} skipped"
+    },
     "title": "Live session"
   },
   "list": {

@@ -13,13 +13,13 @@
  */
 
 import { useTranslations } from "next-intl"
-import { CloudOffIcon, LoaderIcon } from "lucide-react"
+import { CloudOffIcon, LoaderIcon, TriangleAlertIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
 import { useClientLiveQuery } from "@/hooks/data"
 import { useNetworkStatus } from "@/hooks/use-network-status"
 import { usePlatform } from "@/hooks/use-platform"
-import { getQueueSummary } from "@/lib/queue/outbound-queue"
+import { getQueueSummary, inFlight, needsAttention } from "@/lib/queue/outbound-queue"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
@@ -35,22 +35,25 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
   // a live query makes the banner react to enqueue/drain writes instead of
   // re-counting on a fixed 15s interval. The banner only mounts inside the
   // mobile shell, so this query never runs on web/desktop.
-  const pending = useClientLiveQuery<number>(
+  const queue = useClientLiveQuery<{ inFlight: number; stuck: number }>(
     async () => {
       const summary = await getQueueSummary()
-      return summary.pending + summary.failed
+      return { inFlight: inFlight(summary), stuck: needsAttention(summary) }
     },
     [],
-    0
+    { inFlight: 0, stuck: 0 }
   )
 
   if (platform !== "mobile") return null
   if (loading) return null
 
   const offline = !status.connected
-  const pendingCount = pending ?? 0
-  const showQueue = pendingCount > 0
-  const visible = offline || showQueue
+  const pendingCount = queue?.inFlight ?? 0
+  // Rows the Host refused, ran out of retries on, or that lost a race. Nothing
+  // will move them on its own, and they used to be reported by no surface at
+  // all — a refused action looked exactly like one that had gone through.
+  const stuckCount = queue?.stuck ?? 0
+  const visible = offline || pendingCount > 0 || stuckCount > 0
 
   return (
     <AnimatePresence initial={false}>
@@ -58,8 +61,13 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
         <BannerBody
           offline={offline}
           pending={pendingCount}
+          stuck={stuckCount}
           messageOffline={t("bannerOffline")}
-          messageQueue={t("queuePending", { count: pendingCount })}
+          messageQueue={
+            stuckCount > 0
+              ? t("queueNeedsAttention", { count: stuckCount })
+              : t("queuePending", { count: pendingCount })
+          }
           className={className}
         />
       ) : null}
@@ -70,6 +78,7 @@ export function OfflineBanner({ className }: OfflineBannerProps) {
 interface BannerBodyProps {
   offline: boolean
   pending: number
+  stuck: number
   messageOffline: string
   messageQueue: string
   className?: string
@@ -78,6 +87,7 @@ interface BannerBodyProps {
 function BannerBody({
   offline,
   pending,
+  stuck,
   messageOffline,
   messageQueue,
   className,
@@ -89,6 +99,7 @@ function BannerBody({
       aria-live="polite"
       data-testid="offline-banner"
       data-offline={offline ? "true" : "false"}
+      data-stuck={stuck > 0 ? "true" : "false"}
       initial={reduce ? false : { opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
@@ -98,7 +109,7 @@ function BannerBody({
       }}
       className={cn(
         "sticky top-0 z-30 flex items-center gap-2 border-b border-border px-3 py-2 text-xs",
-        offline
+        offline || stuck > 0
           ? "bg-destructive/10 text-destructive"
           : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
         className
@@ -106,6 +117,10 @@ function BannerBody({
     >
       {offline ? (
         <CloudOffIcon className="size-3.5" aria-hidden="true" />
+      ) : stuck > 0 ? (
+        // Not a spinner: nothing is retrying these, and an animation that says
+        // "working on it" is the wrong thing to show for work that has stopped.
+        <TriangleAlertIcon className="size-3.5" aria-hidden="true" />
       ) : (
         <LoaderIcon className="size-3.5 animate-spin" aria-hidden="true" />
       )}

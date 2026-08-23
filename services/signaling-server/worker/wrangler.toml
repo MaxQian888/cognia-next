@@ -55,7 +55,7 @@ SIGNALING_MAX_CONN_PER_IP_PER_ROOM = "4"
 # Comma-separated exact HTTPS WebSocket Origin allowlist. Empty = same-origin
 # browser access only; native clients send no Origin and remain allowed. Add
 # only explicit split-origin web deployments, e.g. "https://app.cognia.cn".
-SIGNALING_ALLOWED_ORIGINS = ""
+SIGNALING_ALLOWED_ORIGINS = "https://cognia.cn"
 # 1-in-N Analytics Engine sampling for hot events (relay + per-frame
 # rejections) so a flood can't amplify AE writes. State changes are unsampled.
 AE_SAMPLE_N = "10"

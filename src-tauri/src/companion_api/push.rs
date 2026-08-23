@@ -96,19 +96,16 @@ impl PushDispatcher for NoopDispatcher {
     }
 }
 
-/// Per-device push token registry plus the active-WS suppression flag.
+/// Per-device push token registry. Whether a device is currently listening
+/// in-band is NOT stored here — see [`PushTokenRegistry::has_live_event_stream`].
 pub struct PushTokenRegistry {
     inner: RwLock<RegistryInner>,
     /// Where to persist the token map. `None` ⇒ in-memory only (tests).
     persistence: Option<PathBuf>,
 }
 
-#[allow(dead_code)] // websocket_active is consumed via the helper methods below.
 struct RegistryInner {
     tokens: HashMap<String, PushTokenRecord>,
-    /// Devices whose phone holds a live WS subscription. Live
-    /// subscribers receive payloads through the event bus, not push.
-    websocket_active: HashMap<String, usize>,
 }
 
 impl PushTokenRegistry {
@@ -116,7 +113,6 @@ impl PushTokenRegistry {
         Arc::new(Self {
             inner: RwLock::new(RegistryInner {
                 tokens: HashMap::new(),
-                websocket_active: HashMap::new(),
             }),
             persistence: None,
         })
@@ -140,10 +136,7 @@ impl PushTokenRegistry {
             })
             .unwrap_or_default();
         Arc::new(Self {
-            inner: RwLock::new(RegistryInner {
-                tokens,
-                websocket_active: HashMap::new(),
-            }),
+            inner: RwLock::new(RegistryInner { tokens }),
             persistence: Some(path),
         })
     }
@@ -199,33 +192,18 @@ impl PushTokenRegistry {
         self.inner.read().tokens.get(device_id).cloned()
     }
 
-    #[allow(dead_code)]
-    pub fn has_websocket(&self, device_id: &str) -> bool {
-        self.inner
-            .read()
-            .websocket_active
-            .get(device_id)
-            .map(|n| *n > 0)
-            .unwrap_or(false)
-    }
-
-    #[allow(dead_code)]
-    pub fn note_websocket_open(&self, device_id: &str) {
-        let mut g = self.inner.write();
-        *g.websocket_active.entry(device_id.to_string()).or_insert(0) += 1;
-    }
-
-    #[allow(dead_code)]
-    pub fn note_websocket_close(&self, device_id: &str) {
-        let mut g = self.inner.write();
-        if let Some(slot) = g.websocket_active.get_mut(device_id) {
-            if *slot > 0 {
-                *slot -= 1;
-            }
-            if *slot == 0 {
-                g.websocket_active.remove(device_id);
-            }
-        }
+    /// True when the device is already receiving canonical events in-band, so
+    /// a native push would duplicate something it can see.
+    ///
+    /// This used to be a WebSocket-only refcount owned by this registry, which
+    /// two things made wrong: nothing outside this file's tests ever
+    /// incremented it (so it answered `false` for everyone and every push woke
+    /// every paired device), and it had no notion of WebRTC (so an RTC-only
+    /// phone would still have read as offline once it did). Ownership now sits
+    /// with `event_leases`, which both transports register with, and which
+    /// distinguishes a socket that has upgraded from one that has caught up.
+    pub fn has_live_event_stream(&self, device_id: &str) -> bool {
+        super::event_leases::has_ready_stream(device_id)
     }
 
     #[allow(dead_code)]
@@ -235,7 +213,7 @@ impl PushTokenRegistry {
         payload: &PushPayload,
         dispatcher: &dyn PushDispatcher,
     ) -> DeliveryOutcome {
-        if self.has_websocket(device_id) {
+        if self.has_live_event_stream(device_id) {
             return DeliveryOutcome::SuppressedWebsocketActive;
         }
         let record = match self.get(device_id) {
@@ -261,11 +239,36 @@ impl PushTokenRegistry {
         payload: &PushPayload,
         dispatcher: &dyn PushDispatcher,
     ) -> usize {
+        self.broadcast_to_offline_targets(provider, payload, dispatcher, None)
+            .await
+    }
+
+    /// Same fan-out, restricted to `targets` when the caller knows which
+    /// devices the event is *for*.
+    ///
+    /// Broadcasting is right for account-wide news ("you have a notification"),
+    /// and wrong for a decision prompt: a tool-approval request is routed to the
+    /// one device attached to that session, so waking every paired phone tells
+    /// devices about a prompt they cannot answer and leaks which sessions are
+    /// active to devices that were never watching. `None` keeps the broadcast
+    /// behaviour; an empty slice sends to nobody, which is the correct outcome
+    /// when no attached device qualifies.
+    pub async fn broadcast_to_offline_targets(
+        &self,
+        provider: PushProvider,
+        payload: &PushPayload,
+        dispatcher: &dyn PushDispatcher,
+        targets: Option<&[String]>,
+    ) -> usize {
         let device_ids: Vec<String> = {
             let g = self.inner.read();
             g.tokens
                 .values()
                 .filter(|record| record.provider == provider)
+                .filter(|record| match targets {
+                    Some(allowed) => allowed.iter().any(|id| id == &record.device_id),
+                    None => true,
+                })
                 .map(|record| record.device_id.clone())
                 .collect()
         };
@@ -365,25 +368,44 @@ mod tests {
         assert!(r.get("dev-1").is_none());
     }
 
+    /// Liveness is now read from `event_leases`, so this asserts the delegation
+    /// as well as the suppression: a ready stream on EITHER transport counts,
+    /// and a stream that has merely opened does not.
     #[test]
-    fn websocket_active_suppresses_delivery_path() {
+    fn a_ready_stream_on_either_transport_suppresses_delivery() {
         let r = PushTokenRegistry::new();
-        r.register(make_record("dev-1"));
-        r.note_websocket_open("dev-1");
-        assert!(r.has_websocket("dev-1"));
-        r.note_websocket_close("dev-1");
-        assert!(!r.has_websocket("dev-1"));
+        r.register(make_record("push-live-1"));
+        let lease = super::super::event_leases::EventStreamLeaseGuard::open(
+            "push-live-1",
+            super::super::event_leases::EventStreamTransport::Rtc,
+        );
+        assert!(
+            !r.has_live_event_stream("push-live-1"),
+            "a channel that is still replaying has not shown the device the frame yet"
+        );
+        lease.advance(super::super::event_leases::EventStreamState::Ready);
+        assert!(r.has_live_event_stream("push-live-1"));
+        drop(lease);
+        assert!(!r.has_live_event_stream("push-live-1"));
     }
 
     #[test]
-    fn ws_open_close_count_is_balanced() {
+    fn the_device_stays_live_until_its_last_stream_closes() {
         let r = PushTokenRegistry::new();
-        r.note_websocket_open("dev-1");
-        r.note_websocket_open("dev-1");
-        r.note_websocket_close("dev-1");
-        assert!(r.has_websocket("dev-1"));
-        r.note_websocket_close("dev-1");
-        assert!(!r.has_websocket("dev-1"));
+        let ws = super::super::event_leases::EventStreamLeaseGuard::open(
+            "push-live-2",
+            super::super::event_leases::EventStreamTransport::Ws,
+        );
+        let rtc = super::super::event_leases::EventStreamLeaseGuard::open(
+            "push-live-2",
+            super::super::event_leases::EventStreamTransport::Rtc,
+        );
+        ws.advance(super::super::event_leases::EventStreamState::Ready);
+        rtc.advance(super::super::event_leases::EventStreamState::Ready);
+        drop(ws);
+        assert!(r.has_live_event_stream("push-live-2"));
+        drop(rtc);
+        assert!(!r.has_live_event_stream("push-live-2"));
     }
 
     #[tokio::test]
@@ -406,11 +428,15 @@ mod tests {
     #[tokio::test]
     async fn dispatch_with_active_ws_is_suppressed_even_if_token_present() {
         let r = PushTokenRegistry::new();
-        r.register(make_record("dev-1"));
-        r.note_websocket_open("dev-1");
+        r.register(make_record("push-suppress-1"));
+        let lease = super::super::event_leases::EventStreamLeaseGuard::open(
+            "push-suppress-1",
+            super::super::event_leases::EventStreamTransport::Ws,
+        );
+        lease.advance(super::super::event_leases::EventStreamState::Ready);
         let outcome = r
             .dispatch_to_device(
-                "dev-1",
+                "push-suppress-1",
                 &PushPayload {
                     title: None,
                     body: None,
@@ -506,6 +532,31 @@ mod tests {
         }
     }
 
+    /// Records who was actually delivered to — the targeting assertions need
+    /// the audience, not just the count.
+    #[derive(Default)]
+    struct RecordingDispatcher {
+        delivered: parking_lot::Mutex<Vec<String>>,
+    }
+
+    impl RecordingDispatcher {
+        fn device_ids(&self) -> Vec<String> {
+            self.delivered.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PushDispatcher for RecordingDispatcher {
+        async fn deliver(
+            &self,
+            record: &PushTokenRecord,
+            _payload: &PushPayload,
+        ) -> DeliveryOutcome {
+            self.delivered.lock().push(record.device_id.clone());
+            DeliveryOutcome::Sent
+        }
+    }
+
     #[test]
     fn dispatcher_set_empty_returns_none() {
         let set = DispatcherSet::new();
@@ -565,19 +616,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn broadcast_to_offline_skips_active_ws_devices() {
+    async fn broadcast_to_offline_targets_reaches_only_the_named_devices() {
+        // Device ids are unique per test: `event_leases` is process-global, so
+        // a `dev-2` leased by a sibling test would suppress delivery here and
+        // this assertion would fail depending on scheduling.
+        let r = PushTokenRegistry::new();
+        r.register(make_record("push-target-1"));
+        r.register(make_record("push-target-2"));
+        r.register(make_record("push-target-3"));
+        let dispatcher = RecordingDispatcher::default();
+
+        let sent = r
+            .broadcast_to_offline_targets(
+                PushProvider::Fcm,
+                &PushPayload {
+                    title: None,
+                    body: None,
+                    data: Default::default(),
+                },
+                &dispatcher,
+                Some(&["push-target-2".to_string()]),
+            )
+            .await;
+
+        assert_eq!(sent, 1);
+        assert_eq!(dispatcher.device_ids(), vec!["push-target-2".to_string()]);
+    }
+
+    /// An empty audience must send to nobody rather than falling back to a
+    /// broadcast — the difference between "nobody is attached" and "everybody".
+    #[tokio::test]
+    async fn broadcast_to_offline_targets_sends_nothing_for_an_empty_audience() {
         let r = PushTokenRegistry::new();
         r.register(make_record("dev-1"));
+        let dispatcher = RecordingDispatcher::default();
+
+        let sent = r
+            .broadcast_to_offline_targets(
+                PushProvider::Fcm,
+                &PushPayload {
+                    title: None,
+                    body: None,
+                    data: Default::default(),
+                },
+                &dispatcher,
+                Some(&[]),
+            )
+            .await;
+
+        assert_eq!(sent, 0);
+        assert!(dispatcher.device_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn broadcast_to_offline_skips_active_ws_devices() {
+        // The leased id is unique to this test: `event_leases` is
+        // process-global, so a shared id would suppress delivery in whichever
+        // sibling test happened to be running at the same time.
+        let r = PushTokenRegistry::new();
+        r.register(make_record("push-skip-offline"));
         r.register(PushTokenRecord {
-            device_id: "dev-2".to_string(),
+            device_id: "push-skip-live".to_string(),
             provider: PushProvider::Fcm,
             token: "tok-2".to_string(),
             app_version: None,
             device_locale: None,
             registered_at: 0,
         });
-        // Mark dev-2 as actively subscribed so it should be suppressed.
-        r.note_websocket_open("dev-2");
+        // Mark the second device as actively streaming so it is suppressed.
+        let lease = super::super::event_leases::EventStreamLeaseGuard::open(
+            "push-skip-live",
+            super::super::event_leases::EventStreamTransport::Ws,
+        );
+        lease.advance(super::super::event_leases::EventStreamState::Ready);
 
         let dispatcher = StubDispatcher {
             outcome: DeliveryOutcome::Sent,
@@ -593,7 +704,7 @@ mod tests {
                 &dispatcher,
             )
             .await;
-        // Only dev-1 should have been delivered to.
+        // Only the offline device should have been delivered to.
         assert_eq!(count, 1);
     }
 }

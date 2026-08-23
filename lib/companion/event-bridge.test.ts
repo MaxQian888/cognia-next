@@ -9,11 +9,34 @@
  */
 
 import "fake-indexeddb/auto"
+import { waitFor } from "@testing-library/react"
 import { installCompanionEventBridge } from "./event-bridge"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listPairedDevices } from "@/lib/db/paired-devices"
+import {
+  attachedDeviceIds,
+  __resetRemoteAttachForTests,
+} from "@/lib/companion/remote-attach-registry"
+import { attachSessionLease, syncEventStreams } from "@/lib/companion/device-presence-registry"
 import { useAccountStore } from "@/stores/account/account-store"
+
+/** Give `deviceId` a live stream and a control attachment on `sessionId`. */
+function attachSessionForTest(sessionId: string, deviceId: string): void {
+  const at = Date.now()
+  syncEventStreams({
+    deviceId,
+    streams: [{ leaseId: `esl-${deviceId}`, transport: "ws", state: "ready", openedAt: at }],
+    at,
+  })
+  attachSessionLease({
+    sessionId,
+    deviceId,
+    mode: "control",
+    eventStreamLeaseId: `esl-${deviceId}`,
+    at,
+  })
+}
 
 jest.mock("@/stores/account/account-store", () => {
   const mockAccountStoreState = {
@@ -47,6 +70,8 @@ beforeEach(async () => {
   await whenSeeded()
   ;(useAccountStore.getState() as { unlockedAccountId: string | null }).unlockedAccountId =
     "local_acct_a"
+  // Process-global presence maps — reset so leases never leak between cases.
+  __resetRemoteAttachForTests()
 })
 
 afterEach(() => {
@@ -70,12 +95,67 @@ function captureHandlers() {
 }
 
 describe("installCompanionEventBridge", () => {
-  it("subscribes to both companion event channels", () => {
+  it("subscribes to every companion event channel", () => {
     const { spy } = captureHandlers()
     installCompanionEventBridge()
     expect(spy).toHaveBeenCalledWith("companion://device-paired", expect.any(Function))
     expect(spy).toHaveBeenCalledWith("companion://device-seen", expect.any(Function))
-    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenCalledWith("companion://device-lifecycle", expect.any(Function))
+    expect(spy).toHaveBeenCalledTimes(3)
+  })
+
+  /**
+   * Attach leases are renderer-owned, so nothing but this handler can release
+   * them when a pairing is suspended or revoked. Without it the device kept its
+   * control lease for the full TTL and went on being handed approval prompts it
+   * had just lost the right to answer.
+   */
+  it("device-lifecycle drops the device's attachments on suspend and revoke", () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-lifecycle")!
+
+    attachSessionForTest("s-1", "dev-A")
+    handler({ deviceId: "dev-A", action: "restore", state: "active" })
+    expect(attachedDeviceIds("s-1")).toEqual(["dev-A"])
+
+    handler({ deviceId: "dev-A", action: "revoke", state: "revoked" })
+    expect(attachedDeviceIds("s-1")).toEqual([])
+  })
+
+  /**
+   * The bytes exist only so a message from that device can carry them, and a
+   * suspended device may no longer send one. Waiting for the 30-minute
+   * collector would leave a revoked phone's screenshot on the desktop's disk.
+   */
+  it("device-lifecycle drops the device's staged attachments too", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-lifecycle")!
+
+    const store = await import("@/lib/db/session-attachment-uploads")
+    const { sha256Bytes } = await import("@/lib/ocr/hash")
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const open = async (deviceId: string) =>
+      store.beginAttachmentUpload({
+        sessionId: "s-1",
+        deviceId,
+        name: "shot.png",
+        mediaType: "image/png",
+        size: png.byteLength,
+        hash: await sha256Bytes(png),
+      })
+    const mine = await open("dev-A")
+    const theirs = await open("dev-B")
+
+    handler({ deviceId: "dev-A", action: "revoke", state: "revoked" })
+
+    const rows = () => getDb().sessionAttachmentUploads
+    await waitFor(async () => {
+      expect(await rows().get(mine.uploadId)).toBeUndefined()
+    })
+    // Nobody else's staging area is touched by one device's revocation.
+    expect(await rows().get(theirs.uploadId)).toBeDefined()
   })
 
   it("device-paired handler writes a row to pairedDevices", async () => {

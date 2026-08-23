@@ -8,9 +8,24 @@
  * see `hooks/chat/use-claude-chat.ts`), the remote may have backgrounded the
  * app, dropping its `/ws/events` subscription. This emits a dedicated
  * `companion://needs-input` Tauri event that the Rust `register_push_trigger`
- * (in `companion_api/commands.rs`) fans out as an APNs/FCM push to every
- * offline paired device — so the approval doesn't silently wait out its
- * backstop timeout.
+ * (in `companion_api/commands.rs`) turns into an APNs/FCM push.
+ *
+ * Two things about the payload are deliberate:
+ *
+ * **It says where, never what.** `toolName` and the tool input used to ride
+ * along, and `push_data_for_channel` passed the raw payload straight through
+ * for this channel — so the name of the command a run wanted to execute
+ * reached the provider and could land on a lock screen. Only ids and a deep
+ * link travel now; the device fetches the actual request over its authenticated
+ * stream once it opens.
+ *
+ * **It is addressed.** `targetDeviceIds` names the devices holding a control
+ * attachment on this session (`approvalPushTargets`), minus any that is already
+ * foreground on a live stream. Without it the trigger fanned out to *every*
+ * registered device, which both woke phones for prompts they had no authority
+ * to answer and told them a session they were not watching had gone active.
+ * The field is consumed by the trigger for routing and stripped before the
+ * payload transits the provider.
  *
  * Lazy Tauri import so the web/mobile bundle stays decoupled; failures are
  * swallowed (the approval is still pending and recoverable when the device
@@ -18,21 +33,55 @@
  */
 
 import { isTauri } from "@/lib/platform/detect"
+import { approvalPushTargets } from "@/lib/companion/remote-attach-registry"
+
+export const NEEDS_INPUT_CHANNEL = "companion://needs-input"
 
 export interface NeedsInputPayload {
   sessionId: string
   requestId: string
-  toolName: string
+}
+
+interface NeedsInputEmit extends NeedsInputPayload {
+  targetDeviceIds: string[]
+  href: string
+  dedupeKey: string
+}
+
+/** Deep link that opens the session and the specific pending decision. */
+export function needsInputHref(sessionId: string, requestId: string): string {
+  const params = new URLSearchParams({ session: sessionId, decision: requestId })
+  return `/remote-sessions?${params.toString()}`
+}
+
+export function buildNeedsInputEmit(
+  payload: NeedsInputPayload,
+  targetDeviceIds: string[]
+): NeedsInputEmit {
+  return {
+    sessionId: payload.sessionId,
+    requestId: payload.requestId,
+    targetDeviceIds,
+    href: needsInputHref(payload.sessionId, payload.requestId),
+    // The request id already identifies the decision uniquely, and re-emitting
+    // for the same one (a retry, a second watcher attaching) must collapse into
+    // the notification the device already has rather than stacking alerts.
+    dedupeKey: payload.requestId,
+  }
 }
 
 export async function notifyRemoteNeedsInput(payload: NeedsInputPayload): Promise<void> {
   if (!isTauri()) return
+  const targetDeviceIds = approvalPushTargets(payload.sessionId)
+  // Every attached controller is already foreground on a live stream, so the
+  // frame is on screen and a native alert would duplicate it.
+  if (targetDeviceIds.length === 0) return
   try {
     const moduleId = "@tauri-apps/api/event"
     const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
       emit: (event: string, payload: unknown) => Promise<void>
     }
-    await mod.emit("companion://needs-input", payload)
+    await mod.emit(NEEDS_INPUT_CHANNEL, buildNeedsInputEmit(payload, targetDeviceIds))
   } catch {
     // Tauri unavailable or transport hiccup — best effort.
   }

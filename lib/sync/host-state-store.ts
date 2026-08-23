@@ -1,18 +1,18 @@
 import {
-  HOST_STATE_PROTOCOL_VERSION,
   canonicalHostStateJson,
   createEmptyHostStateSession,
   hostStateDigest,
-  isHostStateActionV1,
+  isHostStateAction,
+  isHostStateMutation,
   reduceHostStateMutation,
   sessionIndexChannel,
   sessionStateChannel,
-  type HostStateActionOutcomeV1,
-  type HostStateActionV1,
-  type HostStateAppliedActionV1,
-  type HostStateChannelStateV1,
-  type HostStateMutationV1,
-  type HostStateSnapshotV1,
+  type HostStateActionOutcome,
+  type HostStateAction,
+  type HostStateAppliedAction,
+  type HostStateChannelState,
+  type HostStateMutation,
+  type HostStateSnapshot,
 } from "@cognia/agent-config-types/host-state"
 
 import { getDb } from "@/lib/db/schema"
@@ -36,7 +36,7 @@ export interface HostStateChannelRow {
   hostSeq: number
   revision: number
   digest: string
-  state: HostStateChannelStateV1
+  state: HostStateChannelState
   updatedAt: number
 }
 
@@ -45,11 +45,11 @@ export interface HostStateActionRow {
   actionId: string
   channel: string
   hostSeq: number
-  outcome: HostStateActionOutcomeV1
+  outcome: HostStateActionOutcome
   payloadDigest: string
   /** Retained while dispatch/broadcast recovery is pending; compactable once settled. */
-  action?: HostStateActionV1
-  event: HostStateAppliedActionV1
+  action?: HostStateAction
+  event: HostStateAppliedAction
   dispatchState: "not-required" | "pending" | "completed" | "failed"
   broadcastState: "pending" | "completed"
   /** Session-channel mutations must also be durably reflected into the session index. */
@@ -72,6 +72,7 @@ export interface HostStateMetaRow {
 
 export type HostStateStoreErrorCode =
   | "host_state_invalid_action"
+  | "host_state_invalid_mutation"
   | "host_state_channel_mismatch"
   | "host_state_lease_missing"
   | "host_state_lease_held"
@@ -164,16 +165,16 @@ export async function renewHostStateLease(input: {
 }
 
 export interface CommitHostStateActionInput {
-  action: HostStateActionV1
-  mutation?: HostStateMutationV1
+  action: HostStateAction
+  mutation?: HostStateMutation
   runtimeDispatchRequired?: boolean
   rejection?: { code: string; message: string; currentRevision?: number }
   now?: number
 }
 
 export interface CommitHostStateActionResult {
-  event: HostStateAppliedActionV1
-  snapshot: HostStateSnapshotV1
+  event: HostStateAppliedAction
+  snapshot: HostStateSnapshot
   duplicate: boolean
 }
 
@@ -184,14 +185,14 @@ export interface CommitHostStateRuntimeProjectionInput {
   channel: string
   envelopeId: string
   envelopeDigest: string
-  mutation: (state: HostStateChannelStateV1) => HostStateMutationV1
+  mutation: (state: HostStateChannelState) => HostStateMutation
   now?: number
 }
 
 /** Commit a canonical runtime-event projection into the same ordered ledger. */
 export async function commitHostStateRuntimeProjection(
   input: CommitHostStateRuntimeProjectionInput
-): Promise<{ event: HostStateAppliedActionV1; duplicate: boolean }> {
+): Promise<{ event: HostStateAppliedAction; duplicate: boolean }> {
   const db = getDb()
   const now = input.now ?? Date.now()
   const actionId = `runtime:${input.envelopeId}`
@@ -220,8 +221,7 @@ export async function commitHostStateRuntimeProjection(
       const hostSeq = meta.hostSeq + 1
       const mutation = input.mutation(current.state)
       const state = reduceHostStateMutation(current.state, mutation)
-      const event: HostStateAppliedActionV1 = {
-        protocolVersion: HOST_STATE_PROTOCOL_VERSION,
+      const event: HostStateAppliedAction = {
         channel: input.channel,
         hostId: meta.hostId,
         hostGeneration: meta.hostGeneration,
@@ -265,8 +265,15 @@ export async function commitHostStateRuntimeProjection(
 export async function commitHostStateAction(
   input: CommitHostStateActionInput
 ): Promise<CommitHostStateActionResult> {
-  if (!isHostStateActionV1(input.action)) {
+  if (!isHostStateAction(input.action)) {
     throw new HostStateStoreError("host_state_invalid_action")
+  }
+  // The mutation is broadcast verbatim to every replica, so a malformed one
+  // poisons all of them at once. The action was already checked here; the
+  // mutation was not, and a missing field surfaced only as a canonical-JSON
+  // failure from deep inside the write transaction.
+  if (input.mutation && !isHostStateMutation(input.mutation)) {
+    throw new HostStateStoreError("host_state_invalid_mutation")
   }
   assertActionChannel(input.action)
   const db = getDb()
@@ -306,9 +313,8 @@ export async function commitHostStateAction(
       const hostSeq = meta.hostSeq + 1
       const conflict =
         requiresMatchingRevision(input.action) && input.action.baseRevision !== current.revision
-      const event: HostStateAppliedActionV1 = input.rejection
+      const event: HostStateAppliedAction = input.rejection
         ? {
-            protocolVersion: HOST_STATE_PROTOCOL_VERSION,
             channel: input.action.channel,
             hostId: meta.hostId,
             hostGeneration: meta.hostGeneration,
@@ -319,7 +325,6 @@ export async function commitHostStateAction(
           }
         : conflict
           ? {
-              protocolVersion: HOST_STATE_PROTOCOL_VERSION,
               channel: input.action.channel,
               hostId: meta.hostId,
               hostGeneration: meta.hostGeneration,
@@ -333,7 +338,6 @@ export async function commitHostStateAction(
               },
             }
           : {
-              protocolVersion: HOST_STATE_PROTOCOL_VERSION,
               channel: input.action.channel,
               hostId: meta.hostId,
               hostGeneration: meta.hostGeneration,
@@ -395,7 +399,19 @@ export async function commitHostStateAction(
   )
 }
 
-export async function getHostStateSnapshot(channel: string): Promise<HostStateSnapshotV1> {
+/**
+ * Every session channel this Host holds durable state for.
+ *
+ * Used by recovery to find turns a previous owner left in flight. Returns the
+ * channels, not the states, so the caller reads each through the same snapshot
+ * path everything else uses rather than trusting a raw row.
+ */
+export async function listHostStateSessionChannels(): Promise<string[]> {
+  const rows = await getDb().hostStateChannels.toArray()
+  return rows.map((row) => row.channel).filter(isSessionStateChannel)
+}
+
+export async function getHostStateSnapshot(channel: string): Promise<HostStateSnapshot> {
   const db = getDb()
   const now = Date.now()
   return db.transaction(
@@ -417,7 +433,7 @@ async function snapshotInTransaction(
   meta: HostStateMetaRow,
   db: ReturnType<typeof getDb>,
   now: number
-): Promise<HostStateSnapshotV1> {
+): Promise<HostStateSnapshot> {
   const row = await getOrCreateChannel(channel, meta, db, now)
   return snapshotFromRow(row, meta)
 }
@@ -471,7 +487,7 @@ export async function getHostStateAction(
 }
 
 export async function validateHostStateBusinessAction(
-  action: HostStateActionV1
+  action: HostStateAction
 ): Promise<{ code: string; message: string } | undefined> {
   if (!action.sessionId) {
     return { code: "host_state_session_id_required", message: "The action requires a session id." }
@@ -548,7 +564,7 @@ export async function markHostStateSummary(
   })
 }
 
-function emptyStateForChannel(channel: string): HostStateChannelStateV1 {
+function emptyStateForChannel(channel: string): HostStateChannelState {
   const match = /^cognia:\/\/target\/([^/]+)\/sessions(?:\/([^/]+))?$/.exec(channel)
   if (!match) throw new HostStateStoreError("host_state_channel_mismatch")
   if (!match[2]) return { kind: "session-index", channel, revision: 0, sessions: [] }
@@ -558,7 +574,7 @@ function emptyStateForChannel(channel: string): HostStateChannelStateV1 {
 async function materializeInitialState(
   db: ReturnType<typeof getDb>,
   channel: string
-): Promise<HostStateChannelStateV1> {
+): Promise<HostStateChannelState> {
   const base = emptyStateForChannel(channel)
   if (base.kind === "session-index") {
     const sessions = await db.sessions.toArray()
@@ -567,10 +583,14 @@ async function materializeInitialState(
       sessions: sessions.map((session) => ({
         sessionId: session.id,
         title: session.title,
-        status: "idle" as const,
+        conversation:
+          session.archivedAt !== undefined ? ("archived" as const) : ("present" as const),
+        // A freshly materialized index knows nothing about turns in flight —
+        // the runtime tells the Host that, and until it does `idle` is the
+        // only honest answer.
+        turn: "idle" as const,
         revision: 0,
         transcriptRevision: 0,
-        archived: session.archivedAt !== undefined,
       })),
     }
   }
@@ -582,7 +602,7 @@ async function materializeInitialState(
     ...base,
     ...(session?.title ? { title: session.title } : {}),
     transcriptRevision: session?.transcriptRevision ?? 0,
-    archived: session?.archivedAt !== undefined,
+    conversation: session?.archivedAt !== undefined ? ("archived" as const) : ("present" as const),
     draft: {
       text: draft?.text ?? "",
       attachments:
@@ -595,8 +615,8 @@ async function materializeInitialState(
 
 async function persistBusinessProjection(
   db: ReturnType<typeof getDb>,
-  action: HostStateActionV1,
-  event: HostStateAppliedActionV1,
+  action: HostStateAction,
+  event: HostStateAppliedAction,
   now: number
 ): Promise<void> {
   if (event.outcome !== "applied" || !action.sessionId) return
@@ -712,14 +732,18 @@ async function persistBusinessProjection(
       await db.messages.put(message)
       markSessionDirty(action.sessionId)
       await db.chatDrafts.delete(action.sessionId)
+      // `transcriptRevision` deliberately does NOT move here, and the channel's
+      // `message.queued` mutation carries none either. It is the key clients
+      // reconcile on, and a queued message whose dispatch later fails would
+      // have invited every replica to refetch a page that gained a user turn
+      // and no answer, with nothing to say the send never left. The message row
+      // exists (the queue carries it); the fate of the send is reported by its
+      // operation, and the revision moves when the runtime confirms transcript
+      // content.
       await db.sessions.update(action.sessionId, {
         ...(instantTitle && isPlaceholderTitle(session?.title)
           ? { title: instantTitle, titleAuto: true }
           : {}),
-        transcriptRevision:
-          event.mutation?.kind === "message.queued"
-            ? event.mutation.transcriptRevision
-            : (session?.transcriptRevision ?? 0) + 1,
         lastMessagePreview: action.action.text.replace(/\s+/g, " ").trim().slice(0, 120),
         lastMessageAt: now,
         updatedAt: now,
@@ -801,9 +825,8 @@ async function persistBusinessProjection(
   }
 }
 
-function snapshotFromRow(row: HostStateChannelRow, meta: HostStateMetaRow): HostStateSnapshotV1 {
+function snapshotFromRow(row: HostStateChannelRow, meta: HostStateMetaRow): HostStateSnapshot {
   return {
-    protocolVersion: HOST_STATE_PROTOCOL_VERSION,
     channel: row.channel,
     hostId: meta.hostId,
     hostGeneration: meta.hostGeneration,
@@ -814,7 +837,7 @@ function snapshotFromRow(row: HostStateChannelRow, meta: HostStateMetaRow): Host
   }
 }
 
-function assertActionChannel(action: HostStateActionV1): void {
+function assertActionChannel(action: HostStateAction): void {
   const expected = action.sessionId
     ? sessionStateChannel(action.runtimeTargetId, action.sessionId)
     : sessionIndexChannel(action.runtimeTargetId)
@@ -827,11 +850,11 @@ function isSessionStateChannel(channel: string): boolean {
   return /^cognia:\/\/target\/[^/]+\/sessions\/[^/]+$/.test(channel)
 }
 
-function actionOrigin(action: HostStateActionV1): NonNullable<HostStateAppliedActionV1["origin"]> {
+function actionOrigin(action: HostStateAction): NonNullable<HostStateAppliedAction["origin"]> {
   return { clientId: action.clientId, clientSeq: action.clientSeq, actionId: action.actionId }
 }
 
-function requiresMatchingRevision(action: HostStateActionV1): boolean {
+function requiresMatchingRevision(action: HostStateAction): boolean {
   return [
     "session.rename",
     "session.archive",
@@ -848,6 +871,6 @@ function normalizeTtl(value: number | undefined): number {
   return ttl
 }
 
-export function hostStateActionPayloadSize(action: HostStateActionV1): number {
+export function hostStateActionPayloadSize(action: HostStateAction): number {
   return new TextEncoder().encode(canonicalHostStateJson(action)).byteLength
 }

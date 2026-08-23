@@ -230,6 +230,21 @@ async fn run(
             return;
         }
     };
+    // Event-plane lease for this data channel. WebRTC subscribes at the bus's
+    // high-water mark, so there is no backlog to drain and the stream is ready
+    // the moment the subscription exists.
+    //
+    // Nothing used to register a WebRTC peer as present at all: liveness lived
+    // in a WebSocket-only refcount, so an RTC-only phone read as offline. It
+    // collected a native push for every prompt already on its screen, and — once
+    // attach leases started requiring a live event stream — could only ever
+    // attach as an observer.
+    let event_lease = crate::companion_api::event_leases::EventStreamLeaseGuard::open(
+        &device_id,
+        crate::companion_api::event_leases::EventStreamTransport::Rtc,
+    );
+    event_lease.advance(crate::companion_api::event_leases::EventStreamState::Ready);
+
     let mut reassembler =
         crate::companion_api::signaling::datachannel_framing::ChunkReassembler::default();
     // ADR-0127 §2: per-subscriber batching lives here, in the send loop.

@@ -571,6 +571,13 @@ const KNOWN_COMMANDS: &[&str] = &[
     // remote-control capability (see CONTROL_COMMANDS).
     "session_attach",
     "session_detach",
+    // Remote Session Control — chunked attachment upload (ADR-0005 §4.5). The
+    // bytes of a file staged on a phone reach the Host only through these;
+    // `message.enqueue` carries the ref they mint and nothing else.
+    "session_attachment_upload_init",
+    "session_attachment_upload_chunk",
+    "session_attachment_upload_commit",
+    "session_attachment_upload_abort",
     "goal_pause",
     "goal_resume",
     "goal_stop",
@@ -1275,6 +1282,12 @@ const CONTROL_COMMANDS: &[&str] = &[
     "session_attach",
     "host_state_submit",
     "session_detach",
+    // Staging bytes the Host will hand to a model is the same elevation as
+    // sending the message that carries them.
+    "session_attachment_upload_init",
+    "session_attachment_upload_chunk",
+    "session_attachment_upload_commit",
+    "session_attachment_upload_abort",
     "goal_pause",
     "goal_resume",
     "goal_stop",
@@ -1579,6 +1592,19 @@ pub(crate) fn device_can_control(device_id: &str) -> bool {
 /// (ADR-0060). The bridge arm injects `callerDeviceId` into the payload for
 /// exactly these names — see [`inject_caller_device_id`].
 const CALLER_DEVICE_ID_COMMANDS: &[&str] = &[
+    // Remote Session Control — the attach registry keys watchers by device and
+    // the host routes a `permission_request` to whoever is attached. Trusting
+    // `payload.deviceId` let any paired device attach (and collect another
+    // device's approval prompts) under a borrowed id.
+    "session_attach",
+    "session_detach",
+    // Attachment upload — every row is bound to the device that opened it, so
+    // a second device cannot append to, commit, or resolve someone else's
+    // upload even holding its id.
+    "session_attachment_upload_init",
+    "session_attachment_upload_chunk",
+    "session_attachment_upload_commit",
+    "session_attachment_upload_abort",
     // ADR-0131 cross-shell inbox relay — the host stamps the audit row /
     // assignment trail with `device:<callerDeviceId>` so a phone-originated
     // reply or override is attributable to the device that sent it.
@@ -1624,9 +1650,46 @@ fn inject_caller_device_id(name: &str, mut args: Value, device_id: &str) -> Valu
     args
 }
 
-/// Project the authenticated caller's current grants into the host manifest
-/// request. The client cannot self-assert these values: any supplied field is
-/// overwritten from the server-side allow list before the TS bridge sees it.
+/// Hand the attach arm the caller's live event-plane leases.
+///
+/// A device can answer HTTP while the stream that carries agent events is dead
+/// — it can *ask* but not *hear*. Only Rust knows which streams exist and how
+/// far along each one is (`companion_api::event_leases`, written by
+/// `ws::WsPresenceGuard` and by the WebRTC dispatcher), so the renderer cannot
+/// work this out for itself and a self-asserted value would let a device claim
+/// it can hear a run it has no stream for.
+///
+/// The full list rather than a boolean, because an attachment binds itself to
+/// one named stream: when *that* stream closes the attachment stops conferring
+/// control even though the device may still hold another. A boolean cannot
+/// express that, and a device on both LAN and WebRTC routinely does.
+fn inject_caller_event_streams(name: &str, mut args: Value, device_id: &str) -> Value {
+    if name == "session_attach" {
+        if let Value::Object(map) = &mut args {
+            let leases = super::event_leases::leases_for(device_id);
+            map.insert(
+                "callerEventStreams".to_string(),
+                serde_json::to_value(leases).unwrap_or(Value::Array(Vec::new())),
+            );
+        }
+    }
+    args
+}
+
+/// Commands whose TS arm decides something from the caller's real capability
+/// set rather than from the command-level gate alone.
+///
+/// `session_attach` is here because `attachSession` reads `callerDeviceGrants`
+/// as *the* authority on whether a control attachment may be granted. While
+/// only the manifest was injected, the attach arm saw an absent field, read it
+/// as "no grants", and downgraded every controller to an observer — so no
+/// device ever held a control lease and remote approval prompts went back to
+/// being auto-denied.
+const CALLER_DEVICE_GRANTS_COMMANDS: &[&str] = &["host_feature_manifest", "session_attach"];
+
+/// Project the authenticated caller's current grants into the request. The
+/// client cannot self-assert these values: any supplied field is overwritten
+/// from the server-side allow list before the TS bridge sees it.
 fn inject_caller_device_grants(
     name: &str,
     mut args: Value,
@@ -1634,28 +1697,33 @@ fn inject_caller_device_grants(
     device_id: &str,
     account_id: Option<&str>,
 ) -> Value {
-    if name == "host_feature_manifest" {
-        if let Value::Object(map) = &mut args {
+    if !CALLER_DEVICE_GRANTS_COMMANDS.contains(&name) {
+        return args;
+    }
+    if let Value::Object(map) = &mut args {
+        // The opaque host id is the manifest's own concern — the attach arm has
+        // no use for it, so it is not handed a field it never declared.
+        if name == "host_feature_manifest" {
             map.insert(
                 "authoritativeHostId".to_string(),
                 Value::String(opaque_host_id(state)),
             );
-            let grants = account_id
-                .and_then(|tenant_id| {
-                    super::security_store::security_store().map(|store| (tenant_id, store))
-                })
-                .and_then(|(tenant_id, store)| {
-                    store
-                        .capability_snapshot(tenant_id, device_id)
-                        .ok()
-                        .flatten()
-                })
-                .unwrap_or_default()
-                .into_iter()
-                .map(Value::String)
-                .collect();
-            map.insert("callerDeviceGrants".to_string(), Value::Array(grants));
         }
+        let grants = account_id
+            .and_then(|tenant_id| {
+                super::security_store::security_store().map(|store| (tenant_id, store))
+            })
+            .and_then(|(tenant_id, store)| {
+                store
+                    .capability_snapshot(tenant_id, device_id)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(Value::String)
+            .collect();
+        map.insert("callerDeviceGrants".to_string(), Value::Array(grants));
     }
     args
 }
@@ -1920,7 +1988,38 @@ fn scheduled_task_requires_agent_control(name: &str, args: &Value) -> bool {
 }
 
 pub(super) fn payload_required_capability(name: &str, args: &Value) -> Option<&'static str> {
-    scheduled_task_requires_agent_control(name, args).then_some("process.spawn")
+    if scheduled_task_requires_agent_control(name, args) {
+        return Some("process.spawn");
+    }
+    if attach_requests_control(name, args) {
+        return Some("workspace.write");
+    }
+    None
+}
+
+/// True when `session_attach` is asking for a *control* attachment.
+///
+/// Attaching is two operations wearing one command name. Observing needs the
+/// read capability every paired device already holds — the manifest baseline —
+/// while controlling claims the right to be handed this session's approval and
+/// elicitation prompts, which is Remote Control (`workspace.write`, the
+/// capability `GrantKind::Control` maps onto).
+///
+/// Declaring the manifest capability as `workspace.write` for both, which is
+/// what it used to say, made observe-only attach impossible: a device with read
+/// access could not register as a watcher at all, so the plan's read-capability
+/// observe mode had no way to exist. Splitting it here keeps ONE command whose
+/// authorization follows what it was actually asked to do.
+///
+/// The absent case must read the way the handler reads it, not the way that is
+/// cheapest to authorize: `readAttachMode` in `lib/companion/desktop-write-source.ts`
+/// treats anything that is not literally `"observe"` as a control request — the
+/// mode every pre-`mode` client was implicitly asking for. Escalating only on a
+/// literal `"control"` left the gate and the handler disagreeing about what the
+/// same payload means, so a `{ "sessionId": … }` body was authorized as a read
+/// and then handled as a control request.
+fn attach_requests_control(name: &str, args: &Value) -> bool {
+    name == "session_attach" && args.get("mode").and_then(Value::as_str) != Some("observe")
 }
 
 /// Public read-only accessor for the remote-control command set. Used by

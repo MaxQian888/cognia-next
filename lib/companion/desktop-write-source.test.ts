@@ -5,6 +5,7 @@
 import "fake-indexeddb/auto"
 
 import { getDb } from "@/lib/db/schema"
+import { isConnectorRuntimeOwnedHere } from "@/lib/connectors/bootstrap/install-connector-runtime"
 
 const mockActiveRuntimeTarget = jest.fn()
 // ADR-0131 §2.7 — relayed Inbox writes only run on the process that owns the
@@ -14,12 +15,7 @@ jest.mock("@/lib/connectors/bootstrap/install-connector-runtime", () => ({
   isConnectorRuntimeOwnedHere: jest.fn(() => true),
 }))
 
-const ownsRuntimeMock = // eslint-disable-next-line @typescript-eslint/no-require-imports
-(
-  require("@/lib/connectors/bootstrap/install-connector-runtime") as {
-    isConnectorRuntimeOwnedHere: jest.Mock
-  }
-).isConnectorRuntimeOwnedHere
+const ownsRuntimeMock = isConnectorRuntimeOwnedHere as jest.Mock
 
 jest.mock("@/lib/runtime/runtime-target-context", () => ({
   getActiveRuntimeTargetContext: () => mockActiveRuntimeTarget(),
@@ -157,6 +153,18 @@ jest.mock("@/stores/agent/external-agent-store", () => ({
   },
 }))
 
+// The write arm goes through the lifecycle service, not the store: a store
+// write persisted the new value and left the runtime untouched, so disabling
+// an agent from the phone flipped the toggle while the process kept running.
+const mockUpdateConfig = jest.fn(async (id: string, updates: Record<string, unknown>) => {
+  if (mockExternalAgents[id]) {
+    mockExternalAgents[id] = { ...mockExternalAgents[id], ...updates }
+  }
+})
+jest.mock("@/lib/ai/agent/external/lifecycle/service", () => ({
+  getExternalAgentLifecycleService: async () => ({ updateConfig: mockUpdateConfig }),
+}))
+
 // Stub the shared memory API helpers — the arms should validate + delegate
 // with `sourceChannel: "rpc"`, not re-run PII/consolidation logic (covered by
 // lib/memory/api tests).
@@ -227,6 +235,8 @@ describe("dispatchCommand: HostState authority", () => {
       callerAccountId: "local-default",
       runtimeTargetId: "target-a",
       authoritativeHostId: "host-a",
+      callerDeviceId: "device-a",
+      callerDeviceGrants: ["workspace.write"],
       mutations: [{ kind: "noop" }],
     }
 
@@ -234,13 +244,42 @@ describe("dispatchCommand: HostState authority", () => {
       protocolVersion: 1,
       receipts: [],
     })
-    // `authoritativeHostId` / `callerAccountId` are transport-level routing
-    // fields injected by Rust — the service must never see them as request body.
-    expect(mockHostStateService.submit).toHaveBeenCalledWith({
+    // `authoritativeHostId` / `callerAccountId` / `callerDevice*` are
+    // transport-level authority fields injected by Rust — the service takes the
+    // caller as a separate argument and must never see them as request body.
+    expect(mockHostStateService.submit).toHaveBeenCalledWith(
+      {
+        protocolVersion: 1,
+        accountId: "local-default",
+        runtimeTargetId: "target-a",
+        mutations: [{ kind: "noop" }],
+      },
+      { deviceId: "device-a", grants: ["workspace.write"] }
+    )
+  })
+
+  /**
+   * A payload that reached this arm without Rust's `bind_authority` has no
+   * verified caller. Both malformed fields are passed through UNCHANGED so the
+   * service throws `host_state_caller_unbound`; normalising the grant list to
+   * `[]` here made the service's array check unreachable, and the batch came
+   * back as ordinary per-action `host_state_forbidden` receipts that read like
+   * a permission problem instead of the routing bug they are.
+   */
+  it("passes an unbound caller through so the service fails the batch loudly", async () => {
+    await dispatchCommand("host_state_submit", {
       protocolVersion: 1,
       accountId: "local-default",
+      callerAccountId: "local-default",
       runtimeTargetId: "target-a",
-      mutations: [{ kind: "noop" }],
+      authoritativeHostId: "host-a",
+      callerDeviceGrants: "not-an-array",
+      mutations: [],
+    })
+
+    expect(mockHostStateService.submit).toHaveBeenCalledWith(expect.anything(), {
+      deviceId: "",
+      grants: "not-an-array",
     })
   })
 
@@ -806,6 +845,13 @@ describe("dispatchCommand: plugin_set_enabled", () => {
 })
 
 describe("dispatchCommand: session_attach / session_detach", () => {
+  /** A caught-up stream exactly as `inject_caller_event_streams` reports one. */
+  const READY_STREAM = [{ leaseId: "esl_ws", transport: "ws", state: "ready", openedAt: 1 }]
+  /** Grants a device holds once the desktop's remote-control toggle is on. */
+  const CONTROL_GRANTS = ["host.observe", "agent.run", "workspace.read", "workspace.write"]
+  /** What `insert_default_grants` hands every freshly paired member device. */
+  const DEFAULT_GRANTS = ["host.observe", "agent.run", "workspace.read"]
+
   it("attach marks the session watched, detach clears it", async () => {
     const { isSessionAttached, __resetRemoteAttachForTests } =
       await import("./remote-attach-registry")
@@ -813,36 +859,204 @@ describe("dispatchCommand: session_attach / session_detach", () => {
 
     const attachResult = await dispatchCommand("session_attach", {
       sessionId: "s-att",
-      deviceId: "dev-1",
+      callerDeviceId: "dev-1",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: CONTROL_GRANTS,
     })
-    expect(attachResult).toBe(null)
+    expect(attachResult).toMatchObject({
+      mode: "control",
+      downgradeReason: null,
+      eventPlane: "ready",
+      leaseTtlMs: 90_000,
+      renewIntervalMs: 30_000,
+    })
     expect(isSessionAttached("s-att")).toBe(true)
 
     const detachResult = await dispatchCommand("session_detach", {
       sessionId: "s-att",
-      deviceId: "dev-1",
+      callerDeviceId: "dev-1",
     })
     expect(detachResult).toBe(null)
     expect(isSessionAttached("s-att")).toBe(false)
     __resetRemoteAttachForTests()
   })
 
-  it("attach rejects without sessionId or deviceId", async () => {
-    await expect(dispatchCommand("session_attach", { deviceId: "d" })).rejects.toThrow(
+  /**
+   * The per-session capability answer. It comes from the same table
+   * `host_state_submit` authorizes against, so a composer can never offer an
+   * action that would 403 — and an observer is told up front rather than
+   * discovering it one rejected submit at a time.
+   */
+  it("reports the intents this caller may actually submit here", async () => {
+    const { __resetRemoteAttachForTests } = await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    const controller = (await dispatchCommand("session_attach", {
+      sessionId: "s-actions",
+      callerDeviceId: "dev-control",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: CONTROL_GRANTS,
+    })) as { supportedActions: string[] }
+    expect(controller.supportedActions).toEqual([
+      "session.rename",
+      "session.archive",
+      "draft.replace",
+      "message.enqueue",
+      "turn.steer",
+      "turn.followup",
+      "turn.abort",
+      "approval.respond",
+      "elicitation.respond",
+    ])
+    // Remote Control is not Agent Control and is not owner: creating a session
+    // and rewriting a transcript stay out.
+    expect(controller.supportedActions).not.toContain("session.create")
+    expect(controller.supportedActions).not.toContain("transcript.truncate")
+
+    const observer = (await dispatchCommand("session_attach", {
+      sessionId: "s-actions",
+      callerDeviceId: "dev-observe",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: DEFAULT_GRANTS,
+    })) as { mode: string; supportedActions: string[] }
+    expect(observer).toMatchObject({ mode: "observe", downgradeReason: "missing-capability" })
+    expect(observer.supportedActions).toEqual([])
+    __resetRemoteAttachForTests()
+  })
+
+  /**
+   * Attention decides only whether a native push is suppressed, so it is
+   * client-reported. An absent or bogus value must read as `unknown` and
+   * suppress nothing — the failure mode of the alternative is a decision
+   * prompt that no device is ever shown.
+   */
+  it("treats an unreported or bogus attention as unknown, which suppresses no push", async () => {
+    const { __resetRemoteAttachForTests, approvalPushTargets } =
+      await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    await dispatchCommand("session_attach", {
+      sessionId: "s-att2",
+      callerDeviceId: "dev-1",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: CONTROL_GRANTS,
+      attention: "definitely-not-a-state",
+    })
+    expect(approvalPushTargets("s-att2")).toEqual(["dev-1"])
+
+    await dispatchCommand("session_attach", {
+      sessionId: "s-att2",
+      callerDeviceId: "dev-1",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: CONTROL_GRANTS,
+      attention: "foreground",
+    })
+    expect(approvalPushTargets("s-att2")).toEqual([])
+    __resetRemoteAttachForTests()
+  })
+
+  /**
+   * `callerEventStreams` is injected by `inject_caller_event_streams`. A payload
+   * without it reached this arm through a path that did not report the device's
+   * streams, and claiming control on that basis would hand approvals to a
+   * device that cannot receive them. Same for a malformed entry.
+   */
+  it("attaches as an observer when the RPC boundary reports no usable event stream", async () => {
+    const { __resetRemoteAttachForTests, approvalPushTargets } =
+      await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    await expect(
+      dispatchCommand("session_attach", {
+        sessionId: "s-obs",
+        callerDeviceId: "dev-1",
+        callerDeviceGrants: CONTROL_GRANTS,
+      })
+    ).resolves.toMatchObject({
+      mode: "observe",
+      downgradeReason: "event-plane-not-ready",
+      eventPlane: "disconnected",
+    })
+    expect(approvalPushTargets("s-obs")).toEqual([])
+
+    await expect(
+      dispatchCommand("session_attach", {
+        sessionId: "s-obs2",
+        callerDeviceId: "dev-1",
+        callerDeviceGrants: CONTROL_GRANTS,
+        callerEventStreams: [{ leaseId: "x", transport: "carrier-pigeon", state: "ready" }],
+      })
+    ).resolves.toMatchObject({ mode: "observe", downgradeReason: "event-plane-not-ready" })
+    __resetRemoteAttachForTests()
+  })
+
+  /**
+   * Grants are server-injected too. A payload that arrived without them reached
+   * this arm through a path that never consulted the SecurityStore, and reading
+   * that as "control" would grant on the strength of a missing field.
+   */
+  it("attaches as an observer when the RPC boundary reports no grants", async () => {
+    const { __resetRemoteAttachForTests, isSessionAttached } =
+      await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    await expect(
+      dispatchCommand("session_attach", {
+        sessionId: "s-nogrants",
+        callerDeviceId: "dev-1",
+        callerEventStreams: READY_STREAM,
+      })
+    ).resolves.toMatchObject({ mode: "observe", downgradeReason: "missing-capability" })
+    expect(isSessionAttached("s-nogrants")).toBe(false)
+    __resetRemoteAttachForTests()
+  })
+
+  it("attach rejects without sessionId or a server-bound caller", async () => {
+    await expect(dispatchCommand("session_attach", { callerDeviceId: "d" })).rejects.toThrow(
       /sessionId is required/
     )
     await expect(dispatchCommand("session_attach", { sessionId: "s" })).rejects.toThrow(
-      /deviceId is required/
+      /callerDeviceId is required/
     )
   })
 
-  it("detach rejects without sessionId or deviceId", async () => {
-    await expect(dispatchCommand("session_detach", { deviceId: "d" })).rejects.toThrow(
+  it("detach rejects without sessionId or a server-bound caller", async () => {
+    await expect(dispatchCommand("session_detach", { callerDeviceId: "d" })).rejects.toThrow(
       /sessionId is required/
     )
     await expect(dispatchCommand("session_detach", { sessionId: "s" })).rejects.toThrow(
-      /deviceId is required/
+      /callerDeviceId is required/
     )
+  })
+
+  /**
+   * The reason `callerDeviceId` exists. `rpc.rs::inject_caller_device_id`
+   * overwrites it from the verified JWT, so a client-supplied `deviceId` is
+   * whatever the caller felt like typing — and the attach registry decides who
+   * the Host routes an approval prompt to.
+   */
+  it("ignores a client-asserted deviceId and attaches only the verified caller", async () => {
+    const { attachedDeviceIds, __resetRemoteAttachForTests } =
+      await import("./remote-attach-registry")
+    __resetRemoteAttachForTests()
+
+    await dispatchCommand("session_attach", {
+      sessionId: "s-spoof",
+      deviceId: "victim-device",
+      callerDeviceId: "attacker-device",
+      callerEventStreams: READY_STREAM,
+      callerDeviceGrants: CONTROL_GRANTS,
+    })
+    expect(attachedDeviceIds("s-spoof")).toEqual(["attacker-device"])
+
+    // ...and the spoofed id cannot detach the real watcher either.
+    await dispatchCommand("session_detach", {
+      sessionId: "s-spoof",
+      deviceId: "attacker-device",
+      callerDeviceId: "victim-device",
+    })
+    expect(attachedDeviceIds("s-spoof")).toEqual(["attacker-device"])
+    __resetRemoteAttachForTests()
   })
 })
 
@@ -1212,8 +1426,10 @@ describe("dispatchCommand: external_agent_list / external_agent_update", () => {
 
   it("external_agent_update toggles enabled", async () => {
     await dispatchCommand("external_agent_update", { id: "a1", patch: { enabled: false } })
-    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { enabled: false })
+    expect(mockUpdateConfig).toHaveBeenCalledWith("a1", { enabled: false })
     expect(mockExternalAgents.a1.enabled).toBe(false)
+    // The store is never written directly, or the runtime would drift from it.
+    expect(mockUpdateAgent).not.toHaveBeenCalled()
   })
 
   it("external_agent_update clamps an unsupported permission mode per protocol", async () => {
@@ -1223,7 +1439,7 @@ describe("dispatchCommand: external_agent_list / external_agent_update", () => {
       id: "a2",
       patch: { defaultPermissionMode: "dontAsk" },
     })
-    const applied = mockUpdateAgent.mock.calls.at(-1)?.[1] as { defaultPermissionMode: string }
+    const applied = mockUpdateConfig.mock.calls.at(-1)?.[1] as { defaultPermissionMode: string }
     expect(applied.defaultPermissionMode).not.toBe("dontAsk")
   })
 
@@ -1232,7 +1448,7 @@ describe("dispatchCommand: external_agent_list / external_agent_update", () => {
       id: "a1",
       patch: { defaultPermissionMode: "acceptEdits" },
     })
-    expect(mockUpdateAgent).toHaveBeenCalledWith("a1", { defaultPermissionMode: "acceptEdits" })
+    expect(mockUpdateConfig).toHaveBeenCalledWith("a1", { defaultPermissionMode: "acceptEdits" })
   })
 
   it("rejects a missing id, missing patch, invalid mode, or empty patch", async () => {
@@ -1374,6 +1590,137 @@ describe("dispatchCommand: retrieval profile DEK pairing", () => {
       })
     ).rejects.toThrow("upgrade_required")
     expect(mockExportForPairing).not.toHaveBeenCalled()
+  })
+})
+
+describe("dispatchCommand: session attachment upload", () => {
+  const { getDb } = jest.requireActual("@/lib/db/schema") as typeof import("@/lib/db/schema")
+
+  /** A minimal PNG payload, so the commit's magic-byte sniff is satisfied. */
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])
+
+  const toBase64 = (bytes: Uint8Array) =>
+    Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64")
+
+  async function hashOf(bytes: Uint8Array): Promise<string> {
+    const { sha256Bytes } = await import("@/lib/ocr/hash")
+    return sha256Bytes(bytes)
+  }
+
+  beforeEach(async () => {
+    await getDb().sessionAttachmentUploads.clear()
+  })
+
+  it("carries a file across and hands back a ref the message can name", async () => {
+    const hash = await hashOf(PNG)
+    const init = (await dispatchCommand("session_attachment_upload_init", {
+      sessionId: "s-up",
+      callerDeviceId: "dev-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: PNG.byteLength,
+      hash,
+    })) as { uploadId: string; chunkSize: number; resumeOffset: number; complete: boolean }
+
+    expect(init.resumeOffset).toBe(0)
+    expect(init.complete).toBe(false)
+    expect(init.chunkSize).toBeGreaterThan(0)
+
+    const chunk = await dispatchCommand("session_attachment_upload_chunk", {
+      uploadId: init.uploadId,
+      callerDeviceId: "dev-1",
+      offset: 0,
+      dataBase64: toBase64(PNG),
+    })
+    expect(chunk).toEqual({ receivedBytes: PNG.byteLength, complete: true })
+
+    const committed = (await dispatchCommand("session_attachment_upload_commit", {
+      uploadId: init.uploadId,
+      callerDeviceId: "dev-1",
+    })) as { ref: string; mediaType: string }
+    expect(committed.ref).toBe(`cognia-upload:${init.uploadId}`)
+    expect(committed.mediaType).toBe("image/png")
+  })
+
+  /**
+   * `rpc.rs::inject_caller_device_id` overwrites whatever the client sent, so
+   * this arm must read only the injected field. Trusting a self-asserted one
+   * would let any paired device append to — or resolve — another device's file.
+   */
+  it("refuses every arm without the server-injected caller", async () => {
+    for (const [command, payload] of [
+      [
+        "session_attachment_upload_init",
+        { sessionId: "s", name: "a.png", mediaType: "image/png", size: 4, hash: "a".repeat(64) },
+      ],
+      ["session_attachment_upload_chunk", { uploadId: "u", offset: 0, dataBase64: "AAAA" }],
+      ["session_attachment_upload_commit", { uploadId: "u" }],
+      ["session_attachment_upload_abort", { uploadId: "u" }],
+    ] as const) {
+      await expect(dispatchCommand(command, { ...payload, deviceId: "spoofed" })).rejects.toThrow(
+        /callerDeviceId is required/
+      )
+    }
+  })
+
+  it("rejects a malformed chunk instead of silently storing fewer bytes", async () => {
+    const hash = await hashOf(PNG)
+    const init = (await dispatchCommand("session_attachment_upload_init", {
+      sessionId: "s-bad",
+      callerDeviceId: "dev-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: PNG.byteLength,
+      hash,
+    })) as { uploadId: string }
+
+    await expect(
+      dispatchCommand("session_attachment_upload_chunk", {
+        uploadId: init.uploadId,
+        callerDeviceId: "dev-1",
+        offset: 0,
+        dataBase64: "not base64!!",
+      })
+    ).rejects.toThrow(/not valid base64/)
+    await expect(
+      dispatchCommand("session_attachment_upload_chunk", {
+        uploadId: init.uploadId,
+        callerDeviceId: "dev-1",
+        offset: 0,
+        dataBase64: "",
+      })
+    ).rejects.toThrow(/dataBase64 is required/)
+  })
+
+  it("aborting frees the staging slot", async () => {
+    const hash = await hashOf(PNG)
+    const init = (await dispatchCommand("session_attachment_upload_init", {
+      sessionId: "s-abort",
+      callerDeviceId: "dev-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: PNG.byteLength,
+      hash,
+    })) as { uploadId: string }
+
+    expect(
+      await dispatchCommand("session_attachment_upload_abort", {
+        uploadId: init.uploadId,
+        callerDeviceId: "dev-1",
+      })
+    ).toBeNull()
+    // Re-initing the same content now opens a NEW upload rather than rejoining
+    // the aborted one, which is how the client learns the slot was released.
+    const reopened = (await dispatchCommand("session_attachment_upload_init", {
+      sessionId: "s-abort",
+      callerDeviceId: "dev-1",
+      name: "shot.png",
+      mediaType: "image/png",
+      size: PNG.byteLength,
+      hash,
+    })) as { uploadId: string; resumeOffset: number }
+    expect(reopened.uploadId).not.toBe(init.uploadId)
+    expect(reopened.resumeOffset).toBe(0)
   })
 })
 

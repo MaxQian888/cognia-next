@@ -4,13 +4,16 @@ import "fake-indexeddb/auto"
 
 import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 import {
+  CLAIM_ABANDONED_AFTER_MS,
   claimNext,
   enqueue,
   enqueueHostStateAction,
   enqueueHostStateIntentIfAvailable,
   listByStatus,
   markHostStateResult,
+  recordFailure,
   releaseClaim,
+  releaseStaleClaims,
   retryDeadletter,
 } from "./mobile-outbound-queue"
 import { __resetDbForTesting, activateAccountDatabase, getDb } from "./schema"
@@ -58,7 +61,6 @@ describe("mobile outbound queue target isolation", () => {
 
   it("reuses the durable queue for HostState actions and retains terminal conflicts", async () => {
     const row = await enqueueHostStateAction({
-      protocolVersion: 1,
       channel: "cognia://target/desktop-studio/sessions/s1",
       accountId: scope.accountId,
       runtimeTargetId: scope.targetId,
@@ -74,7 +76,7 @@ describe("mobile outbound queue target isolation", () => {
     })
 
     expect(row).toMatchObject({
-      protocol: "host-state-v1",
+      protocol: "host-state",
       command: "host_state_submit",
       idempotencyKey: "action-4",
       actionId: "action-4",
@@ -213,5 +215,206 @@ describe("mobile outbound queue target isolation", () => {
 
     await expect(retryDeadletter("legacy-action", 200)).rejects.toThrow(/cannot be retried/i)
     await expect(claimNext(200, scope)).resolves.toBeNull()
+  })
+})
+
+/**
+ * Head-of-line ordering. The Host applies actions in the order they arrive,
+ * while the client's own optimistic projection sorts by `clientSeq` — so a row
+ * that overtook its predecessor made the two silently disagree until a resync.
+ */
+describe("per-channel dispatch order", () => {
+  const channel = sessionStateChannel(scope.targetId, "s-order")
+  const other = sessionStateChannel(scope.targetId, "s-other")
+
+  beforeEach(async () => {
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
+  })
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  async function seed(
+    id: string,
+    clientSeq: number,
+    overrides: Partial<{
+      status: "pending" | "sending" | "failed" | "deadlettered" | "rejected"
+      nextAttemptAt: number
+      channel: string
+      createdAt: number
+    }> = {}
+  ) {
+    await getDb().mobileOutboundQueue.put({
+      id,
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "host_state_submit",
+      payload: { actions: [] },
+      status: overrides.status ?? "pending",
+      attempts: 0,
+      createdAt: overrides.createdAt ?? clientSeq,
+      nextAttemptAt: overrides.nextAttemptAt ?? 0,
+      idempotencyKey: id,
+      protocol: "host-state",
+      channel: overrides.channel ?? channel,
+      hostGeneration: 1,
+      clientId: "client-a",
+      clientSeq,
+      actionId: id,
+    })
+  }
+
+  it("holds a channel's successors behind a row that is backing off", async () => {
+    await seed("first", 1, { nextAttemptAt: 5_000 })
+    await seed("second", 2)
+
+    await expect(claimNext(1_000, scope)).resolves.toBeNull()
+    await expect(claimNext(5_000, scope)).resolves.toMatchObject({ id: "first" })
+  })
+
+  it("holds them behind one that is already in flight", async () => {
+    await seed("first", 1, { status: "sending" })
+    await seed("second", 2)
+    await expect(claimNext(1_000, scope)).resolves.toBeNull()
+  })
+
+  /**
+   * A retry is `pending` with a future `nextAttemptAt`, never `failed`:
+   * `recordFailure` stores `decideNextAttempt`'s verdict, which is `pending` or
+   * `deadlettered`. This pins the shape a real retry has, so the backoff case
+   * above is exercised against a status the queue can actually reach.
+   */
+  it("puts a retry back to pending rather than to a status nothing claims", async () => {
+    await seed("first", 1)
+    const status = await recordFailure({
+      id: "first",
+      error: new Error("flaky link"),
+      nowMs: 1_000,
+    })
+    expect(status).toBe("pending")
+    expect((await getDb().mobileOutboundQueue.get("first"))?.status).toBe("pending")
+  })
+
+  /**
+   * The reclaim exists for a claim whose process died. A second runner for the
+   * same scope can start while the first is still awaiting its dispatch, and a
+   * blanket reclaim handed that row to both at once.
+   */
+  it("leaves a claim young enough to still be in flight alone", async () => {
+    await seed("first", 1, { status: "sending" })
+    await getDb().mobileOutboundQueue.update("first", { claimedAt: 900 })
+
+    await expect(releaseStaleClaims(scope, 1_000)).resolves.toBe(0)
+    expect((await getDb().mobileOutboundQueue.get("first"))?.status).toBe("sending")
+
+    await expect(releaseStaleClaims(scope, 900 + CLAIM_ABANDONED_AFTER_MS)).resolves.toBe(1)
+    expect((await getDb().mobileOutboundQueue.get("first"))?.status).toBe("pending")
+  })
+
+  it("reclaims a claim that carries no stamp at all", async () => {
+    await seed("first", 1, { status: "sending" })
+
+    await expect(releaseStaleClaims(scope, 1_000)).resolves.toBe(1)
+    expect((await getDb().mobileOutboundQueue.get("first"))?.status).toBe("pending")
+  })
+
+  it("never lets one stalled session block another", async () => {
+    await seed("blocked", 1, { nextAttemptAt: 5_000 })
+    await seed("blocked-next", 2)
+    await seed("free", 1, { channel: other, createdAt: 10 })
+
+    await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: "free" })
+  })
+
+  /**
+   * A terminal row has already been surfaced for the user to decide on.
+   * Blocking the session behind it would freeze every future action on a row
+   * nothing is going to move on its own.
+   */
+  it("does not block behind a row that reached a terminal state", async () => {
+    await seed("dead", 1, { status: "deadlettered" })
+    await seed("refused", 2, { status: "rejected" })
+    await seed("next", 3)
+
+    await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: "next" })
+  })
+
+  it("leaves legacy rows with no channel unordered, as they always were", async () => {
+    await getDb().mobileOutboundQueue.put({
+      id: "legacy",
+      accountId: scope.accountId,
+      targetId: scope.targetId,
+      command: "connector_send",
+      payload: {},
+      status: "pending",
+      attempts: 0,
+      createdAt: 99,
+      nextAttemptAt: 0,
+      idempotencyKey: "legacy",
+    })
+    await seed("blocked", 1, { nextAttemptAt: 5_000 })
+    await seed("blocked-next", 2)
+
+    await expect(claimNext(1_000, scope)).resolves.toMatchObject({ id: "legacy" })
+  })
+
+  /**
+   * The retry keeps its `actionId` — a dispatch that reached the Host before
+   * the client gave up is recognised as a duplicate rather than applied twice —
+   * but takes a fresh sequence. Re-entering at the old one would park it
+   * permanently at the head of a channel whose work is already done.
+   *
+   * The tail is measured against what is still OUTSTANDING, not against every
+   * row the table has ever held: nothing waits behind a `sent` row, and reading
+   * them all meant walking the whole table inside the retry's write
+   * transaction.
+   */
+  it("re-stamps a manual retry behind everything still outstanding on its channel", async () => {
+    await seed("dead", 1, { status: "deadlettered" })
+    await seed("later", 2)
+
+    await retryDeadletter("dead", 7_000)
+
+    const row = await getDb().mobileOutboundQueue.get("dead")
+    expect(row).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: 7_000,
+      clientSeq: 3,
+      actionId: "dead",
+      idempotencyKey: "dead",
+    })
+    // `later` is now the channel head; the retry waits its turn behind it.
+    await expect(claimNext(7_000, scope)).resolves.toMatchObject({ id: "later" })
+  })
+
+  it("makes a retry claimable again once its channel has drained", async () => {
+    await seed("dead", 1, { status: "deadlettered" })
+    await seed("later", 2, { status: "sent" as never })
+
+    await retryDeadletter("dead", 7_000)
+
+    expect((await getDb().mobileOutboundQueue.get("dead"))?.clientSeq).toBe(2)
+    await expect(claimNext(7_000, scope)).resolves.toMatchObject({ id: "dead" })
+  })
+
+  it("clears the previous refusal when a rejected row is retried", async () => {
+    await seed("refused", 1, { status: "rejected" })
+    await getDb().mobileOutboundQueue.update("refused", {
+      rejectionCode: "host_state_revision_conflict",
+      currentRevision: 4,
+    })
+
+    await retryDeadletter("refused", 7_000)
+
+    const row = await getDb().mobileOutboundQueue.get("refused")
+    expect(row?.rejectionCode).toBeUndefined()
+    expect(row?.currentRevision).toBeUndefined()
   })
 })

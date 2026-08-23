@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 
+import { ExecutionControlInitializer } from "./execution-control-initializer"
 import { ProviderCoreRuntimeInitializer } from "./provider-core-runtime-initializer"
 import { RoutingRuntimeInitializer } from "./routing-runtime-initializer"
 import { RemoteNotificationInitializer } from "./remote-notification-initializer"
@@ -21,6 +22,9 @@ import { startRendererWorkOutbox } from "@/lib/work-submission/bootstrap"
  * fall back to a bare `fetch` the packaged shell's CSP blocks).
  *
  * Mount order preserves `app/layout.tsx`'s previous document order.
+ *
+ * `ExecutionControlInitializer` is order-independent — it only registers an
+ * in-memory dispatch table — so it sits last rather than inside that chain.
  */
 export function DeferredBootInitializersImpl() {
   useEffect(() => {
@@ -37,6 +41,8 @@ export function DeferredBootInitializersImpl() {
       <RoutingRuntimeInitializer />
       <RemoteNotificationInitializer />
       <GatewayProvider />
+      {/* No ordering dependency: a registration-only dispatch table. */}
+      <ExecutionControlInitializer />
     </>
   )
 }

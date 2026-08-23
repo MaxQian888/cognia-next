@@ -38,13 +38,54 @@ import type {
 } from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
 import { enqueueHostStateIntentIfAvailable } from "@/lib/db/mobile-outbound-queue"
+import {
+  uploadSessionAttachment,
+  type AttachmentUploadProgress,
+  type UploadableAttachment,
+  type UploadedAttachment,
+} from "@/lib/companion/attachment-upload-client"
 import { runSyncDown } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
-import { loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { ATTACH_LEASE_RENEW_INTERVAL_MS } from "@/lib/companion/device-presence-registry"
+import type { AttachDowngradeReason } from "@/lib/companion/remote-attach-registry"
 
 const SIDECAR_EVENT = "claude://message"
 
+/** What the Host answers to `session_attach`. Every field is optional: a Host
+ *  from before lease-backed attach answers `null`. */
+interface AttachResponse {
+  mode?: string
+  downgradeReason?: AttachDowngradeReason | null
+  eventPlane?: string
+  leaseTtlMs?: number
+  renewIntervalMs?: number
+}
+
+/**
+ * Whether the user is looking at this device right now. Reported on attach and
+ * on every renewal so the Host can suppress a push for a prompt already on
+ * screen. `unknown` outside a browser document — it suppresses nothing.
+ */
+function documentAttention(): "foreground" | "background" | "unknown" {
+  if (typeof document === "undefined") return "unknown"
+  return document.visibilityState === "visible" ? "foreground" : "background"
+}
+
 export type RemoteStreamStatus = "loading" | "idle" | "streaming"
+
+export interface RemoteSendOptions {
+  /**
+   * Per-file upload progress, keyed by the index in the `attachments` array
+   * the caller passed.
+   *
+   * A phone on a cellular link spends most of a send waiting for bytes to
+   * cross, and a composer that shows nothing during it reads as hung. The
+   * index rather than an id because the caller already knows the order it
+   * handed over, and inventing an id here would be a second identity for
+   * something that already has one on the caller's side.
+   */
+  onUploadProgress?: (index: number, progress: AttachmentUploadProgress) => void
+}
 
 export interface RemoteSessionStream {
   /** Reconstructed conversation, source-of-truth for the chat renderer. */
@@ -52,8 +93,17 @@ export interface RemoteSessionStream {
   status: RemoteStreamStatus
   /** A tool-use approval awaiting this watcher's decision, if any. */
   pendingApproval: PendingApproval | null
-  /** False when `session_attach` was rejected (device lacks the capability). */
+  /** False when this device was attached as an observer rather than a
+   *  controller — it lacks the capability, or its event stream is not caught
+   *  up. `attachDowngrade` says which. */
   canControl: boolean
+  /**
+   * Why control was refused, as the Host reported it, or null when the device
+   * is controlling (or never asked). The two cases need different UI: a missing
+   * grant is permanent until someone toggles it on the desktop, while an
+   * event-plane that is not ready clears itself on reconnect.
+   */
+  attachDowngrade: AttachDowngradeReason | null
   /**
    * True once the host session has terminated (`session_ended`) or the host
    * sidecar exited — the composer/interrupt controls lock out and the view
@@ -66,8 +116,20 @@ export interface RemoteSessionStream {
    * observe-only with `canControl=false` but a still-valid session).
    */
   notFound: boolean
-  /** Send a follow-up prompt into the host session. */
-  send: (text: string) => Promise<void>
+  /**
+   * Send a follow-up prompt into the host session.
+   *
+   * Attachments are uploaded to the Host first and the message carries only the
+   * refs that come back — the bytes never enter the action ledger, the replay
+   * stream, or a queue row that might be retried. Rejects if any part fails, so
+   * the composer keeps the text and the files instead of clearing them for a
+   * send that did not happen.
+   */
+  send: (
+    text: string,
+    attachments?: readonly UploadableAttachment[],
+    options?: RemoteSendOptions
+  ) => Promise<void>
   /** Interrupt the in-flight turn. */
   interrupt: () => Promise<void>
   /** Resolve the pending approval (allow / allow_always / deny). */
@@ -126,6 +188,7 @@ export function useRemoteSessionStream(
   const [status, setStatus] = useState<RemoteStreamStatus>("loading")
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [canControl, setCanControl] = useState(true)
+  const [attachDowngrade, setAttachDowngrade] = useState<AttachDowngradeReason | null>(null)
   const [sessionEnded, setSessionEnded] = useState(false)
   const [notFound, setNotFound] = useState(false)
   // Keep the freshest message list for the long-lived stream handler without
@@ -143,6 +206,11 @@ export function useRemoteSessionStream(
 
   useEffect(() => {
     let unsub: (() => void) | null = null
+    let renewal: ReturnType<typeof setInterval> | null = null
+    let renewalIntervalMs = ATTACH_LEASE_RENEW_INTERVAL_MS
+    // Downgraded to `observe` for the life of this effect once the Host has
+    // refused control once; re-asking every renewal is a guaranteed 403.
+    let requestedMode: "control" | "observe" = "control"
     let cancelled = false
     let messageCommitFrame: number | null = null
     let streamedRevision = 0
@@ -183,7 +251,6 @@ export function useRemoteSessionStream(
         setStatusBoth("idle")
         return
       }
-      const deviceId = loadCompanionConfig()?.deviceId ?? ""
       if (seedHistory) {
         try {
           const history = await listMessages(sessionId)
@@ -211,9 +278,77 @@ export function useRemoteSessionStream(
       // means the session is gone; a network error is left optimistic and the
       // transport reconnect (surfaced by the detail view's connection UI)
       // recovers it rather than falsely flagging observe-only.
+      const attach = async (): Promise<void> => {
+        const result = (await transport.call("session_attach", {
+          sessionId,
+          // Ask for control first. The Host grants it only if this device holds
+          // Remote Control AND its event stream has caught up, and answers with
+          // what it actually gave — so the fallback to a read-only view is the
+          // Host's decision, made against state only it can see, rather than a
+          // guess made here. Once a 403 has proved this device has no Remote
+          // Control grant, `requestedMode` sticks at `observe`.
+          mode: requestedMode,
+          // Lets the Host skip a native push for a decision this device is
+          // already showing. Re-read on every renewal so backgrounding the app
+          // starts producing pushes within one renewal interval.
+          attention: documentAttention(),
+        })) as AttachResponse | null
+        if (cancelled) return
+        // An older Host answers `null`; a current one reports the mode it
+        // actually granted, plus why it narrowed the request.
+        setCanControl(requestedMode === "control" && result?.mode !== "observe")
+        setAttachDowngrade(
+          requestedMode === "observe" ? "missing-capability" : (result?.downgradeReason ?? null)
+        )
+        // The Host owns the lease cadence. Adopting the interval it reports
+        // means a change there does not need a client release to take effect —
+        // and a client renewing on a stale constant would silently lose its
+        // attachment between renewals.
+        const reported = result?.renewIntervalMs
+        if (typeof reported === "number" && reported > 0 && reported !== renewalIntervalMs) {
+          renewalIntervalMs = reported
+          scheduleRenewal()
+        }
+      }
+
+      /**
+       * Attach, and fall back to an observe attachment on a control refusal.
+       *
+       * A control request is authorized at the RPC gate against
+       * `workspace.write`, so a device without Remote Control never reaches the
+       * attach handler at all: without this retry it held NO attachment — not
+       * even the read-only one the mode exists for — and the renewal timer
+       * re-issued the same 403 every interval for as long as the view was open.
+       */
+      const attachWithObserveFallback = async (): Promise<void> => {
+        try {
+          await attach()
+        } catch (err) {
+          if (cancelled) return
+          if (requestedMode === "control" && isControlForbidden(err)) {
+            requestedMode = "observe"
+            setCanControl(false)
+            setAttachDowngrade("missing-capability")
+            await attach()
+            return
+          }
+          throw err
+        }
+      }
+
+      const scheduleRenewal = (): void => {
+        if (renewal !== null) clearInterval(renewal)
+        renewal = setInterval(() => {
+          void attachWithObserveFallback().catch(() => {
+            // A failed renewal is not a downgrade: the lease still has ~60s
+            // left and the next tick may succeed. Only an explicit rejection
+            // clears `canControl`.
+          })
+        }, renewalIntervalMs)
+      }
+
       try {
-        await transport.call("session_attach", { sessionId, deviceId })
-        if (!cancelled) setCanControl(true)
+        await attachWithObserveFallback()
       } catch (err) {
         if (cancelled) return
         if (isNotFound(err)) {
@@ -224,6 +359,13 @@ export function useRemoteSessionStream(
         }
         // else: retryable/network — stay optimistic, let transport reconnect.
       }
+
+      // The Host's attachment is a lease, not a registration: it lapses after
+      // `ATTACH_LEASE_TTL_MS` so a device that vanished stops collecting
+      // approval prompts it will never answer. Re-attaching is the renewal —
+      // it is idempotent and refreshes the expiry — and at a third of the TTL
+      // two consecutive failures can be absorbed before the lease drops.
+      scheduleRenewal()
 
       unsub = transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, (evt) => {
         // `resync_required` is a synthetic, non-session-scoped frame the
@@ -288,32 +430,64 @@ export function useRemoteSessionStream(
 
     return () => {
       cancelled = true
+      if (renewal !== null) clearInterval(renewal)
       if (messageCommitFrame !== null) cancelAnimationFrame(messageCommitFrame)
       unsub?.()
       if (!sessionId) return
-      const did = loadCompanionConfig()?.deviceId ?? ""
-      // Best-effort detach so the host stops routing approvals here.
-      void transport.call("session_detach", { sessionId, deviceId: did }).catch(() => {})
+      // Best-effort detach so the host stops routing approvals here. No
+      // `deviceId`: the Host releases the authenticated caller's own lease and
+      // ignores any id in the payload, so sending one only invited spoofing.
+      void transport.call("session_detach", { sessionId }).catch(() => {})
     }
   }, [seedHistory, sessionId, setStatusBoth])
 
   const send = useCallback(
-    async (text: string) => {
-      if (!sessionId || !text.trim()) return
+    async (
+      text: string,
+      attachments: readonly UploadableAttachment[] = [],
+      options?: RemoteSendOptions
+    ) => {
+      // An attachment with no caption is a message. Requiring text would make
+      // "here, look at this screenshot" impossible to send from a phone.
+      if (!sessionId || (!text.trim() && attachments.length === 0)) return
       try {
+        // Bytes first, refs second. The Host refuses a `message.enqueue` whose
+        // ref does not resolve, so uploading after enqueueing would guarantee
+        // the rejection; and doing it here rather than inside the queue keeps
+        // a 10 MB screenshot out of the durable action row entirely.
+        const uploaded: UploadedAttachment[] = []
+        for (const [index, attachment] of attachments.entries()) {
+          uploaded.push(
+            await uploadSessionAttachment(sessionId, attachment, {
+              hash: attachment.hash,
+              onProgress: (progress) => options?.onUploadProgress?.(index, progress),
+            })
+          )
+        }
         const queued = await enqueueHostStateIntentIfAvailable({
           sessionId,
           action: {
             kind: "message.enqueue",
             messageId: crypto.randomUUID(),
             text,
-            attachments: [],
+            attachments: uploaded.map(({ ref, name, mediaType, size, hash }) => ({
+              ref,
+              name,
+              mediaType,
+              size,
+              hash,
+            })),
           },
         })
         // The durable write must win the race with optimism. A negotiated
         // HostState target now owns dispatch; old Hosts retain the direct path.
         setStatusBoth("streaming")
         if (queued) return
+        // No HostState target: the direct path has no ref to resolve, so an
+        // attachment cannot ride it. Refusing the whole send would be worse
+        // than saying so — the text is still worth delivering, and the user is
+        // told the files were not.
+        if (uploaded.length > 0) toast.warning(t("detail.attachmentsNeedHost"))
         await sendPrompt(sessionId, text)
       } catch (err) {
         setStatusBoth("idle")
@@ -323,6 +497,7 @@ export function useRemoteSessionStream(
         } else {
           toast.error(t("detail.sendFailed", { reason: errReason(err) }))
         }
+        throw err
       }
     },
     [sessionId, setStatusBoth, t]
@@ -402,6 +577,7 @@ export function useRemoteSessionStream(
     status,
     pendingApproval,
     canControl,
+    attachDowngrade,
     sessionEnded,
     notFound,
     send,

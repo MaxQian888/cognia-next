@@ -155,6 +155,7 @@ import type { WorkflowFolder } from "@/types/workflow/folder"
 import type { PairedDeviceRow } from "@/types/mobile/paired-device"
 import type { SessionUsageRow } from "./session-usage"
 import type { ChatDraftRow } from "./chat-drafts"
+import type { SessionAttachmentUploadRow } from "./session-attachment-uploads"
 import type { ChatInputHistoryRow } from "./chat-input-history"
 import type { Goal, GoalEvent, GoalTemplate } from "@/types/goal"
 import type { Loop, LoopEvent } from "@/types/loop"
@@ -660,6 +661,11 @@ export class CogniaDB extends Dexie {
   // upgrade hook. Primary key `sessionId` makes upserts trivial; `updatedAt`
   // is indexed so debug surfaces can sort newest-first.
   chatDrafts!: Table<ChatDraftRow, string>
+  // v180 — Host-side staging for attachments a remote device uploads into a
+  // session (ADR-0005 §4.5). `[sessionId+deviceId]` is the per-caller staging
+  // area, `deviceId` powers revoke cleanup, and `expiresAt` powers the
+  // collector. See `lib/db/session-attachment-uploads.ts`.
+  sessionAttachmentUploads!: Table<SessionAttachmentUploadRow, string>
   // v80 — Per-session sent-message history for ↑/↓ recall in the composer.
   // Auto-increment id; compound `[sessionId+createdAt]` powers newest-first
   // listing; capped per session by `lib/db/chat-input-history.ts`.
@@ -4060,7 +4066,7 @@ export class CogniaDB extends Dexie {
         "&id, scope, type, characterId, projectId, agentId, status, reviewStatus, staleness, expiresAt, updatedAt, lastAccessedAt, vectorDocId, sourceSessionId, sourceMessageId, pinned, [scope+type], [scope+status], [type+status], [projectId+status], [agentId+status]",
     })
 
-    // v168 — HostStateProtocolV1 projection, semantic action ledger, and
+    // v168 — HostStateProtocol projection, semantic action ledger, and
     // single-Host fencing metadata. Purely additive: legacy session/message
     // stores remain intact for fallback and rollback.
     this.version(168).stores({
@@ -4347,6 +4353,83 @@ export class CogniaDB extends Dexie {
             delete row.userTokenStoredAt
           })
       })
+
+    // v179 — HostState carries operations and one ordered decision list.
+    //
+    // No `.stores({...})`: the three tables keep their indexes. What changed is
+    // the *shape* of what they hold. A channel row's `state` used to have a
+    // single `status` enum, an `archived` boolean and two per-kind decision
+    // buckets; it now has the `conversation` / `runtime` / `turn` axes, one
+    // ordered `decisions` array and an `operations` list, and the wire envelope
+    // no longer carries a version field at all. Nothing translates the old
+    // shape into the new one, because nothing needs to: every one of these
+    // tables is a *cache of live coordination*, rebuilt from `sessions`,
+    // `messages` and `chatDrafts` — which are untouched — the next time the
+    // Host starts. Clearing the ledger costs a resync, and keeping it would
+    // feed states through guards that now reject them.
+    //
+    // The queue is different: those rows are the user's unsent work — messages
+    // typed offline, drafts, decision answers — so they are REWRITTEN, not
+    // dropped. The only thing wrong with them is the removed version field,
+    // which the closed-shape guard would refuse on the next drain; stripping it
+    // and retagging the protocol is a complete translation, because every other
+    // field on the action survived the change untouched. An earlier draft of
+    // this migration deleted them, which silently threw away work the user
+    // could still see queued in the UI.
+    //
+    // Fencing is deliberately left as-is. Clearing `hostStateMeta` restarts
+    // `hostGeneration`, so a rewritten row may still be refused — but a refusal
+    // is a `rejected` receipt the queue counts and shows, which the user can
+    // act on. Losing the row was the only outcome they could not.
+    this.version(179).upgrade(async (tx) => {
+      await Promise.all([
+        tx.table("hostStateChannels").clear(),
+        tx.table("hostStateActions").clear(),
+        tx.table("hostStateMeta").clear(),
+      ])
+      const queue = tx.table("mobileOutboundQueue")
+      const legacy = await queue
+        .filter((row: Record<string, unknown>) => {
+          if (typeof row.protocol === "string" && row.protocol.startsWith("host-state")) return true
+          // A row written before `protocol` existed. Keyed off the COMMAND as
+          // well as the version field: `host_state_submit` is the only command
+          // whose body ever carried `protocolVersion`, and matching on the
+          // field alone would have swept an unrelated legacy RPC job whose
+          // payload happens to use the same key.
+          if (row.command !== "host_state_submit") return false
+          const payload = row.payload as { protocolVersion?: unknown } | undefined
+          return payload?.protocolVersion !== undefined
+        })
+        .toArray()
+      for (const row of legacy as Record<string, unknown>[]) {
+        const payload = (row.payload ?? {}) as Record<string, unknown>
+        const { protocolVersion: _payloadVersion, ...restPayload } = payload
+        const actions = Array.isArray(restPayload.actions)
+          ? restPayload.actions.map((action) => {
+              if (!action || typeof action !== "object") return action
+              const { protocolVersion: _actionVersion, ...restAction } = action as Record<
+                string,
+                unknown
+              >
+              return restAction
+            })
+          : restPayload.actions
+        await queue.put({
+          ...row,
+          protocol: "host-state",
+          payload: { ...restPayload, ...(actions === undefined ? {} : { actions }) },
+        })
+      }
+    })
+
+    // v180 — Host-side attachment staging (ADR-0005 §4.5). A remote device's
+    // composer holds the only copy of a staged file; `message.enqueue` carries
+    // metadata refs, so without somewhere to land the bytes the Host dispatched
+    // the text and dropped every attachment. Additive: no upgrade hook, and an
+    // older client that never uploads simply leaves the table empty.
+    this.version(180).stores({
+      sessionAttachmentUploads: "&uploadId, sessionId, deviceId, expiresAt, [sessionId+deviceId]",
+    })
 
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.

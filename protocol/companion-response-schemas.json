@@ -2212,6 +2212,66 @@
       "x-cognia-wire-source": "Option<String> from cognia_secrets::keyring_secrets::get, via rpc/chat.rs `to_json(value)`. null means the key is absent — a successful read, not an error.",
       "x-cognia-fixes": "Previously LegacyRecord, which requires an object. Every successful secret_store_get / keyring_secret_get response is a bare string or null, so the enforced output contract rejected all of them with contract_output_violation."
     },
+    "SessionAttachmentUploadChunk": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadChunk",
+      "required": ["receivedBytes", "complete"],
+      "properties": {
+        "receivedBytes": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SessionAttachmentUploadCommit": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadCommit",
+      "required": ["ref", "name", "mediaType", "size", "hash"],
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "hash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SessionAttachmentUploadInit": {
+      "type": "object",
+      "x-cognia-wire-source": "lib/companion/desktop-write-source.ts attachmentUploadInit",
+      "required": ["uploadId", "chunkSize", "resumeOffset", "complete", "ref"],
+      "properties": {
+        "uploadId": {
+          "type": "string"
+        },
+        "chunkSize": {
+          "type": "integer"
+        },
+        "resumeOffset": {
+          "type": "integer"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "ref": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
     "SessionPage": {
       "type": "object",
       "required": ["rows", "total"],
@@ -3835,6 +3895,12 @@
     "mcp_server_stop": {
       "$ref": "#/$defs/NullResult"
     },
+    "mcp_set_enabled": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "mcp_set_tool_rules": {
+      "$ref": "#/$defs/NullResult"
+    },
     "memory_forget": {
       "$ref": "#/$defs/LegacyResult"
     },
@@ -4277,6 +4343,18 @@
     },
     "session_attach": {
       "$ref": "#/$defs/LegacyResult"
+    },
+    "session_attachment_upload_abort": {
+      "$ref": "#/$defs/NullResult"
+    },
+    "session_attachment_upload_chunk": {
+      "$ref": "#/$defs/SessionAttachmentUploadChunk"
+    },
+    "session_attachment_upload_commit": {
+      "$ref": "#/$defs/SessionAttachmentUploadCommit"
+    },
+    "session_attachment_upload_init": {
+      "$ref": "#/$defs/SessionAttachmentUploadInit"
     },
     "session_detach": {
       "$ref": "#/$defs/LegacyResult"

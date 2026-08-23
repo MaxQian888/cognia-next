@@ -2,7 +2,7 @@
 
 import "fake-indexeddb/auto"
 
-import { sessionStateChannel, type HostStateActionV1 } from "@cognia/agent-config-types/host-state"
+import { sessionStateChannel, type HostStateAction } from "@cognia/agent-config-types/host-state"
 import { activateAccountDatabase, __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
   acquireHostStateLease,
@@ -14,9 +14,8 @@ import {
 const scope = { accountId: "acct-host-state", targetId: "desktop-a", hostId: "host-opaque-a" }
 const channel = sessionStateChannel(scope.targetId, "session-1")
 
-function draftAction(overrides: Partial<HostStateActionV1> = {}): HostStateActionV1 {
+function draftAction(overrides: Partial<HostStateAction> = {}): HostStateAction {
   return {
-    protocolVersion: 1,
     channel,
     accountId: scope.accountId,
     runtimeTargetId: scope.targetId,
@@ -183,7 +182,14 @@ describe("HostState durable store", () => {
           attachments: [],
           clientId: "client-a",
         },
-        transcriptRevision: 1,
+        operation: {
+          actionId: "message-action",
+          kind: "message.enqueue",
+          status: "accepted",
+          clientId: "client-a",
+          createdAt: 10,
+          updatedAt: 10,
+        },
         draftRevision: 1,
         revision: 1,
       },
@@ -197,7 +203,10 @@ describe("HostState durable store", () => {
     await expect(getDb().sessions.get("session-1")).resolves.toMatchObject({
       title: "original",
       titleAuto: true,
-      transcriptRevision: 1,
+      // Queueing writes the message row but does NOT advance the transcript
+      // revision — the key clients reconcile on. A send whose dispatch later
+      // fails must not have invited every replica to refetch.
+      transcriptRevision: 0,
       lastMessagePreview: "original",
     })
 
@@ -214,6 +223,37 @@ describe("HostState durable store", () => {
     await expect(getDb().messages.get("message-1")).resolves.toMatchObject({
       parts: [{ type: "text", text: "edited" }],
     })
+  })
+
+  /**
+   * The mutation is broadcast verbatim to every replica, so a malformed one
+   * poisons all of them at once. Before this check a missing field surfaced
+   * only as a canonical-JSON failure from deep inside the write transaction.
+   */
+  it("refuses a malformed mutation before it can reach the ledger", async () => {
+    await acquireWritableLease()
+    await expect(
+      commitHostStateAction({
+        action: draftAction({ actionId: "bad-mutation" }),
+        // A `message.queued` with no operation: type-correct at a glance, and
+        // unserializable once the reducer appends `undefined` to the list.
+        mutation: {
+          kind: "message.queued",
+          message: {
+            actionId: "bad-mutation",
+            messageId: "m",
+            text: "t",
+            attachments: [],
+            clientId: "client-a",
+          },
+          draftRevision: 1,
+          revision: 1,
+        } as never,
+        now: 10,
+      })
+    ).rejects.toThrow("host_state_invalid_mutation")
+    await expect(getDb().hostStateActions.count()).resolves.toBe(0)
+    await expect(getDb().hostStateChannels.count()).resolves.toBe(0)
   })
 
   it("rolls back the ledger when a transcript target is missing", async () => {

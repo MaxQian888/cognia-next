@@ -29,10 +29,11 @@ import {
   markSent,
   recordFailure,
   releaseClaim,
+  releaseStaleClaims,
   vacuumSent,
 } from "@/lib/db/mobile-outbound-queue"
 import type { MobileOutboundJobRow } from "@/lib/db/mobile-outbound-types"
-import { isHostStateSubmitResponseV1 } from "@cognia/agent-config-types/host-state"
+import { isHostStateSubmitResponse } from "@cognia/agent-config-types/host-state"
 import { detectNativePlatform } from "@/lib/capacitor/_shared"
 import { subscribe as subscribeNetwork } from "@/lib/capacitor/network"
 import type { RuntimeTargetScope } from "@/lib/runtime/runtime-target-context"
@@ -102,6 +103,16 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
   let stopped = false
   let unsubNetwork: (() => void) | null = null
   let activeDrain: Promise<void> | null = null
+  /**
+   * Rows a predecessor left mid-dispatch are reclaimed once, on the first
+   * drain. A `sending` row now holds its channel's head, so leaving one behind
+   * blocks every later action on that session forever.
+   *
+   * The flag is per-runner, so it cannot by itself keep a second runner off a
+   * row this one is mid-dispatch on — `releaseStaleClaims` decides that by the
+   * age of the claim, not by who is asking.
+   */
+  let staleClaimsReleased = false
 
   void (async () => {
     unsubNetwork = await subscribeNetwork((status) => {
@@ -127,6 +138,10 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
     activeDrain = (async () => {
       draining = true
       try {
+        if (!staleClaimsReleased) {
+          staleClaimsReleased = true
+          await releaseStaleClaims(scope, now()).catch(() => 0)
+        }
         // Vacuum opportunistically; cheap if nothing to do.
         await vacuumSent(vacuumKeepMs).catch(() => 0)
         const frozenIds = new Set<string>()
@@ -155,7 +170,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
       const result = await dispatcher.call(row.command, row.payload, {
         idempotencyKey: row.idempotencyKey,
       })
-      if (row.protocol === "host-state-v1") {
+      if (row.protocol === "host-state") {
         const receipt = hostStateReceipt(result, row.actionId)
         if (!receipt) throw new Error("host_state_malformed_response")
         await markHostStateResult(row.id, receipt)
@@ -164,7 +179,7 @@ export function createOutboundRunner(opts: RunnerOptions): OutboundRunner {
         await markSent(row.id)
       }
     } catch (err) {
-      if (row.protocol === "host-state-v1") {
+      if (row.protocol === "host-state") {
         const rejectionCode = terminalHostStateErrorCode(err)
         if (rejectionCode) {
           await markHostStateResult(row.id, {
@@ -255,7 +270,7 @@ function hostStateReceipt(
   outcome: "applied" | "duplicate" | "rejected" | "conflicted"
   rejection?: { code: string; currentRevision?: number }
 } | null {
-  if (!isHostStateSubmitResponseV1(value) || value.results.length !== 1) return null
+  if (!isHostStateSubmitResponse(value) || value.results.length !== 1) return null
   const receipt = value.results[0]
   if (!receipt || (expectedActionId && receipt.actionId !== expectedActionId)) return null
   const parsedOutcome = receipt.outcome
@@ -274,20 +289,59 @@ function hostStateReceipt(
 
 /**
  * Read-only helper for the offline banner / queue UI.
+ *
+ * Reports the two terminal HostState outcomes alongside the transport ones.
+ * They used to be counted by nothing at all: a `rejected` or `conflicted`
+ * receipt moved the row out of `pending` and it simply vanished from every
+ * surface, so an action the Host had refused looked, to the user, exactly like
+ * one that had gone through.
+ *
+ * Counts `sending` rather than `failed`, which no row can ever hold — see
+ * {@link QueueSummary.sending}.
  */
-export async function getQueueSummary(): Promise<{
-  pending: number
-  failed: number
-  deadlettered: number
-}> {
-  const [pending, failed, deadlettered] = await Promise.all([
+export async function getQueueSummary(): Promise<QueueSummary> {
+  const [pending, sending, deadlettered, rejected, conflicted] = await Promise.all([
     listByStatus("pending"),
-    listByStatus("failed"),
+    listByStatus("sending"),
     listByStatus("deadlettered"),
+    listByStatus("rejected"),
+    listByStatus("conflicted"),
   ])
   return {
     pending: pending.length,
-    failed: failed.length,
+    sending: sending.length,
     deadlettered: deadlettered.length,
+    rejected: rejected.length,
+    conflicted: conflicted.length,
   }
+}
+
+export interface QueueSummary {
+  /** Waiting for a dispatch attempt — including one backing off before a retry. */
+  pending: number
+  /**
+   * Claimed and currently being dispatched.
+   *
+   * This lane replaces a `failed` count that was structurally always zero:
+   * `recordFailure` stores `decideNextAttempt`'s verdict, which is `pending` or
+   * `deadlettered`, so no row ever held `failed` and the banner's "in flight"
+   * total silently omitted the rows actually on the wire.
+   */
+  sending: number
+  /** Out of retries — the user decides whether to retry or discard. */
+  deadlettered: number
+  /** The Host refused it outright. Retrying unchanged will fail again. */
+  rejected: number
+  /** It raced another writer; the client must refresh and re-submit. */
+  conflicted: number
+}
+
+/** Rows the user must look at, because nothing else will move them. */
+export function needsAttention(summary: QueueSummary): number {
+  return summary.deadlettered + summary.rejected + summary.conflicted
+}
+
+/** Rows still on their way to the Host. */
+export function inFlight(summary: QueueSummary): number {
+  return summary.pending + summary.sending
 }

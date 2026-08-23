@@ -733,6 +733,21 @@ describe("getDb", () => {
     expect(children.every((run) => run.parentRunId !== undefined)).toBe(true)
   })
 
+  it("v180 gives a remote device's attachments somewhere to land", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(180)
+    // The compound index is what makes the per-(session, device) staging area
+    // a lookup rather than a table scan on every init.
+    const table = db.table("sessionAttachmentUploads")
+    expect(table.schema.primKey.keyPath).toBe("uploadId")
+    const indexes = table.schema.indexes.map((index) => index.name)
+    expect(indexes).toEqual(expect.arrayContaining(["sessionId", "deviceId", "expiresAt"]))
+    expect(indexes.some((name) => name.includes("sessionId") && name.includes("deviceId"))).toBe(
+      true
+    )
+  })
+
   it("v178 makes the attachment cache accountable and defaults the media policy", async () => {
     // Three defects are pinned here, because each one was silently wrong:
     // the cache had no access stamp to evict by, deleting a row left its
@@ -858,6 +873,148 @@ describe("getDb", () => {
       expect((await upgraded.adapterInstances.get("adp-optedin"))?.mediaModelPolicy).toBe(
         "allow_cloud_binary"
       )
+
+      upgraded.close()
+    }
+  )
+
+  fullSchemaIt(
+    "v179 clears the HostState ledger and rewrites queued rows instead of losing them",
+    async () => {
+      // The ledger is a cache of live coordination, rebuilt from sessions /
+      // messages / chatDrafts on the next Host start. The queue is the user's
+      // unsent work, so nothing there is dropped: the only thing wrong with a
+      // HostState row is the removed version field, and stripping it is a
+      // complete translation.
+      const name = `cognia-v179-hoststate-${Date.now()}`
+      const legacy = new Dexie(name)
+      legacy.version(178).stores({
+        hostStateChannels: "&channel, hostGeneration, hostSeq, revision, updatedAt",
+        hostStateActions:
+          "&[hostGeneration+actionId], channel, hostSeq, outcome, dispatchState, broadcastState, createdAt, updatedAt",
+        hostStateMeta: "&id, hostGeneration, leaseExpiresAt, migrationStage, updatedAt",
+        mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
+      })
+      await legacy.open()
+      await legacy.table("hostStateChannels").put({
+        channel: "cognia://target/t/sessions/s",
+        hostGeneration: 1,
+        hostSeq: 4,
+        revision: 4,
+        digest: "hsv1-0000000000000000",
+        // The shape the guards now reject: one status enum, two decision
+        // buckets, no operations.
+        state: {
+          kind: "session",
+          channel: "cognia://target/t/sessions/s",
+          sessionId: "s",
+          revision: 4,
+          transcriptRevision: 2,
+          status: "awaiting_approval",
+          archived: false,
+          draft: { text: "", attachments: [], revision: 0 },
+          queue: [],
+          activeTurn: null,
+          pendingApprovals: [{ requestId: "req-1" }],
+          pendingElicitations: [],
+        },
+        updatedAt: 1,
+      })
+      await legacy.table("hostStateActions").put({
+        hostGeneration: 1,
+        actionId: "a-1",
+        channel: "cognia://target/t/sessions/s",
+        hostSeq: 4,
+        outcome: "applied",
+        payloadDigest: "d",
+        event: { protocolVersion: 1, channel: "c", hostId: "h", hostGeneration: 1, hostSeq: 4 },
+        dispatchState: "completed",
+        broadcastState: "completed",
+        summaryState: "completed",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      await legacy.table("hostStateMeta").put({
+        id: "singleton",
+        hostId: "host-a",
+        hostGeneration: 1,
+        hostSeq: 4,
+        leaseOwnerId: "owner",
+        leaseExpiresAt: 9,
+        updatedAt: 1,
+      })
+      await legacy.table("mobileOutboundQueue").bulkPut([
+        {
+          id: "q-hoststate",
+          command: "host_state_submit",
+          protocol: "host-state-v1",
+          payload: { protocolVersion: 1, actions: [] },
+          status: "pending",
+          attempts: 0,
+          createdAt: 1,
+        },
+        {
+          id: "q-legacy-shape",
+          command: "host_state_submit",
+          payload: { protocolVersion: 1, actions: [] },
+          status: "pending",
+          attempts: 0,
+          createdAt: 1,
+        },
+        {
+          id: "q-rpc",
+          command: "connector_send",
+          protocol: "legacy-rpc",
+          payload: { conversationId: "c-1", text: "still mine" },
+          status: "pending",
+          attempts: 0,
+          createdAt: 1,
+        },
+        {
+          // A legacy RPC job whose own payload happens to use the same key.
+          // Matching on `protocolVersion` alone swept rows like this one.
+          id: "q-rpc-versioned",
+          command: "connector_send",
+          protocol: "legacy-rpc",
+          payload: { conversationId: "c-2", protocolVersion: 3 },
+          status: "pending",
+          attempts: 0,
+          createdAt: 1,
+        },
+      ])
+      legacy.close()
+
+      const upgraded = new CogniaDB(name)
+      await upgraded.open()
+      expect(upgraded.verno).toBeGreaterThanOrEqual(179)
+
+      await expect(upgraded.hostStateChannels.count()).resolves.toBe(0)
+      await expect(upgraded.hostStateActions.count()).resolves.toBe(0)
+      await expect(upgraded.hostStateMeta.count()).resolves.toBe(0)
+
+      // Nothing is lost. Both HostState rows are rewritten into the new shape,
+      // and both RPC jobs are untouched — including the one whose payload
+      // happens to carry a `protocolVersion` of its own.
+      const remaining = await upgraded.mobileOutboundQueue.orderBy("id").toArray()
+      expect(remaining.map((row) => row.id)).toEqual([
+        "q-hoststate",
+        "q-legacy-shape",
+        "q-rpc",
+        "q-rpc-versioned",
+      ])
+      for (const id of ["q-hoststate", "q-legacy-shape"]) {
+        const row = remaining.find((candidate) => candidate.id === id)!
+        expect(row.protocol).toBe("host-state")
+        expect(row.payload).toEqual({ actions: [] })
+      }
+      expect(remaining.find((row) => row.id === "q-rpc")!.payload).toEqual({
+        conversationId: "c-1",
+        text: "still mine",
+      })
+      expect(remaining.find((row) => row.id === "q-rpc-versioned")!.payload).toEqual({
+        conversationId: "c-2",
+        protocolVersion: 3,
+      })
 
       upgraded.close()
     }

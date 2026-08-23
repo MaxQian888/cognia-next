@@ -246,12 +246,24 @@ pub fn apply(
         "atMs": now.saturating_mul(1_000),
     });
 
-    // ── 6. Bus frame — closes `/ws/events` for this device ──────────────────
+    // ── 6. Event-plane leases ───────────────────────────────────────────────
+    // Dropped here rather than waiting for the socket teardown in step 7 to
+    // reach `Drop`. A suspended or revoked device must stop counting as an
+    // in-band listener the moment authority ends: while a lease survives it
+    // still suppresses the push that would otherwise reach a device that CAN
+    // still act, and it still satisfies the live-stream precondition an attach
+    // renewal checks. Closing a lease twice is a no-op, so racing the socket's
+    // own teardown is safe.
+    if matches!(action, LifecycleAction::Suspend | LifecycleAction::Revoke) {
+        super::event_leases::close_device(device_id);
+    }
+
+    // ── 7. Bus frame — closes `/ws/events` for this device ──────────────────
     if let Some(bus) = context.event_bus.as_ref() {
         bus.publish(LIFECYCLE_EVENT.to_string(), payload.clone());
     }
 
-    // ── 7. Renderer mirror ──────────────────────────────────────────────────
+    // ── 8. Renderer mirror ──────────────────────────────────────────────────
     if let Some(app) = context.app_handle.as_ref() {
         use tauri::Emitter as _;
         let _ = app.emit(RENDERER_LIFECYCLE_EVENT, payload);
@@ -488,6 +500,74 @@ mod tests {
             .active_device_key(TENANT, "doomed")
             .expect("key lookup")
             .is_none());
+    }
+
+    /// A revoked device must stop counting as an in-band listener at the moment
+    /// authority ends, not whenever its socket happens to notice.
+    ///
+    /// While a lease survives it does two harmful things: it suppresses the
+    /// push that would otherwise reach a device that CAN still act, and it
+    /// satisfies the live-stream precondition an attach renewal checks — so a
+    /// device whose grant was just pulled could renew straight back into
+    /// control.
+    #[test]
+    fn revoking_a_device_closes_its_event_plane_leases_at_once() {
+        let _scope = store_scope();
+        let _store = store_with_owners(&["owner-keep", "doomed", "bystander"]);
+        let context = lifecycle_context();
+
+        let doomed = super::super::event_leases::EventStreamLeaseGuard::open(
+            "doomed",
+            super::super::event_leases::EventStreamTransport::Ws,
+        );
+        let bystander = super::super::event_leases::EventStreamLeaseGuard::open(
+            "bystander",
+            super::super::event_leases::EventStreamTransport::Rtc,
+        );
+        doomed.advance(super::super::event_leases::EventStreamState::Ready);
+        bystander.advance(super::super::event_leases::EventStreamState::Ready);
+
+        apply(
+            &context,
+            &LifecycleActor::local_trust_root(TENANT),
+            "doomed",
+            LifecycleAction::Revoke,
+        )
+        .expect("revoke");
+
+        assert!(!super::super::event_leases::has_ready_stream("doomed"));
+        assert!(
+            super::super::event_leases::has_ready_stream("bystander"),
+            "one device's revocation must not silence another's stream"
+        );
+        drop(doomed);
+        drop(bystander);
+    }
+
+    /// Same reasoning for a suspension: it is reversible, but while it is in
+    /// force the device may not act, so it must not read as present either.
+    #[test]
+    fn suspending_a_device_closes_its_event_plane_leases_too() {
+        let _scope = store_scope();
+        let _store = store_with_owners(&["owner-keep", "paused"]);
+        let context = lifecycle_context();
+
+        let lease = super::super::event_leases::EventStreamLeaseGuard::open(
+            "paused",
+            super::super::event_leases::EventStreamTransport::Ws,
+        );
+        lease.advance(super::super::event_leases::EventStreamState::Ready);
+
+        apply(
+            &context,
+            &LifecycleActor::local_trust_root(TENANT),
+            "paused",
+            LifecycleAction::Suspend,
+        )
+        .expect("suspend");
+
+        assert!(!super::super::event_leases::has_ready_stream("paused"));
+        drop(lease);
     }
 
     /// Suspension has to be reversible, which means the device key survives.

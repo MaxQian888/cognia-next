@@ -1,20 +1,20 @@
 import type {
-  AllowedHostStateIntentV1,
-  HostStateActionReceiptV1,
-  HostStateActionV1,
-  HostStateAppliedActionV1,
-  HostStateSnapshotRequestV1,
-  HostStateSnapshotV1,
-  HostStateStatusV1,
-  HostStateSubmitRequestV1,
-  HostStateSubmitResponseV1,
+  AllowedHostStateIntent,
+  HostStateActionReceipt,
+  HostStateAction,
+  HostStateAppliedAction,
+  HostStateSnapshotRequest,
+  HostStateSnapshot,
+  HostStateStatus,
+  HostStateSubmitRequest,
+  HostStateSubmitResponse,
 } from "@cognia/agent-config-types/host-state"
 import {
-  isHostStateActionV1,
-  isHostStateAppliedActionV1,
-  isHostStateSnapshotV1,
-  isHostStateStatusV1,
-  isHostStateSubmitResponseV1,
+  isHostStateAction,
+  isHostStateAppliedAction,
+  isHostStateSnapshot,
+  isHostStateStatus,
+  isHostStateSubmitResponse,
 } from "@cognia/agent-config-types/host-state"
 import {
   isAgentEventEnvelope,
@@ -36,17 +36,13 @@ import { realOutput, type OutputSink } from "../cli/output"
 const HOST_STATE_BASE_PATH = "/api/dev/host-state"
 
 export interface LocalHostStateClient {
-  snapshot(request: HostStateSnapshotRequestV1): Promise<HostStateSnapshotV1>
-  submit(request: HostStateSubmitRequestV1): Promise<HostStateSubmitResponseV1>
-  status(request: {
-    protocolVersion: 1
-    accountId: string
-    runtimeTargetId: string
-  }): Promise<HostStateStatusV1>
-  nextEvents(afterHostSeq: number, signal?: AbortSignal): Promise<HostStateAppliedActionV1[]>
+  snapshot(request: HostStateSnapshotRequest): Promise<HostStateSnapshot>
+  submit(request: HostStateSubmitRequest): Promise<HostStateSubmitResponse>
+  status(request: { accountId: string; runtimeTargetId: string }): Promise<HostStateStatus>
+  nextEvents(afterHostSeq: number, signal?: AbortSignal): Promise<HostStateAppliedAction[]>
   subscribe(
     afterHostSeq: number,
-    onEvent: (event: HostStateAppliedActionV1) => void,
+    onEvent: (event: HostStateAppliedAction) => void,
     signal: AbortSignal,
     onResyncRequired?: () => Promise<number>
   ): Promise<void>
@@ -84,7 +80,7 @@ export function createLocalHostStateClient(
   const nextEvents = async (
     afterHostSeq: number,
     signal?: AbortSignal
-  ): Promise<HostStateAppliedActionV1[]> => {
+  ): Promise<HostStateAppliedAction[]> => {
     const response = await fetcher(
       `${endpoint.baseUrl}${HOST_STATE_BASE_PATH}/events?afterHostSeq=${afterHostSeq}`,
       {
@@ -104,7 +100,7 @@ export function createLocalHostStateClient(
     // The Host retains only a bounded replay window; past it, resuming from the
     // cursor would silently skip actions.
     if (envelope.gap === true) throw new Error("host_state_resync_required")
-    if (!envelope.events.every(isHostStateAppliedActionV1)) {
+    if (!envelope.events.every(isHostStateAppliedAction)) {
       throw new Error("host_state_events_malformed")
     }
     return envelope.events
@@ -148,17 +144,17 @@ export function createLocalHostStateClient(
   return {
     async snapshot(request) {
       const result = await post<unknown>("snapshot", request)
-      if (!isHostStateSnapshotV1(result)) throw new Error("host_state_snapshot_malformed")
+      if (!isHostStateSnapshot(result)) throw new Error("host_state_snapshot_malformed")
       return result
     },
     async submit(request) {
       const result = await post<unknown>("submit", request)
-      if (!isHostStateSubmitResponseV1(result)) throw new Error("host_state_submit_malformed")
+      if (!isHostStateSubmitResponse(result)) throw new Error("host_state_submit_malformed")
       return result
     },
     async status(request) {
       const result = await post<unknown>("status", request)
-      if (!isHostStateStatusV1(result)) throw new Error("host_state_status_malformed")
+      if (!isHostStateStatus(result)) throw new Error("host_state_status_malformed")
       return result
     },
     nextEvents,
@@ -166,7 +162,7 @@ export function createLocalHostStateClient(
     async subscribe(afterHostSeq, onEvent, signal, onResyncRequired) {
       let cursor = afterHostSeq
       while (!signal.aborted) {
-        let events: HostStateAppliedActionV1[]
+        let events: HostStateAppliedAction[]
         try {
           events = await nextEvents(cursor, signal)
         } catch (error) {
@@ -209,7 +205,6 @@ export function createLocalHostStateClient(
 }
 
 export interface AttachedHostStateRecord {
-  protocolVersion: 1
   accountId: string
   runtimeTargetId: string
   hostId: string
@@ -234,9 +229,9 @@ export type AttachedHostStateOutboxStatus =
   "pending" | "sending" | "sent" | "rejected" | "conflicted"
 
 export interface AttachedHostStateOutboxRow {
-  action: HostStateActionV1
+  action: HostStateAction
   status: AttachedHostStateOutboxStatus
-  receipt?: HostStateActionReceiptV1
+  receipt?: HostStateActionReceipt
   lastError?: string
 }
 
@@ -272,17 +267,16 @@ export function readAttachedHostStateOutbox(
  */
 export function queueAttachedHostStateAction(
   record: AttachedHostStateRecord,
-  intent: AllowedHostStateIntentV1,
+  intent: AllowedHostStateIntent,
   options: QueueAttachedHostStateActionOptions = {}
-): HostStateActionV1 {
+): HostStateAction {
   if (!record.sessionId) throw new Error("attached_session_required")
   const file = readOutboxFile(options)
   const activeRows = file.rows.filter((row) => row.status === "pending" || row.status === "sending")
   if (activeRows.length >= MAX_ATTACHED_PENDING_ACTIONS) {
     throw new Error("attached_host_outbox_full")
   }
-  const action: HostStateActionV1 = {
-    protocolVersion: 1,
+  const action: HostStateAction = {
     channel: sessionStateChannel(record.runtimeTargetId, record.sessionId),
     accountId: record.accountId,
     runtimeTargetId: record.runtimeTargetId,
@@ -296,7 +290,7 @@ export function queueAttachedHostStateAction(
     createdAt: (options.now ?? Date.now)(),
     action: intent,
   }
-  if (!isHostStateActionV1(action)) throw new Error("attached_host_action_invalid")
+  if (!isHostStateAction(action)) throw new Error("attached_host_action_invalid")
   file.nextClientSeq += 1
   file.rows.push({ action, status: "pending" })
   writeOutboxFile(file, options)
@@ -325,7 +319,6 @@ export async function flushAttachedHostStateOutbox(
   if (pending.length === 0) return file.rows
 
   const status = await connection.client.status({
-    protocolVersion: 1,
     accountId: connection.record.accountId,
     runtimeTargetId: connection.record.runtimeTargetId,
   })
@@ -343,10 +336,9 @@ export async function flushAttachedHostStateOutbox(
       delete row.lastError
     }
     writeOutboxFile(file, deps)
-    let response: HostStateSubmitResponseV1
+    let response: HostStateSubmitResponse
     try {
       response = await connection.client.submit({
-        protocolVersion: 1,
         accountId: connection.record.accountId,
         runtimeTargetId: connection.record.runtimeTargetId,
         actions: batch.map((row) => row.action),
@@ -386,15 +378,15 @@ export interface AttachLocalHostOptions {
   sessionId?: string
   accountId?: string
   signal?: AbortSignal
-  onHostStateEvent?: (event: HostStateAppliedActionV1) => void
-  onHostStateSnapshot?: (snapshot: HostStateSnapshotV1) => void
+  onHostStateEvent?: (event: HostStateAppliedAction) => void
+  onHostStateSnapshot?: (snapshot: HostStateSnapshot) => void
   onAgentEvent?: (event: AgentEventEnvelope) => void
 }
 
 export interface AttachedHostConnection {
   record: AttachedHostStateRecord
   client: LocalHostStateClient
-  snapshot: HostStateSnapshotV1
+  snapshot: HostStateSnapshot
   subscriptions: Promise<void>[]
 }
 
@@ -407,7 +399,6 @@ export async function attachLocalHost(
   const accountId = options.accountId ?? "local-default"
   const client = createLocalHostStateClient(endpoint, deps)
   const status = await client.status({
-    protocolVersion: 1,
     accountId,
     runtimeTargetId: options.targetId,
   })
@@ -415,7 +406,6 @@ export async function attachLocalHost(
     ? sessionStateChannel(options.targetId, options.sessionId)
     : sessionIndexChannel(options.targetId)
   const record: AttachedHostStateRecord = {
-    protocolVersion: 1,
     accountId,
     runtimeTargetId: options.targetId,
     hostId: status.hostId,
@@ -423,7 +413,7 @@ export async function attachLocalHost(
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     attachedAt: Date.now(),
   }
-  const buffered: HostStateAppliedActionV1[] = []
+  const buffered: HostStateAppliedAction[] = []
   let snapshotReady = false
   const subscriptions: Promise<void>[] = []
   if (options.signal && options.onHostStateEvent) {
@@ -438,7 +428,6 @@ export async function attachLocalHost(
         options.signal,
         async () => {
           const fresh = await client.snapshot({
-            protocolVersion: 1,
             accountId,
             runtimeTargetId: options.targetId,
             channel,
@@ -459,7 +448,6 @@ export async function attachLocalHost(
     subscriptions.push(client.subscribeAgentEvents(options.onAgentEvent, options.signal))
   }
   const snapshot = await client.snapshot({
-    protocolVersion: 1,
     accountId,
     runtimeTargetId: options.targetId,
     channel,
@@ -489,7 +477,6 @@ export function readAttachedHost(deps: HostStateCommandDeps = {}): AttachedHostS
   if (!raw) return null
   const value = JSON.parse(raw) as Partial<AttachedHostStateRecord>
   if (
-    value.protocolVersion !== 1 ||
     typeof value.accountId !== "string" ||
     typeof value.runtimeTargetId !== "string" ||
     typeof value.hostId !== "string" ||
@@ -502,13 +489,12 @@ export function readAttachedHost(deps: HostStateCommandDeps = {}): AttachedHostS
 
 export async function attachedHostStatus(
   deps: HostStateCommandDeps = {}
-): Promise<{ record: AttachedHostStateRecord; status: HostStateStatusV1 } | null> {
+): Promise<{ record: AttachedHostStateRecord; status: HostStateStatus } | null> {
   const record = readAttachedHost(deps)
   if (!record) return null
   const endpoint = await detectDesktop(deps)
   if (!endpoint) throw new Error("no_running_cognia_desktop")
   const status = await createLocalHostStateClient(endpoint, deps).status({
-    protocolVersion: 1,
     accountId: record.accountId,
     runtimeTargetId: record.runtimeTargetId,
   })
@@ -653,7 +639,7 @@ function isAttachedOutboxRow(value: unknown): value is AttachedHostStateOutboxRo
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const row = value as Partial<AttachedHostStateOutboxRow>
   return (
-    isHostStateActionV1(row.action) &&
+    isHostStateAction(row.action) &&
     (row.status === "pending" ||
       row.status === "sending" ||
       row.status === "sent" ||

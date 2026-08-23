@@ -120,7 +120,10 @@ test.describe("mobile — remote session control", () => {
       )
       .toMatchObject({
         command: "session_attach",
-        body: { sessionId: SESSION_ID, deviceId: companionConfig.deviceId },
+        // No `deviceId`: the Host binds the attachment to the DPoP-verified
+        // caller and ignores any id in the payload. `mode` asks for control and
+        // lets the Host narrow it to observe.
+        body: { sessionId: SESSION_ID, mode: "control" },
       })
     await expect(page.getByTestId("remote-connection-pill")).toHaveAttribute(
       "data-state",
@@ -164,7 +167,10 @@ test.describe("mobile — remote session control", () => {
     const approvalCard = page.getByTestId("remote-approval-card")
     await expect(approvalCard).toContainText("Allow Bash?")
     await expect(approvalCard).toContainText("Read the current repository status")
-    await page.getByTestId("remote-approval-deny").click()
+    // The action buttons come from the shared decision surface now, so their
+    // ids are kind-scoped rather than remote-scoped; the card around them is
+    // still the mobile one.
+    await page.getByTestId("decision-deny").click()
     await expect
       .poll(() =>
         desktop.calls.find(
@@ -191,7 +197,9 @@ test.describe("mobile — remote session control", () => {
       )
       .toMatchObject({
         command: "session_detach",
-        body: { sessionId: SESSION_ID, deviceId: companionConfig.deviceId },
+        // Same as attach: the Host releases the authenticated caller's own
+        // lease, so no device id crosses the wire.
+        body: { sessionId: SESSION_ID },
       })
   })
 })

@@ -3,9 +3,8 @@ import "fake-indexeddb/auto"
 import { webcrypto } from "node:crypto"
 
 import {
-  HOST_STATE_PROTOCOL_VERSION,
-  type AllowedHostStateIntentV1,
-  type HostStateActionV1,
+  type AllowedHostStateIntent,
+  type HostStateAction,
 } from "@cognia/agent-config-types/host-state"
 
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
@@ -36,16 +35,15 @@ function deps(overrides: Partial<HostAdapterDeps> = {}): HostAdapterDeps {
 }
 
 function action(
-  intent: AllowedHostStateIntentV1 = {
+  intent: AllowedHostStateIntent = {
     kind: "message.enqueue",
     messageId: "message-1",
     text: "hello from mobile",
     attachments: [],
   },
-  overrides: Partial<HostStateActionV1> = {}
-): HostStateActionV1 {
+  overrides: Partial<HostStateAction> = {}
+): HostStateAction {
   return {
-    protocolVersion: HOST_STATE_PROTOCOL_VERSION,
     channel: "cognia://target/target-1/sessions/session-1",
     accountId: "account-1",
     runtimeTargetId: "target-1",
@@ -127,7 +125,7 @@ describe("acceptHostStateChatTurn", () => {
     expect(JSON.stringify(batch?.envelope)).not.toContain("hello from mobile")
   }, 30_000)
 
-  it.each<AllowedHostStateIntentV1>([
+  it.each<AllowedHostStateIntent>([
     { kind: "turn.abort" },
     { kind: "turn.steer", text: "actually, stop" },
     { kind: "draft.replace", text: "draft", attachments: [] },
