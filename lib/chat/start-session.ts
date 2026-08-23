@@ -4,6 +4,7 @@ import { useProjectStore } from "@/stores/project/project-store"
 import { useUIStore } from "@/stores/ui"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/lib/task-workspace/managed-workspace"
 
 /** The subset of a session a caller may seed when starting a conversation. */
-export type NewSessionInput = Partial<
+type SessionSeed = Partial<
   Pick<
     ChatSession,
     | "title"
@@ -26,6 +27,13 @@ export type NewSessionInput = Partial<
     | "sdkSessionId"
   >
 >
+
+export interface NewSessionInput extends SessionSeed {
+  /** New-chat execution choice. Persisted on the Project after creation. */
+  executionLocation?: SessionExecutionLocation
+  /** Requested isolation base. Ignored for Local execution. */
+  executionBase?: SessionWorkspaceBaseSpec
+}
 
 /**
  * The single path that starts a conversation. Every entry point — welcome CTA,
@@ -42,7 +50,8 @@ export type NewSessionInput = Partial<
  * given, so a conversation is usable without picking a character first.
  */
 export async function startNewSession(partial?: NewSessionInput): Promise<ChatSession> {
-  let session = await createSession(partial)
+  const { executionLocation, executionBase, ...sessionSeed } = partial ?? {}
+  let session = await createSession(sessionSeed)
 
   // Auto-link to the active workspace so it groups under that project
   // (persisted via `project.sessionIds`). No-op when no workspace is active.
@@ -67,8 +76,10 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
             projectRoot: root.path,
             rootId: root.id,
             environmentId: project.defaultEnvironmentId,
-            requestedLocation: project.defaultExecutionLocation ?? "managedWorktree",
+            requestedLocation:
+              executionLocation ?? project.defaultExecutionLocation ?? "managedWorktree",
             isGitRepository: false,
+            base: executionBase,
             now: Date.now(),
           })
         : createManagedWorkspaceContext(session.id, Date.now())
@@ -87,6 +98,10 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
     updateProject(activeProjectId, {
       defaultExecutionLocation: partial.executionContext.location,
     })
+  }
+
+  if (activeProjectId && executionLocation) {
+    updateProject(activeProjectId, { defaultExecutionLocation: executionLocation })
   }
 
   useChatStore.getState().setActiveSession(session.id)

@@ -28,6 +28,10 @@ import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
 import { Button } from "@/components/ui/button"
 import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
+import {
+  NewChatExecutionPicker,
+  type NewChatExecutionSelection,
+} from "@/components/chat/new-chat-execution-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
 import { TitleBarProjectionScope } from "@/components/shell/title-bar-outlets"
@@ -132,6 +136,9 @@ export function DesktopChatWorkspace() {
   const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  const activeProject = useProjectStore((s) =>
+    s.projects.find((project) => project.id === s.activeProjectId)
+  )
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
 
@@ -149,6 +156,26 @@ export function DesktopChatWorkspace() {
 
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
+  const [newChatExecutionOverride, setNewChatExecutionOverride] = useState<{
+    projectId: string
+    value: NewChatExecutionSelection
+  } | null>(null)
+  const newChatExecution = useMemo<NewChatExecutionSelection>(
+    () =>
+      activeProject && newChatExecutionOverride?.projectId === activeProject.id
+        ? newChatExecutionOverride.value
+        : {
+            location: activeProject?.defaultExecutionLocation ?? "managedWorktree",
+            base: { kind: "workingState" },
+          },
+    [activeProject, newChatExecutionOverride]
+  )
+  const setNewChatExecution = useCallback(
+    (value: NewChatExecutionSelection) => {
+      if (activeProject) setNewChatExecutionOverride({ projectId: activeProject.id, value })
+    },
+    [activeProject]
+  )
 
   const composerRef = useRef<ComposerHandle | null>(null)
 
@@ -266,11 +293,17 @@ export function DesktopChatWorkspace() {
   const handleNewTeamConversation = useCallback(
     async (teamId: string) => {
       log.info("new-team-conversation", { teamId })
-      const s = await create({ title: "New conversation", kind: "team", teamId })
+      const s = await create({
+        title: "New conversation",
+        kind: "team",
+        teamId,
+        executionLocation: newChatExecution.location,
+        executionBase: newChatExecution.base,
+      })
       select(s.id)
       return s
     },
-    [create, select]
+    [create, newChatExecution, select]
   )
 
   const handleSwitchToSession = useCallback(
@@ -491,11 +524,22 @@ export function DesktopChatWorkspace() {
         const s = await handleNewTeamConversation(selectedGuild.teamId)
         await teamChat.send(text, { sessionId: s.id })
       } else {
-        const s = await create()
+        const s = await create({
+          executionLocation: newChatExecution.location,
+          executionBase: newChatExecution.base,
+        })
         await directChat.send(text, undefined, { sessionId: s.id })
       }
     },
-    [directChat, teamChat, isTeamSessionId, create, selectedGuild, handleNewTeamConversation]
+    [
+      directChat,
+      teamChat,
+      isTeamSessionId,
+      create,
+      selectedGuild,
+      handleNewTeamConversation,
+      newChatExecution,
+    ]
   )
 
   // The welcome CTA / tab-strip "+" respect the selected guild: a team guild
@@ -518,11 +562,13 @@ export function DesktopChatWorkspace() {
         title: characterChatTitle(tMembers, c.name),
         kind: "direct",
         characterId: c.id,
+        executionLocation: newChatExecution.location,
+        executionBase: newChatExecution.base,
       })
       select(s.id)
       setSelectedGuild({ kind: "dm" })
     },
-    [create, select, setSelectedGuild, tMembers]
+    [create, newChatExecution, select, setSelectedGuild, tMembers]
   )
 
   // Inline pane gates carry approvals for both kinds; team approvals arrive
@@ -651,6 +697,14 @@ export function DesktopChatWorkspace() {
                     onCreate={handleCreate}
                     onUseSample={handleUseSample}
                     onOpenSettings={openSettings}
+                    newChatExecutionControls={
+                      activeProject ? (
+                        <NewChatExecutionPicker
+                          value={newChatExecution}
+                          onChange={setNewChatExecution}
+                        />
+                      ) : undefined
+                    }
                     recentSessions={recentSessions}
                     onResumeSession={handleSwitchToSession}
                     composerRef={composerRef}

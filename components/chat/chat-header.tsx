@@ -26,6 +26,7 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { BranchLineageChip } from "@/components/chat/branch-lineage-chip"
 import { ImportedOriginChip } from "@/components/chat/imported-origin-chip"
+import { SessionEnvironmentChip } from "@/components/chat/session-environment-chip"
 import { BranchChildrenChip } from "@/components/chat/branch-children-chip"
 import { dispatchSessionToCodexApp } from "@/lib/chat/dispatch-to-codex-app"
 import { inboxConversationHref } from "@/lib/inbox/conversation-href"
@@ -136,6 +137,10 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
             warning for a frozen import — the badge `lib/data/import-merge.ts`
             promised while nothing in the app read `importFrozen` at all. */}
         <ImportedOriginChip session={session} />
+        <SessionEnvironmentChip
+          executionContext={session.executionContext}
+          onManage={() => setSettingsOpen(true)}
+        />
       </div>
 
       {/* Plan-mode tasks for a non-team chat. Self-hides (returns null) when the
@@ -206,12 +211,6 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
         </Button>
       )}
 
-      {/* Persistent end controls. The browser-dock opener moved into the
-          artifact dock's own menu, the agent-flow density switch already had a
-          copy in the settings sheet and the appearance settings, and Insights
-          became a row inside the sheet — none of the three is touched per turn.
-          What is left is the one place to configure this session and the one
-          toggle for the pane beside it. */}
       <Button
         variant="ghost"
         size="icon"

@@ -703,6 +703,17 @@
   "empty": {
     "brandAlt": "Cognia",
     "dismiss": "Hide this section",
+    "execution": {
+      "baseLabel": "Base",
+      "bases": {
+        "localHead": "Local HEAD",
+        "remoteDefault": "Remote default",
+        "workingState": "Working state"
+      },
+      "local": "Local",
+      "locationLabel": "Execution environment",
+      "worktree": "Worktree"
+    },
     "greeting": {
       "afternoon": "Good afternoon",
       "evening": "Good evening",
@@ -796,6 +807,25 @@
       "useInherited": "Use inherited account"
     },
     "ariaSettings": "Session settings",
+    "environment": {
+      "aria": "{mode} execution environment",
+      "base": "Base",
+      "bases": {
+        "gitRef": "Git ref {ref}",
+        "localHead": "Local HEAD",
+        "pullRequest": "{provider} PR #{number}",
+        "remoteDefault": "Remote default",
+        "workingState": "Working state"
+      },
+      "branch": "Branch",
+      "manage": "Manage environment",
+      "modes": {
+        "local": "Local",
+        "managed": "Worktree",
+        "permanent": "Permanent"
+      },
+      "state": "State"
+    },
     "bareMode": "Bare mode",
     "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
     "branchAria": "Branch conversation",

@@ -141,6 +141,44 @@ describe("startNewSession", () => {
     expect(updateProject).toHaveBeenCalledWith("p_1", { defaultExecutionLocation: "local" })
   })
 
+  it("creates a new chat from the picker location and base, then remembers the choice", async () => {
+    const updateProject = jest.fn()
+    const project = {
+      id: "p_picker",
+      name: "Picker",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      projects: [project],
+      activeProjectId: project.id,
+      addSessionToProject: jest.fn(),
+      updateProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({
+      executionLocation: "managedWorktree",
+      executionBase: { kind: "remoteDefault" },
+    })
+
+    expect(session.executionContext).toMatchObject({
+      location: "managedWorktree",
+      execution: { mode: "managed", base: { kind: "remoteDefault" } },
+    })
+    expect(updateProject).toHaveBeenCalledWith(project.id, {
+      defaultExecutionLocation: "managedWorktree",
+    })
+  })
+
   it("automatically gives a projectless chat a durable managed workspace identity", async () => {
     const session = await startNewSession()
 

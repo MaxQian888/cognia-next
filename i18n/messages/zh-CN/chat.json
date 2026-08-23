@@ -703,6 +703,17 @@
   "empty": {
     "brandAlt": "Cognia",
     "dismiss": "隐藏此区块",
+    "execution": {
+      "baseLabel": "基准",
+      "bases": {
+        "localHead": "本地 HEAD",
+        "remoteDefault": "远端默认分支",
+        "workingState": "当前工作状态"
+      },
+      "local": "本地",
+      "locationLabel": "执行环境",
+      "worktree": "工作树"
+    },
     "greeting": {
       "afternoon": "下午好",
       "evening": "晚上好",
@@ -796,6 +807,25 @@
       "useInherited": "使用继承账号"
     },
     "ariaSettings": "会话设置",
+    "environment": {
+      "aria": "{mode}执行环境",
+      "base": "基准",
+      "bases": {
+        "gitRef": "Git 引用 {ref}",
+        "localHead": "本地 HEAD",
+        "pullRequest": "{provider} PR #{number}",
+        "remoteDefault": "远端默认分支",
+        "workingState": "当前工作状态"
+      },
+      "branch": "分支",
+      "manage": "管理环境",
+      "modes": {
+        "local": "本地",
+        "managed": "工作树",
+        "permanent": "永久环境"
+      },
+      "state": "状态"
+    },
     "bareMode": "极简模式",
     "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
     "branchAria": "分支对话",

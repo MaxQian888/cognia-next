@@ -189,6 +189,8 @@ interface ChatPaneProps {
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
+  /** Execution picker rendered on the no-session welcome surface. */
+  newChatExecutionControls?: ReactNode
   /** Recent sessions for the welcome page "Continue" group. */
   recentSessions?: readonly RecentSessionEntry[]
   /** Resume a recent session by id from the welcome page. */
@@ -277,6 +279,7 @@ export function ChatPane({
   onCreate,
   onUseSample,
   onOpenSettings,
+  newChatExecutionControls,
   recentSessions,
   onResumeSession,
   composerRef,
@@ -451,6 +454,7 @@ export function ChatPane({
         hideSamples={welcomeExtras?.hideSamples}
         headerExtraSlot={welcomeExtras?.header}
         quickActionsSlot={welcomeExtras?.quickActions}
+        executionControlsSlot={newChatExecutionControls}
         statsSlot={statsSlot}
         hiddenSections={welcomeHidden}
         onDismissSection={handleDismissSection}

@@ -5435,6 +5435,17 @@
     "empty": {
       "brandAlt": "Cognia",
       "dismiss": "隐藏此区块",
+      "execution": {
+        "baseLabel": "基准",
+        "bases": {
+          "localHead": "本地 HEAD",
+          "remoteDefault": "远端默认分支",
+          "workingState": "当前工作状态"
+        },
+        "local": "本地",
+        "locationLabel": "执行环境",
+        "worktree": "工作树"
+      },
       "greeting": {
         "afternoon": "下午好",
         "evening": "晚上好",
@@ -5555,6 +5566,25 @@
       "debugMode": "调试模式",
       "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。",
       "description": "为本会话覆盖默认值，留空则继承全局设置。",
+      "environment": {
+        "aria": "{mode}执行环境",
+        "base": "基准",
+        "bases": {
+          "gitRef": "Git 引用 {ref}",
+          "localHead": "本地 HEAD",
+          "pullRequest": "{provider} PR #{number}",
+          "remoteDefault": "远端默认分支",
+          "workingState": "当前工作状态"
+        },
+        "branch": "分支",
+        "manage": "管理环境",
+        "modes": {
+          "local": "本地",
+          "managed": "工作树",
+          "permanent": "永久环境"
+        },
+        "state": "状态"
+      },
       "execution": {
         "addEnv": "添加变量",
         "effort": "执行思考强度",

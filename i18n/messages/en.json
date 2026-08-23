@@ -5435,6 +5435,17 @@
     "empty": {
       "brandAlt": "Cognia",
       "dismiss": "Hide this section",
+      "execution": {
+        "baseLabel": "Base",
+        "bases": {
+          "localHead": "Local HEAD",
+          "remoteDefault": "Remote default",
+          "workingState": "Working state"
+        },
+        "local": "Local",
+        "locationLabel": "Execution environment",
+        "worktree": "Worktree"
+      },
       "greeting": {
         "afternoon": "Good afternoon",
         "evening": "Good evening",
@@ -5555,6 +5566,25 @@
       "debugMode": "Debug mode",
       "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process.",
       "description": "Override defaults for this chat. Empty = use global.",
+      "environment": {
+        "aria": "{mode} execution environment",
+        "base": "Base",
+        "bases": {
+          "gitRef": "Git ref {ref}",
+          "localHead": "Local HEAD",
+          "pullRequest": "{provider} PR #{number}",
+          "remoteDefault": "Remote default",
+          "workingState": "Working state"
+        },
+        "branch": "Branch",
+        "manage": "Manage environment",
+        "modes": {
+          "local": "Local",
+          "managed": "Worktree",
+          "permanent": "Permanent"
+        },
+        "state": "State"
+      },
       "execution": {
         "addEnv": "Add variable",
         "effort": "Execution effort",

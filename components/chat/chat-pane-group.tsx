@@ -9,7 +9,7 @@
  * or be confused with pane A's.
  */
 
-import { useCallback, type Ref } from "react"
+import { useCallback, type ReactNode, type Ref } from "react"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { ChatPane } from "./chat-view"
 import { ToolApprovalDialog } from "./tool-approval-dialog"
@@ -56,6 +56,8 @@ export interface ChatPaneGroupProps {
   onCreate: () => void
   onUseSample: (text: string) => void
   onOpenSettings: (tab?: string) => void
+  /** Execution picker rendered on the no-session welcome surface. */
+  newChatExecutionControls?: ReactNode
   recentSessions?: readonly RecentSessionEntry[]
   onResumeSession?: (id: string) => void
   composerRef?: Ref<ComposerHandle>
@@ -119,6 +121,7 @@ export function ChatPaneGroup({
   onCreate,
   onUseSample,
   onOpenSettings,
+  newChatExecutionControls,
   recentSessions,
   onResumeSession,
   composerRef,
@@ -172,6 +175,7 @@ export function ChatPaneGroup({
         onCreate={onCreate}
         onUseSample={onUseSample}
         onOpenSettings={onOpenSettings}
+        newChatExecutionControls={newChatExecutionControls}
         onSplitView={onSplitView}
         onExitSplit={onExitSplit}
         recentSessions={recentSessions}

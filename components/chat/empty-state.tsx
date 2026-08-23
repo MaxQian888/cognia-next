@@ -124,6 +124,8 @@ interface Props {
    * the workflow-editor chat tab — can leave it off.
    */
   statsSlot?: ReactNode
+  /** New-chat execution controls shown beside the primary creation action. */
+  executionControlsSlot?: ReactNode
   /**
    * Visual density. `"rich"` (default) shows the illustrated two-column hero
    * and quiet surfaced starter cards; `"minimal"` uses a compact, media-free
@@ -211,6 +213,7 @@ export function EmptyChatState({
   headerExtraSlot,
   quickActionsSlot,
   statsSlot,
+  executionControlsSlot,
   welcomeStyle = "rich",
   onToggleStyle,
   userName,
@@ -342,10 +345,13 @@ export function EmptyChatState({
             </div>
 
             {variant === "fullscreen" ? (
-              <Button onClick={onCreate} variant={rich ? "default" : "outline"} className="gap-2">
-                <PlusIcon className="size-4" aria-hidden />
-                {t("newChat")}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {executionControlsSlot}
+                <Button onClick={onCreate} variant={rich ? "default" : "outline"} className="gap-2">
+                  <PlusIcon className="size-4" aria-hidden />
+                  {t("newChat")}
+                </Button>
+              </div>
             ) : null}
           </div>
 
