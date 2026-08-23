@@ -601,3 +601,93 @@ describe("retry is offered only where a re-dispatch exists", () => {
     expect(running.allowedActions).toEqual(["stop", "open_details"])
   })
 })
+
+describe("verification artifacts", () => {
+  const summary = {
+    conclusion: "failed",
+    passed: 10,
+    failed: 1,
+    skipped: 2,
+    total: 13,
+    durationMs: 4_200,
+  }
+
+  const reduceArtifact = (payload: Record<string, unknown>) =>
+    reduceRunEvents(baseRun, [
+      event({ type: "run.started", seq: 1 }),
+      event({ type: "artifact.created", seq: 2, payload }),
+    ]).artifacts[0]
+
+  it("projects a well-formed verification summary", () => {
+    expect(
+      reduceArtifact({
+        artifactId: "verification:call-1",
+        title: "Tests",
+        safeTitle: true,
+        kind: "verification",
+        detailsRef: "call-1",
+        verification: summary,
+      })
+    ).toMatchObject({
+      title: "Tests",
+      kind: "verification",
+      detailsRef: "call-1",
+      verification: summary,
+    })
+  })
+
+  it("keeps an inconclusive run inconclusive", () => {
+    const artifact = reduceArtifact({
+      artifactId: "v1",
+      title: "Tests",
+      safeTitle: true,
+      kind: "verification",
+      verification: { conclusion: "inconclusive", passed: 0, failed: 0, skipped: 0, total: 0 },
+    })
+    expect(artifact.verification?.conclusion).toBe("inconclusive")
+  })
+
+  describe("degrades to a plain artifact rather than inventing a green run", () => {
+    it.each([
+      ["a missing count", { conclusion: "passed", passed: 1, failed: 0, skipped: 0 }],
+      [
+        "a non-numeric count",
+        { conclusion: "passed", passed: "1", failed: 0, skipped: 0, total: 1 },
+      ],
+      [
+        "an unknown conclusion",
+        { conclusion: "flaky", passed: 1, failed: 0, skipped: 0, total: 1 },
+      ],
+      ["a missing conclusion", { passed: 1, failed: 0, skipped: 0, total: 1 }],
+      ["a non-object summary", "passed"],
+    ])("%s", (_label, verification) => {
+      const artifact = reduceArtifact({
+        artifactId: "v1",
+        title: "Tests",
+        safeTitle: true,
+        kind: "verification",
+        verification,
+      })
+      expect(artifact.verification).toBeUndefined()
+      expect(artifact.kind).toBeUndefined()
+    })
+  })
+
+  it("leaves artifacts that predate the field untouched", () => {
+    const artifact = reduceArtifact({ artifactId: "a1", title: "Report", safeTitle: true })
+    expect(artifact).toMatchObject({ title: "Report" })
+    expect(artifact.kind).toBeUndefined()
+    expect(artifact.verification).toBeUndefined()
+  })
+
+  it("still refuses an unsafe title on a verification artifact", () => {
+    const artifact = reduceArtifact({
+      artifactId: "v1",
+      title: "pnpm test MY_TOKEN=sk-secret",
+      kind: "verification",
+      verification: summary,
+    })
+    expect(artifact.title).toBe("Artifact created")
+    expect(JSON.stringify(artifact)).not.toContain("sk-secret")
+  })
+})

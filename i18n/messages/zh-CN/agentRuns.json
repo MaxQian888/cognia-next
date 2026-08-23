@@ -1,42 +1,148 @@
 {
   "actions": {
-    "abort": "中止",
+    "approve": "批准",
+    "deny": "拒绝",
     "pause": "暂停",
-    "resume": "恢复"
+    "resume": "继续",
+    "retry": "重试",
+    "steer": "介入",
+    "steerPlaceholder": "不中断运行，直接给出新的指示…",
+    "stop": "停止"
   },
-  "description": "在一处查看所有正在进行和最近的目标、团队、计划与定时智能体运行。",
-  "detail": {
-    "error": "错误",
-    "finished": "结束时间",
-    "kind": "类型",
-    "progress": "进度",
-    "result": "结果",
-    "selectPrompt": "选择一个运行以查看详情。",
-    "started": "开始时间",
+  "activityCategory": {
+    "approval": "审批",
+    "artifact": "产物",
+    "command": "命令",
+    "integration": "集成",
+    "read": "读取",
+    "search": "搜索",
+    "skill": "技能",
     "status": "状态",
-    "tokens": "已用 Token"
+    "write": "写入"
   },
-  "empty": "暂无智能体运行。",
+  "activityStatus": {
+    "blocked": "阻塞",
+    "completed": "完成",
+    "failed": "失败",
+    "pending": "待执行",
+    "running": "进行中",
+    "skipped": "已跳过"
+  },
+  "approvals": {
+    "approved": "已批准",
+    "denied": "已拒绝",
+    "expired": "已过期",
+    "pending": "待处理"
+  },
+  "changeKind": {
+    "any": "已变更",
+    "created": "新建",
+    "deleted": "删除",
+    "gap": "缺失",
+    "modified": "修改",
+    "other": "已变更",
+    "renamed": "重命名",
+    "resync": "已重新同步"
+  },
+  "degraded": {
+    "no_active_run": "没有正在运行的会话可以介入",
+    "not_admitted": "该运行尚未获得执行许可",
+    "pii_blocked": "被隐私脱敏门拦截",
+    "provider_unsupported": "该模型服务不支持中途介入",
+    "store_failed": "回执写入失败"
+  },
+  "description": "把对话轮次、工作流、目标、团队、委派与后台任务的全部运行集中在一处。",
+  "detail": {
+    "activityOmitted": "{count, plural, other {另有 # 条较早的记录未显示}}",
+    "changesIncomplete": "这份文件变更列表并不完整——部分文件事件未被捕获。",
+    "error": "错误",
+    "finished": "结束于",
+    "journalUnavailable": "本设备上没有该运行的日志。",
+    "kind": "类型",
+    "loading": "加载中…",
+    "noActivity": "没有活动记录。",
+    "noApprovals": "没有发起过审批。",
+    "noArtifacts": "没有产物。",
+    "noChanges": "没有文件被修改。",
+    "noTests": "没有测试运行记录。",
+    "notJournalled": "该运行早于执行日志，无法在这里控制。",
+    "progress": "进度",
+    "selectPrompt": "选择一个运行查看详情。",
+    "sensitive": "敏感",
+    "started": "开始于",
+    "status": "状态",
+    "waitingReason": "正在等待"
+  },
+  "empty": "还没有任何运行。",
+  "emptyFiltered": "没有符合当前筛选条件的运行。",
   "filters": {
     "all": "全部",
-    "goal": "目标",
-    "plan": "计划",
-    "scheduledTask": "定时",
-    "team": "团队"
+    "allKinds": "全部类型",
+    "failed": "失败",
+    "finished": "已结束",
+    "kindLabel": "按类型筛选",
+    "kindOption": "{label}（{count}）",
+    "running": "进行中",
+    "statusLabel": "按状态筛选",
+    "waiting": "等待中"
   },
   "kind": {
+    "agentTurn": "对话",
+    "chat": "对话",
+    "connector": "连接器",
+    "delegation": "委派",
     "goal": "目标",
+    "job": "后台任务",
+    "other": "其他",
     "plan": "计划",
-    "scheduledTask": "定时任务",
-    "team": "团队"
+    "scheduled": "定时任务",
+    "securityScan": "安全扫描",
+    "subagent": "子智能体",
+    "team": "团队",
+    "workflow": "工作流",
+    "workflowStep": "工作流步骤"
   },
   "live": "进行中",
+  "loadMore": "加载更多",
+  "outcome": {
+    "action_unavailable": "该操作已失效——运行状态已经变化。",
+    "already_retried": "该运行已经重试过了。",
+    "forbidden": "你没有控制该运行的权限。",
+    "interrupt_expired": "该审批在被处理前已过期。",
+    "interrupt_not_found": "该审批已不存在。",
+    "interrupt_resolved": "该审批已被处理过。",
+    "invalid_command": "命令不完整。",
+    "not_controllable": "该运行没有执行日志，无法在这里控制。",
+    "retried": "已由新的运行接管。",
+    "revision_conflict": "运行状态在你操作期间发生了变化，请重试。",
+    "run_not_found": "该运行已不存在。",
+    "source_rejected": "执行引擎拒绝了这个命令。",
+    "steer_degraded": "消息没有送达，内容仍然保留在你这里。",
+    "unsupported": "没有任何处理器可以控制这种运行。",
+    "unsupported_for_kind": "这种运行不支持该操作。"
+  },
   "status": {
     "cancelled": "已取消",
-    "failed": "已失败",
-    "paused": "已暂停",
-    "running": "运行中",
-    "succeeded": "已成功"
+    "done": "已完成",
+    "error": "失败",
+    "queued": "排队中",
+    "running": "进行中",
+    "waiting": "等待中"
   },
-  "title": "智能体运行"
+  "tabs": {
+    "activity": "活动",
+    "approvals": "审批",
+    "artifacts": "产物",
+    "changes": "文件变更",
+    "overview": "概览",
+    "tests": "测试"
+  },
+  "tests": {
+    "counts": "{passed} 通过 · {failed} 失败 · {skipped} 跳过",
+    "failed": "失败",
+    "inconclusive": "无法判定",
+    "inconclusiveHint": "输出无法解析——这不等于通过。",
+    "passed": "通过"
+  },
+  "title": "运行中心"
 }

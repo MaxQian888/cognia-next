@@ -1,112 +1,174 @@
 "use client"
 
 /**
- * Per-kind lifecycle actions for the Agent Runs panel (Scheduler Phase D).
+ * Run control for the task cockpit, routed through the shared control plane.
  *
- * Routes abort / pause / resume to the right runtime for each `AgentRun` kind:
- *  - goal → `getGoalRuntime().stopGoal / pauseGoal / resumeGoal`
- *  - plan → `getPlanRuntime().cancelPlan / pausePlan / resumePlan`
- *  - team → `abortTeam` (abort) / `agentTeamManager.pause` (pause)
- *  - scheduled-task → not controllable from this panel (managed in /scheduler)
+ * This hook used to lazy-import `getGoalRuntime` / `getPlanRuntime` /
+ * `abortTeam` and call them directly. That worked, and every guarantee the
+ * control plane exists to provide was missing from it: no idempotency key (a
+ * double-click fired twice), no `expectedRevision` check, no authorization, no
+ * `control.accepted` / `control.rejected` in the journal, no steer, and no
+ * coverage of `agent-turn`, `workflow`, `scheduled`, `delegation` or `job` —
+ * which between them are most of what actually runs.
  *
- * Heavy runtimes are lazy-imported inside each method so the hook stays cheap to
- * mount. Capability predicates gate the buttons so the UI only offers an action
- * the run + runtime can actually take.
+ * Everything now goes through `executeRunControlCommand`, and the real result
+ * taxonomy is returned rather than swallowed. A caller that cannot tell
+ * `revision_conflict` from `forbidden` from `steer_degraded` has to show the
+ * user one generic failure for three problems with three different fixes.
+ *
+ * ## Why the run is re-read before dispatch
+ *
+ * `expectedRevision` is optimistic concurrency: "act only if the run is still
+ * where I saw it". Feeding it the revision captured at render time sounds
+ * stricter but is wrong here — this list is live-queried, so a running chat
+ * turn bumps its revision every few hundred milliseconds against its OWN
+ * progress. Every Stop press would answer `revision_conflict` and the button
+ * would simply not work.
+ *
+ * So the run is re-read immediately before dispatch and its current revision
+ * used, exactly as the one existing production caller does
+ * (`lib/connectors/follow-up-control.ts`). The check that carries the real
+ * weight is the one beside it: `allowedActions` is re-read from the fresh
+ * snapshot, so a run that finished, was already retried, or lost its pending
+ * approval between paint and click refuses the action instead of performing it.
  */
 
-import { useMemo } from "react"
-import type { AgentRun } from "@/types/agent-runs/agent-run"
+import { useCallback, useMemo, useRef, useState } from "react"
 
-export interface AgentRunActions {
-  canAbort(run: AgentRun): boolean
-  canPause(run: AgentRun): boolean
-  canResume(run: AgentRun): boolean
-  abort(run: AgentRun): Promise<void>
-  pause(run: AgentRun): Promise<void>
-  resume(run: AgentRun): Promise<void>
+import { getExecutionRun } from "@/lib/db/execution-runs"
+import { executeRunControlCommand, type RunControlResult } from "@/lib/execution/run-control"
+import { localConsoleActor, localConsoleOperatorIds } from "@/lib/execution/local-operator"
+import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
+import type { RunControlAction } from "@/types/execution/run"
+
+/**
+ * Everything the cockpit needs to explain what happened.
+ *
+ * `reason` widens `RunControlResult["reason"]` with the two refusals this layer
+ * makes on its own behalf, so a caller switches over one union instead of
+ * checking a boolean and then a second, differently-shaped error.
+ */
+export type RunControlOutcomeReason =
+  | NonNullable<RunControlResult["reason"]>
+  /** The row has no journal run behind it, so there is nothing to control. */
+  | "not_controllable"
+  /** The run no longer offers this action — it moved between paint and click. */
+  | "action_unavailable"
+
+export interface RunControlOutcome {
+  accepted: boolean
+  reason?: RunControlOutcomeReason
+  /** Set with `steer_degraded`: the message is intact and still the caller's. */
+  degradedReason?: RunControlResult["degradedReason"]
+  /** Set on an accepted `retry` (and on its duplicate) — the replacement run. */
+  retryRunId?: string
+  /** True when the gate recognised this as a redelivery of a press it already took. */
+  duplicate?: boolean
 }
 
-const CONTROLLABLE: ReadonlySet<AgentRun["kind"]> = new Set(["goal", "plan", "team"])
+export interface RunControlDispatchOptions {
+  /** Required for `steer`; ignored otherwise. Never journalled. */
+  steerMessage?: string
+}
 
-export function useAgentRunActions(): AgentRunActions {
-  return useMemo<AgentRunActions>(() => {
-    return {
-      canAbort: (run) => run.isLive && CONTROLLABLE.has(run.kind),
-      canPause: (run) => run.status === "running" && CONTROLLABLE.has(run.kind),
-      // Teams have no true resume (paused teams are aborted + re-run), so only
-      // goal / plan offer resume.
-      canResume: (run) => run.status === "paused" && (run.kind === "goal" || run.kind === "plan"),
+export interface RunControlActions {
+  /** The row currently awaiting a control result, if any. */
+  pendingRowId: string | null
+  /**
+   * Whether to render a button for `action` on `row`.
+   *
+   * Answered from the projection's own `allowedActions`, never from the kind:
+   * the per-kind rules (steer only where a live input lane exists, retry only
+   * on a settled retryable kind that has not already been replaced) live in
+   * `run-reducer.ts`, and a second copy here would drift from them.
+   */
+  can(row: UnifiedExecutionRow, action: RunControlAction): boolean
+  dispatch(
+    row: UnifiedExecutionRow,
+    action: RunControlAction,
+    options?: RunControlDispatchOptions
+  ): Promise<RunControlOutcome>
+}
 
-      async abort(run) {
-        switch (run.kind) {
-          case "goal": {
-            const id = run.origin.goalId ?? run.origin.nativeId
-            const { getGoalRuntime } = await import("@/lib/goal/runtime")
-            await getGoalRuntime().stopGoal(id)
-            return
-          }
-          case "plan": {
-            const id = run.origin.planId ?? run.origin.nativeId
-            const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
-            await getPlanRuntime().cancelPlan(id)
-            return
-          }
-          case "team": {
-            const id = run.origin.teamId
-            if (!id) return
-            const { abortTeam } = await import("@/lib/ai/agent/agent-team-runtime")
-            abortTeam(id, "aborted from agent-runs panel")
-            return
-          }
-          default:
-            return
-        }
-      },
+function outcomeFrom(result: RunControlResult): RunControlOutcome {
+  return {
+    accepted: result.accepted,
+    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
+    ...(result.retryRunId ? { retryRunId: result.retryRunId } : {}),
+    ...(result.duplicate ? { duplicate: true } : {}),
+  }
+}
 
-      async pause(run) {
-        switch (run.kind) {
-          case "goal": {
-            const id = run.origin.goalId ?? run.origin.nativeId
-            const { getGoalRuntime } = await import("@/lib/goal/runtime")
-            await getGoalRuntime().pauseGoal(id)
-            return
-          }
-          case "plan": {
-            const id = run.origin.planId ?? run.origin.nativeId
-            const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
-            await getPlanRuntime().pausePlan(id)
-            return
-          }
-          case "team": {
-            const id = run.origin.teamId
-            if (!id) return
-            const { agentTeamManager } = await import("@/lib/ai/agent/agent-team")
-            await agentTeamManager.pause(id)
-            return
-          }
-          default:
-            return
-        }
-      },
+export function useRunControlActions(): RunControlActions {
+  const [pendingRowId, setPendingRowId] = useState<string | null>(null)
+  /**
+   * Distinguishes two deliberate steers from one double-click.
+   *
+   * Every other action keys on `${runId}:${action}:${revision}`, so a
+   * double-click is correctly answered as a duplicate. A steer must not be: two
+   * corrections typed in a row are two different instructions, and collapsing
+   * them would silently drop the second.
+   */
+  const steerSequence = useRef(0)
 
-      async resume(run) {
-        switch (run.kind) {
-          case "goal": {
-            const id = run.origin.goalId ?? run.origin.nativeId
-            const { getGoalRuntime } = await import("@/lib/goal/runtime")
-            await getGoalRuntime().resumeGoal(id)
-            return
-          }
-          case "plan": {
-            const id = run.origin.planId ?? run.origin.nativeId
-            const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
-            await getPlanRuntime().resumePlan(id)
-            return
-          }
-          default:
-            return
-        }
-      },
-    }
+  const can = useCallback((row: UnifiedExecutionRow, action: RunControlAction): boolean => {
+    if (!row.runId || row.source !== "journal") return false
+    return row.allowedActions?.includes(action) ?? false
   }, [])
+
+  const dispatch = useCallback(
+    async (
+      row: UnifiedExecutionRow,
+      action: RunControlAction,
+      options: RunControlDispatchOptions = {}
+    ): Promise<RunControlOutcome> => {
+      if (!row.runId || row.source !== "journal") {
+        return { accepted: false, reason: "not_controllable" }
+      }
+      setPendingRowId(row.rowId)
+      try {
+        const run = await getExecutionRun(row.runId)
+        if (!run) return { accepted: false, reason: "run_not_found" }
+
+        const snapshot = run.latestSnapshot
+        if (!snapshot?.allowedActions.includes(action)) {
+          return { accepted: false, reason: "action_unavailable" }
+        }
+
+        // Only ever set when the projection says an approval is open — the
+        // reducer offers `approve`/`deny` exactly then, so this cannot silently
+        // send an approve with nothing to approve.
+        const interruptId =
+          action === "approve" || action === "deny" ? snapshot.pendingInterrupt?.id : undefined
+
+        const idempotencyKey =
+          action === "steer"
+            ? `cockpit:${run.id}:steer:${(steerSequence.current += 1)}`
+            : `cockpit:${run.id}:${action}:${run.currentRevision}`
+
+        const result = await executeRunControlCommand(
+          {
+            runId: run.id,
+            action,
+            idempotencyKey,
+            expectedRevision: run.currentRevision,
+            actor: localConsoleActor(),
+            ...(interruptId ? { interruptId } : {}),
+            ...(options.steerMessage ? { steerMessage: options.steerMessage } : {}),
+          },
+          { operatorIds: [...localConsoleOperatorIds()] }
+        )
+        return outcomeFrom(result)
+      } finally {
+        setPendingRowId((current) => (current === row.rowId ? null : current))
+      }
+    },
+    []
+  )
+
+  return useMemo<RunControlActions>(
+    () => ({ pendingRowId, can, dispatch }),
+    [pendingRowId, can, dispatch]
+  )
 }

@@ -1,27 +1,28 @@
-import { renderHook } from "@testing-library/react"
-import { useAgentRuns } from "./use-agent-runs"
+import { act, renderHook } from "@testing-library/react"
+
+import { useExecutionCockpit } from "./use-agent-runs"
+import { COCKPIT_PAGE_SIZE } from "@/lib/execution/cockpit-model"
+import type { ExecutionRun, ExecutionRunKind, ExecutionRunStatus } from "@/types/execution/run"
 import type { Goal } from "@/types/goal"
-import type { AgentPlan } from "@/types/agent/plan"
-import type { WorkflowRunRow } from "@/types/workflow/visual"
-import type { TaskExecution } from "@/types/scheduler"
-import type { ExecutionRun } from "@/types/execution/run"
 
-// useLiveQuery is called 5× per render in a fixed order:
-// canonical runs, goals, plans, teamRuns, taskExecutions. Cycle the queued datasets mod 5 so
-// any number of re-renders returns consistent values per source.
-let liveQueryResults: unknown[] = []
-let callIdx = 0
+let persisted: unknown
+let capturedDeps: unknown[] = []
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => liveQueryResults[callIdx++ % 5],
+  useLiveQuery: (_fn: unknown, deps: unknown[]) => {
+    capturedDeps = deps
+    return persisted
+  },
 }))
 
-let mockTeams: Record<string, { status: string }> = {}
-jest.mock("@/stores/agent/agent-team-store/store", () => ({
-  useAgentTeamStore: (sel: (s: { teams: unknown }) => unknown) => sel({ teams: mockTeams }),
+let brokerLegs: unknown[] = []
+jest.mock("@/lib/execution/broker", () => ({
+  getExecutionBroker: () => ({
+    subscribe: () => () => {},
+    getSnapshot: () => brokerLegs,
+  }),
 }))
 
-// The Dexie querier closures never run (useLiveQuery is mocked), but the module
-// imports must still resolve — stub the data sources to inert no-ops.
+// The Dexie closures never run (useLiveQuery is mocked) but must still resolve.
 jest.mock("@/lib/db/schema", () => ({ getDb: () => ({}) }))
 jest.mock("@/lib/db/goals", () => ({ listAllGoals: jest.fn() }))
 jest.mock("@/lib/db/execution-runs", () => ({ listExecutionRuns: jest.fn() }))
@@ -29,207 +30,184 @@ jest.mock("@/lib/scheduler/scheduler-db", () => ({
   schedulerDb: { getRecentExecutions: jest.fn() },
 }))
 
-function goal(over: Partial<Goal> = {}): Goal {
+function run(
+  id: string,
+  kind: ExecutionRunKind,
+  status: ExecutionRunStatus,
+  over: Partial<ExecutionRun> = {}
+): ExecutionRun {
   return {
-    id: "g1",
-    safeObjective: "goal one",
-    status: "active",
-    tokensUsed: 0,
-    createdAt: 300,
-    updatedAt: 300,
-    ...over,
-  } as Goal
-}
-function plan(over: Partial<AgentPlan> = {}): AgentPlan {
-  return {
-    id: "p1",
-    title: "plan one",
-    status: "completed",
-    totalSteps: 2,
-    completedSteps: 2,
-    createdAt: 200,
-    updatedAt: 250,
-    ...over,
-  } as AgentPlan
-}
-function teamRow(over: Partial<WorkflowRunRow> = {}): WorkflowRunRow {
-  return {
-    id: "wr1",
-    workflowId: "__team__:teamA:nonce",
-    status: "succeeded",
-    startedAt: 100,
-    completedAt: 150,
-    workflowSnapshot: { name: "Team A" },
-    ...over,
-  } as unknown as WorkflowRunRow
-}
-function exec(over: Partial<TaskExecution> = {}): TaskExecution {
-  return {
-    id: "e1",
-    taskName: "sched goal",
-    taskType: "goal",
-    status: "completed",
-    startedAt: new Date(50),
-    completedAt: new Date(60),
-    ...over,
-  } as unknown as TaskExecution
-}
-function canonical(over: Partial<ExecutionRun> = {}): ExecutionRun {
-  return {
-    id: "execution:goal:g1",
-    kind: "goal",
-    sourceId: "g1",
-    title: "canonical goal",
-    status: "running",
+    id,
+    kind,
+    sourceId: id,
+    title: id,
+    status,
     currentRevision: 1,
-    startedAt: 300,
-    updatedAt: 300,
+    startedAt: 1_000,
+    updatedAt: 1_000,
+    latestSnapshot: {
+      runId: id,
+      kind,
+      title: id,
+      status,
+      revision: 1,
+      startedAt: 1_000,
+      updatedAt: 1_000,
+      progress: { completed: 0, total: 0, trustworthy: false },
+      activeSteps: [],
+      recentSteps: [],
+      pendingSteps: [],
+      pendingStepCount: 0,
+      elapsedMs: 1,
+      artifacts: [],
+      allowedActions: ["stop", "open_details"],
+    },
     ...over,
   }
 }
 
-function setSources(opts: {
-  canonicalRuns?: ExecutionRun[]
-  goals?: Goal[]
-  plans?: AgentPlan[]
-  teamRuns?: WorkflowRunRow[]
-  execs?: TaskExecution[]
-}) {
-  liveQueryResults = [opts.canonicalRuns, opts.goals, opts.plans, opts.teamRuns, opts.execs]
-  callIdx = 0
+function sources(over: Record<string, unknown> = {}) {
+  return {
+    executionRuns: [],
+    workflowRuns: [],
+    schedulerExecutions: [],
+    goals: [],
+    plans: [],
+    limit: COCKPIT_PAGE_SIZE,
+    ...over,
+  }
 }
 
 beforeEach(() => {
-  mockTeams = {}
-  callIdx = 0
+  persisted = undefined
+  brokerLegs = []
+  capturedDeps = []
 })
 
-describe("useAgentRuns", () => {
-  it("fans in all four kinds newest-first", () => {
-    setSources({
-      canonicalRuns: [],
-      goals: [goal()],
-      plans: [plan()],
-      teamRuns: [teamRow()],
-      execs: [exec()],
+describe("useExecutionCockpit", () => {
+  it("is loading until the persisted sources resolve", () => {
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.isLoading).toBe(true)
+    expect(result.current.rows).toEqual([])
+  })
+
+  /**
+   * The defect that motivated the rewrite: `toAgentRunFromExecutionRun` returns
+   * null for these three kinds, so the old panel structurally could not show a
+   * chat turn, a workflow or a delegation.
+   */
+  it("shows chat turns, workflows, delegations and jobs — not just goal/team/plan", () => {
+    persisted = sources({
+      executionRuns: [
+        run("r-chat", "agent-turn", "running"),
+        run("r-wf", "workflow", "running"),
+        run("r-del", "delegation", "waiting"),
+        run("r-job", "job", "running"),
+        run("r-goal", "goal", "running"),
+      ],
     })
-    const { result } = renderHook(() => useAgentRuns())
-    expect(result.current.isLoading).toBe(false)
-    expect(result.current.runs.map((r) => r.kind)).toEqual([
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.rows.map((r) => r.kind).sort()).toEqual([
+      "agent-turn",
+      "delegation",
       "goal",
-      "plan",
-      "team",
-      "scheduled-task",
+      "job",
+      "workflow",
     ])
   })
 
-  it("reports loading while any source is undefined", () => {
-    setSources({ canonicalRuns: [], goals: undefined, plans: [], teamRuns: [], execs: [] })
-    const { result } = renderHook(() => useAgentRuns())
-    expect(result.current.isLoading).toBe(true)
-  })
-
-  it("filters by kind", () => {
-    setSources({
-      canonicalRuns: [],
-      goals: [goal()],
-      plans: [plan()],
-      teamRuns: [teamRow()],
-      execs: [exec()],
+  it("keeps settled runs — the cockpit is a history view, not a live monitor", () => {
+    persisted = sources({
+      executionRuns: [run("r-ok", "goal", "completed"), run("r-bad", "team", "failed")],
     })
-    const { result } = renderHook(() => useAgentRuns({ filterKind: "team" }))
-    expect(result.current.runs.map((r) => r.kind)).toEqual(["team"])
-  })
-
-  it("filters by title query (case-insensitive)", () => {
-    setSources({
-      canonicalRuns: [],
-      goals: [goal({ safeObjective: "Ship It" })],
-      plans: [plan({ title: "other" })],
-    })
-    const { result } = renderHook(() => useAgentRuns({ query: "ship" }))
-    expect(result.current.runs.map((r) => r.title)).toEqual(["Ship It"])
-  })
-
-  it("excludes non-team workflow runs", () => {
-    setSources({
-      canonicalRuns: [],
-      teamRuns: [teamRow({ id: "wr2", workflowId: "wf_plain" }), teamRow()],
-    })
-    const { result } = renderHook(() => useAgentRuns())
-    expect(result.current.runs.map((r) => r.origin.nativeId)).toEqual(["wr1"])
-  })
-
-  it("only includes agent-kind scheduled executions", () => {
-    setSources({
-      canonicalRuns: [],
-      execs: [exec({ taskType: "chat" }), exec({ id: "e2", taskType: "plan" })],
-    })
-    const { result } = renderHook(() => useAgentRuns())
-    expect(result.current.runs.map((r) => r.origin.nativeId)).toEqual(["e2"])
-  })
-
-  it("annotates the newest team run with a live store status", () => {
-    mockTeams = { teamA: { status: "executing" } }
-    setSources({
-      canonicalRuns: [],
-      teamRuns: [
-        teamRow({ id: "new", startedAt: 200 }),
-        teamRow({ id: "old", startedAt: 100, status: "succeeded" }),
-      ],
-    })
-    const { result } = renderHook(() => useAgentRuns())
-    const byId = Object.fromEntries(result.current.runs.map((r) => [r.origin.nativeId, r]))
-    expect(byId.new.status).toBe("running")
-    expect(byId.new.isLive).toBe(true)
-    // The older completed run is NOT re-annotated as live.
-    expect(byId.old.status).toBe("succeeded")
-    expect(byId.old.isLive).toBe(false)
-  })
-
-  it("prefers the canonical journal row over the matching legacy source", () => {
-    setSources({
-      canonicalRuns: [canonical({ title: "canonical title" })],
-      goals: [goal({ safeObjective: "legacy title" })],
-      plans: [],
-      teamRuns: [],
-      execs: [],
-    })
-    const { result } = renderHook(() => useAgentRuns())
-    expect(result.current.runs).toHaveLength(1)
-    expect(result.current.runs[0]).toMatchObject({
-      title: "canonical title",
-      origin: { tableName: "executionRuns" },
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.rows).toHaveLength(2)
+    expect(result.current.statusCounts).toEqual({
+      running: 0,
+      waiting: 0,
+      failed: 1,
+      finished: 1,
     })
   })
 
-  it("keeps legacy source control identifiers when the canonical team row wins", () => {
-    setSources({
-      canonicalRuns: [
-        canonical({
-          id: "execution:workflow:wr1",
-          kind: "team",
-          sourceId: "wr1",
-          title: "canonical team",
-        }),
-      ],
-      goals: [],
-      plans: [],
-      teamRuns: [teamRow()],
-      execs: [],
+  it("returns a directly selected run even when it is outside the loaded page", () => {
+    persisted = sources({
+      executionRuns: [run("newest", "agent-turn", "running")],
+      selectedRun: run("older-deep-link", "goal", "completed"),
     })
 
-    const { result } = renderHook(() => useAgentRuns())
+    const { result } = renderHook(() => useExecutionCockpit({ selectedId: "older-deep-link" }))
 
-    expect(result.current.runs).toHaveLength(1)
-    expect(result.current.runs[0]).toMatchObject({
-      title: "canonical team",
-      origin: {
-        tableName: "executionRuns",
-        nativeId: "wr1",
-        executionRunId: "execution:workflow:wr1",
-        teamId: "teamA",
-      },
+    expect(result.current.selectedRow?.runId).toBe("older-deep-link")
+  })
+
+  /** A count derived from the filtered list would read "Failed 0" once you pick Running. */
+  it("counts against the UNFILTERED list so the chips stay meaningful", () => {
+    persisted = sources({
+      executionRuns: [run("r1", "goal", "running"), run("r2", "goal", "failed")],
     })
+    const { result } = renderHook(() => useExecutionCockpit({ statusGroup: "running" }))
+    expect(result.current.rows).toHaveLength(1)
+    expect(result.current.allRows).toHaveLength(2)
+    expect(result.current.statusCounts.failed).toBe(1)
+    expect(result.current.kindCounts.goal).toBe(2)
+  })
+
+  it("filters by kind and by label query", () => {
+    persisted = sources({
+      executionRuns: [run("ship-it", "goal", "running"), run("flake-fix", "agent-turn", "running")],
+    })
+    const byKind = renderHook(() => useExecutionCockpit({ kind: "chat" }))
+    expect(byKind.result.current.rows.map((r) => r.nativeId)).toEqual(["flake-fix"])
+
+    const byQuery = renderHook(() => useExecutionCockpit({ query: "SHIP" }))
+    expect(byQuery.result.current.rows.map((r) => r.nativeId)).toEqual(["ship-it"])
+  })
+
+  it("suppresses a legacy goal once its canonical run exists", () => {
+    const legacyGoal = {
+      id: "g1",
+      safeObjective: "goal one",
+      status: "active",
+      createdAt: 300,
+      updatedAt: 300,
+    } as Goal
+    persisted = sources({
+      executionRuns: [run("g1", "goal", "running")],
+      goals: [legacyGoal],
+    })
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.rows).toHaveLength(1)
+    expect(result.current.rows[0].source).toBe("journal")
+  })
+
+  it("raises the ceiling rather than walking an offset", () => {
+    persisted = sources()
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(capturedDeps).toEqual([COCKPIT_PAGE_SIZE])
+
+    act(() => result.current.loadMore())
+    expect(capturedDeps).toEqual([COCKPIT_PAGE_SIZE * 2])
+  })
+
+  it("offers more when ANY source filled its page, not only the journal", () => {
+    // A user whose goals all predate the bridge: full legacy page, empty journal.
+    persisted = sources({
+      goals: Array.from({ length: COCKPIT_PAGE_SIZE }, (_, i) => ({
+        id: `g${i}`,
+        safeObjective: `goal ${i}`,
+        status: "active",
+        createdAt: i,
+        updatedAt: i,
+      })) as Goal[],
+    })
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.hasMore).toBe(true)
+  })
+
+  it("does not offer more when every source came back short", () => {
+    persisted = sources({ executionRuns: [run("r1", "goal", "running")] })
+    const { result } = renderHook(() => useExecutionCockpit())
+    expect(result.current.hasMore).toBe(false)
   })
 })

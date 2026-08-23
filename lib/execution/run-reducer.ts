@@ -5,10 +5,12 @@ import type {
   RunActivityCategory,
   RunActivitySnapshot,
   RunActivityStatus,
+  RunArtifactSnapshot,
   RunEvent,
   RunProjectionSnapshot,
   RunStepSnapshot,
   RunStepStatus,
+  RunVerificationSummary,
 } from "@/types/execution/run"
 import {
   safeActivityTarget,
@@ -28,6 +30,55 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+const VERIFICATION_CONCLUSIONS = new Set(["passed", "failed", "inconclusive"])
+
+/**
+ * Project a verification artifact's counts, and ONLY when the payload is a
+ * complete, well-formed summary.
+ *
+ * A malformed payload degrades to a plain artifact rather than a partly-filled
+ * one: a summary rendered from defaults would read as `0 failed`, which is the
+ * silent green this projection exists to prevent.
+ */
+function artifactVerification(
+  payload: Record<string, unknown>
+): Pick<RunArtifactSnapshot, "kind" | "detailsRef" | "verification"> {
+  const detailsRef = stringValue(payload.detailsRef)
+  const base = detailsRef ? { detailsRef } : {}
+  const raw = payload.verification
+  if (payload.kind !== "verification" || !raw || typeof raw !== "object") return base
+
+  const summary = raw as Record<string, unknown>
+  const conclusion = stringValue(summary.conclusion)
+  if (!conclusion || !VERIFICATION_CONCLUSIONS.has(conclusion)) return base
+
+  const passed = numberValue(summary.passed)
+  const failed = numberValue(summary.failed)
+  const skipped = numberValue(summary.skipped)
+  const total = numberValue(summary.total)
+  if (
+    passed === undefined ||
+    failed === undefined ||
+    skipped === undefined ||
+    total === undefined
+  ) {
+    return base
+  }
+  const durationMs = numberValue(summary.durationMs)
+  return {
+    ...base,
+    kind: "verification",
+    verification: {
+      conclusion: conclusion as RunVerificationSummary["conclusion"],
+      passed,
+      failed,
+      skipped,
+      total,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    },
+  }
 }
 
 function allowedActions(
@@ -493,6 +544,7 @@ export function reduceRunEvents(
           ...(stringValue(event.payload.mimeType)
             ? { mimeType: stringValue(event.payload.mimeType) }
             : {}),
+          ...artifactVerification(event.payload),
         })
       }
     }

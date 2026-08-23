@@ -1,10 +1,15 @@
 /**
- * Browser E2E: unified Agent Runs fan-in and goal action routing.
+ * Browser E2E: task-cockpit fan-in and goal control routing.
  *
  * The run is authored through the Goals product, then observed and controlled
- * through /agent-runs. This proves the console consumes the durable goal row,
- * mirrors selection/filter state into the URL, and routes lifecycle actions
- * back to the owning goal runtime.
+ * through /agent-runs. This proves the cockpit consumes the durable run, mirrors
+ * selection/filter state into the URL, and drives lifecycle actions through the
+ * shared control plane (`executeRunControlCommand`) rather than reaching into
+ * the goal runtime directly.
+ *
+ * The deep-link assertion is load-bearing: `?run=` now carries the EXECUTION RUN
+ * id, which is what `run-reducer.ts` stamps into every IM card's `detailsUrl`.
+ * The old panel matched a different id space, so those links opened an empty pane.
  */
 
 import { expect, test } from "@/tests/e2e/fixtures/test"
@@ -35,8 +40,9 @@ test.describe("agent runs — goal fan-in and control", () => {
     await page.goto("/agent-runs?kind=goal", { waitUntil: "domcontentloaded" })
     await expect(page.getByRole("heading", { name: "Agent Runs" })).toBeVisible()
 
-    const goalsTab = page.getByRole("tab", { name: "Goals", exact: true })
-    await expect(goalsTab).toHaveAttribute("aria-selected", "true")
+    // Kind is a select now — ten kinds is too many for a tab strip, and the
+    // prominent chips belong to the status filter.
+    await expect(page.getByLabel("Filter by kind")).toHaveValue("goal")
     const runRow = page.getByRole("list", { name: "Agent Runs" }).getByRole("button", {
       name: new RegExp(OBJECTIVE),
     })
@@ -44,7 +50,7 @@ test.describe("agent runs — goal fan-in and control", () => {
     await expect(runRow).toContainText("Live")
     await runRow.click()
 
-    await expect(page).toHaveURL(/kind=goal.*run=goal%3A|run=goal%3A.*kind=goal/)
+    await expect(page).toHaveURL(/kind=goal.*run=|run=.*kind=goal/)
     await expect(page.getByRole("heading", { name: OBJECTIVE, level: 2 })).toBeVisible()
     await expect(page.getByText("Status").locator("..")).toContainText("Running")
 
@@ -57,8 +63,8 @@ test.describe("agent runs — goal fan-in and control", () => {
     await resumeButton.click()
     await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible()
 
-    await page.getByRole("button", { name: "Abort", exact: true }).click()
+    await page.getByRole("button", { name: "Stop", exact: true }).click()
     await expect(page.getByText("Status").locator("..")).toContainText("Cancelled")
-    await expect(page.getByRole("button", { name: "Abort", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
   })
 })

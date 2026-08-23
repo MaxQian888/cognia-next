@@ -65,6 +65,11 @@ jest.mock("@/lib/jobs/background-jobs", () => ({
 
 const toastSuccess = jest.fn()
 const toastError = jest.fn()
+const pushMock = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}))
+
 jest.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
@@ -87,6 +92,7 @@ const row = (overrides: Partial<BackgroundTaskJournalRecord>): BackgroundTaskJou
 })
 
 beforeEach(() => {
+  pushMock.mockReset()
   useClientLiveQuery.mockReset()
   collectRendererBackgroundResult.mockReset()
   cancelRendererBackgroundRun.mockReset()
@@ -392,4 +398,17 @@ it("shows live token + tool telemetry for a running subagent row", async () => {
 
   expect(screen.getByTestId("job-tokens-run-live").textContent).toMatch(/1234/)
   expect(screen.getByTestId("job-tools-run-live").textContent).toMatch(/7/)
+})
+
+/**
+ * The job bridge already projects this row onto `kind: "job"` in the run
+ * journal, so its timeline, changes, tests and approvals live in the cockpit.
+ * This link is what keeps the sheet from growing a second, thinner copy.
+ */
+it("deep-links a task into the cockpit under its projected run id", async () => {
+  const user = userEvent.setup()
+  render(<JobCenterPanel />)
+  await user.click(screen.getByTestId("status-job-center"))
+  await user.click(await screen.findByTestId("job-open-run-run-live"))
+  expect(pushMock).toHaveBeenCalledWith("/agent-runs?run=execution%3Ajob%3Arun-live")
 })

@@ -51,11 +51,22 @@ const ACTIVE_STATUSES: ReadonlySet<ExecutionRunStatus> = new Set<ExecutionRunSta
 ])
 
 const agentControllers = new Map<string, AbortController>()
+const securityScanControllers = new Map<string, AbortController>()
 
 export function registerAgentRunController(runId: string, controller: AbortController): () => void {
   agentControllers.set(runId, controller)
   return () => {
     if (agentControllers.get(runId) === controller) agentControllers.delete(runId)
+  }
+}
+
+export function registerSecurityScanRunController(
+  runId: string,
+  controller: AbortController
+): () => void {
+  securityScanControllers.set(runId, controller)
+  return () => {
+    if (securityScanControllers.get(runId) === controller) securityScanControllers.delete(runId)
   }
 }
 
@@ -75,6 +86,8 @@ const TERMINAL_RETRY_STATUSES = new Set(["failed", "cancelled"])
 
 export function installExecutionRunControlHandlers(deps: ExecutionRunControlHandlerDeps = {}): {
   agent: RunControlHandler
+  job: RunControlHandler
+  securityScan: RunControlHandler
   workflow: RunControlHandler
   team: RunControlHandler
   goal: RunControlHandler
@@ -490,7 +503,39 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     return handler({ ...command, runId: child.id, expectedRevision: child.currentRevision })
   }
 
+  /**
+   * A background task can be stopped and inspected, and nothing else. There is
+   * no live input lane to steer and no coordinator to pause — `allowedActions`
+   * already reflects that, so anything other than `stop` arriving here is a
+   * caller bypassing the projection, not a user pressing a real button.
+   */
+  const job: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    if (command.action !== "stop") throw new UnsupportedForKindError(command.action, "job")
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Background task is not known to this process")
+    const { cancelRendererBackgroundRun } =
+      await import("@/lib/background-tasks/renderer-subagent-registry")
+    // `sourceId` is the background journal's own runId — the execution run id
+    // is a projection and the registry has never heard of it.
+    if (!cancelRendererBackgroundRun(run.sourceId)) {
+      throw new Error("Background task is not active in this process")
+    }
+  }
+
+  const securityScan: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    if (command.action !== "stop") {
+      throw new UnsupportedForKindError(command.action, "security-scan")
+    }
+    const controller = securityScanControllers.get(command.runId)
+    if (!controller) throw new Error("Security scan is not active in this process")
+    controller.abort("execution_run_stopped")
+  }
+
   const unregisterAgent = registerRunControlHandler("agent-turn", agent)
+  const unregisterJob = registerRunControlHandler("job", job)
+  const unregisterSecurityScan = registerRunControlHandler("security-scan", securityScan)
   const unregisterWorkflows = (["workflow", "scheduled"] as const).map((kind) =>
     registerRunControlHandler(kind, workflow)
   )
@@ -510,6 +555,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
   const unregisterDelegationRetry = registerRunRetryHandler("delegation", delegationRetry)
   return {
     agent,
+    job,
+    securityScan,
     workflow,
     team,
     goal,
@@ -519,6 +566,8 @@ export function installExecutionRunControlHandlers(deps: ExecutionRunControlHand
     delegationRetry,
     dispose() {
       unregisterAgent()
+      unregisterJob()
+      unregisterSecurityScan()
       unregisterTeam()
       unregisterDelegation()
       for (const unregister of unregisterWorkflows) unregister()

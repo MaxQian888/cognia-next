@@ -1,10 +1,20 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
-import { installExecutionRunControlHandlers, registerAgentRunController } from "./control-handlers"
+import {
+  installExecutionRunControlHandlers,
+  registerAgentRunController,
+  registerSecurityScanRunController,
+} from "./control-handlers"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { createExecutionRun, listExecutionRunEvents } from "@/lib/db/execution-runs"
 import { executeRunControlCommand } from "./run-control"
+
+const mockCancelRendererBackgroundRun = jest.fn((_runId: string) => true)
+jest.mock("@/lib/background-tasks/renderer-subagent-registry", () => ({
+  cancelRendererBackgroundRun: (...args: unknown[]) =>
+    mockCancelRendererBackgroundRun(...(args as [string])),
+}))
 
 const mockCancelWorkflowRun = jest.fn(async (_runId: string) => undefined)
 jest.mock("@/lib/workflow/runtime/cancel-run", () => ({
@@ -866,5 +876,130 @@ describe("retry mints a replacement instead of reopening a settled run", () => {
 
     expect(result).toMatchObject({ accepted: false, reason: "unsupported_for_kind" })
     handlers.dispose()
+  })
+})
+
+describe("job control", () => {
+  const seedJob = async (id = "job-run") =>
+    createExecutionRun({
+      id,
+      kind: "job",
+      // The registry knows the BACKGROUND journal's id, never the projection's.
+      sourceId: "bg-run-1",
+      title: "code-reviewer",
+      status: "running",
+      currentRevision: 0,
+      startedAt: 1_000,
+      updatedAt: 1_000,
+    })
+
+  it("cancels the background run by its SOURCE id, not the execution run id", async () => {
+    const installed = installExecutionRunControlHandlers()
+    await seedJob()
+
+    await installed.job({
+      runId: "job-run",
+      action: "stop",
+      idempotencyKey: "stop-job-1",
+      expectedRevision: 0,
+      actor: {},
+    })
+
+    expect(mockCancelRendererBackgroundRun).toHaveBeenCalledWith("bg-run-1")
+    installed.dispose()
+  })
+
+  it("reports a task this process is not running rather than claiming success", async () => {
+    mockCancelRendererBackgroundRun.mockReturnValueOnce(false)
+    const installed = installExecutionRunControlHandlers()
+    await seedJob("job-gone")
+
+    await expect(
+      installed.job({
+        runId: "job-gone",
+        action: "stop",
+        idempotencyKey: "stop-job-2",
+        expectedRevision: 0,
+        actor: {},
+      })
+    ).rejects.toThrow(/not active in this process/)
+    installed.dispose()
+  })
+
+  it.each(["pause", "resume", "steer"] as const)(
+    "refuses %s as unsupported for the kind",
+    async (action) => {
+      const installed = installExecutionRunControlHandlers()
+      await seedJob(`job-${action}`)
+
+      await expect(
+        installed.job({
+          runId: `job-${action}`,
+          action,
+          idempotencyKey: `k-${action}`,
+          expectedRevision: 0,
+          actor: {},
+          ...(action === "steer" ? { steerMessage: "hi" } : {}),
+        })
+      ).rejects.toThrow(/cannot/)
+      installed.dispose()
+    }
+  )
+
+  it("treats open_details as a no-op", async () => {
+    const installed = installExecutionRunControlHandlers()
+    await seedJob("job-details")
+    await expect(
+      installed.job({
+        runId: "job-details",
+        action: "open_details",
+        idempotencyKey: "k-details",
+        expectedRevision: 0,
+        actor: {},
+      })
+    ).resolves.toBeUndefined()
+    expect(mockCancelRendererBackgroundRun).not.toHaveBeenCalled()
+    installed.dispose()
+  })
+})
+
+describe("security scan control", () => {
+  beforeEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+    jest.clearAllMocks()
+  })
+
+  it("stops the addressed live scan through the shared control plane", async () => {
+    const controller = new AbortController()
+    const unregister = registerSecurityScanRunController(
+      "execution:security-scan:scan-1",
+      controller
+    )
+    const installed = installExecutionRunControlHandlers()
+    await createExecutionRun({
+      id: "execution:security-scan:scan-1",
+      kind: "security-scan",
+      sourceId: "scan-1",
+      title: "https://example.test",
+      status: "running",
+      currentRevision: 0,
+      initiator: { remoteUserId: "operator-1" },
+      startedAt: 1_000,
+      updatedAt: 1_000,
+    })
+
+    const result = await executeRunControlCommand({
+      runId: "execution:security-scan:scan-1",
+      action: "stop",
+      idempotencyKey: "stop-scan-1",
+      expectedRevision: 0,
+      actor: { remoteUserId: "operator-1" },
+    })
+
+    expect(result.accepted).toBe(true)
+    expect(controller.signal.aborted).toBe(true)
+    unregister()
+    installed.dispose()
   })
 })

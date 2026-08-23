@@ -180,3 +180,89 @@ describe("AgentRunEventProducer", () => {
     ])
   })
 })
+
+describe("verification artifacts", () => {
+  const JEST_OUTPUT = `
+Test Suites: 1 failed, 2 passed, 3 total
+Tests:       1 failed, 2 skipped, 10 passed, 13 total
+Time:        4.2 s
+`
+
+  /** Drive one Bash tool call and return every event the producer appended. */
+  async function runToolCall(command: string, result: unknown, isError = false) {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-verify", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+    await producer.onCaptureEvent(
+      { type: "tool-call", id: "call-1", toolName: "Bash", input: { command } },
+      1_000
+    )
+    await producer.onCaptureEvent(
+      { type: "tool-result", id: "call-1", toolName: "Bash", result, isError },
+      1_001
+    )
+    return appended
+  }
+
+  const artifactsIn = (events: AppendRunEventInput[]) =>
+    events.filter((event) => event.type === "artifact.created")
+
+  it("emits counts for a test command", async () => {
+    const artifacts = artifactsIn(await runToolCall("pnpm test -- lib/", JEST_OUTPUT, true))
+    expect(artifacts).toHaveLength(1)
+    expect(artifacts[0].payload).toMatchObject({
+      artifactId: "verification:call-1",
+      title: "Tests",
+      safeTitle: true,
+      kind: "verification",
+      detailsRef: "call-1",
+      verification: { conclusion: "failed", passed: 10, failed: 1, skipped: 2, total: 13 },
+    })
+  })
+
+  it("emits nothing for a command that is not a test run", async () => {
+    expect(artifactsIn(await runToolCall("git status", "clean"))).toHaveLength(0)
+  })
+
+  it("reports inconclusive rather than a green run when output is unparseable", async () => {
+    const artifacts = artifactsIn(
+      await runToolCall("pnpm test", "Command failed with exit code 137.", true)
+    )
+    expect(artifacts).toHaveLength(1)
+    const { verification } = artifacts[0].payload as {
+      verification: { conclusion: string; failed: number }
+    }
+    expect(verification.conclusion).toBe("inconclusive")
+    expect(verification.conclusion).not.toBe("passed")
+  })
+
+  it("never puts raw test output or the command line in the journal", async () => {
+    const secret = "MY_TOKEN=sk-secret-value"
+    const events = await runToolCall(
+      `${secret} pnpm test -- lib/`,
+      `${JEST_OUTPUT}\nFAIL /Users/someone/private/path/foo.test.ts`
+    )
+    const serialized = JSON.stringify(events)
+    expect(serialized).not.toContain("sk-secret-value")
+    expect(serialized).not.toContain("/Users/someone/private/path")
+    expect(serialized).not.toContain("FAIL")
+  })
+
+  it("emits at most one artifact when a result is delivered twice", async () => {
+    const appended: AppendRunEventInput[] = []
+    const producer = new AgentRunEventProducer("run-verify", async (_runId, input) => {
+      appended.push(input)
+      return {} as never
+    })
+    const call = { type: "tool-call", id: "c1", toolName: "Bash", input: { command: "jest" } }
+    const result = { type: "tool-result", id: "c1", toolName: "Bash", result: JEST_OUTPUT }
+    await producer.onCaptureEvent(call as never, 1_000)
+    await producer.onCaptureEvent(result as never, 1_001)
+    await producer.onCaptureEvent(result as never, 1_002)
+    // The second result has no remembered runner and no test-shaped input of
+    // its own to re-detect from, so it must not mint a duplicate artifact.
+    expect(artifactsIn(appended)).toHaveLength(1)
+  })
+})

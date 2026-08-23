@@ -1,167 +1,198 @@
 "use client"
 
 /**
- * Cross-kind agent-run fan-in (Scheduler Phase D).
+ * Live fan-in for the task cockpit.
  *
- * Aggregates the four agent-run sources — persistent goals (`chatGoals`),
- * agent-team runs (`workflowRuns` with the `__team__:` prefix), unified plans
- * (`agentPlans`), and scheduled agent tasks (scheduler executions of
- * `goal` / `agent-team` / `plan`) — into one newest-first `AgentRun[]`. Mirrors
- * `hooks/scheduler/use-unified-recent-runs.ts`: one `useLiveQuery` per Dexie
- * source, normalize through the pure mappers in `types/agent-runs/agent-run.ts`,
- * merge, filter in-memory.
+ * The canonical source is the run journal — `listExecutionRuns()` with no kind
+ * filter, so chat turns, workflows, delegations and background jobs are in the
+ * list rather than structurally excluded from it. The old shape asked five
+ * questions of four private stores and mapped them through `AgentRun`, whose
+ * kind union has four members and whose canonical mapper returns `null` for
+ * `agent-turn`, `workflow` and `delegation`; between them that is most of what
+ * actually runs, so the panel could not show it.
  *
- * Live team status is joined from the in-memory `agent-team-store`: a team's
- * NEWEST run is annotated with the store's live status when that status is
- * non-terminal, so an in-flight team shows as running even before its
- * `workflowRuns` row is updated. Older runs keep their persisted status.
+ * The three other sources are still read, each for a specific reason:
+ *  - **broker legs** are in-memory and admitted-but-not-yet-journalled, so they
+ *    are the only place a just-started turn exists;
+ *  - **`workflowRuns` / scheduler executions** cover rows written before their
+ *    bridges existed;
+ *  - **`chatGoals` / `agentPlans`** likewise, and `buildCockpitRows` suppresses
+ *    every one of them the moment a canonical run for the same source appears.
+ *
+ * Paging raises a ceiling instead of walking an offset. The list reorders on
+ * every journal append, so `offset += 50` would skip rows and repeat others;
+ * a growing limit cannot.
  */
 
-import { useMemo } from "react"
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+
 import { getDb } from "@/lib/db/schema"
 import { listAllGoals } from "@/lib/db/goals"
-import { listExecutionRuns } from "@/lib/db/execution-runs"
+import { getExecutionRun, listExecutionRuns } from "@/lib/db/execution-runs"
 import { schedulerDb } from "@/lib/scheduler/scheduler-db"
-import { useAgentTeamStore } from "@/stores/agent/agent-team-store/store"
-import type { AgentTeam, TeamStatus } from "@/types/agent/agent-team"
-import type { TaskExecution } from "@/types/scheduler"
+import { getExecutionBroker } from "@/lib/execution/broker"
 import {
-  compareAgentRuns,
-  isTeamWorkflowId,
-  parseTeamWorkflowId,
-  toAgentRunFromGoal,
-  toAgentRunFromExecutionRun,
-  toAgentRunFromPlan,
-  toAgentRunFromTaskExecution,
-  toAgentRunFromTeamRun,
-  type AgentRun,
-  type AgentRunKind,
-} from "@/types/agent-runs/agent-run"
+  COCKPIT_PAGE_SIZE,
+  buildCockpitRows,
+  cockpitHasMore,
+  countCockpitRowsByStatus,
+  filterCockpitRows,
+  type CockpitStatusGroup,
+} from "@/lib/execution/cockpit-model"
+import {
+  countExecutionRowsByKind,
+  journalRunRow,
+  type ExecutionFilterKind,
+  type UnifiedExecutionRow,
+} from "@/lib/execution/monitor-model"
+import type { ExecutionLegSnapshot } from "@/lib/execution/types"
+import type { ExecutionRun } from "@/types/execution/run"
+import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { TaskExecution } from "@/types/scheduler"
+import type { Goal } from "@/types/goal"
+import type { AgentPlan } from "@/types/agent/plan"
 
-const DEFAULT_LIMIT = 50
-
-/** Scheduler task types that represent an agent run. */
-const AGENT_TASK_TYPES = new Set(["goal", "agent-team", "plan"])
-
-/** Team statuses with a live controller (non-terminal). */
-const LIVE_TEAM_STATUSES = new Set<TeamStatus>(["planning", "executing", "paused"])
-
-export interface UseAgentRunsOptions {
-  /** Cap the merged list (newest-first). Default 50. */
-  limit?: number
-  /** Restrict to a single kind. */
-  filterKind?: AgentRunKind
-  /** Case-insensitive title substring filter. */
+export interface UseExecutionCockpitOptions {
+  statusGroup?: CockpitStatusGroup
+  kind?: ExecutionFilterKind
   query?: string
+  projectId?: string
+  /** Run id carried by a deep link; fetched independently of the page ceiling. */
+  selectedId?: string
 }
 
-export interface UseAgentRunsResult {
-  runs: AgentRun[]
+export interface UseExecutionCockpitResult {
+  /** Rows after the status / kind / query filter. */
+  rows: UnifiedExecutionRow[]
+  /**
+   * Rows before filtering.
+   *
+   * The chip counts are computed from this, not from `rows`: a count derived
+   * from the filtered list would read "Failed 0" the moment you selected
+   * Running, which is the opposite of what a filter count is for.
+   */
+  allRows: UnifiedExecutionRow[]
+  statusCounts: Record<CockpitStatusGroup, number>
+  kindCounts: Record<ExecutionFilterKind, number>
+  /** Canonical row for a deep link that is outside the currently loaded page. */
+  selectedRow?: UnifiedExecutionRow
   isLoading: boolean
+  hasMore: boolean
+  loadMore(): void
 }
 
-export function useAgentRuns(options: UseAgentRunsOptions = {}): UseAgentRunsResult {
-  const limit = options.limit && options.limit > 0 ? options.limit : DEFAULT_LIMIT
+const EMPTY_LEGS: ExecutionLegSnapshot[] = []
 
-  const canonicalRuns = useLiveQuery(
-    async () => listExecutionRuns({ kinds: ["goal", "plan", "team", "scheduled"], limit }),
-    [limit]
+interface PersistedSources {
+  executionRuns: ExecutionRun[]
+  workflowRuns: WorkflowRunRow[]
+  schedulerExecutions: TaskExecution[]
+  goals: Goal[]
+  plans: AgentPlan[]
+  selectedRun?: ExecutionRun
+  limit: number
+}
+
+async function resolveSelectedRun(
+  selectedId: string | undefined
+): Promise<ExecutionRun | undefined> {
+  if (!selectedId) return undefined
+  const direct = await getExecutionRun(selectedId)
+  if (direct) return direct
+  const matches = await getDb().executionRuns.where("sourceId").equals(selectedId).toArray()
+  return matches.sort((left, right) => right.updatedAt - left.updatedAt)[0]
+}
+
+export function useExecutionCockpit(
+  options: UseExecutionCockpitOptions = {}
+): UseExecutionCockpitResult {
+  const [limit, setLimit] = useState(COCKPIT_PAGE_SIZE)
+
+  const broker = getExecutionBroker()
+  const brokerLegs = useSyncExternalStore(
+    broker.subscribe,
+    broker.getSnapshot,
+    // Static export / SSR: no live broker.
+    () => EMPTY_LEGS as never
   )
-  const goals = useLiveQuery(async () => listAllGoals(limit), [limit])
-  const plans = useLiveQuery(
-    async () => getDb().agentPlans.orderBy("createdAt").reverse().limit(limit).toArray(),
-    [limit]
+
+  const persisted = useLiveQuery<PersistedSources>(async () => {
+    const [executionRuns, workflowRuns, schedulerExecutions, goals, plans, selectedRun] =
+      await Promise.all([
+        listExecutionRuns({ limit }),
+        getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
+        schedulerDb.getRecentExecutions(limit),
+        listAllGoals(limit),
+        getDb().agentPlans.orderBy("createdAt").reverse().limit(limit).toArray(),
+        resolveSelectedRun(options.selectedId),
+      ])
+    return {
+      executionRuns,
+      workflowRuns,
+      schedulerExecutions,
+      goals,
+      plans,
+      ...(selectedRun ? { selectedRun } : {}),
+      limit,
+    }
+  }, [limit, options.selectedId])
+
+  const allRows = useMemo(
+    () =>
+      buildCockpitRows({
+        brokerLegs,
+        executionRuns: persisted?.executionRuns ?? [],
+        workflowRuns: persisted?.workflowRuns ?? [],
+        schedulerExecutions: persisted?.schedulerExecutions ?? [],
+        goals: persisted?.goals ?? [],
+        plans: persisted?.plans ?? [],
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+      }),
+    [brokerLegs, persisted, options.projectId]
   )
-  const teamRuns = useLiveQuery(
-    async () => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
-    [limit]
+
+  const rows = useMemo(
+    () =>
+      filterCockpitRows(allRows, {
+        ...(options.statusGroup ? { statusGroup: options.statusGroup } : {}),
+        ...(options.kind ? { kind: options.kind } : {}),
+        ...(options.query ? { query: options.query } : {}),
+      }),
+    [allRows, options.statusGroup, options.kind, options.query]
   )
-  const taskExecutions = useLiveQuery(async () => schedulerDb.getRecentExecutions(limit), [limit])
-  const teams = useAgentTeamStore((s) => s.teams)
 
-  const runs = useMemo(() => {
-    const mergedById = new Map<string, AgentRun>()
-    for (const run of canonicalRuns ?? []) {
-      const mapped = toAgentRunFromExecutionRun(run)
-      if (mapped) mergedById.set(mapped.unifiedId, mapped)
-    }
-    const addLegacy = (run: AgentRun) => {
-      const canonical = mergedById.get(run.unifiedId)
-      if (!canonical) {
-        mergedById.set(run.unifiedId, run)
-        return
-      }
-      // Keep the canonical status/projection while retaining source-specific
-      // control identifiers (for example the team id parsed from a legacy
-      // workflow row) until every producer records them in ExecutionRun.
-      mergedById.set(run.unifiedId, {
-        ...canonical,
-        origin: { ...run.origin, ...canonical.origin },
-      })
-    }
+  const loadMore = useCallback(() => setLimit((current) => current + COCKPIT_PAGE_SIZE), [])
+  const selectedRow = useMemo(
+    () => (persisted?.selectedRun ? journalRunRow(persisted.selectedRun) : undefined),
+    [persisted]
+  )
 
-    if (goals) goals.map(toAgentRunFromGoal).forEach(addLegacy)
-    if (plans) plans.map(toAgentRunFromPlan).forEach(addLegacy)
+  /**
+   * More is offered when ANY source filled its ceiling. Asking only the journal
+   * would strand legacy rows: a user whose goals all predate the bridge has a
+   * full `chatGoals` page and an empty journal one.
+   */
+  const hasMore = useMemo(() => {
+    if (!persisted) return false
+    const { limit: fetchedAt } = persisted
+    return [
+      persisted.executionRuns.length,
+      persisted.workflowRuns.length,
+      persisted.schedulerExecutions.length,
+      persisted.goals.length,
+      persisted.plans.length,
+    ].some((count) => cockpitHasMore(count, fetchedAt))
+  }, [persisted])
 
-    if (teamRuns) {
-      const teamRows = teamRuns.filter((r) => isTeamWorkflowId(r.workflowId))
-      // The newest run per team is the one a live store status may annotate.
-      const newestRunIdByTeam = new Map<string, string>()
-      for (const row of teamRows) {
-        const teamId = parseTeamWorkflowId(row.workflowId)?.teamId
-        if (!teamId) continue
-        const prev = newestRunIdByTeam.get(teamId)
-        if (!prev) newestRunIdByTeam.set(teamId, row.id)
-        // teamRows is already startedAt-desc, so the first seen is the newest.
-      }
-      for (const row of teamRows) {
-        const teamId = parseTeamWorkflowId(row.workflowId)?.teamId
-        const team: AgentTeam | undefined = teamId ? teams[teamId] : undefined
-        const isNewest = teamId ? newestRunIdByTeam.get(teamId) === row.id : false
-        const liveStatus =
-          isNewest && team && LIVE_TEAM_STATUSES.has(team.status) ? team.status : undefined
-        addLegacy(toAgentRunFromTeamRun(row, liveStatus))
-      }
-    }
-
-    if (taskExecutions) {
-      const agentExecs = taskExecutions.filter((e: TaskExecution) =>
-        AGENT_TASK_TYPES.has(e.taskType)
-      )
-      agentExecs.map(toAgentRunFromTaskExecution).forEach(addLegacy)
-    }
-
-    const merged = [...mergedById.values()]
-    merged.sort(compareAgentRuns)
-
-    let filtered = merged
-    if (options.filterKind) {
-      filtered = filtered.filter((r) => r.kind === options.filterKind)
-    }
-    if (options.query && options.query.trim()) {
-      const q = options.query.trim().toLowerCase()
-      filtered = filtered.filter((r) => r.title.toLowerCase().includes(q))
-    }
-    return filtered.slice(0, limit)
-  }, [
-    canonicalRuns,
-    goals,
-    plans,
-    teamRuns,
-    taskExecutions,
-    teams,
-    limit,
-    options.filterKind,
-    options.query,
-  ])
-
-  const isLoading =
-    canonicalRuns === undefined ||
-    goals === undefined ||
-    plans === undefined ||
-    teamRuns === undefined ||
-    taskExecutions === undefined
-
-  return { runs, isLoading }
+  return {
+    rows,
+    allRows,
+    statusCounts: useMemo(() => countCockpitRowsByStatus(allRows), [allRows]),
+    kindCounts: useMemo(() => countExecutionRowsByKind(allRows), [allRows]),
+    ...(selectedRow ? { selectedRow } : {}),
+    isLoading: persisted === undefined,
+    hasMore,
+    loadMore,
+  }
 }

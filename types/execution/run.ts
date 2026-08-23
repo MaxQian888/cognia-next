@@ -20,6 +20,31 @@ export type ExecutionRunKind =
    * open delegation, and the retry is a new child, not a resurrected run.
    */
   | "delegation"
+  /**
+   * Background work with an owner: a subagent dispatch, a plugin agent, or a
+   * native supervisor job. Stoppable and inspectable, but never steerable or
+   * pausable — there is no live input lane to steer and no coordinator to
+   * pause, which `allowedActions` already reflects without a special case.
+   *
+   * Distinct from `agent-turn`, which is a turn IN a conversation the user is
+   * watching; a job reports back when it is done.
+   */
+  | "job"
+  /**
+   * An authorized security scan of a named target.
+   *
+   * Its own kind rather than a `job` because the thing that makes it different
+   * is not how it executes but what a settled one MEANS: a scan that ends
+   * without a readable report is inconclusive, not successful, and every
+   * surface that reads run status has to be able to tell those apart. It also
+   * carries an authorization record — a pentest is only legitimate against a
+   * system the operator was cleared to test — which no other kind has.
+   *
+   * Stoppable, never steerable or pausable: the scanner is an external process
+   * with no live input lane, which `allowedActions` already yields without a
+   * special case.
+   */
+  | "security-scan"
 
 export type ExecutionRunStatus =
   | "queued"
@@ -103,11 +128,53 @@ export type RunControlAction =
    */
   | "steer"
 
+/**
+ * What an artifact IS, when the producer knows.
+ *
+ * Optional on {@link RunArtifactSnapshot} because the field postdates the
+ * shape: an artifact without a kind is the generic one the reducer has always
+ * projected, not an unknown-and-therefore-suspect one.
+ */
+export type RunArtifactKind = "generic" | "verification"
+
+export type RunVerificationConclusion = "passed" | "failed" | "inconclusive"
+
+/**
+ * The COUNTS of a verification run, and nothing else.
+ *
+ * Deliberately holds no output, no failing-test names, and no command line.
+ * Test output routinely contains file paths, environment values, and assertion
+ * payloads; the run journal is projected into IM cards and remote surfaces, so
+ * copying it there would be a redaction hole. The full output stays with the
+ * transcript owner and is reachable through `RunArtifactSnapshot.detailsRef`.
+ *
+ * `inconclusive` is a first-class outcome, not an error case. Output that could
+ * not be parsed must never be reported as `0 failed` — a silent green is the
+ * one failure mode this whole projection exists to avoid.
+ */
+export interface RunVerificationSummary {
+  conclusion: RunVerificationConclusion
+  passed: number
+  failed: number
+  skipped: number
+  total: number
+  durationMs?: number
+}
+
 export interface RunArtifactSnapshot {
   id: string
   title: string
   url?: string
   mimeType?: string
+  kind?: RunArtifactKind
+  /**
+   * Opaque handle to the full detail, resolved by whoever owns it (for a
+   * verification run, the tool call in the transcript). Never a payload and
+   * never a path — an id the owner can look up, or nothing.
+   */
+  detailsRef?: string
+  /** Present exactly when `kind === "verification"`. */
+  verification?: RunVerificationSummary
 }
 
 export type RunActivityKind = "lifecycle" | "tool" | "step" | "artifact" | "approval"

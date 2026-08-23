@@ -11,6 +11,11 @@ import {
   safeToolActivityMetadata,
   type SafeToolActivityMetadata,
 } from "@/lib/execution/run-activity"
+import {
+  detectVerificationRunner,
+  type VerificationRunner,
+} from "@/lib/execution/verification/detect"
+import { parseVerificationOutput } from "@/lib/execution/verification/parse"
 
 type Append = (runId: string, input: AppendRunEventInput) => Promise<RunEvent>
 
@@ -39,6 +44,9 @@ export interface AgentRunEventProducerOptions {
   workspaceRoot?: string
 }
 
+/** Ceiling on test-runner tool calls awaiting a result. See the field's docblock. */
+const MAX_PENDING_VERIFICATIONS = 64
+
 /** Capture-stream adapter that emits summaries only and drops reasoning/raw data. */
 export class AgentRunEventProducer {
   private readonly runId: string
@@ -46,6 +54,17 @@ export class AgentRunEventProducer {
   private anonymousToolCounter = 0
   private readonly stepByToolCall = new Map<string, string>()
   private readonly metadataByToolCall = new Map<string, SafeToolActivityMetadata>()
+  /**
+   * Only the RUNNER enum is remembered, never the command that produced it.
+   * Detection happens at `tool-call`, where the arguments are reliably present;
+   * keeping the command around until the result arrived would park a string
+   * that can carry paths, env assignments, and tokens on the producer.
+   *
+   * Bounded: the only removal is the matching `tool-result`, and a call whose
+   * result never arrives (an aborted turn, a dead sidecar) would otherwise hold
+   * its entry for the producer's lifetime under an id that never repeats.
+   */
+  private readonly verificationByToolCall = new Map<string, VerificationRunner>()
   private readonly commentaryByMessage = new Map<string, string>()
   private readonly startedCommentary = new Set<string>()
   private pending: Promise<void> = Promise.resolve()
@@ -116,6 +135,17 @@ export class AgentRunEventProducer {
         this.runId,
         semanticRunEvent("step.started", { stepId, title: label, safeTitle: true }, { ts })
       )
+      const verificationRunner = detectVerificationRunner(event.toolName, event.input)
+      if (verificationRunner) {
+        // Evict oldest-first once the cap is reached. A turn never has this
+        // many test runs in flight at once, so an entry old enough to be
+        // evicted is one whose result is never coming.
+        if (this.verificationByToolCall.size >= MAX_PENDING_VERIFICATIONS) {
+          const oldest = this.verificationByToolCall.keys().next()
+          if (!oldest.done) this.verificationByToolCall.delete(oldest.value)
+        }
+        this.verificationByToolCall.set(toolCallId, verificationRunner)
+      }
       await this.append(
         this.runId,
         semanticRunEvent(
@@ -169,7 +199,46 @@ export class AgentRunEventProducer {
           { ts }
         )
       )
+      await this.emitVerificationArtifact(toolCallId, event, ts)
     }
+  }
+
+  /**
+   * Project a test run's COUNTS onto the run, when this tool call was one.
+   *
+   * The title is a caller-declared safe constant rather than anything derived
+   * from the command, and the output itself never enters the journal — the
+   * transcript already owns it, and `detailsRef` points back at the tool call
+   * for anyone who needs the real thing.
+   */
+  private async emitVerificationArtifact(
+    toolCallId: string,
+    event: Extract<CaptureStreamEvent, { type: "tool-result" }>,
+    ts: number
+  ): Promise<void> {
+    const runner =
+      this.verificationByToolCall.get(toolCallId) ??
+      detectVerificationRunner(event.toolName, event.input)
+    // One artifact per call, even if a result is delivered twice.
+    this.verificationByToolCall.delete(toolCallId)
+    if (!runner) return
+
+    const verification = parseVerificationOutput(runner, event.result)
+    await this.append(
+      this.runId,
+      semanticRunEvent(
+        "artifact.created",
+        {
+          artifactId: `verification:${toolCallId}`,
+          title: "Tests",
+          safeTitle: true,
+          kind: "verification",
+          detailsRef: toolCallId,
+          verification,
+        },
+        { ts }
+      )
+    )
   }
 
   /**

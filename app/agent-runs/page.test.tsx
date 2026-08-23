@@ -28,17 +28,29 @@ describe("AgentRunsPage", () => {
     expect(screen.getByTestId("panel")).toBeInTheDocument()
   })
 
-  it("passes the ?run= + ?kind= params through to the panel", () => {
-    searchParams = new URLSearchParams("run=goal:g1&kind=team")
+  it("passes ?run= / ?kind= / ?status= through to the panel", () => {
+    searchParams = new URLSearchParams("run=execution:goal:g1&kind=team&status=failed")
     render(<AgentRunsPage />)
-    expect(lastProps.selectedId).toBe("goal:g1")
+    expect(lastProps.selectedId).toBe("execution:goal:g1")
     expect(lastProps.filterKind).toBe("team")
+    expect(lastProps.statusGroup).toBe("failed")
+  })
+
+  /**
+   * A hand-edited or stale URL must not filter the list down to nothing:
+   * an unknown value falls back to "all" rather than being cast through.
+   */
+  it("falls back to all for a filter value outside the closed set", () => {
+    searchParams = new URLSearchParams("kind=scheduled-task&status=succeeded")
+    render(<AgentRunsPage />)
+    expect(lastProps.filterKind).toBe("all")
+    expect(lastProps.statusGroup).toBe("all")
   })
 
   it("writes ?run= when a run is selected", () => {
     render(<AgentRunsPage />)
-    ;(lastProps.onSelect as (id: string | null) => void)("plan:p1")
-    expect(replace).toHaveBeenCalledWith(expect.stringContaining("run=plan%3Ap1"))
+    ;(lastProps.onSelect as (id: string | null) => void)("execution:plan:p1")
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining("run=execution%3Aplan%3Ap1"))
   })
 
   it("drops ?kind= when the filter resets to all", () => {
@@ -46,5 +58,12 @@ describe("AgentRunsPage", () => {
     render(<AgentRunsPage />)
     ;(lastProps.onFilterKind as (k: string) => void)("all")
     expect(replace).toHaveBeenCalledWith(expect.not.stringContaining("kind="))
+  })
+
+  it("drops ?status= when the status filter resets to all", () => {
+    searchParams = new URLSearchParams("status=running")
+    render(<AgentRunsPage />)
+    ;(lastProps.onStatusGroup as (g: string) => void)("all")
+    expect(replace).toHaveBeenCalledWith(expect.not.stringContaining("status="))
   })
 })

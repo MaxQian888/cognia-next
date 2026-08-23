@@ -45,7 +45,14 @@ import {
 import { useExecutionMonitor } from "./use-execution-monitor"
 import { useExecutionMonitorPrefs } from "@/hooks/execution/use-execution-monitor-prefs"
 
-/** Broker leg / filter kinds that map to a dedicated i18n label. */
+/**
+ * Broker leg / filter kinds that map to a dedicated i18n label.
+ *
+ * The journal-only kinds are listed too. A row's `kind` is the RAW kind, not
+ * the filter kind, so `agent-turn` / `plan` / `delegation` / `job` reach
+ * `kindLabel` verbatim and would otherwise fall through to its raw-string
+ * fallback — an untranslated internal identifier rendered to the user.
+ */
 const KIND_KEYS: Record<string, string> = {
   chat: "kind.chat",
   "workflow-step": "kind.workflowStep",
@@ -55,6 +62,11 @@ const KIND_KEYS: Record<string, string> = {
   goal: "kind.goal",
   team: "kind.team",
   workflow: "kind.workflow",
+  "agent-turn": "kind.agentTurn",
+  plan: "kind.plan",
+  delegation: "kind.delegation",
+  job: "kind.job",
+  "security-scan": "kind.securityScan",
 }
 
 const STATUS_KEYS: Record<UnifiedExecutionStatus, string> = {

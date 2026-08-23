@@ -1,62 +1,97 @@
 "use client"
 
 /**
- * Unified "Agent Runs" master-detail panel (Scheduler Phase D).
+ * The task cockpit — one place to answer "what is running, what is stuck, what
+ * failed" across every execution kind.
  *
- * Lists every live + recent goal / team / plan / scheduled agent run from
- * `useAgentRuns`, with kind filters, and a detail pane for the selected run
- * that offers abort / pause / resume (routed by `useAgentRunActions`). The
- * selected run is controlled by the parent so it can mirror a `?run=` query
- * param (static-export-safe deep links).
+ * It used to list four kinds (goal / team / plan / scheduled-task) fanned in
+ * from four private stores. Chat turns, workflows, delegations and background
+ * jobs — most of what actually runs — could not appear, because the view model
+ * it mapped through had no member for them.
+ *
+ * Now it reads the run journal directly (`useExecutionCockpit`), so a kind
+ * shows up here the moment it has a bridge, and controls come from the
+ * projection's own `allowedActions` rather than from a per-kind switch.
+ *
+ * The `?run=` / `?kind=` deep-link contract is unchanged — `run-reducer.ts`
+ * stamps `detailsUrl: /agent-runs?run=<id>` into every IM card, and
+ * `tests/e2e/agent-runs/goal-control.spec.ts` guards it.
  */
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ActivityIcon } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
-import { InspectRow } from "@/components/scheduler/details/_shared/inspect-row"
-import { PlanTrackerPanel } from "@/components/agent/plan/plan-tracker-panel"
-import { usePlanById } from "@/hooks/agent/use-session-plan"
-import { formatDuration, formatRelativeTime } from "@/lib/scheduler/format-utils"
-import { useAgentRuns } from "@/hooks/agent-runs/use-agent-runs"
-import { useAgentRunActions } from "@/hooks/agent-runs/use-agent-run-actions"
-import type { AgentRun, AgentRunKind } from "@/types/agent-runs/agent-run"
-import { AgentRunStatusPill } from "./agent-run-status-pill"
+import { formatRelativeTime } from "@/lib/scheduler/format-utils"
+import { useExecutionCockpit } from "@/hooks/agent-runs/use-agent-runs"
+import { useRunControlActions } from "@/hooks/agent-runs/use-agent-run-actions"
+import {
+  COCKPIT_STATUS_GROUPS,
+  filterKindLabelKey,
+  runKindLabelKey,
+  type CockpitStatusGroup,
+} from "@/lib/execution/cockpit-model"
+import {
+  EXECUTION_FILTER_KINDS,
+  type ExecutionFilterKind,
+  type UnifiedExecutionRow,
+} from "@/lib/execution/monitor-model"
+import { ExecutionStatusPill } from "./agent-run-status-pill"
+import { RunDetailPane } from "./run-detail-pane"
 
-const KIND_FILTERS: Array<AgentRunKind | "all"> = ["all", "goal", "team", "plan", "scheduled-task"]
-
-const FILTER_I18N: Record<AgentRunKind | "all", string> = {
-  all: "all",
-  goal: "goal",
-  team: "team",
-  plan: "plan",
-  "scheduled-task": "scheduledTask",
-}
+const LIVE_STATUSES = new Set(["running", "queued", "waiting"])
 
 export interface AgentRunsPanelProps {
+  /** `UnifiedExecutionRow.runId` or `nativeId` — whichever the deep link carried. */
   selectedId?: string
-  onSelect: (unifiedId: string | null) => void
-  filterKind?: AgentRunKind | "all"
-  onFilterKind?: (kind: AgentRunKind | "all") => void
+  onSelect: (runId: string | null) => void
+  statusGroup?: CockpitStatusGroup | "all"
+  onStatusGroup?: (group: CockpitStatusGroup | "all") => void
+  filterKind?: ExecutionFilterKind | "all"
+  onFilterKind?: (kind: ExecutionFilterKind | "all") => void
 }
 
 export function AgentRunsPanel({
   selectedId,
   onSelect,
+  statusGroup = "all",
+  onStatusGroup,
   filterKind = "all",
   onFilterKind,
 }: AgentRunsPanelProps) {
   const t = useTranslations("agentRuns")
-  const { runs, isLoading } = useAgentRuns({
-    filterKind: filterKind === "all" ? undefined : filterKind,
-  })
-  const actions = useAgentRunActions()
+  const { rows, allRows, selectedRow, statusCounts, kindCounts, isLoading, hasMore, loadMore } =
+    useExecutionCockpit({
+      ...(statusGroup !== "all" ? { statusGroup } : {}),
+      ...(filterKind !== "all" ? { kind: filterKind } : {}),
+      ...(selectedId ? { selectedId } : {}),
+    })
+  const actions = useRunControlActions()
 
+  /**
+   * Deep links carry the RUN id; the row's own key is source-prefixed. Match on
+   * either so a `?run=` from an IM card resolves whether the run is currently
+   * projected from the journal or from a live broker leg.
+   */
   const selected = useMemo(
-    () => runs.find((r) => r.unifiedId === selectedId) ?? null,
-    [runs, selectedId]
+    () =>
+      selectedId
+        ? (rows.find((row) => row.runId === selectedId || row.nativeId === selectedId) ??
+          allRows.find((row) => row.runId === selectedId || row.nativeId === selectedId) ??
+          selectedRow ??
+          null)
+        : null,
+    [rows, allRows, selectedRow, selectedId]
   )
 
   return (
@@ -67,72 +102,79 @@ export function AgentRunsPanel({
         title={t("title")}
         description={t("description")}
         controls={
-          <div className="flex gap-1.5" role="tablist" aria-label={t("title")}>
-            {KIND_FILTERS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={filterKind === k}
-                onClick={() => onFilterKind?.(k)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  filterKind === k
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/70"
-                )}
-              >
-                {t(`filters.${FILTER_I18N[k]}`)}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex gap-1.5" role="tablist" aria-label={t("filters.statusLabel")}>
+              <FilterChip
+                label={t("filters.all")}
+                count={allRows.length}
+                selected={statusGroup === "all"}
+                onSelect={() => onStatusGroup?.("all")}
+              />
+              {COCKPIT_STATUS_GROUPS.map((group) => (
+                <FilterChip
+                  key={group}
+                  label={t(`filters.${group}`)}
+                  count={statusCounts[group]}
+                  selected={statusGroup === group}
+                  onSelect={() => onStatusGroup?.(group)}
+                />
+              ))}
+            </div>
+            <Select
+              value={filterKind}
+              onValueChange={(value) => onFilterKind?.(value as ExecutionFilterKind | "all")}
+            >
+              <SelectTrigger size="sm" aria-label={t("filters.kindLabel")} className="w-auto">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("filters.allKinds")}</SelectItem>
+                {EXECUTION_FILTER_KINDS.map((kind) => {
+                  const label = t(`kind.${filterKindLabelKey(kind)}`)
+                  return (
+                    <SelectItem key={kind} value={kind}>
+                      {kindCounts[kind]
+                        ? t("filters.kindOption", { label, count: kindCounts[kind] })
+                        : label}
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
           </div>
         }
       />
 
       <div className="flex min-h-0 flex-1">
-        {/* List */}
-        <ul
-          className="w-full min-w-0 max-w-sm shrink-0 overflow-y-auto border-r"
-          aria-label={t("title")}
-        >
-          {!isLoading && runs.length === 0 && (
-            <li className="p-4 text-center text-xs text-muted-foreground">{t("empty")}</li>
+        <div className="flex w-full min-w-0 max-w-sm shrink-0 flex-col border-r">
+          <ul className="min-h-0 flex-1 overflow-y-auto" aria-label={t("title")}>
+            {!isLoading && rows.length === 0 && (
+              <li className="p-4 text-center text-xs text-muted-foreground">
+                {allRows.length === 0 ? t("empty") : t("emptyFiltered")}
+              </li>
+            )}
+            {rows.map((row) => (
+              <li key={row.rowId}>
+                <RunListRow
+                  row={row}
+                  selected={selected?.rowId === row.rowId}
+                  onSelect={() => onSelect(row.runId ?? row.nativeId)}
+                />
+              </li>
+            ))}
+          </ul>
+          {hasMore && (
+            <div className="border-t p-2">
+              <Button size="sm" variant="ghost" className="w-full" onClick={loadMore}>
+                {t("loadMore")}
+              </Button>
+            </div>
           )}
-          {runs.map((run) => (
-            <li key={run.unifiedId}>
-              <button
-                type="button"
-                onClick={() => onSelect(run.unifiedId)}
-                aria-current={selectedId === run.unifiedId}
-                className={cn(
-                  "flex w-full flex-col gap-1 border-b px-3 py-2 text-left hover:bg-muted/50",
-                  selectedId === run.unifiedId && "bg-muted"
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium">{run.title}</span>
-                  <AgentRunStatusPill status={run.status} />
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="uppercase">{t(`kind.${FILTER_I18N[run.kind]}`)}</span>
-                  <span>·</span>
-                  <span>{formatRelativeTime(new Date(run.startedAt))}</span>
-                  {run.isLive && (
-                    <span className="ml-auto inline-flex items-center gap-1 text-blue-500">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                      {t("live")}
-                    </span>
-                  )}
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        </div>
 
-        {/* Detail */}
         <div className="min-w-0 flex-1 overflow-y-auto p-4">
           {selected ? (
-            <AgentRunDetail run={selected} actions={actions} />
+            <RunDetailPane row={selected} actions={actions} />
           ) : (
             <p className="pt-8 text-center text-sm text-muted-foreground">
               {t("detail.selectPrompt")}
@@ -144,80 +186,71 @@ export function AgentRunsPanel({
   )
 }
 
-/**
- * Live step tracker for a plan run. Renders nothing for other run kinds, or
- * while the plan row has not loaded — the surrounding detail pane stays useful
- * either way.
- */
-function PlanRunSteps({ run }: { run: AgentRun }) {
-  const planId = run.kind === "plan" ? (run.origin.planId ?? run.origin.nativeId) : undefined
-  const plan = usePlanById(planId)
-  if (!plan) return null
-  return <PlanTrackerPanel plan={plan} />
+function FilterChip({
+  label,
+  count,
+  selected,
+  onSelect,
+}: {
+  label: string
+  count: number
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onSelect}
+      className={cn(
+        "flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+        selected
+          ? "bg-primary text-primary-foreground"
+          : "bg-muted text-muted-foreground hover:bg-muted/70"
+      )}
+    >
+      {label}
+      {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+    </button>
+  )
 }
 
-function AgentRunDetail({
-  run,
-  actions,
+function RunListRow({
+  row,
+  selected,
+  onSelect,
 }: {
-  run: AgentRun
-  actions: ReturnType<typeof useAgentRunActions>
+  row: UnifiedExecutionRow
+  selected: boolean
+  onSelect: () => void
 }) {
   const t = useTranslations("agentRuns")
-  const dur = run.finishedAt ? formatDuration(run.finishedAt - run.startedAt) : undefined
-
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="min-w-0 break-words text-base font-semibold">{run.title}</h2>
-        <AgentRunStatusPill status={run.status} />
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected}
+      className={cn(
+        "flex w-full flex-col gap-1 border-b px-3 py-2 text-left hover:bg-muted/50",
+        selected && "bg-muted"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-sm font-medium">{row.label}</span>
+        <ExecutionStatusPill status={row.status} />
       </div>
-
-      <div>
-        <InspectRow label={t("detail.kind")} value={t(`kind.${FILTER_I18N[run.kind]}`)} />
-        <InspectRow label={t("detail.status")} value={t(`status.${run.status}`)} />
-        <InspectRow
-          label={t("detail.started")}
-          value={formatRelativeTime(new Date(run.startedAt))}
-        />
-        {run.finishedAt && (
-          <InspectRow
-            label={t("detail.finished")}
-            value={`${formatRelativeTime(new Date(run.finishedAt))} (${dur})`}
-          />
-        )}
-        {typeof run.progress === "number" && (
-          <InspectRow label={t("detail.progress")} value={`${Math.round(run.progress * 100)}%`} />
-        )}
-        {typeof run.tokensUsed === "number" && (
-          <InspectRow label={t("detail.tokens")} value={String(run.tokensUsed)} />
-        )}
-        {run.error && <InspectRow label={t("detail.error")} value={run.error.message} />}
-      </div>
-
-      {/* A plan run's steps are the run. Without this the detail pane showed a
-          percentage for a plan started headlessly (scheduler / workflow node /
-          external bridge) and the step list was reachable only from the chat
-          session that happened to own it. */}
-      <PlanRunSteps run={run} />
-
-      <div className="flex flex-wrap gap-2">
-        {actions.canPause(run) && (
-          <Button size="sm" variant="outline" onClick={() => void actions.pause(run)}>
-            {t("actions.pause")}
-          </Button>
-        )}
-        {actions.canResume(run) && (
-          <Button size="sm" variant="outline" onClick={() => void actions.resume(run)}>
-            {t("actions.resume")}
-          </Button>
-        )}
-        {actions.canAbort(run) && (
-          <Button size="sm" variant="destructive" onClick={() => void actions.abort(run)}>
-            {t("actions.abort")}
-          </Button>
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="uppercase">{t(`kind.${runKindLabelKey(row)}`)}</span>
+        <span>·</span>
+        <span>{formatRelativeTime(new Date(row.startedAt))}</span>
+        {LIVE_STATUSES.has(row.status) && (
+          <span className="ml-auto inline-flex items-center gap-1 text-blue-500">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
+            {t("live")}
+          </span>
         )}
       </div>
-    </div>
+    </button>
   )
 }

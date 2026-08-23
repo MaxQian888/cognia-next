@@ -1,42 +1,148 @@
 {
   "actions": {
-    "abort": "Abort",
+    "approve": "Approve",
+    "deny": "Deny",
     "pause": "Pause",
-    "resume": "Resume"
+    "resume": "Resume",
+    "retry": "Retry",
+    "steer": "Steer",
+    "steerPlaceholder": "Redirect this run without stopping it…",
+    "stop": "Stop"
   },
-  "description": "Every live and recent goal, team, plan, and scheduled agent run in one place.",
+  "activityCategory": {
+    "approval": "Approval",
+    "artifact": "Artifact",
+    "command": "Command",
+    "integration": "Integration",
+    "read": "Read",
+    "search": "Search",
+    "skill": "Skill",
+    "status": "Status",
+    "write": "Write"
+  },
+  "activityStatus": {
+    "blocked": "Blocked",
+    "completed": "Done",
+    "failed": "Failed",
+    "pending": "Pending",
+    "running": "Running",
+    "skipped": "Skipped"
+  },
+  "approvals": {
+    "approved": "Approved",
+    "denied": "Denied",
+    "expired": "Expired",
+    "pending": "Pending"
+  },
+  "changeKind": {
+    "any": "Changed",
+    "created": "Created",
+    "deleted": "Deleted",
+    "gap": "Gap",
+    "modified": "Modified",
+    "other": "Changed",
+    "renamed": "Renamed",
+    "resync": "Resynced"
+  },
+  "degraded": {
+    "no_active_run": "no live run to steer",
+    "not_admitted": "the run has not been admitted yet",
+    "pii_blocked": "blocked by the redaction gate",
+    "provider_unsupported": "this provider cannot steer",
+    "store_failed": "the receipt could not be stored"
+  },
+  "description": "Every run — chat turns, workflows, goals, teams, delegations and background jobs — in one place.",
   "detail": {
+    "activityOmitted": "{count, plural, one {# earlier step is not shown} other {# earlier steps are not shown}}",
+    "changesIncomplete": "This change list is incomplete — some file events were not captured.",
     "error": "Error",
     "finished": "Finished",
+    "journalUnavailable": "The run journal is not on this device.",
     "kind": "Kind",
+    "loading": "Loading…",
+    "noActivity": "No activity recorded.",
+    "noApprovals": "No approvals were requested.",
+    "noArtifacts": "No artifacts.",
+    "noChanges": "No files were changed.",
+    "noTests": "No test runs were recorded.",
+    "notJournalled": "This run predates the execution journal, so it cannot be controlled from here.",
     "progress": "Progress",
-    "result": "Result",
     "selectPrompt": "Select a run to see its details.",
+    "sensitive": "Sensitive",
     "started": "Started",
     "status": "Status",
-    "tokens": "Tokens used"
+    "waitingReason": "Waiting on"
   },
-  "empty": "No agent runs yet.",
+  "empty": "No runs yet.",
+  "emptyFiltered": "No runs match these filters.",
   "filters": {
     "all": "All",
-    "goal": "Goals",
-    "plan": "Plans",
-    "scheduledTask": "Scheduled",
-    "team": "Teams"
+    "allKinds": "All kinds",
+    "failed": "Failed",
+    "finished": "Finished",
+    "kindLabel": "Filter by kind",
+    "kindOption": "{label} ({count})",
+    "running": "Running",
+    "statusLabel": "Filter by status",
+    "waiting": "Waiting"
   },
   "kind": {
+    "agentTurn": "Chat",
+    "chat": "Chat",
+    "connector": "Connector",
+    "delegation": "Delegation",
     "goal": "Goal",
+    "job": "Background task",
+    "other": "Other",
     "plan": "Plan",
-    "scheduledTask": "Scheduled task",
-    "team": "Team"
+    "scheduled": "Scheduled",
+    "securityScan": "Security scan",
+    "subagent": "Sub-agent",
+    "team": "Team",
+    "workflow": "Workflow",
+    "workflowStep": "Workflow step"
   },
   "live": "Live",
+  "loadMore": "Load more",
+  "outcome": {
+    "action_unavailable": "That action is no longer available — the run has moved on.",
+    "already_retried": "This run has already been retried.",
+    "forbidden": "You are not authorized to control this run.",
+    "interrupt_expired": "The approval expired before it was answered.",
+    "interrupt_not_found": "That approval no longer exists.",
+    "interrupt_resolved": "That approval was already answered.",
+    "invalid_command": "The command was incomplete.",
+    "not_controllable": "This run has no execution journal, so it cannot be controlled from here.",
+    "retried": "A replacement run has taken over.",
+    "revision_conflict": "The run changed while you were looking — try again.",
+    "run_not_found": "That run no longer exists.",
+    "source_rejected": "The engine refused the command.",
+    "steer_degraded": "The message was not delivered and is still yours to send.",
+    "unsupported": "Nothing is registered to control this kind of run.",
+    "unsupported_for_kind": "This kind of run cannot take that action."
+  },
   "status": {
     "cancelled": "Cancelled",
-    "failed": "Failed",
-    "paused": "Paused",
+    "done": "Done",
+    "error": "Failed",
+    "queued": "Queued",
     "running": "Running",
-    "succeeded": "Succeeded"
+    "waiting": "Waiting"
+  },
+  "tabs": {
+    "activity": "Activity",
+    "approvals": "Approvals",
+    "artifacts": "Artifacts",
+    "changes": "Changes",
+    "overview": "Overview",
+    "tests": "Tests"
+  },
+  "tests": {
+    "counts": "{passed} passed · {failed} failed · {skipped} skipped",
+    "failed": "Failed",
+    "inconclusive": "Inconclusive",
+    "inconclusiveHint": "The output could not be parsed — this is not a pass.",
+    "passed": "Passed"
   },
   "title": "Agent Runs"
 }

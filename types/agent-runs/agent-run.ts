@@ -1,24 +1,29 @@
 /**
- * Unified "Agent Run" view-model (Scheduler Phase D).
+ * Legacy adapters for the two run sources that predate the execution journal.
  *
- * One normalized shape over the four agent-run sources that otherwise each
- * have their own console: persistent goals (`chatGoals`), agent-team runs
- * (`workflowRuns` whose `workflowId` carries the `__team__:` prefix), unified
- * plans (`agentPlans`), and scheduled agent tasks (scheduler executions of
- * `goal` / `agent-team` / `plan` task types). The `/agent-runs` panel fans all
- * four in through `hooks/agent-runs/use-agent-runs.ts` so a user can see and
- * control every live + historical agent run in one place.
+ * This was once a rival view model for `/agent-runs`, with a four-member kind
+ * union (`goal | team | plan | scheduled-task`) and a canonical mapper that
+ * returned `null` for `agent-turn`, `workflow` and `delegation` — so the panel
+ * built on it structurally could not show most of what actually runs. The
+ * cockpit reads `UnifiedExecutionRow` (`lib/execution/monitor-model.ts`) now.
  *
- * Pure module — no React / Dexie imports — so the mappers + comparator are
- * unit-testable in isolation.
+ * What survives is the part that still has a job: `chatGoals` and `agentPlans`
+ * rows written before `agent-state-bridge.ts` existed have no journal history
+ * and must not be given a forged one (`appendInsideTransaction` refuses events
+ * on a terminal run by design), so they are READ through these mappers and
+ * projected by `lib/execution/cockpit-model.ts`.
+ *
+ * Everything that existed only to serve the old panel went with it: the team,
+ * scheduler and execution-run mappers, their status helpers, and the
+ * `__team__:` id parser — whose "single source of truth" claim was untrue while
+ * it stood here, since the producers never imported it. That format now has a
+ * real owner next to its producers: `lib/ai/agent/team/team-workflow-id.ts`.
+ *
+ * Pure module — no React / Dexie imports — so the mappers stay unit-testable.
  */
 
 import type { Goal, GoalStatus } from "@/types/goal"
 import type { AgentPlan, PlanStatus } from "@/types/agent/plan"
-import type { TeamStatus } from "@/types/agent/agent-team"
-import type { WorkflowRunRow } from "@/types/workflow/visual"
-import type { TaskExecution } from "@/types/scheduler"
-import type { ExecutionRun, ExecutionRunStatus } from "@/types/execution/run"
 
 export type AgentRunKind = "goal" | "team" | "plan" | "scheduled-task"
 export type AgentRunStatus = "running" | "paused" | "succeeded" | "failed" | "cancelled"
@@ -35,7 +40,7 @@ export interface AgentRunOrigin {
 }
 
 export interface AgentRun {
-  /** `${kind}:${nativeId}` — stable across renders, used for `?run=` deep links. */
+  /** `${kind}:${nativeId}` — stable across renders. */
   unifiedId: string
   kind: AgentRunKind
   title: string
@@ -45,7 +50,7 @@ export interface AgentRun {
   /** 0..1 completion ratio when derivable (plan steps); else undefined. */
   progress?: number
   tokensUsed?: number
-  /** Non-terminal (running / paused) — drives the abort / pause / resume affordances. */
+  /** Non-terminal (running / paused). */
   isLive: boolean
   origin: AgentRunOrigin
   result?: unknown
@@ -58,44 +63,8 @@ export function isTerminalAgentRunStatus(status: AgentRunStatus): boolean {
   return TERMINAL_STATUSES.has(status)
 }
 
-// ── Id helpers ───────────────────────────────────────────────────────────────
-
 export function makeAgentRunId(kind: AgentRunKind, nativeId: string): string {
   return `${kind}:${nativeId}`
-}
-
-export function parseAgentRunId(
-  unifiedId: string
-): { kind: AgentRunKind; nativeId: string } | null {
-  const idx = unifiedId.indexOf(":")
-  if (idx < 0) return null
-  const kind = unifiedId.slice(0, idx) as AgentRunKind
-  const nativeId = unifiedId.slice(idx + 1)
-  if (!nativeId) return null
-  return { kind, nativeId }
-}
-
-/** Newest-first comparator. */
-export function compareAgentRuns(a: AgentRun, b: AgentRun): number {
-  return b.startedAt - a.startedAt
-}
-
-// ── Team workflow-id contract (`__team__:<teamId>:<nonce>`) ───────────────────
-// Centralized + pinned by a test so a rename of the prefix in
-// `lib/ai/agent/team/synthesize-workflow.ts` breaks loudly here.
-
-const TEAM_RUN_PREFIX = "__team__:"
-
-export function isTeamWorkflowId(workflowId: string): boolean {
-  return workflowId.startsWith(TEAM_RUN_PREFIX)
-}
-
-export function parseTeamWorkflowId(workflowId: string): { teamId: string } | null {
-  if (!workflowId.startsWith(TEAM_RUN_PREFIX)) return null
-  const rest = workflowId.slice(TEAM_RUN_PREFIX.length)
-  const idx = rest.indexOf(":")
-  const teamId = idx >= 0 ? rest.slice(0, idx) : rest
-  return teamId ? { teamId } : null
 }
 
 // ── Status mappers ───────────────────────────────────────────────────────────
@@ -140,80 +109,7 @@ export function mapPlanStatus(status: PlanStatus): AgentRunStatus {
   }
 }
 
-export function mapTeamStatus(status: TeamStatus): AgentRunStatus {
-  switch (status) {
-    case "planning":
-    case "executing":
-      return "running"
-    case "paused":
-      return "paused"
-    case "completed":
-      return "succeeded"
-    case "failed":
-      return "failed"
-    case "cancelled":
-      return "cancelled"
-    case "idle":
-    default:
-      return "succeeded"
-  }
-}
-
-export function mapWorkflowRunStatus(status: WorkflowRunRow["status"]): AgentRunStatus {
-  switch (status) {
-    case "pending":
-    case "running":
-    case "waiting":
-      return "running"
-    case "paused":
-      return "paused"
-    case "succeeded":
-      return "succeeded"
-    case "failed":
-      return "failed"
-    case "cancelled":
-      return "cancelled"
-    default:
-      return "failed"
-  }
-}
-
-export function mapTaskExecStatus(status: TaskExecution["status"]): AgentRunStatus {
-  switch (status) {
-    case "pending":
-    case "running":
-      return "running"
-    case "completed":
-      return "succeeded"
-    case "failed":
-      return "failed"
-    case "cancelled":
-    case "skipped":
-      return "cancelled"
-    default:
-      return "failed"
-  }
-}
-
-export function mapExecutionRunStatus(status: ExecutionRunStatus): AgentRunStatus {
-  switch (status) {
-    case "queued":
-    case "running":
-    case "waiting":
-      return "running"
-    case "paused":
-    case "recovery_required":
-      return "paused"
-    case "completed":
-      return "succeeded"
-    case "failed":
-      return "failed"
-    case "cancelled":
-      return "cancelled"
-  }
-}
-
-// ── Row mappers ──────────────────────────────────────────────────────────────
+// ── Source mappers ───────────────────────────────────────────────────────────
 
 export function toAgentRunFromGoal(goal: Goal): AgentRun {
   const status = mapGoalStatus(goal.status)
@@ -244,85 +140,5 @@ export function toAgentRunFromPlan(plan: AgentPlan): AgentRun {
     ...(progress !== undefined ? { progress } : {}),
     isLive: !isTerminalAgentRunStatus(status),
     origin: { tableName: "agentPlans", nativeId: plan.id, planId: plan.id },
-  }
-}
-
-/**
- * Map a team's `workflowRuns` row. Caller filters to team rows first
- * ({@link isTeamWorkflowId}); `liveTeamStatus`, when supplied from the in-memory
- * store, overrides the persisted run status so an in-flight team shows live.
- */
-export function toAgentRunFromTeamRun(row: WorkflowRunRow, liveTeamStatus?: TeamStatus): AgentRun {
-  const teamId = parseTeamWorkflowId(row.workflowId)?.teamId
-  const status = liveTeamStatus ? mapTeamStatus(liveTeamStatus) : mapWorkflowRunStatus(row.status)
-  return {
-    unifiedId: makeAgentRunId("team", row.id),
-    kind: "team",
-    // Prefer the small-model "work content" title generated on completion;
-    // fall back to the static workflow/team name.
-    title: row.title ?? row.workflowSnapshot?.name ?? teamId ?? "Team run",
-    status,
-    startedAt: row.startedAt,
-    finishedAt: isTerminalAgentRunStatus(status) ? row.completedAt : undefined,
-    isLive: !isTerminalAgentRunStatus(status),
-    origin: {
-      tableName: "workflowRuns",
-      nativeId: row.id,
-      ...(teamId ? { teamId } : {}),
-    },
-    result: row.output,
-    error: row.error ? { message: row.error.message, code: row.error.code } : undefined,
-  }
-}
-
-/** Map a scheduler execution of a `goal` / `agent-team` / `plan` task. */
-export function toAgentRunFromTaskExecution(exec: TaskExecution): AgentRun {
-  const status = mapTaskExecStatus(exec.status)
-  return {
-    unifiedId: makeAgentRunId("scheduled-task", exec.id),
-    kind: "scheduled-task",
-    title: exec.taskName || "Scheduled run",
-    status,
-    startedAt: exec.startedAt.getTime(),
-    finishedAt: exec.completedAt ? exec.completedAt.getTime() : undefined,
-    isLive: !isTerminalAgentRunStatus(status),
-    origin: { tableName: "schedulerDb.executions", nativeId: exec.id },
-    result: exec.output,
-    error: exec.error ? { message: exec.error } : undefined,
-  }
-}
-
-/** Canonical mapper for run kinds represented by the Agent Runs product surface. */
-export function toAgentRunFromExecutionRun(run: ExecutionRun): AgentRun | null {
-  const kind: AgentRunKind | undefined =
-    run.kind === "goal"
-      ? "goal"
-      : run.kind === "plan"
-        ? "plan"
-        : run.kind === "team"
-          ? "team"
-          : run.kind === "scheduled"
-            ? "scheduled-task"
-            : undefined
-  if (!kind) return null
-  const status = mapExecutionRunStatus(run.latestSnapshot?.status ?? run.status)
-  const ratio = run.latestSnapshot?.progress.ratio
-  return {
-    unifiedId: makeAgentRunId(kind, run.sourceId),
-    kind,
-    title: run.latestSnapshot?.title || run.title,
-    status,
-    startedAt: run.startedAt,
-    ...(run.endedAt !== undefined ? { finishedAt: run.endedAt } : {}),
-    ...(ratio !== undefined ? { progress: ratio } : {}),
-    isLive: !isTerminalAgentRunStatus(status),
-    origin: {
-      tableName: "executionRuns",
-      nativeId: run.sourceId,
-      executionRunId: run.id,
-      ...(kind === "goal" ? { goalId: run.sourceId } : {}),
-      ...(kind === "plan" ? { planId: run.sourceId } : {}),
-    },
-    ...(run.latestSnapshot?.error ? { error: { message: run.latestSnapshot.error } } : {}),
   }
 }

@@ -1,119 +1,264 @@
-import { renderHook } from "@testing-library/react"
-import { useAgentRunActions } from "./use-agent-run-actions"
-import type { AgentRun } from "@/types/agent-runs/agent-run"
+import { act, renderHook } from "@testing-library/react"
 
-const stopGoal = jest.fn()
-const pauseGoal = jest.fn()
-const resumeGoal = jest.fn()
-jest.mock("@/lib/goal/runtime", () => ({
-  getGoalRuntime: () => ({ stopGoal, pauseGoal, resumeGoal }),
+import { useRunControlActions } from "./use-agent-run-actions"
+import { LOCAL_CONSOLE_ACTOR_ID } from "@/lib/execution/local-operator"
+import type { UnifiedExecutionRow } from "@/lib/execution/monitor-model"
+import type { ExecutionRun, RunControlAction } from "@/types/execution/run"
+
+const getExecutionRun = jest.fn()
+jest.mock("@/lib/db/execution-runs", () => ({
+  getExecutionRun: (...args: unknown[]) => getExecutionRun(...args),
 }))
 
-const cancelPlan = jest.fn()
-const pausePlan = jest.fn()
-const resumePlan = jest.fn()
-jest.mock("@/lib/agent/plan/runtime", () => ({
-  getPlanRuntime: () => ({ cancelPlan, pausePlan, resumePlan }),
+const executeRunControlCommand = jest.fn()
+jest.mock("@/lib/execution/run-control", () => ({
+  executeRunControlCommand: (...args: unknown[]) => executeRunControlCommand(...args),
 }))
 
-const abortTeam = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
-  abortTeam: (...a: unknown[]) => abortTeam(...a),
-}))
-
-const teamPause = jest.fn()
-jest.mock("@/lib/ai/agent/agent-team", () => ({
-  agentTeamManager: { pause: (...a: unknown[]) => teamPause(...a) },
-}))
-
-function run(over: Partial<AgentRun> = {}): AgentRun {
+function row(over: Partial<UnifiedExecutionRow> = {}): UnifiedExecutionRow {
   return {
-    unifiedId: "goal:g1",
-    kind: "goal",
-    title: "t",
+    rowId: "journal:run-1",
+    source: "journal",
+    nativeId: "run-1",
+    kind: "agent-turn",
+    label: "Chat run",
     status: "running",
-    startedAt: 0,
-    isLive: true,
-    origin: { tableName: "chatGoals", nativeId: "g1", goalId: "g1" },
+    startedAt: 1,
+    runId: "run-1",
+    cancellable: false,
+    allowedActions: ["stop", "steer", "open_details"],
     ...over,
-  } as AgentRun
+  }
+}
+
+function storedRun(
+  over: Partial<ExecutionRun> = {},
+  allowedActions: RunControlAction[] = ["stop", "steer", "open_details"]
+): ExecutionRun {
+  return {
+    id: "run-1",
+    kind: "agent-turn",
+    sourceId: "turn-1",
+    title: "Chat run",
+    status: "running",
+    currentRevision: 7,
+    startedAt: 1,
+    updatedAt: 2,
+    latestSnapshot: {
+      runId: "run-1",
+      kind: "agent-turn",
+      title: "Chat run",
+      status: "running",
+      revision: 7,
+      startedAt: 1,
+      updatedAt: 2,
+      progress: { completed: 0, total: 0, trustworthy: false },
+      activeSteps: [],
+      recentSteps: [],
+      pendingSteps: [],
+      pendingStepCount: 0,
+      elapsedMs: 1,
+      artifacts: [],
+      allowedActions,
+    },
+    ...over,
+  }
 }
 
 beforeEach(() => {
-  ;[
-    stopGoal,
-    pauseGoal,
-    resumeGoal,
-    cancelPlan,
-    pausePlan,
-    resumePlan,
-    abortTeam,
-    teamPause,
-  ].forEach((m) => m.mockReset())
+  getExecutionRun.mockReset()
+  executeRunControlCommand.mockReset()
+  executeRunControlCommand.mockResolvedValue({ accepted: true, currentRevision: 8 })
 })
 
-describe("useAgentRunActions — capabilities", () => {
-  it("gates abort/pause/resume by kind + status", () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    const a = result.current
-    expect(a.canAbort(run({ isLive: true }))).toBe(true)
-    expect(a.canAbort(run({ kind: "scheduled-task", isLive: true }))).toBe(false)
-    expect(a.canPause(run({ status: "running" }))).toBe(true)
-    expect(a.canPause(run({ status: "paused" }))).toBe(false)
-    expect(a.canResume(run({ kind: "goal", status: "paused" }))).toBe(true)
-    expect(a.canResume(run({ kind: "team", status: "paused" }))).toBe(false)
-  })
-})
-
-describe("useAgentRunActions — routing", () => {
-  it("routes goal actions to the goal runtime", async () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    await result.current.abort(run({ kind: "goal" }))
-    await result.current.pause(run({ kind: "goal" }))
-    await result.current.resume(run({ kind: "goal", status: "paused" }))
-    expect(stopGoal).toHaveBeenCalledWith("g1")
-    expect(pauseGoal).toHaveBeenCalledWith("g1")
-    expect(resumeGoal).toHaveBeenCalledWith("g1")
+describe("useRunControlActions", () => {
+  it("offers exactly the verbs the projection allows", () => {
+    const { result } = renderHook(() => useRunControlActions())
+    const r = row()
+    expect(result.current.can(r, "stop")).toBe(true)
+    expect(result.current.can(r, "steer")).toBe(true)
+    // Not in `allowedActions` — the reducer refuses to pause an agent turn.
+    expect(result.current.can(r, "pause")).toBe(false)
   })
 
-  it("routes plan actions to the plan runtime", async () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    const p = run({
-      kind: "plan",
-      origin: { tableName: "agentPlans", nativeId: "p1", planId: "p1" },
-    })
-    await result.current.abort(p)
-    await result.current.pause(p)
-    await result.current.resume({ ...p, status: "paused" })
-    expect(cancelPlan).toHaveBeenCalledWith("p1")
-    expect(pausePlan).toHaveBeenCalledWith("p1")
-    expect(resumePlan).toHaveBeenCalledWith("p1")
+  it("offers nothing on a row with no journal behind it", async () => {
+    const { result } = renderHook(() => useRunControlActions())
+    const legacy = row({ rowId: "legacy:goal:g1", source: "legacy", allowedActions: undefined })
+    expect(result.current.can(legacy, "stop")).toBe(false)
+
+    const outcome = await act(() => result.current.dispatch(legacy, "stop"))
+    expect(outcome).toEqual({ accepted: false, reason: "not_controllable" })
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
   })
 
-  it("routes team abort + pause to the team runtime", async () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    const t = run({
-      kind: "team",
-      origin: { tableName: "workflowRuns", nativeId: "wr1", teamId: "teamA" },
-    })
-    await result.current.abort(t)
-    await result.current.pause(t)
-    expect(abortTeam).toHaveBeenCalledWith("teamA", expect.any(String))
-    expect(teamPause).toHaveBeenCalledWith("teamA")
-  })
+  it("dispatches with the FRESH revision, not the one rendered on the row", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({ currentRevision: 42 }))
+    const { result } = renderHook(() => useRunControlActions())
 
-  it("is a no-op for a team without a resolvable teamId", async () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    await result.current.abort(
-      run({ kind: "team", origin: { tableName: "workflowRuns", nativeId: "x" } })
+    await act(() => result.current.dispatch(row(), "stop"))
+
+    expect(executeRunControlCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        action: "stop",
+        expectedRevision: 42,
+        idempotencyKey: "cockpit:run-1:stop:42",
+        actor: { platformIdentityId: LOCAL_CONSOLE_ACTOR_ID },
+      }),
+      { operatorIds: [LOCAL_CONSOLE_ACTOR_ID] }
     )
-    expect(abortTeam).not.toHaveBeenCalled()
   })
 
-  it("does not act on scheduled-task runs", async () => {
-    const { result } = renderHook(() => useAgentRunActions())
-    await result.current.abort(run({ kind: "scheduled-task" }))
-    expect(stopGoal).not.toHaveBeenCalled()
-    expect(abortTeam).not.toHaveBeenCalled()
+  it("grants the local operator id so a run with no initiator is not forbidden", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    const { result } = renderHook(() => useRunControlActions())
+
+    await act(() => result.current.dispatch(row(), "stop"))
+
+    const [, options] = executeRunControlCommand.mock.calls[0]
+    expect(options.operatorIds).toContain(LOCAL_CONSOLE_ACTOR_ID)
+  })
+
+  it("refuses an action the run stopped offering between paint and click", async () => {
+    // Rendered while running; by the time the click lands the run has settled.
+    getExecutionRun.mockResolvedValue(storedRun({ status: "completed" }, ["open_details"]))
+    const { result } = renderHook(() => useRunControlActions())
+
+    const outcome = await act(() => result.current.dispatch(row(), "stop"))
+
+    expect(outcome).toEqual({ accepted: false, reason: "action_unavailable" })
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
+  })
+
+  it("reports a vanished run rather than dispatching into nothing", async () => {
+    getExecutionRun.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useRunControlActions())
+
+    const outcome = await act(() => result.current.dispatch(row(), "stop"))
+
+    expect(outcome).toEqual({ accepted: false, reason: "run_not_found" })
+    expect(executeRunControlCommand).not.toHaveBeenCalled()
+  })
+
+  it("surfaces revision_conflict instead of swallowing it", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    executeRunControlCommand.mockResolvedValue({
+      accepted: false,
+      reason: "revision_conflict",
+      currentRevision: 9,
+    })
+    const { result } = renderHook(() => useRunControlActions())
+
+    const outcome = await act(() => result.current.dispatch(row(), "stop"))
+
+    expect(outcome).toEqual({ accepted: false, reason: "revision_conflict" })
+  })
+
+  it("surfaces steer_degraded WITH its reason — the message is still the caller's", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    executeRunControlCommand.mockResolvedValue({
+      accepted: false,
+      reason: "steer_degraded",
+      degradedReason: "no_active_run",
+    })
+    const { result } = renderHook(() => useRunControlActions())
+
+    const outcome = await act(() =>
+      result.current.dispatch(row(), "steer", { steerMessage: "focus on the tests" })
+    )
+
+    expect(outcome).toEqual({
+      accepted: false,
+      reason: "steer_degraded",
+      degradedReason: "no_active_run",
+    })
+  })
+
+  it("passes the steer message on the command and never in a journalled field", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    const { result } = renderHook(() => useRunControlActions())
+
+    await act(() => result.current.dispatch(row(), "steer", { steerMessage: "use pnpm" }))
+
+    const [command] = executeRunControlCommand.mock.calls[0]
+    expect(command.steerMessage).toBe("use pnpm")
+    expect(JSON.stringify({ ...command, steerMessage: undefined })).not.toContain("use pnpm")
+  })
+
+  /**
+   * Two corrections in a row are two instructions. Keying a steer on the
+   * revision would collapse them into one and silently drop the second.
+   */
+  it("gives each steer its own idempotency key", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    const { result } = renderHook(() => useRunControlActions())
+
+    await act(() => result.current.dispatch(row(), "steer", { steerMessage: "first" }))
+    await act(() => result.current.dispatch(row(), "steer", { steerMessage: "second" }))
+
+    const keys = executeRunControlCommand.mock.calls.map(([c]) => c.idempotencyKey)
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  /** A double-click on Stop IS one press, and must be answered as a duplicate. */
+  it("keys a repeated non-steer press identically so the gate can dedupe it", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    const { result } = renderHook(() => useRunControlActions())
+
+    await act(() => result.current.dispatch(row(), "stop"))
+    await act(() => result.current.dispatch(row(), "stop"))
+
+    const keys = executeRunControlCommand.mock.calls.map(([c]) => c.idempotencyKey)
+    expect(keys[0]).toBe(keys[1])
+  })
+
+  it("carries the pending interrupt id on approve", async () => {
+    getExecutionRun.mockResolvedValue(
+      storedRun(
+        {
+          latestSnapshot: {
+            ...storedRun().latestSnapshot!,
+            allowedActions: ["approve", "deny", "open_details"],
+            pendingInterrupt: { id: "interrupt-3", title: "Run tests?" },
+          },
+        },
+        ["approve", "deny", "open_details"]
+      )
+    )
+    const { result } = renderHook(() => useRunControlActions())
+
+    await act(() =>
+      result.current.dispatch(row({ allowedActions: ["approve", "deny"] }), "approve")
+    )
+
+    expect(executeRunControlCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "approve", interruptId: "interrupt-3" }),
+      expect.anything()
+    )
+  })
+
+  it("returns the replacement run a retry minted", async () => {
+    getExecutionRun.mockResolvedValue(storedRun({ status: "failed" }, ["retry", "open_details"]))
+    executeRunControlCommand.mockResolvedValue({
+      accepted: true,
+      currentRevision: 7,
+      retryRunId: "run-2",
+    })
+    const { result } = renderHook(() => useRunControlActions())
+
+    const outcome = await act(() =>
+      result.current.dispatch(row({ allowedActions: ["retry"] }), "retry")
+    )
+
+    expect(outcome).toEqual({ accepted: true, retryRunId: "run-2" })
+  })
+
+  it("clears the pending row once the command settles", async () => {
+    getExecutionRun.mockResolvedValue(storedRun())
+    const { result } = renderHook(() => useRunControlActions())
+
+    expect(result.current.pendingRowId).toBeNull()
+    await act(() => result.current.dispatch(row(), "stop"))
+    expect(result.current.pendingRowId).toBeNull()
   })
 })

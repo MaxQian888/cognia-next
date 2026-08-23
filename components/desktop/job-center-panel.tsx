@@ -1,7 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from "react"
-import { BriefcaseBusinessIcon, EyeIcon, HistoryIcon, SquareIcon, Trash2Icon } from "lucide-react"
+import {
+  BriefcaseBusinessIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  HistoryIcon,
+  SquareIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -16,6 +24,7 @@ import {
 import { redispatchBackgroundRun } from "@/lib/background-tasks/redispatch"
 import { getBackgroundAgentManager } from "@/lib/ai/agent/background-agent-manager"
 import { cancelSubagentRun } from "@/lib/claude/agents/cancel-subagent"
+import { jobExecutionRunId } from "@/lib/execution/job-bridge"
 import { clearSettledBackgroundTasks, listBackgroundTaskRecords } from "@/lib/db/background-tasks"
 import {
   cancelBackgroundMonitor,
@@ -38,6 +47,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
@@ -458,6 +468,7 @@ function TaskList({
 
 function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: number }) {
   const t = useTranslations("desktop.jobCenter")
+  const router = useRouter()
   const [collecting, setCollecting] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [rerunning, setRerunning] = useState(false)
@@ -578,6 +589,30 @@ function TaskRow({ record, now }: { record: BackgroundTaskJournalRecord; now: nu
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{record.prompt}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {/*
+            Into the cockpit, not into a detail view of its own. The job bridge
+            projects this row onto `kind: "job"`, so the run's timeline, changes,
+            tests and approvals already exist there — growing a second, thinner
+            copy of them inside this sheet is what this link exists to avoid.
+          */}
+          <SheetClose asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label={t("actions.openInRuns")}
+              title={t("actions.openInRuns")}
+              data-testid={`job-open-run-${record.runId}`}
+              onClick={() =>
+                router.push(
+                  `/agent-runs?run=${encodeURIComponent(jobExecutionRunId(record.runId))}`
+                )
+              }
+            >
+              <ExternalLinkIcon className="size-3.5" />
+            </Button>
+          </SheetClose>
           {isInterrupted && isSubagent && !alreadyRedispatched ? (
             <Button
               type="button"

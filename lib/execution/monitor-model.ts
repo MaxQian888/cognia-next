@@ -18,12 +18,19 @@
 import type { ExecutionLegSnapshot } from "./types"
 import type { WorkflowRunRow, RunStatus } from "@/types/workflow/visual"
 import type { TaskExecution, TaskExecutionStatus } from "@/types/scheduler"
-import type { ExecutionRun, ExecutionRunStatus } from "@/types/execution/run"
+import type { ExecutionRun, ExecutionRunStatus, RunControlAction } from "@/types/execution/run"
 
 export type UnifiedExecutionStatus =
   "queued" | "running" | "waiting" | "done" | "error" | "cancelled"
 
-export type UnifiedExecutionSource = "broker" | "journal" | "workflow" | "scheduled"
+/**
+ * Where a row came from, in precedence order.
+ *
+ * `legacy` is the cockpit's only addition: a `chatGoals` / `agentPlans` row
+ * that predates the journal bridge. It is last on purpose — a legacy row is
+ * suppressed the moment a canonical run for the same source exists.
+ */
+export type UnifiedExecutionSource = "broker" | "journal" | "workflow" | "scheduled" | "legacy"
 
 export interface UnifiedExecutionRow {
   /** Source-prefixed unique row id (stable React key). */
@@ -44,6 +51,32 @@ export interface UnifiedExecutionRow {
   legId?: string
   /** True when the panel's cancel affordance should be shown. */
   cancellable: boolean
+
+  // ── Detail fields (journal rows only) ──────────────────────────────────────
+  // Optional because three of the four sources have no journal behind them.
+  // A consumer that needs them must treat `undefined` as "this row is not
+  // canonical", never as a zero value — that distinction is what stops the
+  // cockpit offering a control button on a row nothing can control.
+
+  /** Settled timestamp. */
+  endedAt?: number
+  /** `ExecutionRun.sourceId` — the native id the producing engine knows. */
+  sourceId?: string
+  /**
+   * The control verbs the projection says this run can take RIGHT NOW.
+   *
+   * Read from `latestSnapshot.allowedActions`, which already encodes the
+   * per-kind rules (steer only where a live input lane exists, retry only on a
+   * settled retryable kind, and so on). A surface that derives buttons from the
+   * kind instead re-implements those rules and drifts from them.
+   */
+  allowedActions?: readonly RunControlAction[]
+  /** Terminal error summary from the projection. */
+  error?: string
+  /** 0..1 completion ratio, only when the projection calls it trustworthy. */
+  progressRatio?: number
+  /** Approval this run is currently blocked on. */
+  pendingInterruptId?: string
 }
 
 export interface BuildMonitorModelInput {
@@ -125,11 +158,149 @@ function inProject(rowProjectId: string | undefined, filter: string | undefined)
   return rowProjectId == null || rowProjectId === filter
 }
 
+/** Journal statuses that mean the run is over. */
+export const SETTLED_EXECUTION_RUN_STATUSES: ReadonlySet<ExecutionRunStatus> =
+  new Set<ExecutionRunStatus>(["completed", "failed", "cancelled"])
+
+/**
+ * True when a live broker leg is already projecting this run.
+ *
+ * The broker row stays the live/cancellable projection while the durable
+ * journal supplies replay and suppresses matching legacy rows — showing both
+ * would double-count one piece of work.
+ *
+ * Two matches, and the difference matters. An explicit id match (`leg.runId`)
+ * identifies THIS run and holds whatever its status is. The kind+session match
+ * is a heuristic for a leg that has not yet learned its run id, and it is only
+ * sound while the run is still live: a session hosts many turns over its life,
+ * so applying it to a settled run lets one in-flight leg suppress every
+ * finished run that session ever had. The live monitor never noticed because it
+ * drops settled runs before asking; the cockpit keeps them on purpose.
+ */
+export function hasLiveBrokerLeg(
+  run: ExecutionRun,
+  brokerLegs: readonly ExecutionLegSnapshot[]
+): boolean {
+  const brokerKind = brokerKindForRun(run)
+  const settled = SETTLED_EXECUTION_RUN_STATUSES.has(run.status)
+  return brokerLegs.some(
+    (leg) =>
+      leg.runId === run.id ||
+      leg.runId === run.sourceId ||
+      (!settled &&
+        brokerKind !== undefined &&
+        leg.kind === brokerKind &&
+        run.sessionId !== undefined &&
+        leg.sessionId === run.sessionId)
+  )
+}
+
 function brokerKindForRun(run: ExecutionRun): ExecutionLegSnapshot["kind"] | undefined {
   if (run.kind === "agent-turn") return "chat"
   if (run.kind === "workflow") return "workflow-step"
   if (run.kind === "goal" || run.kind === "team" || run.kind === "scheduled") return run.kind
   return undefined
+}
+
+/**
+ * Per-source row mappers.
+ *
+ * Exported so the cockpit (`cockpit-model.ts`) projects rows the SAME way the
+ * live monitor does instead of forking a second normalization that drifts. The
+ * two builders differ only in which rows they admit — the monitor keeps live
+ * work, the cockpit keeps history too — never in what a row means.
+ */
+
+export function brokerLegRow(leg: ExecutionLegSnapshot): UnifiedExecutionRow {
+  return {
+    rowId: `broker:${leg.id}`,
+    source: "broker",
+    nativeId: leg.id,
+    kind: leg.kind,
+    label: leg.label,
+    status: leg.cancelled ? "cancelled" : leg.state,
+    startedAt: leg.startedAt,
+    ...(leg.sessionId ? { sessionId: leg.sessionId } : {}),
+    ...(leg.runId ? { runId: leg.runId } : {}),
+    ...(leg.taskId ? { taskId: leg.taskId } : {}),
+    ...(leg.projectId ? { projectId: leg.projectId } : {}),
+    legId: leg.id,
+    // A leg that has already been cancelled (awaiting its release) is no
+    // longer actionable.
+    cancellable: !leg.cancelled,
+  }
+}
+
+/** `${kind}:${sourceId}` — the key a legacy row is deduped against. */
+export function journalSourceKey(run: ExecutionRun): string {
+  return `${run.kind}:${run.sourceId}`
+}
+
+export function journalRunRow(run: ExecutionRun): UnifiedExecutionRow {
+  const snapshot = run.latestSnapshot
+  const ratio = snapshot?.progress.trustworthy ? snapshot.progress.ratio : undefined
+  return {
+    rowId: `journal:${run.id}`,
+    source: "journal",
+    nativeId: run.id,
+    kind: run.kind,
+    label: snapshot?.title || run.title,
+    status: mapExecutionStatus(snapshot?.status ?? run.status),
+    startedAt: run.startedAt,
+    ...(run.sessionId ? { sessionId: run.sessionId } : {}),
+    runId: run.id,
+    ...(run.projectId ? { projectId: run.projectId } : {}),
+    // The broker owns cancellation for a live leg; a journal row is driven
+    // through the control plane instead, which `allowedActions` describes.
+    cancellable: false,
+    ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
+    sourceId: run.sourceId,
+    ...(snapshot ? { allowedActions: snapshot.allowedActions } : {}),
+    ...(snapshot?.error ? { error: snapshot.error } : {}),
+    ...(ratio !== undefined ? { progressRatio: ratio } : {}),
+    ...(snapshot?.pendingInterrupt ? { pendingInterruptId: snapshot.pendingInterrupt.id } : {}),
+  }
+}
+
+/** The kind a workflow row is deduped under — a team/cron run is not a workflow. */
+export function workflowRunSourceKind(run: WorkflowRunRow): string {
+  if (run.triggerKind === "trigger.team") return "team"
+  if (run.triggerKind === "trigger.cron") return "scheduled"
+  return "workflow"
+}
+
+export function workflowRunRow(run: WorkflowRunRow): UnifiedExecutionRow {
+  return {
+    rowId: `workflow:${run.id}`,
+    source: "workflow",
+    nativeId: run.id,
+    kind: "workflow",
+    label: run.title || run.workflowSnapshot?.name || run.workflowId,
+    status: mapRunStatus(run.status),
+    startedAt: run.startedAt,
+    runId: run.id,
+    ...(run.projectId ? { projectId: run.projectId } : {}),
+    cancellable: false,
+  }
+}
+
+export function schedulerExecutionRow(exec: TaskExecution): UnifiedExecutionRow {
+  return {
+    rowId: `scheduled:${exec.id}`,
+    source: "scheduled",
+    nativeId: exec.id,
+    kind: exec.taskType,
+    label: exec.taskName,
+    status: mapExecStatus(exec.status),
+    startedAt: exec.startedAt instanceof Date ? exec.startedAt.getTime() : Number(exec.startedAt),
+    taskId: exec.taskId,
+    cancellable: false,
+  }
+}
+
+/** Newest-first, ties broken on the stable row id. */
+export function sortExecutionRowsByRecency(rows: UnifiedExecutionRow[]): UnifiedExecutionRow[] {
+  return rows.sort((a, b) => b.startedAt - a.startedAt || a.rowId.localeCompare(b.rowId))
 }
 
 /**
@@ -142,99 +313,31 @@ export function buildExecutionMonitorModel(input: BuildMonitorModelInput): Unifi
 
   for (const leg of input.brokerLegs) {
     if (!inProject(leg.projectId, input.projectId)) continue
-    const status: UnifiedExecutionStatus = leg.cancelled ? "cancelled" : leg.state
-    rows.push({
-      rowId: `broker:${leg.id}`,
-      source: "broker",
-      nativeId: leg.id,
-      kind: leg.kind,
-      label: leg.label,
-      status,
-      startedAt: leg.startedAt,
-      ...(leg.sessionId ? { sessionId: leg.sessionId } : {}),
-      ...(leg.runId ? { runId: leg.runId } : {}),
-      ...(leg.taskId ? { taskId: leg.taskId } : {}),
-      ...(leg.projectId ? { projectId: leg.projectId } : {}),
-      legId: leg.id,
-      // A leg that has already been cancelled (awaiting its release) is no
-      // longer actionable.
-      cancellable: !leg.cancelled,
-    })
+    rows.push(brokerLegRow(leg))
   }
 
   for (const run of input.executionRuns ?? []) {
     if (["completed", "failed", "cancelled"].includes(run.status)) continue
     if (!inProject(run.projectId, input.projectId)) continue
-    journalSourceKeys.add(`${run.kind}:${run.sourceId}`)
-    const brokerKind = brokerKindForRun(run)
-    const hasLiveBrokerLeg = input.brokerLegs.some(
-      (leg) =>
-        leg.runId === run.id ||
-        leg.runId === run.sourceId ||
-        (brokerKind !== undefined &&
-          leg.kind === brokerKind &&
-          run.sessionId !== undefined &&
-          leg.sessionId === run.sessionId)
-    )
-    // The broker row remains the live/cancellable projection while the
-    // durable journal supplies replay and suppresses matching legacy rows.
-    if (hasLiveBrokerLeg) continue
-    rows.push({
-      rowId: `journal:${run.id}`,
-      source: "journal",
-      nativeId: run.id,
-      kind: run.kind,
-      label: run.latestSnapshot?.title || run.title,
-      status: mapExecutionStatus(run.latestSnapshot?.status ?? run.status),
-      startedAt: run.startedAt,
-      ...(run.sessionId ? { sessionId: run.sessionId } : {}),
-      runId: run.id,
-      ...(run.projectId ? { projectId: run.projectId } : {}),
-      cancellable: false,
-    })
+    journalSourceKeys.add(journalSourceKey(run))
+    if (hasLiveBrokerLeg(run, input.brokerLegs)) continue
+    rows.push(journalRunRow(run))
   }
 
   for (const run of input.workflowRuns ?? []) {
-    const kind =
-      run.triggerKind === "trigger.team"
-        ? "team"
-        : run.triggerKind === "trigger.cron"
-          ? "scheduled"
-          : "workflow"
-    if (journalSourceKeys.has(`${kind}:${run.id}`)) continue
+    if (journalSourceKeys.has(`${workflowRunSourceKind(run)}:${run.id}`)) continue
     if (!ACTIVE_RUN_STATUSES.has(run.status)) continue
     if (!inProject(run.projectId, input.projectId)) continue
-    rows.push({
-      rowId: `workflow:${run.id}`,
-      source: "workflow",
-      nativeId: run.id,
-      kind: "workflow",
-      label: run.title || run.workflowSnapshot?.name || run.workflowId,
-      status: mapRunStatus(run.status),
-      startedAt: run.startedAt,
-      runId: run.id,
-      ...(run.projectId ? { projectId: run.projectId } : {}),
-      cancellable: false,
-    })
+    rows.push(workflowRunRow(run))
   }
 
   for (const exec of input.schedulerExecutions ?? []) {
     if (journalSourceKeys.has(`scheduled:${exec.id}`)) continue
     if (!ACTIVE_EXEC_STATUSES.has(exec.status)) continue
-    rows.push({
-      rowId: `scheduled:${exec.id}`,
-      source: "scheduled",
-      nativeId: exec.id,
-      kind: exec.taskType,
-      label: exec.taskName,
-      status: mapExecStatus(exec.status),
-      startedAt: exec.startedAt instanceof Date ? exec.startedAt.getTime() : Number(exec.startedAt),
-      taskId: exec.taskId,
-      cancellable: false,
-    })
+    rows.push(schedulerExecutionRow(exec))
   }
 
-  return rows.sort((a, b) => b.startedAt - a.startedAt || a.rowId.localeCompare(b.rowId))
+  return sortExecutionRowsByRecency(rows)
 }
 
 /** Count of rows that are actively running (not queued / waiting / settled). */
@@ -257,6 +360,21 @@ export const EXECUTION_FILTER_KINDS = [
   "workflow",
   "workflow-step",
   "scheduled",
+  // Appended, not inserted: `KIND_RANK` in `monitor-prefs.ts` derives the
+  // "by kind" sort order from these indices, so inserting would silently
+  // reorder every existing user's grouped view.
+  //
+  // Both are journal-only kinds — no broker leg carries them — and both became
+  // reachable here once their bridges started projecting: `delegation` from
+  // `delegation-bridge.ts`, `job` from `job-bridge.ts`. Before this they fell
+  // through `executionRowFilterKind`'s cast and were counted under a kind that
+  // does not exist, which is why neither could be filtered out.
+  "delegation",
+  "job",
+  // Appended for the same reason as the two above: `security-scan` became
+  // reachable once `security-scan-bridge.ts` started projecting the Strix
+  // plugin's runs.
+  "security-scan",
 ] as const
 
 export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]
@@ -270,7 +388,12 @@ export type ExecutionFilterKind = (typeof EXECUTION_FILTER_KINDS)[number]
 export function executionRowFilterKind(row: UnifiedExecutionRow): ExecutionFilterKind {
   if (row.source === "workflow") return "workflow"
   if (row.source === "scheduled") return "scheduled"
-  if (row.source === "journal") {
+  // Journal AND legacy rows carry an `ExecutionRunKind`, so both need the same
+  // normalization. Keying it off `source === "journal"` alone left a legacy
+  // `plan` row reporting a kind that is not in EXECUTION_FILTER_KINDS: it
+  // matched no chip, so selecting any kind hid it, and the tally wrote NaN
+  // under a key the record was never seeded with.
+  if (row.source === "journal" || row.source === "legacy") {
     if (row.kind === "agent-turn") return "chat"
     if (row.kind === "plan") return "workflow"
     return row.kind as ExecutionFilterKind

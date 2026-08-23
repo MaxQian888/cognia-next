@@ -2,21 +2,33 @@
 
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
-import type { AgentRunStatus } from "@/types/agent-runs/agent-run"
+import type { UnifiedExecutionStatus } from "@/lib/execution/monitor-model"
 
-const STATUS_CLASSES: Record<AgentRunStatus, string> = {
+/**
+ * Status pill for the task cockpit.
+ *
+ * Keyed on `UnifiedExecutionStatus` — the status every source normalizes to —
+ * rather than on the four-kind `AgentRunStatus` it used to take. That older
+ * union had no `queued`, so a run waiting for a slot rendered as running.
+ *
+ * `cancelled` is deliberately muted rather than red: the user asked for it, and
+ * colouring a deliberate stop like a failure is a small lie the cockpit repeats
+ * on every row.
+ */
+const STATUS_CLASSES: Record<UnifiedExecutionStatus, string> = {
+  queued: "bg-muted text-muted-foreground",
   running: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
-  paused: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  succeeded: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
+  waiting: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  done: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  error: "bg-red-500/15 text-red-600 dark:text-red-400",
   cancelled: "bg-muted text-muted-foreground",
 }
 
-export function AgentRunStatusPill({
+export function ExecutionStatusPill({
   status,
   className,
 }: {
-  status: AgentRunStatus
+  status: UnifiedExecutionStatus
   className?: string
 }) {
   const t = useTranslations("agentRuns.status")
