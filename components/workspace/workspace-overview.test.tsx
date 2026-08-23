@@ -28,6 +28,9 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
 jest.mock("@/components/feature-shell/feature-page-header", () => ({
   FeaturePageHeader: ({ title }: { title: string }) => <h1>{title}</h1>,
 }))
+jest.mock("./workspace-environment-list", () => ({
+  WorkspaceEnvironmentList: () => <section data-testid="workspace-environments-stub" />,
+}))
 
 let projectsResult: unknown[] = []
 let issuesResult: unknown[] = []
@@ -63,7 +66,7 @@ jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { WorkspaceOverview } from "./workspace-overview"
 
 function issue(status: string) {
@@ -87,6 +90,7 @@ describe("WorkspaceOverview", () => {
     }
     render(<WorkspaceOverview />)
     expect(screen.getByRole("heading", { name: "Cognia" })).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-environments-stub")).toBeInTheDocument()
   })
 
   it("counts only unstarted and started issues as open", () => {
@@ -150,6 +154,6 @@ describe("WorkspaceOverview", () => {
     expect(screen.queryByTestId("manage-dialog-stub")).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId("workspace-manage-link"))
     expect(screen.getByTestId("manage-dialog-stub")).toBeInTheDocument()
-    manageDialogProps!.onOpenChange(false)
+    act(() => manageDialogProps!.onOpenChange(false))
   })
 })

@@ -43168,6 +43168,43 @@
     }
   },
   "workspace": {
+    "environments": {
+      "actions": "操作",
+      "base": "基线",
+      "bases": {
+        "gitRef": "Git 引用",
+        "localHead": "本地 HEAD",
+        "pullRequest": "拉取请求",
+        "remoteDefault": "远端默认分支",
+        "workingState": "当前工作状态"
+      },
+      "description": "此设备上的受管、永久和已导入执行环境。",
+      "emptyDescription": "启动 Worktree 会话后，隔离环境会显示在这里。",
+      "emptyTitle": "暂无执行环境",
+      "kind": "类型",
+      "kinds": {
+        "imported": "已导入",
+        "managed": "受管",
+        "permanent": "永久"
+      },
+      "loadError": "无法加载执行环境：{error}",
+      "loading": "正在加载执行环境",
+      "path": "路径",
+      "pin": "固定环境",
+      "refresh": "刷新环境",
+      "state": "状态",
+      "states": {
+        "active": "活跃",
+        "archived": "已归档",
+        "conflict": "冲突",
+        "provisioning": "创建中",
+        "removed": "已移除",
+        "removing": "移除中",
+        "restorable": "可恢复"
+      },
+      "title": "执行环境",
+      "unpin": "取消固定环境"
+    },
     "manage": {
       "activeBadge": "活动",
       "addDir": "添加",

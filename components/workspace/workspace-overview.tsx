@@ -36,6 +36,7 @@ import { ISSUE_STATUSES, statusCategoryOf } from "@/types/issues"
 import type { IssueProject, IssueStatus } from "@/types/issues"
 import { useProjectStore } from "@/stores/project/project-store"
 import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
+import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 
 /** Trailing-separator-insensitive, matching `lib/db/trusted-workspaces.ts`. */
 function normalizePath(path: string): string {
@@ -228,6 +229,8 @@ export function WorkspaceOverview() {
             <p className="text-xs text-muted-foreground">{t("projects.directoryHint")}</p>
           )}
         </section>
+
+        <WorkspaceEnvironmentList />
       </div>
       <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
     </FeaturePageShell>

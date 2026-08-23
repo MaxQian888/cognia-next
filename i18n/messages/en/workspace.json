@@ -1,4 +1,41 @@
 {
+  "environments": {
+    "actions": "Actions",
+    "base": "Base",
+    "bases": {
+      "gitRef": "Git ref",
+      "localHead": "Local HEAD",
+      "pullRequest": "Pull request",
+      "remoteDefault": "Remote default",
+      "workingState": "Working state"
+    },
+    "description": "Managed, permanent, and imported execution environments on this device.",
+    "emptyDescription": "An isolated environment appears here after a Worktree chat starts.",
+    "emptyTitle": "No execution environments",
+    "kind": "Kind",
+    "kinds": {
+      "imported": "Imported",
+      "managed": "Managed",
+      "permanent": "Permanent"
+    },
+    "loadError": "Environments could not be loaded: {error}",
+    "loading": "Loading execution environments",
+    "path": "Path",
+    "pin": "Pin environment",
+    "refresh": "Refresh environments",
+    "state": "State",
+    "states": {
+      "active": "Active",
+      "archived": "Archived",
+      "conflict": "Conflict",
+      "provisioning": "Provisioning",
+      "removed": "Removed",
+      "removing": "Removing",
+      "restorable": "Restorable"
+    },
+    "title": "Execution environments",
+    "unpin": "Unpin environment"
+  },
   "manage": {
     "activeBadge": "Active",
     "addDir": "Add",
