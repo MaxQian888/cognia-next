@@ -28,6 +28,7 @@
     "default": "default",
     "false": "false",
     "rejected": "rejected",
+    "timeout": "timeout",
     "true": "true"
   },
   "pinnedTitle": "Pinned test data"

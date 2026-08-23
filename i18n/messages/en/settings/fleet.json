@@ -103,6 +103,8 @@
     "online": "Online",
     "placementReason": "Placement unavailable: {reason}",
     "qrAria": "Worker enrollment QR code",
+    "remoteDispatchDescription": "Allow new AgentTeam teammates to use eligible remote workers. Turn this off to stop new remote dispatch immediately; active remote sessions can still settle safely.",
+    "remoteDispatchLabel": "Remote AgentTeam dispatch",
     "revoke": "Revoke",
     "revoked": "Worker access revoked.",
     "status": {

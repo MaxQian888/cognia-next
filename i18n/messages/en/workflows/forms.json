@@ -426,9 +426,85 @@
       "label": "Title"
     }
   },
+  "humanInputRequest": {
+    "actions": {
+      "actionLabel": "Action label",
+      "add": "Add action",
+      "defaultLabel": "Submit",
+      "id": "Action ID",
+      "label": "Actions",
+      "remove": "Remove action"
+    },
+    "assignees": {
+      "add": "Add assignee",
+      "group": "Group",
+      "id": "Member or group ID",
+      "initiator": "Run initiator",
+      "kind": "Assignee kind",
+      "label": "Assignees",
+      "member": "Member",
+      "remove": "Remove assignee"
+    },
+    "completion": {
+      "all": "All assignees",
+      "any": "Any assignee",
+      "count": "Required responses",
+      "label": "Completion policy",
+      "quorum": "At least N responses"
+    },
+    "fields": {
+      "add": "Add field",
+      "defaultLabel": "Response",
+      "fieldLabel": "Field label",
+      "id": "Field ID",
+      "label": "Form fields",
+      "options": "Options",
+      "optionsPlaceholder": "One, Two, Three",
+      "remove": "Remove field",
+      "required": "Required",
+      "sensitive": "Sensitive",
+      "type": "Field type",
+      "types": {
+        "boolean": "Boolean",
+        "file": "Single file",
+        "file-list": "File list",
+        "long-text": "Long text",
+        "multi-select": "Multiple choice",
+        "number": "Number",
+        "short-text": "Short text",
+        "single-select": "Single choice"
+      }
+    },
+    "message": "Message (optional)",
+    "sensitiveRetentionDays": "Sensitive value retention (days)",
+    "timeout": "Timeout (ms)",
+    "title": "Title"
+  },
   "arrayField": {
     "add": "Add",
     "removeItem": "Remove item {index}"
+  },
+  "answer": {
+    "citations": {
+      "hint": "JSON array of sourceId, documentId, revisionId, and chunkId references.",
+      "label": "Citations"
+    },
+    "content": {
+      "hint": "Optional structured JSON content rendered by supported Chatflow clients.",
+      "label": "Structured content"
+    },
+    "files": {
+      "hint": "JSON array of durable file refs with optional name and mediaType.",
+      "label": "Files"
+    },
+    "suggestions": {
+      "hint": "One follow-up suggestion per line.",
+      "label": "Follow-up suggestions"
+    },
+    "text": {
+      "hint": "Answer text or expression. Text or structured content is required.",
+      "label": "Answer text"
+    }
   },
   "branch": {
     "condition": {

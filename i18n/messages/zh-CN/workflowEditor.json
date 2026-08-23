@@ -173,15 +173,32 @@
     },
     "publish": {
       "current": "当前",
+      "deleteBlocked": "无法删除，仍被以下对象引用：{reasons}",
+      "deleteVersion": "删除版本",
       "deploymentSummary": "生产版本 v{sequence} · 修订 {revision} · {status}",
+      "details": "详情",
+      "digest": "摘要：{digest}",
+      "export": "导出",
+      "filter": "筛选版本",
+      "filterPlaceholder": "按名称、说明、作者或 ID 筛选",
       "hint": "把该工作流发布为类型化可调用单元——agent 工具、类型化子工作流目标、技能。请先保存工作流。用「手动触发」的输入结构与「输出」节点声明其接口。",
       "publish": "发布",
       "publishedAs": "已发布为工具",
+      "releaseNotes": "发布说明",
+      "releaseNotesPlaceholder": "说明行为变化和评审证据",
       "republish": "重新发布",
+      "restoreDraft": "恢复到草稿",
       "rollback": "回滚",
       "title": "发布",
       "unpublish": "取消发布",
+      "unknownAuthor": "未知",
+      "unnamedVersion": "版本 {sequence}",
+      "versionAuthor": "由 {author} 创建 · {date}",
+      "versionComposition": "{nodes} 个节点 · {dependencies} 个工作流依赖 · {secrets} 个 Secret 引用",
       "versionHistory": "版本历史",
+      "versionName": "版本名称",
+      "versionNamePlaceholder": "例如：8 月生产基线",
+      "noVersions": "没有符合筛选条件的版本。",
       "versionRow": "v{sequence} · {date}"
     },
     "retry": {
@@ -199,6 +216,17 @@
     },
     "runPolicy": {
       "title": "运行策略"
+    },
+    "runOn": {
+      "auto": "自动（最低负载）",
+      "colocate": "当前 Host",
+      "hint": "为定时、Webhook、连接器和手动触发的无需等待结果运行选择 Host。",
+      "handoffActive": "{count} 个交接正在等待或重试。",
+      "handoffFailed": "{count} 个交接在重试后失败。",
+      "label": "运行位置",
+      "noCompatibleHosts": "当前没有兼容的远端 Host。",
+      "pinnedGroup": "固定 Host",
+      "publishRequired": "请先发布该工作流，再选择远端放置。"
     },
     "timeoutMs": {
       "hint": "单次运行的墙钟时间上限。",
@@ -228,7 +256,12 @@
       "failed": "无法插入 {name}：{message}",
       "heading": "节点组",
       "help": "将可复用的图片段作为一个可撤销的节点组插入。",
-      "inserted": "已插入 {name}"
+      "inserted": "已插入 {name}",
+      "draftVersion": "草稿",
+      "upgrade": "升级实例",
+      "upgradeDiff": "{from} → {to} · 新增 {added} / 删除 {removed} / 变更 {changed} 个节点",
+      "upgradeFailed": "无法升级 Node Group：{message}",
+      "upgraded": "Node Group 已升级到 {version}"
     },
     "slotRequiredMissing": "填好所有必填项才能应用模板。",
     "tabHeading": "模板",

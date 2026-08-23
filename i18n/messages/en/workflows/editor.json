@@ -169,6 +169,7 @@
     "alignRight": "Align right",
     "alignTop": "Align top",
     "delete": "Delete",
+    "createNodeGroup": "Create Node Group",
     "distributeH": "Distribute horizontally",
     "distributeV": "Distribute vertically",
     "duplicate": "Duplicate",
@@ -181,6 +182,28 @@
     "selected": "{count, plural, one {# selected} other {# selected}}",
     "toggleGroupDisabled": "Enable / disable block",
     "unlock": "Unlock"
+  },
+  "nodeGroupCreate": {
+    "cancel": "Cancel",
+    "confirmInterface": "Confirm typed boundary",
+    "create": "Create Node Group",
+    "description": "Freeze this selection as a versioned reusable group. Review every inferred input and output before saving.",
+    "details": "Description",
+    "inputs": "Inputs",
+    "name": "Name",
+    "nodeCount": "{count} selected nodes",
+    "none": "None",
+    "optional": "Optional",
+    "outputs": "Outputs",
+    "required": "Required",
+    "scope": "Distribution",
+    "scopes": {
+      "personal": "Personal",
+      "portableBundle": "Portable Bundle",
+      "workspace": "Workspace"
+    },
+    "title": "Create Node Group",
+    "version": "Version"
   },
   "spotlight": {
     "breadcrumbIn": "in {group}",

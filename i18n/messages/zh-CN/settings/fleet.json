@@ -103,6 +103,8 @@
     "online": "在线",
     "placementReason": "无法调度：{reason}",
     "qrAria": "Worker 注册二维码",
+    "remoteDispatchDescription": "允许新的 AgentTeam 队友使用符合条件的远程 Worker。关闭后会立即停止新的远程派发；正在运行的远程会话仍可安全完成结算。",
+    "remoteDispatchLabel": "远程 AgentTeam 派发",
     "revoke": "撤销",
     "revoked": "Worker 访问权限已撤销。",
     "status": {

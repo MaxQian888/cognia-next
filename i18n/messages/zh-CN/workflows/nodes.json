@@ -12,6 +12,12 @@
         "label": "请求审批"
       }
     },
+    "humanInput": {
+      "request": {
+        "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
+        "label": "请求人工输入"
+      }
+    },
     "character": {
       "create": {
         "description": "新建一个角色（员工）。",
@@ -602,6 +608,10 @@
     }
   },
   "io": {
+    "answer": {
+      "description": "返回包含结构化内容、引用、文件和后续建议的 Chatflow 答复。",
+      "label": "答复"
+    },
     "http": {
       "description": "调用外部 HTTP API，支持重试和超时。",
       "label": "HTTP 请求"
@@ -619,6 +629,40 @@
         "description": "向触发本次执行的入站 Webhook 返回响应负载。",
         "label": "Webhook 响应"
       }
+    }
+  },
+  "knowledge": {
+    "source": {
+      "description": "创建或增量更新具有稳定标识的知识库来源。",
+      "label": "知识来源"
+    },
+    "parse": {
+      "description": "将一个已持久化来源解析为受保护的运行级产物。",
+      "label": "解析知识"
+    },
+    "transform": {
+      "description": "在分块前规范化解析内容并执行 PII 脱敏。",
+      "label": "转换知识"
+    },
+    "chunk": {
+      "description": "创建包含稳定位置元数据的格式感知知识分块。",
+      "label": "知识分块"
+    },
+    "embed": {
+      "description": "通过 Cognia 强制安全嵌入网关为知识分块生成向量。",
+      "label": "知识嵌入"
+    },
+    "index": {
+      "description": "在发布前校验向量数量和维度。",
+      "label": "校验知识索引"
+    },
+    "publish": {
+      "description": "原子发布经过校验的不可变索引修订。",
+      "label": "发布知识修订"
+    },
+    "retrieve": {
+      "description": "从冻结的知识库修订中检索经过 ACL 过滤的知识分块。",
+      "label": "检索知识"
     }
   },
   "ocr": {

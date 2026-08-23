@@ -169,6 +169,7 @@
     "alignRight": "右对齐",
     "alignTop": "顶部对齐",
     "delete": "删除",
+    "createNodeGroup": "创建 Node Group",
     "distributeH": "水平均分",
     "distributeV": "垂直均分",
     "duplicate": "复制",
@@ -181,6 +182,28 @@
     "selected": "{count, plural, one {已选 #} other {已选 #}}",
     "toggleGroupDisabled": "启用 / 禁用区块",
     "unlock": "解锁"
+  },
+  "nodeGroupCreate": {
+    "cancel": "取消",
+    "confirmInterface": "确认类型化边界",
+    "create": "创建 Node Group",
+    "description": "把当前选区冻结为可复用的版本化组合。保存前请确认每个推断出的输入与输出。",
+    "details": "说明",
+    "inputs": "输入",
+    "name": "名称",
+    "nodeCount": "已选择 {count} 个节点",
+    "none": "无",
+    "optional": "可选",
+    "outputs": "输出",
+    "required": "必填",
+    "scope": "分发范围",
+    "scopes": {
+      "personal": "个人",
+      "portableBundle": "Portable Bundle",
+      "workspace": "工作区"
+    },
+    "title": "创建 Node Group",
+    "version": "版本"
   },
   "spotlight": {
     "breadcrumbIn": "位于 {group}",

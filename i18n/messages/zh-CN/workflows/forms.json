@@ -426,9 +426,85 @@
       "label": "标题"
     }
   },
+  "humanInputRequest": {
+    "actions": {
+      "actionLabel": "动作名称",
+      "add": "添加动作",
+      "defaultLabel": "提交",
+      "id": "动作 ID",
+      "label": "动作",
+      "remove": "移除动作"
+    },
+    "assignees": {
+      "add": "添加答复对象",
+      "group": "群组",
+      "id": "成员或群组 ID",
+      "initiator": "运行发起者",
+      "kind": "对象类型",
+      "label": "答复对象",
+      "member": "成员",
+      "remove": "移除答复对象"
+    },
+    "completion": {
+      "all": "全部对象",
+      "any": "任一对象",
+      "count": "所需答复数",
+      "label": "完成策略",
+      "quorum": "至少 N 人"
+    },
+    "fields": {
+      "add": "添加字段",
+      "defaultLabel": "答复",
+      "fieldLabel": "字段名称",
+      "id": "字段 ID",
+      "label": "表单字段",
+      "options": "选项",
+      "optionsPlaceholder": "选项一, 选项二, 选项三",
+      "remove": "移除字段",
+      "required": "必填",
+      "sensitive": "敏感",
+      "type": "字段类型",
+      "types": {
+        "boolean": "布尔值",
+        "file": "单文件",
+        "file-list": "文件列表",
+        "long-text": "多行文本",
+        "multi-select": "多选",
+        "number": "数字",
+        "short-text": "短文本",
+        "single-select": "单选"
+      }
+    },
+    "message": "说明（可选）",
+    "sensitiveRetentionDays": "敏感值保留天数",
+    "timeout": "超时（毫秒）",
+    "title": "标题"
+  },
   "arrayField": {
     "add": "添加",
     "removeItem": "移除第 {index} 项"
+  },
+  "answer": {
+    "citations": {
+      "hint": "包含 sourceId、documentId、revisionId 和 chunkId 的 JSON 数组。",
+      "label": "引用"
+    },
+    "content": {
+      "hint": "由支持的 Chatflow 客户端渲染的可选结构化 JSON 内容。",
+      "label": "结构化内容"
+    },
+    "files": {
+      "hint": "持久文件引用的 JSON 数组，可包含 name 和 mediaType。",
+      "label": "文件"
+    },
+    "suggestions": {
+      "hint": "每行一个后续建议。",
+      "label": "后续建议"
+    },
+    "text": {
+      "hint": "答复文本或表达式。文本和结构化内容至少填写一项。",
+      "label": "答复文本"
+    }
   },
   "branch": {
     "condition": {

@@ -173,15 +173,32 @@
     },
     "publish": {
       "current": "Current",
+      "deleteBlocked": "Deletion blocked by: {reasons}",
+      "deleteVersion": "Delete version",
       "deploymentSummary": "Production v{sequence} · revision {revision} · {status}",
+      "details": "Details",
+      "digest": "Digest: {digest}",
+      "export": "Export",
+      "filter": "Filter versions",
+      "filterPlaceholder": "Filter by name, notes, author, or ID",
       "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
       "publish": "Publish",
       "publishedAs": "Published as tool",
+      "releaseNotes": "Release notes",
+      "releaseNotesPlaceholder": "Describe behavior changes and review evidence",
       "republish": "Re-publish",
+      "restoreDraft": "Restore to draft",
       "rollback": "Roll back",
       "title": "Publish",
       "unpublish": "Unpublish",
+      "unknownAuthor": "Unknown",
+      "unnamedVersion": "Version {sequence}",
+      "versionAuthor": "Created by {author} · {date}",
+      "versionComposition": "{nodes} nodes · {dependencies} workflow dependencies · {secrets} secret references",
       "versionHistory": "Version history",
+      "versionName": "Version name",
+      "versionNamePlaceholder": "e.g. August production baseline",
+      "noVersions": "No versions match this filter.",
       "versionRow": "v{sequence} · {date}"
     },
     "retry": {
@@ -199,6 +216,17 @@
     },
     "runPolicy": {
       "title": "Run policy"
+    },
+    "runOn": {
+      "auto": "Auto (least loaded)",
+      "colocate": "This Host",
+      "hint": "Choose a Host for cron, webhook, connector, and manual fire-and-forget runs.",
+      "handoffActive": "{count, plural, one {# handoff is waiting or retrying.} other {# handoffs are waiting or retrying.}}",
+      "handoffFailed": "{count, plural, one {# handoff failed after retrying.} other {# handoffs failed after retrying.}}",
+      "label": "Run on",
+      "noCompatibleHosts": "No compatible Remote Hosts are currently available.",
+      "pinnedGroup": "Pinned Host",
+      "publishRequired": "Publish this workflow before selecting remote placement."
     },
     "timeoutMs": {
       "hint": "Hard ceiling on a single run's wall-clock time.",
@@ -228,7 +256,12 @@
       "failed": "Could not insert {name}: {message}",
       "heading": "Node groups",
       "help": "Insert a reusable graph fragment as one undoable group.",
-      "inserted": "Inserted {name}"
+      "inserted": "Inserted {name}",
+      "draftVersion": "draft",
+      "upgrade": "Upgrade instance",
+      "upgradeDiff": "{from} → {to} · +{added} / −{removed} / ~{changed} nodes",
+      "upgradeFailed": "Could not upgrade Node Group: {message}",
+      "upgraded": "Node Group upgraded to {version}"
     },
     "slotRequiredMissing": "Fill every required field to apply this template.",
     "tabHeading": "Templates",

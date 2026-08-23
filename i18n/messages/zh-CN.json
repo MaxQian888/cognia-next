@@ -2373,6 +2373,7 @@
         "droid": "Droid",
         "geminiCli": "Gemini",
         "kiro": "Kiro",
+        "opencodeAcp": "OpenCode（ACP）",
         "opencodeRemote": "OpenCode（远程）",
         "opencodeServer": "OpenCode",
         "pi": "Pi",
@@ -10061,6 +10062,7 @@
         "branchOutcome": "分支结果：{outcome}",
         "canonicalReason": "规范原因：{code}",
         "canonicalReasonWithText": "规范原因：{code} — {reason}",
+        "compactionUpdates": "ACP 压缩更新：{count}",
         "connectAgentToList": "请先连接代理以列出会话。",
         "contractVersion": "契约版本：{version}",
         "correlation": "关联 — 会话 {session}，轮次 {turn}",
@@ -10075,6 +10077,7 @@
         "latestRun": "最近运行：{outcome}",
         "lifecycleStage": "生命周期阶段：{stage}",
         "naLabel": "暂无",
+        "nesSuggestions": "ACP 下一步编辑建议：{count}",
         "no": "否",
         "noBenchmarkAdaptation": "未记录基准适配。",
         "noBlockingReason": "未记录阻塞原因。",
@@ -10089,6 +10092,7 @@
         "resumeUnsupportedDefault": "未提供原因。",
         "review": "审查：{reviewedBy}",
         "reviewWithLink": "审查：{reviewedBy}（{link}）",
+        "richContentBlocks": "ACP 富内容块：{count}",
         "runtimeDiagnostics": "运行时诊断",
         "session": "会话：{session}",
         "sessionListingUnsupported": "该代理不支持列出会话。",
@@ -10181,6 +10185,19 @@
     "selectorPluginUnavailable": "插件未启用",
     "setConfigOptionFailed": "更新配置项失败",
     "settings": {
+      "acpFeatureSettingsDescription": "稳定版信息征询取决于宿主支持。预览能力默认关闭，需逐项启用，且仅在当前运行时可提供时才会声明。",
+      "acpFeatureSettingsTitle": "ACP 能力",
+      "acpPreview": {
+        "compaction": "上下文压缩",
+        "dynamicMcp": "动态 MCP",
+        "identifiedPlans": "带标识的计划",
+        "nes": "下一步编辑建议与文档同步",
+        "previewToolNames": "预览工具名称",
+        "providers": "提供商配置",
+        "sessionFork": "会话分叉"
+      },
+      "acpPreviewFeatures": "预览能力",
+      "acpStableElicitation": "稳定版信息征询",
       "addAgent": "添加代理",
       "addAgentToStart": "添加一个代理以开始使用",
       "agentAdded": "代理添加成功",
@@ -10377,10 +10394,10 @@
         "refresh": "刷新状态",
         "title": "OpenCode 服务器"
       },
-      "opencodeV2PresetDescription": "连接到已在运行且兼容的 OpenCode V2 本地服务。Cognia 不会启动或停止该服务。",
-      "opencodeV2PresetName": "OpenCode V2 本地服务（预览版）",
-      "opencodeV2PresetSetupHint": "Beta 预览版。请自行运行 `opencode2 service start` 启动兼容服务。",
-      "opencodeV2Protocol": "OpenCode V2（预览版）",
+      "opencodeV2PresetDescription": "记录 Cognia 固定的旧版预览协议；当前 OpenCode V2 构建与其不兼容。",
+      "opencodeV2PresetName": "OpenCode V2 旧版预览协议",
+      "opencodeV2PresetSetupHint": "仅供文档参考。在重新生成预览客户端前，请使用稳定版 OpenCode HTTP/SSE 或 ACP。",
+      "opencodeV2Protocol": "OpenCode V2（旧版预览）",
       "passBareFlag": "附加 --bare",
       "passBareFlagHint": "跳过磁盘自动发现（CLAUDE.md、hooks、插件、MCP）。会在启动时追加到 args 末尾。",
       "passDebugFlag": "附加 --debug",
@@ -14156,6 +14173,21 @@
       "groupTransport": "传输方式"
     }
   },
+  "mcpApps": {
+    "approvalRequired": "此 MCP App 请求了尚未批准的能力。",
+    "confirmDestructiveToolCall": "这是破坏性操作。再次确认 {tool}？",
+    "confirmDownload": "将此下载放入隔离区以供审阅吗？",
+    "confirmOpenLink": "打开指向 {hostname} 的链接吗？",
+    "confirmToolCall": "允许 {server} 调用 {tool} 吗？风险：{risk}。",
+    "discardDownload": "丢弃",
+    "frameTitle": "来自 {server} 的应用",
+    "provenance": "来自 {server} 的应用 · {uri}",
+    "quarantinedDownload": "隔离的下载（{count} 项）",
+    "resourceError": "无法安全加载 MCP App 资源。",
+    "reviewTitle": "逐项审阅应用请求的能力",
+    "runtimeError": "MCP App 无法安全启动。",
+    "saveDownload": "审阅并保存"
+  },
   "memory": {
     "add": {
       "agentIdLabel": "Agent ID",
@@ -16760,6 +16792,21 @@
       },
       "empty": "还没有工作流。在桌面端创建后这里就会出现。",
       "graphViewerEmpty": "工作流中没有节点。",
+      "humanInput": {
+        "goneToast": "该表单已不再等待答复。",
+        "heading": "{count, plural, one {# 个表单等待处理} other {# 个表单等待处理}}",
+        "numberMaxError": "{field}不能大于 {max}。",
+        "numberMinError": "{field}不能小于 {min}。",
+        "requiredError": "{field}为必填项。",
+        "responded": "答复已记录，正在等待其他答复人。",
+        "selectPlaceholder": "请选择",
+        "submitFailedToast": "无法连接桌面端——请重试。",
+        "submitRejectedToast": "答复未被接受。",
+        "submittedToast": "答复已提交。",
+        "uploadFailedToast": "文件校验或上传失败。",
+        "uploading": "正在扫描并上传…",
+        "waitingForOthersToast": "答复已记录，正在等待其他人。"
+      },
       "landscapeHint": "横屏阅读大图",
       "noRuns": "暂无运行记录。",
       "pinned": "置顶",
@@ -29876,6 +29923,7 @@
       "discover": "置顶、排序或隐藏发现页的分类。",
       "eval": "为 Agent 评估设置默认评委模型、评分器、质量门限与费用保护。",
       "externalBridge": "把 Cognia 的 wiki / RAG / 运行时实体通过 MCP 暴露给外部 Agent（Claude Code、Cursor、Cline）。每个 scope 默认 OFF，需手动启用。",
+      "externalServices": "通过统一且受控的服务目录连接 SaaS、网站、API、MCP 服务和本地应用。",
       "fleet": "监控并控制本机任意位置启动的编码 Agent（Claude Code、Codex、OpenCode）、灵动岛悬浮层，以及最近会话历史。",
       "gateway": "本地 OpenAI / Anthropic 兼容端点，让外部工具（Claude Code、任意 OpenAI 客户端）借用你的服务商、路由和凭据。",
       "general": "默认模型、工作目录、系统提示词、权限模式与始终允许的工具。",
@@ -30401,6 +30449,68 @@
         "toastLinted": "检查完成：{orphans} 个孤儿页，{broken} 处失效链接。"
       }
     },
+    "externalServices": {
+      "actions": {
+        "cancel": "取消",
+        "connecting": "正在创建…",
+        "create": "创建连接",
+        "pause": "暂停",
+        "resume": "恢复"
+      },
+      "availability": {
+        "preview": "预览",
+        "supported": "支持",
+        "vendor-pending": "等待厂商批准"
+      },
+      "available": {
+        "title": "可用服务"
+      },
+      "connections": {
+        "empty": "还没有外部服务连接。",
+        "provider": "Provider：{provider}",
+        "title": "连接"
+      },
+      "description": "将 provider 定义与外部账户分开安装，并在启用前审阅能力、风险、范围和可见入口。",
+      "flow": {
+        "ariaLabel": "外部服务生命周期",
+        "connect": "连接",
+        "discover": "发现",
+        "enable": "启用",
+        "install": "安装",
+        "manage": "管理",
+        "validate": "校验"
+      },
+      "status": {
+        "blocked": "已阻止",
+        "connected": "已连接",
+        "degraded": "已降级",
+        "needs-auth": "需要认证",
+        "pending": "等待审阅",
+        "suspended": "已暂停"
+      },
+      "surface": {
+        "chat": "Chat",
+        "inbox": "Inbox",
+        "workflow": "Workflow"
+      },
+      "title": "外部服务",
+      "website": {
+        "connect": "连接网站",
+        "connected": "已创建网站连接",
+        "description": "创建隔离的浏览器 profile。密码、OTP、验证码和支付确认始终由用户接管。",
+        "domains": "允许的域名",
+        "domainsHint": "使用逗号分隔的公网域名；跳转到集合外的域名会被阻止。",
+        "domainsPlaceholder": "example.com, app.example.com",
+        "failed": "无法创建网站连接：{reason}",
+        "loginUrl": "登录起始 URL",
+        "loginUrlPlaceholder": "https://example.com/login",
+        "name": "服务名称",
+        "namePlaceholder": "示例管理后台",
+        "title": "连接网站",
+        "uploads": "允许上传",
+        "uploadsHint": "上传仍仅限于明确授权的路径。"
+      }
+    },
     "finder": {
       "controls": {
         "autoUpdate": "自动更新",
@@ -30534,6 +30644,8 @@
         "online": "在线",
         "placementReason": "无法调度：{reason}",
         "qrAria": "Worker 注册二维码",
+        "remoteDispatchDescription": "允许新的 AgentTeam 队友使用符合条件的远程 Worker。关闭后会立即停止新的远程派发；正在运行的远程会话仍可安全完成结算。",
+        "remoteDispatchLabel": "远程 AgentTeam 派发",
         "revoke": "撤销",
         "revoked": "Worker 访问权限已撤销。",
         "status": {
@@ -33212,6 +33324,7 @@
       "discover": "发现",
       "eval": "评估",
       "externalBridge": "外部桥接 (MCP)",
+      "externalServices": "外部服务",
       "fleet": "Agent 舰队",
       "gateway": "入站网关",
       "general": "常规",
@@ -38363,15 +38476,32 @@
       },
       "publish": {
         "current": "当前",
+        "deleteBlocked": "无法删除，仍被以下对象引用：{reasons}",
+        "deleteVersion": "删除版本",
         "deploymentSummary": "生产版本 v{sequence} · 修订 {revision} · {status}",
+        "details": "详情",
+        "digest": "摘要：{digest}",
+        "export": "导出",
+        "filter": "筛选版本",
+        "filterPlaceholder": "按名称、说明、作者或 ID 筛选",
         "hint": "把该工作流发布为类型化可调用单元——agent 工具、类型化子工作流目标、技能。请先保存工作流。用「手动触发」的输入结构与「输出」节点声明其接口。",
+        "noVersions": "没有符合筛选条件的版本。",
         "publish": "发布",
         "publishedAs": "已发布为工具",
+        "releaseNotes": "发布说明",
+        "releaseNotesPlaceholder": "说明行为变化和评审证据",
         "republish": "重新发布",
+        "restoreDraft": "恢复到草稿",
         "rollback": "回滚",
         "title": "发布",
+        "unknownAuthor": "未知",
+        "unnamedVersion": "版本 {sequence}",
         "unpublish": "取消发布",
+        "versionAuthor": "由 {author} 创建 · {date}",
+        "versionComposition": "{nodes} 个节点 · {dependencies} 个工作流依赖 · {secrets} 个 Secret 引用",
         "versionHistory": "版本历史",
+        "versionName": "版本名称",
+        "versionNamePlaceholder": "例如：8 月生产基线",
         "versionRow": "v{sequence} · {date}"
       },
       "retry": {
@@ -38386,6 +38516,17 @@
       "riskGating": {
         "hint": "当某步骤要对外发送、操作桌面、执行 Shell 命令或删除消息时先征求同意——除非上游已有审批节点。无人值守的运行将直接失败而不是等待。",
         "label": "高风险步骤需审批"
+      },
+      "runOn": {
+        "auto": "自动（最低负载）",
+        "colocate": "当前 Host",
+        "handoffActive": "{count} 个交接正在等待或重试。",
+        "handoffFailed": "{count} 个交接在重试后失败。",
+        "hint": "为定时、Webhook、连接器和手动触发的无需等待结果运行选择 Host。",
+        "label": "运行位置",
+        "noCompatibleHosts": "当前没有兼容的远端 Host。",
+        "pinnedGroup": "固定 Host",
+        "publishRequired": "请先发布该工作流，再选择远端放置。"
       },
       "runPolicy": {
         "title": "运行策略"
@@ -38415,15 +38556,67 @@
       "cancel": "取消",
       "emptyState": "尚未注册任何模板。",
       "nodeGroups": {
+        "draftVersion": "草稿",
         "failed": "无法插入 {name}：{message}",
         "heading": "节点组",
         "help": "将可复用的图片段作为一个可撤销的节点组插入。",
-        "inserted": "已插入 {name}"
+        "inserted": "已插入 {name}",
+        "upgrade": "升级实例",
+        "upgradeDiff": "{from} → {to} · 新增 {added} / 删除 {removed} / 变更 {changed} 个节点",
+        "upgradeFailed": "无法升级 Node Group：{message}",
+        "upgraded": "Node Group 已升级到 {version}"
       },
       "slotRequiredMissing": "填好所有必填项才能应用模板。",
       "tabHeading": "模板",
       "tabHelp": "用 slot 填空脚手架，通过提案流程合并进当前工作流——不会替换已有内容。"
     }
+  },
+  "workflowPortal": {
+    "batchActionFailed": "无法完成批处理操作。",
+    "batchCancel": "取消批处理",
+    "batchExport": "导出结果",
+    "batchExportFailed": "批处理结果导出失败。",
+    "batchFile": "CSV 批处理文件",
+    "batchPause": "暂停批处理",
+    "batchResume": "恢复批处理",
+    "batchStart": "开始批处理",
+    "batchStartFailed": "无法启动批处理。",
+    "batchStatus": "{status}：{succeeded}/{total} 成功，{failed} 失败，{waiting} 等待中",
+    "batchStatusFailed": "无法刷新批处理状态。",
+    "batchTemplate": "下载模板",
+    "batchTemplateFailed": "无法下载 CSV 模板。",
+    "feedbackCorrection": "纠正答案",
+    "feedbackDislike": "需要改进",
+    "feedbackLike": "有帮助",
+    "feedbackSubmit": "提交反馈",
+    "feedbackSubmitFailed": "无法提交你的反馈。",
+    "feedbackTags": "反馈标签",
+    "feedbackTagsPlaceholder": "准确性、语气、完整性",
+    "feedbackThanks": "感谢你的反馈。",
+    "feedbackTitle": "这个结果有帮助吗？",
+    "humanInputFilesUploaded": "已上传 {count} 个文件",
+    "humanInputInbox": "等待你处理的任务",
+    "humanInputLoadFailed": "无法刷新 Human Input 任务。",
+    "humanInputResponses": "已收到 {count} 个答复",
+    "humanInputSelect": "请选择",
+    "humanInputSubmitFailed": "无法提交你的答复。",
+    "humanInputUploadFailed": "无法上传文件。",
+    "legalConsent": "我同意此应用的条款与隐私政策。",
+    "loadFailed": "无法加载已发布的应用。",
+    "loading": "正在加载应用…",
+    "message": "消息",
+    "messageFailed": "无法完成此消息。",
+    "missingApp": "必须提供应用 slug。",
+    "recoveryKey": "请保存此一次性恢复密钥：{key}",
+    "requiredMark": "（必填）",
+    "resultShareCreate": "创建分享链接",
+    "resultShareCreateFailed": "无法创建结果分享链接。",
+    "resultShareRevoke": "撤销分享链接",
+    "resultShareRevokeFailed": "无法撤销结果分享链接。",
+    "resultShareTitle": "分享此结果",
+    "run": "运行",
+    "runFailed": "无法完成工作流运行。",
+    "send": "发送"
   },
   "workflows": {
     "canvasToast": {
@@ -38798,6 +38991,28 @@
         "run": "从此运行",
         "runDisabled": "触发器与注释节点不能直接运行"
       },
+      "nodeGroupCreate": {
+        "cancel": "取消",
+        "confirmInterface": "确认类型化边界",
+        "create": "创建 Node Group",
+        "description": "把当前选区冻结为可复用的版本化组合。保存前请确认每个推断出的输入与输出。",
+        "details": "说明",
+        "inputs": "输入",
+        "name": "名称",
+        "nodeCount": "已选择 {count} 个节点",
+        "none": "无",
+        "optional": "可选",
+        "outputs": "输出",
+        "required": "必填",
+        "scope": "分发范围",
+        "scopes": {
+          "personal": "个人",
+          "portableBundle": "Portable Bundle",
+          "workspace": "工作区"
+        },
+        "title": "创建 Node Group",
+        "version": "版本"
+      },
       "performanceTier": {
         "auto": "自动",
         "autoHint": "根据系统偏好与节点数量自动选择档位。",
@@ -38819,6 +39034,7 @@
         "alignLeft": "左对齐",
         "alignRight": "右对齐",
         "alignTop": "顶部对齐",
+        "createNodeGroup": "创建 Node Group",
         "delete": "删除",
         "distributeH": "水平均分",
         "distributeV": "垂直均分",
@@ -39255,6 +39471,28 @@
         },
         "userPrompt": {
           "label": "用户提示词"
+        }
+      },
+      "answer": {
+        "citations": {
+          "hint": "包含 sourceId、documentId、revisionId 和 chunkId 的 JSON 数组。",
+          "label": "引用"
+        },
+        "content": {
+          "hint": "由支持的 Chatflow 客户端渲染的可选结构化 JSON 内容。",
+          "label": "结构化内容"
+        },
+        "files": {
+          "hint": "持久文件引用的 JSON 数组，可包含 name 和 mediaType。",
+          "label": "文件"
+        },
+        "suggestions": {
+          "hint": "每行一个后续建议。",
+          "label": "后续建议"
+        },
+        "text": {
+          "hint": "答复文本或表达式。文本和结构化内容至少填写一项。",
+          "label": "答复文本"
         }
       },
       "approvalRequest": {
@@ -40302,6 +40540,60 @@
           "label": "URL",
           "placeholder": "https://api.example.com/v1/things"
         }
+      },
+      "humanInputRequest": {
+        "actions": {
+          "actionLabel": "动作名称",
+          "add": "添加动作",
+          "defaultLabel": "提交",
+          "id": "动作 ID",
+          "label": "动作",
+          "remove": "移除动作"
+        },
+        "assignees": {
+          "add": "添加答复对象",
+          "group": "群组",
+          "id": "成员或群组 ID",
+          "initiator": "运行发起者",
+          "kind": "对象类型",
+          "label": "答复对象",
+          "member": "成员",
+          "remove": "移除答复对象"
+        },
+        "completion": {
+          "all": "全部对象",
+          "any": "任一对象",
+          "count": "所需答复数",
+          "label": "完成策略",
+          "quorum": "至少 N 人"
+        },
+        "fields": {
+          "add": "添加字段",
+          "defaultLabel": "答复",
+          "fieldLabel": "字段名称",
+          "id": "字段 ID",
+          "label": "表单字段",
+          "options": "选项",
+          "optionsPlaceholder": "选项一, 选项二, 选项三",
+          "remove": "移除字段",
+          "required": "必填",
+          "sensitive": "敏感",
+          "type": "字段类型",
+          "types": {
+            "boolean": "布尔值",
+            "file": "单文件",
+            "file-list": "文件列表",
+            "long-text": "多行文本",
+            "multi-select": "多选",
+            "number": "数字",
+            "short-text": "短文本",
+            "single-select": "单选"
+          }
+        },
+        "message": "说明（可选）",
+        "sensitiveRetentionDays": "敏感值保留天数",
+        "timeout": "超时（毫秒）",
+        "title": "标题"
       },
       "integrationEventTrigger": {
         "accountId": {
@@ -42181,6 +42473,7 @@
         "default": "默认",
         "false": "假",
         "rejected": "已拒绝",
+        "timeout": "超时",
         "true": "真"
       },
       "pinnedTitle": "已固定测试数据"
@@ -42387,6 +42680,12 @@
           "updateObjective": {
             "description": "通过 GoalRuntime 脱敏路径替换非终态目标的目标内容。",
             "label": "更新目标内容"
+          }
+        },
+        "humanInput": {
+          "request": {
+            "description": "暂停执行，等待指定成员或群组填写结构化表单，并按所选动作路由下游。",
+            "label": "请求人工输入"
           }
         },
         "mcp": {
@@ -42789,6 +43088,10 @@
         }
       },
       "io": {
+        "answer": {
+          "description": "返回包含结构化内容、引用、文件和后续建议的 Chatflow 答复。",
+          "label": "答复"
+        },
         "http": {
           "description": "调用外部 HTTP API，支持重试和超时。",
           "label": "HTTP 请求"
@@ -42806,6 +43109,40 @@
             "description": "向触发本次执行的入站 Webhook 返回响应负载。",
             "label": "Webhook 响应"
           }
+        }
+      },
+      "knowledge": {
+        "chunk": {
+          "description": "创建包含稳定位置元数据的格式感知知识分块。",
+          "label": "知识分块"
+        },
+        "embed": {
+          "description": "通过 Cognia 强制安全嵌入网关为知识分块生成向量。",
+          "label": "知识嵌入"
+        },
+        "index": {
+          "description": "在发布前校验向量数量和维度。",
+          "label": "校验知识索引"
+        },
+        "parse": {
+          "description": "将一个已持久化来源解析为受保护的运行级产物。",
+          "label": "解析知识"
+        },
+        "publish": {
+          "description": "原子发布经过校验的不可变索引修订。",
+          "label": "发布知识修订"
+        },
+        "retrieve": {
+          "description": "从冻结的知识库修订中检索经过 ACL 过滤的知识分块。",
+          "label": "检索知识"
+        },
+        "source": {
+          "description": "创建或增量更新具有稳定标识的知识库来源。",
+          "label": "知识来源"
+        },
+        "transform": {
+          "description": "在分块前规范化解析内容并执行 PII 脱敏。",
+          "label": "转换知识"
         }
       },
       "ocr": {

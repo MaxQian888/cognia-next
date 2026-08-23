@@ -2373,6 +2373,7 @@
         "droid": "Droid",
         "geminiCli": "Gemini",
         "kiro": "Kiro",
+        "opencodeAcp": "OpenCode (ACP)",
         "opencodeRemote": "OpenCode (Remote)",
         "opencodeServer": "OpenCode",
         "pi": "Pi",
@@ -10061,6 +10062,7 @@
         "branchOutcome": "Branch outcome: {outcome}",
         "canonicalReason": "Canonical reason: {code}",
         "canonicalReasonWithText": "Canonical reason: {code} — {reason}",
+        "compactionUpdates": "ACP compaction updates: {count}",
         "connectAgentToList": "Connect an agent to list sessions.",
         "contractVersion": "Contract version: {version}",
         "correlation": "Correlation — session {session}, turn {turn}",
@@ -10075,6 +10077,7 @@
         "latestRun": "Latest run: {outcome}",
         "lifecycleStage": "Lifecycle stage: {stage}",
         "naLabel": "n/a",
+        "nesSuggestions": "ACP next edit suggestions: {count}",
         "no": "no",
         "noBenchmarkAdaptation": "No benchmark adaptations recorded.",
         "noBlockingReason": "No blocking reason recorded.",
@@ -10089,6 +10092,7 @@
         "resumeUnsupportedDefault": "Reason not provided.",
         "review": "Review: {reviewedBy}",
         "reviewWithLink": "Review: {reviewedBy} ({link})",
+        "richContentBlocks": "Rich ACP content blocks: {count}",
         "runtimeDiagnostics": "Runtime diagnostics",
         "session": "Session: {session}",
         "sessionListingUnsupported": "Session listing is unsupported on this agent.",
@@ -10181,6 +10185,19 @@
     "selectorPluginUnavailable": "Plugin off",
     "setConfigOptionFailed": "Failed to update config option",
     "settings": {
+      "acpFeatureSettingsDescription": "Stable elicitation follows host support. Preview capabilities remain off until enabled individually and are advertised only when this runtime can provide them.",
+      "acpFeatureSettingsTitle": "ACP capabilities",
+      "acpPreview": {
+        "compaction": "Compaction",
+        "dynamicMcp": "Dynamic MCP",
+        "identifiedPlans": "Identified plans",
+        "nes": "Next Edit Suggestions and document sync",
+        "previewToolNames": "Preview tool names",
+        "providers": "Provider configuration",
+        "sessionFork": "Session fork"
+      },
+      "acpPreviewFeatures": "Preview capabilities",
+      "acpStableElicitation": "Stable elicitation",
       "addAgent": "Add Agent",
       "addAgentToStart": "Add an agent to get started",
       "agentAdded": "Agent added successfully",
@@ -10377,10 +10394,10 @@
         "refresh": "Refresh status",
         "title": "OpenCode server"
       },
-      "opencodeV2PresetDescription": "Connect to a compatible, already-running OpenCode V2 local service. Cognia never starts or stops it.",
-      "opencodeV2PresetName": "OpenCode V2 local service (Preview)",
-      "opencodeV2PresetSetupHint": "Beta preview. Start the compatible service yourself with `opencode2 service start`.",
-      "opencodeV2Protocol": "OpenCode V2 (Preview)",
+      "opencodeV2PresetDescription": "Documents Cognia's pinned legacy preview contract. Current OpenCode V2 builds are incompatible.",
+      "opencodeV2PresetName": "OpenCode V2 legacy preview contract",
+      "opencodeV2PresetSetupHint": "Documentation only. Use stable OpenCode HTTP/SSE or ACP until the preview client is regenerated.",
+      "opencodeV2Protocol": "OpenCode V2 (legacy preview)",
       "passBareFlag": "Pass --bare",
       "passBareFlagHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Appended to args at spawn time.",
       "passDebugFlag": "Pass --debug",
@@ -14156,6 +14173,21 @@
       "groupTransport": "Transport"
     }
   },
+  "mcpApps": {
+    "approvalRequired": "This MCP App requests capabilities that have not been approved.",
+    "confirmDestructiveToolCall": "This is destructive. Confirm {tool} again?",
+    "confirmDownload": "Place this download in quarantine for review?",
+    "confirmOpenLink": "Open a link to {hostname}?",
+    "confirmToolCall": "Allow {server} to call {tool}? Risk: {risk}.",
+    "discardDownload": "Discard",
+    "frameTitle": "App from {server}",
+    "provenance": "App from {server} · {uri}",
+    "quarantinedDownload": "Quarantined download ({count} items)",
+    "resourceError": "The MCP App resource could not be loaded safely.",
+    "reviewTitle": "Review each requested app capability",
+    "runtimeError": "The MCP App could not start safely.",
+    "saveDownload": "Review and save"
+  },
   "memory": {
     "add": {
       "agentIdLabel": "Agent ID",
@@ -16760,6 +16792,21 @@
       },
       "empty": "No workflows yet. Create one on the desktop and it appears here.",
       "graphViewerEmpty": "No nodes in this workflow.",
+      "humanInput": {
+        "goneToast": "This form is no longer waiting for a response.",
+        "heading": "{count, plural, one {# form waiting} other {# forms waiting}}",
+        "numberMaxError": "{field} must be at most {max}.",
+        "numberMinError": "{field} must be at least {min}.",
+        "requiredError": "{field} is required.",
+        "responded": "Response recorded; waiting for the remaining responders.",
+        "selectPlaceholder": "Select an option",
+        "submitFailedToast": "Couldn't reach the desktop — try again.",
+        "submitRejectedToast": "The response was rejected.",
+        "submittedToast": "Response submitted.",
+        "uploadFailedToast": "The file failed validation or upload.",
+        "uploading": "Scanning and uploading…",
+        "waitingForOthersToast": "Response recorded; waiting for others."
+      },
       "landscapeHint": "Rotate for full graph",
       "noRuns": "No runs yet.",
       "pinned": "Pinned",
@@ -29876,6 +29923,7 @@
       "discover": "Pin, reorder, or hide the Discover categories.",
       "eval": "Default judge model, scorers, quality gates, and cost guards for agent evaluations.",
       "externalBridge": "MCP server that exposes Cognia's wiki, RAG, and runtime entities to external coding agents (Claude Code, Cursor, Cline). Opt-in per scope.",
+      "externalServices": "Connect SaaS, websites, APIs, MCP servers, and local apps through one governed service catalog.",
       "fleet": "Monitor and control coding agents launched anywhere on this machine (Claude Code, Codex, OpenCode), the Dynamic-Island overlay, and recent-session history.",
       "gateway": "Local OpenAI- and Anthropic-compatible endpoint that lets external tools (Claude Code, any OpenAI client) borrow your providers, routing, and credentials.",
       "general": "Default model, working directory, system prompt, permission mode and always-allowed tools.",
@@ -30401,6 +30449,68 @@
         "toastLinted": "Lint done: {orphans} orphans, {broken} broken."
       }
     },
+    "externalServices": {
+      "actions": {
+        "cancel": "Cancel",
+        "connecting": "Creating…",
+        "create": "Create connection",
+        "pause": "Pause",
+        "resume": "Resume"
+      },
+      "availability": {
+        "preview": "Preview",
+        "supported": "Supported",
+        "vendor-pending": "Vendor pending"
+      },
+      "available": {
+        "title": "Available services"
+      },
+      "connections": {
+        "empty": "No external service connections yet.",
+        "provider": "Provider: {provider}",
+        "title": "Connections"
+      },
+      "description": "Install provider definitions separately from external accounts, then review capabilities, risk, scope, and surfaces before enabling them.",
+      "flow": {
+        "ariaLabel": "External service lifecycle",
+        "connect": "Connect",
+        "discover": "Discover",
+        "enable": "Enable",
+        "install": "Install",
+        "manage": "Manage",
+        "validate": "Validate"
+      },
+      "status": {
+        "blocked": "Blocked",
+        "connected": "Connected",
+        "degraded": "Degraded",
+        "needs-auth": "Needs authentication",
+        "pending": "Pending review",
+        "suspended": "Suspended"
+      },
+      "surface": {
+        "chat": "Chat",
+        "inbox": "Inbox",
+        "workflow": "Workflow"
+      },
+      "title": "External services",
+      "website": {
+        "connect": "Connect website",
+        "connected": "Website connection created",
+        "description": "Creates an isolated browser profile. Passwords, OTP, CAPTCHA, and payment confirmation stay in human takeover.",
+        "domains": "Allowed domains",
+        "domainsHint": "Comma-separated public domains. Redirects outside this set are blocked.",
+        "domainsPlaceholder": "example.com, app.example.com",
+        "failed": "Could not create website connection: {reason}",
+        "loginUrl": "Login start URL",
+        "loginUrlPlaceholder": "https://example.com/login",
+        "name": "Service name",
+        "namePlaceholder": "Example Admin",
+        "title": "Connect a website",
+        "uploads": "Allow uploads",
+        "uploadsHint": "Uploads remain limited to explicitly authorized paths."
+      }
+    },
     "finder": {
       "controls": {
         "autoUpdate": "Automatic updates",
@@ -30534,6 +30644,8 @@
         "online": "Online",
         "placementReason": "Placement unavailable: {reason}",
         "qrAria": "Worker enrollment QR code",
+        "remoteDispatchDescription": "Allow new AgentTeam teammates to use eligible remote workers. Turn this off to stop new remote dispatch immediately; active remote sessions can still settle safely.",
+        "remoteDispatchLabel": "Remote AgentTeam dispatch",
         "revoke": "Revoke",
         "revoked": "Worker access revoked.",
         "status": {
@@ -33212,6 +33324,7 @@
       "discover": "Discover",
       "eval": "Evaluation",
       "externalBridge": "External Bridge (MCP)",
+      "externalServices": "External services",
       "fleet": "Agent Fleet",
       "gateway": "Inbound Gateway",
       "general": "General",
@@ -38363,15 +38476,32 @@
       },
       "publish": {
         "current": "Current",
+        "deleteBlocked": "Deletion blocked by: {reasons}",
+        "deleteVersion": "Delete version",
         "deploymentSummary": "Production v{sequence} · revision {revision} · {status}",
+        "details": "Details",
+        "digest": "Digest: {digest}",
+        "export": "Export",
+        "filter": "Filter versions",
+        "filterPlaceholder": "Filter by name, notes, author, or ID",
         "hint": "Publish this workflow as a typed callable unit — an agent tool, a typed sub-workflow target, and a skill. Save the workflow first. Declare its interface with the Manual trigger's input schema and an Output node.",
+        "noVersions": "No versions match this filter.",
         "publish": "Publish",
         "publishedAs": "Published as tool",
+        "releaseNotes": "Release notes",
+        "releaseNotesPlaceholder": "Describe behavior changes and review evidence",
         "republish": "Re-publish",
+        "restoreDraft": "Restore to draft",
         "rollback": "Roll back",
         "title": "Publish",
+        "unknownAuthor": "Unknown",
+        "unnamedVersion": "Version {sequence}",
         "unpublish": "Unpublish",
+        "versionAuthor": "Created by {author} · {date}",
+        "versionComposition": "{nodes} nodes · {dependencies} workflow dependencies · {secrets} secret references",
         "versionHistory": "Version history",
+        "versionName": "Version name",
+        "versionNamePlaceholder": "e.g. August production baseline",
         "versionRow": "v{sequence} · {date}"
       },
       "retry": {
@@ -38386,6 +38516,17 @@
       "riskGating": {
         "hint": "Ask before a step sends externally, drives the desktop, runs a shell command, or deletes a message — unless an approval node already covers it. Unattended runs fail instead of waiting.",
         "label": "Approve risky steps"
+      },
+      "runOn": {
+        "auto": "Auto (least loaded)",
+        "colocate": "This Host",
+        "handoffActive": "{count, plural, one {# handoff is waiting or retrying.} other {# handoffs are waiting or retrying.}}",
+        "handoffFailed": "{count, plural, one {# handoff failed after retrying.} other {# handoffs failed after retrying.}}",
+        "hint": "Choose a Host for cron, webhook, connector, and manual fire-and-forget runs.",
+        "label": "Run on",
+        "noCompatibleHosts": "No compatible Remote Hosts are currently available.",
+        "pinnedGroup": "Pinned Host",
+        "publishRequired": "Publish this workflow before selecting remote placement."
       },
       "runPolicy": {
         "title": "Run policy"
@@ -38415,15 +38556,67 @@
       "cancel": "Cancel",
       "emptyState": "No templates registered.",
       "nodeGroups": {
+        "draftVersion": "draft",
         "failed": "Could not insert {name}: {message}",
         "heading": "Node groups",
         "help": "Insert a reusable graph fragment as one undoable group.",
-        "inserted": "Inserted {name}"
+        "inserted": "Inserted {name}",
+        "upgrade": "Upgrade instance",
+        "upgradeDiff": "{from} → {to} · +{added} / −{removed} / ~{changed} nodes",
+        "upgradeFailed": "Could not upgrade Node Group: {message}",
+        "upgraded": "Node Group upgraded to {version}"
       },
       "slotRequiredMissing": "Fill every required field to apply this template.",
       "tabHeading": "Templates",
       "tabHelp": "Apply a slot-filled scaffold via the proposal flow. Templates merge into the current workflow — they don't replace it."
     }
+  },
+  "workflowPortal": {
+    "batchActionFailed": "The batch action could not be completed.",
+    "batchCancel": "Cancel batch",
+    "batchExport": "Export results",
+    "batchExportFailed": "The batch result export failed.",
+    "batchFile": "CSV batch file",
+    "batchPause": "Pause batch",
+    "batchResume": "Resume batch",
+    "batchStart": "Start batch",
+    "batchStartFailed": "The batch could not be started.",
+    "batchStatus": "{status}: {succeeded}/{total} succeeded, {failed} failed, {waiting} waiting",
+    "batchStatusFailed": "The batch status could not be refreshed.",
+    "batchTemplate": "Download template",
+    "batchTemplateFailed": "The CSV template could not be downloaded.",
+    "feedbackCorrection": "Corrected answer",
+    "feedbackDislike": "Needs improvement",
+    "feedbackLike": "Helpful",
+    "feedbackSubmit": "Submit feedback",
+    "feedbackSubmitFailed": "Your feedback could not be submitted.",
+    "feedbackTags": "Feedback tags",
+    "feedbackTagsPlaceholder": "accuracy, tone, completeness",
+    "feedbackThanks": "Thanks for your feedback.",
+    "feedbackTitle": "Was this result helpful?",
+    "humanInputFilesUploaded": "{count, plural, one {# file uploaded} other {# files uploaded}}",
+    "humanInputInbox": "Tasks awaiting your input",
+    "humanInputLoadFailed": "Human Input tasks could not be refreshed.",
+    "humanInputResponses": "{count, plural, one {# response received} other {# responses received}}",
+    "humanInputSelect": "Select an option",
+    "humanInputSubmitFailed": "Your response could not be submitted.",
+    "humanInputUploadFailed": "The file could not be uploaded.",
+    "legalConsent": "I agree to the terms and privacy policy for this application.",
+    "loadFailed": "The published application could not be loaded.",
+    "loading": "Loading application…",
+    "message": "Message",
+    "messageFailed": "The message could not be completed.",
+    "missingApp": "An application slug is required.",
+    "recoveryKey": "Save this one-time recovery key: {key}",
+    "requiredMark": "(required)",
+    "resultShareCreate": "Create share link",
+    "resultShareCreateFailed": "The result share link could not be created.",
+    "resultShareRevoke": "Revoke share link",
+    "resultShareRevokeFailed": "The result share link could not be revoked.",
+    "resultShareTitle": "Share this result",
+    "run": "Run",
+    "runFailed": "The workflow run could not be completed.",
+    "send": "Send"
   },
   "workflows": {
     "canvasToast": {
@@ -38798,6 +38991,28 @@
         "run": "Run from here",
         "runDisabled": "Triggers and annotations can't be run from here"
       },
+      "nodeGroupCreate": {
+        "cancel": "Cancel",
+        "confirmInterface": "Confirm typed boundary",
+        "create": "Create Node Group",
+        "description": "Freeze this selection as a versioned reusable group. Review every inferred input and output before saving.",
+        "details": "Description",
+        "inputs": "Inputs",
+        "name": "Name",
+        "nodeCount": "{count} selected nodes",
+        "none": "None",
+        "optional": "Optional",
+        "outputs": "Outputs",
+        "required": "Required",
+        "scope": "Distribution",
+        "scopes": {
+          "personal": "Personal",
+          "portableBundle": "Portable Bundle",
+          "workspace": "Workspace"
+        },
+        "title": "Create Node Group",
+        "version": "Version"
+      },
       "performanceTier": {
         "auto": "Auto",
         "autoHint": "Pick the best tier from your system preference and workflow size.",
@@ -38819,6 +39034,7 @@
         "alignLeft": "Align left",
         "alignRight": "Align right",
         "alignTop": "Align top",
+        "createNodeGroup": "Create Node Group",
         "delete": "Delete",
         "distributeH": "Distribute horizontally",
         "distributeV": "Distribute vertically",
@@ -39255,6 +39471,28 @@
         },
         "userPrompt": {
           "label": "User prompt"
+        }
+      },
+      "answer": {
+        "citations": {
+          "hint": "JSON array of sourceId, documentId, revisionId, and chunkId references.",
+          "label": "Citations"
+        },
+        "content": {
+          "hint": "Optional structured JSON content rendered by supported Chatflow clients.",
+          "label": "Structured content"
+        },
+        "files": {
+          "hint": "JSON array of durable file refs with optional name and mediaType.",
+          "label": "Files"
+        },
+        "suggestions": {
+          "hint": "One follow-up suggestion per line.",
+          "label": "Follow-up suggestions"
+        },
+        "text": {
+          "hint": "Answer text or expression. Text or structured content is required.",
+          "label": "Answer text"
         }
       },
       "approvalRequest": {
@@ -40302,6 +40540,60 @@
           "label": "URL",
           "placeholder": "https://api.example.com/v1/things"
         }
+      },
+      "humanInputRequest": {
+        "actions": {
+          "actionLabel": "Action label",
+          "add": "Add action",
+          "defaultLabel": "Submit",
+          "id": "Action ID",
+          "label": "Actions",
+          "remove": "Remove action"
+        },
+        "assignees": {
+          "add": "Add assignee",
+          "group": "Group",
+          "id": "Member or group ID",
+          "initiator": "Run initiator",
+          "kind": "Assignee kind",
+          "label": "Assignees",
+          "member": "Member",
+          "remove": "Remove assignee"
+        },
+        "completion": {
+          "all": "All assignees",
+          "any": "Any assignee",
+          "count": "Required responses",
+          "label": "Completion policy",
+          "quorum": "At least N responses"
+        },
+        "fields": {
+          "add": "Add field",
+          "defaultLabel": "Response",
+          "fieldLabel": "Field label",
+          "id": "Field ID",
+          "label": "Form fields",
+          "options": "Options",
+          "optionsPlaceholder": "One, Two, Three",
+          "remove": "Remove field",
+          "required": "Required",
+          "sensitive": "Sensitive",
+          "type": "Field type",
+          "types": {
+            "boolean": "Boolean",
+            "file": "Single file",
+            "file-list": "File list",
+            "long-text": "Long text",
+            "multi-select": "Multiple choice",
+            "number": "Number",
+            "short-text": "Short text",
+            "single-select": "Single choice"
+          }
+        },
+        "message": "Message (optional)",
+        "sensitiveRetentionDays": "Sensitive value retention (days)",
+        "timeout": "Timeout (ms)",
+        "title": "Title"
       },
       "integrationEventTrigger": {
         "accountId": {
@@ -42181,6 +42473,7 @@
         "default": "default",
         "false": "false",
         "rejected": "rejected",
+        "timeout": "timeout",
         "true": "true"
       },
       "pinnedTitle": "Pinned test data"
@@ -42387,6 +42680,12 @@
           "updateObjective": {
             "description": "Replace a non-terminal goal objective via the GoalRuntime redaction path.",
             "label": "Update goal objective"
+          }
+        },
+        "humanInput": {
+          "request": {
+            "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
+            "label": "Request human input"
           }
         },
         "mcp": {
@@ -42789,6 +43088,10 @@
         }
       },
       "io": {
+        "answer": {
+          "description": "Return a Chatflow answer with structured content, citations, files, and follow-up suggestions.",
+          "label": "Answer"
+        },
         "http": {
           "description": "Call an external HTTP API with retries and timeout.",
           "label": "HTTP request"
@@ -42806,6 +43109,40 @@
             "description": "Respond to the inbound webhook trigger with a payload.",
             "label": "Webhook respond"
           }
+        }
+      },
+      "knowledge": {
+        "chunk": {
+          "description": "Create format-aware chunks with stable position metadata.",
+          "label": "Chunk knowledge"
+        },
+        "embed": {
+          "description": "Embed chunks through Cognia's mandatory safe embedding gateway.",
+          "label": "Embed knowledge"
+        },
+        "index": {
+          "description": "Validate vector counts and dimensions before publication.",
+          "label": "Validate knowledge index"
+        },
+        "parse": {
+          "description": "Parse one persisted source into a protected run-scoped artifact.",
+          "label": "Parse knowledge"
+        },
+        "publish": {
+          "description": "Atomically publish a validated immutable index generation.",
+          "label": "Publish knowledge revision"
+        },
+        "retrieve": {
+          "description": "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
+          "label": "Retrieve knowledge"
+        },
+        "source": {
+          "description": "Create or incrementally update a stable Knowledge Base source.",
+          "label": "Knowledge source"
+        },
+        "transform": {
+          "description": "Normalize and PII-redact parsed content before chunking.",
+          "label": "Transform knowledge"
         }
       },
       "ocr": {

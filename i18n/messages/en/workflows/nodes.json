@@ -12,6 +12,12 @@
         "label": "Request approval"
       }
     },
+    "humanInput": {
+      "request": {
+        "description": "Pause for a schema-driven form response from assigned members or groups, then route by the selected action.",
+        "label": "Request human input"
+      }
+    },
     "character": {
       "create": {
         "description": "Creates a new character (employee) row.",
@@ -602,6 +608,10 @@
     }
   },
   "io": {
+    "answer": {
+      "description": "Return a Chatflow answer with structured content, citations, files, and follow-up suggestions.",
+      "label": "Answer"
+    },
     "http": {
       "description": "Call an external HTTP API with retries and timeout.",
       "label": "HTTP request"
@@ -619,6 +629,40 @@
         "description": "Respond to the inbound webhook trigger with a payload.",
         "label": "Webhook respond"
       }
+    }
+  },
+  "knowledge": {
+    "source": {
+      "description": "Create or incrementally update a stable Knowledge Base source.",
+      "label": "Knowledge source"
+    },
+    "parse": {
+      "description": "Parse one persisted source into a protected run-scoped artifact.",
+      "label": "Parse knowledge"
+    },
+    "transform": {
+      "description": "Normalize and PII-redact parsed content before chunking.",
+      "label": "Transform knowledge"
+    },
+    "chunk": {
+      "description": "Create format-aware chunks with stable position metadata.",
+      "label": "Chunk knowledge"
+    },
+    "embed": {
+      "description": "Embed chunks through Cognia's mandatory safe embedding gateway.",
+      "label": "Embed knowledge"
+    },
+    "index": {
+      "description": "Validate vector counts and dimensions before publication.",
+      "label": "Validate knowledge index"
+    },
+    "publish": {
+      "description": "Atomically publish a validated immutable index generation.",
+      "label": "Publish knowledge revision"
+    },
+    "retrieve": {
+      "description": "Retrieve ACL-filtered chunks from frozen Knowledge Base revisions.",
+      "label": "Retrieve knowledge"
     }
   },
   "ocr": {
