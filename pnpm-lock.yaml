@@ -971,6 +971,8 @@ importers:
         specifier: '*'
         version: 11.16.0
 
+  packages/network-guard: {}
+
   packages/ocr:
     dependencies:
       '@cognia/provider-types':

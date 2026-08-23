@@ -192,52 +192,38 @@ describe("enrichInboundMedia", () => {
 })
 
 describe("isPublicHttpUrl", () => {
+  // The classification matrix lives in `@cognia/network-guard` and is covered
+  // exhaustively there. These cases pin the floor's own contract: the boolean
+  // shape the plans are written against, and the representative targets an
+  // inbound message would actually aim a download at.
+
   it("accepts ordinary public http(s) media hosts", () => {
     expect(isPublicHttpUrl("https://cdn.example.com/a.png")).toBe(true)
     expect(isPublicHttpUrl("http://gchat.qpic.cn/a.jpg")).toBe(true)
     expect(isPublicHttpUrl("https://8.8.8.8/a.png")).toBe(true)
+    expect(isPublicHttpUrl("http://[2606:4700::1]/x")).toBe(true)
   })
 
   it("refuses loopback, LAN and the cloud metadata endpoint", () => {
     // The download URL is remote-controlled data and Rust applies no guard of
     // its own, so this is the only thing standing between an inbound message
     // and a request to the host's own network.
-    expect(isPublicHttpUrl("http://127.0.0.1:8080/admin")).toBe(false)
-    expect(isPublicHttpUrl("http://localhost/x")).toBe(false)
-    expect(isPublicHttpUrl("http://router.local/x")).toBe(false)
-    expect(isPublicHttpUrl("http://169.254.169.254/latest/meta-data/")).toBe(false)
-    expect(isPublicHttpUrl("http://192.168.1.1/x")).toBe(false)
-    expect(isPublicHttpUrl("http://10.0.0.5/x")).toBe(false)
-    expect(isPublicHttpUrl("http://172.16.0.1/x")).toBe(false)
-    expect(isPublicHttpUrl("http://172.31.255.1/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[::1]/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[fd00::1]/x")).toBe(false)
-  })
-
-  it("refuses the IPv6 spellings of the same private addresses", () => {
-    // The URL parser re-serialises `::ffff:127.0.0.1` as `::ffff:7f00:1`, so a
-    // prefix match on the text sees nothing. Decoding the embedded v4 address
-    // is the only thing that closes it.
-    expect(isPublicHttpUrl("http://[::ffff:127.0.0.1]/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[::ffff:169.254.169.254]/latest/meta-data/")).toBe(false)
-    expect(isPublicHttpUrl("http://[::ffff:192.168.1.1]/x")).toBe(false)
-    // `::` is the unspecified address, which most stacks route to loopback.
-    expect(isPublicHttpUrl("http://[::]/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[0:0:0:0:0:0:0:1]/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[fe80::1]/x")).toBe(false)
-    // Site-local, which the old prefix list did not mention at all.
-    expect(isPublicHttpUrl("http://[fec0::1]/x")).toBe(false)
-    expect(isPublicHttpUrl("http://[fc00::1]/x")).toBe(false)
-    // An address we cannot decode is not one we can clear.
-    expect(isPublicHttpUrl("http://[::ffff:999.0.0.1]/x")).toBe(false)
-  })
-
-  it("keeps public addresses next to the private ranges", () => {
-    expect(isPublicHttpUrl("http://172.32.0.1/x")).toBe(true)
-    expect(isPublicHttpUrl("http://172.15.0.1/x")).toBe(true)
-    expect(isPublicHttpUrl("http://[2606:4700::1]/x")).toBe(true)
-    expect(isPublicHttpUrl("http://[2001:db8::1]/x")).toBe(true)
-    expect(isPublicHttpUrl("http://[::ffff:1.2.3.4]/x")).toBe(true)
+    for (const url of [
+      "http://127.0.0.1:8080/admin",
+      "http://localhost/x",
+      "http://router.local/x",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://192.168.1.1/x",
+      "http://10.0.0.5/x",
+      "http://172.16.0.1/x",
+      "http://[::1]/x",
+      "http://[fd00::1]/x",
+      // The parser re-serialises `::ffff:169.254.169.254` to hex, so only a
+      // decoded classification closes this one.
+      "http://[::ffff:169.254.169.254]/latest/meta-data/",
+    ]) {
+      expect(isPublicHttpUrl(url)).toBe(false)
+    }
   })
 
   it("refuses anything that is not http(s)", () => {

@@ -55,6 +55,8 @@
  * only locally-extracted text goes out.
  */
 
+import { evaluateFetchTarget } from "@cognia/network-guard"
+
 import { isTauri } from "@/lib/tauri"
 import {
   connectorsAttachmentFetch,
@@ -190,79 +192,19 @@ export function stableMediaRef(prefix: string, url: string): string {
  * fetch command applies no guard of its own, so this is the floor: every plan
  * passes through it before a byte is requested. It stops the obvious targets —
  * `127.0.0.1`, a LAN address, and the cloud metadata endpoint at
- * `169.254.169.254`. It does NOT stop a public name that resolves to a private
- * address (DNS rebinding); catching that needs a check at resolution time,
- * which belongs in the Rust client. Platforms whose media lives on a known
- * host (Discord, Slack) narrow this further with their own allowlist.
- */
-const PRIVATE_V4 = /^(?:10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/
-
-/**
- * An IPv6 literal's 8 groups, or `null` when it cannot be read.
+ * `169.254.169.254`.
  *
- * Prefix matching on the text is not enough: the URL parser re-serialises
- * `::ffff:127.0.0.1` as `::ffff:7f00:1`, so the loopback is invisible to any
- * check that does not decode the address.
+ * The classification itself lives in `@cognia/network-guard`, shared with the
+ * `web_fetch` gate and the web-clone sidecar so the three cannot drift apart
+ * again. This wrapper keeps the boolean shape the plans are written against.
+ *
+ * It does NOT stop a public name that resolves to a private address (DNS
+ * rebinding); catching that needs a check at resolution time, which belongs in
+ * the Rust client. Platforms whose media lives on a known host (Discord, Slack)
+ * narrow this further with their own allowlist.
  */
-function ipv6Groups(inner: string): number[] | null {
-  let text = inner
-  // A trailing dotted quad (`::ffff:127.0.0.1`) folds into the last two groups.
-  const dotted = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/)
-  if (dotted?.index !== undefined) {
-    const octets = dotted[1].split(".").map(Number)
-    if (octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return null
-    const hi = ((octets[0] << 8) | octets[1]).toString(16)
-    const lo = ((octets[2] << 8) | octets[3]).toString(16)
-    text = `${text.slice(0, dotted.index)}${hi}:${lo}`
-  }
-  // A zone id (`fe80::1%eth0`) is not part of the address.
-  text = text.split("%")[0]
-  const halves = text.split("::")
-  if (halves.length > 2) return null
-  const head = halves[0] ? halves[0].split(":") : []
-  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : []
-  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0
-  if (fill < 0) return null
-  const parts = [...head, ...Array<string>(fill).fill("0"), ...tail]
-  if (parts.length !== 8) return null
-  const groups = parts.map((part) => (/^[0-9a-f]{1,4}$/.test(part) ? parseInt(part, 16) : NaN))
-  return groups.some(Number.isNaN) ? null : groups
-}
-
-/** True for an IPv6 literal a download may be aimed at. */
-function isPublicIpv6(inner: string): boolean {
-  const groups = ipv6Groups(inner)
-  // A literal we cannot decode is not one we can clear.
-  if (!groups) return false
-  // `::1` loopback, and `::` (unspecified) which most stacks route to it.
-  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] <= 1) return false
-  // IPv4-mapped (`::ffff:a.b.c.d`) and IPv4-compatible (`::a.b.c.d`) literals
-  // reach the v4 internet, so they answer to the v4 rules. This is the hole
-  // that let `http://[::ffff:169.254.169.254]/` through the floor.
-  if (groups.slice(0, 5).every((g) => g === 0) && (groups[5] === 0 || groups[5] === 0xffff)) {
-    const v4 = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`
-    return !PRIVATE_V4.test(v4)
-  }
-  if ((groups[0] & 0xfe00) === 0xfc00) return false // fc00::/7 unique-local
-  if ((groups[0] & 0xffc0) === 0xfe80) return false // fe80::/10 link-local
-  if ((groups[0] & 0xffc0) === 0xfec0) return false // fec0::/10 site-local
-  return true
-}
-
 export function isPublicHttpUrl(raw: string): boolean {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return false
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return false
-  const host = url.hostname.toLowerCase()
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false
-  // IPv6 literals arrive bracketed.
-  if (host.startsWith("[")) return isPublicIpv6(host.slice(1, -1))
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return !PRIVATE_V4.test(host)
-  return true
+  return evaluateFetchTarget(raw).allowed
 }
 
 /**

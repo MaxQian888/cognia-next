@@ -16,6 +16,7 @@
     "@babel/parser": "^8.0.4",
     "@babel/traverse": "^8.0.4",
     "@babel/types": "^8.0.4",
+    "@cognia/network-guard": "file:../../packages/network-guard",
     "css-tree": "^3.2.1",
     "http-proxy-agent": "^9.1.0",
     "https-proxy-agent": "^9.1.0",

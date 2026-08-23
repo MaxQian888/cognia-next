@@ -36,6 +36,8 @@
       "@cognia/rag/*": ["./packages/rag/src/*"],
       "@cognia/error-parsers": ["./packages/error-parsers/src/index.ts"],
       "@cognia/error-parsers/*": ["./packages/error-parsers/src/*"],
+      "@cognia/network-guard": ["./packages/network-guard/src/index.ts"],
+      "@cognia/network-guard/*": ["./packages/network-guard/src/*"],
       "@cognia/diagnostics": ["./packages/diagnostics/src/index.ts"],
       "@cognia/diagnostics/*": ["./packages/diagnostics/src/*"],
       "@cognia/vector": ["./packages/vector/src/index.ts"],

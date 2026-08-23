@@ -65,7 +65,7 @@
     "benchmark:connectors": "cross-env CONNECTOR_BENCHMARK=1 jest lib/connectors/outbound-runner.benchmark.test.ts --runInBand",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack",
     "build-storybook": "cross-env NODE_OPTIONS=--max-old-space-size=16384 storybook build",
-    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/eval-core --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings run build",
+    "build:packages": "cross-env NODE_OPTIONS=--max-old-space-size=16384 pnpm --filter @cognia/agent --filter @cognia/eval-core --filter @cognia/provider-types --filter @cognia/provider-core --filter @cognia/memory --filter @cognia/network-guard --filter @cognia/ocr --filter @cognia/plugin-ui --filter @cognia/security-findings run build",
     "build:profile": "node scripts/build/build-profile.mjs",
     "changeset": "changeset",
     "changeset:status": "changeset status",

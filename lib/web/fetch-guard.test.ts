@@ -4,114 +4,96 @@ import {
   FetchTargetBlockedError,
   isPrivateOrLocalHost,
 } from "./fetch-guard"
+import * as shared from "@cognia/network-guard"
 
-describe("isPrivateOrLocalHost", () => {
-  it.each([
-    "localhost",
-    "app.localhost",
-    "127.0.0.1",
-    "127.1.2.3",
-    "0.0.0.0",
-    "10.0.0.5",
-    "172.16.0.1",
-    "172.31.255.254",
-    "192.168.1.1",
-    "169.254.169.254", // cloud metadata
-    "100.64.0.1", // CGNAT
-    "224.0.0.1", // multicast
-    "2130706433", // decimal form of 127.0.0.1
-    "::1",
-    "::",
-    "fe80::1",
-    "fc00::1",
-    "fd12:3456::1",
-    "::ffff:127.0.0.1", // IPv4-mapped loopback
-  ])("flags private/local host %s", (host) => {
-    expect(isPrivateOrLocalHost(host)).toBe(true)
-  })
+// The classification matrix — every IPv4 boundary, IPv6 range, legacy numeric
+// form and scheme — is owned by `@cognia/network-guard` and exhaustively
+// covered in its own suite. What is tested here is only what this adapter
+// adds: that it re-exports the shared policy rather than forking it, and that
+// the app-specific error guidance survives.
 
-  it.each([
-    "example.com",
-    "8.8.8.8",
-    "1.1.1.1",
-    "172.15.0.1", // just below the private /12
-    "172.32.0.1", // just above the private /12
-    "192.167.0.1",
-    "9.255.255.255",
-    "2606:4700:4700::1111", // public Cloudflare IPv6
-  ])("allows public host %s", (host) => {
-    expect(isPrivateOrLocalHost(host)).toBe(false)
-  })
-
-  it("treats an empty host as unsafe", () => {
-    expect(isPrivateOrLocalHost("")).toBe(true)
-    expect(isPrivateOrLocalHost("   ")).toBe(true)
-  })
-
-  it("ignores a trailing dot (FQDN root)", () => {
-    expect(isPrivateOrLocalHost("127.0.0.1.")).toBe(true)
-    expect(isPrivateOrLocalHost("example.com.")).toBe(false)
+describe("adapter wiring", () => {
+  it("re-exports the shared classifier rather than a local copy", () => {
+    expect(evaluateFetchTarget).toBe(shared.evaluateFetchTarget)
+    expect(isPrivateOrLocalHost).toBe(shared.isPrivateOrLocalHost)
   })
 })
 
-describe("evaluateFetchTarget", () => {
-  it("allows a public https URL", () => {
-    expect(evaluateFetchTarget("https://example.com/path")).toEqual({
-      allowed: true,
-      reason: "ok",
-      host: "example.com",
-    })
+describe("FetchTargetBlockedError", () => {
+  it("points a blocked private host at the app's own Settings surface", () => {
+    const error = new FetchTargetBlockedError("http://127.0.0.1/x", "127.0.0.1", "private-host")
+    expect(error).toBeInstanceOf(Error)
+    expect(error.name).toBe("FetchTargetBlockedError")
+    expect(error.message).toContain("127.0.0.1")
+    expect(error.message).toContain("Settings → Search")
+    expect(error.url).toBe("http://127.0.0.1/x")
+    expect(error.host).toBe("127.0.0.1")
+    expect(error.reason).toBe("private-host")
   })
 
-  it("rejects an unparseable URL", () => {
-    expect(evaluateFetchTarget("not a url")).toEqual({ allowed: false, reason: "bad-url" })
-  })
-
-  it("rejects a non-http(s) scheme", () => {
-    const out = evaluateFetchTarget("file:///etc/passwd")
-    expect(out.allowed).toBe(false)
-    expect(out.reason).toBe("bad-scheme")
-  })
-
-  it("rejects a loopback URL by default", () => {
-    const out = evaluateFetchTarget("http://127.0.0.1:8080/admin")
-    expect(out).toEqual({ allowed: false, reason: "private-host", host: "127.0.0.1" })
-  })
-
-  it("rejects the cloud metadata endpoint", () => {
-    expect(evaluateFetchTarget("http://169.254.169.254/latest/meta-data/").allowed).toBe(false)
-  })
-
-  it("permits a private host when allowPrivateHosts is set", () => {
-    const out = evaluateFetchTarget("http://localhost:3000/", { allowPrivateHosts: true })
-    expect(out.allowed).toBe(true)
-    expect(out.reason).toBe("ok")
-  })
-
-  it("still rejects a bad scheme even when allowPrivateHosts is set", () => {
-    expect(evaluateFetchTarget("ftp://localhost/x", { allowPrivateHosts: true }).allowed).toBe(
-      false
+  it("describes a bad scheme and a bad URL without the Settings hint", () => {
+    expect(new FetchTargetBlockedError("file:///etc/passwd", "", "bad-scheme").message).toBe(
+      "Refusing to fetch non-http(s) URL: file:///etc/passwd"
+    )
+    expect(new FetchTargetBlockedError("nope", "", "bad-url").message).toBe(
+      "Refusing to fetch an unparseable URL: nope"
     )
   })
 })
 
 describe("assertFetchTargetAllowed", () => {
-  it("does not throw for a public URL", () => {
-    expect(() => assertFetchTargetAllowed("https://example.com")).not.toThrow()
+  it("passes a public URL through", () => {
+    expect(() => assertFetchTargetAllowed("https://example.com/a")).not.toThrow()
   })
 
-  it("throws FetchTargetBlockedError for a private host", () => {
-    expect(() => assertFetchTargetAllowed("http://192.168.0.1")).toThrow(FetchTargetBlockedError)
+  it.each([
+    ["http://127.0.0.1:8080/admin", "private-host"],
+    ["http://169.254.169.254/latest/meta-data/", "private-host"],
+    ["http://localhost/x", "private-host"],
+    ["file:///etc/passwd", "bad-scheme"],
+    ["not a url", "bad-url"],
+  ])("throws for %s (%s)", (url, reason) => {
+    expect(() => assertFetchTargetAllowed(url)).toThrow(FetchTargetBlockedError)
     try {
-      assertFetchTargetAllowed("http://192.168.0.1")
-    } catch (err) {
-      expect(err).toBeInstanceOf(FetchTargetBlockedError)
-      expect((err as FetchTargetBlockedError).reason).toBe("private-host")
-      expect((err as FetchTargetBlockedError).host).toBe("192.168.0.1")
+      assertFetchTargetAllowed(url)
+    } catch (error) {
+      expect((error as FetchTargetBlockedError).reason).toBe(reason)
     }
   })
 
-  it("throws for a non-http(s) scheme with a descriptive message", () => {
-    expect(() => assertFetchTargetAllowed("gopher://evil/")).toThrow(/non-http/i)
+  it("blocks the IPv6 literals this gate used to clear", () => {
+    // Regression: `URL.hostname` keeps the brackets (`"[::1]"`), so the
+    // pre-extraction textual check matched nothing and allowed every IPv6
+    // private target reachable from `web_fetch`.
+    for (const url of [
+      "http://[::1]/x",
+      "http://[::]/x",
+      "http://[fe80::1]/x",
+      "http://[fc00::1]/x",
+      "http://[fec0::1]/x",
+      "http://[::ffff:169.254.169.254]/latest/meta-data/",
+    ]) {
+      expect(() => assertFetchTargetAllowed(url)).toThrow(FetchTargetBlockedError)
+    }
+  })
+
+  describe("allowPrivateHosts opt-in", () => {
+    it("permits private hosts when the user opted in", () => {
+      expect(() =>
+        assertFetchTargetAllowed("http://127.0.0.1:8080/x", { allowPrivateHosts: true })
+      ).not.toThrow()
+      expect(() =>
+        assertFetchTargetAllowed("http://[::1]/x", { allowPrivateHosts: true })
+      ).not.toThrow()
+    })
+
+    it("still refuses a bad scheme and a bad URL", () => {
+      expect(() =>
+        assertFetchTargetAllowed("file:///etc/passwd", { allowPrivateHosts: true })
+      ).toThrow(FetchTargetBlockedError)
+      expect(() => assertFetchTargetAllowed("not a url", { allowPrivateHosts: true })).toThrow(
+        FetchTargetBlockedError
+      )
+    })
   })
 })

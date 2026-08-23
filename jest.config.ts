@@ -179,6 +179,7 @@ const projectCommon: Config = {
     "^@cognia/provider-routing(.*)$": "<rootDir>/packages/provider-routing/src$1",
     "^@cognia/rag(.*)$": "<rootDir>/packages/rag/src$1",
     "^@cognia/error-parsers(.*)$": "<rootDir>/packages/error-parsers/src$1",
+    "^@cognia/network-guard(.*)$": "<rootDir>/packages/network-guard/src$1",
     "^@cognia/diagnostics(.*)$": "<rootDir>/packages/diagnostics/src$1",
     "^@cognia/vector(.*)$": "<rootDir>/packages/vector/src$1",
     "^@cognia/transformers-runtime$": "<rootDir>/packages/transformers-runtime/src/index.ts",
@@ -478,6 +479,12 @@ const globalConfig: Config = {
     // Type-only module: the v8 provider still maps it back to source and scores
     // it 0%, exactly as for transformers-runtime/src/types.ts below.
     "!packages/diagnostics/src/types.ts",
+    // network-guard is the extracted SSRF policy: new code, held to the 90%
+    // floor. `index.ts` is pure re-exports, which v8 maps back to source and
+    // scores 0%, on the same grounds as eval-core's and security-findings'.
+    "packages/network-guard/src/**/*.{ts,tsx}",
+    "!packages/network-guard/src/**/*.test.{ts,tsx}",
+    "!packages/network-guard/src/index.ts",
     // memory core was lifted out of lib/memory (coverage-collected), so keep it collected.
     "packages/memory/src/**/*.{ts,tsx}",
     // ocr core was lifted out of lib/ocr (coverage-collected), so keep it collected.
