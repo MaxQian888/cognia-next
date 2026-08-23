@@ -24,7 +24,7 @@ async function runProfileBuild() {
       stdio: "inherit",
       env: {
         ...process.env,
-        NODE_OPTIONS: process.env.NODE_OPTIONS ?? "--max-old-space-size=8192",
+        NODE_OPTIONS: process.env.NODE_OPTIONS ?? "--max-old-space-size=16384",
         NEXT_PUBLIC_COGNIA_PROFILE_BUILD: "1",
       },
     })

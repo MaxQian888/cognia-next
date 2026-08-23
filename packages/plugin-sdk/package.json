@@ -115,7 +115,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "node scripts/build-package.mjs",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/build-package.mjs",
     "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
     "pack:test": "pnpm --dir ../provider-types build && pnpm build && node ../../scripts/plugin/test-sdk-package.mjs",
     "performance:check": "node scripts/check-performance-budget.mjs"

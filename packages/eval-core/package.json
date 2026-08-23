@@ -27,7 +27,7 @@
     "src"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 tsup",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

@@ -25,7 +25,7 @@ function runTsup() {
     stdio: "inherit",
     env: {
       ...process.env,
-      NODE_OPTIONS: "--max-old-space-size=12288",
+      NODE_OPTIONS: "--max-old-space-size=16384",
     },
   })
 }

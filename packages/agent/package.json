@@ -44,7 +44,7 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsup",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 tsup",
     "test": "pnpm -w exec jest packages/agent",
     "typecheck": "tsc --noEmit",
     "pack:test": "node scripts/pack-test.mjs"

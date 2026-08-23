@@ -13,7 +13,7 @@ test("parseArgs defaults to memory-safe shards with bounded parallelism", () => 
     shards: 8,
     jobs: 2,
     workers: 4,
-    maxOldSpaceSize: 8192,
+    maxOldSpaceSize: 16384,
     out: "coverage",
     only: undefined,
   })

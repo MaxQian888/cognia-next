@@ -66,7 +66,7 @@ function build() {
     ["exec", "tsup", "--config", "tsup.author-types.config.ts"],
     join(packagesRoot, "plugin-sdk"),
     {
-      NODE_OPTIONS: "--max-old-space-size=12288",
+      NODE_OPTIONS: "--max-old-space-size=16384",
     }
   )
   run(["exec", "tsup", "--config", "tsup.author-types.config.ts"], join(packagesRoot, "plugin-ui"))

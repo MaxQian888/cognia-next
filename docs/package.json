@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "next build --webpack",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack",
     "start": "next start -p 3001"
   },
   "dependencies": {

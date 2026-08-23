@@ -24,7 +24,7 @@ const positiveInteger = (flag) =>
 
 const cliSchema = z.object({
   jobs: positiveInteger("--jobs").default(2),
-  maxOldSpaceSize: positiveInteger("--max-old-space-size").default(8192),
+  maxOldSpaceSize: positiveInteger("--max-old-space-size").default(16384),
   only: z
     .string()
     .trim()
@@ -56,7 +56,7 @@ function createProgram() {
     .option("--shards <count>", "Total Jest shard count.", "8")
     .option("--jobs <count>", "Maximum concurrent shard processes.", "2")
     .option("--workers <count>", "Jest workers per shard.", "4")
-    .option("--max-old-space-size <megabytes>", "Node.js heap limit per shard.", "8192")
+    .option("--max-old-space-size <megabytes>", "Node.js heap limit per shard.", "16384")
     .option("--out <directory>", "Coverage output directory.", "coverage")
     .option("--only <shards>", "Comma-separated shard numbers to rerun.")
 }
