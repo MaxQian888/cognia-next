@@ -14,10 +14,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { searchRegistry } from "@/lib/mcp/registry/client"
 import type { McpPreset } from "@/lib/claude/mcp-presets"
 import { McpPresetGrid } from "./mcp-preset-grid"
+import {
+  __resetMcpServerPresetsForTesting,
+  registerMcpServerPreset,
+} from "@/lib/plugin/registries/mcp-server-preset-registry"
 
 const searchRegistryMock = searchRegistry as jest.MockedFunction<typeof searchRegistry>
 
 beforeEach(() => {
+  __resetMcpServerPresetsForTesting()
   searchRegistryMock.mockReset()
   searchRegistryMock.mockResolvedValue({ presets: [], nextCursor: null })
 })
@@ -90,6 +95,21 @@ describe("McpPresetGrid", () => {
     expect(screen.getByTestId("mcp-preset-configure")).toBeInTheDocument()
     fireEvent.click(screen.getByText("back"))
     expect(screen.getByTestId("mcp-preset-grid")).toBeInTheDocument()
+  })
+
+  it("renders enabled plugin-contributed presets", () => {
+    registerMcpServerPreset(
+      "figma-local",
+      {
+        id: "figma-local",
+        name: "Figma Desktop",
+        transport: "http",
+        config: { url: "http://127.0.0.1:3845/mcp" },
+      },
+      { pluginId: "figma" }
+    )
+    render(<McpPresetGrid existingNames={[]} onPresetSelected={jest.fn()} />)
+    expect(screen.getByText("Figma Desktop")).toBeInTheDocument()
   })
 })
 

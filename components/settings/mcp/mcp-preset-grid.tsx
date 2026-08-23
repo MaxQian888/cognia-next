@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { MCP_PRESETS, type McpPreset } from "@/lib/claude/mcp-presets"
+import type { McpPreset } from "@/lib/claude/mcp-presets"
+import { listMcpPresetCatalog } from "@/lib/mcp/preset-catalog"
 import { searchRegistry } from "@/lib/mcp/registry/client"
 
 interface Props {
@@ -96,24 +97,25 @@ export function McpPresetGrid({ existingNames, onPresetSelected }: Props) {
   const [values, setValues] = useState<Record<string, string>>({})
   const [query, setQuery] = useState("")
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const catalog = useMemo(() => listMcpPresetCatalog(), [])
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
-    for (const p of MCP_PRESETS) {
+    for (const p of catalog) {
       for (const tag of p.tags ?? []) set.add(tag)
     }
     return Array.from(set).sort()
-  }, [])
+  }, [catalog])
 
   const presets = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return MCP_PRESETS.filter((p) => {
+    return catalog.filter((p) => {
       if (activeTag && !(p.tags ?? []).includes(activeTag)) return false
       if (!q) return true
       const haystack = [p.name, p.description, p.id, ...(p.tags ?? [])].join(" ").toLowerCase()
       return haystack.includes(q)
     })
-  }, [query, activeTag])
+  }, [catalog, query, activeTag])
 
   const registry = useRegistrySearch(query, activeTag)
 
