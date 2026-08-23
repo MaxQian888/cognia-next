@@ -909,6 +909,7 @@ pub fn run() {
             task_workspace::task_workspace_policy_set,
             task_workspace::task_workspace_managed_pin,
             task_workspace::task_workspace_managed_permanent,
+            task_workspace::task_workspace_managed_adopt,
             task_workspace::task_workspace_managed_archive,
             task_workspace::task_workspace_managed_restore,
             task_workspace::task_workspace_managed_delete,

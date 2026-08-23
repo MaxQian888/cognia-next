@@ -10,6 +10,7 @@ const pinMock = jest.fn()
 const archiveMock = jest.fn()
 const restoreMock = jest.fn()
 const permanentMock = jest.fn()
+const adoptMock = jest.fn()
 const deleteMock = jest.fn()
 const reconcileMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
@@ -18,6 +19,7 @@ jest.mock("@/lib/task-workspace/client", () => ({
   archiveManagedWorkspace: (...args: unknown[]) => archiveMock(...args),
   restoreManagedWorkspace: (...args: unknown[]) => restoreMock(...args),
   makeManagedWorkspacePermanent: (...args: unknown[]) => permanentMock(...args),
+  adoptManagedWorkspace: (...args: unknown[]) => adoptMock(...args),
   deleteManagedWorkspace: (...args: unknown[]) => deleteMock(...args),
   reconcileManagedWorkspaces: (...args: unknown[]) => reconcileMock(...args),
 }))
@@ -52,6 +54,7 @@ beforeEach(() => {
   archiveMock.mockReset().mockResolvedValue({ ...managed, state: "archived" })
   restoreMock.mockReset().mockResolvedValue({ ...managed, state: "active" })
   permanentMock.mockReset().mockResolvedValue({ ...managed, environmentKind: "permanent" })
+  adoptMock.mockReset().mockResolvedValue({ ...managed, ownerType: "user", ownerRef: null })
   deleteMock.mockReset().mockResolvedValue(undefined)
   reconcileMock.mockReset().mockResolvedValue({ reclaimed: [], orphaned: [], imported: [] })
 })
@@ -93,4 +96,22 @@ it("requires confirmation before deleting an archived environment", async () => 
   await waitFor(() =>
     expect(screen.queryByTestId("workspace-environment-ws-1")).not.toBeInTheDocument()
   )
+})
+
+it("requires an explicit Adopt action before an imported environment becomes managed", async () => {
+  listMock.mockResolvedValueOnce([
+    {
+      ...managed,
+      environmentKind: "imported",
+      ownerType: "imported",
+      ownerRef: null,
+      lockedBy: null,
+    },
+  ])
+  render(<WorkspaceEnvironmentList />)
+
+  fireEvent.click(await screen.findByRole("button", { name: "adopt" }))
+
+  await waitFor(() => expect(adoptMock).toHaveBeenCalledWith("ws-1"))
+  expect(await screen.findByText("kinds.managed")).toBeInTheDocument()
 })

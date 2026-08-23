@@ -856,6 +856,7 @@ commands.allow = [
   "task_workspace_list_resources",
   "task_workspace_list_runs",
   "task_workspace_managed_archive",
+  "task_workspace_managed_adopt",
   "task_workspace_managed_delete",
   "task_workspace_managed_get",
   "task_workspace_managed_list",

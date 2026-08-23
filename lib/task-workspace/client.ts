@@ -250,6 +250,10 @@ export function makeManagedWorkspacePermanent(
   return transport.call("task_workspace_managed_permanent", { workspaceId })
 }
 
+export function adoptManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_managed_adopt", { workspaceId })
+}
+
 export function archiveManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
   return transport.call("task_workspace_managed_archive", { workspaceId })
 }

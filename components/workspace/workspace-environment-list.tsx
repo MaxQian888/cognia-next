@@ -36,6 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
+  adoptManagedWorkspace,
   archiveManagedWorkspace,
   deleteManagedWorkspace,
   listManagedWorkspaces,
@@ -242,6 +243,17 @@ export function WorkspaceEnvironmentList() {
                           <ArchiveIcon aria-hidden className="size-4" />
                         </Button>
                       </>
+                    ) : null}
+                    {row.environmentKind === "imported" && row.state === "active" ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        disabled={pendingId === row.workspaceId}
+                        onClick={() => void updateEnvironment(row, adoptManagedWorkspace)}
+                        aria-label={t("adopt")}
+                      >
+                        <ShieldCheckIcon aria-hidden className="size-4" />
+                      </Button>
                     ) : null}
                     {row.environmentKind === "managed" &&
                     (row.state === "archived" || row.state === "restorable") ? (

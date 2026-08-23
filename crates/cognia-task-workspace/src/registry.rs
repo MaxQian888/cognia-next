@@ -490,6 +490,39 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Transfer an explicitly selected Imported row into Cognia ownership.
+    /// The caller must establish any physical Git lock before committing this
+    /// metadata change; unknown environments remain read-only until this call.
+    pub fn adopt_imported(
+        &self,
+        workspace_id: &str,
+        owner_type: WorkspaceOwnerType,
+        owner_ref: Option<String>,
+        environment_kind: WorkspaceEnvironmentKind,
+    ) -> Result<WorkspaceRecord, RegistryError> {
+        if owner_type == WorkspaceOwnerType::Imported
+            || environment_kind == WorkspaceEnvironmentKind::Imported
+        {
+            return Err(RegistryError::NotImported(workspace_id.to_string()));
+        }
+        let store = self.store.lock();
+        let mut record = store
+            .get_workspace(workspace_id)
+            .map_err(RegistryError::Store)?
+            .ok_or_else(|| RegistryError::NotFound(workspace_id.to_string()))?;
+        if record.owner_type != WorkspaceOwnerType::Imported
+            || record.environment_kind != WorkspaceEnvironmentKind::Imported
+        {
+            return Err(RegistryError::NotImported(workspace_id.to_string()));
+        }
+        record.owner_type = owner_type;
+        record.owner_ref = owner_ref;
+        record.environment_kind = environment_kind;
+        record.locked_by = Some(compose_lock_reason(workspace_id));
+        store.put_workspace(&record).map_err(RegistryError::Store)?;
+        Ok(record)
+    }
+
     pub fn set_archive_metadata(
         &self,
         workspace_id: &str,
@@ -935,6 +968,44 @@ mod tests {
             )
             .expect_err("must reject imported");
         assert!(matches!(error, RegistryError::OwnershipMismatch { .. }));
+    }
+
+    #[test]
+    fn imported_rows_require_explicit_adoption_before_ownership_changes() {
+        let (registry, _dir) = new_registry();
+        let imported = registry
+            .insert_imported(
+                ImportedWorkspaceHint {
+                    source_root: "/workspace".into(),
+                    execution_root: "/tmp/imported".into(),
+                    git_common_dir: Some("/workspace/.git".into()),
+                    branch: None,
+                },
+                1,
+            )
+            .unwrap();
+        let lock_reason = compose_lock_reason(&imported.workspace_id);
+        let adopted = registry
+            .adopt_imported(
+                &imported.workspace_id,
+                WorkspaceOwnerType::User,
+                None,
+                WorkspaceEnvironmentKind::Managed,
+            )
+            .unwrap();
+
+        assert_eq!(adopted.owner_type, WorkspaceOwnerType::User);
+        assert_eq!(adopted.environment_kind, WorkspaceEnvironmentKind::Managed);
+        assert_eq!(adopted.locked_by.as_deref(), Some(lock_reason.as_str()));
+        assert!(matches!(
+            registry.adopt_imported(
+                &imported.workspace_id,
+                WorkspaceOwnerType::User,
+                None,
+                WorkspaceEnvironmentKind::Managed,
+            ),
+            Err(RegistryError::NotImported(_))
+        ));
     }
 
     #[test]

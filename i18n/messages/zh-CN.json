@@ -43200,6 +43200,7 @@
   "workspace": {
     "environments": {
       "actions": "操作",
+      "adopt": "接管已导入环境",
       "archive": "归档环境",
       "base": "基线",
       "bases": {

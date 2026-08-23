@@ -315,6 +315,11 @@ pub fn task_workspace_managed_permanent(workspace_id: String) -> Result<Workspac
 }
 
 #[tauri::command]
+pub async fn task_workspace_managed_adopt(workspace_id: String) -> Result<WorkspaceRecord, String> {
+    blocking(move |service| service.adopt_imported_workspace(&workspace_id)).await
+}
+
+#[tauri::command]
 pub async fn task_workspace_managed_archive(
     workspace_id: String,
 ) -> Result<WorkspaceRecord, String> {

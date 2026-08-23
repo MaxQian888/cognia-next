@@ -43200,6 +43200,7 @@
   "workspace": {
     "environments": {
       "actions": "Actions",
+      "adopt": "Adopt imported environment",
       "archive": "Archive environment",
       "base": "Base",
       "bases": {

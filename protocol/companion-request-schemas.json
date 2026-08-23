@@ -8603,6 +8603,19 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_managed_adopt": {
+      "type": "object",
+      "required": [
+        "workspaceId"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_managed_delete": {
       "type": "object",
       "required": [

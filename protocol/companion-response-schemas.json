@@ -4488,6 +4488,9 @@
     "task_workspace_managed_archive": {
       "$ref": "#/$defs/LegacyRecord"
     },
+    "task_workspace_managed_adopt": {
+      "$ref": "#/$defs/LegacyRecord"
+    },
     "task_workspace_managed_delete": {
       "$ref": "#/$defs/NullResult"
     },

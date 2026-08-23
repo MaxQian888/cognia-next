@@ -26,6 +26,7 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_managed_pin",
     "task_workspace_managed_permanent",
     "task_workspace_managed_archive",
+    "task_workspace_managed_adopt",
     "task_workspace_managed_restore",
     "task_workspace_managed_delete",
     "task_workspace_settle",
@@ -341,6 +342,16 @@ pub(super) async fn dispatch(
             let workspace_id: String = required(&args, "workspaceId")?;
             tokio::task::spawn_blocking(move || {
                 crate::task_workspace::service()?.archive_managed_workspace(&workspace_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_managed_adopt" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.adopt_imported_workspace(&workspace_id)
             })
             .await
             .map_err(|error| RpcError::internal(error.to_string()))?
@@ -768,6 +779,7 @@ mod tests {
             "task_workspace_policy_get",
             "task_workspace_policy_set",
             "task_workspace_managed_archive",
+            "task_workspace_managed_adopt",
             "task_workspace_managed_restore",
             "task_workspace_managed_delete",
         ] {

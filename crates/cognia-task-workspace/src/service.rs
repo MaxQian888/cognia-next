@@ -950,6 +950,88 @@ impl TaskWorkspaceService {
             .map_err(|error| error.to_string())
     }
 
+    pub fn adopt_imported_workspace(&self, workspace_id: &str) -> Result<WorkspaceRecord, String> {
+        let record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.environment_kind != crate::WorkspaceEnvironmentKind::Imported
+            || record.owner_type != WorkspaceOwnerType::Imported
+        {
+            return Err("only an imported environment can be adopted".into());
+        }
+        if record.state != WorkspaceState::Active {
+            return Err("only an active imported environment can be adopted".into());
+        }
+        self.enforce_managed_workspace_capacity(1)?;
+        let lock_reason = crate::registry::compose_lock_reason(workspace_id);
+        if record.isolation_kind == IsolationKind::GitWorktree {
+            match managed_git_lock_reason(
+                Path::new(&record.source_root),
+                Path::new(&record.execution_root),
+            )? {
+                Some(existing_reason) if existing_reason == lock_reason => {
+                    // A matching lock can remain after a process exit between
+                    // the physical lock and the Registry transaction. Resume
+                    // that adoption instead of stranding the imported row.
+                }
+                Some(existing_reason) => {
+                    return Err(format!(
+                        "imported worktree is locked by another owner ({existing_reason}); unlock it explicitly before adoption"
+                    ));
+                }
+                None => {
+                    let lock = Command::new("git")
+                        .args(["-C"])
+                        .arg(&record.source_root)
+                        .args(["worktree", "lock", "--reason", &lock_reason])
+                        .arg(&record.execution_root)
+                        .output()
+                        .map_err(|error| format!("start git worktree adoption lock: {error}"))?;
+                    if !lock.status.success() {
+                        return Err(format!(
+                            "adopt imported worktree lock failed: {}",
+                            String::from_utf8_lossy(&lock.stderr).trim()
+                        ));
+                    }
+                }
+            }
+        }
+        match self.registry.adopt_imported(
+            workspace_id,
+            WorkspaceOwnerType::User,
+            None,
+            crate::WorkspaceEnvironmentKind::Managed,
+        ) {
+            Ok(adopted) => Ok(adopted),
+            Err(error) => {
+                if record.isolation_kind == IsolationKind::GitWorktree {
+                    let unlock = Command::new("git")
+                        .args(["-C"])
+                        .arg(&record.source_root)
+                        .args(["worktree", "unlock"])
+                        .arg(&record.execution_root)
+                        .output()
+                        .map_err(|unlock_error| {
+                            format!(
+                                "adoption Registry update failed: {error}; recovery could not start git worktree unlock: {unlock_error}; inspect {} before retrying",
+                                record.execution_root
+                            )
+                        })?;
+                    if !unlock.status.success() {
+                        return Err(format!(
+                            "adoption Registry update failed: {error}; recovery could not unlock the worktree: {}; inspect {} before retrying",
+                            String::from_utf8_lossy(&unlock.stderr).trim(),
+                            record.execution_root
+                        ));
+                    }
+                }
+                Err(error.to_string())
+            }
+        }
+    }
+
     pub fn archive_managed_workspace(&self, workspace_id: &str) -> Result<WorkspaceRecord, String> {
         let mut record = self
             .registry
@@ -4769,6 +4851,50 @@ mod tests {
                 .count(),
             1
         );
+        let foreign_lock = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "lock", "--reason", "external-owner"])
+            .arg(&external)
+            .status()
+            .unwrap();
+        assert!(foreign_lock.success());
+        assert!(reopened
+            .adopt_imported_workspace(&imported.workspace_id)
+            .unwrap_err()
+            .contains("locked by another owner (external-owner)"));
+        let foreign_unlock = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "unlock"])
+            .arg(&external)
+            .status()
+            .unwrap();
+        assert!(foreign_unlock.success());
+
+        let expected_lock = crate::registry::compose_lock_reason(&imported.workspace_id);
+        let interrupted_lock = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "lock", "--reason", &expected_lock])
+            .arg(&external)
+            .status()
+            .unwrap();
+        assert!(interrupted_lock.success());
+        let adopted = reopened
+            .adopt_imported_workspace(&imported.workspace_id)
+            .unwrap();
+        assert_eq!(
+            adopted.environment_kind,
+            crate::WorkspaceEnvironmentKind::Managed
+        );
+        assert_eq!(adopted.owner_type, WorkspaceOwnerType::User);
+        assert_eq!(
+            managed_git_lock_reason(&repository, &external)
+                .unwrap()
+                .as_deref(),
+            Some(expected_lock.as_str())
+        );
     }
 
     #[test]
@@ -4799,5 +4925,52 @@ mod tests {
 
         let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         assert_eq!(reopened.workspace_lifecycle_policy(), policy);
+    }
+
+    #[test]
+    fn adoption_respects_managed_workspace_capacity() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .set_workspace_lifecycle_policy(crate::WorkspaceLifecyclePolicy {
+                active_directory_cap: 1,
+                snapshot_retention_days: 9,
+                blob_budget_bytes: 4096,
+            })
+            .unwrap();
+        service
+            .begin_run(input(&workspace, "task-capacity-1", "run-capacity-1"))
+            .unwrap();
+        let imported = service
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: workspace.path().to_string_lossy().into_owned(),
+                    execution_root: workspace
+                        .path()
+                        .join("external")
+                        .to_string_lossy()
+                        .into_owned(),
+                    git_common_dir: None,
+                    branch: None,
+                },
+                2,
+            )
+            .unwrap();
+
+        let adoption_error = service
+            .adopt_imported_workspace(&imported.workspace_id)
+            .unwrap_err();
+        assert!(adoption_error.contains("managed workspace capacity reached (1+1/1)"));
+        assert_eq!(
+            service
+                .registry
+                .get(&imported.workspace_id)
+                .unwrap()
+                .unwrap()
+                .environment_kind,
+            crate::WorkspaceEnvironmentKind::Imported
+        );
     }
 }

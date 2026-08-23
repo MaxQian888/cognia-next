@@ -18,6 +18,7 @@ import {
   applyTaskWorkspace,
   beginTaskWorkspaceTurn,
   beginTaskWorkspaceBundleTurn,
+  adoptManagedWorkspace,
   exportTaskResourceManifest,
   getTaskResourceSummary,
   listTaskResourceEvents,
@@ -217,6 +218,16 @@ describe("task workspace client", () => {
       ["task_workspace_managed_restore", { workspaceId: "ws-2" }],
       ["task_workspace_managed_delete", { workspaceId: "ws-2" }],
     ])
+  })
+
+  it("adopts imported environments only through the explicit Registry command", async () => {
+    call.mockResolvedValueOnce({ workspaceId: "ws-imported", environmentKind: "managed" })
+
+    await adoptManagedWorkspace("ws-imported")
+
+    expect(call).toHaveBeenCalledWith("task_workspace_managed_adopt", {
+      workspaceId: "ws-imported",
+    })
   })
 
   it("reconciles signed and imported worktrees through the host", async () => {
