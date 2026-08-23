@@ -139,6 +139,14 @@ export async function invalidateCapabilityGrants(
   return collection.filter((grant) => grant.providerFingerprint !== providerFingerprint).delete()
 }
 
+export async function removeServiceConnection(id: string): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", [db.serviceConnections, db.capabilityGrants], async () => {
+    await db.capabilityGrants.where("connectionId").equals(id).delete()
+    await db.serviceConnections.delete(id)
+  })
+}
+
 export async function putOpenApiImport(row: OpenApiImportRow): Promise<OpenApiImportRow> {
   if (!row.id || !row.serviceId || !row.providerId || !row.documentFingerprint) {
     throw new Error("OpenAPI import identity is incomplete")

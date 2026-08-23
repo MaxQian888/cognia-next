@@ -48,6 +48,7 @@ function integrationCapabilities(
     risk: action.risk,
     inputSchema: action.inputSchema,
     outputSchema: action.outputSchema,
+    scopeSelectors: action.scopeSelectors,
     surfaces: provider.surfaces,
   }))
   for (const kind of integration.resourceKinds) {
@@ -102,7 +103,23 @@ export function registerExternalServicesForPlugin(
   pluginId: string,
   manifest: PluginManifest
 ): void {
-  const services = manifest.services ?? []
+  const services =
+    manifest.services ??
+    (manifest.integrations ?? []).map((integration) => ({
+      id: integration.id,
+      label: integration.label,
+      description: integration.description,
+      fallbackPolicy: "confirm" as const,
+      providers: [
+        {
+          id: "integration",
+          kind: "integration" as const,
+          contributionId: integration.id,
+          priority: 100,
+          surfaces: ["chat", "workflow", "inbox"] as const,
+        },
+      ],
+    }))
   if (services.length === 0) return
   unregisterManagedMcpChatSurfacesByPlugin(pluginId)
   unregisterExternalServicesByPlugin(pluginId)

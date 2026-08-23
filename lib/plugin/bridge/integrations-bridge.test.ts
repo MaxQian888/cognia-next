@@ -61,17 +61,36 @@ describe("Integration manifest bridge", () => {
     const commentIssue = jest.fn()
     const listResources = jest.fn()
     const checkHealth = jest.fn()
+    const registeredTools: Array<{ name: string; definition: { parametersSchema: unknown } }> = []
 
-    await registerIntegrationsForPlugin("example-delivery", manifest, {
-      commentIssue,
-      listResources,
-      checkHealth,
-    })
+    await registerIntegrationsForPlugin(
+      "example-delivery",
+      manifest,
+      {
+        commentIssue,
+        listResources,
+        checkHealth,
+      },
+      (tool) => {
+        registeredTools.push(tool)
+        return () => undefined
+      }
+    )
 
     expect(listRegisteredIntegrations("example-delivery")).toHaveLength(1)
     expect(getIntegrationResourceProvider("example-delivery", "example")).toBe(listResources)
     expect(getIntegrationAccountStatusProvider("example-delivery", "example")).toBe(checkHealth)
     expect(getExecutor("example-delivery.action.issue.comment" as never, 1)).toBeDefined()
+    expect(registeredTools).toEqual([
+      expect.objectContaining({
+        name: "integration__example-delivery__example__issue_comment",
+        definition: expect.objectContaining({
+          parametersSchema: expect.objectContaining({
+            required: ["accountId", "issueId"],
+          }),
+        }),
+      }),
+    ])
     expect(
       getPluginCatalogSnapshot().find(
         (entry) => entry.kind === ("example-delivery.action.issue.comment" as never)

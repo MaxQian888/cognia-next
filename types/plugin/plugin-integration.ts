@@ -46,6 +46,8 @@ export interface IntegrationActionDef {
   risk: IntegrationActionRisk
   idempotency: IntegrationActionIdempotency
   timeoutMs?: number
+  /** Input selectors used to scope durable account/resource grants. */
+  scopeSelectors?: Array<{ kind: string; jsonPointer: string }>
 }
 
 /**

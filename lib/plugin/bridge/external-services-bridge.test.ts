@@ -119,4 +119,19 @@ describe("external services plugin bridge", () => {
     )
     expect(listExternalServices()).toEqual([])
   })
+
+  it("creates a temporary service projection for legacy integration manifests", () => {
+    const legacy = manifest()
+    delete legacy.services
+    registerExternalServicesForPlugin("delivery", legacy)
+
+    expect(listExternalServices("delivery")).toEqual([
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          id: "github",
+          providers: [expect.objectContaining({ id: "integration", kind: "integration" })],
+        }),
+      }),
+    ])
+  })
 })

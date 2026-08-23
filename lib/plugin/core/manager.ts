@@ -5237,6 +5237,16 @@ export class PluginManager {
       resolveAsset: await createPluginAssetResolver(pluginId),
       moduleExports: this.loader.getModuleExports(pluginId) ?? {},
       hasPermission: (permission: string) => context.permissions.hasPermission(permission as never),
+      registerAgentTool: (tool: PluginTool) => {
+        this.registry.registerTool(pluginId, tool)
+        usePluginStore.getState().registerPluginTool(pluginId, tool)
+        return () => {
+          if (this.registry.getTool(tool.name)?.pluginId === pluginId) {
+            this.registry.unregisterTool(tool.name)
+            usePluginStore.getState().unregisterPluginTool(pluginId, tool.name)
+          }
+        }
+      },
     }
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       const descriptor = MODULE_BRIDGE_CAPABILITIES[cap]
@@ -5253,10 +5263,14 @@ export class PluginManager {
     // External services are a control-plane composition over existing provider
     // contributions. Register them only after provider bridges so discovery
     // never exposes a service whose native runtime failed to activate.
-    if (plugin.manifest.services?.length) {
+    if (plugin.manifest.services?.length || plugin.manifest.integrations?.length) {
       const { registerExternalServicesForPlugin } =
         await import("@/lib/plugin/bridge/external-services-bridge")
       registerExternalServicesForPlugin(pluginId, plugin.manifest)
+      if (plugin.manifest.integrations?.length) {
+        const { reprojectIntegrationAccountsForPlugin } = await import("@/lib/db/integrations")
+        await reprojectIntegrationAccountsForPlugin(pluginId)
+      }
     }
 
     // Phase B of the LSP reuse work — `manifest.lspServers[]`. Kept

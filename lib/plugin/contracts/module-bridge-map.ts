@@ -32,6 +32,7 @@
  */
 
 import type { PluginManifest } from "@/types/plugin/plugin"
+import type { PluginTool } from "@/types/plugin/plugin"
 import type { PluginAssetResolver } from "@/lib/plugin/core/plugin-asset-resolver"
 import {
   registerAiProvidersForPlugin,
@@ -139,6 +140,8 @@ export interface ModuleBridgeContext {
   moduleExports: Record<string, unknown>
   /** Live permission resolver; reflects revocation without re-enabling. */
   hasPermission: (permission: string) => boolean
+  /** Host-owned tool registration used by semantic provider projections. */
+  registerAgentTool: (tool: PluginTool) => () => void
 }
 
 export interface ModuleBridgeCapabilityDescriptor {
@@ -236,7 +239,12 @@ export const MODULE_BRIDGE_CAPABILITIES = {
     key: "integrations",
     manifestField: "integrations",
     register: async (ctx) => {
-      await registerIntegrationsForPlugin(ctx.pluginId, ctx.manifest, ctx.moduleExports)
+      await registerIntegrationsForPlugin(
+        ctx.pluginId,
+        ctx.manifest,
+        ctx.moduleExports,
+        ctx.registerAgentTool
+      )
     },
     unregister: unregisterIntegrationsForPlugin,
   },

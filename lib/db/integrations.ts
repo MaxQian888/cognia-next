@@ -9,6 +9,13 @@ import type {
   IntegrationSubscriptionInput,
 } from "@/types/plugin/plugin-integration"
 import { getDb } from "./schema"
+import {
+  listServiceConnections,
+  putServiceConnection,
+  removeServiceConnection,
+} from "./external-services"
+import { listExternalCapabilities, listExternalServices } from "@/lib/external-services/catalog"
+import { sha256Hex } from "@/lib/share/hash"
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -27,6 +34,60 @@ function normalizeApprovedOrigins(origins?: string[]): string[] | undefined {
       })
     ),
   ]
+}
+
+async function projectIntegrationAccount(account: IntegrationAccount): Promise<void> {
+  const services = listExternalServices(account.pluginId)
+  for (const service of services) {
+    for (const provider of service.definition.providers) {
+      if (provider.kind !== "integration" || provider.contributionId !== account.integrationId) {
+        continue
+      }
+      const capabilities = listExternalCapabilities({
+        pluginId: account.pluginId,
+        serviceId: service.definition.id,
+        providerId: provider.id,
+      }).map((capability) => ({
+        capabilityId: capability.capabilityId,
+        operationId: capability.operationId,
+        risk: capability.risk,
+        inputSchema: capability.inputSchema,
+      }))
+      const providerFingerprint = await sha256Hex(
+        JSON.stringify({
+          providerId: account.providerId,
+          approvedOrigins: account.approvedOrigins ?? [],
+          capabilities,
+        })
+      )
+      const id = `integration:${account.id}:${service.definition.id}:${provider.id}`
+      const existing = await getDb().serviceConnections.get(id)
+      await putServiceConnection({
+        id,
+        pluginId: account.pluginId,
+        serviceId: service.definition.id,
+        providerId: provider.id,
+        runtimeTargetId: "local",
+        accountLabel: account.label,
+        status: !account.enabled
+          ? "suspended"
+          : account.health === "revoked"
+            ? "needs-auth"
+            : "connected",
+        providerFingerprint,
+        providerRef: { kind: "integration", accountId: account.id },
+        enabledSurfaces: existing?.enabledSurfaces ?? provider.surfaces,
+        createdAt: existing?.createdAt ?? account.createdAt,
+        updatedAt: account.updatedAt,
+      })
+    }
+  }
+}
+
+export async function reprojectIntegrationAccountsForPlugin(pluginId: string): Promise<number> {
+  const accounts = await getDb().integrationAccounts.where("pluginId").equals(pluginId).toArray()
+  await Promise.all(accounts.map(projectIntegrationAccount))
+  return accounts.length
 }
 
 export async function createIntegrationAccount(
@@ -50,6 +111,12 @@ export async function createIntegrationAccount(
     updatedAt: now,
   }
   await getDb().integrationAccounts.add(row)
+  try {
+    await projectIntegrationAccount(row)
+  } catch (error) {
+    await getDb().integrationAccounts.delete(row.id)
+    throw error
+  }
   return row
 }
 
@@ -88,6 +155,7 @@ export async function updateIntegrationAccount(
   if (!existing) throw new Error(`Integration account "${accountId}" was not found`)
   const row = { ...existing, ...patch, updatedAt: nowIso() }
   await getDb().integrationAccounts.put(row)
+  await projectIntegrationAccount(row)
   return row
 }
 
@@ -95,6 +163,11 @@ export async function removeIntegrationAccount(pluginId: string, accountId: stri
   const existing = await getIntegrationAccount(pluginId, accountId)
   if (!existing) return
   const db = getDb()
+  const connections = (await listServiceConnections({ pluginId })).filter(
+    (connection) =>
+      connection.providerRef.kind === "integration" &&
+      connection.providerRef.accountId === accountId
+  )
   await db.transaction(
     "rw",
     [
@@ -110,6 +183,7 @@ export async function removeIntegrationAccount(pluginId: string, accountId: stri
       await db.integrationActionJobs.where("accountId").equals(accountId).delete()
     }
   )
+  await Promise.all(connections.map((connection) => removeServiceConnection(connection.id)))
 }
 
 export async function getIntegrationIngressEndpoint(
