@@ -9,11 +9,107 @@
 
 import type { NetworkProxySettings } from "@/types/network/proxy"
 
-/** True when the user has enabled a proxy AND filled in a host + non-zero port. */
+/**
+ * Why a proxy host was refused. Distinct cases because the settings UI can
+ * only say something useful ("drop the `http://`", "the port goes in its own
+ * field") if it knows which mistake was made.
+ */
+export type ProxyHostRejection =
+  "empty" | "scheme" | "userinfo" | "path" | "port-in-host" | "illegal-character" | "malformed"
+
+export type ProxyHostValidation =
+  { ok: true; host: string } | { ok: false; reason: ProxyHostRejection }
+
+/** Characters a host may contain. Everything else is refused up front. */
+const HOST_CHARSET = /^[A-Za-z0-9._\-:[\]]+$/
+
+/**
+ * Validate a proxy host as the user typed it.
+ *
+ * A host field that accepts anything is not a convenience — `http://proxy`
+ * becomes `http://http://proxy:8080`, `user:pw@proxy` puts credentials in a
+ * URL the renderer is never allowed to build, and `proxy:8080` silently
+ * produces a double port. Each of those used to be accepted and fail later
+ * as an opaque connection error.
+ *
+ * Refusing control and non-DNS bytes also closes the parser/resolver
+ * differential class: the string validated here is the string that gets
+ * dialled, so an embedded NUL or CR cannot make the two disagree.
+ *
+ * Returns the trimmed host on success. IPv6 is accepted bare or bracketed and
+ * normalized to bare — [`formatProxyAuthority`] adds the brackets back where
+ * a URL needs them.
+ */
+export function validateProxyHost(raw: string): ProxyHostValidation {
+  const host = raw.trim()
+  if (host.length === 0) return { ok: false, reason: "empty" }
+  if (host.includes("://")) return { ok: false, reason: "scheme" }
+  if (host.includes("@")) return { ok: false, reason: "userinfo" }
+  if (host.includes("/") || host.includes("?") || host.includes("#")) {
+    return { ok: false, reason: "path" }
+  }
+  if (!HOST_CHARSET.test(host)) return { ok: false, reason: "illegal-character" }
+
+  const bare = stripBrackets(host)
+  if (host.startsWith("[")) {
+    // A bracketed host is an IPv6 literal by definition; anything else in
+    // brackets is malformed rather than a hostname that happens to have them.
+    if (!host.endsWith("]") || !isIpv6(bare)) return { ok: false, reason: "malformed" }
+    return { ok: true, host: bare }
+  }
+  if (host.includes(":")) {
+    // Either a bare IPv6 literal or — far more likely — someone pasted
+    // `proxy.corp:8080` into a field that already has a port of its own.
+    return isIpv6(host) ? { ok: true, host } : { ok: false, reason: "port-in-host" }
+  }
+  if (host.startsWith(".") || host.endsWith(".") || host.includes("..")) {
+    return { ok: false, reason: "malformed" }
+  }
+  return { ok: true, host }
+}
+
+/** True for a usable TCP port. `0` is "unset", not "pick one for me". */
+export function validateProxyPort(port: number): boolean {
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+}
+
+/**
+ * `host:port` for a URL, TCP dial, or CONNECT line.
+ *
+ * IPv6 literals must be bracketed or the last group is read as the port:
+ * `::1:8080` is not a parse of `::1` port 8080, it is a different (invalid)
+ * address. Mirrors `proxy_config::authority` on the Rust side.
+ */
+export function formatProxyAuthority(host: string, port: number): string {
+  const bare = stripBrackets(host.trim())
+  return isIpv6(bare) ? `[${bare}]:${port}` : `${bare}:${port}`
+}
+
+/**
+ * Strip the brackets `URL.hostname` keeps on an IPv6 literal.
+ *
+ * `new URL("http://[::1]/").hostname` is `"[::1]"`, so comparing it against a
+ * bypass entry of `::1` never matched — and `::1` is in the DEFAULT bypass
+ * list, which meant loopback IPv6 was silently proxied.
+ */
+export function normalizeProxyHostForMatch(hostname: string): string {
+  return stripBrackets(hostname.trim().toLowerCase())
+}
+
+function stripBrackets(value: string): string {
+  return value.startsWith("[") && value.endsWith("]") ? value.slice(1, -1) : value
+}
+
+function isIpv6(value: string): boolean {
+  const parsed = parseIpv6(value)
+  return parsed !== null
+}
+
+/** True when the user has enabled a proxy AND filled in a valid host + port. */
 export function isProxyActive(cfg?: NetworkProxySettings | null): cfg is NetworkProxySettings {
   if (!cfg) return false
   if (cfg.mode === "off") return false
-  return cfg.host.trim().length > 0 && cfg.port > 0
+  return validateProxyHost(cfg.host).ok && validateProxyPort(cfg.port)
 }
 
 /**
@@ -26,7 +122,7 @@ export function isProxyActive(cfg?: NetworkProxySettings | null): cfg is Network
 export function buildProxyUrl(cfg?: NetworkProxySettings | null): string | null {
   if (!isProxyActive(cfg)) return null
   const scheme = cfg.protocol === "socks5" ? "socks5" : cfg.protocol
-  return `${scheme}://${cfg.host}:${cfg.port}`
+  return `${scheme}://${formatProxyAuthority(cfg.host, cfg.port)}`
 }
 
 type ParsedIp = { bits: 32 | 128; bytes: number[] }
@@ -116,14 +212,18 @@ export function shouldBypass(targetUrl: string, bypass: string[]): boolean {
   if (bypass.length === 0) return false
   let host: string
   try {
-    host = new URL(targetUrl).hostname.toLowerCase()
+    // Bracket-stripped once, for every branch. `URL.hostname` keeps the
+    // brackets on an IPv6 literal, so the literal comparison below used to
+    // test `"[::1]" === "::1"` and never match — with `::1` in the default
+    // bypass list.
+    host = normalizeProxyHostForMatch(new URL(targetUrl).hostname)
   } catch {
     return false
   }
   return bypass.some((raw) => {
-    const entry = raw.trim().toLowerCase()
+    const entry = normalizeProxyHostForMatch(raw)
     if (!entry) return false
-    if (entry.includes("/")) return cidrMatches(host.replace(/^\[|\]$/g, ""), entry)
+    if (entry.includes("/")) return cidrMatches(host, entry)
     if (entry.startsWith(".")) return host === entry.slice(1) || host.endsWith(entry)
     return host === entry
   })

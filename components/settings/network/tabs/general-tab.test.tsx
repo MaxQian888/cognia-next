@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, cleanup } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) => {
@@ -309,5 +309,95 @@ describe("NetworkGeneralTab", () => {
     expect(saveMock).toHaveBeenCalled()
     const patch = saveMock.mock.calls[0][0]
     expect(patch.networkProxy.username).toBe("alice")
+  })
+})
+
+describe("NetworkGeneralTab — host and port validation", () => {
+  async function commitHost(value: string): Promise<HTMLInputElement> {
+    mockedSettings = { networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, mode: "manual" } }
+    render(<NetworkGeneralTab />)
+    const input = screen.getByLabelText("form.host") as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(input, { target: { value } })
+      fireEvent.blur(input)
+    })
+    return input
+  }
+
+  it("names the specific mistake for each rejected host", async () => {
+    // These were all accepted before, producing `http://http://proxy:8080` or
+    // a double port, and surfacing much later as an opaque connect failure.
+    for (const [value, reason] of [
+      ["http://proxy.corp", "scheme"],
+      ["user:pw@proxy.corp", "userinfo"],
+      ["proxy.corp:8080", "port-in-host"],
+      ["proxy.corp/path", "path"],
+      ["proxy..corp", "malformed"],
+    ] as const) {
+      const input = await commitHost(value)
+      expect(screen.getByRole("alert")).toHaveTextContent(`form.hostError.${reason}`)
+      expect(input).toHaveAttribute("aria-invalid", "true")
+      cleanup()
+    }
+  })
+
+  it("accepts a plain host, an IPv4 literal and an IPv6 literal without complaint", async () => {
+    for (const value of ["proxy.corp", "127.0.0.1", "::1", "[2001:db8::1]"]) {
+      const input = await commitHost(value)
+      expect(screen.queryByRole("alert")).toBeNull()
+      expect(input).toHaveAttribute("aria-invalid", "false")
+      cleanup()
+    }
+  })
+
+  it("still persists a rejected host so the field never lies about what is stored", async () => {
+    // Silently discarding the typed value would leave the input showing
+    // something the app does not actually have.
+    saveMock.mockClear()
+    await commitHost("http://proxy.corp")
+    expect(saveMock.mock.calls[0][0].networkProxy.host).toBe("http://proxy.corp")
+  })
+
+  it("clears the message once the host is corrected", async () => {
+    mockedSettings = { networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, mode: "manual" } }
+    render(<NetworkGeneralTab />)
+    const input = screen.getByLabelText("form.host") as HTMLInputElement
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "http://proxy.corp" } })
+      fireEvent.blur(input)
+    })
+    expect(screen.getByRole("alert")).toBeInTheDocument()
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "proxy.corp" } })
+      fireEvent.blur(input)
+    })
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("flags an out-of-range port but treats an empty field as unset", async () => {
+    mockedSettings = { networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, mode: "manual" } }
+    render(<NetworkGeneralTab />)
+    const input = screen.getByLabelText("form.port") as HTMLInputElement
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "0" } })
+      fireEvent.blur(input)
+    })
+    expect(screen.getByRole("alert")).toHaveTextContent("form.portError")
+
+    // Clearing the field is how a user unsets the port, not an error.
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "" } })
+      fireEvent.blur(input)
+    })
+    expect(screen.queryByRole("alert")).toBeNull()
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "7890" } })
+      fireEvent.blur(input)
+    })
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 })

@@ -188,7 +188,13 @@ impl ProxyConfig {
         if matches!(self.mode, ProxyMode::Off) {
             return Ok(());
         }
-        if self.host.trim().is_empty() || self.port == 0 {
+        if let Err(reason) = validate_proxy_host(&self.host) {
+            return Err(ProxyError::new(
+                ProxyErrorCode::ProxyInvalidConfig,
+                format!("proxy host is not usable: {reason}"),
+            ));
+        }
+        if self.port == 0 {
             return Err(ProxyError::new(
                 ProxyErrorCode::ProxyInvalidConfig,
                 "enabled proxy requires a host and non-zero port",
@@ -229,8 +235,8 @@ impl ProxyConfig {
             _ => String::new(),
         };
         Ok(Some(format!(
-            "{scheme}://{auth}{}:{}",
-            self.host, self.port
+            "{scheme}://{auth}{}",
+            authority(&self.host, self.port)
         )))
     }
 
@@ -270,16 +276,21 @@ impl ProxyConfig {
         if self.bypass.is_empty() {
             return false;
         }
+        // Bracket-stripped once, for every branch. `Url::host_str` keeps the
+        // brackets on an IPv6 literal, so the literal comparison below used to
+        // test `"[::1]" == "::1"` and never match — with `::1` in the DEFAULT
+        // bypass list, loopback IPv6 was silently proxied. Mirrors
+        // `normalizeProxyHostForMatch` on the TS side.
         let host = match url::Url::parse(target_url) {
-            Ok(u) => u.host_str().unwrap_or("").to_lowercase(),
+            Ok(u) => normalize_host_for_match(u.host_str().unwrap_or("")),
             Err(_) => return false,
         };
         if host.is_empty() {
             return false;
         }
-        let target_ip = host.trim_matches(['[', ']']).parse::<IpAddr>().ok();
+        let target_ip = host.parse::<IpAddr>().ok();
         self.bypass.iter().any(|raw| {
-            let entry = raw.trim().to_lowercase();
+            let entry = normalize_host_for_match(raw);
             if entry.is_empty() {
                 return false;
             }
@@ -306,10 +317,10 @@ impl ProxyConfig {
         })?;
         let bypass = self.bypass.clone();
         let proxy = reqwest::Proxy::custom(move |target| {
-            let host = target.host_str().unwrap_or("").to_lowercase();
-            let target_ip = host.trim_matches(['[', ']']).parse::<IpAddr>().ok();
+            let host = normalize_host_for_match(target.host_str().unwrap_or(""));
+            let target_ip = host.parse::<IpAddr>().ok();
             for raw in &bypass {
-                let entry = raw.trim().to_lowercase();
+                let entry = normalize_host_for_match(raw);
                 if entry.is_empty() {
                     continue;
                 }
@@ -389,6 +400,105 @@ impl ProxyConfig {
             _ => None,
         }
     }
+}
+
+/// Why a proxy host was refused. Mirrors `ProxyHostRejection` in
+/// `lib/network/proxy-config.ts`; the two must agree or the UI accepts a value
+/// the native side then rejects (or worse, silently mangles).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyHostRejection {
+    Empty,
+    Scheme,
+    Userinfo,
+    Path,
+    PortInHost,
+    IllegalCharacter,
+    Malformed,
+}
+
+impl fmt::Display for ProxyHostRejection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::Empty => "a host is required",
+            Self::Scheme => "drop the scheme (http:// / socks5://)",
+            Self::Userinfo => "credentials belong in the keyring, not the host",
+            Self::PortInHost => "the port belongs in its own field",
+            Self::Path => "a host cannot carry a path, query or fragment",
+            Self::IllegalCharacter => "the host contains a character a DNS name cannot",
+            Self::Malformed => "the host is not a valid name or IP literal",
+        };
+        formatter.write_str(text)
+    }
+}
+
+/// Validate a proxy host. Mirrors `validateProxyHost` in
+/// `lib/network/proxy-config.ts` — see that function for why each class is
+/// refused rather than accepted and mangled later.
+pub fn validate_proxy_host(raw: &str) -> Result<String, ProxyHostRejection> {
+    let host = raw.trim();
+    if host.is_empty() {
+        return Err(ProxyHostRejection::Empty);
+    }
+    if host.contains("://") {
+        return Err(ProxyHostRejection::Scheme);
+    }
+    if host.contains('@') {
+        return Err(ProxyHostRejection::Userinfo);
+    }
+    if host.contains('/') || host.contains('?') || host.contains('#') {
+        return Err(ProxyHostRejection::Path);
+    }
+    if !host.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '[' | ']')
+    }) {
+        return Err(ProxyHostRejection::IllegalCharacter);
+    }
+
+    let bare = strip_brackets(host);
+    if host.starts_with('[') {
+        if !host.ends_with(']') || bare.parse::<std::net::Ipv6Addr>().is_err() {
+            return Err(ProxyHostRejection::Malformed);
+        }
+        return Ok(bare.to_string());
+    }
+    if host.contains(':') {
+        return if host.parse::<std::net::Ipv6Addr>().is_ok() {
+            Ok(host.to_string())
+        } else {
+            Err(ProxyHostRejection::PortInHost)
+        };
+    }
+    if host.starts_with('.') || host.ends_with('.') || host.contains("..") {
+        return Err(ProxyHostRejection::Malformed);
+    }
+    Ok(host.to_string())
+}
+
+/// `host:port` for a URL, TCP dial, or CONNECT line.
+///
+/// IPv6 literals must be bracketed or the last group is read as the port:
+/// `::1:8080` is not a parse of `::1` port 8080, it is a different (invalid)
+/// address that `TcpStream::connect` refuses. Mirrors `formatProxyAuthority`
+/// on the TS side.
+pub fn authority(host: &str, port: u16) -> String {
+    let bare = strip_brackets(host.trim());
+    if bare.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{bare}]:{port}")
+    } else {
+        format!("{bare}:{port}")
+    }
+}
+
+/// Lowercase and strip the brackets a URL parser keeps on an IPv6 literal.
+pub fn normalize_host_for_match(host: &str) -> String {
+    strip_brackets(host.trim()).to_lowercase()
+}
+
+fn strip_brackets(value: &str) -> &str {
+    value
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(value)
 }
 
 fn parse_cidr(entry: &str) -> Option<(IpAddr, u8)> {
@@ -834,6 +944,109 @@ mod tests {
             .contains("/after-change"));
 
         reset_uninitialized();
+    }
+
+    #[test]
+    fn validate_proxy_host_accepts_names_ipv4_and_either_ipv6_form() {
+        assert_eq!(validate_proxy_host("proxy.corp").unwrap(), "proxy.corp");
+        assert_eq!(validate_proxy_host("  10.0.0.1 ").unwrap(), "10.0.0.1");
+        assert_eq!(validate_proxy_host("::1").unwrap(), "::1");
+        // Brackets are normalized away; `authority` puts them back.
+        assert_eq!(validate_proxy_host("[2001:db8::1]").unwrap(), "2001:db8::1");
+    }
+
+    #[test]
+    fn validate_proxy_host_names_the_mistake() {
+        // Mirrors the TS cases one-for-one; the two sides must agree or the UI
+        // accepts a value the native side rejects.
+        use ProxyHostRejection::*;
+        assert_eq!(validate_proxy_host("").unwrap_err(), Empty);
+        assert_eq!(validate_proxy_host("   ").unwrap_err(), Empty);
+        assert_eq!(validate_proxy_host("http://proxy.corp").unwrap_err(), Scheme);
+        assert_eq!(
+            validate_proxy_host("socks5://proxy.corp").unwrap_err(),
+            Scheme
+        );
+        assert_eq!(
+            validate_proxy_host("user:pw@proxy.corp").unwrap_err(),
+            Userinfo
+        );
+        assert_eq!(validate_proxy_host("proxy.corp/path").unwrap_err(), Path);
+        assert_eq!(validate_proxy_host("proxy.corp?a=1").unwrap_err(), Path);
+        assert_eq!(
+            validate_proxy_host("proxy.corp:8080").unwrap_err(),
+            PortInHost
+        );
+        assert_eq!(validate_proxy_host(".corp").unwrap_err(), Malformed);
+        assert_eq!(validate_proxy_host("proxy..corp").unwrap_err(), Malformed);
+        assert_eq!(validate_proxy_host("[proxy.corp]").unwrap_err(), Malformed);
+        assert_eq!(validate_proxy_host("[::1").unwrap_err(), Malformed);
+    }
+
+    #[test]
+    fn validate_proxy_host_refuses_parser_resolver_differential_bytes() {
+        use ProxyHostRejection::IllegalCharacter;
+        assert_eq!(
+            validate_proxy_host("proxy\0.corp").unwrap_err(),
+            IllegalCharacter
+        );
+        assert_eq!(
+            validate_proxy_host("proxy\r\n.corp").unwrap_err(),
+            IllegalCharacter
+        );
+        assert_eq!(
+            validate_proxy_host("proxy%2ecorp").unwrap_err(),
+            IllegalCharacter
+        );
+    }
+
+    #[test]
+    fn config_validation_rejects_a_host_the_dialler_could_never_use() {
+        let mut cfg = manual("proxy.corp:8080", 8080);
+        assert!(cfg.validate().is_err());
+        assert!(!cfg.is_active() || cfg.credentialed_proxy_url().is_err());
+
+        cfg.host = "http://proxy.corp".to_string();
+        assert!(cfg.validate().is_err());
+
+        cfg.host = "proxy.corp".to_string();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn authority_brackets_ipv6_and_leaves_the_rest_alone() {
+        assert_eq!(authority("proxy.corp", 8080), "proxy.corp:8080");
+        assert_eq!(authority("10.0.0.1", 1080), "10.0.0.1:1080");
+        // `::1:8080` is not "::1 port 8080" — `TcpStream::connect` refuses it.
+        assert_eq!(authority("::1", 8080), "[::1]:8080");
+        assert_eq!(authority("[2001:db8::1]", 3128), "[2001:db8::1]:3128");
+    }
+
+    #[test]
+    fn credentialed_url_brackets_an_ipv6_proxy() {
+        let cfg = manual("::1", 8080);
+        assert_eq!(
+            cfg.credentialed_proxy_url().unwrap().unwrap(),
+            "http://[::1]:8080"
+        );
+    }
+
+    #[test]
+    fn bypass_matches_a_bracketed_ipv6_target_against_a_bare_entry() {
+        // `Url::host_str` returns `"[::1]"`, so the literal comparison used to
+        // test `"[::1]" == "::1"` and never match — with `::1` in the DEFAULT
+        // bypass list, loopback IPv6 was silently proxied.
+        let mut cfg = manual("proxy.corp", 8080);
+        cfg.bypass = vec!["::1".to_string()];
+        assert!(cfg.should_bypass("http://[::1]:3000/health"));
+        assert!(!cfg.should_bypass("http://[2001:db8::1]/x"));
+
+        cfg.bypass = vec!["[::1]".to_string()];
+        assert!(cfg.should_bypass("http://[::1]:3000/health"));
+
+        cfg.bypass = vec!["2001:db8::/32".to_string()];
+        assert!(cfg.should_bypass("http://[2001:db8::5]/x"));
+        assert!(!cfg.should_bypass("http://[2001:dead::5]/x"));
     }
 
     #[test]

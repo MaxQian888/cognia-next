@@ -4,7 +4,7 @@
     "http": "HTTP 代理",
     "socks5": "SOCKS5 代理"
   },
-  "description": "把所有 HTTP / HTTPS / WebSocket 出站请求统一走本地代理 — Clash Verge、Mihomo、V2Ray、Shadowsocks 等。",
+  "description": "将本桌面应用的所有出站 HTTP、HTTPS 和 WebSocket 请求经本地代理转发 —— Clash Verge、Mihomo、V2Ray、Shadowsocks 或任意 HTTP/SOCKS5 代理。移动端与浏览器会话使用各自的系统设置。",
   "detection": {
     "apply": "应用",
     "button": "立即检测",
@@ -29,11 +29,21 @@
     "bypassHint": "命中以下主机或域名后缀的请求直接走直连。以「.」开头表示匹配域名后缀，例如「.internal」。",
     "clearPassword": "清除已保存密码",
     "host": "主机",
+    "hostError": {
+      "empty": "请输入主机地址。",
+      "illegal-character": "主机包含 DNS 名称不允许的字符。",
+      "malformed": "这不是合法的主机名或 IP 地址。",
+      "path": "主机不能包含路径、查询参数或锚点。",
+      "port-in-host": "端口请填在“端口”字段。",
+      "scheme": "请去掉协议前缀，只填主机，例如 127.0.0.1。",
+      "userinfo": "凭据请填在“用户名”和“密码”字段，不要写在主机里。"
+    },
     "optionalPlaceholder": "可选",
     "password": "密码",
     "passwordConfiguredPlaceholder": "密码已配置",
     "passwordKeyringError": "无法在安全存储中更新代理密码。",
     "port": "端口",
+    "portError": "请输入 1–65535 之间的端口。",
     "protocol": "协议",
     "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。",
     "proxyWebsocketsLabel": "WebSocket 走代理",

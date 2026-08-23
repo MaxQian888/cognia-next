@@ -31378,7 +31378,7 @@
         "http": "HTTP proxy",
         "socks5": "SOCKS5 proxy"
       },
-      "description": "Route every outbound HTTP, HTTPS, and WebSocket request through a local proxy — Clash Verge, Mihomo, V2Ray, Shadowsocks, or any HTTP/SOCKS5 proxy.",
+      "description": "Route every outbound HTTP, HTTPS, and WebSocket request from this desktop app through a local proxy — Clash Verge, Mihomo, V2Ray, Shadowsocks, or any HTTP/SOCKS5 proxy. Mobile and browser sessions use their own system settings.",
       "detection": {
         "apply": "Apply",
         "button": "Detect now",
@@ -31403,11 +31403,21 @@
         "bypassHint": "Hosts and domain suffixes that should skip the proxy. Add a leading dot to match a domain suffix (e.g. \".internal\").",
         "clearPassword": "Clear saved password",
         "host": "Host",
+        "hostError": {
+          "empty": "Enter a host.",
+          "illegal-character": "This host contains a character a DNS name cannot.",
+          "malformed": "This isn't a valid hostname or IP address.",
+          "path": "A host cannot include a path, query, or fragment.",
+          "port-in-host": "The port goes in the Port field.",
+          "scheme": "Drop the scheme — enter just the host, e.g. 127.0.0.1.",
+          "userinfo": "Credentials go in the Username and Password fields, not the host."
+        },
         "optionalPlaceholder": "Optional",
         "password": "Password",
         "passwordConfiguredPlaceholder": "Password configured",
         "passwordKeyringError": "Couldn't update the proxy password in secure storage.",
         "port": "Port",
+        "portError": "Enter a port between 1 and 65535.",
         "protocol": "Protocol",
         "proxyWebsocketsHint": "Tunnel Discord Gateway, Slack Socket Mode, and other WSS connections through the proxy via HTTP CONNECT or SOCKS5.",
         "proxyWebsocketsLabel": "Proxy WebSocket connections",

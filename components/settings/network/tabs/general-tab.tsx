@@ -47,6 +47,11 @@ import {
   type ProxyMode,
   type ProxyProtocol,
 } from "@/types/network/proxy"
+import {
+  validateProxyHost,
+  validateProxyPort,
+  type ProxyHostRejection,
+} from "@/lib/network/proxy-config"
 
 const MODE_VALUES: ProxyMode[] = ["off", "manual", "auto"]
 const PROTOCOL_VALUES: ProxyProtocol[] = ["http", "https", "socks5"]
@@ -62,6 +67,8 @@ export function NetworkGeneralTab() {
 
   // Local drafts for the free-text fields. Kept out of the store while typing
   // so the controlled inputs don't lag behind the async Dexie write.
+  const [hostError, setHostError] = useState<ProxyHostRejection | null>(null)
+  const [portError, setPortError] = useState(false)
   const [hostDraft, setHostDraft] = useState(cfg.host)
   const [portDraft, setPortDraft] = useState(cfg.port ? String(cfg.port) : "")
   const [usernameDraft, setUsernameDraft] = useState(cfg.username ?? "")
@@ -103,11 +110,26 @@ export function NetworkGeneralTab() {
 
   // Commit helpers — only persist when the draft actually differs from the
   // stored value so a plain focus/blur doesn't churn the store.
+  //
+  // Validation runs on commit, not on every keystroke: a half-typed host is
+  // not an error yet. A rejected value is still stored — refusing to persist
+  // would silently discard what the user typed and leave the field showing a
+  // value the app does not have. Instead it is saved, `isProxyActive` treats
+  // it as inactive, and the message below says which part is wrong.
+  //
+  // These were previously accepted outright. `http://proxy` became
+  // `http://http://proxy:8080`, `proxy:8080` produced a double port, and both
+  // surfaced much later as an opaque connection failure.
   const commitHost = () => {
+    const verdict = validateProxyHost(hostDraft)
+    setHostError(verdict.ok ? null : verdict.reason)
     if (hostDraft !== cfg.host) void persist({ host: hostDraft })
   }
   const commitPort = () => {
-    const clamped = Math.max(0, Math.min(65535, Number(portDraft) || 0))
+    const parsed = Number(portDraft)
+    const clamped = Math.max(0, Math.min(65535, Number.isFinite(parsed) ? Math.trunc(parsed) : 0))
+    // Empty is "unset", not an error — that is how a user clears the field.
+    setPortError(portDraft.trim().length > 0 && !validateProxyPort(clamped))
     if (clamped !== cfg.port) void persist({ port: clamped })
   }
   const commitUsername = () => {
@@ -217,8 +239,15 @@ export function NetworkGeneralTab() {
             }}
             placeholder="127.0.0.1"
             disabled={disabled}
+            aria-invalid={hostError !== null}
+            aria-describedby={hostError ? "proxy-host-error" : undefined}
             aria-label={t("form.host")}
           />
+          {hostError ? (
+            <p id="proxy-host-error" role="alert" className="text-destructive text-xs">
+              {t(`form.hostError.${hostError}`)}
+            </p>
+          ) : null}
         </div>
         <div className="space-y-2">
           <Label className="text-sm">{t("form.port")}</Label>
@@ -234,8 +263,15 @@ export function NetworkGeneralTab() {
             }}
             placeholder="7890"
             disabled={disabled}
+            aria-invalid={portError}
+            aria-describedby={portError ? "proxy-port-error" : undefined}
             aria-label={t("form.port")}
           />
+          {portError ? (
+            <p id="proxy-port-error" role="alert" className="text-destructive text-xs">
+              {t("form.portError")}
+            </p>
+          ) : null}
         </div>
       </div>
 

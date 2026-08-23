@@ -56,7 +56,7 @@ async fn connect_http_tunnel(
     target_host: &str,
     target_port: u16,
 ) -> Result<ProxyStream, IoError> {
-    let proxy_addr = format!("{}:{}", cfg.host, cfg.port);
+    let proxy_addr = super::authority(&cfg.host, cfg.port);
     let mut stream = TcpStream::connect(&proxy_addr).await?;
     establish_connect_tunnel(&mut stream, cfg, target_host, target_port).await?;
     Ok(Box::new(stream))
@@ -96,9 +96,13 @@ async fn connect_https_tunnel_with_config(
     target_port: u16,
     tls_config: Arc<rustls::ClientConfig>,
 ) -> Result<ProxyStream, IoError> {
-    let proxy_addr = format!("{}:{}", cfg.host, cfg.port);
+    let proxy_addr = super::authority(&cfg.host, cfg.port);
     let tcp = TcpStream::connect(&proxy_addr).await?;
-    let server_name = rustls::pki_types::ServerName::try_from(cfg.host.clone())
+    // The bare host, not the authority: `ServerName` takes a name or an IP,
+    // never a bracketed one, and never a port.
+    let server_name = rustls::pki_types::ServerName::try_from(
+        super::normalize_host_for_match(&cfg.host),
+    )
         .map_err(|_| IoError::new(ErrorKind::InvalidInput, "invalid HTTPS proxy hostname"))?;
     let connector = tokio_rustls::TlsConnector::from(tls_config);
     let mut stream = connector
@@ -118,8 +122,12 @@ async fn establish_connect_tunnel<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    // Bracketed authority: an IPv6 target written bare would make
+    // `CONNECT ::1:443` — which a proxy reads as host `::1:443` with no port,
+    // or rejects outright.
+    let target = super::authority(target_host, target_port);
     let mut request = format!(
-        "CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\nProxy-Connection: keep-alive\r\n"
+        "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Connection: keep-alive\r\n"
     );
     if let Some(auth) = cfg.basic_auth_header() {
         request.push_str(&format!("Proxy-Authorization: {auth}\r\n"));
@@ -170,7 +178,7 @@ async fn connect_socks5(
     target_host: &str,
     target_port: u16,
 ) -> Result<ProxyStream, IoError> {
-    let proxy_addr = format!("{}:{}", cfg.host, cfg.port);
+    let proxy_addr = super::authority(&cfg.host, cfg.port);
     let target = (target_host, target_port);
     let stream = match (cfg.username.as_deref(), cfg.password.as_deref()) {
         (Some(u), Some(p)) if !u.is_empty() && !p.is_empty() => {

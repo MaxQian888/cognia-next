@@ -1,10 +1,14 @@
 import { DEFAULT_NETWORK_PROXY_SETTINGS, type NetworkProxySettings } from "@/types/network/proxy"
 import {
   buildProxyUrl,
+  formatProxyAuthority,
   isProxyActive,
+  normalizeProxyHostForMatch,
   proxyEnvVars,
   redactProxyUrl,
   shouldBypass,
+  validateProxyHost,
+  validateProxyPort,
 } from "./proxy-config"
 
 const make = (overrides: Partial<NetworkProxySettings> = {}): NetworkProxySettings => ({
@@ -172,5 +176,143 @@ describe("redactProxyUrl", () => {
 
   it("returns a safe marker for malformed values", () => {
     expect(redactProxyUrl("not a url")).toBe("<invalid-proxy-url>")
+  })
+})
+
+describe("validateProxyHost", () => {
+  it("accepts a hostname, an IPv4 literal, and IPv6 in either form", () => {
+    expect(validateProxyHost("proxy.corp")).toEqual({ ok: true, host: "proxy.corp" })
+    expect(validateProxyHost("  10.0.0.1 ")).toEqual({ ok: true, host: "10.0.0.1" })
+    expect(validateProxyHost("::1")).toEqual({ ok: true, host: "::1" })
+    // Brackets are normalized away; `formatProxyAuthority` puts them back.
+    expect(validateProxyHost("[2001:db8::1]")).toEqual({ ok: true, host: "2001:db8::1" })
+  })
+
+  it("names the mistake instead of failing later as a connection error", () => {
+    // Each of these used to be accepted and produce a broken proxy URL —
+    // `http://http://proxy:8080`, a double port, or credentials in a URL the
+    // renderer must never build.
+    expect(validateProxyHost("")).toEqual({ ok: false, reason: "empty" })
+    expect(validateProxyHost("   ")).toEqual({ ok: false, reason: "empty" })
+    expect(validateProxyHost("http://proxy.corp")).toEqual({ ok: false, reason: "scheme" })
+    expect(validateProxyHost("socks5://proxy.corp")).toEqual({ ok: false, reason: "scheme" })
+    expect(validateProxyHost("user:pw@proxy.corp")).toEqual({ ok: false, reason: "userinfo" })
+    expect(validateProxyHost("proxy.corp/path")).toEqual({ ok: false, reason: "path" })
+    expect(validateProxyHost("proxy.corp?a=1")).toEqual({ ok: false, reason: "path" })
+    expect(validateProxyHost("proxy.corp#frag")).toEqual({ ok: false, reason: "path" })
+    expect(validateProxyHost("proxy.corp:8080")).toEqual({ ok: false, reason: "port-in-host" })
+  })
+
+  it("refuses the bytes that make a parser and a resolver disagree", () => {
+    // The differential-bypass class: a host the allowlist reads as one string
+    // and `getaddrinfo` resolves as another.
+    expect(validateProxyHost("proxy\u0000.corp")).toEqual({
+      ok: false,
+      reason: "illegal-character",
+    })
+    expect(validateProxyHost("proxy\r\n.corp")).toEqual({
+      ok: false,
+      reason: "illegal-character",
+    })
+    expect(validateProxyHost("proxy .corp")).toEqual({ ok: false, reason: "illegal-character" })
+    expect(validateProxyHost("proxy%2ecorp")).toEqual({ ok: false, reason: "illegal-character" })
+  })
+
+  it("rejects malformed dotted names and bracket abuse", () => {
+    expect(validateProxyHost(".corp")).toEqual({ ok: false, reason: "malformed" })
+    expect(validateProxyHost("proxy.")).toEqual({ ok: false, reason: "malformed" })
+    expect(validateProxyHost("proxy..corp")).toEqual({ ok: false, reason: "malformed" })
+    expect(validateProxyHost("[proxy.corp]")).toEqual({ ok: false, reason: "malformed" })
+    expect(validateProxyHost("[::1")).toEqual({ ok: false, reason: "malformed" })
+  })
+})
+
+describe("validateProxyPort", () => {
+  it("accepts 1..65535 and nothing else", () => {
+    expect(validateProxyPort(1)).toBe(true)
+    expect(validateProxyPort(8080)).toBe(true)
+    expect(validateProxyPort(65535)).toBe(true)
+    // 0 is "unset", not "pick one"; the rest cannot be dialled at all.
+    expect(validateProxyPort(0)).toBe(false)
+    expect(validateProxyPort(-1)).toBe(false)
+    expect(validateProxyPort(65536)).toBe(false)
+    expect(validateProxyPort(8080.5)).toBe(false)
+    expect(validateProxyPort(Number.NaN)).toBe(false)
+  })
+})
+
+describe("formatProxyAuthority", () => {
+  it("brackets an IPv6 literal and leaves everything else alone", () => {
+    expect(formatProxyAuthority("proxy.corp", 8080)).toBe("proxy.corp:8080")
+    expect(formatProxyAuthority("10.0.0.1", 1080)).toBe("10.0.0.1:1080")
+    // `::1:8080` is not "::1 port 8080" — it is a different, invalid address.
+    expect(formatProxyAuthority("::1", 8080)).toBe("[::1]:8080")
+    expect(formatProxyAuthority("[2001:db8::1]", 3128)).toBe("[2001:db8::1]:3128")
+  })
+})
+
+describe("IPv6 handling across the config surface", () => {
+  function ipv6Settings(): NetworkProxySettings {
+    return {
+      ...DEFAULT_NETWORK_PROXY_SETTINGS,
+      mode: "manual",
+      protocol: "http",
+      host: "::1",
+      port: 8080,
+    }
+  }
+
+  it("builds a bracketed proxy URL", () => {
+    expect(buildProxyUrl(ipv6Settings())).toBe("http://[::1]:8080")
+  })
+
+  it("bypasses an IPv6 target that matches a bare entry", () => {
+    // `URL.hostname` returns `"[::1]"`, so the literal comparison used to test
+    // `"[::1]" === "::1"` and never match — with `::1` in the DEFAULT bypass
+    // list, loopback IPv6 was silently proxied.
+    expect(shouldBypass("http://[::1]:3000/health", ["::1"])).toBe(true)
+    expect(shouldBypass("http://[::1]:3000/health", ["[::1]"])).toBe(true)
+    expect(shouldBypass("http://[2001:db8::1]/x", ["::1"])).toBe(false)
+  })
+
+  it("still matches an IPv6 CIDR entry", () => {
+    expect(shouldBypass("http://[2001:db8::5]/x", ["2001:db8::/32"])).toBe(true)
+    expect(shouldBypass("http://[2001:dead::5]/x", ["2001:db8::/32"])).toBe(false)
+  })
+
+  it("normalizes a bracketed hostname for matching", () => {
+    expect(normalizeProxyHostForMatch("[::1]")).toBe("::1")
+    expect(normalizeProxyHostForMatch(" PROXY.Corp ")).toBe("proxy.corp")
+  })
+})
+
+describe("isProxyActive rejects a host the native side could never dial", () => {
+  it("treats a host with an embedded port or scheme as inactive", () => {
+    const withPortInHost: NetworkProxySettings = {
+      ...DEFAULT_NETWORK_PROXY_SETTINGS,
+      mode: "manual",
+      host: "proxy.corp:8080",
+      port: 8080,
+    }
+    expect(isProxyActive(withPortInHost)).toBe(false)
+    expect(buildProxyUrl(withPortInHost)).toBeNull()
+
+    const withScheme: NetworkProxySettings = {
+      ...DEFAULT_NETWORK_PROXY_SETTINGS,
+      mode: "manual",
+      host: "http://proxy.corp",
+      port: 8080,
+    }
+    expect(isProxyActive(withScheme)).toBe(false)
+  })
+
+  it("treats an out-of-range port as inactive", () => {
+    const settings: NetworkProxySettings = {
+      ...DEFAULT_NETWORK_PROXY_SETTINGS,
+      mode: "manual",
+      host: "proxy.corp",
+      port: 70000,
+    }
+    expect(isProxyActive(settings)).toBe(false)
   })
 })
