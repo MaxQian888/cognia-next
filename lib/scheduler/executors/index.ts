@@ -43,7 +43,11 @@ import type {
   TaskExecution,
   TaskExecutorResult,
 } from "@/types/scheduler"
-import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import {
+  openTaskWorkspaceBundleRunLease,
+  openTaskWorkspaceRunLease,
+} from "@/lib/task-workspace/run-lease"
+import type { BeginTaskWorkspaceTurn } from "@/lib/task-workspace/client"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
@@ -436,14 +440,25 @@ async function runChatPrompt(
   // durable workspaceKey binds subsequent schedule fires to the same chat
   // worktree while each execution still gets its own versioned TaskRun.
   const executionContext = payload.executionContext
-  const boundWorkspaceRoot = executionContext
-    ? resolveSessionWorkspaceRoot(executionContext)
-    : undefined
+  const canonicalExecution = executionContext?.execution
+  const canonicalPrimary = canonicalExecution?.roots.find((root) => root.role === "primary")
+  const canonicalAdditionalAliases = canonicalExecution?.roots
+    .filter((root) => root.role === "additional")
+    .map((root) => root.aliasPath)
+  const canonicalManaged = canonicalExecution && canonicalExecution.mode !== "local"
+  if (canonicalManaged && (!canonicalExecution.bundleId || !canonicalPrimary)) {
+    return { success: false, error: "Scheduled workspace canonical bundle is unavailable" }
+  }
+  const boundWorkspaceRoot = canonicalManaged
+    ? canonicalPrimary!.aliasPath
+    : executionContext
+      ? resolveSessionWorkspaceRoot(executionContext)
+      : undefined
   if (executionContext && !boundWorkspaceRoot) {
     return { success: false, error: "Scheduled workspace is missing on this device" }
   }
-  const taskLease = executionContext
-    ? await openTaskWorkspaceRunLease({
+  const taskLeaseInput: BeginTaskWorkspaceTurn | null = executionContext
+    ? {
         taskId: executionContext.taskWorkspace.taskId,
         sessionId,
         runId: `scheduled:${execution.id}`,
@@ -459,7 +474,16 @@ async function runChatPrompt(
             : { kind: "workingState" },
         executionRunId: execution.id,
         surface: "scheduler",
-      })
+      }
+    : null
+  const taskLease = taskLeaseInput
+    ? canonicalManaged
+      ? await openTaskWorkspaceBundleRunLease(
+          canonicalExecution.bundleId!,
+          canonicalPrimary!.logicalRootId,
+          taskLeaseInput
+        )
+      : await openTaskWorkspaceRunLease(taskLeaseInput)
     : null
   if (executionContext && !taskLease) {
     return { success: false, error: "Scheduled workspace isolation is unavailable" }
@@ -468,6 +492,7 @@ async function runChatPrompt(
     finalOptions = {
       ...finalOptions,
       cwd: taskLease.run.executionRoot,
+      ...(canonicalManaged ? { additionalDirectories: canonicalAdditionalAliases ?? [] } : {}),
       taskWorkspace: {
         taskId: executionContext!.taskWorkspace.taskId,
         runId: taskLease.run.runId,

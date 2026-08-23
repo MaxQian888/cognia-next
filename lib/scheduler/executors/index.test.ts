@@ -60,6 +60,7 @@ jest.mock("@/lib/db/agent-tasks", () => ({
 }))
 
 const settleTaskWorkspaceMock = jest.fn(async () => [])
+const openTaskWorkspaceBundleRunLeaseMock = jest.fn()
 const openTaskWorkspaceRunLeaseMock = jest.fn(
   async (
     _input: unknown
@@ -75,6 +76,8 @@ const openTaskWorkspaceRunLeaseMock = jest.fn(
   })
 )
 jest.mock("@/lib/task-workspace/run-lease", () => ({
+  openTaskWorkspaceBundleRunLease: (...args: unknown[]) =>
+    openTaskWorkspaceBundleRunLeaseMock(...args),
   openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
 }))
 
@@ -234,6 +237,10 @@ beforeEach(() => {
   beginAgentTaskAttemptMock.mockReset().mockResolvedValue({ id: "attempt-1" })
   linkAgentTaskAttemptExecutionMock.mockReset().mockResolvedValue(undefined)
   settleAgentTaskAttemptMock.mockReset().mockResolvedValue(undefined)
+  openTaskWorkspaceBundleRunLeaseMock.mockReset().mockResolvedValue({
+    run: { runId: "task-run-bundle-1", executionRoot: "/bundle/primary" },
+    settle: settleTaskWorkspaceMock,
+  })
   openTaskWorkspaceRunLeaseMock.mockClear()
   openTaskWorkspaceRunLeaseMock.mockResolvedValue({
     run: { runId: "task-run-1", executionRoot: "/managed/session-1" },
@@ -640,6 +647,63 @@ describe("executeChatTask", () => {
       error: "Scheduled workspace isolation is unavailable",
     })
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it("borrows the canonical bundle and replaces live additional directories", async () => {
+    const executionContext = {
+      execution: {
+        mode: "managed" as const,
+        bundleId: "bundle-1",
+        base: { kind: "remoteDefault" as const },
+        roots: [
+          {
+            logicalRootId: "root-primary",
+            role: "primary" as const,
+            aliasPath: "/bundle/primary",
+            workspaceId: "workspace-primary",
+          },
+          {
+            logicalRootId: "root-docs",
+            role: "additional" as const,
+            aliasPath: "/bundle/docs",
+            workspaceId: "workspace-docs",
+          },
+        ],
+      },
+      location: "managedWorktree" as const,
+      projectId: "project-1",
+      projectRoot: "/live/repo",
+      taskWorkspace: { taskId: "task-workspace:session-1", workspaceKey: "session-1" },
+    }
+    resolveSendOptionsMock.mockResolvedValueOnce({
+      additionalDirectories: ["/live/docs"],
+    } as SendOptions)
+    emitTerminalResult()
+
+    const result = await executeChatTask(
+      makeTask({ payload: { prompt: "hi", executionContext } }),
+      { ...makeExecution(), id: "execution-bundle-1" },
+      makeSignal()
+    )
+
+    expect(openTaskWorkspaceBundleRunLeaseMock).toHaveBeenCalledWith(
+      "bundle-1",
+      "root-primary",
+      expect.objectContaining({
+        taskId: "task-workspace:session-1",
+        surface: "scheduler",
+      })
+    )
+    expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
+    expect(sendPromptMock).toHaveBeenCalledWith(
+      "session-created",
+      "hi",
+      expect.objectContaining({
+        cwd: "/bundle/primary",
+        additionalDirectories: ["/bundle/docs"],
+      })
+    )
+    expect(result.success).toBe(true)
   })
 
   it("runs project setup in the selected execution root before scheduled chat", async () => {
