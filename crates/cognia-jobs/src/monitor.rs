@@ -416,6 +416,10 @@ impl MonitorRegistry {
             cmd.args(args)
                 .current_dir(cwd)
                 .env_clear()
+                // Same proxy env the supervisor gives the job itself: a
+                // readiness predicate that probes an HTTP endpoint has to take
+                // the same route as the thing it is checking.
+                .envs(cognia_net::proxy_config::child_network_env())
                 .envs(env)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

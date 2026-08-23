@@ -2247,6 +2247,7 @@ name = "cognia-jobs"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cognia-net",
  "libc",
  "log",
  "parking_lot",

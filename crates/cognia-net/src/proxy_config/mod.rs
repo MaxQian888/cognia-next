@@ -674,6 +674,51 @@ pub fn install_uninitialized_proxy_environment() {
     }
 }
 
+/// Proxy environment for a child process that is *permitted* to use the
+/// network and is spawned with `env_clear()`.
+///
+/// Children that inherit the parent environment already see these — the
+/// `proxy_apply` command mirrors the live policy into the process via
+/// [`install_process_proxy_environment`]. A child spawned with `env_clear()`
+/// does not, and would go direct around whatever the user configured. That is
+/// what this returns the values for.
+///
+/// Three cases, and the third is the one that matters:
+///
+///   - policy Ready and active → the real proxy variables;
+///   - policy Ready and Off    → nothing, so the child dials direct;
+///   - policy Uninitialized or Blocked → the same deliberate black hole
+///     [`install_uninitialized_proxy_environment`] installs. A child spawned
+///     during the renderer hydration window must not be the one path that
+///     silently escapes the policy just because it was early.
+///
+/// Only call this for a child that is allowed network. Network-off, a plugin
+/// without a network grant, and a sandbox deny policy all take precedence:
+/// handing proxy credentials to a process that must not reach the network
+/// would widen its permissions, not narrow them.
+pub fn child_network_env() -> Vec<(String, String)> {
+    match slot().read().expect("proxy config lock poisoned").clone() {
+        ProxyRuntimeState::Ready(config) => config.env_vars(),
+        ProxyRuntimeState::Uninitialized | ProxyRuntimeState::Blocked(_) => {
+            let mut out = Vec::new();
+            for key in [
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "ALL_PROXY",
+                "http_proxy",
+                "https_proxy",
+                "all_proxy",
+            ] {
+                out.push((key.to_string(), "http://127.0.0.1:9".to_string()));
+            }
+            for key in ["NO_PROXY", "no_proxy"] {
+                out.push((key.to_string(), "localhost,127.0.0.1,::1".to_string()));
+            }
+            out
+        }
+    }
+}
+
 /// Mirror an initialized policy into the process environment for native
 /// plugins whose HTTP stack is owned by Tauri (notably the updater). Managed
 /// reqwest clients still use explicit connectors or `.no_proxy()`.
@@ -1047,6 +1092,40 @@ mod tests {
         cfg.bypass = vec!["2001:db8::/32".to_string()];
         assert!(cfg.should_bypass("http://[2001:db8::5]/x"));
         assert!(!cfg.should_bypass("http://[2001:dead::5]/x"));
+    }
+
+    #[test]
+    fn child_network_env_covers_ready_off_and_uninitialized() {
+        static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = TEST_STATE.lock().unwrap();
+
+        // Uninitialized: the same black hole the process environment gets, so
+        // a child spawned during hydration cannot be the one path that escapes.
+        reset_uninitialized();
+        let early: std::collections::HashMap<_, _> = child_network_env().into_iter().collect();
+        assert_eq!(early.get("HTTPS_PROXY").unwrap(), "http://127.0.0.1:9");
+        assert_eq!(early.get("NO_PROXY").unwrap(), "localhost,127.0.0.1,::1");
+
+        // Blocked behaves the same — a credential we cannot read is not a
+        // reason to let the child out.
+        block_current(ProxyError::new(
+            ProxyErrorCode::ProxyCredentialUnavailable,
+            "test",
+        ));
+        let blocked: std::collections::HashMap<_, _> = child_network_env().into_iter().collect();
+        assert_eq!(blocked.get("HTTPS_PROXY").unwrap(), "http://127.0.0.1:9");
+
+        // Off: nothing, so the child dials direct.
+        apply_current(ProxyConfig::default()).unwrap();
+        assert!(child_network_env().is_empty());
+
+        // Active: the real values, in both casings.
+        apply_current(manual("proxy.corp", 8080)).unwrap();
+        let active: std::collections::HashMap<_, _> = child_network_env().into_iter().collect();
+        assert_eq!(active.get("HTTPS_PROXY").unwrap(), "http://proxy.corp:8080");
+        assert_eq!(active.get("https_proxy").unwrap(), "http://proxy.corp:8080");
+
+        reset_uninitialized();
     }
 
     #[test]

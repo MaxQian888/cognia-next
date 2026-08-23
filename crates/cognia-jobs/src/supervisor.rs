@@ -118,6 +118,12 @@ impl JobSupervisor {
         cmd.args(&req.args)
             .current_dir(&req.cwd)
             .env_clear()
+            // The Host's proxy, applied BEFORE the request's own env so an
+            // explicit override in the job definition still wins. Without it a
+            // job spawned with `env_clear()` is the one outbound path that
+            // dials past the proxy the user configured — and on a network that
+            // only permits egress through it, simply fails.
+            .envs(cognia_net::proxy_config::child_network_env())
             .envs(&req.env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

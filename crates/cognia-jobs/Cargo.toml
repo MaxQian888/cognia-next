@@ -20,6 +20,9 @@ name = "cognia_jobs"
 path = "src/lib.rs"
 
 [dependencies]
+# Shared outbound proxy policy — a job spawned with `env_clear()` would
+# otherwise dial past whatever proxy the user configured.
+cognia-net = { path = "../cognia-net" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }

@@ -1382,6 +1382,15 @@ async fn run_shell_exec(
             if let Ok(path) = std::env::var("PATH") {
                 cmd.env("PATH", path);
             }
+            // A `shell:execute` grant is a network-capable grant: whatever the
+            // plugin runs can open a socket. Give it the Host's proxy so it
+            // takes the same route as every other outbound path — and, while
+            // the policy is uninitialized or blocked, the same black hole, so
+            // this is not the one child that escapes by being early.
+            for (key, value) in cognia_net::proxy_config::child_network_env() {
+                cmd.env(key, value);
+            }
+            // The caller's own env last: an explicit override still wins.
             for (k, v) in &env {
                 cmd.env(k, v);
             }
