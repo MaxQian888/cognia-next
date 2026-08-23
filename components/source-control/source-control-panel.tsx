@@ -529,10 +529,13 @@ export function SourceControlPanel() {
         onOpenChange={setReviewOpen}
         rootDir={rootDir}
         repositoryRoots={activeProject ? allRootPaths(activeProject) : [rootDir]}
-        branch={status?.branch ?? null}
         stagedCount={status?.staged.length ?? 0}
         committing={committing}
         actions={actions}
+        // One entry, for the root the active task run actually wrote in. A
+        // last-turn review of any OTHER selected root has no run to read, and
+        // the scope collector says so by name instead of silently reviewing
+        // this root's patch against a repository it never touched.
         lastTurnRunIdByRoot={
           activeTaskRun ? { [activeTaskRun.workspaceRoot]: activeTaskRun.runId } : undefined
         }

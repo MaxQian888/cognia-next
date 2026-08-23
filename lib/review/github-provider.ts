@@ -1,4 +1,5 @@
 import { gitPush } from "@/lib/git/commands"
+import { assertSingleRootBundle } from "./bundle"
 import type {
   CreatePullRequestInput,
   PullRequestProvider,
@@ -33,10 +34,28 @@ export class PullRequestProviderError extends Error {
     message: string,
     readonly operation: "lookup" | "push" | "create" | "feedback",
     readonly recoverable: boolean,
-    options?: ErrorOptions
+    options?: ErrorOptions & {
+      /**
+       * HTTP status, when one came back.
+       *
+       * Absent means no response was ever received, which is the only case
+       * where a write's outcome is genuinely unknown. A 4xx/5xx is a definite
+       * "this did not happen"; a dropped connection is not, and a retry that
+       * cannot tell them apart may double-post a review.
+       */
+      status?: number
+    }
   ) {
     super(message, options)
     this.name = "PullRequestProviderError"
+    this.status = options?.status
+  }
+
+  readonly status?: number
+
+  /** True when the request never got an answer, so a replay may duplicate. */
+  get outcomeUncertain(): boolean {
+    return this.status === undefined || this.status === 0
   }
 }
 
@@ -49,14 +68,22 @@ function isOffline(error: unknown): boolean {
   )
 }
 
+function httpStatus(error: unknown): number | undefined {
+  const candidate = error as { status?: number; response?: { status?: number } }
+  const status = candidate.status ?? candidate.response?.status
+  return typeof status === "number" ? status : undefined
+}
+
 function wrapError(
   error: unknown,
   operation: PullRequestProviderError["operation"]
 ): PullRequestProviderError {
   if (error instanceof PullRequestProviderError) return error
   const message = error instanceof Error ? error.message : String(error)
+  const status = httpStatus(error)
   return new PullRequestProviderError(message, operation, isOffline(error), {
     cause: error,
+    ...(status !== undefined ? { status } : {}),
   })
 }
 
@@ -141,20 +168,30 @@ export class GitHubPullRequestProvider implements PullRequestProvider {
     }
   }
 
+  /**
+   * Post one repository's review.
+   *
+   * The root comes from the bundle and the comment set is validated against it
+   * (`assertSingleRootBundle`) before a single request goes out. The previous
+   * implementation took `repositoryRoots[0]` and posted every comment there,
+   * so in a two-root review the second repository's comments were filed against
+   * the first repository's pull request, at whatever path matched. Refusing is
+   * the only safe answer to an ambiguous bundle: there is no way to post a
+   * comment "partly" to the wrong repo and undo it.
+   */
   async publishFeedback(pullRequest: PullRequestRef, bundle: ReviewFeedbackBundle): Promise<void> {
     try {
       const root = bundle.repositoryRoots[0]
       if (!root) throw new Error("Review feedback has no repository root")
+      const live = assertSingleRootBundle(bundle, root)
       const binding = await this.options.resolveRepository(root)
-      const comments = bundle.comments
-        .filter((comment) => comment.status !== "stale")
-        .map((comment) => ({
-          path: comment.anchor.path,
-          line: comment.anchor.line,
-          side: comment.anchor.side === "before" ? "LEFT" : "RIGHT",
-          body: comment.body,
-          ...(comment.anchor.commitSha ? { commit_id: comment.anchor.commitSha } : {}),
-        }))
+      const comments = live.map((comment) => ({
+        path: comment.anchor.path,
+        line: comment.anchor.line,
+        side: comment.anchor.side === "before" ? "LEFT" : "RIGHT",
+        body: comment.body,
+        ...(comment.anchor.commitSha ? { commit_id: comment.anchor.commitSha } : {}),
+      }))
       await binding.client.request("POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews", {
         owner: binding.owner,
         repo: binding.repo,

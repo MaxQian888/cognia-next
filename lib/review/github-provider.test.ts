@@ -155,3 +155,132 @@ it("marks offline failures recoverable for retry", async () => {
   )
   expect(PullRequestProviderError).toBeDefined()
 })
+
+/**
+ * The live bug this replaced: `publishFeedback` took `repositoryRoots[0]` and
+ * posted EVERY comment against that repository, so in a two-root review the
+ * second repository's comments landed on the first repository's pull request.
+ */
+it("refuses a multi-root bundle instead of posting it all to the first root", async () => {
+  request.mockResolvedValue({ status: 200, data: {} })
+  const multiRoot: ReviewFeedbackBundle = {
+    id: "bundle-2",
+    sessionId: "session-1",
+    scope: "branch",
+    repositoryRoots: ["/repo-a", "/repo-b"],
+    summary: "Review summary",
+    state: "draft",
+    createdAt: 1,
+    updatedAt: 1,
+    comments: [
+      {
+        id: "c-a",
+        contentHash: "a",
+        anchor: {
+          repositoryRoot: "/repo-a",
+          path: "src/a.ts",
+          hunkHash: "h",
+          side: "after",
+          line: 1,
+        },
+        body: "In A",
+        createdAt: 1,
+        updatedAt: 1,
+        status: "draft",
+      },
+      {
+        id: "c-b",
+        contentHash: "b",
+        anchor: {
+          repositoryRoot: "/repo-b",
+          path: "src/b.ts",
+          hunkHash: "h",
+          side: "after",
+          line: 2,
+        },
+        body: "In B",
+        createdAt: 1,
+        updatedAt: 1,
+        status: "draft",
+      },
+    ],
+  }
+  await expect(
+    provider.publishFeedback(
+      {
+        provider: "github",
+        repository: "owner/repo",
+        number: 42,
+        url: "url",
+        headRef: "head",
+        baseRef: "main",
+        title: "title",
+        state: "open",
+      },
+      multiRoot
+    )
+  ).rejects.toMatchObject({ operation: "feedback" })
+  expect(request).not.toHaveBeenCalled()
+})
+
+it("refuses a single-root bundle that smuggles in a foreign comment", async () => {
+  request.mockResolvedValue({ status: 200, data: {} })
+  const smuggled: ReviewFeedbackBundle = {
+    id: "bundle-3",
+    sessionId: "session-1",
+    scope: "branch",
+    repositoryRoots: ["/repo"],
+    summary: "Review summary",
+    state: "draft",
+    createdAt: 1,
+    updatedAt: 1,
+    comments: [
+      {
+        id: "c-other",
+        contentHash: "o",
+        anchor: {
+          repositoryRoot: "/elsewhere",
+          path: "src/secret.ts",
+          hunkHash: "h",
+          side: "after",
+          line: 3,
+        },
+        body: "Leaks to the wrong repo",
+        createdAt: 1,
+        updatedAt: 1,
+        status: "draft",
+      },
+    ],
+  }
+  await expect(
+    provider.publishFeedback(
+      {
+        provider: "github",
+        repository: "owner/repo",
+        number: 42,
+        url: "url",
+        headRef: "head",
+        baseRef: "main",
+        title: "title",
+        state: "open",
+      },
+      smuggled
+    )
+  ).rejects.toMatchObject({ operation: "feedback" })
+  expect(request).not.toHaveBeenCalled()
+})
+
+/** `recoverable` asks "retry?"; `outcomeUncertain` asks "might a retry duplicate?". */
+it("separates a definite HTTP failure from a request that got no answer", async () => {
+  request.mockRejectedValueOnce(Object.assign(new Error("Validation failed"), { status: 422 }))
+  await expect(provider.findForBranch("/repo", "branch")).rejects.toMatchObject({
+    status: 422,
+    outcomeUncertain: false,
+  })
+
+  request.mockRejectedValueOnce(Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }))
+  await expect(provider.findForBranch("/repo", "branch")).rejects.toMatchObject({
+    recoverable: true,
+    outcomeUncertain: true,
+  })
+})

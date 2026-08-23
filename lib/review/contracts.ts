@@ -1,7 +1,15 @@
 import { sha256Hex } from "@/lib/share/hash"
 import type { ReviewComment, ReviewCommentAnchor } from "@/types/review"
 
-function normalizeReviewPath(path: string): string {
+/**
+ * Canonical form for anchor paths and repository roots.
+ *
+ * Exported because comparing an anchor's root against a publish target has to
+ * use the SAME normalization the anchor was written with — otherwise
+ * `C:/repo` and `c:/repo` are two repositories, and a comment silently belongs
+ * to neither.
+ */
+export function normalizeReviewPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^([A-Z]):\//, (_match, drive: string) => {
     return `${drive.toLowerCase()}:/`
   })
