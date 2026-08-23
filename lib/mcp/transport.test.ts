@@ -5,6 +5,7 @@ import type { McpServer } from "@cognia/agent-config-types"
 
 import {
   buildMcpTransport,
+  COGNIA_MCP_PROTOCOL_VERSIONS,
   createMcpConnection,
   openMcpClient,
   type McpTransportCtors,
@@ -105,13 +106,16 @@ describe("buildMcpTransport", () => {
 describe("createMcpConnection", () => {
   it("passes the provided clientInfo to the SDK Client", async () => {
     let seen: { name: string; version: string } | undefined
+    let options: Record<string, unknown> | undefined
     const load = async () => ({
       Client: class {
-        constructor(info: { name: string; version: string }) {
+        constructor(info: { name: string; version: string }, opts: Record<string, unknown>) {
           seen = info
+          options = opts
         }
       } as never,
       ctors: recordingCtors().ctors,
+      elicitRequestSchema: {},
     })
     await createMcpConnection(
       srv("stdio", { command: "x" }),
@@ -119,6 +123,14 @@ describe("createMcpConnection", () => {
       { load }
     )
     expect(seen).toEqual({ name: "cognia-workflow", version: "1.0.0" })
+    expect(options).toEqual(
+      expect.objectContaining({
+        versionNegotiation: { mode: "auto", probe: { timeoutMs: 3000, maxRetries: 0 } },
+        supportedProtocolVersions: [...COGNIA_MCP_PROTOCOL_VERSIONS],
+        inputRequired: { autoFulfill: true, maxRounds: 8 },
+        defaultCacheTtlMs: 0,
+      })
+    )
   })
 
   it("defaults the client identity when none is given", async () => {
@@ -135,21 +147,79 @@ describe("createMcpConnection", () => {
     expect(seen?.name).toBe("cognia")
   })
 
-  it("registers tools/list_changed capability invalidation", async () => {
+  it("configures dynamic capability refresh for every semantic list", async () => {
     const onToolsChanged = jest.fn()
-    const setNotificationHandler = jest.fn()
-    const schema = { method: "notifications/tools/list_changed" }
+    let options: Record<string, unknown> | undefined
     const load = async () => ({
       Client: class {
-        setNotificationHandler = setNotificationHandler
+        constructor(_info: unknown, opts: Record<string, unknown>) {
+          options = opts
+        }
       } as never,
       ctors: recordingCtors().ctors,
-      toolsListChangedSchema: schema,
+      elicitRequestSchema: {},
     })
 
     await createMcpConnection(srv("stdio", { command: "x" }), { onToolsChanged }, { load })
 
-    expect(setNotificationHandler).toHaveBeenCalledWith(schema, onToolsChanged)
+    const listChanged = options?.listChanged as Record<
+      string,
+      { onChanged: (error: Error | null) => void }
+    >
+    expect(Object.keys(listChanged)).toEqual(["tools", "resources", "prompts"])
+    listChanged.resources.onChanged(null)
+    expect(onToolsChanged).toHaveBeenCalledTimes(1)
+    listChanged.tools.onChanged(new Error("refresh failed"))
+    expect(onToolsChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it("advertises and registers safe elicitation only when a presenter is supplied", async () => {
+    const presenter = jest.fn(async () => ({ action: "decline" as const }))
+    const setRequestHandler = jest.fn()
+    let options: Record<string, unknown> | undefined
+    const schema = { method: "elicitation/create" }
+    const load = async () => ({
+      Client: class {
+        setRequestHandler = setRequestHandler
+        constructor(_info: unknown, opts: Record<string, unknown>) {
+          options = opts
+        }
+      } as never,
+      ctors: recordingCtors().ctors,
+      elicitRequestSchema: schema,
+    })
+
+    await createMcpConnection(
+      srv("http", { url: "https://figma.example/mcp" }),
+      {
+        onElicitation: presenter,
+      },
+      { load }
+    )
+
+    expect(options?.capabilities).toEqual({ elicitation: { form: {}, url: {} } })
+    expect(setRequestHandler).toHaveBeenCalledWith(schema, expect.any(Function))
+    const handler = setRequestHandler.mock.calls[0][1]
+    await expect(
+      handler({
+        params: {
+          mode: "url",
+          message: "Authorize",
+          elicitationId: "e1",
+          url: "https://accounts.example.com/authorize",
+        },
+      })
+    ).resolves.toEqual({ action: "decline" })
+    expect(presenter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "url",
+        targetHostname: "accounts.example.com",
+        provenance: expect.objectContaining({
+          serverId: "mcp_s",
+          endpoint: "https://figma.example/mcp",
+        }),
+      })
+    )
   })
 })
 
@@ -250,6 +320,8 @@ describe("openMcpClient", () => {
       listTools: jest.fn(async () => ({ tools: [] })),
       listResources: jest.fn(async () => ({ resources: [] })),
       listPrompts: jest.fn(async () => ({ prompts: [] })),
+      getNegotiatedProtocolVersion: jest.fn(() => "2026-07-28"),
+      getProtocolEra: jest.fn(() => "modern" as const),
       close: jest.fn(async () => undefined),
     }
   }
@@ -266,6 +338,8 @@ describe("openMcpClient", () => {
     const client = fakeClient()
     const opened = await openMcpClient(srv("stdio", { command: "x" }), {}, { load: load(client) })
     expect(client.connect).toHaveBeenCalledTimes(1)
+    expect(opened.protocolEra).toBe("modern")
+    expect(opened.negotiatedProtocolVersion).toBe("2026-07-28")
     await opened.close()
     expect(client.close).toHaveBeenCalledTimes(1)
   })

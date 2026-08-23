@@ -8,11 +8,16 @@
  *
  * The transport construction is a pure, injectable function so it can be unit
  * tested without the real SDK; `openMcpClient` is the thin live wrapper that
- * loads `@modelcontextprotocol/sdk` and connects. The SDK is loaded lazily
+ * loads the split MCP v2 client/core packages and connects. The SDK is loaded lazily
  * (`await import`) so the static-exported renderer never bundles it.
  */
 import type { McpServer } from "@cognia/agent-config-types"
 import { hasMcpSecretRefs, resolveMcpSecrets } from "./credentials"
+import {
+  createMcpElicitationRequest,
+  type McpElicitationHandler,
+  type McpElicitationResult,
+} from "./elicitation"
 import {
   evaluateMcpPolicy,
   validateMcpRemoteEgress,
@@ -27,6 +32,29 @@ export interface McpClientInfo {
 }
 
 const DEFAULT_CLIENT_INFO: McpClientInfo = { name: "cognia", version: "1.0.0" }
+
+export const COGNIA_MCP_PROTOCOL_VERSIONS = [
+  "2026-07-28",
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+  "2024-10-07",
+] as const
+
+interface McpClientOptions {
+  capabilities: Record<string, unknown>
+  versionNegotiation: { mode: "auto"; probe: { timeoutMs: number; maxRetries: number } }
+  supportedProtocolVersions: string[]
+  inputRequired: { autoFulfill: true; maxRounds: number }
+  listMaxPages: number
+  defaultCacheTtlMs: number
+  cachePartition: string
+  listChanged?: Record<
+    "tools" | "resources" | "prompts",
+    { autoRefresh: boolean; debounceMs: number; onChanged: (error: Error | null) => void }
+  >
+}
 
 /** The slice of the SDK `Client` callers use. */
 export interface McpClientLike {
@@ -75,7 +103,12 @@ export interface McpClientLike {
       content: unknown
     }>
   }>
-  setNotificationHandler?(schema: unknown, handler: () => void | Promise<void>): void
+  setRequestHandler?(
+    schema: unknown,
+    handler: (request: { params?: Record<string, unknown> }) => Promise<McpElicitationResult>
+  ): void
+  getNegotiatedProtocolVersion?(): string | undefined
+  getProtocolEra?(): "legacy" | "modern" | undefined
   close(): Promise<void>
 }
 
@@ -83,6 +116,8 @@ export interface McpClientLike {
 export interface OpenedMcp {
   client: McpClientLike
   transport: { finishAuth?(authorizationCode: string): Promise<void> }
+  negotiatedProtocolVersion?: string
+  protocolEra?: "legacy" | "modern"
   close(): Promise<void>
 }
 
@@ -114,6 +149,8 @@ export interface OpenMcpOptions {
   onToolsChanged?: () => void | Promise<void>
   /** Invalidate tools/resources/prompts after any list_changed notification. */
   onCapabilitiesChanged?: () => void | Promise<void>
+  /** Presents a provenance-labelled form or URL confirmation to the user. */
+  onElicitation?: McpElicitationHandler
 }
 
 /** How the spawned stdio child's stderr is wired. Matches the SDK's IOType. */
@@ -180,31 +217,18 @@ export function buildMcpTransport(
 
 /** Lazily load the SDK client + transport classes. */
 async function loadSdk(): Promise<{
-  Client: new (
-    info: { name: string; version: string },
-    opts: { capabilities: object }
-  ) => McpClientLike
+  Client: new (info: { name: string; version: string }, opts: McpClientOptions) => McpClientLike
   ctors: McpTransportCtors
-  toolsListChangedSchema?: unknown
-  resourcesListChangedSchema?: unknown
-  promptsListChangedSchema?: unknown
+  elicitRequestSchema: unknown
 }> {
   const [
-    { Client },
+    { Client, StreamableHTTPClientTransport, SSEClientTransport },
     { StdioClientTransport },
-    { StreamableHTTPClientTransport },
-    { SSEClientTransport },
-    {
-      ToolListChangedNotificationSchema,
-      ResourceListChangedNotificationSchema,
-      PromptListChangedNotificationSchema,
-    },
+    core,
   ] = await Promise.all([
-    import("@modelcontextprotocol/sdk/client/index.js"),
-    import("@modelcontextprotocol/sdk/client/stdio.js"),
-    import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-    import("@modelcontextprotocol/sdk/client/sse.js"),
-    import("@modelcontextprotocol/sdk/types.js"),
+    import("@modelcontextprotocol/client"),
+    import("@modelcontextprotocol/client/stdio"),
+    import("@modelcontextprotocol/core"),
   ])
   return {
     Client: Client as never,
@@ -213,9 +237,7 @@ async function loadSdk(): Promise<{
       Http: StreamableHTTPClientTransport as never,
       Sse: SSEClientTransport as never,
     },
-    toolsListChangedSchema: ToolListChangedNotificationSchema,
-    resourcesListChangedSchema: ResourceListChangedNotificationSchema,
-    promptsListChangedSchema: PromptListChangedNotificationSchema,
+    elicitRequestSchema: core.ElicitRequestSchema,
   }
 }
 
@@ -299,24 +321,50 @@ export async function createMcpConnection(
         config: (await (deps.resolveConfig ?? resolveMcpSecrets)(server.config)) as never,
       }
     : server
-  const {
-    Client,
-    ctors,
-    toolsListChangedSchema,
-    resourcesListChangedSchema,
-    promptsListChangedSchema,
-  } = await (deps.load ?? loadSdk)()
+  const { Client, ctors, elicitRequestSchema } = await (deps.load ?? loadSdk)()
   const info = opts.clientInfo ?? DEFAULT_CLIENT_INFO
-  const client = new Client({ name: info.name, version: info.version }, { capabilities: {} })
   const onCapabilitiesChanged = opts.onCapabilitiesChanged ?? opts.onToolsChanged
-  if (onCapabilitiesChanged && client.setNotificationHandler) {
-    for (const schema of [
-      toolsListChangedSchema,
-      resourcesListChangedSchema,
-      promptsListChangedSchema,
-    ]) {
-      if (schema) client.setNotificationHandler(schema, onCapabilitiesChanged)
+  const listChanged = onCapabilitiesChanged
+    ? Object.fromEntries(
+        ["tools", "resources", "prompts"].map((kind) => [
+          kind,
+          {
+            autoRefresh: true,
+            debounceMs: 100,
+            onChanged: (error: Error | null) => {
+              if (!error) void onCapabilitiesChanged()
+            },
+          },
+        ])
+      )
+    : undefined
+  const client = new Client(
+    { name: info.name, version: info.version },
+    {
+      capabilities: opts.onElicitation ? { elicitation: { form: {}, url: {} } } : {},
+      versionNegotiation: { mode: "auto", probe: { timeoutMs: 3_000, maxRetries: 0 } },
+      supportedProtocolVersions: [...COGNIA_MCP_PROTOCOL_VERSIONS],
+      inputRequired: { autoFulfill: true, maxRounds: 8 },
+      listMaxPages: 64,
+      defaultCacheTtlMs: 0,
+      cachePartition: opts.fingerprint ?? server.id,
+      ...(listChanged ? { listChanged: listChanged as McpClientOptions["listChanged"] } : {}),
     }
+  )
+  if (opts.onElicitation && client.setRequestHandler) {
+    const endpoint =
+      server.transport === "stdio"
+        ? undefined
+        : String((server.config as unknown as Record<string, unknown>).url ?? "")
+    client.setRequestHandler(elicitRequestSchema, async (request) =>
+      opts.onElicitation!(
+        createMcpElicitationRequest(request, {
+          serverId: server.id,
+          serverName: server.name,
+          ...(endpoint ? { endpoint } : {}),
+        })
+      )
+    )
   }
   const remote = effectiveServer.transport !== "stdio"
   const allowPrivateNetwork =
@@ -379,6 +427,8 @@ export async function openMcpClient(
   return {
     client,
     transport,
+    negotiatedProtocolVersion: client.getNegotiatedProtocolVersion?.(),
+    protocolEra: client.getProtocolEra?.(),
     close: async () => {
       if (opts.signal) opts.signal.removeEventListener("abort", onAbort)
       await closeResources()
