@@ -223,7 +223,7 @@ describe("createCogniaClient", () => {
         if (request.method === "task/list") return { tasks: [] }
         if (request.method === "audit/query") return { entries: [] }
         if (request.method === "sandbox/status") return { enabled: true }
-        if (request.method === "sandbox/snapshot") return { snapshotId: "snapshot-1" }
+        if (request.method === "sandbox/policy/capture") return { policyRecordId: "policy-1" }
         if (request.method === "trace/subscribe") return { subscriptionId: "trace-1" }
         return { ok: true, commandId: "command-1" }
       },
@@ -236,8 +236,8 @@ describe("createCogniaClient", () => {
     await session.resolveExternalTool("external-1", { kind: "result", value: "done" })
     await session.tree()
     await session.sandboxStatus()
-    const snapshot = await session.snapshot()
-    await session.restoreSnapshot(snapshot.snapshotId)
+    const policyRecord = await session.captureSandboxPolicy()
+    await session.restoreSandboxPolicy(policyRecord.policyRecordId)
     await client.auth.status()
     await client.mcp.configure([])
     await client.mcp.status()
@@ -263,8 +263,8 @@ describe("createCogniaClient", () => {
         "session/rename",
         "session/tag",
         "externalTool/respond",
-        "sandbox/snapshot",
-        "sandbox/restore",
+        "sandbox/policy/capture",
+        "sandbox/policy/restore",
         "mcp/configure",
         "task/background",
         "trace/export",

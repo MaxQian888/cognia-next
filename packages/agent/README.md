@@ -168,11 +168,31 @@ JSON-RPC code as `rpcCode`.
 | `reconnect_failed`      | Reconnection exhausted its attempt budget                    |
 | `limit_exceeded`        | A negotiated protocol limit would be exceeded                |
 
-## Attachments
+## Assets
 
-This version carries none. A turn whose input has `attachments` fails with
-`invalid_params` rather than running without them, which is what previously
-happened silently. Asset references arrive with the `assets-v1` capability.
+Bytes go to the host once and a turn references them:
+
+```ts
+const asset = await client.assets.upload(png, { mediaType: "image/png", name: "chart.png" })
+// or, when the host can already see the file:
+const same = await client.assets.registerPath("/srv/reports/chart.png")
+```
+
+An asset is content-addressed, so uploading identical bytes twice yields one id.
+`registerPath` copies nothing — the host records where the file is and the digest
+it had, and refuses to read it later if it changed underneath.
+
+A turn carries `{ assetId, digest, mediaType, byteLength }` and never bytes or a
+host path, so neither ends up in the canonical event log that gets replayed,
+exported and shared. Bytes or a path smuggled onto a reference are rejected.
+
+Two capabilities, deliberately: `assets-v1` means the store works, and
+`assets-in-turn-v1` means the agent runtime can actually read an asset during a
+turn. The current host declares the first and not the second, so a turn carrying
+`assets` is **refused** rather than run without them.
+
+The legacy `attachments` field is likewise refused with `invalid_params`. It was
+previously accepted and silently dropped.
 
 ## Protocol
 

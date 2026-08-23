@@ -48,6 +48,7 @@ import { subscribePluginToolDispatch } from "../../plugin/plugin-tool-dispatch"
 import { makeCliPluginToolHandle } from "../subagent-dispatch"
 import type { AgentRpcService, AgentRpcServiceContext } from "./server"
 import { AgentRpcHostError } from "./server"
+import { AssetStoreError, createAssetStore, type AssetStore } from "./asset-store"
 import {
   AgentDefinitionStoreError,
   createAgentDefinitionStore,
@@ -66,6 +67,7 @@ import {
 import {
   CAP_AGENT_DEFINITIONS_V1,
   CAP_AGENT_SESSION_BINDING_V1,
+  CAP_ASSETS_V1,
   CAP_AUDIT_DURABLE_V1,
   CAP_CALLBACK_ATTRIBUTION_V1,
   CAP_CLIENT_HOOKS_V1,
@@ -153,12 +155,16 @@ const SUPPORTED_METHODS = [
   "task/stop",
   "task/background",
   "sandbox/status",
-  "sandbox/snapshot",
-  "sandbox/restore",
+  "sandbox/policy/capture",
+  "sandbox/policy/restore",
   "trace/subscribe",
   "trace/unsubscribe",
   "trace/export",
   "audit/query",
+  "asset/put",
+  "asset/register",
+  "asset/stat",
+  "asset/delete",
 ] as const satisfies readonly RpcMethod[]
 
 /**
@@ -193,6 +199,7 @@ const SERVICE_CAPABILITIES = [
   CAP_SESSION_FOREST_V1,
   CAP_AGENT_DEFINITIONS_V1,
   CAP_AGENT_SESSION_BINDING_V1,
+  CAP_ASSETS_V1,
 ] as const
 
 /**
@@ -267,6 +274,8 @@ export interface AgentRuntimeServiceOptions {
   store?: SessionStore
   /** Injected in tests; defaults to the on-disk store under `home`. */
   agentDefinitions?: AgentDefinitionStore
+  /** Injected in tests; defaults to the content-addressed store under `home`. */
+  assets?: AssetStore
   runTurn?: typeof runUnifiedTurn
   createLease?: () => ProviderSessionLease
   mintSessionId?: (now?: number, random?: number) => string
@@ -302,6 +311,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
   const auditStore = createRpcAuditStore(options.home)
   const agentStore: AgentDefinitionStore =
     options.agentDefinitions ?? createAgentDefinitionStore({ home: options.home, now })
+  const assetStore: AssetStore = options.assets ?? createAssetStore({ home: options.home, now })
   const registeredTools = new Map<
     string,
     { pluginId: string; toolName: string; schemaDigest: string }
@@ -586,6 +596,30 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
         return result(
           withDefinitionErrors(() => agentStore.restore(requireString(params, "agentId")))
         )
+      case "asset/put":
+        return result(
+          withAssetErrors(() =>
+            assetStore.put({
+              data: requireString(params, "data"),
+              mediaType: requireString(params, "mediaType"),
+              ...(typeof params.name === "string" ? { name: params.name } : {}),
+            })
+          )
+        )
+      case "asset/register":
+        return result(
+          withAssetErrors(() =>
+            assetStore.registerPath({
+              path: requireString(params, "path"),
+              ...(typeof params.mediaType === "string" ? { mediaType: params.mediaType } : {}),
+            })
+          )
+        )
+      case "asset/stat":
+        return result(withAssetErrors(() => assetStore.stat(requireString(params, "assetId"))))
+      case "asset/delete":
+        withAssetErrors(() => assetStore.delete(requireString(params, "assetId")))
+        return result({ ok: true })
       case "agent/versions": {
         const agentId = requireString(params, "agentId")
         return result({
@@ -1178,38 +1212,40 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           snapshotCount: Object.keys(persisted.sandboxSnapshots).length,
         })
       }
-      case "sandbox/snapshot": {
+      case "sandbox/policy/capture": {
         const session = materialize(requireString(params, "sessionId"))
         return result(
           await runCommand(session, method, params, async (commandId) => {
-            const snapshotId = `sandbox-${randomUUID()}`
+            const policyRecordId = `sandbox-policy-${randomUUID()}`
             const createdAt = new Date(now()).toISOString()
             const active = getActiveSandboxPolicy(session.id)
             session.durableState.update(session.id, (state) => {
               state.sandboxPolicy = active ? { ...active } : state.sandboxPolicy
-              state.sandboxSnapshots[snapshotId] = {
-                snapshotId,
+              state.sandboxSnapshots[policyRecordId] = {
+                snapshotId: policyRecordId,
                 createdAt,
                 policy: active ? { ...active } : state.sandboxPolicy,
               }
             })
-            return { snapshotId, createdAt, commandId }
+            return { policyRecordId, createdAt, commandId }
           })
         )
       }
-      case "sandbox/restore": {
+      case "sandbox/policy/restore": {
         const session = materialize(requireString(params, "sessionId"))
         return result(
           await runCommand(session, method, params, async (commandId) => {
-            const snapshotId = requireString(params, "snapshotId")
-            const snapshot = session.durableState.read(session.id).sandboxSnapshots[snapshotId]
-            if (!snapshot) throw structured("usage_error", `unknown sandbox snapshot ${snapshotId}`)
+            const policyRecordId = requireString(params, "policyRecordId")
+            const record = session.durableState.read(session.id).sandboxSnapshots[policyRecordId]
+            if (!record) {
+              throw structured("usage_error", `unknown sandbox policy record ${policyRecordId}`)
+            }
             session.durableState.update(session.id, (state) => {
-              state.sandboxPolicy = snapshot.policy ? { ...snapshot.policy } : null
+              state.sandboxPolicy = record.policy ? { ...record.policy } : null
             })
-            setActiveSandboxPolicy(session.id, snapshot.policy as SandboxResourcePolicy | null)
+            setActiveSandboxPolicy(session.id, record.policy as SandboxResourcePolicy | null)
             session.lease.current?.invalidateOptions?.()
-            return { ...receipt(commandId), snapshotId }
+            return { ...receipt(commandId), policyRecordId }
           })
         )
       }
@@ -1958,6 +1994,23 @@ function evictOldest(map: Map<string, unknown>): void {
  * than as a generic internal error, because it is the one failure a caller is
  * expected to handle by re-reading and retrying.
  */
+/** Map asset-store failures onto the wire's structured error codes. */
+function withAssetErrors<T>(operation: () => T): T {
+  try {
+    return operation()
+  } catch (error) {
+    if (!(error instanceof AssetStoreError)) throw error
+    switch (error.code) {
+      case "not_found":
+        throw structured("asset_not_found", error.message, error.detail)
+      case "too_large":
+        throw structured("asset_too_large", error.message, error.detail)
+      default:
+        throw structured("usage_error", error.message, error.detail)
+    }
+  }
+}
+
 function withDefinitionErrors<T>(operation: () => T): T {
   try {
     return operation()
@@ -1995,8 +2048,18 @@ function lowerInput(input: unknown): string {
     if (Array.isArray(attachments) && attachments.length > 0) {
       throw structured(
         "usage_error",
-        `input carries ${attachments.length} attachment(s); this host accepts none. ` +
-          "Use asset references once the host declares the assets-v1 capability."
+        `input carries ${attachments.length} attachment(s); this host accepts none.`
+      )
+    }
+    const assets = (input as { assets?: unknown }).assets
+    // The asset *store* works, but `UnifiedTurnParams` has nowhere to put a
+    // reference, so the runtime would never read it. Refusing keeps the
+    // `assets-in-turn-v1` capability honest instead of dropping the reference.
+    if (Array.isArray(assets) && assets.length > 0) {
+      throw structured(
+        "unsupported_capability",
+        `input carries ${assets.length} asset reference(s); this host stores assets but its ` +
+          "agent runtime cannot read one during a turn yet (assets-in-turn-v1 is not declared)."
       )
     }
     const prompt = (input as { prompt: string }).prompt

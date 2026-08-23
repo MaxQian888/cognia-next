@@ -162,12 +162,16 @@ describe("RPC protocol", () => {
         "task/stop",
         "task/background",
         "sandbox/status",
-        "sandbox/snapshot",
-        "sandbox/restore",
+        "sandbox/policy/capture",
+        "sandbox/policy/restore",
         "trace/subscribe",
         "trace/unsubscribe",
         "trace/export",
         "audit/query",
+        "asset/put",
+        "asset/register",
+        "asset/stat",
+        "asset/delete",
       ])
       expect(HOST_REQUEST_METHODS).toEqual(["client/tool/invoke", "client/hook/invoke"])
     })

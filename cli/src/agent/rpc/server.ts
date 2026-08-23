@@ -449,6 +449,10 @@ function mapStructuredError(code: string | undefined): number {
       return RPC_ERROR_CODES.handlerUnavailable
     case "output_invalid":
       return RPC_ERROR_CODES.outputInvalid
+    case "asset_not_found":
+      return RPC_ERROR_CODES.assetNotFound
+    case "asset_too_large":
+      return RPC_ERROR_CODES.limitExceeded
     case "config_error":
     case "usage_error":
       return RPC_ERROR_CODES.configError

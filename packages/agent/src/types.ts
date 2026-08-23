@@ -90,10 +90,27 @@ export interface ResolvedAgentExecutionSpec {
   legacyMigrated?: boolean
 }
 
+/**
+ * A content-addressed handle to bytes the host already holds.
+ *
+ * This is what a turn carries instead of a path or a base64 blob: the digest
+ * makes the reference verifiable, and nothing large or host-local ends up in
+ * the canonical event log that later gets replayed, exported or shared.
+ */
+export interface AssetReference {
+  assetId: string
+  digest: string
+  mediaType: string
+  byteLength: number
+  name?: string
+}
+
 export type AgentInput =
   | string
   | {
       prompt: string
+      /** Assets the host already holds. Requires the `assets-v1` capability. */
+      assets?: AssetReference[]
       /**
        * @deprecated Not carried by any host build. Attachments were accepted by
        * the schema and read by no host code path, so the turn ran without them
@@ -301,8 +318,15 @@ export interface SandboxStatus {
   [key: string]: unknown
 }
 
-export interface SandboxSnapshot {
-  snapshotId: string
+/**
+ * A record of the sandbox resource policy that was in force.
+ *
+ * Not a workspace checkpoint. Nothing on disk is captured, and restoring one
+ * re-applies the policy only. A real filesystem checkpoint would be declared
+ * as `workspace-checkpoint-v1`, which no host currently implements.
+ */
+export interface SandboxPolicyRecord {
+  policyRecordId: string
   createdAt?: string
   [key: string]: unknown
 }

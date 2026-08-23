@@ -8,6 +8,7 @@ import { assertSupportedInput } from "./agent-input"
 import {
   CAP_AGENT_DEFINITIONS_V1,
   CAP_AGENT_SESSION_BINDING_V1,
+  CAP_ASSETS_V1,
   CAP_TRACE_UNSUBSCRIBE_V1,
   hasCapability,
 } from "./capabilities"
@@ -33,6 +34,7 @@ import type {
   AgentInput,
   AgentPermissionMode,
   AgentTurnOutcome,
+  AssetReference,
   AuditPage,
   CanonicalSession,
   CanonicalTurn,
@@ -57,7 +59,7 @@ import type {
   ProtocolLimits,
   ResolvedAgentExecutionSpec,
   RunOptions,
-  SandboxSnapshot,
+  SandboxPolicyRecord,
   SandboxStatus,
   SessionCreateOptions,
   SessionState,
@@ -200,6 +202,25 @@ export interface TraceApi {
   export(options?: { sessionId?: string; format?: string }): Promise<Record<string, unknown>>
 }
 
+/**
+ * Content-addressed bytes the host holds on the client's behalf.
+ *
+ * A turn references an asset; it never carries the bytes or a host path. That
+ * is what keeps large or host-local content out of the canonical event log,
+ * which is replayed, exported and shared.
+ */
+export interface AssetApi {
+  /** Upload bytes. Bounded by the host's `maxAssetBytes`. */
+  upload(
+    data: Uint8Array | string,
+    options: { mediaType: string; name?: string }
+  ): Promise<AssetReference>
+  /** Register a path the *host* can read. No bytes cross the transport. */
+  registerPath(path: string, options?: { mediaType?: string }): Promise<AssetReference>
+  stat(assetId: string): Promise<AssetReference>
+  delete(assetId: string): Promise<void>
+}
+
 export interface AuditApi {
   query(options?: { sessionId?: string; cursor?: string; limit?: number }): Promise<AuditPage>
 }
@@ -219,6 +240,7 @@ export interface CogniaClient extends AsyncDisposable {
   readonly models: ModelApi
   readonly auth: AuthApi
   readonly agents: AgentApi
+  readonly assets: AssetApi
   readonly sessions: SessionApi
   readonly tools: ToolApi
   readonly hooks: HookApi
@@ -283,8 +305,12 @@ export interface CogniaSession extends AsyncDisposable {
   /** The subtree rooted at this session. */
   tree(): Promise<readonly unknown[]>
   sandboxStatus(): Promise<SandboxStatus>
-  snapshot(options?: CommandOptions): Promise<SandboxSnapshot>
-  restoreSnapshot(snapshotId: string, options?: CommandOptions): Promise<CommandReceipt>
+  /**
+   * Record the sandbox resource policy in force. This is not a workspace
+   * checkpoint — nothing on disk is captured. See `SandboxPolicyRecord`.
+   */
+  captureSandboxPolicy(options?: CommandOptions): Promise<SandboxPolicyRecord>
+  restoreSandboxPolicy(policyRecordId: string, options?: CommandOptions): Promise<CommandReceipt>
   close(): Promise<void>
 }
 
@@ -304,13 +330,13 @@ type SessionCommandMethod =
   | "session/compact"
   | "session/compact/undo"
   | "session/close"
-  | "sandbox/snapshot"
-  | "sandbox/restore"
+  | "sandbox/policy/capture"
+  | "sandbox/policy/restore"
 
 type SessionCommandResult<Method extends SessionCommandMethod> = Method extends "session/compact"
   ? CompactionResult
-  : Method extends "sandbox/snapshot"
-    ? SandboxSnapshot
+  : Method extends "sandbox/policy/capture"
+    ? SandboxPolicyRecord
     : CommandReceipt
 
 class TraceChannel {
@@ -347,6 +373,8 @@ class TraceChannel {
 
 interface SessionRuntime {
   connection: HostConnection
+  /** What the host declared, so input validation can be capability-aware. */
+  hostCapabilities: readonly string[]
   hub: SessionEventHub
   requestTimeoutMs: number
   defaultCapacity: number
@@ -373,7 +401,7 @@ class CogniaSessionImpl implements CogniaSession {
 
   async start(input: AgentInput, options: RunOptions = {}): Promise<AgentRunHandle> {
     this.assertOpen()
-    assertSupportedInput(input)
+    assertSupportedInput(input, this.runtime.hostCapabilities)
     const commandId = options.commandId ?? randomUUID()
 
     if (options.signal?.aborted) {
@@ -439,12 +467,12 @@ class CogniaSessionImpl implements CogniaSession {
   }
 
   steer(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt> {
-    assertSupportedInput(input)
+    assertSupportedInput(input, this.runtime.hostCapabilities)
     return this.command("turn/steer", { input }, options)
   }
 
   followUp(input: AgentInput, options?: CommandOptions): Promise<CommandReceipt> {
-    assertSupportedInput(input)
+    assertSupportedInput(input, this.runtime.hostCapabilities)
     return this.command("turn/followUp", { input }, options)
   }
 
@@ -610,12 +638,12 @@ class CogniaSessionImpl implements CogniaSession {
     ) as unknown as Promise<SandboxStatus>
   }
 
-  snapshot(options?: CommandOptions): Promise<SandboxSnapshot> {
-    return this.command("sandbox/snapshot", {}, options)
+  captureSandboxPolicy(options?: CommandOptions): Promise<SandboxPolicyRecord> {
+    return this.command("sandbox/policy/capture", {}, options)
   }
 
-  restoreSnapshot(snapshotId: string, options?: CommandOptions): Promise<CommandReceipt> {
-    return this.command("sandbox/restore", { snapshotId }, options)
+  restoreSandboxPolicy(policyRecordId: string, options?: CommandOptions): Promise<CommandReceipt> {
+    return this.command("sandbox/policy/restore", { policyRecordId }, options)
   }
 
   async close(): Promise<void> {
@@ -808,6 +836,12 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     if (closed) throw new ConnectionLostError("the Cognia client is closed")
   }
 
+  function requireAssets(): void {
+    if (!hasCapability(connection.info.capabilities, CAP_ASSETS_V1)) {
+      throw new RpcError(RPC_ERROR_CODES.capabilityError, `host does not support ${CAP_ASSETS_V1}`)
+    }
+  }
+
   function requireAuthoring(): void {
     if (!hasCapability(connection.info.capabilities, CAP_AGENT_DEFINITIONS_V1)) {
       throw new RpcError(
@@ -880,6 +914,7 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
     hubs.set(sessionId, hub)
     const session = new CogniaSessionImpl(sessionId, spec, {
       connection,
+      hostCapabilities: connection.info.capabilities,
       hub,
       requestTimeoutMs,
       defaultCapacity,
@@ -1013,6 +1048,56 @@ export async function createCogniaClient(options: CogniaClientOptions = {}): Pro
         return (
           await connection.call("agent/versions", { agentId }, { timeoutMs: requestTimeoutMs })
         ).versions
+      },
+    },
+    assets: {
+      async upload(data, uploadOptions) {
+        assertUsable()
+        requireAssets()
+        const base64 = typeof data === "string" ? data : Buffer.from(data).toString("base64")
+        return (await connection.call(
+          "asset/put",
+          {
+            data: base64,
+            mediaType: uploadOptions.mediaType,
+            ...(uploadOptions.name !== undefined ? { name: uploadOptions.name } : {}),
+            commandId: randomUUID(),
+          },
+          { timeoutMs: requestTimeoutMs }
+        )) as unknown as AssetReference
+      },
+      async registerPath(assetPath, registerOptions = {}) {
+        assertUsable()
+        requireAssets()
+        return (await connection.call(
+          "asset/register",
+          {
+            path: assetPath,
+            ...(registerOptions.mediaType !== undefined
+              ? { mediaType: registerOptions.mediaType }
+              : {}),
+            commandId: randomUUID(),
+          },
+          { timeoutMs: requestTimeoutMs }
+        )) as unknown as AssetReference
+      },
+      async stat(assetId) {
+        assertUsable()
+        requireAssets()
+        return (await connection.call(
+          "asset/stat",
+          { assetId },
+          { timeoutMs: requestTimeoutMs }
+        )) as unknown as AssetReference
+      },
+      async delete(assetId) {
+        assertUsable()
+        requireAssets()
+        await connection.call(
+          "asset/delete",
+          { assetId, commandId: randomUUID() },
+          { timeoutMs: requestTimeoutMs }
+        )
       },
     },
     sessions: {

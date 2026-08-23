@@ -79,8 +79,25 @@ export const CAP_STRUCTURED_OUTPUT_V1 = "structured-output-v1"
 export const CAP_TYPED_TOOLS_V1 = "typed-tools-v1"
 /** `session/create({ agent })` freezes the resolved version into the session. */
 export const CAP_AGENT_SESSION_BINDING_V1 = "agent-session-binding-v1"
-/** Content-addressed asset upload; turns reference assets by id. */
+/**
+ * Content-addressed asset upload; turns reference assets by id.
+ *
+ * The point of the indirection is that raw bytes and host-local paths never
+ * enter a turn, and therefore never enter the canonical event log that gets
+ * replayed, exported and shared.
+ */
 export const CAP_ASSETS_V1 = "assets-v1"
+/**
+ * A turn may carry asset references in its input.
+ *
+ * Separate from `assets-v1` on purpose. Storing an asset and having the agent
+ * runtime actually read one during a turn are different capabilities, and a
+ * host can honestly have the first without the second — which is exactly the
+ * situation today, since `UnifiedTurnParams` has nowhere to put an asset. Fusing
+ * them into one claim would mean accepting a reference the turn then drops,
+ * which is the failure mode attachments already had.
+ */
+export const CAP_ASSETS_IN_TURN_V1 = "assets-in-turn-v1"
 /** The client can re-attach after a transport drop and replay from a cursor. */
 export const CAP_RECONNECT_V1 = "reconnect-v1"
 

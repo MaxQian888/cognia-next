@@ -125,12 +125,16 @@ export const RPC_METHODS = [
   "task/stop",
   "task/background",
   "sandbox/status",
-  "sandbox/snapshot",
-  "sandbox/restore",
+  "sandbox/policy/capture",
+  "sandbox/policy/restore",
   "trace/subscribe",
   "trace/unsubscribe",
   "trace/export",
   "audit/query",
+  "asset/put",
+  "asset/register",
+  "asset/stat",
+  "asset/delete",
 ] as const
 
 export type RpcMethod = (typeof RPC_METHODS)[number]
@@ -178,14 +182,17 @@ export const SIDE_EFFECTING_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>
   "skill/reload",
   "task/stop",
   "task/background",
-  "sandbox/snapshot",
-  "sandbox/restore",
+  "sandbox/policy/capture",
+  "sandbox/policy/restore",
   "trace/subscribe",
   "trace/unsubscribe",
   "agent/create",
   "agent/update",
   "agent/archive",
   "agent/restore",
+  "asset/put",
+  "asset/register",
+  "asset/delete",
 ])
 
 /** A read whose repetition after a reconnect changes nothing host-side. */
@@ -216,9 +223,26 @@ const sessionCommandParams = v.looseObject({
 const sessionResult = v.looseObject({ sessionId: nonEmptyString })
 const objectResult = v.record(v.string(), v.unknown())
 const arrayResult = v.array(v.unknown())
+const assetRefSchema = v.object({
+  assetId: nonEmptyString,
+  digest: nonEmptyString,
+  mediaType: nonEmptyString,
+  byteLength: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  name: v.optional(v.string()),
+})
+
 const inputSchema = v.union([
   nonEmptyString,
-  v.looseObject({ prompt: nonEmptyString, attachments: v.optional(v.array(v.unknown())) }),
+  v.looseObject({
+    prompt: nonEmptyString,
+    /** Legacy shape. Accepted by the schema so it can be refused with a reason. */
+    attachments: v.optional(v.array(v.unknown())),
+    /**
+     * Content-addressed references. Raw bytes and host paths never travel in a
+     * turn, so neither ends up in the canonical event log.
+     */
+    assets: v.optional(v.array(assetRefSchema)),
+  }),
 ])
 
 const handoffEnvelopeSchema = v.custom<HandoffEnvelope>(
@@ -598,11 +622,16 @@ export const rpcMethodSchemas = {
     result: objectResult,
   },
   "sandbox/status": { params: sessionParams, result: objectResult },
-  "sandbox/snapshot": { params: sessionCommandParams, result: objectResult },
-  "sandbox/restore": {
+  /**
+   * Capture the sandbox *resource policy* in force. Deliberately not called a
+   * snapshot: no workspace content is captured, and naming it one led callers
+   * to expect a filesystem checkpoint that this method has never provided.
+   */
+  "sandbox/policy/capture": { params: sessionCommandParams, result: objectResult },
+  "sandbox/policy/restore": {
     params: v.looseObject({
       sessionId: nonEmptyString,
-      snapshotId: nonEmptyString,
+      policyRecordId: nonEmptyString,
       commandId: optionalCommandId,
     }),
     result: objectResult,
@@ -629,6 +658,48 @@ export const rpcMethodSchemas = {
       limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
     }),
     result: objectResult,
+  },
+  "asset/put": {
+    params: v.looseObject({
+      /** Base64 payload. Bounded by the negotiated `maxAssetBytes`. */
+      data: nonEmptyString,
+      mediaType: nonEmptyString,
+      name: v.optional(v.string()),
+      commandId: optionalCommandId,
+    }),
+    result: v.looseObject({
+      assetId: nonEmptyString,
+      digest: nonEmptyString,
+      mediaType: nonEmptyString,
+      byteLength: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    }),
+  },
+  "asset/register": {
+    params: v.looseObject({
+      /** A host-visible path. The host reads it; the client never sends bytes. */
+      path: nonEmptyString,
+      mediaType: v.optional(nonEmptyString),
+      commandId: optionalCommandId,
+    }),
+    result: v.looseObject({
+      assetId: nonEmptyString,
+      digest: nonEmptyString,
+      mediaType: nonEmptyString,
+      byteLength: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    }),
+  },
+  "asset/stat": {
+    params: v.object({ assetId: nonEmptyString }),
+    result: v.looseObject({
+      assetId: nonEmptyString,
+      digest: nonEmptyString,
+      mediaType: nonEmptyString,
+      byteLength: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    }),
+  },
+  "asset/delete": {
+    params: v.looseObject({ assetId: nonEmptyString, commandId: optionalCommandId }),
+    result: okResult,
   },
 } satisfies Record<RpcMethod, { params: v.GenericSchema; result: v.GenericSchema }>
 

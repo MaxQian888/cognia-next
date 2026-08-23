@@ -72,7 +72,58 @@ describe("assertSupportedInput", () => {
 
   it("explains what to use instead", () => {
     expect(() => assertSupportedInput({ prompt: "x", attachments: [{ path: "/tmp/a" }] })).toThrow(
-      /asset references/
+      /client\.assets/
     )
+  })
+})
+
+describe("assertSupportedInput — asset references", () => {
+  const assets = [{ assetId: "a1", digest: "sha256-x", mediaType: "image/png", byteLength: 12 }]
+
+  it("accepts references against a host whose runtime can read them", () => {
+    expect(() =>
+      assertSupportedInput({ prompt: "look", assets }, ["assets-in-turn-v1"])
+    ).not.toThrow()
+  })
+
+  it("refuses references against a host that can only store them", () => {
+    // `assets-v1` alone means the store works, not that a turn can read one.
+    expect(() => assertSupportedInput({ prompt: "look", assets }, ["assets-v1"])).toThrow(
+      expect.objectContaining({ code: "capability_error" })
+    )
+  })
+
+  it("ignores an empty assets array on any host", () => {
+    expect(() => assertSupportedInput({ prompt: "look", assets: [] }, [])).not.toThrow()
+  })
+
+  it("requires the fields that make a reference verifiable", () => {
+    for (const broken of [
+      { digest: "sha256-x", mediaType: "image/png", byteLength: 1 },
+      { assetId: "a1", mediaType: "image/png", byteLength: 1 },
+      { assetId: "a1", digest: "sha256-x", byteLength: 1 },
+      { assetId: "a1", digest: "sha256-x", mediaType: "image/png" },
+    ]) {
+      expect(() =>
+        assertSupportedInput({ prompt: "x", assets: [broken as never] }, ["assets-in-turn-v1"])
+      ).toThrow(expect.objectContaining({ code: "invalid_params" }))
+    }
+  })
+
+  it("refuses bytes or a host path smuggled onto a reference", () => {
+    for (const key of ["path", "data", "contents"]) {
+      expect(() =>
+        assertSupportedInput(
+          { prompt: "x", assets: [{ ...assets[0]!, [key]: "/tmp/a" } as never] },
+          ["assets-in-turn-v1"]
+        )
+      ).toThrow(/never bytes or host paths/)
+    }
+  })
+
+  it("rejects a non-array assets field", () => {
+    expect(() =>
+      assertSupportedInput({ prompt: "x", assets: "nope" } as never, ["assets-in-turn-v1"])
+    ).toThrow(expect.objectContaining({ code: "invalid_params" }))
   })
 })

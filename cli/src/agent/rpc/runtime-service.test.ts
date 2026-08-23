@@ -570,18 +570,18 @@ describe("createAgentRuntimeService", () => {
       writableRoots: [home],
       maxMemoryMb: 512,
     })
-    const snapshot = await service.handle(
-      "sandbox/snapshot",
+    const policyRecord = await service.handle(
+      "sandbox/policy/capture",
       { sessionId: "session-1", commandId: "snapshot-one" },
       context as never
     )
     setActiveSandboxPolicy("session-1", { network: "on" })
 
     await service.handle(
-      "sandbox/restore",
+      "sandbox/policy/restore",
       {
         sessionId: "session-1",
-        snapshotId: String(snapshot.snapshotId),
+        policyRecordId: String(policyRecord.policyRecordId),
         commandId: "restore-one",
       },
       context as never
@@ -1750,6 +1750,63 @@ describe("createAgentRuntimeService", () => {
         context as never
       )
     ).resolves.toMatchObject({ status: "completed" })
+    await service.close()
+  })
+  // ---- ADR-0142 Phase 4: content-addressed assets ---------------------------
+
+  it("stores, stats and deletes assets over RPC", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    const data = Buffer.from("hello asset").toString("base64")
+
+    const put = (await service.handle(
+      "asset/put",
+      { data, mediaType: "text/plain", name: "note.txt", commandId: "put-1" },
+      context as never
+    )) as { assetId: string; digest: string; byteLength: number }
+    expect(put).toMatchObject({ mediaType: "text/plain", byteLength: 11 })
+    expect(put.digest).toMatch(/^sha256-[0-9a-f]{64}$/)
+
+    expect(
+      await service.handle("asset/stat", { assetId: put.assetId }, context as never)
+    ).toMatchObject({ assetId: put.assetId, digest: put.digest })
+
+    expect(
+      await service.handle("asset/delete", { assetId: put.assetId }, context as never)
+    ).toEqual({ ok: true })
+    await expect(
+      service.handle("asset/stat", { assetId: put.assetId }, context as never)
+    ).rejects.toMatchObject({ structuredError: { code: "asset_not_found" } })
+    await service.close()
+  })
+
+  it("declares asset storage but not asset carriage in a turn", async () => {
+    const service = makeService(emittingTurn(0), () => "session-1")
+    expect(service.capabilities).toContain("assets-v1")
+    expect(service.capabilities).not.toContain("assets-in-turn-v1")
+    await service.close()
+  })
+
+  it("refuses a turn carrying asset references rather than dropping them", async () => {
+    const runTurn = emittingTurn(0)
+    const service = makeService(runTurn, () => "session-1")
+    await service.handle("session/create", { commandId: "create-1" }, context as never)
+    await expect(
+      service.handle(
+        "turn/run",
+        {
+          sessionId: "session-1",
+          input: {
+            prompt: "look",
+            assets: [
+              { assetId: "asset-1", digest: "sha256-x", mediaType: "image/png", byteLength: 4 },
+            ],
+          },
+          commandId: "run-1",
+        },
+        context as never
+      )
+    ).rejects.toMatchObject({ structuredError: { code: "unsupported_capability" } })
+    expect(runTurn).not.toHaveBeenCalled()
     await service.close()
   })
 })

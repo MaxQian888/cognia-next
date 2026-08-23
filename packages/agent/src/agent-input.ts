@@ -1,3 +1,4 @@
+import { CAP_ASSETS_IN_TURN_V1, hasCapability } from "./capabilities"
 import { RpcError } from "./errors"
 import { RPC_ERROR_CODES } from "./rpc/protocol"
 import type { AgentInput } from "./types"
@@ -12,7 +13,10 @@ import type { AgentInput } from "./types"
  * `{ assetId, digest, mediaType, byteLength }` and raw bytes never enter the
  * canonical log.
  */
-export function assertSupportedInput(input: AgentInput): void {
+export function assertSupportedInput(
+  input: AgentInput,
+  hostCapabilities: readonly string[] = []
+): void {
   if (typeof input === "string") return
   if (!input || typeof input !== "object") {
     throw new RpcError(RPC_ERROR_CODES.invalidParams, "turn input must be a string or an object")
@@ -20,6 +24,51 @@ export function assertSupportedInput(input: AgentInput): void {
   if (typeof input.prompt !== "string" || input.prompt.length === 0) {
     throw new RpcError(RPC_ERROR_CODES.invalidParams, "turn input requires a non-empty prompt")
   }
+  const assets = input.assets
+  if (assets !== undefined) {
+    if (!Array.isArray(assets)) {
+      throw new RpcError(RPC_ERROR_CODES.invalidParams, "assets must be an array when present")
+    }
+    if (assets.length > 0 && !hasCapability(hostCapabilities, CAP_ASSETS_IN_TURN_V1)) {
+      throw new RpcError(
+        RPC_ERROR_CODES.capabilityError,
+        `turn input carries ${assets.length} asset reference(s) but the host does not declare ` +
+          `${CAP_ASSETS_IN_TURN_V1}. This host can store assets, but its agent runtime cannot ` +
+          "read one during a turn yet, and accepting the reference would mean dropping it."
+      )
+    }
+    assets.forEach((asset, index) => {
+      if (!asset || typeof asset !== "object") {
+        throw new RpcError(RPC_ERROR_CODES.invalidParams, `assets[${index}] must be an object`)
+      }
+      const record = asset as unknown as Record<string, unknown>
+      for (const key of ["assetId", "digest", "mediaType"]) {
+        if (typeof record[key] !== "string" || (record[key] as string).length === 0) {
+          throw new RpcError(
+            RPC_ERROR_CODES.invalidParams,
+            `assets[${index}].${key} must be a non-empty string`
+          )
+        }
+      }
+      if (typeof record.byteLength !== "number" || record.byteLength < 0) {
+        throw new RpcError(
+          RPC_ERROR_CODES.invalidParams,
+          `assets[${index}].byteLength must be a non-negative number`
+        )
+      }
+      // A raw path or blob smuggled onto a reference would defeat the point.
+      for (const forbidden of ["path", "data", "contents"]) {
+        if (record[forbidden] !== undefined) {
+          throw new RpcError(
+            RPC_ERROR_CODES.invalidParams,
+            `assets[${index}].${forbidden} is not part of an asset reference; a turn carries the ` +
+              "reference only, never bytes or host paths"
+          )
+        }
+      }
+    })
+  }
+
   const attachments = input.attachments
   if (attachments === undefined) return
   if (!Array.isArray(attachments)) {
@@ -50,7 +99,7 @@ export function assertSupportedInput(input: AgentInput): void {
     RPC_ERROR_CODES.invalidParams,
     `turn input carries ${attachments.length} attachment(s) (${[...shapes].sort().join(", ")}); ` +
       "this host build accepts no attachments. They were previously accepted and silently " +
-      "dropped. Use asset references once the host declares the assets-v1 capability.",
+      "dropped. Upload the bytes with client.assets and pass `assets` instead.",
     { attachmentCount: attachments.length, shapes: [...shapes].sort() }
   )
 }
