@@ -162,6 +162,7 @@
     "clearSearch": "Clear search",
     "empty": "No workspaces yet",
     "folderCount": "{count, plural, one {# folder} other {# folders}}",
+    "followedSession": "Switched to workspace {name}",
     "heading": "Workspaces",
     "manage": "Manage workspaces",
     "newWorkspace": "New workspace",
@@ -172,6 +173,7 @@
     "pinnedHeading": "Pinned",
     "recentHeading": "Recent",
     "searchPlaceholder": "Search workspaces…",
+    "undoFollow": "Undo",
     "unpin": "Unpin {name}",
     "untrustedHint": "Untrusted workspace"
   }

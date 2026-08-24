@@ -176,4 +176,35 @@ describe("ChatPaneGroup", () => {
     ;(activePane.onSplitView as () => void)()
     expect(chatState.setSplitSessionId).toHaveBeenCalledWith("b")
   })
+  describe("cross-workspace split is refused, not silently co-rendered", () => {
+    // Artifacts, terminals, source control and the workspace panel all resolve
+    // against ONE active workspace, so a second pane from another project would
+    // render a conversation whose surroundings describe a different repository.
+    const crossWorkspace = [
+      { id: "a", title: "Alpha", projectId: "project-a" },
+      { id: "b", title: "Beta", projectId: "project-b" },
+    ] as unknown as ChatSession[]
+
+    it("offers no split target when the only other open conversation is elsewhere", () => {
+      render(<ChatPaneGroup {...makeProps({ sessions: crossWorkspace })} />)
+      expect(paneRenders.at(-1)?.onSplitView).toBeUndefined()
+    })
+
+    it("still offers a split target within the same workspace", () => {
+      const sameWorkspace = [
+        { id: "a", title: "Alpha", projectId: "project-a" },
+        { id: "b", title: "Beta", projectId: "project-a" },
+      ] as unknown as ChatSession[]
+      render(<ChatPaneGroup {...makeProps({ sessions: sameWorkspace })} />)
+      expect(paneRenders.at(-1)?.onSplitView).toBeInstanceOf(Function)
+    })
+
+    it("collapses an existing split once the panes no longer share a workspace", () => {
+      chatState.splitSessionId = "b"
+      render(<ChatPaneGroup {...makeProps({ sessions: crossWorkspace })} />)
+      expect(screen.queryByTestId("rpg")).not.toBeInTheDocument()
+      expect(screen.getByTestId("pane-a")).toBeInTheDocument()
+      expect(screen.queryByTestId("pane-b")).not.toBeInTheDocument()
+    })
+  })
 })

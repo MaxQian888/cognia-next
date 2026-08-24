@@ -79,6 +79,14 @@ export function DesktopChatWorkspace() {
   const platform = usePlatform()
   const runtimeT = useTranslations("desktop.chatRuntime")
   const tMembers = useTranslations("desktop.memberList")
+  // Held in a ref for the same reason as `bulkT` below: `useTranslations`
+  // returns a fresh function each render, and `handleSwitchToSession` must not
+  // change identity on every render because of it.
+  const workspaceT = useTranslations("workspace.switcher")
+  const workspaceTRef = useRef(workspaceT)
+  useEffect(() => {
+    workspaceTRef.current = workspaceT
+  }, [workspaceT])
   const runtimeSnapshot = useRuntimeSnapshot()
   const chatAvailability = resolveOperationAvailability({
     snapshot: runtimeSnapshot,
@@ -317,13 +325,33 @@ export function DesktopChatWorkspace() {
       // leaves all of them pointed at the workspace the user just left, and the
       // conversation itself reads as `absent` (see `use-sessions.ts`).
       if (target?.projectId) {
-        const { activeProjectId, setActiveProject } = useProjectStore.getState()
+        const { activeProjectId, projects, setActiveProject } = useProjectStore.getState()
         if (target.projectId !== activeProjectId) {
           log.info("switch-to-session crosses workspace", {
             sessionId: id,
             projectId: target.projectId,
           })
+          // Announce it. Following is right, but doing it silently re-points the
+          // editor, terminal, source control and workspace panel at another
+          // project with nothing on screen saying so — the user reads it as the
+          // app losing their place. The undo restores both halves, since
+          // reverting only the workspace would strand the conversation reading
+          // as `absent`.
+          const previousProjectId = activeProjectId
+          const previousSessionId = useChatStore.getState().activeSessionId
+          const name = projects.find((p) => p.id === target.projectId)?.name ?? ""
           setActiveProject(target.projectId)
+          toast.info(workspaceTRef.current("followedSession", { name }), {
+            action: {
+              label: workspaceTRef.current("undoFollow"),
+              onClick: () => {
+                if (previousProjectId) {
+                  useProjectStore.getState().setActiveProject(previousProjectId)
+                }
+                if (previousSessionId) select(previousSessionId)
+              },
+            },
+          })
         }
       }
       select(id)

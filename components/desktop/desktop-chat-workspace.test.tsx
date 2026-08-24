@@ -303,6 +303,7 @@ jest.mock("@/components/chat/tool-approval-dialog", () => ({
 import { requestComposerMention } from "@/lib/chat/composer-mention-request"
 import { DesktopChatWorkspace } from "./desktop-chat-workspace"
 import { useProjectStore } from "@/stores/project/project-store"
+import { toast } from "sonner"
 
 beforeEach(() => {
   insertMention.mockReset()
@@ -407,6 +408,7 @@ test("selecting a conversation from another workspace switches the workspace fir
   // following the conversation into its workspace leaves all of them pointed at
   // the one the user just left.
   useProjectStore.setState({ activeProjectId: "project-a", loaded: false })
+  activeSessionId = "s-1"
   sessionsRef.current = [
     {
       id: "s-2",
@@ -428,6 +430,23 @@ test("selecting a conversation from another workspace switches the workspace fir
     "switch-to-session crosses workspace",
     expect.objectContaining({ sessionId: "s-2", projectId: "project-b" })
   )
+
+  // Following is right, but doing it silently re-points the editor, terminal
+  // and workspace panel at another project with nothing on screen saying so.
+  expect(toast.info).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ action: expect.objectContaining({ label: expect.any(String) }) })
+  )
+
+  // The undo restores BOTH halves — reverting only the workspace would strand
+  // the conversation reading as `absent`.
+  const undo = jest.mocked(toast.info).mock.calls[0]?.[1] as unknown as {
+    action: { onClick: () => void }
+  }
+  select.mockClear()
+  act(() => undo.action.onClick())
+  expect(useProjectStore.getState().activeProjectId).toBe("project-a")
+  expect(select).toHaveBeenCalledWith("s-1")
 })
 
 test("selecting a conversation in the current workspace leaves the workspace alone", async () => {

@@ -140,10 +140,22 @@ export function ChatPaneGroup({
     [sessions]
   )
 
-  // A split pane that points at a no-longer-open session collapses back to a
-  // single pane.
+  // Split only within one workspace. Everything around the panes — artifacts,
+  // terminals, source control, the workspace panel — resolves against the single
+  // active workspace, so a second pane from another project would render a
+  // conversation whose surroundings all describe a different repository.
+  const activeWorkspaceId = sessionById(activeSessionId)?.projectId ?? undefined
+  const sharesActiveWorkspace = (id: string): boolean =>
+    (sessionById(id)?.projectId ?? undefined) === activeWorkspaceId
+
+  // A split pane that points at a no-longer-open session — or at one that the
+  // active pane has since left the workspace of — collapses back to a single
+  // pane.
   const effectiveSplitId =
-    splitSessionId && openSessionIds.includes(splitSessionId) && splitSessionId !== activeSessionId
+    splitSessionId &&
+    openSessionIds.includes(splitSessionId) &&
+    splitSessionId !== activeSessionId &&
+    sharesActiveWorkspace(splitSessionId)
       ? splitSessionId
       : null
 
@@ -197,7 +209,10 @@ export function ChatPaneGroup({
     )
   }
 
-  const splitTargetId = openSessionIds.find((id) => id !== activeSessionId) ?? null
+  // A cross-workspace conversation is not offered as a split target. Picking it
+  // from the list still follows into its workspace, which now announces itself.
+  const splitTargetId =
+    openSessionIds.find((id) => id !== activeSessionId && sharesActiveWorkspace(id)) ?? null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

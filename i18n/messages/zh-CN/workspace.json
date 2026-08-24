@@ -162,6 +162,7 @@
     "clearSearch": "清除搜索",
     "empty": "暂无工作区",
     "folderCount": "{count, plural, other {# 个文件夹}}",
+    "followedSession": "已切换到工作区 {name}",
     "heading": "工作区",
     "manage": "管理工作区",
     "newWorkspace": "新建工作区",
@@ -172,6 +173,7 @@
     "pinnedHeading": "已置顶",
     "recentHeading": "最近",
     "searchPlaceholder": "搜索工作区…",
+    "undoFollow": "撤销",
     "unpin": "取消置顶 {name}",
     "untrustedHint": "未受信任的工作区"
   }
