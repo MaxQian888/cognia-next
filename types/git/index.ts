@@ -88,6 +88,10 @@ export interface GitWorktree {
   path: string
   branch: string | null
   head: string | null
+  locked: boolean
+  lockReason: string | null
+  prunable: boolean
+  pruneReason: string | null
   isMain: boolean
 }
 

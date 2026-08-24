@@ -434,30 +434,33 @@ describe("when in Tauri", () => {
   it("fires WorktreeCreate / WorktreeRemove hooks after the git op with the documented payload", async () => {
     fireAgentHookMock.mockClear()
     await gitWorktreeAdd("/r", "/wt", "agent/b", "HEAD", {
-      source: "agent-team-allocator",
+      source: "worktree-panel",
       sessionId: "s1",
-      ownerType: "team",
-      ownerRef: "run_1",
+      ownerType: "user",
     })
     expect(fireAgentHookMock).toHaveBeenCalledWith(
       "WorktreeCreate",
-      { agentId: "agent-team-allocator", sessionId: "s1", cwd: "/r" },
+      {
+        agentId: "worktree-panel",
+        agentKind: "system",
+        sessionId: "s1",
+        cwd: "/r",
+      },
       {
         payload: {
           worktree_path: "/wt",
           workspace_root: "/r",
           branch: "agent/b",
           base_ref: "HEAD",
-          source: "agent-team-allocator",
-          owner_type: "team",
-          owner_ref: "run_1",
+          source: "worktree-panel",
+          owner_type: "user",
         },
       }
     )
     await gitWorktreeRemove("/r", "/wt", true, "agent/b", { reason: "cleanup" })
     expect(fireAgentHookMock).toHaveBeenLastCalledWith(
       "WorktreeRemove",
-      { agentId: "git-command", sessionId: "", cwd: "/r" },
+      { agentId: "git-command", agentKind: "system", sessionId: "", cwd: "/r" },
       {
         payload: {
           worktree_path: "/wt",
@@ -473,7 +476,7 @@ describe("when in Tauri", () => {
     await gitWorktreeAdd("/r", "/wt2", "x")
     expect(fireAgentHookMock).toHaveBeenLastCalledWith(
       "WorktreeCreate",
-      { agentId: "git-command", sessionId: "", cwd: "/r" },
+      { agentId: "git-command", agentKind: "system", sessionId: "", cwd: "/r" },
       { payload: expect.objectContaining({ base_ref: null, source: "git-command" }) }
     )
     // Removal without a deleted branch reports null and the default reason.
@@ -528,7 +531,18 @@ describe("when in Tauri", () => {
       force: false,
       deleteBranch: null,
     })
-    callMock.mockResolvedValueOnce([{ path: "/r", branch: "main", head: "abc", isMain: true }])
+    callMock.mockResolvedValueOnce([
+      {
+        path: "/r",
+        branch: "main",
+        head: "abc",
+        locked: false,
+        lockReason: null,
+        prunable: false,
+        pruneReason: null,
+        isMain: true,
+      },
+    ])
     const wts = await gitWorktreeList("/r")
     expect(callMock).toHaveBeenCalledWith("git_worktree_list", { repoPath: "/r" })
     expect(wts[0]?.isMain).toBe(true)

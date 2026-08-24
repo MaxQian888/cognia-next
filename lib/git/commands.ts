@@ -505,12 +505,12 @@ export async function gitWorktreeRemove(
 /**
  * Who is creating/removing the worktree, for the `WorktreeCreate` /
  * `WorktreeRemove` hook payload. Optional: the source-control panel passes
- * nothing (user-driven, no session); the agent-team allocator passes the team
- * run it is allocating for.
+ * its user-driven ownership metadata. Managed callers go through the Registry
+ * lifecycle sink instead of this manual Git seam.
  */
 export interface WorktreeHookContext {
   sessionId?: string
-  /** `agent-team-allocator` | `worktree-panel` | … ; defaults to `git-command`. */
+  /** `worktree-panel` | another manual Git caller; defaults to `git-command`. */
   source?: string
   ownerType?: string
   ownerRef?: string
@@ -520,9 +520,8 @@ export interface WorktreeHookContext {
 
 /**
  * The TS producer for the two worktree hook events (ADR-0111 decision 9).
- * The managed Registry fires them from Rust; the two legacy worktree owners —
- * the agent-team allocator and the source-control panel — both funnel through
- * `gitWorktreeAdd` / `gitWorktreeRemove` above, so this one seam covers them.
+ * The managed Registry fires them from Rust; manual source-control operations
+ * funnel through `gitWorktreeAdd` / `gitWorktreeRemove` above.
  * Payload field names match the Rust producer (`worktree_hook_fields`).
  * Observational: never throws, never blocks the git operation that succeeded.
  */

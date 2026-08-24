@@ -11,17 +11,11 @@ import { useTranslations } from "next-intl"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { gitDiffRefsFile, gitDiffRefsFiles, gitRefs } from "@/lib/git/commands"
 import { cn } from "@/lib/utils"
 import type { GitDiff, GitFileChange, GitRef } from "@/types/git"
 import { DiffViewer } from "./diff-viewer"
+import { GitRefSelect } from "./git-ref-select"
 import { splitPath, statusDecoration } from "./status-decoration"
 
 interface CompareRefsSheetProps {
@@ -83,39 +77,25 @@ export function CompareRefsSheet({ open, onOpenChange, rootDir }: CompareRefsShe
         </SheetHeader>
 
         <div className="flex items-center gap-2 px-4">
-          <Select value={base ?? undefined} onValueChange={setBase}>
-            <SelectTrigger className="h-8 flex-1 text-xs" data-testid="compare-base">
-              <SelectValue placeholder={t("compare.selectBase")} />
-            </SelectTrigger>
-            <SelectContent>
-              {refs.map((r) => (
-                <SelectItem
-                  key={`b:${r.name}`}
-                  value={r.name}
-                  data-testid={`compare-base-${r.name}`}
-                >
-                  {r.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <GitRefSelect
+            refs={refs}
+            value={base}
+            onValueChange={setBase}
+            placeholder={t("compare.selectBase")}
+            ariaLabel={t("compare.selectBase")}
+            testId="compare-base"
+            className="h-8 flex-1 text-xs"
+          />
           <span className="shrink-0 text-xs text-muted-foreground">…</span>
-          <Select value={target ?? undefined} onValueChange={setTarget}>
-            <SelectTrigger className="h-8 flex-1 text-xs" data-testid="compare-target">
-              <SelectValue placeholder={t("compare.selectTarget")} />
-            </SelectTrigger>
-            <SelectContent>
-              {refs.map((r) => (
-                <SelectItem
-                  key={`t:${r.name}`}
-                  value={r.name}
-                  data-testid={`compare-target-${r.name}`}
-                >
-                  {r.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <GitRefSelect
+            refs={refs}
+            value={target}
+            onValueChange={setTarget}
+            placeholder={t("compare.selectTarget")}
+            ariaLabel={t("compare.selectTarget")}
+            testId="compare-target"
+            className="h-8 flex-1 text-xs"
+          />
         </div>
 
         <div className="mt-2 flex min-h-0 flex-1">

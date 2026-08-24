@@ -44,6 +44,7 @@ async function pickBoth() {
   fireEvent.click(await screen.findByTestId("compare-base-main"))
   fireEvent.click(screen.getByTestId("compare-target"))
   fireEvent.click(await screen.findByTestId("compare-target-feature"))
+  await screen.findByTestId("compare-file-src/a.ts")
 }
 
 describe("CompareRefsSheet", () => {

@@ -124,6 +124,7 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     { key: workingDir, label: "main", path: workingDir, isMain: true },
   ])
   const [rootKey, setRootKey] = useState<string>(persisted?.rootKey || workingDir)
+  const [rootsReady, setRootsReady] = useState(false)
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
   // Guards the one-shot session restore so re-renders don't re-open files.
@@ -207,8 +208,15 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
           })
         }
         setRoots(next)
+        setRootKey((current) => (next.some((root) => root.key === current) ? current : workingDir))
+        setRootsReady(true)
       })
-      .catch((err) => editorLogger.debug("worktree list failed", { err: String(err) }))
+      .catch((err) => {
+        if (cancelled) return
+        editorLogger.debug("worktree list failed", { err: String(err) })
+        setRootKey(workingDir)
+        setRootsReady(true)
+      })
     return () => {
       cancelled = true
     }
@@ -223,12 +231,13 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
 
   // ── Persist the session (root / open files / active file) ───────────────
   useEffect(() => {
+    if (!rootsReady) return
     setEditorSession(scopeKey, {
       rootKey,
       openPaths: openFiles.map((f) => f.relPath),
       activePath,
     })
-  }, [scopeKey, rootKey, openFiles, activePath, setEditorSession])
+  }, [scopeKey, rootKey, openFiles, activePath, rootsReady, setEditorSession])
 
   // ── File operations ─────────────────────────────────────────────────────
 
@@ -426,6 +435,7 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
 
   // ── One-shot session restore (reopen persisted files for this root) ─────
   useEffect(() => {
+    if (!rootsReady) return
     if (restoredRef.current) return
     if (!persisted || persisted.rootKey !== rootKey) {
       restoredRef.current = true
@@ -439,9 +449,8 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
       }
       if (persisted.activePath) setActivePath(persisted.activePath)
     })()
-    // Intentionally one-shot on mount — openFile is stable enough for a restore.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    // Intentionally one-shot after worktree discovery validates the persisted root.
+  }, [openFile, persisted, rootKey, rootsReady])
 
   // ── External-change watch: mark open files, notify tree consumers ───────
   const [treeRefreshToken, setTreeRefreshToken] = useState(0)
