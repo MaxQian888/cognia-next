@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+Conversations now run where they say they run. A turn sent in a conversation belonging to one workspace no longer executes against whichever workspace happens to be focused — the working directory, root list, workspace trust and additional directories all follow the conversation. For a managed worktree, the working directory now resolves from the session's execution binding, so project instruction files (CLAUDE.md / AGENTS.md), the sandbox placement, environment setup and the environment chip all point at the leased worktree instead of the source checkout. A sandbox placement whose reference is lost on the way to a tool is recovered from the session rather than silently downgraded to an unpoliced run on your own machine, and a session bound to a remote Computer Use target no longer falls back to driving your desktop. Selecting a conversation from another workspace still follows it there, but now says so and offers an undo; split view stays within one workspace instead of pairing panes whose surrounding panels describe different repositories.
