@@ -1,0 +1,46 @@
+{
+  "reachability": {
+    "online": "在线",
+    "recently-active": "近期活跃",
+    "offline": "离线",
+    "unknown": "从未连接"
+  },
+  "adminState": {
+    "active": "正常",
+    "paused": "已暂停",
+    "revoked": "已吊销",
+    "unknown": "未知"
+  },
+  "kind": {
+    "local": "本机",
+    "paired-device": "配对设备",
+    "remote-host": "远程主机",
+    "worker": "执行 Worker"
+  },
+  "capabilityState": {
+    "reported": "已上报",
+    "expected": "预期具备",
+    "absent": "不具备",
+    "unknown": "未确认"
+  },
+  "grantState": {
+    "granted": "已授权",
+    "partial": "部分授权",
+    "denied": "未授权",
+    "unknown": "未知"
+  },
+  "never": "从未",
+  "notAvailable": "—",
+  "listPane": {
+    "searchPlaceholder": "搜索设备",
+    "searchAria": "按名称、地址或平台搜索设备",
+    "filterAria": "按设备类型筛选",
+    "filterAll": "全部类型",
+    "emptyTitle": "暂无设备",
+    "emptyBody": "配对一台手机或添加远程主机后会显示在这里。",
+    "emptyFiltered": "没有设备符合当前的搜索或筛选条件。"
+  },
+  "row": {
+    "needsAttention": "需要关注"
+  }
+}

@@ -8197,6 +8197,52 @@
       "workspaceUntitled": "Untitled workspace"
     }
   },
+  "devices": {
+    "adminState": {
+      "active": "Active",
+      "paused": "Paused",
+      "revoked": "Revoked",
+      "unknown": "Unknown"
+    },
+    "capabilityState": {
+      "absent": "Not available",
+      "expected": "Expected",
+      "reported": "Reported",
+      "unknown": "Unconfirmed"
+    },
+    "grantState": {
+      "denied": "Not granted",
+      "granted": "Granted",
+      "partial": "Partial",
+      "unknown": "Unknown"
+    },
+    "kind": {
+      "local": "This device",
+      "paired-device": "Paired device",
+      "remote-host": "Remote host",
+      "worker": "Execution worker"
+    },
+    "listPane": {
+      "emptyBody": "Pair a phone or add a remote host to see it here.",
+      "emptyFiltered": "No device matches the current search or filter.",
+      "emptyTitle": "No devices",
+      "filterAll": "All kinds",
+      "filterAria": "Filter by device kind",
+      "searchAria": "Search devices by name, address or platform",
+      "searchPlaceholder": "Search devices"
+    },
+    "never": "Never",
+    "notAvailable": "—",
+    "reachability": {
+      "offline": "Offline",
+      "online": "Online",
+      "recently-active": "Recently active",
+      "unknown": "Never seen"
+    },
+    "row": {
+      "needsAttention": "Needs attention"
+    }
+  },
   "diagnostics": {
     "action": {
       "copyInstallCommand": "Copy install command",

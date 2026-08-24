@@ -1,0 +1,46 @@
+{
+  "reachability": {
+    "online": "Online",
+    "recently-active": "Recently active",
+    "offline": "Offline",
+    "unknown": "Never seen"
+  },
+  "adminState": {
+    "active": "Active",
+    "paused": "Paused",
+    "revoked": "Revoked",
+    "unknown": "Unknown"
+  },
+  "kind": {
+    "local": "This device",
+    "paired-device": "Paired device",
+    "remote-host": "Remote host",
+    "worker": "Execution worker"
+  },
+  "capabilityState": {
+    "reported": "Reported",
+    "expected": "Expected",
+    "absent": "Not available",
+    "unknown": "Unconfirmed"
+  },
+  "grantState": {
+    "granted": "Granted",
+    "partial": "Partial",
+    "denied": "Not granted",
+    "unknown": "Unknown"
+  },
+  "never": "Never",
+  "notAvailable": "—",
+  "listPane": {
+    "searchPlaceholder": "Search devices",
+    "searchAria": "Search devices by name, address or platform",
+    "filterAria": "Filter by device kind",
+    "filterAll": "All kinds",
+    "emptyTitle": "No devices",
+    "emptyBody": "Pair a phone or add a remote host to see it here.",
+    "emptyFiltered": "No device matches the current search or filter."
+  },
+  "row": {
+    "needsAttention": "Needs attention"
+  }
+}

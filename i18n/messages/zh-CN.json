@@ -8197,6 +8197,52 @@
       "workspaceUntitled": "未命名工作区"
     }
   },
+  "devices": {
+    "adminState": {
+      "active": "正常",
+      "paused": "已暂停",
+      "revoked": "已吊销",
+      "unknown": "未知"
+    },
+    "capabilityState": {
+      "absent": "不具备",
+      "expected": "预期具备",
+      "reported": "已上报",
+      "unknown": "未确认"
+    },
+    "grantState": {
+      "denied": "未授权",
+      "granted": "已授权",
+      "partial": "部分授权",
+      "unknown": "未知"
+    },
+    "kind": {
+      "local": "本机",
+      "paired-device": "配对设备",
+      "remote-host": "远程主机",
+      "worker": "执行 Worker"
+    },
+    "listPane": {
+      "emptyBody": "配对一台手机或添加远程主机后会显示在这里。",
+      "emptyFiltered": "没有设备符合当前的搜索或筛选条件。",
+      "emptyTitle": "暂无设备",
+      "filterAll": "全部类型",
+      "filterAria": "按设备类型筛选",
+      "searchAria": "按名称、地址或平台搜索设备",
+      "searchPlaceholder": "搜索设备"
+    },
+    "never": "从未",
+    "notAvailable": "—",
+    "reachability": {
+      "offline": "离线",
+      "online": "在线",
+      "recently-active": "近期活跃",
+      "unknown": "从未连接"
+    },
+    "row": {
+      "needsAttention": "需要关注"
+    }
+  },
   "diagnostics": {
     "action": {
       "copyInstallCommand": "复制安装命令",
