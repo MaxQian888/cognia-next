@@ -86,6 +86,7 @@ export const SETTINGS_SYNC = {
   defaultModel: { category: "shared" },
   defaultSystemPrompt: { category: "shared" },
   defaultWorkingDir: { category: "desktop-only" },
+  projectsRoot: { category: "desktop-only" },
   activeProjectId: { category: "desktop-only" },
   workspaceTrust: { category: "desktop-only" },
   permissionMode: { category: "shared" },

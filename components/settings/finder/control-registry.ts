@@ -57,6 +57,13 @@ export const SETTING_CONTROLS: SettingControl[] = [
     settingKey: "defaultWorkingDir",
     keywords: ["working directory", "cwd", "工作目录"],
   },
+  {
+    id: "projects-root",
+    sectionId: "agent-runtime",
+    labelKey: "projectsRoot",
+    settingKey: "projectsRoot",
+    keywords: ["projects root", "new workspace", "工作区目录", "新建工作区", "项目目录"],
+  },
   // appearance (behind tabs → section-level jump)
   {
     id: "theme",

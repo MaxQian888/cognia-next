@@ -79,6 +79,24 @@ describe("DefaultsTab", () => {
     expect(save).toHaveBeenCalledWith({ defaultWorkingDir: undefined })
   })
 
+  it("blur on projects-root input persists trimmed value", () => {
+    render(<DefaultsTab />)
+    const input = screen.getByLabelText("projectsRootTitle") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "  /srv/code  " } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ projectsRoot: "/srv/code" })
+  })
+
+  it("clearing projects-root persists undefined so the platform default applies", () => {
+    // Empty is meaningful here: it means `~/Projects`, resolved lazily rather
+    // than frozen into settings.
+    render(<DefaultsTab />)
+    const input = screen.getByLabelText("projectsRootTitle") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "   " } })
+    fireEvent.blur(input)
+    expect(save).toHaveBeenCalledWith({ projectsRoot: undefined })
+  })
+
   it("blur on append textarea persists trimmed value", () => {
     render(<DefaultsTab />)
     const ta = screen.getByLabelText("appendTitle")

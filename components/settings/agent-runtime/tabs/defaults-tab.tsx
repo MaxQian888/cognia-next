@@ -20,6 +20,7 @@ import {
   SettingsStack,
 } from "@/components/settings/common/settings-block"
 import { Input } from "@/components/ui/input"
+import { DirectoryField } from "@/components/settings/common/directory-field"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
@@ -81,6 +82,7 @@ export function DefaultsTab() {
 
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default")
   const [workingDir, setWorkingDir] = useState("")
+  const [projectsRoot, setProjectsRoot] = useState("")
   const [appendSystem, setAppendSystem] = useState("")
   const [routingFallback, setRoutingFallback] = useState(true)
   const [cacheOptimization, setCacheOptimization] = useState(false)
@@ -103,6 +105,7 @@ export function DefaultsTab() {
     /* eslint-disable react-hooks/set-state-in-effect */
     setPermissionMode((settings.permissionMode ?? "default") as PermissionMode)
     setWorkingDir(settings.defaultWorkingDir ?? "")
+    setProjectsRoot(settings.projectsRoot ?? "")
     setAppendSystem(settings.defaultSystemPrompt ?? "")
     setRoutingFallback(settings.routingFallbackEnabled !== false)
     setCacheOptimization(settings.cacheOptimizationEnabled !== false)
@@ -126,9 +129,16 @@ export function DefaultsTab() {
     void save({ permissionMode: value })
   }
 
-  const persistWorkingDir = () => {
-    const trimmed = workingDir.trim()
+  const persistWorkingDir = (next: string) => {
+    const trimmed = next.trim()
     void save({ defaultWorkingDir: trimmed || undefined })
+  }
+
+  // Empty is meaningful: it means "use the platform default" (`~/Projects`),
+  // resolved lazily by `resolveProjectsRoot` rather than baked into settings.
+  const persistProjectsRoot = (next: string) => {
+    const trimmed = next.trim()
+    void save({ projectsRoot: trimmed || undefined })
   }
 
   const persistAppend = () => {
@@ -270,12 +280,28 @@ export function DefaultsTab() {
         description={t("workingDirDesc")}
         settingId="default-working-dir"
       >
-        <Input
+        <DirectoryField
           value={workingDir}
-          onChange={(e) => setWorkingDir(e.target.value)}
-          onBlur={persistWorkingDir}
+          onChange={setWorkingDir}
+          onCommit={persistWorkingDir}
           placeholder={t("workingDirPlaceholder")}
-          aria-label={t("workingDirTitle")}
+          ariaLabel={t("workingDirTitle")}
+          browseLabel={t("browse")}
+        />
+      </SettingsBlock>
+
+      <SettingsBlock
+        title={t("projectsRootTitle")}
+        description={t("projectsRootDesc")}
+        settingId="projects-root"
+      >
+        <DirectoryField
+          value={projectsRoot}
+          onChange={setProjectsRoot}
+          onCommit={persistProjectsRoot}
+          placeholder={t("projectsRootPlaceholder")}
+          ariaLabel={t("projectsRootTitle")}
+          browseLabel={t("browse")}
         />
       </SettingsBlock>
 

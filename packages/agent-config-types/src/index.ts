@@ -3201,6 +3201,19 @@ export interface AppSettings {
   defaultSystemPrompt?: string
   defaultWorkingDir?: string
   /**
+   * Parent directory new workspaces are created under.
+   *
+   * Distinct from `defaultWorkingDir`, which is the last-resort cwd a session
+   * falls back to when nothing else resolves. This one is only ever a PARENT:
+   * "New workspace" joins it with the workspace name to propose a path.
+   * Overloading `defaultWorkingDir` for it would add a seventh source of truth
+   * for "which directory" — the opposite of where the cwd chain is going.
+   *
+   * Unset means the platform default (`~/Projects`); resolved lazily so the
+   * stored value stays empty until the user picks something else.
+   */
+  projectsRoot?: string
+  /**
    * Id of the active workspace (project). Persists the `useProjectStore`
    * active-workspace pointer across restarts; hydrated on boot by the project
    * store's `load()`. `null`/undefined means no workspace is active.

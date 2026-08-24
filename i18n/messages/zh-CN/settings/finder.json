@@ -12,6 +12,7 @@
     "networkProxy": "网络代理",
     "notifications": "通知",
     "permissionMode": "权限模式",
+    "projectsRoot": "新建工作区的位置",
     "reduceMotion": "减少动效",
     "sandboxEnabled": "沙箱",
     "searchEnabled": "网页搜索",

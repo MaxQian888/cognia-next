@@ -72,6 +72,7 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "defaultModel",
     "defaultSystemPrompt",
     "defaultWorkingDir",
+    "projectsRoot",
     "permissionMode",
     "cacheOptimizationEnabled",
     // Desktop → cognia CLI storage sync (CLI ↔ APP unification).
