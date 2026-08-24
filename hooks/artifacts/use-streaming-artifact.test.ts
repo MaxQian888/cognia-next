@@ -43,9 +43,30 @@ describe("useStreamingArtifact", () => {
     expect(result.current).toBeNull()
   })
 
-  it("never claims another session is generating something", () => {
-    // The chat store only holds the active session's messages.
+  it("never claims a session with no slice is generating something", () => {
     const { result } = renderHook(() => useStreamingArtifact("some-other-session"))
+    expect(result.current).toBeNull()
+  })
+
+  it("detects the block a BACKGROUND pane is writing", () => {
+    // This used to bail out for any unfocused session, so a background pane
+    // streaming a long code block showed no placeholder and then produced an
+    // artifact on turn-complete out of nowhere.
+    useChatStore.setState({
+      sessions: {
+        s2: { status: "streaming", messages: [assistant(OPEN_BLOCK)] },
+      },
+    } as never)
+    const { result } = renderHook(() => useStreamingArtifact("s2"))
+    expect(result.current?.type).toBe("code")
+    expect(result.current?.lineCount).toBe(12)
+  })
+
+  it("does not borrow the focused pane's turn for an idle background one", () => {
+    useChatStore.setState({
+      sessions: { s2: { status: "idle", messages: [assistant(OPEN_BLOCK)] } },
+    } as never)
+    const { result } = renderHook(() => useStreamingArtifact("s2"))
     expect(result.current).toBeNull()
   })
 

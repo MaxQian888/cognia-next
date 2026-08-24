@@ -42,20 +42,37 @@ function assistantText(message: UIMessage | undefined): string {
     .join("\n")
 }
 
+/** Stable empty reference — a fresh array per render would re-trigger the memo. */
+const NO_MESSAGES: UIMessage[] = []
+
 /**
- * @param sessionId Scope guard. The chat store only holds the active session's
- * messages, so a list rendered for a different session must not claim that
- * session is generating something.
+ * @param sessionId Which conversation to detect for. Omitted means the focused
+ * one.
+ *
+ * This used to bail out entirely for any session that was not focused, on the
+ * grounds that "the chat store only holds the active session's messages". That
+ * stopped being true when the store grew per-session slices, and the guard
+ * outlived it: a background pane streaming a long code block showed no
+ * artifact placeholder at all, then produced one on turn-complete out of
+ * nowhere. Reads the named session's own slice instead — with the projection
+ * preferred for the focused one, whose slice is materialised lazily and can
+ * still be missing while `messages` is live.
  */
 export function useStreamingArtifact(sessionId?: string): StreamingArtifact | null {
-  const status = useChatStore((state) => state.status)
-  const messages = useChatStore((state) => state.messages)
-  const activeSessionId = useChatStore((state) => state.activeSessionId)
+  const status = useChatStore((state) =>
+    !sessionId || sessionId === state.activeSessionId
+      ? state.status
+      : (state.sessions[sessionId]?.status ?? "idle")
+  )
+  const messages = useChatStore((state) =>
+    !sessionId || sessionId === state.activeSessionId
+      ? state.messages
+      : (state.sessions[sessionId]?.messages ?? NO_MESSAGES)
+  )
   const artifacts = useSettingsStore((state) => state.settings?.artifacts)
 
   return useMemo(() => {
     if (status !== "streaming") return null
-    if (sessionId && sessionId !== activeSessionId) return null
     // Honour the same opt-out auto-creation honours, so the placeholder never
     // promises an artifact the turn-complete handler will decline to create.
     if (artifacts?.autoCreate === false) return null
@@ -70,13 +87,5 @@ export function useStreamingArtifact(sessionId?: string): StreamingArtifact | nu
       minLines: artifacts?.minLines ?? DEFAULT_DETECTION_CONFIG.minLines,
       enabledTypes: artifacts?.enabledTypes ?? DEFAULT_DETECTION_CONFIG.enabledTypes,
     })
-  }, [
-    activeSessionId,
-    artifacts?.autoCreate,
-    artifacts?.enabledTypes,
-    artifacts?.minLines,
-    messages,
-    sessionId,
-    status,
-  ])
+  }, [artifacts?.autoCreate, artifacts?.enabledTypes, artifacts?.minLines, messages, status])
 }

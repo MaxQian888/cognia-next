@@ -206,22 +206,35 @@ export function useClaudeChat() {
 
   // Surface dispatched sub-agent runs inline in the chat. `recordDispatch*`
   // (the dispatch runtime store) is the producer; this is the consumer the
-  // subagent-bridge docstring promised. For the active session it folds each
-  // run's tree onto the spawning assistant turn, deduped by a cheap signature
-  // so progress ticks don't rewrite the message array needlessly.
-  const subagentSigRef = useRef<string>("")
+  // subagent-bridge docstring promised. It folds each run's tree onto the
+  // spawning assistant turn, deduped by a cheap signature so progress ticks
+  // don't rewrite the message array needlessly.
+  //
+  // Every OPEN session, not just the focused one. This used to read
+  // `activeSessionId`, so a background pane that dispatched subagents never got
+  // their tree folded in — and because the signature is only recomputed on a
+  // runtime change, switching to that pane later did not fix it either: its
+  // transcript was permanently missing the subagent trees for that turn.
+  const subagentSigRef = useRef<Map<string, string>>(new Map())
   useEffect(() => {
     const apply = () => {
-      const sid = useChatStore.getState().activeSessionId
-      if (!sid) return
-      const subs = selectSessionSubagents(useSubagentRuntimeStore.getState().subAgents, sid)
-      const sig = subagentSignature(subs)
-      if (sig === subagentSigRef.current) return
-      subagentSigRef.current = sig
-      if (subs.length === 0) return
-      const current = useChatStore.getState().messages
-      const next = applySubagentsToMessages(current, subs)
-      if (next !== current) useChatStore.getState().replaceMessages(next)
+      const runtime = useSubagentRuntimeStore.getState().subAgents
+      const chat = useChatStore.getState()
+      const ids = new Set(chat.openSessionIds)
+      if (chat.activeSessionId) ids.add(chat.activeSessionId)
+      for (const sid of ids) {
+        const subs = selectSessionSubagents(runtime, sid)
+        const sig = subagentSignature(subs)
+        if (sig === subagentSigRef.current.get(sid)) continue
+        subagentSigRef.current.set(sid, sig)
+        if (subs.length === 0) continue
+        // Re-read per session: an earlier iteration may already have written.
+        const state = useChatStore.getState()
+        const current =
+          sid === state.activeSessionId ? state.messages : (state.sessions[sid]?.messages ?? [])
+        const next = applySubagentsToMessages(current, subs)
+        if (next !== current) state.replaceMessagesForSession(sid, next)
+      }
     }
     apply()
     return useSubagentRuntimeStore.subscribe(apply)

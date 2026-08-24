@@ -634,6 +634,12 @@ interface ChatState {
    * persisted messages — the mistake outlived the session.
    */
   appendMessageToSession: (sessionId: string | null, msg: UIMessage) => void
+  /**
+   * Replace a NAMED session's message array. Same reason as
+   * `appendMessageToSession`: a producer that knows which conversation it is
+   * rewriting must not be routed through focus.
+   */
+  replaceMessagesForSession: (sessionId: string | null, msgs: UIMessage[]) => void
   replaceMessages: (msgs: UIMessage[]) => void
   setMessagesLoading: (v: boolean) => void
   setMessagesLoadError: (msg: string | null) => void
@@ -863,6 +869,8 @@ export const useChatStore = create<ChatState>((set) => ({
         : patchSliceState(s, sessionId, { messages: [...sliceForId(s, sessionId).messages, msg] })
     ),
   replaceMessages: (msgs) => set((s) => patchActiveState(s, { messages: msgs })),
+  replaceMessagesForSession: (sessionId, msgs) =>
+    set((s) => patchComposerState(s, sessionId, { messages: msgs })),
   setMessagesLoading: (v) => set((s) => patchActiveState(s, { messagesLoading: v })),
   setMessagesLoadError: (msg) =>
     set((s) => patchActiveState(s, { messagesLoadError: msg, messagesLoading: false })),
