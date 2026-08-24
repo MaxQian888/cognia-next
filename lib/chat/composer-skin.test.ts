@@ -7,6 +7,7 @@ import {
   composerSkinVars,
   resolveComposerSkin,
   resolveToolbarLayout,
+  toolbarSitsInBox,
   type ComposerSkinId,
 } from "./composer-skin"
 
@@ -129,9 +130,6 @@ describe("mobile floors", () => {
     // Mobile stacking is the box's `isMobile` prop, not this flag. Folding the
     // platform in here would hand a phone the desktop compact skin's geometry.
     expect(resolveComposerSkin({ skin: "classic" }, { isMobile: true }).compactLayout).toBe(false)
-    for (const id of NON_CLASSIC) {
-      expect(resolveComposerSkin({ skin: id }, { isMobile: true }).compactLayout).toBe(false)
-    }
   })
 })
 
@@ -185,5 +183,31 @@ describe("the table stays coherent", () => {
     expect(circle!["--composer-inner-radius"]).toBe("9999px")
     const boxy = composerSkinVars(resolveComposerSkin({ skin: "dense" }, { isMobile: false }))
     expect(boxy!["--composer-inner-radius"]).not.toBe("9999px")
+  })
+})
+
+describe("placement is not the same axis as arrangement", () => {
+  // Found by looking at the rendered box: `airy`'s embedded toolbar shared one
+  // flex line with the textarea and the chips painted over the input. A row
+  // INSIDE the box needs the box stacked; a row below it does not.
+  it("stacks the box for every arrangement that sits inside it", () => {
+    for (const id of ["airy", "dense", "focus"] as const) {
+      const skin = resolveComposerSkin({ skin: id }, { isMobile: false })
+      expect(toolbarSitsInBox(skin.toolbarLayout)).toBe(true)
+      expect(skin.compactLayout).toBe(true)
+    }
+  })
+
+  it("leaves the box unstacked when the row sits below it", () => {
+    // `expanded` spells every control out and needs the full pane width, so it
+    // belongs below the box despite not being `detached`.
+    const full = resolveComposerSkin({ skin: "full" }, { isMobile: false })
+    expect(toolbarSitsInBox(full.toolbarLayout)).toBe(false)
+    expect(full.compactLayout).toBe(false)
+  })
+
+  it("keeps detached and expanded out of the box", () => {
+    expect(toolbarSitsInBox("detached")).toBe(false)
+    expect(toolbarSitsInBox("expanded")).toBe(false)
   })
 })

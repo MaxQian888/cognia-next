@@ -119,6 +119,23 @@ export const COMPOSER_SKINS: Record<ComposerSkinId, ComposerSkinTokens> = {
   },
 }
 
+/**
+ * Does this arrangement sit INSIDE the composer box, or below it?
+ *
+ * Two separate questions got conflated in the first draft of this table:
+ * where the status row lives, and how much of its roster is spelled out. They
+ * are not the same axis. `expanded` spells everything out and therefore needs
+ * the full pane width — it belongs BELOW the box, like `detached`. The three
+ * tighter arrangements fit inside it.
+ *
+ * This matters beyond aesthetics: a row placed inside the box has to share the
+ * flex line with the textarea, so the box must stack (textarea on its own row,
+ * controls beneath) or the chips overlap the input. See `compactLayout` below.
+ */
+export function toolbarSitsInBox(layout: ComposerToolbarLayout): boolean {
+  return layout === "embedded" || layout === "rail" || layout === "folded"
+}
+
 /** User overrides layered on top of the chosen preset. All optional. */
 export interface ComposerSkinOverrides {
   radiusPx?: number
@@ -233,10 +250,11 @@ export function resolveComposerSkin(
     sendShape: o.sendShape ?? preset.sendShape,
     mono: o.mono ?? preset.mono,
     toolbarLayout,
-    // The skin owns its geometry, so the legacy stacked-layout flag has nothing
-    // to say here (see the dormancy note above). Mobile stacking still happens
-    // — it rides the box's `isMobile` prop, same as it did before skins.
-    compactLayout: false,
+    // A toolbar INSIDE the box needs the box stacked: otherwise it shares one
+    // flex line with the textarea and the chips paint over the input. The
+    // legacy flag has no say here (see the dormancy note above) — this is
+    // derived from where the skin put the row.
+    compactLayout: toolbarSitsInBox(toolbarLayout),
   }
 }
 

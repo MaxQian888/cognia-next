@@ -338,7 +338,10 @@ export function ComposerBox({
             {sendButton.mode === "draft" ? (
               <Button
                 aria-label={t("editDraftAria")}
-                className="h-9 rounded-full px-3 text-xs"
+                className={cn(
+                  "h-9 px-3 text-xs",
+                  skin.isClassic ? "rounded-full" : "rounded-[var(--composer-inner-radius)]"
+                )}
                 disabled={sendButton.disabled}
                 onClick={() => void submit()}
                 type="button"

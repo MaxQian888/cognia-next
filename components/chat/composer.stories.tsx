@@ -5,8 +5,10 @@ import { fn } from "storybook/test"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import { resetStore } from "@/lib/storybook/seed-stores"
+import { resetStore, seedStore } from "@/lib/storybook/seed-stores"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import type { ComposerSkinId } from "@/lib/chat/composer-skin"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 // The full chat composer: textarea + toolbar (model / permission / effort /
@@ -75,4 +77,52 @@ export const CustomPlaceholder: Story = {
 /** Disabled (e.g. before an API key is configured). */
 export const Disabled: Story = {
   args: { disabled: true },
+}
+
+// ── Skins ──────────────────────────────────────────────────────────────────
+//
+// The same composer under each arrangement. Every one reaches the identical
+// roster of controls; they differ in what sits on the row and what folds behind
+// the "⋯" on the status line. `Classic` is the default and is what the app has
+// always rendered — it is here so the others can be compared against it.
+function withSkin(skin: ComposerSkinId) {
+  return () => {
+    resetStore(useChatStore)
+    useChatStore.getState().setActiveSession("demo-session")
+    seedStore(useSettingsStore, {
+      settings: { id: "singleton", composerBehavior: { skin } },
+    } as never)
+  }
+}
+
+/** Today's composer. The default, and preserved byte-for-byte. */
+export const SkinClassic: Story = { beforeEach: withSkin("classic") }
+
+/** Roomy and rounded, status row inside the box under the text. */
+export const SkinAiry: Story = { beforeEach: withSkin("airy") }
+
+/** Tight and squared, with a monospace status line inside the box. */
+export const SkinDense: Story = { beforeEach: withSkin("dense") }
+
+/** Every control spelled out inline, cost and context on their own rail. */
+export const SkinDetailed: Story = { beforeEach: withSkin("full") }
+
+/** Just the text and the model; everything else folds behind "⋯". */
+export const SkinMinimal: Story = { beforeEach: withSkin("focus") }
+
+/** A tuned skin: square corners and a monospace input on top of `dense`. */
+export const SkinCustomised: Story = {
+  beforeEach: () => {
+    resetStore(useChatStore)
+    useChatStore.getState().setActiveSession("demo-session")
+    seedStore(useSettingsStore, {
+      settings: {
+        id: "singleton",
+        composerBehavior: {
+          skin: "airy",
+          skinOverrides: { radiusPx: 4, padXPx: 18, mono: true, sendShape: "rounded" },
+        },
+      },
+    } as never)
+  },
 }

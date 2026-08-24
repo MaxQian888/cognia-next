@@ -53,7 +53,11 @@ import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
 import { ComposerBox } from "./composer/composer-box"
-import { resolveComposerSkin, type ResolvedComposerSkin } from "@/lib/chat/composer-skin"
+import {
+  resolveComposerSkin,
+  toolbarSitsInBox,
+  type ResolvedComposerSkin,
+} from "@/lib/chat/composer-skin"
 import { buildLinkContextBlocks, mergeContextBlocks } from "@/lib/chat/link-context"
 import {
   AlertDialog,
@@ -2092,8 +2096,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
   const compactLayout = skin.compactLayout
   // `compactLayout` (the legacy desktop setting) has always put the row inside
-  // the box; a skin can now ask for the same thing without it.
-  const toolbarInBox = skin.toolbarLayout !== "detached" || compactLayout
+  // the box; a skin can now ask for the same thing without it. `expanded` is
+  // NOT in-box despite not being `detached` — it needs the full pane width.
+  const toolbarInBox = toolbarSitsInBox(skin.toolbarLayout) || compactLayout
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
