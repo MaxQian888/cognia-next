@@ -21,6 +21,10 @@ jest.mock("@/lib/db/trusted-workspaces", () => ({
   revokeWorkspaceTrust: jest.fn(async () => undefined),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+const listWorkspaceEnvironmentsMock = jest.fn(async () => [] as unknown[])
+jest.mock("@/lib/task-workspace/client", () => ({
+  listWorkspaceEnvironments: () => listWorkspaceEnvironmentsMock(),
+}))
 jest.mock("@cognia/logging", () => ({
   loggers: { shell: { info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
 }))
@@ -46,6 +50,7 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 
 import { WorkspaceSwitcher } from "./workspace-switcher"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
 function makeProject(id: string, over: Record<string, unknown> = {}) {
   const now = new Date()
@@ -69,6 +74,12 @@ function makeProject(id: string, over: Record<string, unknown> = {}) {
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
   openDialogMock.mockReset()
+  localStorage.clear()
+  listWorkspaceEnvironmentsMock.mockReset()
+  listWorkspaceEnvironmentsMock.mockResolvedValue([])
+  act(() => {
+    useTerminalStore.setState({ sessions: {} } as never)
+  })
   act(() => {
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
   })
@@ -312,5 +323,36 @@ describe("WorkspaceSwitcher", () => {
     renderSwitcher()
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     expect(screen.queryByTestId("workspace-switcher-open-folder")).not.toBeInTheDocument()
+  })
+
+  it("offers to adopt a folder in use that no workspace owns", async () => {
+    listWorkspaceEnvironmentsMock.mockResolvedValue([
+      { environmentId: "e1", sourceRoot: "/repos/api" },
+    ])
+    renderSwitcher()
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    const entry = screen.getByTestId("workspace-switcher-adopt")
+    // The count is the affordance — the gap is invisible without a number.
+    expect(entry).toHaveTextContent("1")
+  })
+
+  it("hides the adopt entry when every folder in use is already owned", async () => {
+    // A permanent "Detected folders (0)" row trains the user to ignore the one
+    // time it matters.
+    act(() => {
+      useProjectStore.setState({
+        projects: [makeProject("p1", { rootDir: "/repos/api" })],
+        activeProjectId: "p1",
+        loaded: true,
+      })
+    })
+    listWorkspaceEnvironmentsMock.mockResolvedValue([
+      { environmentId: "e1", sourceRoot: "/repos/api" },
+    ])
+    renderSwitcher()
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("workspace-switcher"))
+    expect(screen.queryByTestId("workspace-switcher-adopt")).not.toBeInTheDocument()
   })
 })

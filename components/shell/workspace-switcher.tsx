@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   FolderIcon,
   FolderOpenIcon,
+  FolderSearchIcon,
   PlusIcon,
   SearchIcon,
   ShieldAlertIcon,
@@ -15,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -29,6 +31,8 @@ import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import type { Project } from "@/types"
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 import { NewWorkspaceDialog } from "@/components/workspace/new-workspace-dialog"
+import { AdoptWorkspacesDialog } from "@/components/workspace/adopt-workspaces-dialog"
+import { useAdoptionCandidates } from "@/hooks/workspace/use-adoption-candidates"
 
 // Above this count the flat list stops being scannable, so we surface the
 // search field and a "Recent" quick-access group. Below it the whole list fits
@@ -69,6 +73,11 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const [query, setQuery] = useState("")
   const [manageOpen, setManageOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [adoptOpen, setAdoptOpen] = useState(false)
+  // Directories the app is already working in that no workspace owns. Collected
+  // here rather than inside the dialog so the entry can carry the count — the
+  // gap is invisible until something says how big it is.
+  const { candidates: adoptable } = useAdoptionCandidates()
   // project id → has any untrusted root (desktop only).
   const [untrustedMap, setUntrustedMap] = useState<Record<string, boolean>>({})
 
@@ -356,6 +365,28 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
             <PlusIcon className="size-4 text-muted-foreground" />
             {t("newWorkspace")}
           </button>
+          {/*
+            Only when there is something to adopt: a permanent "Detected
+            folders (0)" row would train the user to ignore the one time it
+            matters. The count is the whole affordance.
+          */}
+          {adoptable.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                setAdoptOpen(true)
+              }}
+              data-testid="workspace-switcher-adopt"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+            >
+              <FolderSearchIcon className="size-4 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-left">{t("adoptEntry")}</span>
+              <Badge variant="secondary" className="shrink-0 font-normal tabular-nums">
+                {adoptable.length}
+              </Badge>
+            </button>
+          )}
           <button
             type="button"
             onClick={openManage}
@@ -369,6 +400,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
       </Popover>
 
       <NewWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <AdoptWorkspacesDialog open={adoptOpen} onOpenChange={setAdoptOpen} />
       <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
     </>
   )

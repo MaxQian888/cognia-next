@@ -198,7 +198,8 @@
     "searchPlaceholder": "Search workspaces…",
     "undoFollow": "Undo",
     "unpin": "Unpin {name}",
-    "untrustedHint": "Untrusted workspace"
+    "untrustedHint": "Untrusted workspace",
+    "adoptEntry": "Folders in use"
   },
   "capabilities": {
     "tab": "Capabilities",
@@ -221,5 +222,19 @@
     },
     "pluginsAreGlobal": "Plugins stay machine-wide: their enabled flag is the record of what is actually running, not a preference, so it is not something a workspace can hold a second opinion about. Manage them in Settings → Plugins.",
     "unavailable": "not available — trust it in Settings → MCP first"
+  },
+  "adopt": {
+    "title": "Folders in use",
+    "description": "These directories are already in use — by a worktree, a terminal tab — but no workspace owns them. Adopting one mounts it as a workspace; nothing on disk moves.",
+    "empty": "Every folder in use already belongs to a workspace.",
+    "scanning": "Looking for folders…",
+    "adopt": "Adopt",
+    "dismissLabel": "Stop offering {name} on this device",
+    "origin": {
+      "worktree": "Repository",
+      "environment": "Environment",
+      "terminal": "Terminal",
+      "session": "Conversation"
+    }
   }
 }

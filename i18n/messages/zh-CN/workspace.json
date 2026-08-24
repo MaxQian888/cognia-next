@@ -198,7 +198,8 @@
     "searchPlaceholder": "搜索工作区…",
     "undoFollow": "撤销",
     "unpin": "取消置顶 {name}",
-    "untrustedHint": "未受信任的工作区"
+    "untrustedHint": "未受信任的工作区",
+    "adoptEntry": "正在使用的目录"
   },
   "capabilities": {
     "tab": "能力",
@@ -221,5 +222,19 @@
     },
     "pluginsAreGlobal": "插件保持全机范围：它的启用标记记录的是「当前实际在运行什么」，而不是一项偏好，因此工作区无法对它另持一份意见。请在「设置 → 插件」中管理。",
     "unavailable": "不可用 — 请先在「设置 → MCP」中信任它"
+  },
+  "adopt": {
+    "title": "正在使用的目录",
+    "description": "这些目录已经在被使用 —— 来自工作树、终端标签页 —— 但还没有工作区拥有它们。收编只是把目录挂载为工作区，磁盘上的内容不会被移动。",
+    "empty": "正在使用的目录都已归属于某个工作区。",
+    "scanning": "正在查找目录……",
+    "adopt": "收编",
+    "dismissLabel": "在本设备上不再提示 {name}",
+    "origin": {
+      "worktree": "仓库",
+      "environment": "环境",
+      "terminal": "终端",
+      "session": "会话"
+    }
   }
 }
