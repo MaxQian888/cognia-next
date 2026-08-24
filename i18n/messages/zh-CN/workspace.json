@@ -236,5 +236,14 @@
       "terminal": "终端",
       "session": "会话"
     }
+  },
+  "panelRoot": {
+    "none": "无目录",
+    "following": "跟随当前会话",
+    "worktree": "工作树",
+    "workspace": "工作区根目录",
+    "pinned": "已固定",
+    "pinLabel": "将此面板固定到当前目录",
+    "unpinLabel": "恢复跟随会话"
   }
 }

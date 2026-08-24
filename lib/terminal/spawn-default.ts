@@ -36,6 +36,28 @@ import { spawnFromDock, type SpawnOutcome } from "@/lib/terminal/spawn-orchestra
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import { resolvePanelRoot } from "@/lib/workspace/panel-follow"
+import { useChatStore } from "@/stores/chat/chat-store"
+import type { SessionExecutionContext } from "@/types/execution-context"
+
+/**
+ * The focused conversation's durable execution binding.
+ *
+ * Read lazily and never fatally: a terminal that cannot find the conversation
+ * still opens, on the workspace root, which is what it did before any of this
+ * existed.
+ */
+async function loadSessionExecutionContext(
+  sessionId: string | null | undefined
+): Promise<SessionExecutionContext | null> {
+  if (!sessionId) return null
+  try {
+    const { getDb } = await import("@/lib/db/schema")
+    return (await getDb().sessions.get(sessionId))?.executionContext ?? null
+  } catch {
+    return null
+  }
+}
 
 export interface SpawnDefaultTerminalOptions {
   /** Defaults to the active project. Pass `null` for an explicitly project-less tab. */
@@ -46,6 +68,22 @@ export interface SpawnDefaultTerminalOptions {
   profileId?: string
   /** Explicit child worktree cwd; wins over profile and project defaults. */
   cwdOverride?: string
+  /**
+   * The conversation this terminal belongs to. Its execution root becomes the
+   * cwd, which is what makes a terminal opened for a managed-worktree
+   * conversation land in the worktree instead of in the checkout it was cut
+   * from — the directory the agent is actually working in.
+   *
+   * Below `cwdOverride` (an explicit ask) and above the project's configured
+   * cwd, because `terminalConfig.cwd` describes the workspace, not this turn.
+   */
+  sessionExecutionContext?: SessionExecutionContext | null
+  /**
+   * Which conversation to inherit the execution root from when
+   * `sessionExecutionContext` is not supplied. Defaults to the focused
+   * conversation; pass `null` for a deliberately conversation-less terminal.
+   */
+  sessionId?: string | null
   rows?: number
   cols?: number
 }
@@ -65,6 +103,20 @@ export async function spawnDefaultTerminal(
   const projectState = useProjectStore.getState()
   const projectId = opts.projectId !== undefined ? opts.projectId : projectState.activeProjectId
   const project = projectId ? (projectState.projects.find((p) => p.id === projectId) ?? null) : null
+  const executionContext =
+    opts.sessionExecutionContext !== undefined
+      ? opts.sessionExecutionContext
+      : await loadSessionExecutionContext(
+          opts.sessionId !== undefined ? opts.sessionId : useChatStore.getState().activeSessionId
+        )
+  // One rule for every panel that operates on a directory. A terminal always
+  // FOLLOWS — it is never pinnable — so a stale pin can never point a shell at
+  // a tree the agent is not working in.
+  const followed = resolvePanelRoot({
+    panel: "terminal",
+    executionContext,
+    activeProject: project,
+  })
 
   const terminal = (useSettingsStore.getState().settings?.terminal ?? {}) as TerminalSettings
   const forceUtf8 = terminal.forceUtf8 ?? true
@@ -89,7 +141,15 @@ export async function spawnDefaultTerminal(
       return spawnFromDock({
         req: {
           ...fields,
-          ...(opts.cwdOverride?.trim() ? { cwd: opts.cwdOverride.trim() } : {}),
+          // A profile carries its own cwd, but the conversation's execution
+          // root outranks it for the same reason it outranks the project's:
+          // the profile describes a habit, the execution root describes where
+          // this work is happening.
+          ...(opts.cwdOverride?.trim()
+            ? { cwd: opts.cwdOverride.trim() }
+            : followed.source === "execution" && followed.root
+              ? { cwd: followed.root }
+              : {}),
           profileId,
           rows,
           cols,
@@ -126,8 +186,9 @@ export async function spawnDefaultTerminal(
       cols,
       cwd:
         opts.cwdOverride?.trim() ||
+        (followed.source === "execution" ? (followed.root ?? undefined) : undefined) ||
         project?.terminalConfig?.cwd?.trim() ||
-        project?.rootDir?.trim() ||
+        followed.root ||
         undefined,
       env: project?.terminalConfig?.env,
       projectId: projectId ?? undefined,

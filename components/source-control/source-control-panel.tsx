@@ -54,6 +54,8 @@ import { DiffPane } from "./diff-pane"
 import { InteractiveRebaseDialog } from "./interactive-rebase-dialog"
 import { RemotePanel } from "./remote-panel"
 import { RestoreDialog } from "./restore-dialog"
+import { PanelRootChip } from "@/components/workspace/panel-root-chip"
+import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { RootSwitcher } from "./root-switcher"
 import { StashPanel } from "./stash-panel"
 import { SyncToolbar } from "./sync-toolbar"
@@ -80,6 +82,9 @@ export function SourceControlPanel() {
     selectRemoteWorkspace,
     remote,
   } = useGitRepo()
+  // Observe only: `useGitBranchIndicator` is always mounted elsewhere and owns
+  // the native controller. This reads its resolved target for the header chip.
+  const indicator = useGitBranchIndicator({ enabled: false })
   const actions = useGitActions(refresh)
   const can = actions.can ?? (() => true)
   const { isDefault: prefsIsDefault } = useSourceControlPrefs()
@@ -260,10 +265,21 @@ export function SourceControlPanel() {
         icon={<GitBranchIcon />}
         title={t("title")}
         breadcrumb={
-          <RootSwitcher
-            remoteWorkspaces={remote ? remoteWorkspaces : undefined}
-            onSelectRemoteWorkspace={selectRemoteWorkspace}
-          />
+          <div className="flex min-w-0 items-center gap-2">
+            <RootSwitcher
+              remoteWorkspaces={remote ? remoteWorkspaces : undefined}
+              onSelectRemoteWorkspace={selectRemoteWorkspace}
+            />
+            {/* A panel that silently retargets is worse than one that needs a
+                click: the user reads a diff believing they know which tree it
+                is. Says which folder, whether it is a worktree alias, and
+                whether it is following the conversation or pinned. */}
+            <PanelRootChip
+              panel="sourceControl"
+              target={indicator.target}
+              onTogglePin={indicator.togglePin}
+            />
+          </div>
         }
         actions={
           <div className="flex min-w-0 items-center gap-0.5">

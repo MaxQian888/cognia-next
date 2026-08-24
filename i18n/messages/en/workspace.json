@@ -236,5 +236,14 @@
       "terminal": "Terminal",
       "session": "Conversation"
     }
+  },
+  "panelRoot": {
+    "none": "No folder",
+    "following": "following this conversation",
+    "worktree": "worktree",
+    "workspace": "workspace root",
+    "pinned": "pinned",
+    "pinLabel": "Pin this panel to the current folder",
+    "unpinLabel": "Follow the conversation again"
   }
 }

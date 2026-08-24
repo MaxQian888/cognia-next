@@ -16,6 +16,12 @@ import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
 import { useGitBranchIndicator, __resetGitIndicatorBinding } from "./use-git-branch-indicator"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { useChatStore } from "@/stores/chat/chat-store"
+
+const executionContextRef = { value: null as unknown }
+jest.mock("@/hooks/workspace/use-session-execution-context", () => ({
+  useSessionExecutionContext: () => executionContextRef.value,
+}))
 
 const uiAvailableMock = isSourceControlUiAvailable as jest.Mock
 const watchStartMock = gitWatchStart as jest.Mock
@@ -41,6 +47,9 @@ beforeEach(() => {
   act(() => {
     useGitStore.setState({ rootDir: null })
     useProjectStore.setState({ projects: [], activeProjectId: null })
+    useChatStore.setState({ activeSessionId: null } as never)
+    useGitStore.setState({ pinnedRoot: null })
+    executionContextRef.value = null
   })
 })
 
@@ -260,5 +269,62 @@ describe("useGitBranchIndicator", () => {
     expect(loadGitRepoMock).not.toHaveBeenCalled()
     expect(watchStartMock).not.toHaveBeenCalled()
     expect(subscribeMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("useGitBranchIndicator — following the conversation", () => {
+  const managed = {
+    projectRoot: "/repos/app",
+    workspaceBinding: { kind: "managed" },
+    execution: { roots: [{ role: "primary", aliasPath: "/repos/app/.cognia/wt/1" }] },
+  }
+
+  function seedWorkspace() {
+    useProjectStore.setState({
+      projects: [
+        { id: "p1", name: "p", roots: [{ id: "r", path: "/repos/app", isPrimary: true }] },
+      ] as never,
+      activeProjectId: "p1",
+    })
+  }
+
+  it("binds to the worktree the conversation is working in", async () => {
+    // The panel and the agent used to disagree about which tree was changing.
+    seedWorkspace()
+    executionContextRef.value = managed
+    const { result } = renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(result.current.rootDir).toBe("/repos/app/.cognia/wt/1"))
+    expect(result.current.target.managed).toBe(true)
+  })
+
+  it("falls back to the workspace root with no conversation binding", async () => {
+    seedWorkspace()
+    const { result } = renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(result.current.rootDir).toBe("/repos/app"))
+    expect(result.current.target.source).toBe("workspace")
+  })
+
+  it("holds a pinned repository against the conversation", async () => {
+    // Comparing is part of this panel's job — "what does this look like on
+    // main" — which is why pinning is offered here and not to the terminal.
+    seedWorkspace()
+    executionContextRef.value = managed
+    const { result } = renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(result.current.rootDir).toBe("/repos/app/.cognia/wt/1"))
+
+    act(() => result.current.togglePin())
+    await waitFor(() => expect(result.current.target.source).toBe("pinned"))
+    expect(result.current.target.root).toBe("/repos/app/.cognia/wt/1")
+  })
+
+  it("resumes following when the pin is cleared", async () => {
+    seedWorkspace()
+    executionContextRef.value = managed
+    const { result } = renderHook(() => useGitBranchIndicator())
+    await waitFor(() => expect(result.current.rootDir).toBe("/repos/app/.cognia/wt/1"))
+    act(() => result.current.togglePin())
+    await waitFor(() => expect(result.current.target.source).toBe("pinned"))
+    act(() => result.current.togglePin())
+    await waitFor(() => expect(result.current.target.source).toBe("execution"))
   })
 })

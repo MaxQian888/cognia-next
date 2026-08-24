@@ -195,3 +195,68 @@ describe("spawnDefaultTerminal", () => {
     await expect(spawnDefaultTerminal()).resolves.toEqual({ kind: "denied" })
   })
 })
+
+describe("spawnDefaultTerminal — following the conversation", () => {
+  const managed = {
+    projectRoot: "/repos/app",
+    workspaceBinding: { kind: "managed" },
+    execution: { roots: [{ role: "primary", aliasPath: "/repos/app/.cognia/wt/1" }] },
+  } as never
+
+  it("opens in the worktree the conversation is working in, not the source repo", async () => {
+    // The defect this closes: every tool the agent worked through pointed at a
+    // different directory than the agent itself.
+    useProjectStore.setState({
+      projects: [{ id: "p1", name: "p", roots: [], rootDir: "/repos/app" }],
+      activeProjectId: "p1",
+    } as never)
+    await spawnDefaultTerminal({ sessionExecutionContext: managed })
+    expect(lastRequest().cwd).toBe("/repos/app/.cognia/wt/1")
+  })
+
+  it("still honours an explicit cwd over the conversation's root", async () => {
+    await spawnDefaultTerminal({
+      sessionExecutionContext: managed,
+      cwdOverride: "/somewhere/else",
+    })
+    expect(lastRequest().cwd).toBe("/somewhere/else")
+  })
+
+  it("puts the conversation's root above a profile's own cwd", async () => {
+    // A profile describes a habit; the execution root describes where this
+    // work is happening.
+    withSettings({
+      defaultProfileId: "prof",
+      profiles: [{ id: "prof", name: "P", shell: "/bin/zsh", cwd: "/profile/dir" }],
+    })
+    await spawnDefaultTerminal({ sessionExecutionContext: managed })
+    expect(lastRequest().cwd).toBe("/repos/app/.cognia/wt/1")
+  })
+
+  it("falls back to the workspace root for a conversation-less terminal", async () => {
+    useProjectStore.setState({
+      projects: [
+        { id: "p1", name: "p", roots: [{ id: "r", path: "/repos/app", isPrimary: true }] },
+      ],
+      activeProjectId: "p1",
+    } as never)
+    await spawnDefaultTerminal({ sessionExecutionContext: null })
+    expect(lastRequest().cwd).toBe("/repos/app")
+  })
+
+  it("keeps the project's configured cwd when the conversation adds nothing", async () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "p1",
+          name: "p",
+          roots: [{ id: "r", path: "/repos/app", isPrimary: true }],
+          terminalConfig: { cwd: "/repos/app/packages" },
+        },
+      ],
+      activeProjectId: "p1",
+    } as never)
+    await spawnDefaultTerminal({ sessionExecutionContext: null })
+    expect(lastRequest().cwd).toBe("/repos/app/packages")
+  })
+})

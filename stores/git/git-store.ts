@@ -129,6 +129,17 @@ export interface GitState {
 
   // actions
   setRootDir: (rootDir: string | null) => void
+  /**
+   * A repository the user pinned the panel to, holding it against the
+   * conversation-follow rule.
+   *
+   * Deliberately NOT persisted. Pinning is a comparison act — "what does this
+   * look like on main" — and a pin that survived a restart would silently keep
+   * the panel off the conversation days later, which is the exact confusion
+   * following exists to remove. See `lib/workspace/panel-follow.ts`.
+   */
+  pinnedRoot: string | null
+  setPinnedRoot: (rootDir: string | null) => void
   setRepoState: (state: GitRepoState | null) => void
   setStatus: (status: GitStatus | null) => void
   setLoadingStatus: (loading: boolean) => void
@@ -157,6 +168,7 @@ export const useGitStore = create<GitState>()(
   persist(
     (set, get) => ({
       rootDir: null,
+      pinnedRoot: null,
       repoState: null,
       status: null,
       loadingStatus: false,
@@ -178,6 +190,8 @@ export const useGitStore = create<GitState>()(
       timelineScope: "repo",
       ops: emptyOps(),
       lastError: null,
+
+      setPinnedRoot: (pinnedRoot) => set({ pinnedRoot }),
 
       setRootDir: (rootDir) => {
         if (rootDir === get().rootDir) return

@@ -8,12 +8,14 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { gitWatchStart, gitWatchStop, isSourceControlUiAvailable } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
 import { useProjectStore } from "@/stores/project/project-store"
-import { primaryRootOf } from "@/lib/workspace/roots"
+import { resolvePanelRoot, type PanelRootTarget } from "@/lib/workspace/panel-follow"
+import { useSessionExecutionContext } from "@/hooks/workspace/use-session-execution-context"
+import { useChatStore } from "@/stores/chat/chat-store"
 import { useGitBranchInfo, useGitBusy, useGitStore } from "@/stores/git/git-store"
 
 export interface BranchIndicator {
@@ -23,12 +25,16 @@ export interface BranchIndicator {
   ahead: number
   behind: number
   busy: boolean
+  /** Where the panel is pointing and why — rendered by `PanelRootChip`. */
+  target: PanelRootTarget
+  /** Pin to the current root, or resume following the conversation. */
+  togglePin: () => void
 }
 
-// The last workspace root we auto-bound the repo to. Module-scoped (NOT a
-// per-mount ref) so it survives a remount of this always-mounted hook — a
-// remount must not re-seed the guard to `null` and snap an ad-hoc git-panel
-// rebind back to the workspace root. Reset between tests via `__resetBinding`.
+// The last root we auto-bound the repo to. Module-scoped (NOT a per-mount ref)
+// so it survives a remount of this always-mounted hook — a remount must not
+// re-seed the guard to `null` and snap an ad-hoc git-panel rebind back.
+// Reset between tests via `__resetGitIndicatorBinding`.
 let lastBoundProjectRoot: string | null = null
 
 /** Test-only: reset the module-scoped workspace-follow guard. */
@@ -53,26 +59,46 @@ export function useGitBranchIndicator({
   const branchInfo = useGitBranchInfo()
   const busy = useGitBusy()
 
-  // Active project's primary on-disk root (the natural repo source).
-  const activeProjectRoot = useProjectStore((s) => {
+  // Active workspace, as the fallback when no conversation names a root.
+  const activeProject = useProjectStore((s) => {
     const id = s.activeProjectId
-    const project = id ? s.projects.find((p) => p.id === id) : undefined
-    return project ? (primaryRootOf(project)?.path ?? null) : null
+    return (id ? s.projects.find((p) => p.id === id) : undefined) ?? null
   })
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const pinnedRoot = useGitStore((s) => s.pinnedRoot)
+  const setPinnedRoot = useGitStore((s) => s.setPinnedRoot)
 
-  // Follow the active workspace: bind the repo to its `rootDir` on first sight
-  // and re-bind whenever the user switches workspaces. We track the last
-  // workspace root we bound (not `rootDir`) so a manual git-panel rebind to an
-  // ad-hoc repo isn't snapped back — only an actual workspace switch re-binds.
-  // An empty workspace root leaves the current binding untouched. The tracker
-  // is module-scoped so a remount can't reset it and trigger a spurious rebind.
+  // Follow the CONVERSATION, not just the workspace. Source Control used to
+  // bind to the active workspace's primary root, so a conversation working in
+  // a managed worktree showed the diff of the checkout it was cut from — the
+  // panel and the agent disagreed about which tree was being changed.
+  //
+  // Pinning is honoured because comparing is part of this panel's job ("what
+  // does this look like on main"); `resolvePanelRoot` is the one place that
+  // decides, so the terminal cannot accidentally acquire the same behaviour.
+  const executionContext = useSessionExecutionContext(activeSessionId)
+  const target = useMemo(
+    () =>
+      resolvePanelRoot({
+        panel: "sourceControl",
+        executionContext,
+        activeProject,
+        pinnedRoot,
+      }),
+    [executionContext, activeProject, pinnedRoot]
+  )
+
+  // Re-bind when the resolved target moves. The tracker holds the last target
+  // we bound (not `rootDir`) so a manual git-panel rebind to an ad-hoc repo is
+  // not snapped back — only an actual change of target re-binds. A target of
+  // null leaves the current binding untouched.
   useEffect(() => {
     if (!available) return
-    if (activeProjectRoot && activeProjectRoot !== lastBoundProjectRoot) {
-      lastBoundProjectRoot = activeProjectRoot
-      setRootDir(activeProjectRoot)
+    if (target.root && target.root !== lastBoundProjectRoot) {
+      lastBoundProjectRoot = target.root
+      setRootDir(target.root)
     }
-  }, [available, activeProjectRoot, setRootDir])
+  }, [available, target.root, setRootDir])
 
   // Own the native fs watcher + subscription for the bound repo. `available`
   // implies Tauri, so watcher start/stop are unconditional here.
@@ -109,5 +135,10 @@ export function useGitBranchIndicator({
     ahead: branchInfo.ahead,
     behind: branchInfo.behind,
     busy,
+    target,
+    // Pin to what is on screen now / go back to following. A pin equal to the
+    // followed root would claim a divergence that does not exist, so pinning
+    // stores the resolved root and unpinning clears it outright.
+    togglePin: () => setPinnedRoot(pinnedRoot ? null : (target.root ?? null)),
   }
 }

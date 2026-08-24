@@ -66,6 +66,9 @@ import { useTerminalTransport } from "@/hooks/terminal/use-terminal-transport"
 import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
+import { PanelRootChip } from "@/components/workspace/panel-root-chip"
+import { useSessionExecutionContext } from "@/hooks/workspace/use-session-execution-context"
+import { resolvePanelRoot } from "@/lib/workspace/panel-follow"
 import { useSettingsStore } from "@/stores/settings"
 import {
   orderTabRows,
@@ -132,6 +135,23 @@ export function TerminalDock() {
   )
 
   const projectKey = activeProjectId ?? ""
+
+  // Where a new terminal will open — the same resolution `spawnDefaultTerminal`
+  // performs, so the chip cannot disagree with the shell it describes.
+  const activeChatSessionId = useChatStore((s) => s.activeSessionId)
+  const terminalExecutionContext = useSessionExecutionContext(activeChatSessionId)
+  const activeProject = useProjectStore((s) =>
+    activeProjectId ? (s.projects.find((p) => p.id === activeProjectId) ?? null) : null
+  )
+  const terminalRootTarget = useMemo(
+    () =>
+      resolvePanelRoot({
+        panel: "terminal",
+        executionContext: terminalExecutionContext,
+        activeProject,
+      }),
+    [terminalExecutionContext, activeProject]
+  )
   const tabs = useMemo<TerminalSessionRow[]>(() => {
     // Tab strip lists group anchors only — split-pane members are hidden
     // (they render inside their anchor's TerminalPaneGroup).
@@ -574,6 +594,11 @@ export function TerminalDock() {
         renderTabWrapper={renderTabWrapper}
         trailing={
           <>
+            {/* Where "+ New" will actually open. A terminal that silently
+                retargets is the sharpest version of this problem — the user
+                types `rm -rf build` believing they know where they are. No pin
+                control: an execution panel always follows. */}
+            <PanelRootChip panel="terminal" target={terminalRootTarget} className="mr-1" />
             <PluginExtensionSlot
               point="terminal.toolbar"
               className="flex items-center gap-1"
