@@ -8468,6 +8468,7 @@
     "standalonePair": "与主机配对",
     "standaloneTitle": "只有本机",
     "summary": "{total} 台中 {online} 台在线",
+    "attentionCount": "{count, plural, other {# 台需要处理}}",
     "title": "设备"
   },
   "diagnostics": {

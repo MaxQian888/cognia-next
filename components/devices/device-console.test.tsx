@@ -8,13 +8,14 @@ import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { DeviceConsole } from "./device-console"
 
 let rows: DeviceRow[] = []
+let needsAttention = 0
 let hostUnreachable = false
 const refresh = jest.fn(async () => {})
 
 jest.mock("@/hooks/devices/use-device-rows", () => ({
   useDeviceRows: () => ({
     rows,
-    summary: { total: rows.length, online: rows.length, needsAttention: 0 },
+    summary: { total: rows.length, online: rows.length, needsAttention },
     loading: false,
     hostUnreachable,
     refresh,
@@ -103,6 +104,7 @@ beforeEach(() => {
   searchParams = new URLSearchParams()
   platform = { tauri: true, capacitor: false, webCompanion: false }
   hostUnreachable = false
+  needsAttention = 0
   jest.clearAllMocks()
 })
 
@@ -220,5 +222,21 @@ describe("DeviceConsole", () => {
     renderConsole()
     expect(screen.getByTestId("device-list-pane")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument()
+  })
+
+  /**
+   * `summarizeDeviceRows` has always returned this count and nothing rendered
+   * it, so a revoked phone or a host stuck in `versionMismatch` could only be
+   * found by opening every row in turn.
+   */
+  it("surfaces the attention count in the header", () => {
+    needsAttention = 2
+    renderConsole()
+    expect(screen.getByTestId("devices-attention-count")).toHaveTextContent("2 need attention")
+  })
+
+  it("hides the attention badge when nothing needs attention", () => {
+    renderConsole()
+    expect(screen.queryByTestId("devices-attention-count")).not.toBeInTheDocument()
   })
 })

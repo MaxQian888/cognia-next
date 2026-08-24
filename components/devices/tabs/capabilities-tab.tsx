@@ -65,17 +65,27 @@ function CapabilityGroup({
           })}
         </span>
       </h3>
-      <ul className="divide-y divide-border/50">
+      {/* Columns as soon as the pane can seat one ~340px wide. A platform
+          vocabulary runs to ~20 single-line entries, and one tall column in a
+          wide pane is both all scroll and unreadable sideways: the id sits
+          left, the verdict sits right, and the eye has to cross several
+          hundred pixels of nothing to bind them. Narrower columns put the two
+          back within a glance of each other. Per-row borders rather than
+          `divide-y`, which draws down the grid's flow order, not down each
+          column. */}
+      <ul className="grid gap-x-6 @2xl/device-pane:grid-cols-2 @5xl/device-pane:grid-cols-3">
         {sorted.map((cell) => (
           <li
             key={cell.id}
-            className="flex items-baseline gap-2 py-1"
+            className="flex items-baseline gap-2 border-b border-border/50 py-1"
             data-testid={`capability-${cell.id}`}
           >
             <CapabilityDot state={cell.state} className="translate-y-[-1px]" />
             <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{cell.id}</span>
             {cell.detail ? (
-              <span className="hidden max-w-[45%] truncate text-[11px] text-muted-foreground sm:inline">
+              /* Sized off the pane, not the window — a 300px rail-heavy pane
+                 must not seat this just because the monitor is wide. */
+              <span className="hidden max-w-[45%] truncate text-[11px] text-muted-foreground @xl/device-pane:inline">
                 {cell.detail}
               </span>
             ) : null}

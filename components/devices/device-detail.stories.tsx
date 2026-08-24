@@ -6,7 +6,15 @@ import type { DeviceGrantActions } from "@/hooks/devices/use-device-grant-action
 
 import { DeviceDetail } from "./device-detail"
 
-const NOW = 1_700_000_000_000
+/**
+ * Stories read against the wall clock, not a frozen instant.
+ *
+ * A pinned epoch makes every row say "3 years ago" and gets worse each year,
+ * which defeats the point of a story you look at to judge how the surface
+ * reads. Purity does not apply here: a story is not a render pass and not a
+ * test — no suite imports this file.
+ */
+const NOW = Date.now()
 
 const noopActions: DeviceGrantActions = {
   toggleRemoteControl: async () => {},

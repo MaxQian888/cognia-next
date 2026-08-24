@@ -12,6 +12,7 @@
 
 import { useTranslations } from "next-intl"
 
+import { rowNeedsAttention } from "@/lib/devices/build-device-rows"
 import type { DeviceRow } from "@/lib/devices/types"
 import { cn } from "@/lib/utils"
 
@@ -44,11 +45,8 @@ export function DeviceRowButton({ row, selected, onSelect }: DeviceRowButtonProp
         ? `v${row.appVersion}`
         : t(`kind.${row.kind}`)
 
-  const needsAttention =
-    row.adminState === "revoked" ||
-    row.adminStateConflict === true ||
-    row.connectionState === "degraded" ||
-    row.connectionState === "versionMismatch"
+  // Shared with the header count so a lit badge always has a marked row.
+  const needsAttention = rowNeedsAttention(row)
 
   return (
     <button

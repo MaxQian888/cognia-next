@@ -364,6 +364,28 @@ export function buildDeviceRows(input: BuildDeviceRowsInput): DeviceRow[] {
 }
 
 /** Counts for the console header. */
+/**
+ * Whether this row is something a person has to go and look at.
+ *
+ * Deliberately not "is it offline": a phone in a pocket is offline and that is
+ * the expected state, so counting it would make the badge permanently lit and
+ * therefore unreadable. What qualifies is a device whose *configuration* is
+ * wrong — revoked, disagreeing with the host about its own lifecycle, or
+ * connected-but-broken — because each of those needs an action to clear.
+ *
+ * Exported because the rail dot and the header count must never disagree; they
+ * used to re-derive this predicate separately, which is exactly how a badge
+ * ends up saying "1" with no row marked.
+ */
+export function rowNeedsAttention(row: DeviceRow): boolean {
+  return (
+    row.adminState === "revoked" ||
+    row.adminStateConflict === true ||
+    row.connectionState === "degraded" ||
+    row.connectionState === "versionMismatch"
+  )
+}
+
 export function summarizeDeviceRows(rows: readonly DeviceRow[]): {
   total: number
   online: number
@@ -373,14 +395,7 @@ export function summarizeDeviceRows(rows: readonly DeviceRow[]): {
   let needsAttention = 0
   for (const row of rows) {
     if (row.reachability === "online") online += 1
-    if (
-      row.adminState === "revoked" ||
-      row.adminStateConflict === true ||
-      row.connectionState === "degraded" ||
-      row.connectionState === "versionMismatch"
-    ) {
-      needsAttention += 1
-    }
+    if (rowNeedsAttention(row)) needsAttention += 1
   }
   return { total: rows.length, online, needsAttention }
 }

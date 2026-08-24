@@ -8,4 +8,6 @@ It shows what the old surfaces held but never rendered: the capability manifest 
 
 The Runtime tab connects devices to the sandbox and workspace runtimes: available shell tiers with the concrete reason each unavailable one refuses, the sandbox connection registry for this machine, workspace environments for whichever host execution currently routes to (with a control to switch), and the scheduled timing authority. The Activity tab shows the durable dispatch queue per device and what the device offers a placement decision, which is the answer to "why does this machine never get picked".
 
+The header carries a count of the devices that need looking at — revoked, disagreeing with the host about their own lifecycle, or connected but broken — so those are findable without opening each row in turn. Offline is deliberately not counted: a phone in a pocket is offline by design, and counting it would leave the badge permanently lit.
+
 Pairing a device and adding a host stay in Settings; both tabs now link into the console. On mobile, the Me → Devices entry opens the same console.

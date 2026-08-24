@@ -120,6 +120,7 @@
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
   "summary": "{total} 台中 {online} 台在线",
+  "attentionCount": "{count, plural, other {# 台需要处理}}",
   "hostUnreachableTitle": "当前显示的是本地记录",
   "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
   "actions": {

@@ -4,6 +4,7 @@ import {
   dispatchTargetRef,
   pairedDeviceRef,
   remoteHostRef,
+  rowNeedsAttention,
   summarizeDeviceRows,
   workerRef,
 } from "./build-device-rows"
@@ -394,5 +395,50 @@ describe("ordering and summary", () => {
       })
     )
     expect(summarizeDeviceRows(rows)).toEqual({ total: 3, online: 1, needsAttention: 2 })
+  })
+
+  /**
+   * The header badge and the rail dot both call `rowNeedsAttention`. They used
+   * to carry their own copy of the predicate, which is how a console ends up
+   * announcing "2 need attention" over a list with nothing marked.
+   */
+  it("counts exactly the rows the shared predicate marks", () => {
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [phone({ deviceId: "gone", revokedAt: NOW })],
+        remoteHosts: [host({ id: "h9", connectionState: "degraded", lastConnectedAt: NOW - 10 })],
+      })
+    )
+    expect(rows.filter(rowNeedsAttention)).toHaveLength(summarizeDeviceRows(rows).needsAttention)
+  })
+
+  it("does not count an offline device as needing attention", () => {
+    // A phone in a pocket is offline and that is its expected state. Counting
+    // it would light the badge permanently and make it unreadable.
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [
+          phone({ deviceId: "idle", lastSeenAt: NOW - DEFAULT_LIVENESS_TTL_MS * 10 }),
+        ],
+      })
+    )
+    const idle = rows.find((row) => row.deviceId === "idle")
+    expect(idle?.reachability).toBe("offline")
+    expect(rowNeedsAttention(idle as DeviceRow)).toBe(false)
+    expect(summarizeDeviceRows(rows).needsAttention).toBe(0)
+  })
+
+  it("marks a host whose lifecycle the mirror disagrees about", () => {
+    const rows = buildDeviceRows(
+      input({
+        pairedDevices: [phone({ deviceId: "d1" })],
+        hostDevices: new Map<string, HostDeviceSummaryInput>([
+          ["d1", { deviceId: "d1", status: "suspended", role: "member", capabilities: [] }],
+        ]),
+      })
+    )
+    const row = rows.find((candidate) => candidate.deviceId === "d1") as DeviceRow
+    expect(row.adminStateConflict).toBe(true)
+    expect(rowNeedsAttention(row)).toBe(true)
   })
 })

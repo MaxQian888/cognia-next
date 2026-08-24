@@ -23,6 +23,7 @@ import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
 import Link from "next/link"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
@@ -94,6 +95,27 @@ export function DeviceConsole() {
           title={t("title")}
           description={t("description")}
           summary={t("summary", { online: summary.online, total: summary.total })}
+          status={
+            /**
+             * The one number a fleet is actually scanned for. It was computed
+             * by `summarizeDeviceRows` from the start and rendered nowhere,
+             * so a revoked phone or a host stuck in `versionMismatch` was
+             * only findable by opening every row.
+             */
+            summary.needsAttention > 0 ? (
+              <Badge
+                variant="outline"
+                className="gap-1.5 font-normal text-amber-600 dark:text-amber-400"
+                data-testid="devices-attention-count"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-block size-1.5 rounded-full bg-current"
+                />
+                {t("attentionCount", { count: summary.needsAttention })}
+              </Badge>
+            ) : null
+          }
           primaryAction={{
             id: "pair",
             label: t("actions.pair"),

@@ -10,6 +10,13 @@
  * tabs of very different heights is exactly what causes the jump those rules
  * exist to prevent, and motion that strands an element at opacity 0 is
  * invisible to jsdom, so the failure would only ever be seen by a user.
+ *
+ * A third: each body is `@container/device-pane`, and everything multi-column
+ * inside sizes off *that*, never off the viewport. This pane is a draggable
+ * fraction of the window (18–40% goes to the rail), so a viewport `sm:` inside
+ * it is answering a question nobody asked — it turns two columns on in a
+ * 300px-wide pane purely because the window happens to be wide. Same reasoning
+ * and same naming as `@container/memory-pane`.
  */
 
 import { useTranslations } from "next-intl"
@@ -84,19 +91,34 @@ export function DeviceDetail({ row, activeTab, onTabChange, actions }: DeviceDet
 
         {/* Each body owns its own scroll container so switching tabs cannot
             resize the pane — the rule `mcp-panel.tsx` documents. */}
-        <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <TabsContent
+          value="overview"
+          className="@container/device-pane min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <OverviewTab row={row} />
         </TabsContent>
-        <TabsContent value="capabilities" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <TabsContent
+          value="capabilities"
+          className="@container/device-pane min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <CapabilitiesTab row={row} />
         </TabsContent>
-        <TabsContent value="access" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <TabsContent
+          value="access"
+          className="@container/device-pane min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <AccessTab row={row} actions={actions} />
         </TabsContent>
-        <TabsContent value="runtime" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <TabsContent
+          value="runtime"
+          className="@container/device-pane min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <RuntimeTab row={row} />
         </TabsContent>
-        <TabsContent value="activity" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <TabsContent
+          value="activity"
+          className="@container/device-pane min-h-0 flex-1 overflow-y-auto px-4 py-3"
+        >
           <ActivityTab row={row} />
         </TabsContent>
       </Tabs>

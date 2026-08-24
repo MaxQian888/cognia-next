@@ -8468,6 +8468,7 @@
     "standalonePair": "Pair with a host",
     "standaloneTitle": "Only this device",
     "summary": "{online} of {total} online",
+    "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
     "title": "Devices"
   },
   "diagnostics": {

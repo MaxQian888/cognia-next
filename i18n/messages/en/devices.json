@@ -120,6 +120,7 @@
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
   "summary": "{online} of {total} online",
+  "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
   "hostUnreachableTitle": "Showing the local record",
   "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
   "actions": {
