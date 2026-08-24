@@ -9,7 +9,6 @@ import {
   serializeGetForwardMsgV11,
   serializeGetMsgV11,
   serializeSendForwardMsgV11,
-  OneBotUnsupportedError,
   OneBotValidationError,
 } from "./serialize"
 import type { OutboundRequest } from "@/types/connectors/outbound"

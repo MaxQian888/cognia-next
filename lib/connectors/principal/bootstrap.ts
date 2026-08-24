@@ -20,12 +20,10 @@
  */
 
 import type { AdapterInstanceRow, PlatformIdentityRow } from "@/lib/db/connector-types"
-import { appendAudit } from "@/lib/connectors/audit"
 import { createFeishuPrincipal, getFeishuTenant } from "@/lib/db/feishu-principals"
 import { getDb } from "@/lib/db/schema"
 import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
 import { registerFeishuTenant, withDefaults, type PrincipalAdminDependencies } from "./admin"
-import { getActiveRuntimeAccountId } from "./resolve"
 
 export type BootstrapSkipReason = "flag_off" | "identity_unknown" | "already_registered"
 

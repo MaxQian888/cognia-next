@@ -32,6 +32,12 @@ import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { groundSendOptionsAnswer } from "@/lib/rag/chat-grounding"
+import { acquireWorkspaceBundle } from "@/lib/task-workspace/client"
+import {
+  openWorkspaceBundleTurnLease,
+  type WorkspaceBundleTurnLease,
+} from "@/lib/task-workspace/run-lease"
+import type { AcquireWorkspaceBundle, BeginTaskWorkspaceTurn } from "@/lib/task-workspace/types"
 
 export interface SafeSendPromptOptions extends RunAndCaptureOptions {
   /**
@@ -108,6 +114,135 @@ export class GroundingGateBlocked extends Error {
   }
 }
 
+interface ConnectorWritableRoot {
+  logicalRootId: string
+  role: "primary" | "additional"
+  sourceRoot: string
+}
+
+interface ConnectorWorkspaceTurn {
+  lease: WorkspaceBundleTurnLease
+  options: SendOptions
+}
+
+let connectorTurnSequence = 0
+
+function compareRootPaths(left: string, right: string): number {
+  return right.length - left.length || (left < right ? -1 : left > right ? 1 : 0)
+}
+
+function connectorWritableRoots(options: SendOptions | undefined): ConnectorWritableRoot[] {
+  const cwd = options?.cwd?.trim()
+  const unique = new Set<string>()
+  if (cwd) unique.add(cwd)
+  for (const value of options?.additionalDirectories ?? []) {
+    const path = value.trim()
+    if (path) unique.add(path)
+  }
+  if (unique.size === 0) return []
+
+  const sorted = [...unique].sort(compareRootPaths)
+  const primaryPath = cwd ?? sorted[0]
+  const ordered = [primaryPath, ...sorted.filter((path) => path !== primaryPath)]
+  return ordered.map((sourceRoot, index) => ({
+    logicalRootId: `connector-root-${index}`,
+    role: index === 0 ? "primary" : "additional",
+    sourceRoot,
+  }))
+}
+
+function connectorBoundaryId(prefix: string, value: string): string {
+  return `${prefix}${value.replace(/[^a-zA-Z0-9_.:-]/g, "_")}`.slice(0, 128)
+}
+
+function remapExactRoots(values: string[], aliasesBySource: ReadonlyMap<string, string>): string[] {
+  return values.map((value) => aliasesBySource.get(value.trim()) ?? value)
+}
+
+async function openConnectorWorkspaceTurn(
+  sessionId: string,
+  options: SendOptions | undefined,
+  opts: SafeSendPromptOptions
+): Promise<ConnectorWorkspaceTurn | null> {
+  const roots = connectorWritableRoots(options)
+  if (roots.length === 0) return null
+  if (options?.sandboxRuntimeRef) {
+    // The send already carries a resolved sandbox placement, bound against the
+    // pre-remap roots. Remapping `cwd` onto bundle aliases underneath it would
+    // leave the two describing different directories, so the bundle stands
+    // down and the sandbox placement — the stricter, already-authoritative one
+    // — governs the turn. Refusing outright is not an option: `resolveSendOptions`
+    // stamps this ref for every session with the sandbox or Computer Use on,
+    // so throwing here failed every inbound auto-reply for those users.
+    return null
+  }
+
+  const acquire: AcquireWorkspaceBundle = {
+    ownerType: "session",
+    ownerRef: sessionId,
+    environmentKind: "managed",
+    base: { kind: "remoteDefault" },
+    roots,
+  }
+  const bundle = await acquireWorkspaceBundle(acquire)
+  const turnId =
+    options?.turnId?.trim() || `connector-${Date.now()}-${(connectorTurnSequence += 1)}`
+  const taskId = connectorBoundaryId("task:connector:", sessionId)
+  const runId = connectorBoundaryId("run:connector:", `${sessionId}:${turnId}`)
+  const primaryRoot = roots[0]
+  const run: BeginTaskWorkspaceTurn = {
+    taskId,
+    sessionId,
+    runId,
+    executionRunId: runId,
+    turnId,
+    attemptId: "a1",
+    surface: "connector",
+    agentId: opts.adapterId,
+    agentKind: "connector",
+    workspaceRoot: primaryRoot.sourceRoot,
+  }
+  const lease = await openWorkspaceBundleTurnLease(bundle, primaryRoot.logicalRootId, run)
+  if (!lease) throw new Error("Connector workspace Bundle Turn is unavailable")
+  const aliases = [lease.primaryAlias, ...lease.additionalAliases]
+  if (aliases.length !== roots.length) {
+    await lease.abort().catch(() => undefined)
+    throw new Error("Connector workspace Bundle Turn returned an incomplete root alias mapping")
+  }
+  const aliasesBySource = new Map(
+    roots.map((root, index) => [root.sourceRoot, aliases[index]] as const)
+  )
+
+  return {
+    lease,
+    options: {
+      ...options,
+      cwd: lease.primaryAlias,
+      additionalDirectories: lease.additionalAliases,
+      ...(options?.confinement
+        ? {
+            confinement: {
+              ...options.confinement,
+              roots: remapExactRoots(options.confinement.roots, aliasesBySource),
+            },
+          }
+        : {}),
+      ...(options?.trustedWorkspaceRoots
+        ? {
+            trustedWorkspaceRoots: remapExactRoots(options.trustedWorkspaceRoots, aliasesBySource),
+          }
+        : {}),
+      taskWorkspace: {
+        taskId,
+        runId: lease.run.runId,
+        workspaceRoot: primaryRoot.sourceRoot,
+        agentId: opts.adapterId,
+        agentKind: "connector",
+      },
+    },
+  }
+}
+
 /**
  * Drive a Claude turn for the connector auto-mode loop, gating on the
  * PII red-line first.
@@ -155,37 +290,47 @@ export async function safeSendPrompt(
     throw new PiiGateBlocked("appendSystemPrompt", opts.adapterId, opts.conversationKey)
   }
 
+  const workspaceTurn = await openConnectorWorkspaceTurn(sessionId, options, opts)
+  const sendOptions = workspaceTurn?.options ?? options
+
   // ── 3. Delegate to the existing capture wrapper ────────────────────
   // Forward the FULL capture surface, not just signal/timeout/onPartial:
   // the primary inbound ai-run wires `onPermissionRequest` (IM tool-approval
   // HITL) and `onEvent` (live-activity card). Dropping them here would
   // silently disable both when the inbound turn is routed through this gate.
-  const result = await runAndCaptureAssistantReply(sessionId, prompt, options, {
-    signal: opts.signal,
-    timeoutMs: opts.timeoutMs,
-    onPartial: opts.onPartial,
-    onPermissionRequest: opts.onPermissionRequest,
-    onEvent: opts.onEvent,
-    execution: {
-      kind: "connector",
-      label: `${opts.adapterId} · ${opts.conversationKey}`,
-    },
-  })
-  const grounding = groundSendOptionsAnswer(result.text, options, "external_send")
-  if (grounding?.blocked) {
-    await appendAudit({
-      adapterId: opts.adapterId,
-      kind: "adapter.error",
-      at: Date.now(),
-      conversationKey: opts.conversationKey,
-      reason: "grounding_below_threshold",
-      message: "auto-mode reply blocked before outbound delivery",
-      fields: {
-        supportedClaims: grounding.claims.length - grounding.unsupportedClaimIds.length,
-        unsupportedClaims: grounding.unsupportedClaimIds.length,
+  let result: RunAndCaptureResult
+  try {
+    result = await runAndCaptureAssistantReply(sessionId, prompt, sendOptions, {
+      signal: opts.signal,
+      timeoutMs: opts.timeoutMs,
+      onPartial: opts.onPartial,
+      onPermissionRequest: opts.onPermissionRequest,
+      onEvent: opts.onEvent,
+      execution: {
+        kind: "connector",
+        label: `${opts.adapterId} · ${opts.conversationKey}`,
       },
     })
-    throw new GroundingGateBlocked(opts.adapterId, opts.conversationKey, grounding.supportRatio)
+    const grounding = groundSendOptionsAnswer(result.text, sendOptions, "external_send")
+    if (grounding?.blocked) {
+      await appendAudit({
+        adapterId: opts.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: opts.conversationKey,
+        reason: "grounding_below_threshold",
+        message: "auto-mode reply blocked before outbound delivery",
+        fields: {
+          supportedClaims: grounding.claims.length - grounding.unsupportedClaimIds.length,
+          unsupportedClaims: grounding.unsupportedClaimIds.length,
+        },
+      })
+      throw new GroundingGateBlocked(opts.adapterId, opts.conversationKey, grounding.supportRatio)
+    }
+    if (workspaceTurn) await workspaceTurn.lease.settle("ready")
+  } catch (error) {
+    if (workspaceTurn) await workspaceTurn.lease.abort().catch(() => undefined)
+    throw error
   }
   if (result.usage) {
     const usage = result.usage
@@ -196,13 +341,13 @@ export async function safeSendPrompt(
         usage,
       })
     )
-    if (options?.provider) {
+    if (sendOptions?.provider) {
       recordProviderOutcome({
-        providerId: options.provider,
+        providerId: sendOptions.provider,
         ok: true,
         latencyMs: usage.durationMs ?? 0,
         estimatedCostUsd: usage.totalCostUsd,
-        modelId: options.model,
+        modelId: sendOptions.model,
         tokensUsed: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
@@ -211,8 +356,8 @@ export async function safeSendPrompt(
         sessionId,
         // Provider child span nests under the connector turn's root span
         // (minted by resolveSendOptions with traceSurface "connector").
-        traceId: options?.traceId,
-        parentSpanId: options?.spanId,
+        traceId: sendOptions.traceId,
+        parentSpanId: sendOptions.spanId,
         surface: "connector",
       })
     }

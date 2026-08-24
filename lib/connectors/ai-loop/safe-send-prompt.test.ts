@@ -47,10 +47,22 @@ jest.mock("@/lib/claude/provider-telemetry", () => {
   }
 })
 
+jest.mock("@/lib/task-workspace/client", () => ({
+  __esModule: true,
+  acquireWorkspaceBundle: jest.fn(),
+}))
+
+jest.mock("@/lib/task-workspace/run-lease", () => ({
+  __esModule: true,
+  openWorkspaceBundleTurnLease: jest.fn(),
+}))
+
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { appendAudit } from "@/lib/connectors/audit"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
+import { acquireWorkspaceBundle } from "@/lib/task-workspace/client"
+import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 
 const mockRun = runAndCaptureAssistantReply as jest.MockedFunction<
   typeof runAndCaptureAssistantReply
@@ -63,6 +75,12 @@ const mockSwallowUsageWrite = swallowUsageWrite as jest.MockedFunction<typeof sw
 const mockRecordProviderOutcome = recordProviderOutcome as jest.MockedFunction<
   typeof recordProviderOutcome
 >
+const mockAcquireWorkspaceBundle = acquireWorkspaceBundle as jest.MockedFunction<
+  typeof acquireWorkspaceBundle
+>
+const mockOpenWorkspaceBundleTurnLease = openWorkspaceBundleTurnLease as jest.MockedFunction<
+  typeof openWorkspaceBundleTurnLease
+>
 
 beforeEach(() => {
   mockRun.mockClear()
@@ -70,6 +88,8 @@ beforeEach(() => {
   mockRecordConnectorUsage.mockClear()
   mockSwallowUsageWrite.mockClear()
   mockRecordProviderOutcome.mockClear()
+  mockAcquireWorkspaceBundle.mockReset()
+  mockOpenWorkspaceBundleTurnLease.mockReset()
 })
 
 describe("isPiiSafeSendContent", () => {
@@ -339,6 +359,203 @@ describe("safeSendPrompt", () => {
       usage,
     })
     expect(mockRecordProviderOutcome).not.toHaveBeenCalled()
+  })
+
+  it("routes every unique writable root through one managed Bundle Turn", async () => {
+    const settle = jest.fn(async () => [])
+    const abort = jest.fn(async () => [])
+    const bundle = {
+      bundleId: "bundle-connector",
+      environmentKind: "managed" as const,
+      ownerType: "session" as const,
+      ownerRef: "sess_1",
+      state: "active" as const,
+      leases: [],
+      lastUsedAt: 1,
+      pinned: false,
+      createdAt: 1,
+    }
+    mockAcquireWorkspaceBundle.mockResolvedValueOnce(bundle)
+    mockOpenWorkspaceBundleTurnLease.mockResolvedValueOnce({
+      bundleTurnId: "bundle-turn-1",
+      bundleId: bundle.bundleId,
+      run: { runId: "connector-run-1" } as never,
+      runs: [],
+      primaryAlias: "/managed/repo",
+      additionalAliases: ["/managed/repo/packages/deep", "/managed/repo/docs"],
+      settle,
+      abort,
+    })
+
+    await safeSendPrompt(
+      "sess_1",
+      "clean",
+      {
+        cwd: "/repo",
+        additionalDirectories: [
+          "/repo/docs",
+          "/repo/packages/deep",
+          "/repo/docs",
+          " /repo/packages/deep ",
+          "/repo",
+        ],
+        confinement: {
+          enabled: true,
+          roots: ["/repo", "/repo/docs", "/read-only/reference"],
+        },
+        trustedWorkspaceRoots: ["/repo", "/repo/packages/deep"],
+        turnId: "turn-1",
+      },
+      auditCtx
+    )
+
+    expect(mockAcquireWorkspaceBundle).toHaveBeenCalledWith({
+      ownerType: "session",
+      ownerRef: "sess_1",
+      environmentKind: "managed",
+      base: { kind: "remoteDefault" },
+      roots: [
+        { logicalRootId: "connector-root-0", role: "primary", sourceRoot: "/repo" },
+        {
+          logicalRootId: "connector-root-1",
+          role: "additional",
+          sourceRoot: "/repo/packages/deep",
+        },
+        {
+          logicalRootId: "connector-root-2",
+          role: "additional",
+          sourceRoot: "/repo/docs",
+        },
+      ],
+    })
+    expect(mockOpenWorkspaceBundleTurnLease).toHaveBeenCalledWith(
+      bundle,
+      "connector-root-0",
+      expect.objectContaining({
+        sessionId: "sess_1",
+        turnId: "turn-1",
+        surface: "connector",
+        agentId: "adp_1",
+        agentKind: "connector",
+        workspaceRoot: "/repo",
+      })
+    )
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      expect.objectContaining({
+        cwd: "/managed/repo",
+        additionalDirectories: ["/managed/repo/packages/deep", "/managed/repo/docs"],
+        confinement: {
+          enabled: true,
+          roots: ["/managed/repo", "/managed/repo/docs", "/read-only/reference"],
+        },
+        trustedWorkspaceRoots: ["/managed/repo", "/managed/repo/packages/deep"],
+        taskWorkspace: expect.objectContaining({
+          runId: "connector-run-1",
+          workspaceRoot: "/repo",
+        }),
+      }),
+      expect.any(Object)
+    )
+    expect(settle).toHaveBeenCalledWith("ready")
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it("fails closed when Registry Bundle acquisition fails", async () => {
+    mockAcquireWorkspaceBundle.mockRejectedValueOnce(new Error("registry unavailable"))
+
+    await expect(safeSendPrompt("sess_1", "clean", { cwd: "/repo" }, auditCtx)).rejects.toThrow(
+      "registry unavailable"
+    )
+
+    expect(mockOpenWorkspaceBundleTurnLease).not.toHaveBeenCalled()
+    expect(mockRun).not.toHaveBeenCalled()
+  })
+
+  it("stands down — without failing the turn — when a sandbox runtime is already bound", async () => {
+    // `resolveSendOptions` stamps `sandboxRuntimeRef` for EVERY session with the
+    // sandbox or Computer Use enabled, so refusing here failed every inbound
+    // auto-reply for those users. The bundle declines to remap on top of an
+    // authoritative placement; the send proceeds under that placement.
+    await expect(
+      safeSendPrompt(
+        "sess_1",
+        "clean",
+        { cwd: "/repo", sandboxRuntimeRef: "sandbox-live-root" },
+        auditCtx
+      )
+    ).resolves.toMatchObject({ text: "model reply" })
+
+    expect(mockAcquireWorkspaceBundle).not.toHaveBeenCalled()
+    expect(mockOpenWorkspaceBundleTurnLease).not.toHaveBeenCalled()
+    // The turn ran, and it ran with the original options — no alias remap.
+    expect(mockRun).toHaveBeenCalledTimes(1)
+    expect(mockRun.mock.calls[0][2]).toMatchObject({
+      cwd: "/repo",
+      sandboxRuntimeRef: "sandbox-live-root",
+    })
+  })
+
+  it("fails closed when Registry does not open a Bundle Turn", async () => {
+    mockAcquireWorkspaceBundle.mockResolvedValueOnce({
+      bundleId: "bundle-connector",
+      environmentKind: "managed",
+      ownerType: "session",
+      ownerRef: "sess_1",
+      state: "active",
+      leases: [],
+      lastUsedAt: 1,
+      pinned: false,
+      createdAt: 1,
+    })
+    mockOpenWorkspaceBundleTurnLease.mockResolvedValueOnce(null)
+
+    await expect(safeSendPrompt("sess_1", "clean", { cwd: "/repo" }, auditCtx)).rejects.toThrow(
+      "Connector workspace Bundle Turn is unavailable"
+    )
+
+    expect(mockRun).not.toHaveBeenCalled()
+  })
+
+  it("aborts the whole Bundle Turn when isolated execution fails", async () => {
+    const settle = jest.fn(async () => [])
+    const abort = jest.fn(async () => [])
+    mockAcquireWorkspaceBundle.mockResolvedValueOnce({
+      bundleId: "bundle-connector",
+      environmentKind: "managed",
+      ownerType: "session",
+      ownerRef: "sess_1",
+      state: "active",
+      leases: [],
+      lastUsedAt: 1,
+      pinned: false,
+      createdAt: 1,
+    })
+    mockOpenWorkspaceBundleTurnLease.mockResolvedValueOnce({
+      bundleTurnId: "bundle-turn-1",
+      bundleId: "bundle-connector",
+      run: { runId: "connector-run-1" } as never,
+      runs: [],
+      primaryAlias: "/managed/repo",
+      additionalAliases: [],
+      settle,
+      abort,
+    })
+    mockRun.mockRejectedValueOnce(new Error("model failed"))
+
+    await expect(safeSendPrompt("sess_1", "clean", { cwd: "/repo" }, auditCtx)).rejects.toThrow(
+      "model failed"
+    )
+
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(settle).not.toHaveBeenCalled()
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      expect.objectContaining({ cwd: "/managed/repo" }),
+      expect.any(Object)
+    )
   })
 })
 
