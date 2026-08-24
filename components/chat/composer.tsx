@@ -2084,6 +2084,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     [composerBehavior, isMobileShell]
   )
   const compactLayout = skin.compactLayout
+  // `compactLayout` (the legacy desktop setting) has always put the row inside
+  // the box; a skin can now ask for the same thing without it.
+  const toolbarInBox = skin.toolbarLayout !== "detached" || compactLayout
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
@@ -2568,17 +2571,21 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               compactLayout={compactLayout}
               skin={skin}
               toolbar={
-                compactLayout ? (
+                // The skin decides WHERE the status row sits. `detached` keeps
+                // it below the box (today's desktop default); every other
+                // arrangement puts it inside, and the toolbar itself decides
+                // how much of the roster is spelled out vs. folded.
+                toolbarInBox ? (
                   <BottomToolbar
                     session={session ?? null}
                     status={status}
-                    variant="embedded"
+                    variant={skin.toolbarLayout === "detached" ? "embedded" : skin.toolbarLayout}
                     onOpenProviderSettings={() => onOpenSettings("api-key")}
                   />
                 ) : null
               }
             />
-            {compactLayout ? null : (
+            {toolbarInBox ? null : (
               <BottomToolbar
                 session={session ?? null}
                 status={status}

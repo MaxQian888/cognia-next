@@ -452,3 +452,81 @@ describe("BottomToolbar — agent-mode wiring", () => {
     expect(lastSelectorProps.onAgentChange).toBeUndefined()
   })
 })
+
+// ── Reachability, not visibility ───────────────────────────────────────────
+//
+// The contract a composer skin signs: it may move a control inline, onto a
+// rail, or behind the "⋯" disclosure — it may not drop one. `focus` folds the
+// most and is the interesting case; if this ever passes because a control
+// stopped mounting anywhere, the whole skin system is lying about what it does.
+describe("BottomToolbar — every layout keeps the whole roster reachable", () => {
+  const ROSTER = [
+    "permission-mode-indicator",
+    "agent-runtime-selector",
+    "composition-chip",
+    "composer-preset-chip",
+  ] as const
+
+  const LAYOUTS = ["detached", "embedded", "rail", "expanded", "folded"] as const
+
+  beforeEach(() => {
+    mockToolbarWidth = 900
+    movedControlsVisible = true
+  })
+
+  it.each(LAYOUTS)("%s reaches every control, inline or folded", (layout) => {
+    const view = render(<BottomToolbar session={session} variant={layout} />)
+    // Open the disclosure if this layout has one — that is a legitimate home.
+    const more = screen.queryByTestId("composer-toolbar-more")
+    if (more) fireEvent.click(more)
+    for (const id of ROSTER) {
+      expect(screen.queryByTestId(id)).not.toBeNull()
+    }
+    view.unmount()
+  })
+
+  it("folds nearly everything under focus, keeping only the per-turn model inline", () => {
+    render(<BottomToolbar session={session} variant="folded" />)
+    // Before opening the disclosure, the row is quiet.
+    expect(screen.queryByTestId("agent-runtime-selector")).toBeNull()
+    expect(screen.queryByTestId("composition-chip")).toBeNull()
+    // And the disclosure is what makes them reachable.
+    fireEvent.click(screen.getByTestId("composer-toolbar-more"))
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.getByTestId("composition-chip")).toBeInTheDocument()
+  })
+
+  it("lays the roster out inline under full, with an ambient rail beside it", () => {
+    render(<BottomToolbar session={session} variant="expanded" />)
+    expect(screen.getByTestId("composer-ambient-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("agent-runtime-selector")).toBeInTheDocument()
+    expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
+  })
+
+  it("keeps the full roster inline even in a narrow pane, once the skin asked for it", () => {
+    // `resolveToolbarLayout` is what protects a genuinely narrow pane; if the
+    // caller still says `expanded`, re-deciding here on raw width would undo it.
+    mockToolbarWidth = 300
+    render(<BottomToolbar session={session} variant="expanded" />)
+    expect(screen.getByTestId("composer-ambient-rail")).toBeInTheDocument()
+  })
+
+  it("gives rail the same roster as embedded, only quieter", () => {
+    const railView = render(<BottomToolbar session={session} variant="rail" />)
+    const rail = screen.getByTestId("composer-toolbar-embedded")
+    expect(rail).toHaveAttribute("data-toolbar-layout", "rail")
+    expect(rail.className).toContain("font-mono")
+    railView.unmount()
+
+    render(<BottomToolbar session={session} variant="embedded" />)
+    const embedded = screen.getByTestId("composer-toolbar-embedded")
+    expect(embedded).toHaveAttribute("data-toolbar-layout", "embedded")
+    expect(embedded.className).not.toContain("font-mono")
+  })
+
+  it("treats the legacy 'default' variant as detached", () => {
+    render(<BottomToolbar session={session} variant="default" />)
+    expect(screen.getByTestId("composer-footer")).toBeInTheDocument()
+    expect(screen.queryByTestId("composer-toolbar-embedded")).toBeNull()
+  })
+})

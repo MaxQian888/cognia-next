@@ -63,6 +63,7 @@ import { useAgentRuntimeStore } from "@/stores/agent"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
+import type { ComposerToolbarLayout } from "@/lib/chat/composer-skin"
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -70,7 +71,14 @@ import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
 interface BottomToolbarProps {
   session: ChatSession | null
   status?: ChatStatus
-  variant?: "default" | "embedded"
+  /**
+   * How this row is arranged — chosen by the active composer skin, then
+   * narrowed by the measured pane (see `resolveToolbarLayout`). Every branch
+   * renders the SAME roster; they differ only in what sits inline and what is
+   * packed into the "⋯" disclosure. `"default"` is the legacy alias for
+   * `"detached"` and is what a caller that has no opinion still passes.
+   */
+  variant?: "default" | ComposerToolbarLayout
   leading?: ReactNode
   /** Where the "No API key" badge sends the user — provider settings. */
   onOpenProviderSettings?: () => void
@@ -89,7 +97,9 @@ export function BottomToolbar({
   // runtime / mode / external-agent / web-search / generic-skills / generic
   // plugin-slot controls have no useful meaning inside a workflow chat.
   if (session?.kind === "workflow-editor") {
-    if (variant === "embedded") {
+    // A workflow chat has no runtime / mode / skills roster to arrange, so
+    // every in-box layout collapses to the one embedded form.
+    if (variant !== "default" && variant !== "detached") {
       return (
         <div className="min-w-0 flex-1" data-testid="composer-toolbar-embedded">
           <WorkflowBottomToolbar session={session} />
@@ -153,6 +163,9 @@ function GenericBottomToolbar({
   // Popover: re-mounting a trigger-owning control inside a `DropdownMenuItem`
   // desyncs its open state.) `toolbarWidth === 0` (pre-measure) takes the wide
   // branch, matching the common chat pane.
+  const layout: ComposerToolbarLayout = variant === "default" ? "detached" : variant
+  /** Any arrangement that sits INSIDE the composer box rather than below it. */
+  const inBox = layout !== "detached"
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
   const tierActive = runtime !== "claude-sdk"
 
@@ -179,7 +192,7 @@ function GenericBottomToolbar({
       <CompositionChip
         sessionId={session?.id}
         disabled={isStreaming}
-        layout={compact || variant === "embedded" ? "combined" : "split"}
+        layout={compact || inBox ? "combined" : "split"}
       />
     ) : null
 
@@ -317,6 +330,28 @@ function GenericBottomToolbar({
     />
   )
 
+  // `focus` folds nearly everything. It is the one skin allowed to hide the
+  // per-turn group inline — but hiding is not dropping: the same controls are
+  // one click away in the same disclosure the narrow layouts already use.
+  const foldedOverflow = (
+    <ToolbarMoreMenu label={t("moreControls")} active={tierActive} disabled={isStreaming}>
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">{runConfigGroup}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {presetControl}
+          {modeControl}
+          {runtimeControl}
+          {sandboxIndicator}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {sessionStatus}
+          {contextIndicator}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">{pluginSlots}</div>
+      </div>
+    </ToolbarMoreMenu>
+  )
+
   // Narrow packing only. A Popover, not a DropdownMenu: the agent-mode selector
   // and the plugin slots own their own overlays, and re-mounting those inside a
   // `DropdownMenuItem` desyncs their open state.
@@ -333,13 +368,39 @@ function GenericBottomToolbar({
     </ToolbarMoreMenu>
   )
 
-  // Both narrow layouts pack the tail into "⋯"; the wide one lays it out.
-  if (variant === "embedded") {
+  // `focus`: the model glyph earns its place because it answers the question
+  // asked every turn; the rest is one click away rather than on the row.
+  if (layout === "folded") {
     return (
       <div
         ref={rootRef}
         className="flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground"
         data-testid="composer-toolbar-embedded"
+        data-toolbar-layout="folded"
+      >
+        <ModelPicker
+          session={session}
+          disabled={isStreaming}
+          className={cn(TOOLBAR_CHIP, "max-w-[9rem]")}
+        />
+        {foldedOverflow}
+      </div>
+    )
+  }
+
+  // Both narrow layouts pack the tail into "⋯"; the wide one lays it out.
+  // `rail` is `embedded` in a quieter voice: same roster, same order,
+  // monospace so it reads as a status line rather than a control strip.
+  if (layout === "embedded" || layout === "rail") {
+    return (
+      <div
+        ref={rootRef}
+        className={cn(
+          "flex min-w-0 flex-1 items-center justify-end gap-1 text-[11px] text-muted-foreground",
+          layout === "rail" && "font-mono text-[10px] tracking-tight"
+        )}
+        data-testid="composer-toolbar-embedded"
+        data-toolbar-layout={layout}
       >
         {runConfigGroup}
         <ToolbarDivider />
@@ -353,7 +414,11 @@ function GenericBottomToolbar({
 
   // Compact (mobile / narrow workflow sidebar): two rows at most — Tier 1 on
   // the first, context usage + overflow sharing the second.
-  if (compact) {
+  //
+  // `expanded` opts out: the skin explicitly asked for the full inline roster,
+  // and `resolveToolbarLayout` has already downgraded it if the pane is too
+  // narrow to hold one. Re-deciding here on raw width would undo that.
+  if (compact && layout !== "expanded") {
     return (
       <div
         ref={rootRef}
@@ -378,7 +443,7 @@ function GenericBottomToolbar({
   // Nothing is collapsed here — the row has the space once the default-valued
   // chips are glyphs, and a "⋯" that hides the active Agent mode costs a click
   // to answer a question the user asks on every turn.
-  return (
+  const wideRow = (
     <div
       ref={rootRef}
       className="mt-2 flex min-w-0 flex-nowrap items-center gap-x-1 px-1 text-[11px] text-muted-foreground"
@@ -399,6 +464,25 @@ function GenericBottomToolbar({
         {sessionStatus}
         {contextIndicator}
         {sandboxIndicator}
+      </div>
+    </div>
+  )
+
+  if (layout !== "expanded") return wideRow
+
+  // `full`: the same roster, plus the ambient numbers the wide row pins to its
+  // right edge given a rail of their own. Nothing new is mounted — the cluster
+  // above already carries cost and context; this only stops them competing with
+  // the controls for the one row's width.
+  return (
+    <div className="flex min-w-0 flex-col" data-toolbar-layout="expanded">
+      {wideRow}
+      <div
+        className="flex min-w-0 items-center gap-2 px-1 pt-0.5 font-mono text-[10px] text-muted-foreground/80"
+        data-testid="composer-ambient-rail"
+      >
+        {sessionStatus}
+        {contextIndicator}
       </div>
     </div>
   )
