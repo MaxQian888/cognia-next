@@ -326,3 +326,45 @@ it("renders exceptional badges even when the host provides no reason text", asyn
   expect(await screen.findByText("locked")).toBeInTheDocument()
   expect(screen.getByText("prunable")).toBeInTheDocument()
 })
+
+describe("WorkspaceEnvironmentList — workspace scoping", () => {
+  it("lists only the rows this workspace owns, and offers the rest", async () => {
+    // Unscoped, a laptop with several checked-out projects reads as "this
+    // workspace owns all of these".
+    listMock.mockResolvedValue([
+      { ...managed, environmentId: "mine", workspaceId: "mine", projectId: "project-a" },
+      { ...managed, environmentId: "theirs", workspaceId: "theirs", projectId: "project-b" },
+      { ...manual, environmentId: "unclaimed" },
+    ])
+    render(<WorkspaceEnvironmentList projectId="project-a" />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-mine")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("workspace-environment-theirs")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environment-unclaimed")).not.toBeInTheDocument()
+
+    // A worktree no project claims is exactly what the user needs in order to
+    // reclaim it, so it stays one click away rather than hidden.
+    fireEvent.click(screen.getByTestId("workspace-environments-scope-toggle"))
+    expect(screen.getByTestId("workspace-environment-theirs")).toBeInTheDocument()
+    expect(screen.getByTestId("workspace-environment-unclaimed")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workspace-environments-scope-toggle"))
+    expect(screen.queryByTestId("workspace-environment-theirs")).not.toBeInTheDocument()
+  })
+
+  it("stays machine-wide with no workspace scope, and offers no toggle", async () => {
+    listMock.mockResolvedValue([
+      { ...managed, environmentId: "mine", workspaceId: "mine", projectId: "project-a" },
+      { ...manual, environmentId: "unclaimed" },
+    ])
+    render(<WorkspaceEnvironmentList />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-environment-mine")).toBeInTheDocument()
+    )
+    expect(screen.getByTestId("workspace-environment-unclaimed")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-environments-scope-toggle")).not.toBeInTheDocument()
+  })
+})

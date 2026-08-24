@@ -239,6 +239,12 @@ export type WorkspaceEnvironmentAction =
 export interface WorkspaceEnvironmentSummary {
   environmentId: string
   workspaceId: string | null
+  /**
+   * Owning Workspace, so the inventory can be scoped to one project instead of
+   * only ever being shown machine-wide. Absent for a directory on disk that no
+   * project claims.
+   */
+  projectId?: string
   path: string
   sourceRoot: string
   ownership: WorkspaceEnvironmentOwnership

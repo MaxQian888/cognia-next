@@ -62,6 +62,13 @@ import { useWorkspaceActionController } from "@/hooks/use-workspace-action-contr
 export interface WorkspaceEnvironmentListProps {
   presentation?: "page" | "sheet"
   rootDir?: string
+  /**
+   * Scope the inventory to one Workspace. Rows this project does not own are
+   * counted and reachable behind a toggle rather than hidden: a worktree on
+   * disk that no project claims is exactly what the user needs to see in order
+   * to reclaim it.
+   */
+  projectId?: string
   refreshKey?: number
   showPrune?: boolean
   canMutate?: (command: string) => boolean
@@ -84,12 +91,25 @@ function errorDetail(cause: unknown): string {
 export function WorkspaceEnvironmentList({
   presentation = "page",
   rootDir,
+  projectId,
   refreshKey = 0,
   showPrune = false,
   canMutate = () => true,
 }: WorkspaceEnvironmentListProps) {
   const t = useTranslations("workspace.environments")
   const [rows, setRows] = useState<WorkspaceEnvironmentSummary[] | null>(null)
+  const [showAllProjects, setShowAllProjects] = useState(false)
+  // Scoping happens here rather than in the query: the host answers with every
+  // environment it knows about, and the count of the ones this Workspace does
+  // not own is itself information — a worktree no project claims is what the
+  // user needs to see in order to reclaim it.
+  const scoped =
+    rows === null || !projectId || showAllProjects
+      ? rows
+      : rows.filter((row) => row.projectId === projectId)
+  // Counted independently of the toggle, so the way back is always offered.
+  const otherProjectCount =
+    rows === null || !projectId ? 0 : rows.filter((row) => row.projectId !== projectId).length
   const { pendingKey: pendingId, error, setError, clearError, run } = useWorkspaceActionController()
   const [deleteTarget, setDeleteTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
   const [branchTarget, setBranchTarget] = useState<WorkspaceEnvironmentSummary | null>(null)
@@ -234,7 +254,7 @@ export function WorkspaceEnvironmentList({
           </div>
         ) : (
           <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {t("count", { count: rows?.length ?? 0 })}
+            {t("count", { count: scoped?.length ?? 0 })}
           </span>
         )}
         {showPrune ? (
@@ -265,12 +285,12 @@ export function WorkspaceEnvironmentList({
         </p>
       ) : null}
 
-      {rows === null ? (
+      {scoped === null ? (
         <div className="flex flex-col gap-2" aria-label={t("loading")}>
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-      ) : rows.length === 0 ? (
+      ) : scoped.length === 0 ? (
         <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -292,7 +312,7 @@ export function WorkspaceEnvironmentList({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
+            {scoped.map((row) => (
               <TableRow
                 key={row.environmentId}
                 data-testid={`workspace-environment-${row.environmentId}`}
@@ -455,6 +475,20 @@ export function WorkspaceEnvironmentList({
           </TableBody>
         </Table>
       )}
+
+      {otherProjectCount > 0 ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="self-start text-xs text-muted-foreground"
+          onClick={() => setShowAllProjects((current) => !current)}
+          data-testid="workspace-environments-scope-toggle"
+        >
+          {showAllProjects
+            ? t("scopeToWorkspace")
+            : t("otherWorkspaces", { count: otherProjectCount })}
+        </Button>
+      ) : null}
 
       <AlertDialog
         open={branchTarget !== null}

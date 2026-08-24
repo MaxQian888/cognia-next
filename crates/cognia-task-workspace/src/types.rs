@@ -665,6 +665,11 @@ pub enum WorkspaceEnvironmentAction {
 pub struct WorkspaceEnvironmentSummary {
     pub environment_id: String,
     pub workspace_id: Option<String>,
+    /// Owning Workspace, so the inventory can be scoped to one project instead
+    /// of only ever being shown machine-wide. `None` for a directory found on
+    /// disk that no project claims.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub path: String,
     pub source_root: String,
     pub ownership: WorkspaceEnvironmentOwnership,

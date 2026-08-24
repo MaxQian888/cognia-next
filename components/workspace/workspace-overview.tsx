@@ -245,7 +245,11 @@ export function WorkspaceOverview() {
         </TabsContent>
 
         <TabsContent value="environments" className="mt-0" data-testid="workspace-environments">
-          <WorkspaceEnvironmentList />
+          {/* Scoped to this Workspace. It used to list every environment on the
+              machine, which on a laptop with several checked-out projects read
+              as "this workspace owns all of these". Rows it does not own stay
+              one click away. */}
+          <WorkspaceEnvironmentList projectId={workspaceId ?? undefined} />
         </TabsContent>
 
         <TabsContent

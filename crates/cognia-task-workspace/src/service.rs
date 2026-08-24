@@ -4340,6 +4340,7 @@ fn environment_summary_from_git(
             .clone()
             .unwrap_or_else(|| format!("git:{}", storage_key(&normalized_path_key(&row.path)))),
         workspace_id,
+        project_id: record.and_then(|record| record.project_id.clone()),
         path,
         source_root: source_root.to_string_lossy().into_owned(),
         ownership,
@@ -4367,6 +4368,7 @@ fn environment_summary_from_record(record: &WorkspaceRecord) -> crate::Workspace
     crate::WorkspaceEnvironmentSummary {
         environment_id: record.workspace_id.clone(),
         workspace_id: Some(record.workspace_id.clone()),
+        project_id: record.project_id.clone(),
         path: record.execution_root.clone(),
         source_root: record.source_root.clone(),
         ownership,
