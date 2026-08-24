@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import type { ChatSession, Project } from "@cognia/agent-config-types"
+import type { ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
 
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
-const updateSession = jest.fn(async () => undefined)
+const updateSession = jest.fn(async (..._a: unknown[]) => undefined)
 jest.mock("@/lib/db/sessions", () => ({ updateSession: (...a: unknown[]) => updateSession(...a) }))
 const toastError = jest.fn()
 const toastSuccess = jest.fn()
@@ -65,7 +66,7 @@ describe("SessionWorkspaceMove", () => {
     fireEvent.click(await screen.findByText("Beta"))
 
     await waitFor(() => expect(updateSession).toHaveBeenCalled())
-    const [, patch] = updateSession.mock.calls[0] as [
+    const [, patch] = updateSession.mock.calls[0] as unknown as [
       string,
       { projectId: string; executionContext: { projectRoot: string } },
     ]

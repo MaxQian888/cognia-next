@@ -1,4 +1,5 @@
-import type { ChatSession, Project } from "@cognia/agent-config-types"
+import type { ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
 import { planSessionMove } from "./move-session-workspace"
 
 const target = {
@@ -50,7 +51,10 @@ describe("planSessionMove", () => {
     expect(
       planSessionMove({
         ...base,
-        session: { ...session, handoffLock: { ticketId: "t", state: "held" } } as ChatSession,
+        session: {
+          ...session,
+          handoffLock: { ticketId: "t", state: "held" },
+        } as unknown as ChatSession,
       })
     ).toEqual({ ok: false, reason: "session-locked" })
   })

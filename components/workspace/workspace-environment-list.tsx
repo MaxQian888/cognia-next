@@ -152,9 +152,10 @@ export function WorkspaceEnvironmentList({
     row: WorkspaceEnvironmentSummary,
     operation: (workspaceId: string) => Promise<unknown>
   ) => {
-    if (!row.workspaceId) return
+    const workspaceId = row.workspaceId
+    if (!workspaceId) return
     await run(row.environmentId, async () => {
-      await operation(row.workspaceId)
+      await operation(workspaceId)
       await load()
     })
   }

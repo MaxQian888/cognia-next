@@ -200,7 +200,10 @@ export async function changedSince(handle: PluginWorkspaceHandle, ref: string): 
 }
 
 /** Production dependencies for one plugin. */
-export function defaultAcquireDeps(pluginId: string, openRoots: () => string[]): AcquireDeps {
+export function defaultAcquireDeps(
+  pluginId: string,
+  openRoots: () => string[] | Promise<string[]>
+): AcquireDeps {
   return {
     openRoots,
     repoCacheDir: (segments) =>

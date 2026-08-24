@@ -20,7 +20,8 @@
  * settle its patches into a directory nobody is watching.
  */
 
-import type { ChatSession, Project } from "@cognia/agent-config-types"
+import type { ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
 import type { SessionExecutionContext } from "@/types/execution-context"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import { primaryRootOf } from "@/lib/workspace/roots"
