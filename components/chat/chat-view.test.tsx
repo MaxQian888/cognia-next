@@ -116,7 +116,11 @@ jest.mock("@/stores/chat", () => ({
 // Welcome-section dismissal persistence (AppSettings.welcomeHidden).
 jest.mock("@/stores/settings", () => {
   const state = {
-    settings: null as { welcomeHidden?: { tryPrompt?: boolean } } | null,
+    settings: null as {
+      welcomeHidden?: { tryPrompt?: boolean }
+      welcomeStyle?: "rich" | "minimal"
+      userName?: string
+    } | null,
     save: jest.fn(),
   }
   const useSettingsStore = Object.assign((sel: (s: typeof state) => unknown) => sel(state), {
@@ -158,6 +162,8 @@ import {
   clearComputerUsePipState,
   publishComputerUseActivity,
 } from "@/lib/automation/computer-use-pip"
+import { EmptyChatState } from "./empty-state"
+import { __settingsState as settingsState } from "@/stores/settings"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 const hasWebCompanionTargetMock = jest.mocked(hasWebCompanionTarget)
@@ -780,5 +786,55 @@ describe("ChatPane", () => {
 
       expect(stage).toContainElement(screen.getByTestId("composer"))
     })
+  })
+})
+
+// ── The welcome screen actually reads what settings wrote ──────────────────
+//
+// `EmptyChatState` has always ACCEPTED `welcomeStyle` / `userName` /
+// `onToggleStyle` and rendered a style toggle for them — but no production
+// caller passed any of the three, so the name a user typed into Settings was
+// written and never read, and the page was permanently `rich`. These pin the
+// wiring so it cannot rot back.
+describe("ChatPane — welcome personalization reaches the welcome page", () => {
+  const emptyStateMock = jest.mocked(EmptyChatState)
+
+  function renderWelcome() {
+    // No active session → the welcome branch.
+    render(<ChatPane {...makeProps()} activeSession={null} />)
+    return emptyStateMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
+  }
+
+  beforeEach(() => {
+    emptyStateMock.mockClear()
+    settingsState.settings = null
+  })
+
+  it("passes the stored display name through to the greeting", () => {
+    settingsState.settings = { userName: "Max" }
+    expect(renderWelcome().userName).toBe("Max")
+  })
+
+  it("passes the stored style through", () => {
+    settingsState.settings = { welcomeStyle: "minimal" }
+    expect(renderWelcome().welcomeStyle).toBe("minimal")
+  })
+
+  it("defaults to rich when nothing is stored", () => {
+    expect(renderWelcome().welcomeStyle).toBe("rich")
+  })
+
+  it("offers the inline style toggle on desktop", () => {
+    expect(typeof renderWelcome().onToggleStyle).toBe("function")
+  })
+
+  it("supplies a hero composer when the shell can dispatch a first turn", () => {
+    render(<ChatPane {...makeProps()} activeSession={null} onHeroSend={jest.fn()} />)
+    const props = emptyStateMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(props.composerSlot).toBeTruthy()
+  })
+
+  it("omits the hero composer when the shell cannot create a session", () => {
+    expect(renderWelcome().composerSlot).toBeUndefined()
   })
 })

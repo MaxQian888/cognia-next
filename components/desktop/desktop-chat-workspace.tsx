@@ -539,12 +539,22 @@ export function DesktopChatWorkspace() {
   // no session is selected, which made the cards read as dead buttons. The new
   // session is addressed explicitly — the store pointer has not propagated to
   // this closure yet.
-  const handleUseSample = useCallback(
-    async (text: string) => {
+  //
+  // Also serves the welcome screen's hero composer, which is why it carries a
+  // manifest: a first message typed there can already have attachments staged,
+  // and they must survive the session being created underneath them.
+  const handleFirstTurn = useCallback(
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
       const active = useChatStore.getState().activeSessionId
       if (active) {
-        if (isTeamSessionId(active)) await teamChat.send(text, { sessionId: active })
-        else await directChat.send(text, undefined, { sessionId: active })
+        if (isTeamSessionId(active)) {
+          await teamChat.send(content, { sessionId: active, attachmentManifest: manifest })
+        } else {
+          await directChat.send(content, undefined, {
+            sessionId: active,
+            attachmentManifest: manifest,
+          })
+        }
         return
       }
       // Quick-start respects the selected guild, same as the welcome CTA. A
@@ -552,13 +562,16 @@ export function DesktopChatWorkspace() {
       // quick-start needs no character pick.
       if (selectedGuild.kind === "team") {
         const s = await handleNewTeamConversation(selectedGuild.teamId)
-        await teamChat.send(text, { sessionId: s.id })
+        await teamChat.send(content, { sessionId: s.id, attachmentManifest: manifest })
       } else {
         const s = await create({
           executionLocation: newChatExecution.location,
           executionBase: newChatExecution.base,
         })
-        await directChat.send(text, undefined, { sessionId: s.id })
+        await directChat.send(content, undefined, {
+          sessionId: s.id,
+          attachmentManifest: manifest,
+        })
       }
     },
     [
@@ -570,6 +583,12 @@ export function DesktopChatWorkspace() {
       handleNewTeamConversation,
       newChatExecution,
     ]
+  )
+
+  /** Starter cards / follow-up chips — plain text, no attachments. */
+  const handleUseSample = useCallback(
+    (text: string) => void handleFirstTurn(text),
+    [handleFirstTurn]
   )
 
   // The welcome CTA / tab-strip "+" respect the selected guild: a team guild
@@ -726,6 +745,7 @@ export function DesktopChatWorkspace() {
                     respondToApproval={handleApprovalRespond}
                     onCreate={handleCreate}
                     onUseSample={handleUseSample}
+                    onHeroSend={handleFirstTurn}
                     onOpenSettings={openSettings}
                     newChatExecutionControls={
                       // Only offered when the workspace HAS a directory. A

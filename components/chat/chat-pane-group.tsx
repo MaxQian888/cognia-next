@@ -55,6 +55,11 @@ export interface ChatPaneGroupProps {
   ) => Promise<void> | void
   onCreate: () => void
   onUseSample: (text: string) => void
+  /** First turn from the welcome hero composer — creates the session, then sends. */
+  onHeroSend?: (
+    content: SendContent,
+    manifest?: readonly AttachmentManifestEntry[]
+  ) => void | Promise<void>
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
@@ -120,6 +125,7 @@ export function ChatPaneGroup({
   respondToApproval,
   onCreate,
   onUseSample,
+  onHeroSend,
   onOpenSettings,
   newChatExecutionControls,
   recentSessions,
@@ -186,6 +192,7 @@ export function ChatPaneGroup({
         onResetRuntime={sessionId && resetRuntime ? () => resetRuntime(sessionId) : undefined}
         onCreate={onCreate}
         onUseSample={onUseSample}
+        onHeroSend={onHeroSend}
         onOpenSettings={onOpenSettings}
         newChatExecutionControls={newChatExecutionControls}
         onSplitView={onSplitView}

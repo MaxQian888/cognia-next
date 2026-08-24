@@ -127,6 +127,16 @@ interface Props {
   /** New-chat execution controls shown beside the primary creation action. */
   executionControlsSlot?: ReactNode
   /**
+   * A live composer, rendered directly under the greeting.
+   *
+   * This is the welcome screen's primary affordance when present: a user can
+   * type their first message without creating a session first, the way Claude
+   * and Codex both open. The chat pane supplies the real `<Composer>` (not a
+   * lookalike), so attachments, slash commands and `@`-mentions all work from
+   * the first keystroke.
+   */
+  composerSlot?: ReactNode
+  /**
    * Visual density. `"rich"` (default) shows the illustrated two-column hero
    * and quiet surfaced starter cards; `"minimal"` uses a compact, media-free
    * layout. The chat pane forces `"minimal"` on mobile/narrow viewports.
@@ -214,6 +224,7 @@ export function EmptyChatState({
   quickActionsSlot,
   statsSlot,
   executionControlsSlot,
+  composerSlot,
   welcomeStyle = "rich",
   onToggleStyle,
   userName,
@@ -378,6 +389,15 @@ export function EmptyChatState({
             </div>
           ) : null}
         </motion.section>
+
+        {/* The composer, directly under the greeting. Sits above every other
+            section because it is what the page is FOR — the starters and recent
+            sessions below are shortcuts into the same box. */}
+        {composerSlot ? (
+          <motion.div className="w-full" variants={STAGGER_CHILD} data-testid="welcome-composer">
+            {composerSlot}
+          </motion.div>
+        ) : null}
 
         {/* Mobile home customizable quick-action grid. */}
         {quickActionsSlot ? (

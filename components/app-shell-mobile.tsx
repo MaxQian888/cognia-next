@@ -259,6 +259,31 @@ export function AppShellMobile() {
     },
     [directChat, isTeamSession, teamChat]
   )
+  // First turn from the welcome screen's hero composer. `handleSend` above
+  // targets whatever session is active, and on the welcome screen there is
+  // none — `send` would drop the message. Create one first, then send into it
+  // explicitly (the store pointer has not reached this closure yet).
+  //
+  // A bare `create()` auto-applies the default preset, so typing a first
+  // message does not force a character pick the way the "+" button does.
+  const handleFirstTurn = useCallback(
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+      if (useChatStore.getState().activeSessionId) {
+        await handleSend(content, manifest)
+        return
+      }
+      const s = await create({ kind: "direct" })
+      select(s.id)
+      setSelectedGuild({ kind: "dm" })
+      await directChat.send(content, undefined, {
+        sessionId: s.id,
+        attachmentManifest: manifest,
+      })
+      void impact("light")
+    },
+    [create, select, setSelectedGuild, directChat, handleSend]
+  )
+
   // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
   // Mirrors `desktop-chat-workspace.resumeAfterPlanApproval`: set the store
   // mode first (so the composer's persist effect can't clobber the row back
@@ -610,7 +635,8 @@ export function AppShellMobile() {
               // never rendered.
               onResumeAfterPlanApproval={isTeamSession ? undefined : resumeAfterPlanApproval}
               onCreate={handleNewDirect}
-              onUseSample={(text) => void handleSend(text)}
+              onUseSample={(text) => void handleFirstTurn(text)}
+              onHeroSend={handleFirstTurn}
               onOpenSettings={openSettings}
               recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
               onResumeSession={handleSwitchToSession}

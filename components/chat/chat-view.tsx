@@ -11,6 +11,7 @@ import {
 import { useTranslations } from "next-intl"
 import { AlertTriangle, MessageCircleMore } from "lucide-react"
 import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
+import { usePlatform } from "@/hooks/use-platform"
 import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
 import { ChatColumn } from "./chat-column"
@@ -18,6 +19,7 @@ import { CharacterMissingBanner } from "./character-missing-banner"
 import { WorkSubmissionNotice } from "./work-submission-notice"
 import {
   EmptyChatState,
+  type WelcomeStyle,
   type EmptyStateOverride,
   type RecentSessionEntry,
   type WelcomeSection,
@@ -191,6 +193,17 @@ interface ChatPaneProps {
   onOpenSettings: (tab?: string) => void
   /** Execution picker rendered on the no-session welcome surface. */
   newChatExecutionControls?: ReactNode
+  /**
+   * Dispatch a first turn from the welcome screen's hero composer: create the
+   * session, then send into it. Mirrors `onUseSample` but takes full
+   * `SendContent` + a manifest, so attachments staged before any session
+   * existed survive the transition. Omit to render the welcome screen without a
+   * composer (the workflow-editor chat tab does).
+   */
+  onHeroSend?: (
+    content: SendContent,
+    manifest?: readonly AttachmentManifestEntry[]
+  ) => void | Promise<void>
   /** Recent sessions for the welcome page "Continue" group. */
   recentSessions?: readonly RecentSessionEntry[]
   /** Resume a recent session by id from the welcome page. */
@@ -292,6 +305,7 @@ export function ChatPane({
   showHeader = true,
   emptyState,
   welcomeExtras,
+  onHeroSend,
   workflowMention,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
@@ -438,6 +452,17 @@ export function ChatPane({
     void save({ welcomeHidden: { ...settings?.welcomeHidden, [section]: true } })
   }, [])
 
+  // Welcome personalization. Mobile forces `minimal` and omits the inline
+  // toggle: the rich hero's two-column illustration has nowhere to go at phone
+  // width, so offering the switch there would be a control that does nothing.
+  const isMobileShell = usePlatform() === "mobile"
+  const storedWelcomeStyle = useSettingsStore((s) => s.settings?.welcomeStyle)
+  const userName = useSettingsStore((s) => s.settings?.userName)
+  const welcomeStyle: WelcomeStyle = isMobileShell ? "minimal" : (storedWelcomeStyle ?? "rich")
+  const handleToggleWelcomeStyle = useCallback((next: WelcomeStyle) => {
+    void useSettingsStore.getState().save({ welcomeStyle: next })
+  }, [])
+
   // Usage dashboard — only on the generic chat welcome. Surfaces that replace
   // the welcome copy entirely (the workflow-editor chat tab passes
   // `emptyState`) get their own framing and would read as off-topic with it.
@@ -458,6 +483,31 @@ export function ChatPane({
         statsSlot={statsSlot}
         hiddenSections={welcomeHidden}
         onDismissSection={handleDismissSection}
+        // These three were declared on `EmptyChatState` and rendered a style
+        // toggle, but no production caller ever passed them — so the name typed
+        // into Settings → Personalization was written and never read, and the
+        // page was permanently `rich`. Wiring them is a prerequisite here: the
+        // hero has to know which density it is laying out.
+        welcomeStyle={welcomeStyle}
+        userName={userName}
+        onToggleStyle={isMobileShell ? undefined : handleToggleWelcomeStyle}
+        // The real composer, not a lookalike — so a first message carries
+        // attachments, slash commands and @-mentions like any other turn.
+        // `onHeroSend` creates the session, then sends into it.
+        composerSlot={
+          onHeroSend && !emptyState ? (
+            <Composer
+              placement="hero"
+              session={null}
+              onStartNewSession={() => onCreate()}
+              onOpenSettings={(tab) => onOpenSettings(tab)}
+              onSend={onHeroSend}
+              onStop={() => void onStop()}
+              disabled={composerDisabled}
+              mobileMentionMembers={mobileMentionMembers}
+            />
+          ) : undefined
+        }
       />
     )
   }

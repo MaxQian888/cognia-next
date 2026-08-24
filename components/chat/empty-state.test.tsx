@@ -391,3 +391,24 @@ describe("<SectionHeading />", () => {
     expect(screen.getByText("sections.tryPrompt")).toBeInTheDocument()
   })
 })
+
+// ── The welcome screen's primary affordance ────────────────────────────────
+describe("<EmptyChatState /> — hero composer", () => {
+  it("renders the composer directly under the greeting when one is supplied", () => {
+    render(<EmptyChatState {...baseProps()} composerSlot={<div data-testid="hero-composer" />} />)
+    expect(screen.getByTestId("hero-composer")).toBeInTheDocument()
+  })
+
+  it("places it above the starter cards — the box is what the page is for", () => {
+    render(<EmptyChatState {...baseProps()} composerSlot={<div data-testid="hero-composer" />} />)
+    const composer = screen.getByTestId("welcome-composer")
+    const starters = screen.getByText("sections.tryPrompt")
+    // DOCUMENT_POSITION_FOLLOWING === the starters come after the composer.
+    expect(composer.compareDocumentPosition(starters)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
+  it("renders nothing extra when no composer is supplied", () => {
+    render(<EmptyChatState {...baseProps()} />)
+    expect(screen.queryByTestId("welcome-composer")).not.toBeInTheDocument()
+  })
+})

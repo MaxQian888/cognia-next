@@ -234,6 +234,12 @@ interface Props {
    * Undefined for every non-workflow composer.
    */
   workflowMention?: ComposerWorkflowMention
+  /**
+   * Where this composer sits. `"docked"` (default) is the bar pinned under a
+   * message list. `"hero"` is the centred box on the welcome screen, which has
+   * no list above it to fade from — see the class branch in the wrapper.
+   */
+  placement?: "docked" | "hero"
 }
 
 /** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
@@ -2062,6 +2068,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     placeholder,
     mobileMentionMembers,
     workflowMention,
+    placement = "docked",
   },
   ref
 ) {
@@ -2535,7 +2542,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // swap `background-color`, and the gradient is a `background-image`, so
       // the opaque slab won and the composer stopped matching the message area
       // as soon as a wallpaper was active.
-      className="composer-scrim @container/composer shrink-0 pb-3 pt-5 sm:pb-4 sm:pt-6"
+      className={cn(
+        "@container/composer shrink-0",
+        // Docked: the scrim fades the message list into the box, and the top
+        // padding separates them. In the hero there is no list above — the
+        // scrim would paint a gradient across the middle of an empty page, and
+        // the dock padding would push the box off the vertical centre.
+        placement === "docked" && "composer-scrim pb-3 pt-5 sm:pb-4 sm:pt-6"
+      )}
     >
       {/* Padding lives INSIDE the max-width cap so the composer box and the
           message text share one content edge. With the padding on the bar
