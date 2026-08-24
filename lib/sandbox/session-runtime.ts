@@ -214,6 +214,49 @@ export class SandboxSessionRuntime {
   }
 
   /**
+   * Re-establish a placement against the working directory the turn actually
+   * resolved to.
+   *
+   * `resolveSendOptions` binds while assembling the send envelope, but a
+   * session whose execution binding is created *during* the turn — a managed
+   * worktree acquires its bundle after the envelope is built — only learns its
+   * real root afterwards. Re-binding keeps `workspaceRoot`, which the microVM
+   * preflight claims against and which the confine roots are measured from, in
+   * agreement with the directory the agent is writing to.
+   *
+   * Re-binding an unplaced record is deliberate rather than wasteful: the root
+   * is exactly what a microVM preflight refuses on, so the corrected root is
+   * often what turns the refusal into a real placement.
+   *
+   * A no-op when the root is unchanged — `bindSession` fingerprints its input
+   * and returns the same ref without re-running the preflight. Never throws:
+   * the turn already holds a usable (if coarser) placement, and a refusal here
+   * must not take down a send that is otherwise ready to go.
+   */
+  async rebindWorkspaceRoot(
+    ref: SandboxRuntimeRef,
+    workspaceRoot: string | undefined
+  ): Promise<SandboxRuntimeRef> {
+    if (ref === HOST_FALLBACK_RUNTIME_REF) return ref
+    const record = this.records.get(ref)
+    if (!record || record.workspaceRoot === workspaceRoot) return ref
+    const input: BindSandboxSessionInput = {
+      sessionId: record.sessionId,
+      binding: record.binding,
+      policy: record.policy,
+      confine: record.confine,
+      sandboxEnabled: record.sandboxEnabled,
+      computerUseEnabled: record.computerUseEnabled,
+      workspaceRoot,
+    }
+    try {
+      return await this.bindSession(input)
+    } catch (err) {
+      return this.bindUnplacedSession(input, err)
+    }
+  }
+
+  /**
    * Register the placement a session ASKED for when the bind could not be
    * established, so the surfaces that cannot honour it refuse instead of
    * silently running here.

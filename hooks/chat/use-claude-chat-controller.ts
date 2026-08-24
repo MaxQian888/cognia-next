@@ -85,6 +85,7 @@ import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
 import { acquireWorkspaceBundle, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   finishDirectChatExecutionRun,
   projectDirectChatCaptureEvent,
@@ -1406,6 +1407,22 @@ export function useClaudeChat() {
               console.error("persist execution context failed", error)
             )
           }
+        }
+      }
+
+      // The sandbox placement was bound while `resolveSendOptions` assembled
+      // the envelope — before this turn knew where it would actually run. A
+      // managed worktree only leases its bundle alias above, so re-bind against
+      // the final cwd: the microVM preflight claims against `workspaceRoot`,
+      // and the confine roots are measured from it. A no-op when the root did
+      // not move, and it never throws.
+      if (sendOptions.sandboxRuntimeRef) {
+        const reboundRef = await sandboxSessionRuntime.rebindWorkspaceRoot(
+          sendOptions.sandboxRuntimeRef,
+          sendOptions.cwd
+        )
+        if (reboundRef !== sendOptions.sandboxRuntimeRef) {
+          sendOptions = { ...sendOptions, sandboxRuntimeRef: reboundRef }
         }
       }
 

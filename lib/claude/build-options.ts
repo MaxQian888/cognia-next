@@ -9,6 +9,7 @@
 
 import { additionalDirsOf, allRootPaths } from "@/lib/workspace/roots"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import type { MarkdownAgentFile } from "@/lib/claude/agents/markdown-agents"
 import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 import type { BedrockConnectionSettings } from "@cognia/provider-types"
@@ -1671,6 +1672,15 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   // helper so what the user sees always matches what the send uses.
   const cwd = resolveEffectiveCwd({
     sessionWorkingDir: session?.workingDir,
+    // The durable execution binding wins over the workspace root: a
+    // `managedWorktree` session is leased into a bundle alias, and everything
+    // resolved from `cwd` below — instruction discovery, the sandbox placement
+    // — must see that alias rather than the source checkout the agent is not
+    // writing to. Undefined until a binding exists, so a brand-new managed
+    // session's first turn still resolves through the workspace root.
+    executionWorkspaceRoot: session?.executionContext
+      ? resolveSessionWorkspaceRoot(session.executionContext)
+      : undefined,
     activeProject: ctx.activeProject,
     characterWorkingDir: character?.workingDir,
     defaultWorkingDir: appSettings?.defaultWorkingDir,

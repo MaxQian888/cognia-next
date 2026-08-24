@@ -728,4 +728,73 @@ describe("SandboxSessionRuntime", () => {
     ).resolves.toMatchObject({ stdout: "ok" })
     __resetSandboxSessionRuntimeForTesting()
   })
+  describe("rebindWorkspaceRoot — the placement follows the cwd the turn resolved to", () => {
+    const baseInput = {
+      sessionId: "session-rebind",
+      binding: { shellTier: "os", computerTarget: "local" } as const,
+      policy: null as SandboxResourcePolicy | null,
+      confine: null,
+      sandboxEnabled: true,
+      computerUseEnabled: false,
+      workspaceRoot: "/repos/source",
+    }
+
+    it("mints a new generation when the root moved", async () => {
+      const deps = createDeps()
+      deps.makeRef
+        .mockReturnValueOnce("sandbox-runtime:first")
+        .mockReturnValueOnce("sandbox-runtime:second")
+      const runtime = new SandboxSessionRuntime(deps)
+
+      const first = await runtime.bindSession(baseInput)
+      const rebound = await runtime.rebindWorkspaceRoot(first, "/bundles/alias-a")
+
+      expect(rebound).not.toBe(first)
+      expect(runtime.activeRefForSession("session-rebind")).toBe(rebound)
+    })
+
+    it("returns the same ref when the root did not move", async () => {
+      const deps = createDeps()
+      const runtime = new SandboxSessionRuntime(deps)
+      const first = await runtime.bindSession(baseInput)
+      expect(await runtime.rebindWorkspaceRoot(first, "/repos/source")).toBe(first)
+    })
+
+    it("leaves the shared host-fallback placement alone", async () => {
+      const runtime = new SandboxSessionRuntime(createDeps())
+      expect(await runtime.rebindWorkspaceRoot(HOST_FALLBACK_RUNTIME_REF, "/anywhere")).toBe(
+        HOST_FALLBACK_RUNTIME_REF
+      )
+    })
+
+    it("records an unplaced generation instead of throwing when the rebind refuses", async () => {
+      const deps = createDeps()
+      // The corrected root is exactly what a microVM preflight refuses on, so
+      // the rebind must degrade to an unplaced record rather than throw and
+      // take the send down with it.
+      const preflight = jest
+        .fn<Promise<void>, [string, string | undefined, string | undefined]>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("cannot claim /bundles/alias-b"))
+      deps.getMicrovmAdapter.mockReturnValue({
+        preflight,
+        execute: jest.fn(),
+      } as never)
+      let refSeq = 0
+      deps.makeRef.mockImplementation(() => `sandbox-runtime:gen-${++refSeq}`)
+      const runtime = new SandboxSessionRuntime(deps)
+      const first = await runtime.bindSession({
+        ...baseInput,
+        binding: { shellTier: "microvm", computerTarget: "local" } as const,
+      })
+
+      const rebound = await runtime.rebindWorkspaceRoot(first, "/bundles/alias-b")
+
+      expect(preflight).toHaveBeenCalledTimes(2)
+      expect(rebound).not.toBe(first)
+      await expect(runtime.executeSandbox(rebound, payload)).rejects.toThrow(
+        /cannot claim \/bundles\/alias-b/
+      )
+    })
+  })
 })

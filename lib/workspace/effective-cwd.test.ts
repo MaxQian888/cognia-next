@@ -70,3 +70,36 @@ describe("resolveEffectiveCwd", () => {
     expect(resolveEffectiveCwd({ sessionWorkingDir: " /padded " })).toBe("/padded")
   })
 })
+
+describe("resolveEffectiveCwd — execution binding", () => {
+  const roots: WorkspaceRoot[] = [{ id: "r1", path: "/repos/source", isPrimary: true }]
+
+  it("prefers the execution binding over the workspace root", () => {
+    expect(
+      resolveEffectiveCwd({
+        executionWorkspaceRoot: "/bundles/alias",
+        activeProject: { roots },
+        characterWorkingDir: "/char",
+      })
+    ).toBe("/bundles/alias")
+  })
+
+  it("still yields to a hand-typed per-session override", () => {
+    expect(
+      resolveEffectiveCwd({
+        sessionWorkingDir: "/session/dir",
+        executionWorkspaceRoot: "/bundles/alias",
+        activeProject: { roots },
+      })
+    ).toBe("/session/dir")
+  })
+
+  it("falls through to the workspace root before a binding exists", () => {
+    expect(
+      resolveEffectiveCwd({ executionWorkspaceRoot: undefined, activeProject: { roots } })
+    ).toBe("/repos/source")
+    expect(resolveEffectiveCwd({ executionWorkspaceRoot: "  ", activeProject: { roots } })).toBe(
+      "/repos/source"
+    )
+  })
+})
