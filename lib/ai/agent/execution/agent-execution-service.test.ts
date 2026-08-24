@@ -23,13 +23,30 @@ const UNSERVED_BY_CLAUDE = (() => {
   return id
 })()
 
-const workspaceLease = jest.fn(
-  async (_input: unknown, execute: (cwd: string) => Promise<unknown>) => ({
-    value: await execute("/isolated"),
-    taskWorkspaceRunId: "workspace-run-1",
-    executionRoot: "/isolated",
-  })
-)
+const acquireWorkspaceBundle = jest.fn(async () => ({
+  bundleId: "bundle-1",
+  leases: [
+    {
+      bundleId: "bundle-1",
+      workspaceId: "workspace-1",
+      logicalRootId: "primary",
+      role: "primary",
+      aliasPath: "/isolated",
+    },
+  ],
+}))
+const settleWorkspaceBundle = jest.fn(async () => [])
+const abortWorkspaceBundle = jest.fn(async () => [])
+const openWorkspaceBundleTurnLease = jest.fn(async () => ({
+  bundleTurnId: "bundle-turn-1",
+  bundleId: "bundle-1",
+  run: { runId: "workspace-run-1", executionRoot: "/isolated" },
+  runs: [],
+  primaryAlias: "/isolated",
+  additionalAliases: [],
+  settle: settleWorkspaceBundle,
+  abort: abortWorkspaceBundle,
+}))
 
 const resolveActiveCertification = jest.fn<Promise<unknown>, [unknown]>(async () => undefined)
 
@@ -39,8 +56,11 @@ jest.mock("./certification-store", () => ({
 }))
 
 jest.mock("@/lib/task-workspace/run-lease", () => ({
-  withTaskWorkspaceRun: (...args: unknown[]) =>
-    workspaceLease(...(args as [unknown, (cwd: string) => Promise<unknown>])),
+  openWorkspaceBundleTurnLease: (...args: unknown[]) => openWorkspaceBundleTurnLease(...args),
+}))
+
+jest.mock("@/lib/task-workspace/client", () => ({
+  acquireWorkspaceBundle: (...args: unknown[]) => acquireWorkspaceBundle(...args),
 }))
 
 jest.mock("@/lib/ai/agent/agent-executor", () => ({
@@ -69,6 +89,28 @@ const completionRail = runCompletionRail as jest.Mock
 beforeEach(() => {
   jest.clearAllMocks()
   resolveActiveCertification.mockResolvedValue(undefined)
+  acquireWorkspaceBundle.mockResolvedValue({
+    bundleId: "bundle-1",
+    leases: [
+      {
+        bundleId: "bundle-1",
+        workspaceId: "workspace-1",
+        logicalRootId: "primary",
+        role: "primary",
+        aliasPath: "/isolated",
+      },
+    ],
+  })
+  openWorkspaceBundleTurnLease.mockResolvedValue({
+    bundleTurnId: "bundle-turn-1",
+    bundleId: "bundle-1",
+    run: { runId: "workspace-run-1", executionRoot: "/isolated" },
+    runs: [],
+    primaryAlias: "/isolated",
+    additionalAliases: [],
+    settle: settleWorkspaceBundle,
+    abort: abortWorkspaceBundle,
+  })
 })
 
 it("routes an intentional completion (toolsEnabled absent) to the completion rail and stamps the spec", async () => {
@@ -309,7 +351,7 @@ it("threads the caller session id into the resolved identity fingerprint determi
   expect(a.executionFingerprint).toBe(b.executionFingerprint)
 })
 
-it("runs managed filesystem work through one Task Workspace lease", async () => {
+it("runs managed filesystem work through one Registry Bundle Turn", async () => {
   const result = await executeAgentTurn(
     "p",
     { sessionId: "session-1", cwd: "/repo", toolsEnabled: true },
@@ -321,18 +363,72 @@ it("runs managed filesystem work through one Task Workspace lease", async () => 
     }
   )
 
-  expect(workspaceLease).toHaveBeenCalledWith(
+  expect(acquireWorkspaceBundle).toHaveBeenCalledWith({
+    ownerType: "session",
+    ownerRef: "session-1",
+    environmentKind: "managed",
+    base: { kind: "remoteDefault" },
+    roots: [
+      {
+        logicalRootId: "primary",
+        role: "primary",
+        sourceRoot: "/repo",
+      },
+    ],
+  })
+  expect(openWorkspaceBundleTurnLease).toHaveBeenCalledWith(
+    expect.objectContaining({ bundleId: "bundle-1" }),
+    "primary",
     expect.objectContaining({
       workspaceRoot: "/repo",
       runId: "execution-1",
       attemptId: "attempt-1",
       surface: "workflow-agent-turn",
-    }),
-    expect.any(Function)
+      base: { kind: "remoteDefault" },
+    })
   )
   expect(agentRail).toHaveBeenCalledWith("p", expect.objectContaining({ cwd: "/isolated" }))
+  expect(settleWorkspaceBundle).toHaveBeenCalledWith("ready")
   expect(result.taskWorkspaceRunId).toBe("workspace-run-1")
   expect(result.trackingUnavailable).toBeUndefined()
+})
+
+it("fails closed before agent execution when the Registry cannot open a Bundle Turn", async () => {
+  openWorkspaceBundleTurnLease.mockResolvedValueOnce(null)
+
+  await expect(
+    executeAgentTurn(
+      "p",
+      { sessionId: "session-1", cwd: "/repo", toolsEnabled: true },
+      { isTauri: true, isHeadlessHost: false },
+      {
+        surface: "workflow-agent-turn",
+        identity: { runId: "execution-1", attemptId: "attempt-1" },
+        taskWorkspace: { enabled: true, agentId: "workflow-agent", agentKind: "workflow" },
+      }
+    )
+  ).rejects.toThrow("Registry did not return an Agent Bundle Turn execution root")
+  expect(agentRail).not.toHaveBeenCalled()
+})
+
+it("aborts the whole Bundle Turn when the managed agent rail fails", async () => {
+  agentRail.mockRejectedValueOnce(new Error("agent rail failed"))
+
+  await expect(
+    executeAgentTurn(
+      "p",
+      { sessionId: "session-1", cwd: "/repo", toolsEnabled: true },
+      { isTauri: true, isHeadlessHost: false },
+      {
+        surface: "workflow-agent-turn",
+        identity: { runId: "execution-1", attemptId: "attempt-1" },
+        taskWorkspace: { enabled: true, agentId: "workflow-agent", agentKind: "workflow" },
+      }
+    )
+  ).rejects.toThrow("agent rail failed")
+
+  expect(abortWorkspaceBundle).toHaveBeenCalledTimes(1)
+  expect(settleWorkspaceBundle).not.toHaveBeenCalled()
 })
 
 describe("execution-handle path is live (CLAUDE.md working rule 7)", () => {

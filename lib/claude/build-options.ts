@@ -2871,7 +2871,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   const computerUseNeedsConfine =
     computerUseAllowedForChat && sandboxBinding.computerTarget === "bound"
   if (session?.id && (sandboxEnabled || computerUseAllowedForChat)) {
-    opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
+    const bindInput = {
       sessionId: session.id,
       binding: sandboxBinding,
       policy: sandboxEnabled ? resolvedSandboxPolicy : null,
@@ -2886,10 +2886,52 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
           : null,
       sandboxEnabled,
       computerUseEnabled: computerUseAllowedForChat,
+      // The microVM tier claims an EXISTING remote workspace by its handle
+      // path, so this only binds when `cwd` IS such a handle — an Agent Team
+      // teammate cloned into E2B. For an ordinary chat `cwd` (a local
+      // directory) the claim misses and the bind refuses, which is correct:
+      // there is nothing to isolate into. The refusal names the requirement
+      // (see `buildMicrovmExec.preflight`) and, per the catch below, the shell
+      // tier then declines rather than running here.
       workspaceRoot: opts.cwd,
-    })
+    }
+    try {
+      opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession(bindInput)
+    } catch (err) {
+      // An unusable placement must not take the whole send down with it. The
+      // binding can be refused by state the user changed elsewhere — a deleted
+      // sandbox connection, a character still pinned to the withdrawn
+      // `cua-desktop` tier, a microVM preflight that cannot claim a workspace
+      // — and none of those should leave the session unable to send anything
+      // at all with no UI affordance to recover.
+      //
+      // What it must NOT do is answer "I could not isolate this" with "then run
+      // it here, unrestricted". `bindUnplacedSession` records the placement the
+      // session asked for: the resolved ceiling still clamps every surface that
+      // legitimately runs on this host, and the surfaces that were supposed to
+      // leave it (a non-`os` shell tier, a bound GUI target) refuse at call
+      // time instead of silently landing on the user's own machine.
+      loggers.app.warn("unusable sandbox binding", {
+        sessionId: session.id,
+        shellTier: sandboxBinding.shellTier,
+        computerTarget: sandboxBinding.computerTarget,
+        error: String(err),
+      })
+      opts.sandboxRuntimeRef = sandboxSessionRuntime.bindUnplacedSession(bindInput, err)
+    }
   } else if (session?.id) {
-    await sandboxSessionRuntime.releaseSession(session.id)
+    // Same invariant as the catch above, for the same reason: `releaseSession`
+    // rethrows a provider that refused to close, and a send must not be
+    // impossible because an E2B teardown is timing out. The runtime keeps the
+    // records it could not release and retries them on the next bind.
+    try {
+      await sandboxSessionRuntime.releaseSession(session.id)
+    } catch (err) {
+      loggers.app.warn("sandbox runtime release failed", {
+        sessionId: session.id,
+        error: String(err),
+      })
+    }
     delete opts.sandboxRuntimeRef
   }
   if (sandboxEnabled) {

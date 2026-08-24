@@ -26,7 +26,7 @@
 
 import type { PluginContext, PluginDefinition, PluginTool, PluginToolContext } from "@/types/plugin"
 import type { MicrovmExecPayload } from "@/lib/sandbox/microvm-bridge"
-import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
@@ -223,12 +223,7 @@ async function dispatchSandbox(
   payload: MicrovmExecPayload,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
-  if (!ctx.sandboxRuntimeRef) {
-    throw new Error(
-      "sandbox runtime binding is missing from this tool call; refusing to guess a host target"
-    )
-  }
-  return sandboxSessionRuntime.executeSandbox(ctx.sandboxRuntimeRef, payload)
+  return sandboxSessionRuntime.executeSandbox(requireRuntimeRef(ctx), payload)
 }
 
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
@@ -288,13 +283,14 @@ function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "p
   sandboxSessionRuntime.assertWritablePath(requireRuntimeRef(ctx), path, label)
 }
 
+/**
+ * A chat send always carries its resolved placement. Callers that have no send
+ * envelope — workflow nodes, plan steps, External Bridge orchestration,
+ * plugin-to-plugin calls, the CLI rail — get the host OS-tier placement, which
+ * is exactly where they ran before the runtime reference existed.
+ */
 function requireRuntimeRef(ctx: PluginToolContext): string {
-  if (!ctx.sandboxRuntimeRef) {
-    throw new Error(
-      "sandbox runtime binding is missing from this tool call; refusing to guess a host target"
-    )
-  }
-  return ctx.sandboxRuntimeRef
+  return ctx.sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF
 }
 
 function parentDir(p: string): string {
@@ -319,7 +315,11 @@ async function sandboxReadFile(
   ctx: PluginToolContext,
   env?: Record<string, string>
 ): Promise<string> {
-  const request = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
+  // Clamp with an EMPTY `targetFiles` so the writable-root ceiling does not
+  // gate a read (`narrowRequiredWriteScope` throws for a path outside the
+  // roots), then restore the single target: the Rust `policy_for` rejects an
+  // `edit` / `write` / `text_editor` request whose `target_files` is empty.
+  const clamped = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
     writable: [],
     readable: Array.from(new Set([...readable, path])),
     targetFiles: [],
@@ -328,6 +328,7 @@ async function sandboxReadFile(
     network: "off" as const,
     networkHosts: [],
   })
+  const request = { ...clamped, targetFiles: [path] }
   const res = await dispatchSandbox(
     {
       tool,

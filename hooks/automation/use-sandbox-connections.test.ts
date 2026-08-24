@@ -115,3 +115,59 @@ test("remove deletes the row only after the provider delete succeeds", async () 
   expect(sandboxClient.stop).toHaveBeenCalledWith("c1")
   expect(db.deleteSandboxConnection).toHaveBeenCalledWith("c1")
 })
+
+test("a failed probe keeps the diagnostic the user asked to see", async () => {
+  get.mockResolvedValue(
+    dockerRow({
+      state: "error",
+      lastHealthStatus: "error",
+      lastHealthError: "Docker daemon not reachable at unix:///var/run/docker.sock",
+    })
+  )
+  ;(sandboxClient.health as jest.Mock).mockRejectedValueOnce(new Error("connect ECONNREFUSED"))
+  const { result } = renderHook(() => useSandboxConnections())
+
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+
+  // Refresh is what a user reaches for when the machine is already broken;
+  // it must not blank the only message telling them what to fix.
+  expect(put.mock.calls.at(-1)?.[0]).toMatchObject({
+    lastHealthStatus: "unreachable",
+    lastHealthError: "connect ECONNREFUSED",
+  })
+})
+
+test("a probe that answers false falls back to the recorded reason", async () => {
+  get.mockResolvedValue(
+    dockerRow({ state: "running", lastHealthError: "container exited with code 1" })
+  )
+  ;(sandboxClient.health as jest.Mock).mockResolvedValueOnce(false)
+  const { result } = renderHook(() => useSandboxConnections())
+
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+
+  expect(put.mock.calls.at(-1)?.[0]).toMatchObject({
+    lastHealthStatus: "unreachable",
+    lastHealthError: "container exited with code 1",
+  })
+})
+
+test("a healthy probe clears the stale diagnostic", async () => {
+  get.mockResolvedValue(
+    dockerRow({ state: "running", lastHealthError: "container exited with code 1" })
+  )
+  const { result } = renderHook(() => useSandboxConnections())
+
+  await act(async () => {
+    await result.current.refreshHealth("c1")
+  })
+
+  expect(put.mock.calls.at(-1)?.[0]).toMatchObject({
+    lastHealthStatus: "ok",
+    lastHealthError: undefined,
+  })
+})

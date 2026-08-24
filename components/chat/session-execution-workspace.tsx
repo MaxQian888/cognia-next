@@ -37,7 +37,12 @@ import {
   restoreSessionSnapshot,
   undoSessionHandoff,
 } from "@/lib/task-workspace/handoff"
-import { getTaskPatchSet, listTaskRuns } from "@/lib/task-workspace/client"
+import {
+  getBundleHandoffUndoOutcome,
+  getTaskPatchSet,
+  getWorkspaceBundleTurn,
+  listTaskRuns,
+} from "@/lib/task-workspace/client"
 import {
   convertManagedWorkspaceToProject,
   createManagedWorkspaceArchive,
@@ -50,9 +55,15 @@ import {
 } from "@/lib/task-workspace/managed-workspace"
 import { saveExport } from "@/lib/files/save-export"
 import { isTauri } from "@/lib/platform/detect"
-import type { PatchSelection, PatchSet, TaskRun } from "@/lib/task-workspace/types"
+import type {
+  BundleHandoffRootSelection,
+  PatchSelection,
+  PatchSet,
+  TaskRun,
+} from "@/lib/task-workspace/types"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SessionExecutionContext } from "@/types/execution-context"
+import { useWorkspaceActionController } from "@/hooks/use-workspace-action-controller"
 
 interface DirtyPreview {
   isGitRepository: boolean
@@ -62,6 +73,13 @@ interface DirtyPreview {
 interface ConflictRow {
   path: string
   reason: string
+}
+
+interface BundleRootPatch {
+  workspaceId: string
+  logicalRootId: string
+  runId: string
+  patch: PatchSet
 }
 
 interface SessionExecutionWorkspaceProps {
@@ -78,6 +96,7 @@ export function SessionExecutionWorkspace(props: SessionExecutionWorkspaceProps)
     props.session.id,
     executionContext?.location,
     executionContext?.taskWorkspace.runId,
+    executionContext?.taskWorkspace.bundleTurnId,
     executionContext?.lifecycle?.updatedAt,
   ].join(":")
   return <SessionExecutionWorkspaceContent key={contextVersion} {...props} />
@@ -96,12 +115,16 @@ function SessionExecutionWorkspaceContent({
   )
   const [dirtyPreview, setDirtyPreview] = useState<DirtyPreview | null>(null)
   const [patch, setPatch] = useState<PatchSet | null>(null)
+  const [bundlePatches, setBundlePatches] = useState<BundleRootPatch[]>([])
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const [allowIrreversible, setAllowIrreversible] = useState(false)
   const [conflicts, setConflicts] = useState<ConflictRow[]>([])
   const [runs, setRuns] = useState<TaskRun[]>([])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [bundleUndoRecovery, setBundleUndoRecovery] = useState<{
+    bundleTurnId: string
+    recovered: boolean
+  } | null>(null)
+  const { busy, error, run } = useWorkspaceActionController()
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const managedBinding = context?.workspaceBinding?.kind === "managed"
   const managedAvailability = context?.managedWorkspace?.availability ?? "missing-on-device"
@@ -110,7 +133,13 @@ function SessionExecutionWorkspaceContent({
     const taskId = context?.taskWorkspace.taskId
     if (!taskId) return
     let cancelled = false
-    void listTaskRuns(taskId)
+    const bundleTurnId = context?.taskWorkspace.bundleTurnId
+    const loadRuns = bundleTurnId
+      ? getWorkspaceBundleTurn(bundleTurnId).then(
+          (turn) => turn?.runs.map((lease) => lease.run) ?? []
+        )
+      : listTaskRuns(taskId)
+    void loadRuns
       .then((rows) => {
         if (!cancelled) setRuns(rows.filter((row) => row.state === "ready"))
       })
@@ -120,7 +149,34 @@ function SessionExecutionWorkspaceContent({
     return () => {
       cancelled = true
     }
-  }, [context?.taskWorkspace.taskId, context?.taskWorkspace.runId])
+  }, [
+    context?.taskWorkspace.taskId,
+    context?.taskWorkspace.runId,
+    context?.taskWorkspace.bundleTurnId,
+  ])
+
+  useEffect(() => {
+    const bundleTurnId = context?.taskWorkspace.bundleTurnId
+    if (!bundleTurnId) return
+    let cancelled = false
+    void getBundleHandoffUndoOutcome(bundleTurnId).then(
+      (outcome) => {
+        if (!cancelled) setBundleUndoRecovery({ bundleTurnId, recovered: outcome !== null })
+      },
+      () => {
+        if (!cancelled) setBundleUndoRecovery({ bundleTurnId, recovered: false })
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [context?.taskWorkspace.bundleTurnId])
+
+  const bundleUndoRecovered = Boolean(
+    context?.taskWorkspace.bundleTurnId &&
+    bundleUndoRecovery?.bundleTurnId === context.taskWorkspace.bundleTurnId &&
+    bundleUndoRecovery.recovered
+  )
 
   const location = context?.location ?? "local"
   const selectedPatch = useMemo<PatchSelection[]>(
@@ -130,17 +186,20 @@ function SessionExecutionWorkspaceContent({
         .map((file) => ({ path: file.path, hunkIds: file.hunks.map((hunk) => hunk.id) })),
     [patch, selectedPaths]
   )
+  const bundleSelections = useMemo<BundleHandoffRootSelection[]>(
+    () =>
+      bundlePatches.map((root) => ({
+        workspaceId: root.workspaceId,
+        logicalRootId: root.logicalRootId,
+        selection: root.patch.files
+          .filter((file) => selectedPaths.has(`${root.workspaceId}:${file.path}`))
+          .map((file) => ({ path: file.path, hunkIds: file.hunks.map((hunk) => hunk.id) })),
+      })),
+    [bundlePatches, selectedPaths]
+  )
 
   const runOperation = async (operation: () => Promise<void>) => {
-    setBusy(true)
-    setError(null)
-    try {
-      await operation()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
+    await run("session-environment", operation)
   }
 
   const previewLocalHandoff = () =>
@@ -215,8 +274,40 @@ function SessionExecutionWorkspaceContent({
 
   const previewManagedHandoff = () =>
     runOperation(async () => {
+      const bundleTurnId = context?.taskWorkspace.bundleTurnId
+      if (bundleTurnId) {
+        const turn = await getWorkspaceBundleTurn(bundleTurnId)
+        if (!turn) throw new Error(t("bundleTurnMissing"))
+        const roots = await Promise.all(
+          turn.runs.map(async (lease) => {
+            const next = await getTaskPatchSet(lease.run.runId)
+            if (!next) return null
+            return {
+              workspaceId: lease.workspaceId,
+              logicalRootId: lease.logicalRootIds.includes(turn.primaryLogicalRootId)
+                ? turn.primaryLogicalRootId
+                : lease.logicalRootIds[0],
+              runId: lease.run.runId,
+              patch: next,
+            }
+          })
+        )
+        const available = roots.filter((root): root is BundleRootPatch =>
+          Boolean(root?.logicalRootId)
+        )
+        setBundlePatches(available)
+        setSelectedPaths(
+          new Set(
+            available.flatMap((root) =>
+              root.patch.files.map((file) => `${root.workspaceId}:${file.path}`)
+            )
+          )
+        )
+        setPatch(null)
+        return
+      }
       const runId = context?.taskWorkspace.runId
-      if (!runId) throw new Error("Managed Worktree has no completed run")
+      if (!runId) throw new Error(t("runMissing"))
       const next = await getTaskPatchSet(runId)
       setPatch(next)
       setSelectedPaths(new Set(next?.files.map((file) => file.path) ?? []))
@@ -224,11 +315,18 @@ function SessionExecutionWorkspaceContent({
 
   const confirmLocalHandoff = () =>
     runOperation(async () => {
-      const outcome = await handoffSessionToLocal(session.id, selectedPatch, allowIrreversible)
+      const outcome = await handoffSessionToLocal(
+        session.id,
+        selectedPatch,
+        allowIrreversible,
+        undefined,
+        bundlePatches.length > 0 ? bundleSelections : undefined
+      )
       setConflicts(outcome.conflicts)
       if (outcome.state !== "conflict" && context) {
         setContext({ ...context, location: "local" })
         setPatch(null)
+        setBundlePatches([])
       }
     })
 
@@ -431,30 +529,45 @@ function SessionExecutionWorkspaceContent({
         </div>
       )}
 
-      {patch && (
+      {(patch || bundlePatches.length > 0) && (
         <div className="space-y-2 rounded-md border p-2">
           <p className="text-xs font-medium">{t("patchTitle")}</p>
-          {patch.files.length === 0 ? (
+          {(patch?.files.length ?? 0) === 0 &&
+          bundlePatches.every((root) => root.patch.files.length === 0) ? (
             <p className="text-[11px] text-muted-foreground">{t("patchEmpty")}</p>
           ) : (
-            patch.files.map((file) => (
-              <label key={file.path} className="flex items-start gap-2 text-[11px]">
-                <Checkbox
-                  checked={selectedPaths.has(file.path)}
-                  onCheckedChange={(checked) =>
-                    setSelectedPaths((current) => {
-                      const next = new Set(current)
-                      if (checked) next.add(file.path)
-                      else next.delete(file.path)
-                      return next
-                    })
-                  }
-                />
-                <span className="break-all font-mono">{file.path}</span>
-              </label>
-            ))
+            (patch ? [{ workspaceId: "", logicalRootId: "", patch }] : bundlePatches).flatMap(
+              (root) =>
+                root.patch.files.map((file) => {
+                  const selectionKey = root.workspaceId
+                    ? `${root.workspaceId}:${file.path}`
+                    : file.path
+                  return (
+                    <label
+                      key={`${root.workspaceId}:${file.path}`}
+                      className="flex items-start gap-2 text-[11px]"
+                    >
+                      <Checkbox
+                        checked={selectedPaths.has(selectionKey)}
+                        onCheckedChange={(checked) =>
+                          setSelectedPaths((current) => {
+                            const next = new Set(current)
+                            if (checked) next.add(selectionKey)
+                            else next.delete(selectionKey)
+                            return next
+                          })
+                        }
+                      />
+                      <span className="break-all font-mono">
+                        {root.logicalRootId ? `${root.logicalRootId}: ` : ""}
+                        {file.path}
+                      </span>
+                    </label>
+                  )
+                })
+            )
           )}
-          {!patch.reversible && (
+          {(patch ? !patch.reversible : bundlePatches.some((root) => !root.patch.reversible)) && (
             <label className="flex items-center gap-2 text-[11px]">
               <Checkbox
                 checked={allowIrreversible}
@@ -464,12 +577,25 @@ function SessionExecutionWorkspaceContent({
             </label>
           )}
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setPatch(null)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPatch(null)
+                setBundlePatches([])
+              }}
+            >
               {t("cancel")}
             </Button>
             <Button
               size="sm"
-              disabled={busy || (!patch.reversible && !allowIrreversible)}
+              disabled={
+                busy ||
+                ((patch
+                  ? !patch.reversible
+                  : bundlePatches.some((root) => !root.patch.reversible)) &&
+                  !allowIrreversible)
+              }
               onClick={() => void confirmLocalHandoff()}
             >
               {t("confirmApply")}
@@ -503,7 +629,7 @@ function SessionExecutionWorkspaceContent({
         </div>
       )}
 
-      {!dirtyPreview && !patch && (
+      {!dirtyPreview && !patch && bundlePatches.length === 0 && (
         <div className="flex flex-wrap gap-1.5">
           {location === "local" && projectId && projectRoot ? (
             <Button
@@ -525,7 +651,7 @@ function SessionExecutionWorkspaceContent({
               {t("switchLocal")}
             </Button>
           ) : null}
-          {context?.taskWorkspace.runId && (
+          {context?.taskWorkspace.runId && !bundleUndoRecovered && (
             <Button
               size="sm"
               variant="ghost"
@@ -533,6 +659,7 @@ function SessionExecutionWorkspaceContent({
               onClick={() =>
                 void runOperation(async () => {
                   await undoSessionHandoff(session.id)
+                  setBundleUndoRecovery({ bundleTurnId, recovered: true })
                   if (context) setContext({ ...context, location: "managedWorktree" })
                 })
               }

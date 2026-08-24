@@ -627,11 +627,13 @@ describe("deletion tombstones (companion sync v61)", () => {
     expect(releaseSandboxSessionMock).toHaveBeenCalledTimes(2)
   })
 
-  it("finishes local cleanup while surfacing a persistent provider release failure", async () => {
+  it("reports the delete as done even when the provider release keeps failing", async () => {
     const session = await createSession({ title: "Persistent release failure" })
     releaseSandboxSessionMock.mockRejectedValue(new Error("provider close failed"))
 
-    await expect(bulkDeleteSessions([session.id])).rejects.toThrow(/could not release/)
+    // The transaction already committed, so the delete succeeded. Rejecting
+    // would tell the caller a completed deletion failed.
+    await expect(bulkDeleteSessions([session.id])).resolves.toBeUndefined()
 
     expect(await getSession(session.id)).toBeUndefined()
     expect(markSessionRemovedMock).toHaveBeenCalledWith(session.id)

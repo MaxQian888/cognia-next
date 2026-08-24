@@ -58,7 +58,19 @@ function adapterFor(
       message: `No lifecycle adapter is available for ${row.provider}/${row.driver}.`,
     })
   }
-  const image = row.config.provider === "docker" ? row.config.image : ""
+  // Narrows the config union AND catches a row whose `provider` and
+  // `config.provider` disagree — starting such a row with an empty image
+  // would ask Docker to run nothing at all.
+  if (row.config.provider !== "docker") {
+    throw new SandboxCapabilityError({
+      code: "not-implemented",
+      operation,
+      provider: row.provider,
+      driver: row.driver,
+      message: `Connection "${row.id}" is a Docker row whose config describes ${row.config.provider}.`,
+    })
+  }
+  const image = row.config.image
   return {
     provider: row.provider,
     driver: row.driver,

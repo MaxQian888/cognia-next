@@ -125,7 +125,19 @@ describe("e2b-sandbox (built-in)", () => {
     expect(setMicrovmExecMock).toHaveBeenCalledWith(fakeExec)
     await e2bSandbox.deactivate?.(ctx)
     expect(setMicrovmExecMock).toHaveBeenLastCalledWith(null)
-    expect(fakeExec.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not close live workspaces on deactivate", async () => {
+    const { ctx } = makeCtx({ workspace: true })
+    await e2bSandbox.activate?.(ctx)
+    await e2bSandbox.deactivate?.(ctx)
+
+    // `dispose()` closes every entry in the shared pool — including the
+    // workspaces `E2BWorkspaceBackend.clone` handed to Agent Team teammates who
+    // are still working inside them. Toggling the plugin off must not destroy
+    // in-flight runs; those workspaces belong to the handles that were issued
+    // and are reaped by `remove(handle)`.
+    expect(fakeExec.dispose).not.toHaveBeenCalled()
   })
 
   it("deactivate unsubscribes from plugin config changes", async () => {

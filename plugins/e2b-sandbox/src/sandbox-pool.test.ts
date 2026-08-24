@@ -4,7 +4,7 @@ function sandbox(id: string) {
   return {
     id,
     exec: jest.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
-    close: jest.fn(async () => undefined),
+    close: jest.fn<Promise<void>, []>(async () => undefined),
   }
 }
 

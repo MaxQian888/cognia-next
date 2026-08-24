@@ -87,7 +87,14 @@ export function SandboxShield({ session, forceState, className }: SandboxShieldP
       // A distinct glyph, not a differently-coloured shield: this tier moves
       // execution onto another machine entirely, which is a bigger claim than
       // "isolated here" and should not be mistaken for one at a glance.
-      <MonitorCheck className={cn("size-3.5 text-violet-500", className)} aria-hidden="true" />
+      //
+      // Muted, not violet: the tier is withdrawn — `SandboxSessionRuntime`
+      // refuses the binding — so the badge must not read as active protection
+      // at the exact moment nothing is protecting the shell.
+      <MonitorCheck
+        className={cn("size-3.5 text-muted-foreground", className)}
+        aria-hidden="true"
+      />
     ) : (
       <Shield
         className={cn(

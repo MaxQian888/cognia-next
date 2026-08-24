@@ -19,7 +19,7 @@ import type { PluginContext } from "@/types/plugin"
 import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
 import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 import manifestJson from "../plugin.json"
-import { setMicrovmExec, type MicrovmExecAdapter } from "@/lib/sandbox/microvm-bridge"
+import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import type { E2BSandboxConnection } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
@@ -64,7 +64,6 @@ const E2B_PRESET = defineMcpServerPreset({
 let workspaceRegistrationDispose: (() => void) | undefined
 let configChangeDispose: (() => void) | undefined
 let sandboxConnection: E2BSandboxConnection = {}
-let microvmAdapter: MicrovmExecAdapter | undefined
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
@@ -180,8 +179,7 @@ const definition = definePlugin({
     // an ephemeral Firecracker microVM instead of the OS sandbox. When
     // `@e2b/sdk` isn't installed the factory throws a clean install hint
     // at first call — strict-mode compliant (no silent fallback).
-    microvmAdapter = buildMicrovmExec({ pool: sandboxPool })
-    setMicrovmExec(microvmAdapter)
+    setMicrovmExec(buildMicrovmExec({ pool: sandboxPool }))
 
     // The slash command is declared in plugin.json so the manager owns
     // namespacing, command-palette registration, idle refresh, and teardown.
@@ -205,10 +203,12 @@ const definition = definePlugin({
       workspaceRegistrationDispose()
       workspaceRegistrationDispose = undefined
     }
-    const adapter = microvmAdapter
-    microvmAdapter = undefined
+    // Unregister the adapter, but do NOT dispose the pool. The pool's entries
+    // are workspaces `E2BWorkspaceBackend.clone` handed to callers — Agent Team
+    // teammates are working inside them right now — and closing those here
+    // destroys in-flight runs the moment the plugin is toggled off. They are
+    // owned by the handles that were issued and are reaped by `remove(handle)`.
     setMicrovmExec(null)
-    await adapter?.dispose?.()
   },
 })
 

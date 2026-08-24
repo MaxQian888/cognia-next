@@ -1,5 +1,11 @@
 import type { AgentTeamEvidenceKind } from "@/types/agent/agent-team-runtime"
 import type { ProjectEnvironment, ProjectEnvironmentVersion } from "@/types/project-environment"
+import type { WorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
+import type {
+  AcquireWorkspaceBundle,
+  BeginTaskWorkspaceTurn,
+  WorkspaceBundle,
+} from "@/lib/task-workspace/types"
 
 export type AgentExecutionEnvironmentCapability =
   ProjectEnvironmentVersion["policy"]["requiredRuntimeCapabilities"][number]
@@ -67,6 +73,13 @@ interface OpenWorkspaceResult {
   settle(finalState: "ready" | "failed" | "cancelled"): Promise<unknown>
 }
 
+type AcquireBundle = (input: AcquireWorkspaceBundle) => Promise<WorkspaceBundle>
+type OpenBundleTurn = (
+  bundle: Pick<WorkspaceBundle, "bundleId" | "leases">,
+  primaryLogicalRootId: string,
+  input: BeginTaskWorkspaceTurn
+) => Promise<WorkspaceBundleTurnLease | null>
+
 export interface LocalTauriEnvironmentOptions {
   isTauri?: () => boolean
   sandboxSupported?: boolean
@@ -77,6 +90,8 @@ export interface LocalTauriEnvironmentOptions {
     repositoryPath: string
   ) => Promise<{ success: boolean; error?: string }>
   openWorkspace?: (input: OpenAgentChildInput) => Promise<OpenWorkspaceResult>
+  acquireWorkspaceBundle?: AcquireBundle
+  openWorkspaceBundleTurnLease?: OpenBundleTurn
   collectEvidence?: AgentExecutionEnvironment["collectEvidence"]
 }
 
@@ -141,20 +156,41 @@ export function createLocalTauriExecutionEnvironment(
   const openWorkspace =
     options.openWorkspace ??
     (async (input: OpenAgentChildInput): Promise<OpenWorkspaceResult> => {
-      const { openTaskWorkspaceRunLease } = await import("@/lib/task-workspace/run-lease")
-      const lease = await openTaskWorkspaceRunLease({
+      const acquireBundle =
+        options.acquireWorkspaceBundle ??
+        (await import("@/lib/task-workspace/client")).acquireWorkspaceBundle
+      const openBundleTurn =
+        options.openWorkspaceBundleTurnLease ??
+        (await import("@/lib/task-workspace/run-lease")).openWorkspaceBundleTurnLease
+      const primaryLogicalRootId = "primary"
+      const bundle = await acquireBundle({
+        ownerType: "team",
+        ownerRef: input.runId,
+        environmentKind: "managed",
+        base: { kind: "remoteDefault" },
+        roots: [
+          {
+            logicalRootId: primaryLogicalRootId,
+            role: "primary",
+            sourceRoot: input.repositoryPath,
+          },
+        ],
+      })
+      const lease = await openBundleTurn(bundle, primaryLogicalRootId, {
         taskId: input.taskId,
         sessionId: input.runId,
         runId: input.childRunId,
         executionRunId: input.runId,
-        turnId: input.taskId,
+        turnId: input.childRunId,
         attemptId: "a1",
         surface: "agent-team-durable",
         agentId: input.teammateId,
         agentKind: "agent-team",
         workspaceRoot: input.repositoryPath,
       })
-      if (!lease) throw new Error("Local task workspace host did not return an execution root")
+      if (!lease) {
+        throw new Error("Registry did not return a Bundle Turn execution root")
+      }
       return {
         executionRoot: lease.run.executionRoot,
         workspaceRunId: lease.run.runId,

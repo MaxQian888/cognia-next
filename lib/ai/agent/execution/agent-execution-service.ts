@@ -226,34 +226,58 @@ export async function executeAgentTurn(
     options?.taskWorkspace ??
     (config.cwd ? { enabled: true, agentId: spec.identity.runId, agentKind: surface } : undefined)
   if (tracking?.enabled && config.cwd && spec.executionKind === "agent" && hostAvailable) {
-    const { withTaskWorkspaceRun } = await import("@/lib/task-workspace/run-lease")
-    const leased = await withTaskWorkspaceRun(
-      {
-        enabled: true,
-        workspaceRoot: config.cwd,
-        ...(tracking.taskId ? { taskId: tracking.taskId } : {}),
-        sessionId: spec.identity.sessionId,
-        runId: spec.identity.runId,
-        ...(tracking.parentRunId ? { parentRunId: tracking.parentRunId } : {}),
-        ...(spec.identity.turnId ? { turnId: spec.identity.turnId } : {}),
-        attemptId: spec.identity.attemptId,
-        ...(spec.identity.providerAttemptId
-          ? { providerAttemptId: spec.identity.providerAttemptId }
-          : {}),
-        executionRunId: tracking.executionRunId ?? spec.identity.runId,
-        traceId: resolution.trace.traceId,
-        ...(tracking.traceSpanId ? { traceSpanId: tracking.traceSpanId } : {}),
-        surface,
-        agentId: tracking.agentId,
-        agentKind: tracking.agentKind,
-        ...(tracking.trackingPolicy ? { trackingPolicy: tracking.trackingPolicy } : {}),
-      },
-      (executionRoot) => executeResolved({ ...config, cwd: executionRoot })
-    )
-    return {
-      ...leased.value,
-      ...(leased.taskWorkspaceRunId ? { taskWorkspaceRunId: leased.taskWorkspaceRunId } : {}),
-      ...(leased.trackingUnavailable ? { trackingUnavailable: true } : {}),
+    const [{ acquireWorkspaceBundle }, { openWorkspaceBundleTurnLease }] = await Promise.all([
+      import("@/lib/task-workspace/client"),
+      import("@/lib/task-workspace/run-lease"),
+    ])
+    const primaryLogicalRootId = "primary"
+    const base =
+      surface === "chat"
+        ? ({ kind: "workingState" } as const)
+        : ({ kind: "remoteDefault" } as const)
+    const bundle = await acquireWorkspaceBundle({
+      ownerType: "session",
+      ownerRef: spec.identity.sessionId,
+      environmentKind: "managed",
+      base,
+      roots: [
+        {
+          logicalRootId: primaryLogicalRootId,
+          role: "primary",
+          sourceRoot: config.cwd,
+        },
+      ],
+    })
+    const lease = await openWorkspaceBundleTurnLease(bundle, primaryLogicalRootId, {
+      taskId: tracking.taskId ?? `agent:${spec.identity.sessionId}`,
+      sessionId: spec.identity.sessionId,
+      runId: spec.identity.runId,
+      ...(tracking.parentRunId ? { parentRunId: tracking.parentRunId } : {}),
+      agentId: tracking.agentId,
+      agentKind: tracking.agentKind,
+      workspaceRoot: config.cwd,
+      base,
+      executionRunId: tracking.executionRunId ?? spec.identity.runId,
+      traceId: resolution.trace.traceId,
+      ...(tracking.traceSpanId ? { traceSpanId: tracking.traceSpanId } : {}),
+      ...(spec.identity.turnId ? { turnId: spec.identity.turnId } : {}),
+      attemptId: spec.identity.attemptId,
+      ...(spec.identity.providerAttemptId
+        ? { providerAttemptId: spec.identity.providerAttemptId }
+        : {}),
+      surface,
+      ...(tracking.trackingPolicy ? { trackingPolicy: tracking.trackingPolicy } : {}),
+    })
+    if (!lease) {
+      throw new Error("Registry did not return an Agent Bundle Turn execution root")
+    }
+    try {
+      const value = await executeResolved({ ...config, cwd: lease.primaryAlias })
+      await lease.settle("ready")
+      return { ...value, taskWorkspaceRunId: lease.run.runId }
+    } catch (error) {
+      await lease.abort().catch(() => undefined)
+      throw error
     }
   }
 

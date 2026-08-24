@@ -189,6 +189,10 @@ describe("SandboxShield component", () => {
     // Execution moving to another machine is a bigger claim than "isolated
     // here" — it must not be a recoloured shield.
     expect(container.querySelector("svg.lucide-shield")).toBeNull()
+    // The tier is withdrawn (`SandboxSessionRuntime` refuses the binding), so
+    // the badge must read as inert rather than as active protection.
+    expect(container.querySelector("svg")).toHaveClass("text-muted-foreground")
+    expect(container.querySelector("svg")).not.toHaveClass("text-violet-500")
   })
 
   it("resolves state from store hooks when forceState is omitted", () => {

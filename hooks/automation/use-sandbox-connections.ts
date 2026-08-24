@@ -62,13 +62,12 @@ export function useSandboxConnections() {
     await serializeSandboxConnectionOperation(id, async () => {
       const row = await getSandboxConnection(id)
       if (!row) return
-      try {
-        await runSandboxConnectionOperation(row, "delete")
-        await deleteSandboxConnection(id)
-      } catch (error) {
-        await persistLifecycleError(row, error)
-        throw error
-      }
+      // Best-effort teardown, then always drop the row. A container that was
+      // never started, an unreachable Docker daemon, or a provider with no
+      // lifecycle adapter yet must not leave the user with a connection they
+      // can never delete from Settings.
+      await runSandboxConnectionOperation(row, "delete").catch(() => undefined)
+      await deleteSandboxConnection(id)
     })
   }, [])
 
@@ -76,6 +75,9 @@ export function useSandboxConnections() {
     await serializeSandboxConnectionOperation(id, async () => {
       const row = await getSandboxConnection(id)
       if (!row) return
+      // The toolbar offers Start unconditionally; starting an already-running
+      // connection is a no-op, not a reason to mark the row broken.
+      if (row.state === "running") return
       await putSandboxConnection({
         ...row,
         state: "starting",
@@ -108,7 +110,12 @@ export function useSandboxConnections() {
       const row = await getSandboxConnection(id)
       if (!row) return
       try {
-        await runSandboxConnectionOperation(row, "stop")
+        // A connection that was never initialized has nothing to stop — the
+        // lifecycle contract refuses `stop` in that state, and the toolbar
+        // still offers the button. Settle the row instead of erroring it.
+        if (row.state !== "uninitialized") {
+          await runSandboxConnectionOperation(row, "stop")
+        }
         await putSandboxConnection({
           ...row,
           state: "stopped",
@@ -132,35 +139,38 @@ export function useSandboxConnections() {
     await serializeSandboxConnectionOperation(id, async () => {
       const row = await getSandboxConnection(id)
       if (!row) return
-      try {
-        const { health } = await runSandboxConnectionOperation(row, "health")
-        await putSandboxConnection({
-          ...row,
-          lastHealthStatus: health ? "ok" : "unreachable",
-          lastHealthError: undefined,
-          // A failed probe is not proof the machine is stopped, so `state` is left
-          // alone; only an explicit stop/start transition moves it.
-          lastHealthCheckAt: Date.now(),
-          updatedAt: Date.now(),
-        })
-      } catch (error) {
-        await persistLifecycleError(row, error, false)
-        throw error
-      }
+      // A probe that cannot complete IS the unreachable answer — it is not a
+      // lifecycle failure, and it must not reject: `refreshHealth` is the one
+      // action a user reaches for when the machine is already broken.
+      const probe = await runSandboxConnectionOperation(row, "health")
+        .then((result) => ({ ok: result.health === true, error: undefined as string | undefined }))
+        .catch((error: unknown) => ({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }))
+      await putSandboxConnection({
+        ...row,
+        lastHealthStatus: probe.ok ? "ok" : "unreachable",
+        // Clearing this on success is the point — the machine answered. On
+        // failure it must NOT be cleared: this is the moment the user asked
+        // what is wrong, and the message a failed start left behind is the one
+        // answer they have. Prefer the probe's own reason when it has one.
+        lastHealthError: probe.ok ? undefined : (probe.error ?? row.lastHealthError),
+        // A failed probe is not proof the machine is stopped, so `state` is left
+        // alone; only an explicit stop/start transition moves it.
+        lastHealthCheckAt: Date.now(),
+        updatedAt: Date.now(),
+      })
     })
   }, [])
 
   return { connections: connections ?? [], create, update, remove, start, stop, refreshHealth }
 }
 
-async function persistLifecycleError(
-  row: SandboxConnectionRow,
-  error: unknown,
-  markStateError = true
-): Promise<void> {
+async function persistLifecycleError(row: SandboxConnectionRow, error: unknown): Promise<void> {
   await putSandboxConnection({
     ...row,
-    ...(markStateError ? { state: "error" as const } : {}),
+    state: "error",
     lastHealthStatus: "error",
     lastHealthError: error instanceof Error ? error.message : String(error),
     lastHealthCheckAt: Date.now(),

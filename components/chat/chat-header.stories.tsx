@@ -1,7 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs"
 import type { ReactNode } from "react"
-import { fn } from "storybook/test"
-
 import { ChatHeader } from "./chat-header"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"

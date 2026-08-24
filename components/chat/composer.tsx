@@ -120,7 +120,6 @@ import {
   sendManualReply,
 } from "@/lib/connectors/inbox-writes"
 import { showMainWindow } from "@/lib/tauri/pet-window"
-import { getDb } from "@/lib/db/schema"
 import { listPendingForConversation as listPendingDrafts } from "@/lib/db/connector-drafts"
 import type { MessageSegment } from "@/types/connectors/segment"
 import {
@@ -2893,6 +2892,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       clearContextSelections,
       pushSystemMessage,
       tAttach,
+      tInbox,
       tWebSearch,
       session,
       resolvedMode,

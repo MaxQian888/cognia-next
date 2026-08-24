@@ -40,11 +40,24 @@ export interface MicrovmRequest {
   networkHosts: string[]
 }
 
+/**
+ * The session's resolved ceiling, as opposed to the per-call `request`. An
+ * adapter needs both: `request.network === "off"` may mean "the operator
+ * capped egress" or merely "this command needs no network", and only the
+ * ceiling distinguishes them. Absent = no ceiling configured.
+ */
+export interface MicrovmCeiling {
+  network?: "off" | "on" | "allowlist"
+  maxCpuSeconds?: number
+  maxMemoryMb?: number
+}
+
 /** Full payload an exec impl receives. */
 export interface MicrovmExecPayload {
   tool: string
   command: MicrovmCommand
   request: MicrovmRequest
+  ceiling?: MicrovmCeiling
 }
 
 export type MicrovmAdapterErrorCode =

@@ -768,10 +768,15 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     await purgeSessionStoreBuckets(id)
   }
   if (sandboxReleaseErrors.length > 0) {
-    throw new AggregateError(
-      sandboxReleaseErrors,
-      "One or more sandbox runtimes could not release their provider resources."
-    )
+    // The transaction already committed — the sessions ARE deleted. Rejecting
+    // here would report a completed deletion as failed and let an optimistic
+    // caller roll rows back into a list they no longer exist in. A provider
+    // resource that outlived its session is a cleanup problem, not a delete
+    // failure, and the runtime retries the release on the next bind.
+    loggers.store.warn("sandbox runtime release failed after session delete", {
+      sessionIds: deletedIds,
+      errors: sandboxReleaseErrors.map((error) => String(error)),
+    })
   }
 }
 

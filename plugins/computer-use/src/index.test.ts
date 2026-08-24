@@ -32,6 +32,7 @@ jest.mock("@/lib/claude/computer-use-active-settings", () => ({
 }))
 
 jest.mock("@/lib/sandbox/session-runtime", () => ({
+  HOST_FALLBACK_RUNTIME_REF: "sandbox-runtime:host-default",
   sandboxSessionRuntime: {
     decorateComputerUseContext: jest.fn(async (_ref: string, context: object) => ({
       ...context,
@@ -47,7 +48,7 @@ import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-co
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
-import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { ActionRequest } from "@/lib/automation/types"
 import type { PluginTool } from "@/types/plugin/plugin"
 
@@ -237,15 +238,23 @@ describe("computer-use plugin activate()", () => {
     )
   })
 
-  it("refuses a call without a runtime binding before touching local automation", async () => {
+  it("falls back to the host placement when the caller has no send envelope", async () => {
     const tool = await getTool("list_apps")
 
-    await expect(tool.execute({}, { config: {}, sessionId: "origin-session" })).rejects.toThrow(
-      /runtime binding is missing/i
-    )
+    // Workflow nodes, plan steps, External Bridge orchestration and
+    // plugin-to-plugin calls reach `invokePluginTool` with no
+    // `sandboxRuntimeRef`. They ran on the local desktop before the runtime
+    // reference existed and must keep working — the refusal belongs to a
+    // *bound* placement that has since gone away, not to a missing envelope.
+    await expect(
+      tool.execute({}, { config: {}, sessionId: "origin-session" })
+    ).resolves.not.toThrow()
 
-    expect(mockedDesktop.listApps).not.toHaveBeenCalled()
-    expect(mockedDecorate).not.toHaveBeenCalled()
+    expect(mockedDecorate).toHaveBeenCalledWith(
+      HOST_FALLBACK_RUNTIME_REF,
+      expect.objectContaining({ surface: "computerUse" })
+    )
+    expect(mockedDesktop.listApps).toHaveBeenCalled()
   })
 })
 

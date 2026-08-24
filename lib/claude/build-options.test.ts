@@ -210,7 +210,11 @@ import { isTauri } from "@/lib/tauri"
 import { isNativeMobile } from "@/lib/platform/detect"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
-import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import {
+  __resetSandboxSessionRuntimeForTesting,
+  HOST_FALLBACK_RUNTIME_REF,
+  sandboxSessionRuntime,
+} from "@/lib/sandbox/session-runtime"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
@@ -4160,6 +4164,102 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
     } finally {
       bindSpy.mockRestore()
     }
+  })
+
+  describe("a binding that cannot be established", () => {
+    afterEach(() => {
+      __resetSandboxSessionRuntimeForTesting()
+    })
+
+    it("keeps the resolved ceiling instead of dropping to the unpoliced host", async () => {
+      const bindSpy = jest
+        .spyOn(sandboxSessionRuntime, "bindSession")
+        .mockRejectedValueOnce(new Error("no live E2B workspace"))
+      mGetCharacter.mockResolvedValue(
+        makeChar({
+          id: "c1",
+          sandboxEnabled: true,
+          sandboxTier: "microvm",
+          sandboxPolicy: { writableRoots: ["/workspace"], network: "off" },
+        })
+      )
+
+      try {
+        const opts = await resolveSendOptions({
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+
+        // The send survives — but it does NOT survive by handing the tools an
+        // unpoliced host placement.
+        expect(opts.sandboxRuntimeRef).toBeDefined()
+        expect(opts.sandboxRuntimeRef).not.toBe(HOST_FALLBACK_RUNTIME_REF)
+        expect(() =>
+          sandboxSessionRuntime.assertWritablePath(opts.sandboxRuntimeRef!, "/etc/passwd")
+        ).toThrow(/outside the configured writable roots/)
+        // And the microVM tier the user chose refuses rather than running here.
+        await expect(
+          sandboxSessionRuntime.executeSandbox(opts.sandboxRuntimeRef!, {
+            tool: "sandbox_bash",
+            command: { argv: ["id"], cwd: "/workspace", env: {}, stdin: null, timeout: 5 },
+            request: {
+              writable: [],
+              readable: [],
+              targetFiles: [],
+              maxCpuSeconds: 0,
+              maxMemoryMb: 0,
+              network: "off",
+              networkHosts: [],
+            },
+          })
+        ).rejects.toMatchObject({ code: "placement-unavailable" })
+      } finally {
+        bindSpy.mockRestore()
+      }
+    })
+
+    it("refuses a bound GUI target rather than retargeting the local desktop", async () => {
+      const bindSpy = jest
+        .spyOn(sandboxSessionRuntime, "bindSession")
+        .mockRejectedValueOnce(new Error("connection is stopped"))
+      mGetCharacter.mockResolvedValue(
+        makeChar({
+          id: "c1",
+          enableComputerUse: true,
+          sandboxEnabled: false,
+          computerUseTarget: { connectionId: "connection-1" },
+        })
+      )
+
+      try {
+        const opts = await resolveSendOptions({
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+
+        expect(opts.sandboxRuntimeRef).toBeDefined()
+        await expect(
+          sandboxSessionRuntime.decorateComputerUseContext(opts.sandboxRuntimeRef!, {})
+        ).rejects.toMatchObject({ code: "placement-unavailable" })
+      } finally {
+        bindSpy.mockRestore()
+      }
+    })
+
+    it("does not fail the send when releasing a disabled session's runtime throws", async () => {
+      const releaseSpy = jest
+        .spyOn(sandboxSessionRuntime, "releaseSession")
+        .mockRejectedValueOnce(new Error("E2B close timed out"))
+      mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: false }))
+
+      try {
+        const opts = await resolveSendOptions({
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+        expect(opts.sandboxRuntimeRef).toBeUndefined()
+        expect(releaseSpy).toHaveBeenCalledWith("s1")
+      } finally {
+        releaseSpy.mockRestore()
+      }
+    })
   })
 })
 

@@ -84,7 +84,7 @@ import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
 import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
-import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import { acquireWorkspaceBundle, runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
 import {
   finishDirectChatExecutionRun,
   projectDirectChatCaptureEvent,
@@ -103,12 +103,13 @@ import {
   canonicalEventFromExternalEvent,
   captureEventFromCanonical,
 } from "@/lib/ai/agent/execution/event-envelope"
+import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 import {
-  openTaskWorkspaceBundleRunLease,
-  openTaskWorkspaceRunLease,
-} from "@/lib/task-workspace/run-lease"
-import { ensureSessionExecutionBundle } from "@/lib/task-workspace/session-bundle"
+  ensureSessionExecutionBundle,
+  type SessionBundleBinding,
+} from "@/lib/task-workspace/session-bundle"
 import {
+  bindExecutionBundleTurn,
   bindExecutionRun,
   resolveSessionWorkspaceRoot,
   transitionManagedWorktree,
@@ -1230,6 +1231,7 @@ export function useClaudeChat() {
         }
       }
       let bundlePrimaryRootId: string | undefined
+      let managedBundle: SessionBundleBinding["bundle"] | undefined
       if (!hasNoToolSurface && executionContext?.location === "managedWorktree") {
         const project = useProjectStore
           .getState()
@@ -1253,6 +1255,7 @@ export function useClaudeChat() {
           })
           executionContext = binding.context
           bundlePrimaryRootId = binding.primaryLogicalRootId
+          managedBundle = binding.bundle
           sendOptions = {
             ...sendOptions,
             cwd: binding.primaryAlias,
@@ -1340,17 +1343,35 @@ export function useClaudeChat() {
             ? { workspaceKey: executionContext.taskWorkspace.workspaceKey }
             : {}),
         }
-        const taskLease =
-          executionContext?.location === "managedWorktree" &&
-          executionContext.execution?.bundleId &&
-          bundlePrimaryRootId
-            ? await openTaskWorkspaceBundleRunLease(
-                executionContext.execution.bundleId,
-                bundlePrimaryRootId,
-                taskEnvelope
-              )
-            : await openTaskWorkspaceRunLease(taskEnvelope)
-        if (!taskLease && executionContext?.location === "managedWorktree") {
+        const legacyBundle = legacyWorkspaceEnabled
+          ? await acquireWorkspaceBundle({
+              ownerType: "session",
+              ownerRef: sessionId,
+              environmentKind: "managed",
+              base: { kind: "workingState" },
+              roots: [
+                {
+                  logicalRootId: "primary",
+                  role: "primary",
+                  sourceRoot: workspaceRoot,
+                },
+              ],
+            }).catch(() => null)
+          : null
+        const bundleTurnLease =
+          executionContext?.location === "managedWorktree" && managedBundle && bundlePrimaryRootId
+            ? await openWorkspaceBundleTurnLease(managedBundle, bundlePrimaryRootId, taskEnvelope)
+            : legacyBundle
+              ? await openWorkspaceBundleTurnLease(legacyBundle, "primary", {
+                  ...taskEnvelope,
+                  base: { kind: "workingState" },
+                })
+              : null
+        const taskLease = bundleTurnLease
+        if (
+          !taskLease &&
+          (executionContext?.location === "managedWorktree" || legacyWorkspaceEnabled)
+        ) {
           await finishDirectChatExecutionRun(sessionId, "failed")
           const message = tInlineErr("managedWorktreeUnavailable")
           store.getState().setSessionStatus(sessionId, "idle")
@@ -1365,13 +1386,22 @@ export function useClaudeChat() {
         }
         sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
         if (taskLease) {
-          sendOptions = { ...sendOptions, cwd: taskLease.run.executionRoot }
+          sendOptions = bundleTurnLease
+            ? {
+                ...sendOptions,
+                cwd: bundleTurnLease.primaryAlias,
+                additionalDirectories: bundleTurnLease.additionalAliases,
+              }
+            : { ...sendOptions, cwd: taskLease.run.executionRoot }
           if (executionContext?.location === "managedWorktree") {
-            const bound = bindExecutionRun(executionContext, taskLease.run.runId)
-            const active = transitionManagedWorktree(bound, "active", Date.now(), {
-              worktreePath: taskLease.run.executionRoot,
-              ...(taskLease.run.isolationRef ? { branch: taskLease.run.isolationRef } : {}),
-            })
+            const bound = bundleTurnLease
+              ? bindExecutionBundleTurn(
+                  executionContext,
+                  bundleTurnLease.bundleTurnId,
+                  taskLease.run.runId
+                )
+              : bindExecutionRun(executionContext, taskLease.run.runId)
+            const active = transitionManagedWorktree(bound, "active", Date.now())
             void updateSession(sessionId, { executionContext: active }).catch((error) =>
               console.error("persist execution context failed", error)
             )

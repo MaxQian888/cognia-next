@@ -23,7 +23,7 @@ import type {
   Locator,
 } from "@/lib/automation/types"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
-import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { CallContext } from "@/lib/automation/client"
 import manifestJson from "../plugin.json"
 
@@ -58,12 +58,14 @@ async function buildChatCallContext(
   if (originMessageId) {
     ctx.turnKey = originMessageId
   }
-  if (!sandboxRuntimeRef) {
-    throw new Error(
-      "Computer Use runtime binding is missing; refusing to guess a local automation target."
-    )
-  }
-  return sandboxSessionRuntime.decorateComputerUseContext(sandboxRuntimeRef, ctx)
+  // A chat send always carries its resolved placement. Callers with no send
+  // envelope — workflow nodes, plan steps, External Bridge orchestration,
+  // plugin-to-plugin calls, the CLI rail — get the host/local placement, which
+  // is exactly where they ran before the runtime reference existed.
+  return sandboxSessionRuntime.decorateComputerUseContext(
+    sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF,
+    ctx
+  )
 }
 
 /**

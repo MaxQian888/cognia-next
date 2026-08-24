@@ -1,4 +1,6 @@
 import type { ProjectEnvironmentVersion } from "@/types/project-environment"
+import type { WorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
+import type { WorkspaceBundle } from "@/lib/task-workspace/types"
 import { createLocalTauriExecutionEnvironment } from "./local-tauri-environment"
 
 const profile = (
@@ -39,17 +41,50 @@ describe("local Tauri AgentTeam execution environment", () => {
   it("prepares an immutable environment version and exposes takeover surfaces", async () => {
     const executeSetup = jest.fn(async () => ({ success: true, bypassed: false }))
     const settle = jest.fn(async () => [{ path: "src/index.ts", kind: "modified" }])
+    const acquireWorkspaceBundle = jest.fn(async () => ({
+      bundleId: "bundle-1",
+      environmentKind: "managed" as const,
+      ownerType: "team" as const,
+      ownerRef: "run-1",
+      state: "active" as const,
+      leases: [
+        {
+          bundleId: "bundle-1",
+          workspaceId: "workspace-1",
+          logicalRootId: "primary",
+          role: "primary" as const,
+          aliasPath: "/worktrees/child-1",
+        },
+      ],
+      lastUsedAt: 1,
+      pinned: false,
+      createdAt: 1,
+    }))
+    const openWorkspaceBundleTurnLease = jest.fn(
+      async () =>
+        ({
+          bundleTurnId: "bundle-turn-1",
+          bundleId: "bundle-1",
+          run: {
+            runId: "workspace-run-1",
+            executionRoot: "/worktrees/child-1",
+            isolationKind: "gitWorktree" as const,
+            isolationRef: "codex/child-1",
+          },
+          runs: [],
+          primaryAlias: "/worktrees/child-1",
+          additionalAliases: [],
+          settle,
+          abort: jest.fn(),
+        }) as WorkspaceBundleTurnLease
+    )
     const environment = createLocalTauriExecutionEnvironment({
       isTauri: () => true,
       sandboxSupported: true,
       networkPolicySupported: true,
       executeSetup,
-      openWorkspace: async () => ({
-        executionRoot: "/worktrees/child-1",
-        workspaceRunId: "workspace-run-1",
-        branch: "codex/child-1",
-        settle,
-      }),
+      acquireWorkspaceBundle,
+      openWorkspaceBundleTurnLease,
     })
 
     const prepared = await environment.prepare(profile(), "/repo")
@@ -63,6 +98,35 @@ describe("local Tauri AgentTeam execution environment", () => {
     })
 
     expect(executeSetup).toHaveBeenCalledWith(profile(), "/repo")
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith({
+      ownerType: "team",
+      ownerRef: "run-1",
+      environmentKind: "managed",
+      base: { kind: "remoteDefault" },
+      roots: [
+        {
+          logicalRootId: "primary",
+          role: "primary",
+          sourceRoot: "/repo",
+        },
+      ],
+    })
+    expect(openWorkspaceBundleTurnLease).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleId: "bundle-1" }),
+      "primary",
+      {
+        taskId: "task-1",
+        sessionId: "run-1",
+        runId: "child-1",
+        executionRunId: "run-1",
+        turnId: "child-1",
+        attemptId: "a1",
+        surface: "agent-team-durable",
+        agentId: "mate-1",
+        agentKind: "agent-team",
+        workspaceRoot: "/repo",
+      }
+    )
     expect(child.executionRoot).toBe("/worktrees/child-1")
     expect(child.branch).toBe("codex/child-1")
     expect(environment.getInteractiveSurfaces("child-1")).toEqual({
@@ -75,6 +139,52 @@ describe("local Tauri AgentTeam execution environment", () => {
     ])
     await environment.dispose("child-1")
     expect(settle).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails closed when Registry Bundle acquisition fails", async () => {
+    const openWorkspaceBundleTurnLease = jest.fn()
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      acquireWorkspaceBundle: async () => {
+        throw new Error("Registry unavailable")
+      },
+      openWorkspaceBundleTurnLease,
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+
+    await expect(
+      environment.openChild({
+        runId: "run-1",
+        childRunId: "child-1",
+        taskId: "task-1",
+        teammateId: "mate-1",
+        repositoryPath: "/repo",
+        profile: prepared,
+      })
+    ).rejects.toThrow("Registry unavailable")
+    expect(openWorkspaceBundleTurnLease).not.toHaveBeenCalled()
+    expect(environment.getInteractiveSurfaces("child-1")).toBeNull()
+  })
+
+  it("fails closed when Registry does not open a Bundle Turn", async () => {
+    const environment = createLocalTauriExecutionEnvironment({
+      executeSetup: async () => ({ success: true }),
+      acquireWorkspaceBundle: async () => ({ bundleId: "bundle-1", leases: [] }) as WorkspaceBundle,
+      openWorkspaceBundleTurnLease: async () => null,
+    })
+    const prepared = await environment.prepare(profile(), "/repo")
+
+    await expect(
+      environment.openChild({
+        runId: "run-1",
+        childRunId: "child-1",
+        taskId: "task-1",
+        teammateId: "mate-1",
+        repositoryPath: "/repo",
+        profile: prepared,
+      })
+    ).rejects.toThrow("Registry did not return a Bundle Turn execution root")
+    expect(environment.getInteractiveSurfaces("child-1")).toBeNull()
   })
 
   it("uses the host-neutral execution transport outside Tauri", async () => {

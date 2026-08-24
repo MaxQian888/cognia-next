@@ -700,6 +700,7 @@ export function DesktopChatWorkspace() {
                     newChatExecutionControls={
                       activeProject ? (
                         <NewChatExecutionPicker
+                          rootDir={activeProject.rootDir}
                           value={newChatExecution}
                           onChange={setNewChatExecution}
                         />

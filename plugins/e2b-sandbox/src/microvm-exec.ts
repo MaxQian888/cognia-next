@@ -31,9 +31,15 @@ export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
       try {
         opts.pool.claim(ownerRef, workspaceRoot, ownerGroup ?? ownerRef)
       } catch (error) {
+        // The pool is keyed on the handle path a remote clone minted, so an
+        // ordinary local working directory misses and reports itself as a
+        // missing path. State the requirement instead: this tier isolates INTO
+        // an existing E2B workspace, it does not provision one per session.
         throw new MicrovmAdapterError(
           "workspace-unavailable",
-          error instanceof Error ? error.message : String(error),
+          `The microVM tier runs inside an existing E2B workspace and cannot provision one for "${workspaceRoot}". ` +
+            "Use it from a session whose working directory is an E2B workspace handle, or choose the OS sandbox tier. " +
+            `(${error instanceof Error ? error.message : String(error)})`,
           { cause: error }
         )
       }
@@ -96,19 +102,36 @@ function assertSupportedPolicy(
   provisionedNetwork: "off" | "on"
 ): void {
   const request = payload.request
-  if (request.network === "allowlist") {
+  const ceiling = payload.ceiling ?? {}
+  if (request.network === "allowlist" || ceiling.network === "allowlist") {
     throw new MicrovmAdapterError(
       "policy-not-attested",
       "E2B microVM network allowlists are not attested by this adapter."
     )
   }
-  if (request.network !== provisionedNetwork) {
+  // Network is fixed at instance creation, so it can only be refused in the
+  // direction the adapter cannot deliver:
+  //   - the operator capped egress but the instance has it  → cannot attest;
+  //   - the instance has no egress but the call needs it    → cannot enable.
+  // A call that merely needs LESS than the instance offers is satisfied — the
+  // file helpers and the default bash request always ask for `network: "off"`,
+  // so refusing that direction made every file-tool call on this tier fail.
+  if (ceiling.network === "off" && provisionedNetwork !== "off") {
     throw new MicrovmAdapterError(
       "policy-not-attested",
-      `E2B workspace was provisioned with network=${provisionedNetwork}; requested network=${request.network} cannot be applied after creation.`
+      `E2B workspace was provisioned with network=${provisionedNetwork}; the configured network=off ceiling cannot be applied after creation.`
     )
   }
-  if (request.maxCpuSeconds > 0 || request.maxMemoryMb > 0) {
+  if (provisionedNetwork === "off" && request.network !== "off") {
+    throw new MicrovmAdapterError(
+      "policy-not-attested",
+      `E2B workspace was provisioned with network=off; requested network=${request.network} cannot be enabled after creation.`
+    )
+  }
+  // Same split for the resource caps: only a ceiling the operator configured
+  // is a guarantee this adapter would be silently dropping. A clamped default
+  // carries no such promise.
+  if ((ceiling.maxCpuSeconds ?? 0) > 0 || (ceiling.maxMemoryMb ?? 0) > 0) {
     throw new MicrovmAdapterError(
       "policy-not-attested",
       "E2B microVM CPU and memory limits are not attested by this adapter."
@@ -154,7 +177,8 @@ function normalizeAbsolutePosixPath(value: string): string | null {
 
 function buildBashCommand(payload: MicrovmExecPayload): string {
   const envExports = Object.entries(payload.command.env)
-    .map(([key, value]) => `export ${escapeShellName(key)}=${escapeShellArg(value)};`)
+    .filter(([key]) => isShellName(key))
+    .map(([key, value]) => `export ${key}=${escapeShellArg(value)};`)
     .join(" ")
   const argv = payload.command.argv.map(escapeShellArg).join(" ")
   const command = `${envExports} ${argv}`.trim()
@@ -166,6 +190,14 @@ function escapeShellArg(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`
 }
 
-function escapeShellName(name: string): string {
-  return name.replace(/[^A-Za-z0-9_]/g, "")
+/**
+ * A shell identifier, exactly. Rewriting an invalid name by stripping its bad
+ * characters was worse than dropping it: `1TOKEN` survives the strip unchanged
+ * and `export 1TOKEN=…` is a bash syntax error that aborts the WHOLE line, so
+ * one malformed env entry took the model's actual command down with it — and a
+ * name made only of stripped characters produced `export =…`, the same fatal
+ * error. An entry bash cannot accept is skipped, not smuggled in mangled.
+ */
+function isShellName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
 }

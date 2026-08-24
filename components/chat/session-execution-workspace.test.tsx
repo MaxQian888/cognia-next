@@ -17,9 +17,13 @@ jest.mock("@/lib/task-workspace/handoff", () => ({
 }))
 const listRunsMock = jest.fn()
 const getPatchMock = jest.fn()
+const getBundleTurnMock = jest.fn()
+const getBundleHandoffUndoOutcomeMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
   listTaskRuns: (...args: unknown[]) => listRunsMock(...args),
   getTaskPatchSet: (...args: unknown[]) => getPatchMock(...args),
+  getWorkspaceBundleTurn: (...args: unknown[]) => getBundleTurnMock(...args),
+  getBundleHandoffUndoOutcome: (...args: unknown[]) => getBundleHandoffUndoOutcomeMock(...args),
 }))
 const materializeManagedMock = jest.fn()
 const deleteManagedMock = jest.fn()
@@ -60,6 +64,8 @@ beforeEach(() => {
   handoffLocalMock.mockReset().mockResolvedValue({ state: "applied", conflicts: [] })
   listRunsMock.mockReset().mockResolvedValue([])
   getPatchMock.mockReset().mockResolvedValue(null)
+  getBundleTurnMock.mockReset().mockResolvedValue(null)
+  getBundleHandoffUndoOutcomeMock.mockReset().mockResolvedValue(null)
   materializeManagedMock.mockReset().mockResolvedValue({
     location: "managedWorktree",
     workspaceBinding: { kind: "managed", workspaceId: "managed-workspace:session-1" },
@@ -82,6 +88,107 @@ beforeEach(() => {
       workspaceKey: "managed-workspace:session-1",
     },
   })
+})
+
+it("reviews and hands off every Bundle root with root-scoped selections", async () => {
+  getBundleTurnMock.mockResolvedValue({
+    bundleTurnId: "bundle-turn-1",
+    bundleId: "bundle-1",
+    primaryLogicalRootId: "app",
+    primaryAlias: "/managed/app",
+    additionalAliases: ["/managed/docs"],
+    state: "ready",
+    createdAt: 1,
+    settledAt: 2,
+    runs: [
+      {
+        workspaceId: "ws-app",
+        logicalRootIds: ["app"],
+        run: { runId: "run-app", state: "ready" },
+      },
+      {
+        workspaceId: "ws-docs",
+        logicalRootIds: ["docs"],
+        run: { runId: "run-docs", state: "ready" },
+      },
+    ],
+  })
+  getPatchMock.mockImplementation(async (runId: string) => ({
+    runId,
+    reversible: true,
+    files: [
+      {
+        path: runId === "run-app" ? "src/app.ts" : "guide.md",
+        hunks: [{ id: `${runId}-h1` }],
+      },
+    ],
+  }))
+  render(
+    <SessionExecutionWorkspace
+      session={
+        {
+          ...session,
+          executionContext: {
+            execution: {
+              mode: "managed",
+              bundleId: "bundle-1",
+              base: { kind: "remoteDefault" },
+              roots: [
+                {
+                  logicalRootId: "app",
+                  role: "primary",
+                  aliasPath: "/managed/app",
+                  workspaceId: "ws-app",
+                },
+                {
+                  logicalRootId: "docs",
+                  role: "additional",
+                  aliasPath: "/managed/docs",
+                  workspaceId: "ws-docs",
+                },
+              ],
+            },
+            location: "managedWorktree",
+            workspaceBinding: { kind: "project", projectId: "project-1" },
+            projectId: "project-1",
+            projectRoot: "/repo",
+            taskWorkspace: {
+              taskId: "task-workspace:session-1",
+              workspaceKey: "session-1",
+              runId: "run-app",
+              bundleTurnId: "bundle-turn-1",
+            },
+          },
+        } as never
+      }
+    />
+  )
+
+  fireEvent.click(screen.getByRole("button", { name: "Apply to Local" }))
+  expect(await screen.findByText(/src\/app\.ts/)).toBeInTheDocument()
+  expect(screen.getByText(/guide\.md/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Apply selected changes" }))
+
+  await waitFor(() =>
+    expect(handoffLocalMock).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(Array),
+      false,
+      undefined,
+      [
+        {
+          workspaceId: "ws-app",
+          logicalRootId: "app",
+          selection: [{ path: "src/app.ts", hunkIds: ["run-app-h1"] }],
+        },
+        {
+          workspaceId: "ws-docs",
+          logicalRootId: "docs",
+          selection: [{ path: "guide.md", hunkIds: ["run-docs-h1"] }],
+        },
+      ]
+    )
+  )
 })
 
 it("previews dirty local files before binding the task to a managed Worktree", async () => {

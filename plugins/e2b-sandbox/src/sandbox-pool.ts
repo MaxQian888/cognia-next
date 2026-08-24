@@ -92,6 +92,19 @@ export class E2BSandboxPool {
     return true
   }
 
+  /**
+   * Drop a workspace entry without asking the provider to close it. Only for
+   * a caller that already tried and failed: keeping the entry after that leaks
+   * it for the lifetime of the pool.
+   */
+  forget(workspacePath: string): void {
+    const entry = this.byWorkspace.get(workspacePath)
+    if (!entry) return
+    this.byWorkspace.delete(workspacePath)
+    for (const ownerRef of entry.ownerRefs) this.workspaceByOwner.delete(ownerRef)
+    entry.ownerRefs.clear()
+  }
+
   async dispose(): Promise<void> {
     await Promise.all([...this.byWorkspace.keys()].map((path) => this.closeWorkspace(path)))
   }

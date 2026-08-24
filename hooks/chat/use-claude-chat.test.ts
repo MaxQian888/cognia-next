@@ -256,12 +256,9 @@ jest.mock("@/lib/claude/build-options", () => ({
   resolveSendOptions: (...args: unknown[]) => resolveSendOptionsMock(...(args as [])),
 }))
 
-const openTaskWorkspaceRunLeaseMock = jest.fn()
-const openTaskWorkspaceBundleRunLeaseMock = jest.fn()
+const openWorkspaceBundleTurnLeaseMock = jest.fn()
 jest.mock("@/lib/task-workspace/run-lease", () => ({
-  openTaskWorkspaceBundleRunLease: (...args: unknown[]) =>
-    openTaskWorkspaceBundleRunLeaseMock(...args),
-  openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+  openWorkspaceBundleTurnLease: (...args: unknown[]) => openWorkspaceBundleTurnLeaseMock(...args),
 }))
 
 const ensureSessionExecutionBundleMock = jest.fn()
@@ -651,8 +648,7 @@ beforeEach(() => {
   touchSessionMock.mockClear()
   updateSessionMock.mockReset().mockResolvedValue(undefined)
   resolveSendOptionsMock.mockReset().mockResolvedValue({ model: "sonnet", systemPrompt: "sys" })
-  openTaskWorkspaceRunLeaseMock.mockReset().mockResolvedValue(null)
-  openTaskWorkspaceBundleRunLeaseMock.mockReset().mockResolvedValue(null)
+  openWorkspaceBundleTurnLeaseMock.mockReset().mockResolvedValue(null)
   ensureSessionExecutionBundleMock
     .mockReset()
     .mockImplementation(async ({ context }: { context: Record<string, unknown> }) => ({
@@ -671,7 +667,18 @@ beforeEach(() => {
             },
           ],
         },
-        worktreePath: "/managed/sess-1",
+      },
+      bundle: {
+        bundleId: "bundle-1",
+        leases: [
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-1",
+            logicalRootId: "root-1",
+            role: "primary",
+            aliasPath: "/managed/sess-1",
+          },
+        ],
       },
       primaryAlias: "/managed/sess-1",
       additionalAliases: [],
@@ -928,12 +935,15 @@ describe("useClaudeChat — actions", () => {
         lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
       },
     })
-    openTaskWorkspaceBundleRunLeaseMock.mockResolvedValue({
+    openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+      bundleTurnId: "bundle-turn-1",
       run: {
         runId: "run:sess-1:1",
-        executionRoot: "/managed/sess-1",
+        executionRoot: "/physical/workspace-1",
         isolationRef: "codex/sess-1",
       },
+      primaryAlias: "/managed/sess-1",
+      additionalAliases: ["/managed/docs"],
       settle: jest.fn(),
     })
 
@@ -943,8 +953,8 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("hello")
     })
 
-    expect(openTaskWorkspaceBundleRunLeaseMock).toHaveBeenCalledWith(
-      "bundle-1",
+    expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleId: "bundle-1" }),
       "root-1",
       expect.objectContaining({
         taskId: "task-workspace:sess-1",
@@ -955,19 +965,26 @@ describe("useClaudeChat — actions", () => {
     expect(sendPromptMock).toHaveBeenCalledWith(
       "sess-1",
       expect.anything(),
-      expect.objectContaining({ cwd: "/managed/sess-1" })
+      expect.objectContaining({
+        cwd: "/managed/sess-1",
+        additionalDirectories: ["/managed/docs"],
+      })
     )
     expect(updateSessionMock).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({
         executionContext: expect.objectContaining({
-          worktreePath: "/managed/sess-1",
-          branch: "codex/sess-1",
-          taskWorkspace: expect.objectContaining({ runId: "run:sess-1:1" }),
+          taskWorkspace: expect.objectContaining({
+            runId: "run:sess-1:1",
+            bundleTurnId: "bundle-turn-1",
+          }),
           lifecycle: expect.objectContaining({ state: "active" }),
         }),
       })
     )
+    const persistedContext = updateSessionMock.mock.calls.at(-1)?.[1]?.executionContext
+    expect(persistedContext).not.toHaveProperty("worktreePath")
+    expect(persistedContext).not.toHaveProperty("branch")
   })
 
   it("fails closed instead of falling back to Local when managed isolation is unavailable", async () => {
@@ -1021,7 +1038,6 @@ describe("useClaudeChat — actions", () => {
       await result.current.send("help")
     })
 
-    expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
     expect(runStandaloneTurnMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "sess-1",
@@ -1061,8 +1077,11 @@ describe("useClaudeChat — actions", () => {
         lifecycle: { state: "ready", createdAt: 1, updatedAt: 2, pinned: false },
       },
     })
-    openTaskWorkspaceBundleRunLeaseMock.mockResolvedValue({
+    openWorkspaceBundleTurnLeaseMock.mockResolvedValue({
+      bundleTurnId: "bundle-turn-1",
       run: { runId: "run-1", executionRoot: "/managed/sess-1", isolationRef: "branch" },
+      primaryAlias: "/managed/sess-1",
+      additionalAliases: [],
       settle: jest.fn(),
     })
 

@@ -93,9 +93,13 @@ export class E2BWorkspaceBackend implements E2BBackend {
       // The sandbox starts with a writable working directory; we clone into
       // /tmp/cognia/<repo>/<stamp> so multiple clones in one sandbox lifetime
       // don't collide.
-      const stamp = this.opts.now().toString(36)
+      // The stamp alone is not unique: Agent Team fans teammates out in
+      // parallel, so two clones of the same repo can land in the same
+      // millisecond and collide in the pool. The sandbox id is unique per
+      // instance, which is exactly the identity the pool is keyed on.
+      const stamp = `${this.opts.now().toString(36)}-${sandbox.id}`
       const safeRepo = opts.repoFullName.replace(/[^a-zA-Z0-9._-]/g, "_")
-      const cwd = `/tmp/cognia/${safeRepo}/${stamp}`
+      const cwd = `/tmp/cognia/${safeRepo}/${stamp.replace(/[^a-zA-Z0-9._-]/g, "_")}`
       await execChecked(sandbox, { cmd: `mkdir -p ${shellEscape(cwd)}` })
       const remote = `https://x-access-token:${opts.token}@github.com/${opts.repoFullName}.git`
       await execChecked(sandbox, {
@@ -141,7 +145,15 @@ export class E2BWorkspaceBackend implements E2BBackend {
   }
 
   async remove(handle: WorkspaceHandle): Promise<boolean> {
-    return this.pool.removeWorkspace(handle.path)
+    try {
+      return await this.pool.removeWorkspace(handle.path)
+    } catch {
+      // The handle is being reaped: a sandbox that is already gone, or an API
+      // call that times out, must not reject and abort the caller's sweep.
+      // Drop the tracking entry so the pool cannot retain it forever.
+      this.pool.forget(handle.path)
+      return true
+    }
   }
 
   /** Test utility — number of live sandboxes the backend is tracking. */
