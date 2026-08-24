@@ -261,6 +261,17 @@ export const SURFACE_CONTRACTS = [
     offline: "cached-read",
   },
   {
+    id: "devices",
+    route: "/devices",
+    navigation: true,
+    // A standalone phone with nothing paired still has one device to describe
+    // — itself — but the fleet half of the console is empty, so it explains
+    // rather than pretending to be a fleet view.
+    standalone: "explain",
+    companion: "remote",
+    offline: "cached-read",
+  },
+  {
     // Developer-mode only (ADR-0117). Deliberately not `navigation: true`: the
     // rail is the same for every user, and Creator is gated on a per-user
     // setting, so its entry point is the devtools panel behind the same gate.

@@ -9,7 +9,8 @@
     "search": "搜索",
     "servers": "服务器",
     "twin": "数字分身",
-    "workflows": "工作流"
+    "workflows": "工作流",
+    "devices": "设备"
   },
   "activeRuns": {
     "empty": "暂无运行中的工作流",

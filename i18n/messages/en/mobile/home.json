@@ -9,7 +9,8 @@
     "search": "Search",
     "servers": "Servers",
     "twin": "Digital twin",
-    "workflows": "Workflows"
+    "workflows": "Workflows",
+    "devices": "Devices"
   },
   "activeRuns": {
     "empty": "No active runs",

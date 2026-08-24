@@ -220,5 +220,26 @@
       "credential": "Credential",
       "host-feature": "Host feature"
     }
+  },
+  "host": {
+    "controls": "Host controls",
+    "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "rename": "Rename",
+    "renameLabel": "Host name",
+    "save": "Save",
+    "cancel": "Cancel",
+    "remove": "Remove",
+    "removeAria": "Remove {label}",
+    "removeTitle": "Remove this host?",
+    "removeBody": "{label} will be forgotten, along with its stored credential. Pair with it again to reconnect."
+  },
+  "settingsLink": {
+    "pairedTitle": "Paired devices",
+    "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
+    "hostsTitle": "Remote hosts",
+    "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Connecting, renaming and removing are managed in the device console.",
+    "open": "Open device console"
   }
 }

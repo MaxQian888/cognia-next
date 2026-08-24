@@ -177,7 +177,8 @@
     "a2ui": "Mini-Apps",
     "agentRuns": "Agent runs",
     "aliases": {
-      "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
+      "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost",
+      "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers"
     },
     "auxiliaryGroup": "Profile and logs",
     "browser": "Browser",
@@ -235,7 +236,8 @@
     "unreadCount": "{count, plural, one {# unread} other {# unread}}",
     "workflows": "Workflows",
     "workspace": "Workspace",
-    "workspacesGroup": "Workspaces"
+    "workspacesGroup": "Workspaces",
+    "devices": "Devices"
   },
   "jobCenter": {
     "actions": {

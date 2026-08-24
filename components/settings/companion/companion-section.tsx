@@ -30,13 +30,15 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { isTauri, transport } from "@/lib/tauri"
 import { patchReachabilityPrefs } from "@/lib/connectivity/reachability-prefs"
+import { useLiveQuery } from "dexie-react-hooks"
+
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
 import { useAccountStore } from "@/stores/account/account-store"
 import { ChannelMatrixCard } from "./channel-matrix-card"
-import { PairedDevicesCard } from "./paired-devices-card"
+import { DeviceConsoleLink } from "@/components/devices/device-console-link"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
 import { LogtoLoginCard } from "./logto-login-card"
@@ -238,7 +240,7 @@ export function CompanionSection() {
       </CompanionGroup>
       <CompanionGroup id="pairing" title={t("pairing")} defaultOpen>
         <PairDeviceCard />
-        <PairedDevicesCard />
+        <PairedDevicesSummary />
       </CompanionGroup>
       <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
         <RemoteBrowserCard />
@@ -264,6 +266,19 @@ export function CompanionSection() {
 // (not its own file) so it rides the existing companion-section.test.tsx
 // coverage; its only behavior is open/close, exercised by the section tests.
 // ---------------------------------------------------------------------------
+
+/**
+ * What is left of the paired-devices table here: a count and a way in.
+ *
+ * The table itself moved to `/devices`, where a device is more than a row —
+ * capabilities, live presence, the capabilities behind each grant. Keeping a
+ * second list here would mean two surfaces to hold in step, and the one in
+ * Settings would be the one that fell behind.
+ */
+function PairedDevicesSummary() {
+  const devices = useLiveQuery(() => listPairedDevices(), [], [])
+  return <DeviceConsoleLink surface="paired" count={devices?.length ?? 0} />
+}
 
 function CompanionGroup({
   id,

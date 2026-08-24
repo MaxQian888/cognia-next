@@ -158,7 +158,10 @@ export const ME_ENTRIES: MeEntry[] = [
     id: "devices",
     icon: SmartphoneIcon,
     labelKey: "devicesRow",
-    href: "/me/devices",
+    // Was `/me/devices`, a mobile-only wrapper around the paired-devices card.
+    // `FeaturePageShell` already collapses to a single column with sheet
+    // triggers below `md`, so the console serves both shells from one tree.
+    href: "/devices",
     section: "account",
     keywords: ["device", "paired", "设备", "配对"],
   },

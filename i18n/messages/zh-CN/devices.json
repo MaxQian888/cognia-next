@@ -220,5 +220,26 @@
       "credential": "凭据",
       "host-feature": "主机特性"
     }
+  },
+  "host": {
+    "controls": "主机控制",
+    "controlsHint": "连接后，本窗口的执行会以这台主机为目标。添加与发现主机仍留在设置中。",
+    "connect": "连接",
+    "disconnect": "断开",
+    "rename": "重命名",
+    "renameLabel": "主机名称",
+    "save": "保存",
+    "cancel": "取消",
+    "remove": "移除",
+    "removeAria": "移除 {label}",
+    "removeTitle": "移除这台主机？",
+    "removeBody": "{label} 及其保存的凭据将被遗忘。需要重新配对才能再次连接。"
+  },
+  "settingsLink": {
+    "pairedTitle": "配对设备",
+    "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
+    "hostsTitle": "远程主机",
+    "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}连接、重命名与移除在设备控制台中管理。",
+    "open": "打开设备控制台"
   }
 }

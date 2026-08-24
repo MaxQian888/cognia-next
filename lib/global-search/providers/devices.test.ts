@@ -1,0 +1,125 @@
+import { createDevicesProvider, loadDeviceSearchRows, type DevicesProviderDeps } from "./devices"
+import type { GlobalSearchContext } from "../types"
+import type { PairedDeviceRow } from "@/types/mobile/paired-device"
+import type { RemoteHostInput } from "@/lib/devices/types"
+
+function phone(overrides: Partial<PairedDeviceRow> = {}): PairedDeviceRow {
+  return {
+    deviceId: "d1",
+    label: "Max's iPhone",
+    platform: "ios",
+    pubkey: "k",
+    pairedAt: 1,
+    lastSeenAt: 1_000,
+    allowRemoteTerminal: false,
+    appVersion: "1.0.0",
+    ...overrides,
+  }
+}
+
+function host(overrides: Partial<RemoteHostInput> = {}): RemoteHostInput {
+  return {
+    id: "h1",
+    label: "Build box",
+    connectionState: "ready",
+    addedAt: 5,
+    lastConnectedAt: 2_000,
+    config: { baseUrl: "https://build.local", serverVersion: "2.0.0" },
+    ...overrides,
+  }
+}
+
+function deps(overrides: Partial<DevicesProviderDeps> = {}): DevicesProviderDeps {
+  return {
+    listPairedDevices: (async () => [phone()]) as DevicesProviderDeps["listPairedDevices"],
+    listRemoteHosts: () => [host()],
+    ...overrides,
+  }
+}
+
+const ctx = {
+  now: 10_000,
+  t: (key: string) => key,
+} as unknown as GlobalSearchContext
+
+describe("loadDeviceSearchRows", () => {
+  it("indexes both paired devices and remote hosts under one kind", async () => {
+    const rows = await loadDeviceSearchRows(deps())
+    expect(rows).toEqual([
+      {
+        ref: "device:d1",
+        kind: "paired-device",
+        label: "Max's iPhone",
+        detail: "ios",
+        timestamp: 1_000,
+      },
+      {
+        ref: "host:h1",
+        kind: "remote-host",
+        label: "Build box",
+        detail: "https://build.local",
+        timestamp: 2_000,
+      },
+    ])
+  })
+
+  /**
+   * A search provider runs on every keystroke. A Dexie failure must degrade to
+   * "no devices matched", never take the palette down with it.
+   */
+  it("survives a Dexie read failure", async () => {
+    const rows = await loadDeviceSearchRows(
+      deps({
+        listPairedDevices: (async () => {
+          throw new Error("db closed")
+        }) as DevicesProviderDeps["listPairedDevices"],
+      })
+    )
+    expect(rows.map((row) => row.ref)).toEqual(["host:h1"])
+  })
+})
+
+describe("devicesProvider", () => {
+  it("matches on the label and links into the console", async () => {
+    const provider = createDevicesProvider(deps())
+    const result = await provider.search({
+      query: { needle: "iphone", raw: "iphone" } as never,
+      ctx,
+      limit: 10,
+      signal: new AbortController().signal,
+    })
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({
+      id: "device:device:d1",
+      kind: "device",
+      title: "Max's iPhone",
+      action: { type: "navigate", href: "/devices?device=device%3Ad1" },
+    })
+  })
+
+  /**
+   * A ref pasted from a log has to resolve to the device it names; hunting for
+   * it by eye through the list is the thing this avoids.
+   */
+  it("matches on the ref, not just the label", async () => {
+    const provider = createDevicesProvider(deps())
+    const result = await provider.search({
+      query: { needle: "host:h1", raw: "host:h1" } as never,
+      ctx,
+      limit: 10,
+      signal: new AbortController().signal,
+    })
+    expect(result.items.map((item) => item.title)).toContain("Build box")
+  })
+
+  it("returns nothing rather than everything for an unmatched needle", async () => {
+    const provider = createDevicesProvider(deps())
+    const result = await provider.search({
+      query: { needle: "zzzzz", raw: "zzzzz" } as never,
+      ctx,
+      limit: 10,
+      signal: new AbortController().signal,
+    })
+    expect(result.items).toEqual([])
+  })
+})

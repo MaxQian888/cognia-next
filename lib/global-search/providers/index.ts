@@ -7,6 +7,7 @@
 import { registerGlobalSearchProvider } from "../registry"
 import type { GlobalSearchProvider } from "../types"
 import { actionsProvider } from "./actions"
+import { devicesProvider } from "./devices"
 import { pluginActionsProvider, workbenchPanelsProvider } from "./host"
 import { inboxContactsProvider, inboxProvider } from "./inbox"
 import { issuesProvider } from "./issues"
@@ -53,6 +54,7 @@ export function builtinGlobalSearchProviders(
     // where Pi's config file and CLI do not exist.
     piPackagesProvider,
     issuesProvider,
+    devicesProvider,
   ]
 }
 

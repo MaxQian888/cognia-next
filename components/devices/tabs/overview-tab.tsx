@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import type { DeviceRow } from "@/lib/devices/types"
 
+import { HostControls } from "../host-controls"
 import {
   AdminStateBadge,
   DeviceFactList,
@@ -192,6 +193,8 @@ export function OverviewTab({ row }: { row: DeviceRow }) {
           </DeviceFactList>
         </section>
       ) : null}
+
+      <HostControls row={row} />
     </div>
   )
 }

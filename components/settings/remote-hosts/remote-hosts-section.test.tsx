@@ -29,8 +29,9 @@ it("renders the header and both tabs, defaulting to Hosts", () => {
   expect(screen.getByText("settings.remoteHosts.title")).toBeInTheDocument()
   expect(screen.getByRole("tab", { name: "settings.remoteHosts.tabs.hosts" })).toBeInTheDocument()
   expect(screen.getByRole("tab", { name: "settings.remoteHosts.tabs.add" })).toBeInTheDocument()
-  // Default tab = hosts → the (empty) hosts list is shown.
-  expect(screen.getByText("settings.remoteHosts.list.emptyTitle")).toBeInTheDocument()
+  // Default tab = hosts. The list itself moved to `/devices`; what the tab
+  // shows now is the count and the way in.
+  expect(screen.getByTestId("device-console-link-hosts")).toBeInTheDocument()
 })
 
 it("reflects the active tab in the URL when Add host is clicked", async () => {

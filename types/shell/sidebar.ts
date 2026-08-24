@@ -74,6 +74,10 @@ export const SIDEBAR_NAV_META: readonly SidebarNavMeta[] = [
   // → Traces now, not a route of its own, and two rail items pointing at the
   // same page would both light up as the active destination.
   { id: "servers", route: "/servers", i18nKey: "servers", group: "auxiliary" },
+  // Absorbed the paired-devices table from Settings → Companion and the host
+  // list from Settings → Remote hosts, so both retired names have to resolve
+  // here in ⌘K — someone who learned "paired devices" will keep typing it.
+  { id: "devices", route: "/devices", i18nKey: "devices", group: "auxiliary", aliasKey: "devices" },
   { id: "eval", route: "/eval", i18nKey: "eval", group: "auxiliary" },
   {
     id: "performance",

@@ -11,6 +11,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [string, BootCapability]> = [
   ["/inbox", "integrations"],
   ["/lark", "integrations"],
   ["/servers", "integrations"],
+  ["/devices", "integrations"],
   ["/me/connectors", "integrations"],
   ["/me/mcp", "integrations"],
   ["/memory", "knowledge-agents"],

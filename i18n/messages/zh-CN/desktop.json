@@ -177,7 +177,8 @@
     "a2ui": "小应用",
     "agentRuns": "智能体运行",
     "aliases": {
-      "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本"
+      "logs": "可观测性, 追踪, trace, 遥测, span, 仪表盘, 成本",
+      "devices": "配对设备, 远程主机, 手机, 机队, 配对, 沙盒, worker, devices, paired devices, remote hosts"
     },
     "auxiliaryGroup": "个人与日志",
     "browser": "浏览器",
@@ -235,7 +236,8 @@
     "unreadCount": "{count} 条未读",
     "workflows": "工作流",
     "workspace": "工作区",
-    "workspacesGroup": "工作区"
+    "workspacesGroup": "工作区",
+    "devices": "设备"
   },
   "jobCenter": {
     "actions": {

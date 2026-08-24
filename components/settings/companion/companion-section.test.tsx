@@ -91,8 +91,10 @@ describe("CompanionSection", () => {
     expect(await screen.findByText(/Mobile companion server/i)).toBeInTheDocument()
     expect(screen.getByText(/Pair a new device/i)).toBeInTheDocument()
     expect(screen.getByText(/Paired devices/i)).toBeInTheDocument()
-    // Empty state for the table
-    expect(await screen.findByText(/No devices paired yet/i)).toBeInTheDocument()
+    // The table itself moved to `/devices`; what stays is the count and the
+    // way in. Its own coverage lives in `components/devices/**`.
+    expect(await screen.findByTestId("device-console-link-paired")).toBeInTheDocument()
+    expect(screen.getByText(/No devices are paired/i)).toBeInTheDocument()
   })
 
   it("toggling the master switch calls companion_server_start", async () => {
@@ -261,7 +263,14 @@ describe("CompanionSection", () => {
     expect(await screen.findByTestId("qr-mock")).toBeInTheDocument()
   })
 
-  it("renders rows from listPairedDevices via useLiveQuery", async () => {
+  /**
+   * Row rendering, revoke, pause and resume all moved to the device console
+   * with their behaviour intact — the biometric gating and the Dexie + Rust
+   * dual write are covered by `hooks/devices/use-device-grant-actions.test.tsx`
+   * and the surface by `components/devices/tabs/access-tab.test.tsx`. What is
+   * asserted here is only that Settings reports the count.
+   */
+  it("reports how many devices are paired without listing them", async () => {
     await addPairedDevice({
       deviceId: "dev-1",
       label: "Max's iPhone",
@@ -280,119 +289,8 @@ describe("CompanionSection", () => {
     })
 
     render(<CompanionSection />)
-    expect(await screen.findByText("Max's iPhone")).toBeInTheDocument()
-    expect(screen.getByText("Pixel 8")).toBeInTheDocument()
-  })
-
-  it("revoking a device calls both Dexie and the Rust deny-list", async () => {
-    const user = userEvent.setup()
-    await addPairedDevice({
-      deviceId: "dev-1",
-      label: "Phone",
-      platform: "ios",
-      pubkey: "k",
-      appVersion: "0.1.0",
-      nowMs: Date.now(),
-    })
-
-    const revokeIds: string[] = []
-    callSpy.mockImplementation(async (name: string, args?: unknown) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_revoke_device") {
-        revokeIds.push((args as { deviceId: string }).deviceId)
-        return undefined as unknown as never
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    const revokeBtn = await screen.findByRole("button", {
-      name: /Revoke Phone/i,
-    })
-    await user.click(revokeBtn)
-
-    await waitFor(() => {
-      expect(revokeIds).toEqual(["dev-1"])
-    })
-    const rows = await listPairedDevices()
-    expect(rows[0]?.revokedAt).toBeDefined()
-  })
-
-  it("pausing a device routes through the same biometric guard as revoke", async () => {
-    const user = userEvent.setup()
-    await addPairedDevice({
-      deviceId: "dev-pause",
-      label: "Phone",
-      platform: "ios",
-      pubkey: "k",
-      appVersion: "0.1.0",
-      nowMs: Date.now(),
-    })
-
-    const revokeIds: string[] = []
-    callSpy.mockImplementation(async (name: string, args?: unknown) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_revoke_device") {
-        revokeIds.push((args as { deviceId: string }).deviceId)
-        return undefined as unknown as never
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    const pauseBtn = await screen.findByRole("button", { name: /Pause Phone/i })
-    await user.click(pauseBtn)
-
-    // The guard's `fallthroughWhenUnavailable` default lets pause complete
-    // when no biometric is enrolled (jsdom). The Rust deny-list write must
-    // still fire — that's the bit a stolen-unlocked-desktop attacker uses.
-    await waitFor(() => {
-      expect(revokeIds).toEqual(["dev-pause"])
-    })
-    const rows = await listPairedDevices()
-    expect(rows[0]?.pausedAt).toBeDefined()
-    expect(rows[0]?.revokedAt).toBeUndefined()
-  })
-
-  it("resuming a paused device clears the deny-list entry", async () => {
-    const user = userEvent.setup()
-    const now = Date.now()
-    await addPairedDevice({
-      deviceId: "dev-resume",
-      label: "Phone",
-      platform: "ios",
-      pubkey: "k",
-      appVersion: "0.1.0",
-      nowMs: now - 60_000,
-    })
-    // Put the row in the paused state up-front so the Resume button renders.
-    const db = getDb()
-    await db.table("pairedDevices").update("dev-resume", { pausedAt: now })
-
-    const unrevokeIds: string[] = []
-    callSpy.mockImplementation(async (name: string, args?: unknown) => {
-      if (name === "companion_server_status") return STATUS_STOPPED
-      if (name === "companion_unrevoke_device") {
-        unrevokeIds.push((args as { deviceId: string }).deviceId)
-        return undefined as unknown as never
-      }
-      return undefined as unknown as never
-    })
-
-    render(<CompanionSection />)
-    const resumeBtn = await screen.findByRole("button", { name: /Resume Phone/i })
-    await user.click(resumeBtn)
-
-    await waitFor(() => {
-      expect(unrevokeIds).toEqual(["dev-resume"])
-    })
-    const rows = await listPairedDevices()
-    expect(rows[0]?.pausedAt).toBeUndefined()
-  })
-
-  it("renders 'No devices paired yet' empty state when the table is empty", async () => {
-    render(<CompanionSection />)
-    expect(await screen.findByText(/No devices paired yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/2 devices are paired/i)).toBeInTheDocument()
+    expect(screen.queryByText("Max's iPhone")).not.toBeInTheDocument()
   })
 
   it("shows a LAN HTTPS notice when running with bindMode=lan", async () => {

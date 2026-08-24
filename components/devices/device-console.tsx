@@ -16,7 +16,7 @@
 import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { RefreshCwIcon, ServerIcon, SmartphoneIcon } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
@@ -31,6 +31,7 @@ import { DeviceListPane } from "./device-list-pane"
 export function DeviceConsole() {
   const t = useTranslations("devices")
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { rows, summary, hostUnreachable, refresh } = useDeviceRows()
   const actions = useDeviceGrantActions(refresh)
 
@@ -45,14 +46,28 @@ export function DeviceConsole() {
 
   const selected = rows.find((row) => row.ref === selectedRef) ?? null
 
+  // A `?device=<ref>` deep link wins over whatever was last selected — it is
+  // what ⌘K and the Settings entry points hand us, and landing on the previous
+  // selection instead would silently ignore the thing the user asked for.
+  const deepLinkRef = searchParams.get("device")
+
+  useEffect(() => {
+    if (!deepLinkRef || deepLinkRef === selectedRef) return
+    if (rows.some((row) => row.ref === deepLinkRef)) select(deepLinkRef)
+  }, [deepLinkRef, rows, select, selectedRef])
+
   // Fall back to this machine whenever the selection points at nothing — on
   // first open, and also after a device is revoked and disappears from the
   // list, which would otherwise leave the pane empty with no explanation.
   useEffect(() => {
     if (selected || rows.length === 0) return
+    // A deep link that names a device we do not have yet must not be stomped
+    // on: the rows may still be loading, and selecting the local device would
+    // make the link look broken.
+    if (deepLinkRef && rows.some((row) => row.ref === deepLinkRef)) return
     const local = rows.find((row) => row.isSelf)
     if (local) select(local.ref)
-  }, [rows, select, selected])
+  }, [deepLinkRef, rows, select, selected])
 
   return (
     <FeaturePageShell

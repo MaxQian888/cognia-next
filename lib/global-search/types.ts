@@ -45,6 +45,8 @@ export type GlobalSearchKind =
   /** A package for the Pi coding agent (ADR-0119), not a Cognia plugin. */
   | "pi-package"
   | "issue"
+  /** A paired device, remote host or execution worker (`/devices`). */
+  | "device"
 
 /** The scope tabs across the top of the dialog. */
 export type GlobalSearchScope =
@@ -87,6 +89,7 @@ export const KIND_SCOPES: Readonly<Record<GlobalSearchKind, readonly GlobalSearc
   "workbench-panel": ["commands"],
   "pi-package": ["library"],
   issue: ["library"],
+  device: ["library"],
 }
 
 /**
@@ -118,6 +121,7 @@ export const KIND_PRIORITY: Readonly<Record<GlobalSearchKind, number>> = {
   // should never outrank the user's own workflows, skills or plugins.
   "pi-package": 19,
   issue: 20,
+  device: 21,
 }
 
 /** What the dialog does when an item is chosen. */

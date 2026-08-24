@@ -25,7 +25,11 @@ jest.mock("@/hooks/devices/use-device-grant-actions", () => ({
   useDeviceGrantActions: () => ({}),
 }))
 
-jest.mock("next/navigation", () => ({ useRouter: () => ({ push: jest.fn() }) }))
+let searchParams = new URLSearchParams()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  useSearchParams: () => searchParams,
+}))
 
 jest.mock("./device-detail", () => ({
   DeviceDetail: ({ row }: { row: DeviceRow | null }) => (
@@ -75,6 +79,7 @@ const initial = useDeviceConsoleStore.getState()
 beforeEach(() => {
   useDeviceConsoleStore.setState(initial, true)
   rows = [LOCAL, row()]
+  searchParams = new URLSearchParams()
   hostUnreachable = false
   jest.clearAllMocks()
 })
@@ -108,6 +113,24 @@ describe("DeviceConsole", () => {
     useDeviceConsoleStore.getState().select("device:a")
     renderConsole()
     expect(screen.getByTestId("detail")).toHaveTextContent("device:a")
+  })
+
+  /**
+   * The deep link is what ⌘K and the Settings entry points hand us; landing on
+   * the previous selection instead would silently ignore what was asked for.
+   */
+  it("honours a ?device= deep link over the stored selection", () => {
+    useDeviceConsoleStore.getState().select("local")
+    searchParams = new URLSearchParams("device=device:a")
+    renderConsole()
+    expect(screen.getByTestId("detail")).toHaveTextContent("device:a")
+  })
+
+  it("waits rather than stomping a deep link for a device that has not loaded", () => {
+    searchParams = new URLSearchParams("device=device:not-yet")
+    rows = []
+    renderConsole()
+    expect(screen.getByTestId("detail")).toHaveTextContent("none")
   })
 
   it("reports how much of the fleet is online", () => {

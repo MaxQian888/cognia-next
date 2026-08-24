@@ -7681,6 +7681,7 @@
       "a2ui": "Mini-Apps",
       "agentRuns": "Agent runs",
       "aliases": {
+        "devices": "Paired devices, remote hosts, phones, fleet, pairing, sandbox, workers",
         "logs": "Observability, tracing, traces, telemetry, spans, dashboard, cost"
       },
       "auxiliaryGroup": "Profile and logs",
@@ -7707,6 +7708,7 @@
         "sideRight": "Right",
         "title": "Customize sidebar"
       },
+      "devices": "Devices",
       "directMessages": "Chats",
       "discover": "Discover",
       "eval": "Evaluation",
@@ -8330,6 +8332,20 @@
       "partial": "Partial",
       "unknown": "Unknown"
     },
+    "host": {
+      "cancel": "Cancel",
+      "connect": "Connect",
+      "controls": "Host controls",
+      "controlsHint": "Connecting makes this host the execution target for this window. Adding and discovering hosts stays in Settings.",
+      "disconnect": "Disconnect",
+      "remove": "Remove",
+      "removeAria": "Remove {label}",
+      "removeBody": "{label} will be forgotten, along with its stored credential. Pair with it again to reconnect.",
+      "removeTitle": "Remove this host?",
+      "rename": "Rename",
+      "renameLabel": "Host name",
+      "save": "Save"
+    },
     "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
     "hostUnreachableTitle": "Showing the local record",
     "kind": {
@@ -8417,6 +8433,13 @@
       "workspaces": "Workspace environments",
       "workspacesInactiveTitle": "Not the current routing target",
       "workspacesUnsupportedTitle": "No workspaces here"
+    },
+    "settingsLink": {
+      "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Connecting, renaming and removing are managed in the device console.",
+      "hostsTitle": "Remote hosts",
+      "open": "Open device console",
+      "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
+      "pairedTitle": "Paired devices"
     },
     "summary": "{online} of {total} online",
     "title": "Devices"
@@ -15607,6 +15630,7 @@
     "home": {
       "actions": {
         "agentTeams": "Agent teams",
+        "devices": "Devices",
         "discover": "Discover",
         "fleet": "Agent fleet",
         "inbox": "Inbox",
