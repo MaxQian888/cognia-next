@@ -35,7 +35,24 @@ export type PlacementCandidateKind =
  * vocabulary nobody owns, so the requirement carries a discriminant instead
  * and each source matches only the dimension it understands.
  */
-export type PlacementDimension = "platform" | "agent" | "sandbox" | "workspace" | "credential"
+export type PlacementDimension =
+  | "platform"
+  | "agent"
+  | "sandbox"
+  | "workspace"
+  | "credential"
+  /**
+   * A versioned operation contract a Host advertises (`HostFeatureId`).
+   *
+   * Its own value space for the same reason `platform` and `agent` are: the
+   * ids are minted by `lib/platform/host-feature-manifest.ts` and carry a
+   * version and an operation list, so a Host `workflow.execution` is not a
+   * platform capability and must not satisfy one. Callers that previously
+   * filtered hosts by reading `featureManifest.features[...]` directly can
+   * express the same requirement here and get a typed `PlacementReason` back
+   * instead of silently dropping the candidate from a list.
+   */
+  | "host-feature"
 
 export interface PlacementRequirement {
   dimension: PlacementDimension
