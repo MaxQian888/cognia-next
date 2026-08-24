@@ -79,6 +79,197 @@ pub async fn clone_repo(remote_url: &str, destination: &str) -> Result<String> {
         })
 }
 
+/// Hosts a guarded clone will fetch from when the caller names none.
+///
+/// An allow-list rather than a block-list: a plugin handing this an arbitrary
+/// URL would otherwise be a request-forgery primitive reaching whatever the
+/// desktop can route to, including a link-local metadata service.
+pub const DEFAULT_CLONE_HOSTS: &[&str] = &["github.com", "gitlab.com", "bitbucket.org"];
+
+/// Guard rails for [`clone_repo_guarded`]. Every field has a default; a caller
+/// may tighten but the host floor (scheme, credentials, allow-list) always
+/// applies.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CloneGuards {
+    /// Extra hosts beyond [`DEFAULT_CLONE_HOSTS`].
+    pub allowed_hosts: Vec<String>,
+    /// `--depth`; `0` clones full history. Default 1.
+    pub depth: Option<u32>,
+    /// Reject (and delete) a checkout larger than this. Default 500 MiB.
+    pub max_size_mb: Option<u64>,
+    /// Wall-clock budget for the clone. Default 120s.
+    pub timeout_secs: Option<u64>,
+}
+
+const CLONE_DEFAULT_DEPTH: u32 = 1;
+const CLONE_DEFAULT_MAX_SIZE_MB: u64 = 500;
+const CLONE_DEFAULT_TIMEOUT_SECS: u64 = 120;
+
+/// Validate a clone URL against the host floor.
+///
+/// Pure so the policy is testable without a network or a git binary. Returns
+/// the parsed host on success.
+pub fn validate_clone_url(remote_url: &str, extra_hosts: &[String]) -> Result<String> {
+    let url = remote_url.trim();
+    if url.is_empty() {
+        return Err(GitError::InvalidArgument("empty clone URL".into()));
+    }
+    if url.starts_with('-') {
+        return Err(GitError::InvalidArgument(
+            "clone URL may not begin with '-'".into(),
+        ));
+    }
+    let rest = url.strip_prefix("https://").ok_or_else(|| {
+        GitError::InvalidArgument(
+            format!(
+                "only https:// clone URLs are allowed, got: {}",
+                exec::redact(url)
+            )
+            .into(),
+        )
+    })?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() {
+        return Err(GitError::InvalidArgument("clone URL has no host".into()));
+    }
+    if authority.contains('@') {
+        // Credentials in the URL would be written into the checkout's remote
+        // and read back by anything that can run `git remote -v` inside it.
+        return Err(GitError::InvalidArgument(
+            "clone URL may not embed credentials".into(),
+        ));
+    }
+    let host = authority
+        .split(':')
+        .next()
+        .unwrap_or(authority)
+        .to_ascii_lowercase();
+    let allowed = DEFAULT_CLONE_HOSTS.iter().any(|h| *h == host)
+        || extra_hosts.iter().any(|h| h.to_ascii_lowercase() == host);
+    if !allowed {
+        return Err(GitError::InvalidArgument(
+            format!("clone host not allowed: {host}").into(),
+        ));
+    }
+    Ok(host)
+}
+
+/// Total byte size of a directory tree, following no symlinks.
+fn dir_size_bytes(root: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+/// Clone with guard rails: https-only, host allow-list, no embedded
+/// credentials, shallow by default, under a wall-clock budget, and bounded in
+/// size.
+///
+/// The size bound is a **post-condition**, not a pre-emptive limit: git offers
+/// no reliable "stop at N bytes", so an oversized repository is cloned, then
+/// detected and deleted. The shallow default keeps the usual case small. The
+/// bare [`clone_repo`] stays as-is for the Source Control panel, where the user
+/// typed the URL themselves.
+pub async fn clone_repo_guarded(
+    remote_url: &str,
+    destination: &str,
+    guards: &CloneGuards,
+) -> Result<String> {
+    validate_clone_url(remote_url, &guards.allowed_hosts)?;
+
+    let destination_path = std::path::PathBuf::from(destination);
+    if !destination_path.is_absolute() {
+        return Err(GitError::InvalidArgument(
+            "clone destination must be an absolute path".into(),
+        ));
+    }
+    let parent = destination_path.parent().ok_or_else(|| {
+        GitError::InvalidArgument(format!("clone destination has no parent: {destination}").into())
+    })?;
+    tokio::fs::create_dir_all(parent).await.map_err(|err| {
+        GitError::CommandFailed(format!("create clone parent {}: {err}", parent.display()).into())
+    })?;
+
+    let depth = guards.depth.unwrap_or(CLONE_DEFAULT_DEPTH);
+    let mut args = vec!["clone".to_string()];
+    if depth > 0 {
+        args.push("--depth".to_string());
+        args.push(depth.to_string());
+        args.push("--single-branch".to_string());
+    }
+    args.push("--".to_string());
+    args.push(remote_url.trim().to_string());
+    args.push(destination_path.to_string_lossy().into_owned());
+
+    let budget = std::time::Duration::from_secs(
+        guards
+            .timeout_secs
+            .unwrap_or(CLONE_DEFAULT_TIMEOUT_SECS)
+            .max(1),
+    );
+    match tokio::time::timeout(budget, exec::run(parent, args)).await {
+        Ok(result) => result?,
+        Err(_) => {
+            // A half-written checkout is worse than none: the next call would
+            // find a directory that looks cloned and is not.
+            let _ = tokio::fs::remove_dir_all(&destination_path).await;
+            return Err(GitError::CommandFailed(
+                format!("clone timed out after {}s", budget.as_secs()).into(),
+            ));
+        }
+    }
+
+    let max_bytes = guards
+        .max_size_mb
+        .unwrap_or(CLONE_DEFAULT_MAX_SIZE_MB)
+        .saturating_mul(1024 * 1024);
+    let cloned = destination_path.clone();
+    let size = tokio::task::spawn_blocking(move || dir_size_bytes(&cloned))
+        .await
+        .unwrap_or(0);
+    if max_bytes > 0 && size > max_bytes {
+        let _ = tokio::fs::remove_dir_all(&destination_path).await;
+        return Err(GitError::InvalidArgument(
+            format!(
+                "cloned repository is {} MiB, over the {} MiB limit",
+                size / (1024 * 1024),
+                max_bytes / (1024 * 1024)
+            )
+            .into(),
+        ));
+    }
+
+    tokio::fs::canonicalize(&destination_path)
+        .await
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|err| {
+            GitError::CommandFailed(
+                format!(
+                    "canonicalize cloned repository {}: {err}",
+                    destination_path.display()
+                )
+                .into(),
+            )
+        })
+}
+
 /// Resolve the effective commit identity for this repository (local config
 /// first, then the user's inherited/global Git configuration).
 pub fn identity(repo_path: &str) -> Result<GitIdentity> {
@@ -180,6 +371,69 @@ pub async fn ignore_add(repo_path: &str, pattern: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clone_url_floor_rejects_everything_that_is_not_a_plain_https_allowlisted_url() {
+        let none: Vec<String> = Vec::new();
+
+        assert_eq!(
+            validate_clone_url("https://github.com/owner/repo.git", &none).unwrap(),
+            "github.com"
+        );
+        assert_eq!(
+            validate_clone_url("https://GitLab.com/owner/repo", &none).unwrap(),
+            "gitlab.com"
+        );
+
+        // Non-https transports would reach the SSH agent or the local disk.
+        for url in [
+            "git@github.com:owner/repo.git",
+            "ssh://git@github.com/owner/repo.git",
+            "http://github.com/owner/repo.git",
+            "file:///etc/passwd",
+            "/tmp/local/repo",
+        ] {
+            assert!(
+                validate_clone_url(url, &none).is_err(),
+                "{url} must be refused"
+            );
+        }
+
+        // A URL beginning with '-' would be read by git as an option.
+        assert!(validate_clone_url("--upload-pack=touch /tmp/x", &none).is_err());
+
+        // Credentials in the URL end up in the checkout's remote config.
+        assert!(validate_clone_url("https://user:pw@github.com/o/r.git", &none).is_err());
+
+        // Anything off the list, including a metadata service.
+        for url in [
+            "https://169.254.169.254/latest/meta-data/",
+            "https://localhost/repo.git",
+            "https://evil.example.com/o/r.git",
+        ] {
+            assert!(
+                validate_clone_url(url, &none).is_err(),
+                "{url} must be refused"
+            );
+        }
+
+        // A caller may widen the list, and only the host it named.
+        let extra = vec!["git.internal.example".to_string()];
+        assert_eq!(
+            validate_clone_url("https://git.internal.example/o/r.git", &extra).unwrap(),
+            "git.internal.example"
+        );
+        assert!(validate_clone_url("https://other.example/o/r.git", &extra).is_err());
+    }
+
+    #[test]
+    fn clone_url_floor_keeps_the_port_out_of_the_host_comparison() {
+        let extra = vec!["git.internal.example".to_string()];
+        assert_eq!(
+            validate_clone_url("https://git.internal.example:8443/o/r.git", &extra).unwrap(),
+            "git.internal.example"
+        );
+    }
+
     use super::*;
     use git2::Repository;
     use std::fs;

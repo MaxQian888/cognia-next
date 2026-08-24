@@ -73,3 +73,38 @@ describe("createWorkspaceAPI", () => {
     expect(hasWorkspaceBackend("p:b")).toBe(false)
   })
 })
+
+describe("workspace consumer surface", () => {
+  beforeEach(() => {
+    __resetWorkspaceApiForTesting()
+    __resetWorkspaceBackendRegistryForTesting()
+  })
+
+  it("exposes every consumer method the contract advertises", () => {
+    // The contract marks `acquire` as returning a disposable handle, which is
+    // what forced `release` to exist: the generator refuses a `returned-handle`
+    // effect with no `disposeMethod`, and the first draft of this API had none.
+    const api = createWorkspaceAPI("p")
+    for (const method of ["acquire", "walk", "read", "changedSince", "release"] as const) {
+      expect(typeof api[method]).toBe("function")
+    }
+  })
+
+  it("refuses a local path when no workspace is open", async () => {
+    // The project store is unavailable under the node test env, so
+    // `openWorkspaceRoots` yields nothing — and the acquire path must fail
+    // closed rather than treating "unknown roots" as "any path allowed".
+    const api = createWorkspaceAPI("p")
+    await expect(api.acquire({ kind: "local-path", path: "/etc" })).rejects.toThrow(
+      /not inside a workspace the user has opened/
+    )
+    await expect(api.acquire({ kind: "current-project" })).rejects.toThrow(/no workspace is open/)
+  })
+
+  it("releasing a non-ephemeral handle never deletes the user's project", async () => {
+    const api = createWorkspaceAPI("p")
+    await expect(
+      api.release({ root: "/home/u/project", origin: "current-project", ephemeral: false })
+    ).resolves.toBe(false)
+  })
+})

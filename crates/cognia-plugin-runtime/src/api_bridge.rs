@@ -1684,6 +1684,105 @@ pub async fn plugin_api_batch_invoke(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Workspace acquisition — where a plugin's checkouts live
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One path segment of a repository cache key (`github.com`, `owner`, `repo`).
+///
+/// Sanitized here rather than by the caller: a plugin that could pick the
+/// destination could steer a clone anywhere the desktop can write, and `..`
+/// through a host name is the obvious first attempt.
+fn sanitize_repo_segment(raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return Err(PluginError::InvalidArgument(format!(
+            "invalid repository path segment: {raw:?}"
+        )));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(PluginError::InvalidArgument(format!(
+            "repository path segment has unsupported characters: {raw:?}"
+        )));
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
+pub fn plugin_workspace_repo_dir_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    segments: &[String],
+) -> Result<String> {
+    if segments.is_empty() {
+        return Err(PluginError::InvalidArgument(
+            "a repository cache path needs at least one segment".into(),
+        ));
+    }
+    let mut relative = String::from("repos");
+    for segment in segments {
+        relative.push('/');
+        relative.push_str(&sanitize_repo_segment(segment)?);
+    }
+    let resolved = resolve_scoped(state, plugin_id, &relative)
+        .map_err(|error| PluginError::InvalidArgument(error.message))?;
+    if let Some(parent) = resolved.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            PluginError::Internal(format!(
+                "create repository cache parent {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    Ok(resolved.to_string_lossy().into_owned())
+}
+
+pub fn plugin_workspace_repo_remove_for_state(
+    state: &PluginRuntimeState,
+    plugin_id: &str,
+    segments: &[String],
+) -> Result<bool> {
+    let path = plugin_workspace_repo_dir_for_state(state, plugin_id, segments)?;
+    match std::fs::remove_dir_all(&path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(PluginError::Internal(format!(
+            "remove repository cache {path}: {error}"
+        ))),
+    }
+}
+
+/// Delete a plugin's checkout of one repository.
+///
+/// Resolves through the same containment as
+/// [`plugin_workspace_repo_dir`], so a plugin cannot aim the delete anywhere
+/// but its own cache. `Ok(false)` means there was nothing there — releasing
+/// twice is not an error.
+#[tauri::command]
+pub fn plugin_workspace_repo_remove(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    segments: Vec<String>,
+) -> Result<bool> {
+    plugin_workspace_repo_remove_for_state(&state, &plugin_id, &segments)
+}
+
+/// Absolute path a plugin's checkout of one repository belongs at.
+///
+/// Under the plugin's own data directory, so uninstalling it reclaims the
+/// disk, and so one plugin cannot read another's checkouts. The directory
+/// itself is not created — `git clone` wants to make it — but its parent is.
+#[tauri::command]
+pub fn plugin_workspace_repo_dir(
+    state: State<'_, PluginRuntimeState>,
+    plugin_id: String,
+    segments: Vec<String>,
+) -> Result<String> {
+    plugin_workspace_repo_dir_for_state(&state, &plugin_id, &segments)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Capability advertisement — backs transport.ts:getPluginCapabilities()
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2699,5 +2798,54 @@ mod tests {
         assert!(!supported("clipboard:readText"));
         assert!(!supported("window:minimize"));
         assert!(!supported("shell:open"));
+    }
+
+    #[test]
+    fn repo_cache_dir_is_confined_to_the_plugin_and_rejects_traversal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        let base = state.plugin_dir("demo").join("data");
+        std::fs::create_dir_all(&base).unwrap();
+
+        let path = plugin_workspace_repo_dir_for_state(
+            &state,
+            "demo",
+            &["GitHub.com".into(), "Owner".into(), "Repo".into()],
+        )
+        .unwrap();
+        // Case-folded so two spellings of one remote share a checkout.
+        assert!(path.ends_with("repos/github.com/owner/repo"), "{path}");
+        assert!(
+            path.starts_with(&base.to_string_lossy().to_string()),
+            "{path}"
+        );
+        // The parent exists so `git clone` can create the leaf itself.
+        assert!(std::path::Path::new(&path).parent().unwrap().is_dir());
+
+        // A plugin picking the destination is the whole risk; every escape
+        // shape is refused rather than sanitized into something surprising.
+        for bad in ["..", ".", "", "a/b", "a\\b", "own er", "o;wner", "$(id)"] {
+            assert!(
+                plugin_workspace_repo_dir_for_state(&state, "demo", &[bad.into()]).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        assert!(plugin_workspace_repo_dir_for_state(&state, "demo", &[]).is_err());
+    }
+
+    #[test]
+    fn repo_cache_dirs_do_not_collide_across_plugins() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PluginRuntimeState::new(tmp.path().to_path_buf());
+        for id in ["one", "two"] {
+            std::fs::create_dir_all(state.plugin_dir(id).join("data")).unwrap();
+        }
+        let segments = vec!["github.com".to_string(), "o".to_string(), "r".to_string()];
+        let first = plugin_workspace_repo_dir_for_state(&state, "one", &segments).unwrap();
+        let second = plugin_workspace_repo_dir_for_state(&state, "two", &segments).unwrap();
+        assert_ne!(
+            first, second,
+            "one plugin must not read another's checkouts"
+        );
     }
 }

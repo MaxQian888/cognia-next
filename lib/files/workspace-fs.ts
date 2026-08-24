@@ -50,6 +50,62 @@ export async function listWorkspaceDir(
   return raw.map(fromRawWorkspaceEntry)
 }
 
+/** What a recursive walk found, and what it withheld. */
+export interface WorkspaceWalkResult {
+  entries: WorkspaceEntry[]
+  /** A cap stopped the walk before the tree was exhausted. */
+  truncated: boolean
+  /** Files refused by the host's sensitive-name floor (`.env`, `id_rsa`, …). */
+  skippedSensitive: number
+}
+
+export interface WorkspaceWalkOptions {
+  relPath?: string
+  includeIgnored?: boolean
+  /** Include directories as well as files. Default: files only. */
+  includeDirs?: boolean
+  /** Entry cap. Default 5 000, hard ceiling 50 000. */
+  maxEntries?: number
+  /** Directory depth. Default 24. */
+  maxDepth?: number
+}
+
+/**
+ * Recursively enumerate a workspace, honouring `.gitignore`.
+ *
+ * The counterpart to {@link listWorkspaceDir}, which is depth-1 on purpose for
+ * the file tree's lazy expansion. Use this when a consumer needs the whole
+ * repository — before it existed, the only recursive walker was
+ * `searchWorkspace`, capped at 200 hits.
+ *
+ * Caps are reported rather than silent: check `truncated` before treating the
+ * result as the repository's full contents. `skippedSensitive` counts files the
+ * host refused outright; that floor cannot be disabled, including by
+ * `includeIgnored`.
+ */
+export async function walkWorkspace(
+  root: string,
+  options: WorkspaceWalkOptions = {}
+): Promise<WorkspaceWalkResult> {
+  const raw = await transport.call<{
+    entries: RawWorkspaceEntry[]
+    truncated: boolean
+    skippedSensitive: number
+  }>("fs_walk_workspace", {
+    root,
+    relPath: options.relPath,
+    includeIgnored: options.includeIgnored,
+    includeDirs: options.includeDirs,
+    maxEntries: options.maxEntries,
+    maxDepth: options.maxDepth,
+  })
+  return {
+    entries: raw.entries.map(fromRawWorkspaceEntry),
+    truncated: raw.truncated,
+    skippedSensitive: raw.skippedSensitive,
+  }
+}
+
 /**
  * Metadata for a single workspace path. Returns `{ exists: false }` (never
  * throws) when the path is absent, so callers can probe before a create/rename.

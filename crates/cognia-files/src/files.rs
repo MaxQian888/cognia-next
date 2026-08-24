@@ -964,6 +964,159 @@ pub fn fs_list_workspace_dir(
     Ok(out)
 }
 
+/// Result of a recursive workspace walk.
+///
+/// Carries what was *withheld* alongside what was found: a caller that cannot
+/// tell "the repo has 900 files" from "the walk stopped at 900" will report the
+/// second as the first, and the missing files never surface as a question.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWalk {
+    pub entries: Vec<WorkspaceEntry>,
+    /// True when a cap stopped the walk before the tree was exhausted.
+    pub truncated: bool,
+    /// Files refused by the sensitive-name floor. Never zero silently: a
+    /// scanner that skips `.env` should be able to say so.
+    pub skipped_sensitive: usize,
+}
+
+/// Files never returned by a workspace walk, whatever the caller asks for.
+///
+/// Enforced host-side rather than left to each plugin: a scanner that forgets
+/// this hands the user's credentials to whatever it feeds. `.env.example` is
+/// the documented exception — it is a template by convention and carries no
+/// secret. Derived from RepoWiki's scanner, which had the same list in Python.
+const SENSITIVE_FILE_NAMES: &[&str] = &[
+    ".env",
+    ".envrc",
+    ".netrc",
+    ".npmrc",
+    ".pgpass",
+    ".pypirc",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+];
+
+/// Whether a file name is refused by the sensitive-name floor.
+pub fn is_sensitive_workspace_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if SENSITIVE_FILE_NAMES.contains(&lower.as_str()) {
+        return true;
+    }
+    // `.env.production`, `.env.local`, … but not `.env.example`/`.env.sample`.
+    if let Some(suffix) = lower.strip_prefix(".env.") {
+        return !matches!(suffix, "example" | "sample" | "template" | "dist");
+    }
+    // Private keys keep their base name and gain an extension.
+    if let Some((base, ext)) = lower.rsplit_once('.') {
+        if matches!(ext, "pem" | "key" | "p12" | "pfx") {
+            return true;
+        }
+        if SENSITIVE_FILE_NAMES.contains(&base) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Default and hard ceilings for one walk.
+const WALK_DEFAULT_MAX_ENTRIES: usize = 5_000;
+const WALK_HARD_MAX_ENTRIES: usize = 50_000;
+const WALK_DEFAULT_MAX_DEPTH: usize = 24;
+
+/// Recursively enumerate `root`/`rel_path`, honouring the standard ignore set.
+///
+/// The non-recursive [`fs_list_workspace_dir`] exists for the file-tree
+/// browser's lazy expansion and must stay depth-1; this is the separate
+/// primitive a whole-repository consumer needs. Before it existed there was no
+/// command in the app that could list a repository's un-ignored files: the
+/// tree browser is one level deep and `fs_search_workspace` stops at 200 hits.
+///
+/// Caps are reported, never silent — see [`WorkspaceWalk`].
+#[tauri::command]
+pub fn fs_walk_workspace(
+    root: String,
+    rel_path: Option<String>,
+    include_ignored: Option<bool>,
+    include_dirs: Option<bool>,
+    max_entries: Option<usize>,
+    max_depth: Option<usize>,
+) -> Result<WorkspaceWalk, String> {
+    let rel = rel_path.unwrap_or_default();
+    let (root_path, dir) = resolve_workspace_target(&root, &rel, true)?;
+    if !dir.is_dir() {
+        return Err(format!("not a directory: {}", dir.display()));
+    }
+    let respect_ignore = !include_ignored.unwrap_or(false);
+    let want_dirs = include_dirs.unwrap_or(false);
+    let cap = max_entries
+        .unwrap_or(WALK_DEFAULT_MAX_ENTRIES)
+        .clamp(1, WALK_HARD_MAX_ENTRIES);
+    let depth = max_depth.unwrap_or(WALK_DEFAULT_MAX_DEPTH).max(1);
+
+    let walker = WalkBuilder::new(&dir)
+        .hidden(false)
+        .git_ignore(respect_ignore)
+        .git_exclude(respect_ignore)
+        .git_global(respect_ignore)
+        .ignore(respect_ignore)
+        .parents(respect_ignore)
+        .require_git(false)
+        .follow_links(false)
+        .max_depth(Some(depth))
+        .build();
+
+    let mut entries: Vec<WorkspaceEntry> = Vec::new();
+    let mut truncated = false;
+    let mut skipped_sensitive = 0usize;
+
+    for dent in walker.flatten() {
+        if dent.depth() == 0 {
+            continue; // the starting directory itself
+        }
+        let is_dir = dent.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let path = dent.path();
+        if !is_dir {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if name.as_deref().is_some_and(is_sensitive_workspace_file) {
+                skipped_sensitive += 1;
+                continue;
+            }
+        }
+        if is_dir && !want_dirs {
+            continue;
+        }
+        if entries.len() >= cap {
+            truncated = true;
+            break;
+        }
+        let rel_to_root = match path.strip_prefix(&root_path) {
+            Ok(r) => r.to_string_lossy().replace('\\', "/"),
+            Err(_) => continue,
+        };
+        let meta = dent.metadata().ok();
+        entries.push(WorkspaceEntry {
+            rel_path: rel_to_root,
+            absolute_path: path.to_string_lossy().to_string(),
+            is_dir,
+            size: if is_dir {
+                0
+            } else {
+                meta.as_ref().map(|m| m.len()).unwrap_or(0)
+            },
+            mtime_ms: meta.as_ref().and_then(mtime_ms_of),
+        });
+    }
+    sort_dir_listing(&mut entries);
+    Ok(WorkspaceWalk {
+        entries,
+        truncated,
+        skipped_sensitive,
+    })
+}
+
 /// Metadata for a single workspace path (`root`/`rel_path`). Returns
 /// `exists: false` (never an error) when the path is absent, so a client can
 /// probe before a create/rename. Sandbox-checked against `root`; a `rel_path`
@@ -2142,6 +2295,187 @@ mod tests {
         assert_eq!(file.size, 5);
         assert!(file.mtime_ms.is_some());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn walk_workspace_recurses_where_the_tree_browser_stops() {
+        let root = make_sandbox("walk-deep");
+        std::fs::create_dir_all(root.join("a").join("b").join("c")).unwrap();
+        std::fs::write(root.join("a").join("b").join("c").join("deep.txt"), "x").unwrap();
+        std::fs::write(root.join("top.txt"), "xx").unwrap();
+
+        let walk = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let names: Vec<_> = walk.entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(names.iter().any(|n| n == "a/b/c/deep.txt"), "{names:?}");
+        assert!(names.iter().any(|n| n == "top.txt"), "{names:?}");
+        // Files only unless directories are asked for.
+        assert!(!names.iter().any(|n| n == "a"), "{names:?}");
+        assert!(!walk.truncated);
+        assert_eq!(walk.skipped_sensitive, 0);
+
+        let with_dirs = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(with_dirs
+            .entries
+            .iter()
+            .any(|e| e.rel_path == "a" && e.is_dir));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn walk_workspace_refuses_secrets_and_says_how_many() {
+        let root = make_sandbox("walk-secrets");
+        std::fs::write(root.join(".env"), "TOKEN=1").unwrap();
+        std::fs::write(root.join(".env.production"), "TOKEN=2").unwrap();
+        std::fs::write(root.join(".env.example"), "TOKEN=").unwrap();
+        std::fs::create_dir_all(root.join(".ssh")).unwrap();
+        std::fs::write(root.join(".ssh").join("id_rsa"), "key").unwrap();
+        std::fs::write(root.join("main.rs"), "fn main() {}").unwrap();
+
+        // `include_ignored` must not become a way around the floor.
+        for include_ignored in [None, Some(true)] {
+            let walk = fs_walk_workspace(
+                root.to_string_lossy().to_string(),
+                None,
+                include_ignored,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            let names: Vec<_> = walk.entries.iter().map(|e| e.rel_path.clone()).collect();
+            assert!(names.iter().any(|n| n == "main.rs"), "{names:?}");
+            assert!(
+                names.iter().any(|n| n == ".env.example"),
+                "a template carries no secret: {names:?}"
+            );
+            for refused in [".env", ".env.production", ".ssh/id_rsa"] {
+                assert!(
+                    !names.iter().any(|n| n == refused),
+                    "{refused} leaked: {names:?}"
+                );
+            }
+            assert_eq!(
+                walk.skipped_sensitive, 3,
+                "caller must learn files were withheld"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn walk_workspace_reports_truncation_rather_than_lying_about_the_tree() {
+        let root = make_sandbox("walk-cap");
+        for index in 0..10 {
+            std::fs::write(root.join(format!("f{index}.txt")), "x").unwrap();
+        }
+        let walk = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            Some(4),
+            None,
+        )
+        .unwrap();
+        assert_eq!(walk.entries.len(), 4);
+        assert!(walk.truncated, "a capped walk must say so");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn walk_workspace_honours_gitignore_and_max_depth() {
+        let root = make_sandbox("walk-ignore");
+        std::fs::write(root.join(".gitignore"), "node_modules/\n").unwrap();
+        std::fs::create_dir_all(root.join("node_modules").join("pkg")).unwrap();
+        std::fs::write(root.join("node_modules").join("pkg").join("index.js"), "x").unwrap();
+        std::fs::create_dir_all(root.join("src").join("deep")).unwrap();
+        std::fs::write(root.join("src").join("shallow.rs"), "x").unwrap();
+        std::fs::write(root.join("src").join("deep").join("deeper.rs"), "x").unwrap();
+
+        let walk = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let names: Vec<_> = walk.entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(
+            !names.iter().any(|n| n.starts_with("node_modules")),
+            "{names:?}"
+        );
+        assert!(names.iter().any(|n| n == "src/deep/deeper.rs"), "{names:?}");
+
+        let shallow = fs_walk_workspace(
+            root.to_string_lossy().to_string(),
+            None,
+            None,
+            None,
+            None,
+            Some(1),
+        )
+        .unwrap();
+        let shallow_names: Vec<_> = shallow.entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert!(
+            !shallow_names.iter().any(|n| n.contains('/')),
+            "{shallow_names:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sensitive_file_floor_covers_the_usual_shapes() {
+        for refused in [
+            ".env",
+            ".ENV",
+            ".env.local",
+            ".env.production",
+            ".npmrc",
+            ".netrc",
+            ".pypirc",
+            "id_rsa",
+            "id_ed25519",
+            "id_rsa.pem",
+            "server.key",
+            "cert.p12",
+        ] {
+            assert!(
+                is_sensitive_workspace_file(refused),
+                "{refused} must be refused"
+            );
+        }
+        for allowed in [
+            ".env.example",
+            ".env.sample",
+            ".env.template",
+            "environment.ts",
+            "keyboard.ts",
+            "main.rs",
+            "README.md",
+        ] {
+            assert!(
+                !is_sensitive_workspace_file(allowed),
+                "{allowed} must be allowed"
+            );
+        }
     }
 
     #[test]

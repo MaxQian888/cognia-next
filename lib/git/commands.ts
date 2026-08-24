@@ -725,6 +725,48 @@ export async function gitInit(path: string): Promise<void> {
 }
 
 /** Clone a remote repository and return the canonical cloned worktree path. */
+/** Guard rails for {@link gitCloneGuarded}. Every field has a host default. */
+export interface GitCloneGuards {
+  /** Hosts beyond github.com / gitlab.com / bitbucket.org. */
+  allowedHosts?: string[]
+  /** `--depth`; 0 clones full history. Default 1. */
+  depth?: number
+  /** Reject (and delete) a checkout above this size. Default 500. */
+  maxSizeMb?: number
+  /** Wall-clock budget. Default 120. */
+  timeoutSecs?: number
+}
+
+/**
+ * Clone under guard rails — https only, host allow-list, no embedded
+ * credentials, shallow, timed, size bounded.
+ *
+ * For callers that did not type the URL themselves (a plugin acquiring a
+ * repository to document). {@link gitClone} stays unguarded for the Source
+ * Control panel, where the user supplied the remote.
+ */
+export async function gitCloneGuarded(
+  remoteUrl: string,
+  destination: string,
+  guards?: GitCloneGuards
+): Promise<string> {
+  if (!hasGitBridge()) return ""
+  return transport.call<string>("git_clone_guarded", { remoteUrl, destination, guards })
+}
+
+/**
+ * Read a file as text at a revision. `null` means absent-at-that-ref or binary
+ * — an ordinary answer when diffing two revisions; an unresolvable ref throws.
+ */
+export async function gitReadBlobAtRef(
+  repoPath: string,
+  gitRef: string,
+  path: string
+): Promise<string | null> {
+  if (!hasGitBridge()) return null
+  return transport.call<string | null>("git_read_blob_at_ref", { repoPath, gitRef, path })
+}
+
 export async function gitClone(remoteUrl: string, destination: string): Promise<string> {
   if (!hasGitBridge()) return ""
   const cloned = await transport.call<string | { workspaceId: string; relativePath: string }>(

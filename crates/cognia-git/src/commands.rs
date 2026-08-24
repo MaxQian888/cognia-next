@@ -505,6 +505,39 @@ pub async fn git_clone(remote_url: String, destination: String) -> Result<String
     repo::clone_repo(&remote_url, &destination).await
 }
 
+/// Clone under guard rails (https-only, host allow-list, shallow, timed, size
+/// bounded) — the entry point for callers that did not type the URL, such as a
+/// plugin acquiring a repository to document. `git_clone` stays unguarded for
+/// the Source Control panel, where the user supplied the remote themselves.
+#[tauri::command]
+pub async fn git_clone_guarded(
+    remote_url: String,
+    destination: String,
+    guards: Option<repo::CloneGuards>,
+) -> Result<String, GitError> {
+    repo::clone_repo_guarded(&remote_url, &destination, &guards.unwrap_or_default()).await
+}
+
+/// Read `path` as text at `git_ref` (branch, tag or SHA).
+///
+/// `Ok(None)` distinguishes "absent or binary at that revision" from an error,
+/// which is the distinction a consumer needs: a file that did not exist yet at
+/// a base ref is normal, a bad ref is not. The underlying `read::blob_text` has
+/// existed since the crate was written and was never exposed as a command, so
+/// the only way to read a historical file was to abuse `git_diff_refs_file` and
+/// hope the file happened to differ.
+#[tauri::command]
+pub async fn git_read_blob_at_ref(
+    repo_path: String,
+    git_ref: String,
+    path: String,
+) -> Result<Option<String>, GitError> {
+    blocking("git_read_blob_at_ref", move || {
+        read::blob_text_at_ref(&repo_path, &git_ref, &path)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn git_identity(repo_path: String) -> Result<GitIdentity, GitError> {
     blocking("git_identity", move || repo::identity(&repo_path)).await

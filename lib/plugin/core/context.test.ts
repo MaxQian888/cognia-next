@@ -1986,7 +1986,7 @@ describe("python host-call parity (ADR-0143)", () => {
 
   it("opens at least the namespaces the reverse RPC channel was built for", () => {
     expect(pythonNamespaces.map((namespace) => namespace.id).sort()).toEqual(
-      ["agent", "fs", "git", "logger", "secrets", "storage", "ui"].sort()
+      ["agent", "fs", "git", "logger", "secrets", "storage", "ui", "workspace"].sort()
     )
   })
 

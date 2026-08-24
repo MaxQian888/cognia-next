@@ -10264,7 +10264,7 @@
       "type": "PluginWorkspaceAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.workspace",
@@ -10275,6 +10275,31 @@
       "errorPolicy": "preserve",
       "lifecycle": "plugin",
       "methods": [
+        {
+          "id": "workspace.acquire",
+          "name": "acquire",
+          "requiredPermissions": ["filesystem:read", "network:fetch"],
+          "consentTier": "none",
+          "risk": "high",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "returned-handle",
+            "disposeMethod": "release"
+          }
+        },
+        {
+          "id": "workspace.changedSince",
+          "name": "changedSince",
+          "requiredPermissions": ["git:read"],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
         {
           "id": "workspace.getBackend",
           "name": "getBackend",
@@ -10300,6 +10325,18 @@
           }
         },
         {
+          "id": "workspace.read",
+          "name": "read",
+          "requiredPermissions": ["filesystem:read"],
+          "consentTier": "none",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "workspace.registerBackend",
           "name": "registerBackend",
           "requiredPermissions": [],
@@ -10310,6 +10347,30 @@
           "resourceEffect": {
             "kind": "returned-handle",
             "disposeMethod": "unregister"
+          }
+        },
+        {
+          "id": "workspace.release",
+          "name": "release",
+          "requiredPermissions": ["filesystem:write"],
+          "consentTier": "none",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "workspace.walk",
+          "name": "walk",
+          "requiredPermissions": ["filesystem:read"],
+          "consentTier": "none",
+          "risk": "medium",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
           }
         }
       ]

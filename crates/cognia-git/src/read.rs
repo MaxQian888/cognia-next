@@ -199,6 +199,29 @@ pub fn head_blob_text(repo: &Repository, path: &str) -> Option<String> {
     blob_text(blob.content())
 }
 
+/// Text content of `path` at an arbitrary revision, or `None` when the file is
+/// absent there or binary.
+///
+/// The `None` case is deliberately not an error: a file that did not exist yet
+/// at a base ref is an ordinary answer for a consumer diffing two revisions,
+/// while an unresolvable ref is a real failure and stays one.
+pub fn blob_text_at_ref(repo_path: &str, git_ref: &str, path: &str) -> Result<Option<String>> {
+    let repo = open_repo(repo_path)?;
+    let object = repo.revparse_single(git_ref).map_err(|err| {
+        crate::error::GitError::NotFound(format!("unknown ref {git_ref}: {err}").into())
+    })?;
+    let tree = object.peel_to_tree().map_err(|err| {
+        crate::error::GitError::NotFound(format!("ref {git_ref} has no tree: {err}").into())
+    })?;
+    let Ok(entry) = tree.get_path(Path::new(path)) else {
+        return Ok(None);
+    };
+    let Ok(blob) = repo.find_blob(entry.id()) else {
+        return Ok(None);
+    };
+    Ok(blob_text(blob.content()))
+}
+
 /// Text content of `path` from the index (staged), or `None`.
 pub fn index_blob_text(repo: &Repository, path: &str) -> Option<String> {
     let index = repo.index().ok()?;
@@ -271,6 +294,51 @@ mod tests {
         let parents: Vec<&git2::Commit> = parent.iter().collect();
         repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
             .unwrap()
+    }
+
+    #[test]
+    fn blob_text_at_ref_reads_history_and_separates_absent_from_broken() {
+        let (tmp, repo) = init_repo();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("a.txt"), "first").unwrap();
+        let first = commit_all(&repo, "one");
+        fs::write(tmp.path().join("a.txt"), "second").unwrap();
+        fs::write(tmp.path().join("b.txt"), "added later").unwrap();
+        commit_all(&repo, "two");
+
+        // The historical revision, not the working tree.
+        assert_eq!(
+            blob_text_at_ref(&root, &first.to_string(), "a.txt").unwrap(),
+            Some("first".to_string())
+        );
+        assert_eq!(
+            blob_text_at_ref(&root, "HEAD", "a.txt").unwrap(),
+            Some("second".to_string())
+        );
+
+        // A file that did not exist yet is an ordinary answer...
+        assert_eq!(
+            blob_text_at_ref(&root, &first.to_string(), "b.txt").unwrap(),
+            None
+        );
+        assert_eq!(
+            blob_text_at_ref(&root, "HEAD", "missing.txt").unwrap(),
+            None
+        );
+        // ...while an unresolvable ref is a failure.
+        assert!(matches!(
+            blob_text_at_ref(&root, "no-such-ref", "a.txt"),
+            Err(GitError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn blob_text_at_ref_returns_none_for_binary_content() {
+        let (tmp, repo) = init_repo();
+        let root = tmp.path().to_string_lossy().to_string();
+        fs::write(tmp.path().join("bin.dat"), [0x00u8, 0x01, 0x02]).unwrap();
+        commit_all(&repo, "binary");
+        assert_eq!(blob_text_at_ref(&root, "HEAD", "bin.dat").unwrap(), None);
     }
 
     #[test]

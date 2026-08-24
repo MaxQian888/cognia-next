@@ -45,7 +45,7 @@ def test_namespaces_are_exactly_the_contracts_python_entries():
     assert set(PYTHON_HOST_NAMESPACES) == expected
     # Guards the direction that matters: someone dropping "python" from the
     # catalog silently removes a capability plugins already depend on.
-    assert expected >= {"agent", "storage", "secrets", "fs", "git", "ui", "logger"}
+    assert expected >= {"agent", "storage", "secrets", "fs", "git", "ui", "logger", "workspace"}
 
 
 def test_methods_are_exactly_the_contracts_methods():
@@ -70,10 +70,10 @@ def test_unknown_namespace_and_method_fail_fast_with_alternatives():
 
 
 def test_namespaces_the_contract_withholds_are_not_reachable():
-    # contextPanels/chat/workspace exist on the TS context but their consumer
-    # surfaces are not python-routable yet. The catalog says so; this proves
-    # the SDK honours it rather than exposing them optimistically.
-    for withheld in ("contextPanels", "chat", "workspace"):
+    # contextPanels and chat exist on the TS context but their python-routable
+    # surfaces do not exist yet. The catalog says so; this proves the SDK
+    # honours it rather than exposing them optimistically.
+    for withheld in ("contextPanels", "chat"):
         assert withheld not in PYTHON_HOST_NAMESPACES
         with pytest.raises(AttributeError):
             getattr(cognia.ctx, withheld)

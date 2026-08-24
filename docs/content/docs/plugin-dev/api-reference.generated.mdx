@@ -77,7 +77,7 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.webview` | 1 | None | frontend, hybrid | internal |
 | `ctx.window` | 4 | None | frontend, hybrid | internal |
 | `ctx.workflow` | 3 | None | frontend, hybrid | internal |
-| `ctx.workspace` | 3 | None | frontend, hybrid | internal |
+| `ctx.workspace` | 8 | `filesystem:read`, `network:fetch`, `git:read`, `filesystem:write` | frontend, hybrid, python | internal |
 
 ## Adapter error codes
 
@@ -1066,6 +1066,11 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
+| `workspace.acquire` | `filesystem:read`, `network:fetch` | high | No |
+| `workspace.changedSince` | `git:read` | low | Yes |
 | `workspace.getBackend` | None | low | Yes |
 | `workspace.listRegistered` | None | low | Yes |
+| `workspace.read` | `filesystem:read` | medium | Yes |
 | `workspace.registerBackend` | None | low | No |
+| `workspace.release` | `filesystem:write` | medium | Yes |
+| `workspace.walk` | `filesystem:read` | medium | Yes |

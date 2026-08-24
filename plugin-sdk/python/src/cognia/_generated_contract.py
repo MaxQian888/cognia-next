@@ -13910,6 +13910,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -13925,6 +13926,36 @@ API_NAMESPACE_CONTRACTS = [
         "errorPolicy": "preserve",
         "lifecycle": "plugin",
         "methods": [
+            {
+                "id": "workspace.acquire",
+                "name": "acquire",
+                "requiredPermissions": [
+                    "filesystem:read",
+                    "network:fetch",
+                ],
+                "consentTier": "none",
+                "risk": "high",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "returned-handle",
+                    "disposeMethod": "release",
+                },
+            },
+            {
+                "id": "workspace.changedSince",
+                "name": "changedSince",
+                "requiredPermissions": [
+                    "git:read",
+                ],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
             {
                 "id": "workspace.getBackend",
                 "name": "getBackend",
@@ -13950,6 +13981,20 @@ API_NAMESPACE_CONTRACTS = [
                 },
             },
             {
+                "id": "workspace.read",
+                "name": "read",
+                "requiredPermissions": [
+                    "filesystem:read",
+                ],
+                "consentTier": "none",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "workspace.registerBackend",
                 "name": "registerBackend",
                 "requiredPermissions": [],
@@ -13960,6 +14005,34 @@ API_NAMESPACE_CONTRACTS = [
                 "resourceEffect": {
                     "kind": "returned-handle",
                     "disposeMethod": "unregister",
+                },
+            },
+            {
+                "id": "workspace.release",
+                "name": "release",
+                "requiredPermissions": [
+                    "filesystem:write",
+                ],
+                "consentTier": "none",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "workspace.walk",
+                "name": "walk",
+                "requiredPermissions": [
+                    "filesystem:read",
+                ],
+                "consentTier": "none",
+                "risk": "medium",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
                 },
             },
         ],

@@ -1,0 +1,183 @@
+import {
+  WorkspaceAcquireError,
+  acquireWorkspace,
+  isInsideOpenRoot,
+  releaseWorkspace,
+  type AcquireDeps,
+} from "./acquire"
+
+function deps(overrides: Partial<AcquireDeps> = {}): AcquireDeps {
+  return {
+    openRoots: () => ["/home/u/project"],
+    repoCacheDir: async (segments) => `/plugins/demo/data/repos/${segments.join("/")}`,
+    removeRepoCache: async () => true,
+    clone: (async (_url: string, destination: string) => destination) as AcquireDeps["clone"],
+    ...overrides,
+  }
+}
+
+describe("isInsideOpenRoot", () => {
+  it("accepts the root itself and anything under it", () => {
+    expect(isInsideOpenRoot("/home/u/project", ["/home/u/project"])).toBe(true)
+    expect(isInsideOpenRoot("/home/u/project/src", ["/home/u/project"])).toBe(true)
+  })
+
+  it("does not treat a sibling with a shared prefix as inside", () => {
+    // The bug a naive startsWith would ship: /home/u/project-two is not in
+    // /home/u/project.
+    expect(isInsideOpenRoot("/home/u/project-two", ["/home/u/project"])).toBe(false)
+  })
+
+  it("ignores a trailing separator on either side", () => {
+    expect(isInsideOpenRoot("/home/u/project/", ["/home/u/project"])).toBe(true)
+    expect(isInsideOpenRoot("/home/u/project/src", ["/home/u/project/"])).toBe(true)
+  })
+
+  it("is false when nothing is open", () => {
+    expect(isInsideOpenRoot("/home/u/project", [])).toBe(false)
+  })
+})
+
+describe("acquireWorkspace", () => {
+  it("resolves the current project to its first open root", async () => {
+    const handle = await acquireWorkspace({ kind: "current-project" }, deps())
+    expect(handle).toEqual({
+      root: "/home/u/project",
+      origin: "current-project",
+      ephemeral: false,
+    })
+  })
+
+  it("refuses the current project when nothing is open", async () => {
+    await expect(
+      acquireWorkspace({ kind: "current-project" }, deps({ openRoots: () => [] }))
+    ).rejects.toThrow(/no workspace is open/)
+  })
+
+  it("accepts a local path inside an open root", async () => {
+    const handle = await acquireWorkspace(
+      { kind: "local-path", path: "/home/u/project/packages/api" },
+      deps()
+    )
+    expect(handle.origin).toBe("local-path")
+    expect(handle.ephemeral).toBe(false)
+  })
+
+  it("refuses a local path outside every open root", async () => {
+    // This is the filesystem escape ctx.fs and ctx.git both exist to prevent;
+    // acquire must not reopen it.
+    await expect(acquireWorkspace({ kind: "local-path", path: "/etc" }, deps())).rejects.toThrow(
+      WorkspaceAcquireError
+    )
+    await expect(
+      acquireWorkspace({ kind: "local-path", path: "/home/u/other" }, deps())
+    ).rejects.toThrow(/not inside a workspace the user has opened/)
+  })
+
+  it("clones a remote into the plugin's own cache, host first", async () => {
+    const seen: { url?: string; destination?: string } = {}
+    const handle = await acquireWorkspace(
+      { kind: "git-url", url: "https://github.com/pallets/flask.git" },
+      deps({
+        clone: (async (url: string, destination: string) => {
+          seen.url = url
+          seen.destination = destination
+          return destination
+        }) as AcquireDeps["clone"],
+      })
+    )
+    expect(seen.url).toBe("https://github.com/pallets/flask.git")
+    expect(seen.destination).toBe("/plugins/demo/data/repos/github.com/pallets/flask")
+    expect(handle).toMatchObject({
+      origin: "clone",
+      ephemeral: true,
+      remote: { host: "github.com", owner: "pallets", repo: "flask" },
+    })
+  })
+
+  it("carries an explicit ref onto the handle", async () => {
+    const handle = await acquireWorkspace(
+      { kind: "git-url", url: "https://github.com/o/r.git", ref: "v2" },
+      deps()
+    )
+    expect(handle.remote?.ref).toBe("v2")
+  })
+
+  it("forwards extra allowed hosts to the guarded clone", async () => {
+    let guards: unknown
+    await acquireWorkspace(
+      {
+        kind: "git-url",
+        url: "https://git.internal.example/o/r.git",
+        allowedHosts: ["git.internal.example"],
+      },
+      deps({
+        clone: (async (_url: string, destination: string, g: unknown) => {
+          guards = g
+          return destination
+        }) as unknown as AcquireDeps["clone"],
+      })
+    )
+    expect(guards).toEqual({ allowedHosts: ["git.internal.example"] })
+  })
+
+  it("routes an auto spec by what the user typed", async () => {
+    const remote = await acquireWorkspace({ kind: "auto", input: "pallets/flask" }, deps())
+    expect(remote.origin).toBe("clone")
+
+    const local = await acquireWorkspace({ kind: "auto", input: "/home/u/project" }, deps())
+    expect(local.origin).toBe("local-path")
+  })
+
+  it("refuses a git-url spec that names a path", async () => {
+    await expect(
+      acquireWorkspace({ kind: "git-url", url: "/home/u/project" }, deps())
+    ).rejects.toThrow(/is a path, not a remote/)
+  })
+
+  it("reports a missing git bridge instead of returning an empty root", async () => {
+    // gitCloneGuarded returns "" off-desktop; a handle rooted at "" would walk
+    // the process CWD.
+    await expect(
+      acquireWorkspace(
+        { kind: "git-url", url: "https://github.com/o/r.git" },
+        deps({ clone: (async () => "") as AcquireDeps["clone"] })
+      )
+    ).rejects.toThrow(/cloning is unavailable/)
+  })
+})
+
+describe("releaseWorkspace", () => {
+  it("deletes only the cache entry for the clone it was given", async () => {
+    const removed: string[][] = []
+    const handle = await acquireWorkspace(
+      { kind: "git-url", url: "https://github.com/pallets/flask.git" },
+      deps()
+    )
+    await expect(
+      releaseWorkspace(handle, {
+        removeRepoCache: async (segments) => {
+          removed.push(segments)
+          return true
+        },
+      })
+    ).resolves.toBe(true)
+    expect(removed).toEqual([["github.com", "pallets", "flask"]])
+  })
+
+  it("never deletes a checkout it did not create", async () => {
+    // Releasing a handle onto the user's own project must drop the reference,
+    // not the directory.
+    const removeRepoCache = jest.fn()
+    const handle = await acquireWorkspace({ kind: "current-project" }, deps())
+    await expect(releaseWorkspace(handle, { removeRepoCache })).resolves.toBe(false)
+    expect(removeRepoCache).not.toHaveBeenCalled()
+  })
+
+  it("reports false when the cache entry was already gone", async () => {
+    const handle = await acquireWorkspace({ kind: "auto", input: "o/r" }, deps())
+    await expect(releaseWorkspace(handle, { removeRepoCache: async () => false })).resolves.toBe(
+      false
+    )
+  })
+})
