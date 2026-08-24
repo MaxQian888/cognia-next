@@ -1,9 +1,10 @@
 import { buildReviewEvidence, MAX_REVIEW_DIFF_BYTES, type ReviewGitOps } from "./review-evidence"
 import type { GitDiff, GitFileChange, GitStatus } from "@/types/git"
-import type { WorktreeHandle } from "./workspace/allocator"
+import type { PromotionWorkspaceHandle } from "./workspace/promotion"
 
-const handle: WorktreeHandle = {
+const handle: PromotionWorkspaceHandle = {
   key: "t1",
+  logicalRootId: "app",
   runId: "run1",
   teammateName: "Coder",
   taskId: "t1",
@@ -46,8 +47,7 @@ function makeGit(over: Partial<ReviewGitOps> = {}): ReviewGitOps {
   }
 }
 
-/** The allocator's commit — required alongside a worktree, since only the
- *  allocator owns the handle. */
+/** The Registry promotion commit — required alongside a managed environment. */
 let commit: jest.Mock<Promise<string | null>, [unknown, string]>
 beforeEach(() => {
   commit = jest.fn<Promise<string | null>, [unknown, string]>(async () => "sha1")
@@ -226,7 +226,7 @@ describe("buildReviewEvidence — default git wiring", () => {
       taskId: "t1",
     })
     expect(ev.kind).toBe("text")
-    // It still asked the allocator to commit — the allocator, not this module,
+    // It still asked the Registry promotion controller to commit — this module
     // decides whether git is reachable.
     expect(commit).toHaveBeenCalled()
   })

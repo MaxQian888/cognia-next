@@ -38,16 +38,11 @@ import { applyTeammateTwinContext } from "./twin-context"
 import type { TeamRunContext } from "./team-run-context"
 import { isTaskReviewEnabled } from "./task-review-policy"
 import type { ClaimOptions } from "./teammate-pool"
-import type { WorktreeHandle } from "./workspace/allocator"
 import type { CaptureStreamEvent } from "@/lib/claude/run-and-capture"
 import type { AgentChildEnvironmentSession } from "../execution/local-tauri-environment"
 import { createTeammateProgressReporter } from "./teammate-progress-coalescer"
 import { agendaFingerprint, parseRateLimitCooldown } from "./nudge-guard"
-import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
-import {
-  openTaskWorkspaceRunLease,
-  type TaskWorkspaceRunLease,
-} from "@/lib/task-workspace/run-lease"
+import type { WorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 import { useSettingsStore } from "@/stores/settings"
 import type {
   AgentCapabilityEvidence,
@@ -954,8 +949,7 @@ export async function dispatchTeammate(
   budgetAccount?.recordAttempt()
 
   let turn: { text: string; usage?: TokenUsage }
-  let workspace: WorktreeHandle | undefined
-  let taskWorkspaceLease: TaskWorkspaceRunLease | undefined
+  let taskWorkspaceLease: WorkspaceBundleTurnLease | undefined
   let durableEnvironmentSession: AgentChildEnvironmentSession | undefined
   let taskWorkspaceExecutionRoot: string | undefined
   let taskWorkspaceChanges: unknown[] = []
@@ -977,16 +971,6 @@ export async function dispatchTeammate(
     const changes = await durableEnvironmentSession.settle(finalState)
     await teamCtx.durableEnvironment.adapter.dispose(durableEnvironmentSession.childRunId)
     return changes
-  }
-  const recordWorkspace = (ok: boolean, output?: string, commitSha?: string): void => {
-    if (workspace && teamCtx.workspaceLedger) {
-      teamCtx.workspaceLedger.set(workspace.key, {
-        handle: workspace,
-        ok,
-        ...(output ? { output } : {}),
-        ...(commitSha ? { commitSha } : {}),
-      })
-    }
   }
   try {
     const executeTurn = async (): Promise<{ text: string; usage?: TokenUsage }> => {
@@ -1292,8 +1276,8 @@ export async function dispatchTeammate(
           clearInterval(renew)
         }
       }
-      // Durable-v2 always uses a task workspace for writable isolation. Legacy
-      // runs retain the developer setting and existing allocator behavior.
+      // Durable-v2 routes through the run-scoped environment adapter, whose
+      // local implementation is backed by the same Registry controller.
       const taskWorkspaceRoot = dispatchWorkingDir
       if (durableDispatch && taskWorkspaceRoot) {
         const environment = teamCtx.durableEnvironment
@@ -1319,40 +1303,25 @@ export async function dispatchTeammate(
           workspacePath: durableEnvironmentSession.executionRoot,
           ...(durableEnvironmentSession.branch ? { branch: durableEnvironmentSession.branch } : {}),
         })
-      } else if (taskWorkspaceRoot) {
-        const lease = await openTaskWorkspaceRunLease({
-          taskId: taskIdForMessage(`team:${teamCtx.runId}`),
-          sessionId: teamCtx.runId,
-          runId: runIdForTurn(`${teamCtx.runId}:${teammate.id}:${args.taskId}`, 0),
-          executionRunId: teamCtx.runId,
+      } else if (taskWorkspaceRoot && channel !== "text") {
+        if (!teamCtx.workspaceController) {
+          throw new Error("Agent Team writable execution requires a Registry workspace controller")
+        }
+        const lease = await teamCtx.workspaceController.openDispatch({
+          taskId: args.taskId,
+          teammateId: teammate.id,
+          repositoryId: durableRepositoryId,
+          ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
           traceId: span.traceId,
           traceSpanId: span.spanId,
-          turnId: args.taskId,
-          attemptId: "a1",
-          surface: "team",
-          agentId: teammate.id,
-          agentKind: "agent-team",
-          workspaceRoot: taskWorkspaceRoot,
-          ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
         })
-        if (!lease) {
-          throw new Error("task workspace host did not return an execution root for Agent Team")
-        }
         taskWorkspaceLease = lease
-        taskWorkspaceExecutionRoot = lease.run.executionRoot
-      } else if (teamCtx.workspaceAllocator) {
-        workspace = await teamCtx.workspaceAllocator.allocate({
-          runId: teamCtx.runId,
-          teammateName: teammate.name,
-          taskId: args.taskId,
-          ...(args.workspaceKey ? { workspaceKey: args.workspaceKey } : {}),
-        })
+        taskWorkspaceExecutionRoot = lease.primaryAlias
         await durableDispatch?.setWorkspace({
-          workspacePath: workspace.path,
-          branch: workspace.branch,
+          workspacePath: lease.primaryAlias,
         })
       }
-      const executionRoot = taskWorkspaceExecutionRoot ?? workspace?.path ?? dispatchWorkingDir
+      const executionRoot = taskWorkspaceExecutionRoot ?? dispatchWorkingDir
       if (channel === "external" && externalAgentId) {
         if (durableDispatch) {
           const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
@@ -1446,6 +1415,11 @@ export async function dispatchTeammate(
       await taskWorkspaceLease.settle(
         err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed"
       )
+    if (taskWorkspaceLease) {
+      teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
+        ok: false,
+      })
+    }
     if (!(err instanceof RemoteWorkerWaitingError)) reporter?.finalize("failed")
     endSpan(span.spanId, {
       errorType: err instanceof Error ? err.name : "Error",
@@ -1477,7 +1451,6 @@ export async function dispatchTeammate(
         retryAfterMs: cooldown.retryAfterMs,
       })
     }
-    recordWorkspace(false)
     if (!(err instanceof RemoteWorkerWaitingError)) release("failure", error)
     throw error
   }
@@ -1500,9 +1473,13 @@ export async function dispatchTeammate(
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, empty.message)
       }
-      recordWorkspace(false)
       release("failure", empty)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
+      if (taskWorkspaceLease) {
+        teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
+          ok: false,
+        })
+      }
       if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
       await settleRemoteDispatch().catch(() => undefined)
       throw empty
@@ -1518,9 +1495,13 @@ export async function dispatchTeammate(
       if (args.recordToStore) {
         teamCtx.storeWriter.setTaskStatus(args.taskId, "failed", undefined, short.message)
       }
-      recordWorkspace(false)
       release("failure", short)
       if (taskWorkspaceLease) await taskWorkspaceLease.settle("failed")
+      if (taskWorkspaceLease) {
+        teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
+          ok: false,
+        })
+      }
       if (durableEnvironmentSession) await settleDurableEnvironment("failed").catch(() => undefined)
       await settleRemoteDispatch().catch(() => undefined)
       throw short
@@ -1528,6 +1509,12 @@ export async function dispatchTeammate(
   }
 
   if (taskWorkspaceLease) taskWorkspaceChanges = await taskWorkspaceLease.settle("ready")
+  if (taskWorkspaceLease) {
+    teamCtx.workspaceController?.recordDispatchResult(taskWorkspaceLease.bundleTurnId, {
+      ok: true,
+      output: text,
+    })
+  }
   if (durableEnvironmentSession && teamCtx.durableEnvironment) {
     taskWorkspaceChanges = await durableEnvironmentSession.settle("ready")
     environmentEvidence = await teamCtx.durableEnvironment.adapter.collectEvidence(
@@ -1598,29 +1585,6 @@ export async function dispatchTeammate(
       teamCtx.storeWriter.setTaskStatus(args.taskId, requireReview ? "review" : "completed", text)
     }
   }
-  // Workspace isolation: capture the agent's work on its branch (worktrees are
-  // GC'd; reconcile merge/select operate on commits). Best-effort — the turn
-  // already succeeded, so a commit failure only warns.
-  let commitSha: string | null = null
-  if (workspace && teamCtx.workspaceAllocator) {
-    try {
-      commitSha = await teamCtx.workspaceAllocator.commit(
-        workspace,
-        `${teammate.name}: ${args.taskId}`
-      )
-    } catch {
-      teamCtx.notifier.notify({
-        level: "warn",
-        title: "Worktree commit failed",
-        body: `Could not commit ${teammate.name}'s worktree for task ${args.taskId}; its changes remain uncommitted.`,
-        runId: teamCtx.runId,
-        teamId: teamCtx.teamId,
-        taskId: args.taskId,
-        dedupeKey: `wt-commit:${teamCtx.runId}:${workspace.key}`,
-      })
-    }
-  }
-  recordWorkspace(true, text, commitSha ?? undefined)
   reporter?.finalize("done")
   release("success")
 

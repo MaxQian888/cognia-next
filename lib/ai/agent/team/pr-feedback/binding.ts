@@ -4,13 +4,11 @@
  * or (b) opens a PR itself (via its git/gh tools, or the optional auto-publish
  * step), which the observer discovers by the branch head.
  *
- * The worktree branch mirrors the allocator's naming
+ * The Registry promotion branch keeps the historical naming
  * (`agent/<runId>/<teammate>/<taskId>`) so a PR opened for that branch is
- * discoverable; {@link teammateBranch} reuses the allocator's `sanitizeSegment`
- * so the two never drift.
+ * discoverable by the observer.
  */
 
-import { sanitizeSegment } from "@/lib/ai/agent/team/workspace/allocator"
 import type { ObserveRef } from "@/lib/github/pr-observe/types"
 
 export interface TeammatePrBinding {
@@ -27,11 +25,6 @@ export interface TeammatePrBinding {
   prNumber?: number
   /** Known PR url (when task-bound or after discovery). */
   prUrl?: string
-}
-
-/** The allocator branch for a teammate/task — kept in sync with the allocator. */
-export function teammateBranch(runId: string, teammateName: string, taskId: string): string {
-  return `agent/${runId}/${sanitizeSegment(teammateName)}/${sanitizeSegment(taskId)}`
 }
 
 /** Stable per-run tracking key for a binding (PR url is unknown until discovered). */

@@ -546,23 +546,9 @@ registerNodeExecutor({
     }
 
     for (let revision = 0; revision <= maxRevisions; revision++) {
-      // A worktree is only diffable alongside the allocator that can commit it,
-      // so the two are resolved together or not at all.
-      const handle = teamCtx.workspaceLedger?.get(taskId)?.handle
-      const allocator = teamCtx.workspaceAllocator
-      const baseRef = teamCtx.team.config?.workspaceIsolation?.baseRef
+      const executionRoot = teamCtx.workspaceController?.getDispatchExecutionRoot(taskId)
       const evidence = await buildReviewEvidence({
-        ...(handle && allocator
-          ? {
-              worktree: {
-                handle,
-                repoPath: allocator.repo,
-                commit: (h, message) => allocator.commit(h, message),
-                ...(baseRef ? { baseRef } : {}),
-              },
-            }
-          : {}),
-        ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
+        ...(executionRoot ? { workingDir: executionRoot } : {}),
         taskId,
       })
       const durableEvidence =
@@ -573,15 +559,9 @@ registerNodeExecutor({
         .filter((item) => item.taskId === taskId)
         .map((item) => item.id)
 
-      // Record what was reviewed, so reconcile / the UI can point at the commit
-      // the verdict was actually about. `dispatchTeammate` already commits the
-      // worker's work, so our own commit usually finds a clean tree and returns
-      // null — the dispatcher's recorded sha is then the one we diffed.
-      const ledgerEntry = teamCtx.workspaceLedger?.get(taskId)
-      const reviewedCommitSha = evidence.commitSha ?? ledgerEntry?.commitSha
-      if (ledgerEntry && reviewedCommitSha) {
-        teamCtx.workspaceLedger!.set(taskId, { ...ledgerEntry, reviewedCommitSha })
-      }
+      // Registry reviews normally inspect the still-live detached environment;
+      // a commit SHA remains optional until explicit branch promotion.
+      const reviewedCommitSha = evidence.commitSha
 
       let verdict: { verdict: "approved" | "changes_requested"; feedback: string }
       try {
@@ -688,12 +668,7 @@ registerNodeExecutor({
 })
 
 // ── action.team.reconcile ─────────────────────────────────────────────────
-// Workspace-isolation reconcile for a fan-out group. Reads the per-run
-// TeamRunContext; when isolation is active, reconciles the agent branches
-// recorded in the ledger SO FAR using this node's mode (falling back to the
-// team's default), then clears the ledger so a later run-end reconcile only
-// sees dispatches that came after. Lets a workflow mix e.g. `merge-all` after
-// one fan-out and `select` after another. No-op when isolation is off.
+// Explicit promotion checkpoint for Registry-managed Agent Team environments.
 registerNodeExecutor({
   kind: "action.team.reconcile",
   typeVersion: 1,
@@ -710,37 +685,37 @@ registerNodeExecutor({
         `action.team.reconcile: no TeamRunContext registered for runId=${ctx.runId}`
       )
     }
-    if (!teamCtx.workspaceAllocator || !teamCtx.workspaceLedger) {
+    if (!teamCtx.workspaceController) {
       return { output: { reconciled: false } }
     }
-    const [{ reconcile }, { selectWinnerByJudge }, { executeAgent }] = await Promise.all([
-      import("@/lib/ai/agent/team/workspace/reconciler"),
-      import("@/lib/ai/agent/team/workspace/judge"),
-      import("@/lib/ai/agent/agent-executor"),
-    ])
-    const mode = params.mode ?? teamCtx.workspaceIsolation?.mode ?? "manual"
-    const selectStrategy = params.selectStrategy ?? teamCtx.workspaceIsolation?.selectStrategy
-    const retain = params.retain ?? teamCtx.workspaceIsolation?.retain
-    const result = await reconcile(
-      teamCtx.workspaceAllocator,
-      [...teamCtx.workspaceLedger.values()],
-      {
-        runId: ctx.runId,
-        mode,
-        ...(selectStrategy ? { selectStrategy } : {}),
-        ...(retain ? { retain } : {}),
-        ...(selectStrategy === "judge"
-          ? {
-              judge: (cands) =>
-                selectWinnerByJudge(cands, {
-                  run: async (p) => (await executeAgent(p, {})).text ?? "",
-                }),
-            }
-          : {}),
-      }
-    )
-    // Consumed this group; a run-end reconcile should only see later dispatches.
-    teamCtx.workspaceLedger.clear()
+    const mode = params.mode ?? teamCtx.team.config.workspaceIsolation?.reconcile ?? "manual"
+    if (mode === "merge-all") {
+      throw nonRetryable(
+        "action.team.reconcile: merge-all requires a host-side atomic Registry promotion transaction"
+      )
+    }
+    const selectStrategy =
+      params.selectStrategy ?? teamCtx.team.config.workspaceIsolation?.selectStrategy
+    const result = await teamCtx.workspaceController.reconcile({
+      mode,
+      ...(selectStrategy ? { selectStrategy } : {}),
+      ...(selectStrategy === "judge"
+        ? {
+            judge: async (candidates) => {
+              const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
+              const prompt = candidates
+                .map(
+                  (candidate) => `key=${candidate.key}\n${(candidate.output ?? "").slice(0, 2000)}`
+                )
+                .join("\n\n")
+              const text = (
+                await executeAgent(`Pick the best candidate key only.\n\n${prompt}`, {})
+              ).text
+              return candidates.find((candidate) => text?.includes(candidate.key))?.key ?? null
+            },
+          }
+        : {}),
+    })
     return { output: { reconciled: true, ...result } }
   },
 })

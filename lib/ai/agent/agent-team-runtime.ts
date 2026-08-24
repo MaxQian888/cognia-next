@@ -326,6 +326,36 @@ export async function runTeamLifecycle(
 
     // ── Allocate runId early so the onTeamStart hook can carry it ──
     const runId = deps.runId ?? `run_team_${nanoid(12)}`
+    const origin: TeamRunOrigin =
+      deps.origin ?? (deps.triggeredFrom?.source === "im" ? "im" : "interactive")
+    const isoCfg = team.config.workspaceIsolation
+    const configuredRoots =
+      team.config.repositories && team.config.repositories.length > 0
+        ? team.config.repositories
+            .filter((repository) => repository.writable)
+            .map((repository) => ({
+              logicalRootId: repository.id,
+              sourceRoot: repository.path,
+            }))
+        : team.config.workingDir
+          ? [{ logicalRootId: "primary", sourceRoot: team.config.workingDir }]
+          : []
+    let workspaceController:
+      | import("./team/workspace/registry-controller").AgentTeamRegistryWorkspaceController
+      | undefined
+    if (configuredRoots.length > 0) {
+      const { AgentTeamRegistryWorkspaceController } =
+        await import("./team/workspace/registry-controller")
+      workspaceController = new AgentTeamRegistryWorkspaceController({
+        runId,
+        roots: configuredRoots,
+        base: isoCfg?.baseRef
+          ? { kind: "gitRef", gitRef: isoCfg.baseRef }
+          : origin === "interactive"
+            ? { kind: "workingState" }
+            : { kind: "remoteDefault" },
+      })
+    }
     let durableEnvironment:
       | NonNullable<import("./team/team-run-context").TeamRunContext["durableEnvironment"]>
       | undefined
@@ -353,7 +383,33 @@ export async function runTeamLifecycle(
         // Capability truth comes from the host adapter, never from the team's
         // requested policy. Unsupported sandbox/network guarantees therefore
         // fail closed instead of being treated as capabilities by declaration.
-        const adapter = createLocalTauriExecutionEnvironment()
+        if (!workspaceController) {
+          throw new Error("Durable AgentTeam requires a writable Registry repository")
+        }
+        const setupAdapter = createLocalTauriExecutionEnvironment()
+        const adapter = createLocalTauriExecutionEnvironment({
+          // Admission validates and freezes the profile; setup itself runs only
+          // after the Registry alias exists, never against the live checkout.
+          executeSetup: async () => ({ success: true }),
+          openWorkspace: async (input) => {
+            const repositoryId =
+              configuredRoots.find((root) => root.sourceRoot === input.repositoryPath)
+                ?.logicalRootId ??
+              primary?.id ??
+              "primary"
+            const lease = await workspaceController.openDispatch({
+              taskId: input.taskId,
+              teammateId: input.teammateId,
+              repositoryId,
+            })
+            await setupAdapter.prepare(input.profile.profile, lease.primaryAlias)
+            return {
+              executionRoot: lease.primaryAlias,
+              workspaceRunId: lease.run.runId,
+              settle: lease.settle,
+            }
+          },
+        })
         const prepared = await adapter.prepare(profile, repositoryPath)
         durableEnvironment = {
           adapter,
@@ -395,8 +451,6 @@ export async function runTeamLifecycle(
     // ── Resolve the per-run gate policy from the trigger origin ──
     // Headless origins resolve gates immediately (auto-approve / auto-reject /
     // fail-fast) instead of blocking on a modal nobody is watching.
-    const origin: TeamRunOrigin =
-      deps.origin ?? (deps.triggeredFrom?.source === "im" ? "im" : "interactive")
     const gatePolicy = resolveGatePolicy(origin, {
       approvalChannel: deps.planApprovalDelegate !== undefined,
     })
@@ -817,93 +871,31 @@ export async function runTeamLifecycle(
       listAvailable: mayRecruit,
     })
 
-    // ── Workspace isolation: build the per-dispatch worktree allocator ──
-    // Only when enabled + on desktop + the workingDir is a git repo. Otherwise
-    // every teammate runs in the shared workingDir (today's behavior). Enabled
-    // but unusable (web / non-git) warns once and runs unisolated.
-    const isoCfg = team.config.workspaceIsolation
-    let workspaceAllocator: import("./team/workspace/allocator").AgentWorkspaceAllocator | undefined
-    let workspaceLedger:
-      Map<string, import("./team/workspace/reconciler").ReconcileCandidate> | undefined
-    let workspaceReconcile:
-      | {
-          mode: import("./team/workspace/reconciler").ReconcileMode
-          selectStrategy?: import("./team/workspace/reconciler").SelectStrategy
-          retain?: "all" | "keep-winner" | "prune-losers"
-        }
-      | undefined
-    if (isoCfg?.enabled && team.config.workingDir) {
-      const { isTauri } = await import("@/lib/tauri")
-      const { gitIsRepo, gitWorktreeList } = await import("@/lib/git/commands")
-      if (isTauri() && (await gitIsRepo(team.config.workingDir).catch(() => false))) {
-        const wts = await gitWorktreeList(team.config.workingDir).catch(() => [])
-        const baseRef = isoCfg.baseRef ?? wts.find((w) => w.isMain)?.head ?? undefined
-        const { AgentWorkspaceAllocator } = await import("./team/workspace/allocator")
-        workspaceAllocator = new AgentWorkspaceAllocator({
-          mainRepo: team.config.workingDir,
-          ...(baseRef ? { baseRef } : {}),
-        })
-        workspaceLedger = new Map()
-        workspaceReconcile = {
-          mode: isoCfg.reconcile ?? "manual",
-          ...(isoCfg.selectStrategy ? { selectStrategy: isoCfg.selectStrategy } : {}),
-          ...(isoCfg.retain ? { retain: isoCfg.retain } : {}),
-        }
-      } else {
-        notifier.notify({
-          level: "warn",
-          title: "Workspace isolation unavailable",
-          body: "Per-agent git isolation needs the desktop app and a git repository as the team's working directory. Running without isolation.",
-          runId,
-          teamId,
-          dedupeKey: `wsiso-unavailable:${runId}`,
-        })
-      }
-    }
-
-    // ── PR feedback loop (ADR — team PR feedback) ──
-    // Built when enabled + isolation active + a GitHub repo/creds resolve. It
-    // observes each teammate's PR post-DAG (see the track+settle after
-    // reconcile) and is disposed in the run's `finally`. Inert otherwise.
-    let teamPrFeedback: import("./team/pr-feedback/runtime").TeamPrFeedback | undefined
-    if (
-      team.config.prFeedback?.enabled &&
-      workspaceAllocator &&
-      team.config.workingDir &&
-      deps.resolveTeamRepo &&
-      deps.resolvePrObserveOctokit
-    ) {
-      teamPrFeedback = await buildRunPrFeedback({
+    // ── Workspace isolation: one Registry/Bundle authority ──
+    // A tool-capable local dispatch may only receive a Registry alias. Browser
+    // text-only execution does not touch the filesystem and needs no controller.
+    if (isoCfg?.enabled && isoCfg.reconcile && !["manual", "pipeline"].includes(isoCfg.reconcile)) {
+      notifier.notify({
+        level: "warn",
+        title: "Workspace promotion requires review",
+        body: `The ${isoCfg.reconcile} reconcile mode is not applied automatically to detached Registry environments. Review and promote the result explicitly.`,
         runId,
         teamId,
-        config: team.config.prFeedback,
-        workingDir: team.config.workingDir,
-        ...(team.leadId ? { leadId: team.leadId } : {}),
-        ...(team.config.nudges ? { nudges: team.config.nudges } : {}),
-        teammates: workers.map((w) => ({ id: w.id, name: w.name })),
-        tasks: tasks.map((t) => ({ id: t.id, title: t.title })),
-        resolveTeamRepo: deps.resolveTeamRepo,
-        resolvePrObserveOctokit: deps.resolvePrObserveOctokit,
-        ...(deps.runPrReview ? { runPrReview: deps.runPrReview } : {}),
-        notify: (n) =>
-          notifier.notify({
-            level: n.level,
-            title: n.title,
-            body: n.body,
-            runId: n.runId,
-            teamId: n.teamId,
-            dedupeKey: n.dedupeKey,
-          }),
-        addMessage: (m) => deps.storeWriter.addMessage(m),
-        onWarn: (message) =>
-          notifier.notify({
-            level: "warn",
-            title: "PR feedback unavailable",
-            body: message,
-            runId,
-            teamId,
-            dedupeKey: `prfeedback-init:${runId}`,
-          }),
+        dedupeKey: `wsiso-promotion:${runId}`,
+      })
+    }
+
+    // PR feedback remains a promotion-only compatibility feature. Managed
+    // environments are detached, so the runtime must not invent branches or
+    // PR bindings before the user explicitly promotes one.
+    if (team.config.prFeedback?.enabled && workspaceController) {
+      notifier.notify({
+        level: "warn",
+        title: "PR feedback awaits branch promotion",
+        body: "Detached Registry environments do not create pull-request branches automatically.",
+        runId,
+        teamId,
+        dedupeKey: `prfeedback-promotion:${runId}`,
       })
     }
 
@@ -952,10 +944,7 @@ export async function runTeamLifecycle(
       // Lazily populated by resolveTeammateExternalAgent for external-backed
       // teammates — see `lib/ai/agent/team/resolve-external-backing.ts`.
       externalAgentInstances: new Map(),
-      // Workspace isolation (undefined unless enabled + desktop + git repo).
-      ...(workspaceAllocator ? { workspaceAllocator } : {}),
-      ...(workspaceLedger ? { workspaceLedger } : {}),
-      ...(workspaceReconcile ? { workspaceIsolation: workspaceReconcile } : {}),
+      ...(workspaceController ? { workspaceController } : {}),
     })
 
     // ── Synthesize the VisualWorkflow (ultracode patterns vs. flat task DAG) ──
@@ -1104,76 +1093,6 @@ export async function runTeamLifecycle(
           }
         }
       }
-      // Workspace isolation: reconcile the per-dispatch agent branches now the
-      // run has settled. Only on a clean completion — a failed/cancelled run
-      // leaves its branches untouched for inspection. Best-effort: reconcile
-      // never fails the run (the `finally` still reclaims the worktree dirs).
-      if (
-        finalStatus === "completed" &&
-        workspaceAllocator &&
-        workspaceLedger &&
-        workspaceReconcile
-      ) {
-        try {
-          const { reconcile } = await import("./team/workspace/reconciler")
-          const strategy = workspaceReconcile.selectStrategy
-          const judge =
-            strategy === "judge"
-              ? async (
-                  cands: import("./team/workspace/reconciler").ReconcileCandidate[]
-                ): Promise<string | null> => {
-                  const [{ selectWinnerByJudge }, { executeAgent }] = await Promise.all([
-                    import("./team/workspace/judge"),
-                    import("./agent-executor"),
-                  ])
-                  return selectWinnerByJudge(cands, {
-                    run: async (prompt) => (await executeAgent(prompt, {})).text ?? "",
-                  })
-                }
-              : undefined
-          const recResult = await reconcile(workspaceAllocator, [...workspaceLedger.values()], {
-            runId,
-            mode: workspaceReconcile.mode,
-            ...(strategy ? { selectStrategy: strategy } : {}),
-            ...(workspaceReconcile.retain ? { retain: workspaceReconcile.retain } : {}),
-            ...(judge ? { judge } : {}),
-          })
-          deps.storeWriter.addEvent?.({
-            type: "progress_update",
-            teamId,
-            data: { kind: "workspace_reconcile", ...recResult },
-            timestamp: new Date(),
-          })
-        } catch (err) {
-          notifier.notify({
-            level: "warn",
-            title: "Workspace reconcile failed",
-            body: err instanceof Error ? err.message : String(err),
-            runId,
-            teamId,
-            dedupeKey: `wsiso-reconcile:${runId}`,
-          })
-        }
-      }
-      // PR feedback: bind each teammate's committed branch to its PR and observe
-      // for the bounded window (0 = one pass). Nudges route back via the team
-      // mailbox; the loop is disposed in `finally`. Best-effort — never fails the
-      // run.
-      if (teamPrFeedback && workspaceAllocator) {
-        try {
-          await teamPrFeedback.trackAll(workspaceAllocator.allocated())
-          await teamPrFeedback.settle(team.config.prFeedback?.observeWindowMs ?? 0)
-        } catch (err) {
-          notifier.notify({
-            level: "warn",
-            title: "PR feedback loop error",
-            body: err instanceof Error ? err.message : String(err),
-            runId,
-            teamId,
-            dedupeKey: `prfeedback-run:${runId}`,
-          })
-        }
-      }
       return {
         runId: result.runId,
         status: finalStatus,
@@ -1283,15 +1202,6 @@ export async function runTeamLifecycle(
       }
       // Cancel any pending resume timer so it can't fire after the run ends.
       rateLimitResume?.dispose()
-      // Stop the PR feedback loop so no scheduled poll fires after the run ends.
-      teamPrFeedback?.dispose()
-      // Workspace isolation: reclaim every worktree DIRECTORY (agent work is
-      // already committed to its branch, which persists). Branch deletion is
-      // reconcile's job (loser pruning), so keep branches here. Runs on every
-      // exit path (success / failure / cancel) so worktrees never leak.
-      if (workspaceAllocator) {
-        await workspaceAllocator.gc({ deleteBranches: false }).catch(() => undefined)
-      }
       unregisterTeamRunContext(runId)
       // Release any pending approval-bus waiters keyed to this run.
       approveBus({ scope: "agent-team-deadlock", id: runId })

@@ -60,6 +60,18 @@ describe("TeamRunContext registry", () => {
     expect(getTeamRunContext("run-B")).toBe(b)
   })
 
+  it("keeps the run-scoped Registry workspace controller as the writable authority", () => {
+    const workspaceController = { openDispatch: jest.fn() }
+    const ctx = {
+      ...fakeCtx("run-registry"),
+      workspaceController,
+    } as unknown as TeamRunContext
+
+    registerTeamRunContext(ctx)
+
+    expect(getTeamRunContext("run-registry")?.workspaceController).toBe(workspaceController)
+  })
+
   describe("leak guards", () => {
     let warn: jest.SpyInstance
 

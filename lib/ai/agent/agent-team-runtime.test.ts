@@ -302,6 +302,34 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     })
   })
 
+  it("registers one Registry workspace controller for writable team repositories", async () => {
+    const observed: unknown[] = []
+    ;(executeAgent as jest.Mock).mockImplementation(async () => {
+      observed.push(getTeamRunContext("run_team_registry")?.workspaceController)
+      return {
+        text: "result",
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      }
+    })
+    const registryTeam = {
+      ...baseTeam,
+      config: {
+        ...baseTeam.config,
+        workingDir: "/repo",
+        workspaceIsolation: { enabled: true, baseRef: "release/1", reconcile: "manual" },
+      },
+    } as AgentTeam
+
+    await expect(
+      runTeamLifecycle("team-1", {
+        ...buildDeps(registryTeam, [task("t1")], [lead, worker("w1")]),
+        runId: "run_team_registry",
+      })
+    ).resolves.toMatchObject({ status: "completed" })
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBeDefined()
+  })
+
   it("omits triggeredBy for non-IM (UI/API) runs", async () => {
     ;(executeAgent as jest.Mock).mockResolvedValue({
       text: "result",

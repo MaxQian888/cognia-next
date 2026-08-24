@@ -2,10 +2,8 @@
  * @jest-environment jsdom
  *
  * Focused test for the `action.team.reconcile` executor: it reads the per-run
- * TeamRunContext, no-ops when workspace isolation is off, and delegates to the
- * (real) reconciler + clears the ledger when it is on. `getTeamRunContext` and
- * the LLM `executeAgent` are mocked; the reconciler runs for real (manual mode
- * touches no git).
+ * TeamRunContext, no-ops without a Registry controller, and delegates explicit
+ * detached-environment promotion to that controller.
  */
 
 import "fake-indexeddb/auto"
@@ -41,17 +39,6 @@ function makeCtx<T extends Record<string, unknown>>(
   } as StepExecutionContext<T>
 }
 
-function handle(taskId: string) {
-  return {
-    key: taskId,
-    runId: "run_test",
-    teammateName: "A",
-    taskId,
-    branch: `agent/run_test/A/${taskId}`,
-    path: `/wt/${taskId}`,
-  }
-}
-
 beforeEach(() => {
   getTeamRunContextMock.mockReset()
 })
@@ -72,38 +59,39 @@ describe("action.team.reconcile executor", () => {
     expect(res.output).toEqual({ reconciled: false })
   })
 
-  it("reconciles the ledger and clears it (manual mode)", async () => {
-    const ledger = new Map([
-      ["t1", { handle: handle("t1"), ok: true }],
-      ["t2", { handle: handle("t2"), ok: true }],
-    ])
+  it("promotes Registry candidates in manual mode", async () => {
+    const reconcile = jest.fn(async () => ({
+      mode: "manual",
+      branches: ["agent/run/A/t1", "agent/run/A/t2"],
+      handles: [],
+      summary: "2 promoted",
+    }))
     getTeamRunContextMock.mockReturnValue({
       runId: "run_test",
-      workspaceAllocator: { remove: jest.fn(), allocate: jest.fn(), commit: jest.fn() },
-      workspaceLedger: ledger,
-      workspaceIsolation: { mode: "manual" },
+      team: { config: { workspaceIsolation: { reconcile: "manual" } } },
+      workspaceController: { reconcile },
     })
     const exec = getExecutor("action.team.reconcile", 1)!
     const res = await exec.execute(makeCtx("action.team.reconcile", {}))
     const output = res.output as { reconciled: boolean; mode: string; branches: string[] }
     expect(output.reconciled).toBe(true)
     expect(output.mode).toBe("manual")
-    expect(output.branches).toEqual(["agent/run_test/A/t1", "agent/run_test/A/t2"])
-    // Ledger consumed so a later run-end reconcile only sees new dispatches.
-    expect(ledger.size).toBe(0)
+    expect(output.branches).toEqual(["agent/run/A/t1", "agent/run/A/t2"])
+    expect(reconcile).toHaveBeenCalledWith({ mode: "manual" })
   })
 
   it("lets the node param override the team default mode", async () => {
-    const alloc = { remove: jest.fn(async () => {}), allocate: jest.fn(), commit: jest.fn() }
-    const ledger = new Map([
-      ["t1", { handle: handle("t1"), ok: false }],
-      ["t2", { handle: handle("t2"), ok: true }],
-    ])
+    const reconcile = jest.fn(async () => ({
+      mode: "select",
+      branches: ["agent/run/A/t2"],
+      handles: [],
+      winnerKey: "t2",
+      summary: "selected",
+    }))
     getTeamRunContextMock.mockReturnValue({
       runId: "run_test",
-      workspaceAllocator: alloc,
-      workspaceLedger: ledger,
-      workspaceIsolation: { mode: "manual" },
+      team: { config: { workspaceIsolation: { reconcile: "manual" } } },
+      workspaceController: { reconcile },
     })
     const exec = getExecutor("action.team.reconcile", 1)!
     const res = await exec.execute(
@@ -112,7 +100,22 @@ describe("action.team.reconcile executor", () => {
     const output = res.output as { reconciled: boolean; winnerKey?: string }
     expect(output.reconciled).toBe(true)
     expect(output.winnerKey).toBe("t2")
-    // Loser t1 pruned via the allocator.
-    expect(alloc.remove).toHaveBeenCalled()
+    expect(reconcile).toHaveBeenCalledWith({
+      mode: "select",
+      selectStrategy: "first-success",
+    })
+  })
+
+  it("rejects merge-all until the host provides atomic Registry promotion", async () => {
+    getTeamRunContextMock.mockReturnValue({
+      runId: "run_test",
+      team: { config: { workspaceIsolation: { reconcile: "manual" } } },
+      workspaceController: { reconcile: jest.fn() },
+    })
+    const exec = getExecutor("action.team.reconcile", 1)!
+
+    await expect(
+      exec.execute(makeCtx("action.team.reconcile", { mode: "merge-all" }))
+    ).rejects.toThrow(/host-side atomic Registry promotion/)
   })
 })

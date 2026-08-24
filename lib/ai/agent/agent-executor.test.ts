@@ -32,18 +32,40 @@ jest.mock("@/lib/ai/provider-consumption", () => ({
   createFeatureProviderModel: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
-// Task Workspace isolation is GA, so a config carrying `cwd` now always asks
-// the host for a run lease. This suite has no transport behind that call; a real
-// host without Task Workspace answers "unknown command", which
-// `beginTaskWorkspaceTurn` maps to `null` and the lease then runs in place.
+const workspaceRoot = { value: "" }
+const acquireWorkspaceBundleMock = jest.fn(
+  async (input: { roots: Array<{ sourceRoot: string }> }) => {
+    workspaceRoot.value = input.roots[0]?.sourceRoot ?? ""
+    return {
+      bundleId: "bundle-test",
+      leases: [
+        {
+          bundleId: "bundle-test",
+          workspaceId: "workspace-test",
+          logicalRootId: "primary",
+          role: "primary",
+          aliasPath: workspaceRoot.value,
+        },
+      ],
+    }
+  }
+)
+const settleWorkspaceBundleMock = jest.fn(async () => [])
+const abortWorkspaceBundleMock = jest.fn(async () => [])
+jest.mock("@/lib/task-workspace/client", () => ({
+  acquireWorkspaceBundle: (input: { roots: Array<{ sourceRoot: string }> }) =>
+    acquireWorkspaceBundleMock(input),
+}))
 jest.mock("@/lib/task-workspace/run-lease", () => ({
-  withTaskWorkspaceRun: async (
-    input: { workspaceRoot?: string },
-    execute: (root: string) => Promise<unknown>
-  ) => ({
-    value: await execute(input.workspaceRoot ?? ""),
-    executionRoot: input.workspaceRoot ?? "",
-    trackingUnavailable: true,
+  openWorkspaceBundleTurnLease: async () => ({
+    bundleTurnId: "bundle-turn-test",
+    bundleId: "bundle-test",
+    run: { runId: "workspace-run-test", executionRoot: workspaceRoot.value },
+    runs: [],
+    primaryAlias: workspaceRoot.value,
+    additionalAliases: [],
+    settle: settleWorkspaceBundleMock,
+    abort: abortWorkspaceBundleMock,
   }),
 }))
 jest.mock("@/lib/db/characters", () => ({ resolveCharacterById: jest.fn() }))

@@ -13,7 +13,7 @@ import {
 import type { OctokitLike } from "@/lib/github/pr-observe/types"
 import type { TimerHandle } from "./observer"
 import type { RunReview } from "./reviewer"
-import type { WorktreeHandle } from "@/lib/ai/agent/team/workspace/allocator"
+import type { PromotionWorkspaceHandle } from "@/lib/ai/agent/team/workspace/promotion"
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 
@@ -129,8 +129,9 @@ function ciRoutes(
   }
 }
 
-const handle: WorktreeHandle = {
+const handle: PromotionWorkspaceHandle = {
   key: "t1",
+  logicalRootId: "app",
   runId: "run-1",
   teammateName: "dev",
   taskId: "t1",

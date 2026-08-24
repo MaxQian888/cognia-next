@@ -29,7 +29,10 @@ import {
 import { publishTeammatePr, type PublishGitOps } from "./publish"
 import type { PrNudge } from "./reactions"
 import { createPrReviewer, type RunReview } from "./reviewer"
-import { sanitizeSegment, type WorktreeHandle } from "@/lib/ai/agent/team/workspace/allocator"
+import {
+  sanitizePromotionSegment,
+  type PromotionWorkspaceHandle,
+} from "@/lib/ai/agent/team/workspace/promotion"
 
 /** Narrow notifier callback (maps to `TeamNotifier.notify` at the call site). */
 export interface PrFeedbackNotifyInput {
@@ -80,7 +83,7 @@ export interface BuildTeamPrFeedbackParams {
 /** Handle the runtime drives: track bindings, bound the window, dispose. */
 export interface TeamPrFeedback {
   controller: PrFeedbackController
-  trackAll: (handles: WorktreeHandle[]) => Promise<void>
+  trackAll: (handles: PromotionWorkspaceHandle[]) => Promise<void>
   settle: (maxWaitMs: number) => Promise<void>
   dispose: () => void
 }
@@ -174,10 +177,12 @@ export function buildTeamPrFeedback(params: BuildTeamPrFeedbackParams): TeamPrFe
     busyWindowMs: nudges?.busySignalWindowMs,
   })
 
-  const trackAll = async (handles: WorktreeHandle[]): Promise<void> => {
+  const trackAll = async (handles: PromotionWorkspaceHandle[]): Promise<void> => {
     for (const h of handles) {
       const memberId =
-        teammates.find((t) => sanitizeSegment(t.name) === sanitizeSegment(h.teammateName))?.id ??
+        teammates.find(
+          (t) => sanitizePromotionSegment(t.name) === sanitizePromotionSegment(h.teammateName)
+        )?.id ??
         leadId ??
         h.teammateName
       let binding: TeammatePrBinding = {

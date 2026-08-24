@@ -1,4 +1,4 @@
-import { bindingKey, bindingRef, teammateBranch, type TeammatePrBinding } from "./binding"
+import { bindingKey, bindingRef, type TeammatePrBinding } from "./binding"
 
 function mk(over: Partial<TeammatePrBinding> = {}): TeammatePrBinding {
   return {
@@ -11,12 +11,6 @@ function mk(over: Partial<TeammatePrBinding> = {}): TeammatePrBinding {
     ...over,
   }
 }
-
-describe("teammateBranch", () => {
-  it("matches the allocator's branch naming with sanitized segments", () => {
-    expect(teammateBranch("run-1", "Dev One!", "task/42")).toBe("agent/run-1/Dev-One/task-42")
-  })
-})
 
 describe("bindingKey", () => {
   it("is stable per (run, member, task) and independent of the discovered PR", () => {

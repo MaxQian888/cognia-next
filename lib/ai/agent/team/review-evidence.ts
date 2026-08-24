@@ -13,13 +13,13 @@
  *
  * Git runs desktop-side in Rust, so everything goes through an injectable
  * `ReviewGitOps` seam — the same shape (and for the same reason) as the
- * allocator's `WorktreeGitOps`: this unit-tests without Tauri, and returns
+ * Registry controller's Git boundary: this unit-tests without Tauri, and returns
  * `kind: "text"` on web/mobile where the git bridge is inert.
  */
 
 import { gitDiffFile, gitDiffRefsFile, gitDiffRefsFiles, gitStatus } from "@/lib/git/commands"
 import type { GitDiff, GitFileChange, GitStatus } from "@/types/git"
-import type { WorktreeHandle } from "./workspace/allocator"
+import type { PromotionWorkspaceHandle } from "./workspace/promotion"
 
 /**
  * Hard cap on the diff handed to the lead. Large enough to carry a real change
@@ -61,18 +61,18 @@ export interface ReviewGitOps {
  * The task's worktree and everything needed to diff it.
  *
  * One object rather than four loose optional fields, because they are only ever
- * meaningful together: committing is the allocator's job (it owns the handle),
+ * meaningful together: committing is the Registry promotion controller's job,
  * and without a commit there is nothing on the branch to diff against
  * `repoPath`. Splitting them let a caller supply a repo with no way to commit,
  * which would silently produce "no diff" — the lead would then review prose
  * believing the worker changed nothing. The type now makes that unbuildable.
  */
 export interface ReviewWorktreeSource {
-  handle: WorktreeHandle
+  handle: PromotionWorkspaceHandle
   /** The team's main repo — the diff base for the worktree branch. */
   repoPath: string
-  /** Commits the worktree's work onto its branch. Usually `allocator.commit`. */
-  commit: (handle: WorktreeHandle, message: string) => Promise<string | null>
+  /** Commits the managed environment's work onto its promotion branch. */
+  commit: (handle: PromotionWorkspaceHandle, message: string) => Promise<string | null>
   /** Ref the worktree branched from. Defaults to `HEAD`. */
   baseRef?: string
 }
