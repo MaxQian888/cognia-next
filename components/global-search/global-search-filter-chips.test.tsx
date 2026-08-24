@@ -43,3 +43,48 @@ describe("GlobalSearchFilterChips", () => {
     expect(filterKeyLabel("zzz", t)).toBe("zzz")
   })
 })
+
+describe("workspace scope chip", () => {
+  it("says which workspace a plain search is confined to", () => {
+    // A default the user cannot see is indistinguishable from a search that is
+    // simply missing things.
+    render(
+      <GlobalSearchFilterChips
+        tokens={[]}
+        onRemove={() => {}}
+        workspaceScope={{ name: "Cognia", onWiden: () => {} }}
+      />
+    )
+    expect(screen.getByTestId("global-search-workspace-scope")).toHaveTextContent("Cognia")
+  })
+
+  it("widens the search on click", async () => {
+    const onWiden = jest.fn()
+    render(
+      <GlobalSearchFilterChips
+        tokens={[]}
+        onRemove={() => {}}
+        workspaceScope={{ name: "Cognia", onWiden }}
+      />
+    )
+    await userEvent.click(screen.getByTestId("global-search-workspace-scope"))
+    expect(onWiden).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders nothing at all when there is neither a token nor a scope", () => {
+    const { container } = render(<GlobalSearchFilterChips tokens={[]} onRemove={() => {}} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("shows the scope chip beside ordinary filter chips", () => {
+    render(
+      <GlobalSearchFilterChips
+        tokens={[{ key: "from", value: "user", source: "from:me" }]}
+        onRemove={() => {}}
+        workspaceScope={{ name: "Cognia", onWiden: () => {} }}
+      />
+    )
+    expect(screen.getByTestId("global-search-workspace-scope")).toBeInTheDocument()
+    expect(screen.getAllByTestId("global-search-filter-chip")).toHaveLength(1)
+  })
+})

@@ -12,13 +12,19 @@ const NOW = new Date(2026, 7, 16, 15, 30).getTime()
 const startOf = (y: number, m: number, d: number) => new Date(y, m - 1, d).getTime()
 
 describe("parseGlobalSearchQuery", () => {
-  it("returns plain text as needle with no filters", () => {
+  it("returns plain text as needle, scoped to the current workspace by default", () => {
     const q = parseGlobalSearchQuery("  Hello World ", { now: NOW })
     expect(q.text).toBe("Hello World")
     expect(q.needle).toBe("hello world")
-    expect(q.filters).toEqual({})
+    // The default is normalized rather than left undefined so every provider
+    // and every surface reads one explicit value.
+    expect(q.filters).toEqual({ workspace: "current" })
     expect(q.tokens).toEqual([])
     expect(q.prefixScope).toBeUndefined()
+  })
+
+  it("lets an explicit workspace:all override the default", () => {
+    expect(parseGlobalSearchQuery("bug workspace:all", { now: NOW }).filters.workspace).toBe("all")
   })
 
   it("recognises the > and @ prefixes", () => {

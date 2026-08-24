@@ -281,7 +281,10 @@ export function parseGlobalSearchQuery(
     text,
     needle: text.toLowerCase(),
     prefixScope,
-    filters,
+    // Normalized rather than left undefined: the default is now `current`, and
+    // an explicit value is what lets a surface render "searching this
+    // workspace" without re-deriving the default in three places.
+    filters: { workspace: "current", ...filters },
     tokens,
   }
 }

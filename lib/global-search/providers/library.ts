@@ -14,6 +14,8 @@ import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
 import { templateCatalog } from "@/lib/templates/catalog"
 import type { Memory } from "@/types/memory/memory"
 import type { WorkflowRow } from "@/types/workflow/visual"
+import { resolveCapabilityEnabled } from "@/lib/workspace/capability-overlay"
+import { byProjectId } from "../workspace-scope"
 import { excerptAround, highlightPositions } from "./helpers"
 import { createListProvider } from "./list-provider"
 
@@ -79,6 +81,20 @@ export function createSkillsProvider(deps: Pick<LibraryProviderDeps, "listSkills
     getSecondary: (s) => s.description,
     getKeywords: (s) => [s.id, s.slug ?? "", ...(s.tags ?? [])],
     getTimestamp: (s) => s.updatedAt,
+    // A skill is defined once for the machine; a workspace only expresses a
+    // preference about it. Hiding one this workspace switched off would produce
+    // the worst possible result — "I know I have this and it is not there" — so
+    // it ranks below the ones this workspace actually loads.
+    workspaceScope: {
+      mode: "demote",
+      belongs: (row, ctx) =>
+        resolveCapabilityEnabled(
+          (row.status ?? "enabled") === "enabled",
+          ctx.capabilityOverlay,
+          "skill",
+          row.id
+        ),
+    },
     toItem: ({ row, match }, ctx) => ({
       id: `skill:${row.id}`,
       kind: "skill",
@@ -105,6 +121,9 @@ export function createMemoriesProvider(deps: Pick<LibraryProviderDeps, "listMemo
     kind: "memory",
     load: () => deps.listMemories(),
     include: (m) => m.status === "active",
+    // A memory belongs to a workspace, so out of scope it is noise. Memories
+    // with no workspace are shared and always in scope.
+    workspaceScope: { mode: "filter", belongs: byProjectId<Memory>((m) => m.projectId) },
     // Titles are the memory text itself: substring only, a fuzzy subsequence in
     // a paragraph is noise.
     fuzzy: false,

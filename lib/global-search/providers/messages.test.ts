@@ -55,9 +55,17 @@ describe("toChatSearchQuery", () => {
     const plain = makeProviderInput("needle", { ctx: makeTestContext({ scope: "messages" }) })
     const q = toChatSearchQuery(plain.query, plain.ctx, 5)
     expect(q.collapseBySession).toBe(false)
-    expect(q.projectId).toBeUndefined()
+    // Scoped to the active workspace even with no `workspace:` token — the
+    // default changed from `all`, which used to leak every other workspace's
+    // messages into a plain search.
+    expect(q.projectId).toBe("p1")
     expect(q.roles).toBeUndefined()
     expect(q.includeArchived).toBe(false)
+
+    const widened = makeProviderInput("needle workspace:all", {
+      ctx: makeTestContext({ scope: "messages" }),
+    })
+    expect(toChatSearchQuery(widened.query, widened.ctx, 5).projectId).toBeUndefined()
   })
 })
 
@@ -112,9 +120,7 @@ describe("messageResultToItem", () => {
       messageId: "m2",
     })
     // Unknown session (not in the dialog's list) → the plain chat action.
-    expect(messageHitAction({ sessionId: "ghost", messageId: "m3" }, ctx).type).toBe(
-      "open-session"
-    )
+    expect(messageHitAction({ sessionId: "ghost", messageId: "m3" }, ctx).type).toBe("open-session")
     expect(messageResultToItem(result(), ctx).action).toEqual({
       type: "open-inbox-conversation",
       conversationKey: "lark:a1:oc",

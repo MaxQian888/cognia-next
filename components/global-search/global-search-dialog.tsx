@@ -39,7 +39,7 @@ import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
 import { usePlatform } from "@/hooks/use-platform"
 import { invalidateGlobalSearchCaches } from "@/lib/global-search/cache"
 import { SCOPED_GROUP_LIMIT } from "@/lib/global-search/engine"
-import { removeFilterToken } from "@/lib/global-search/query-parser"
+import { removeFilterToken, setFilterToken } from "@/lib/global-search/query-parser"
 import { recordRecentQuery, type RecentItem } from "@/lib/global-search/recents"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
 import {
@@ -82,6 +82,11 @@ export function GlobalSearchDialog({
 
   const { sessions, select, create } = useSessions({ crossWorkspace: true })
   const ctx = useGlobalSearchContext({ sessions, scope })
+  // Named, not just "this workspace": the point of the chip is to say WHICH
+  // one, since the reason a hit is missing is that it lives in another.
+  const activeWorkspaceName = ctx.workspaces.find(
+    (workspace) => workspace.id === ctx.activeProjectId
+  )?.name
   const { parsed, outcome, suggestions, loading, error } = useGlobalSearch({
     rawQuery,
     ctx,
@@ -272,6 +277,19 @@ export function GlobalSearchDialog({
           <GlobalSearchFilterChips
             tokens={parsed.tokens}
             onRemove={(token) => setRawQuery(removeFilterToken(rawQuery, token))}
+            // Only for the IMPLICIT case: with an explicit `workspace:` token
+            // the ordinary removable chip already says it, and two chips for
+            // one filter is how a surface starts contradicting itself.
+            workspaceScope={
+              parsed.filters.workspace === "current" &&
+              !parsed.tokens.some((token) => token.key === "workspace") &&
+              activeWorkspaceName
+                ? {
+                    name: activeWorkspaceName,
+                    onWiden: () => setRawQuery(setFilterToken(rawQuery, "workspace", "all")),
+                  }
+                : null
+            }
             className="pt-2"
           />
           <CommandList

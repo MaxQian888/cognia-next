@@ -86,11 +86,18 @@ describe("sessions provider", () => {
     expect(out.items[0]!.titlePositions).toEqual([0, 1, 2, 3, 4, 5])
     expect(out.items[0]!.meta).toBe("One")
     expect(out.items[0]!.action).toEqual({ type: "open-session", sessionId: "a" })
+    // Scoped to the active workspace by default, so the archived conversation
+    // in another workspace stays out until the search is widened.
     const withArchived = await sessionsProvider.search(
       makeProviderInput("is:archived deploy", { ctx: ctx() })
     )
-    expect(withArchived.items.map((i) => i.title)).toEqual(["Deploy pipeline", "Prod deploy notes"])
-    expect(withArchived.items[1]!.extra?.archived).toBe(true)
+    expect(withArchived.items.map((i) => i.title)).toEqual(["Deploy pipeline"])
+
+    const everywhere = await sessionsProvider.search(
+      makeProviderInput("is:archived workspace:all deploy", { ctx: ctx() })
+    )
+    expect(everywhere.items.map((i) => i.title)).toEqual(["Deploy pipeline", "Prod deploy notes"])
+    expect(everywhere.items[1]!.extra?.archived).toBe(true)
   })
 
   it("matches session ids as keywords", async () => {

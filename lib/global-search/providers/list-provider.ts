@@ -14,6 +14,7 @@ import type {
   GlobalSearchProviderInput,
   ParsedGlobalSearchQuery,
 } from "../types"
+import { DEMOTED_SCORE_FACTOR, scopedWorkspaceId } from "../workspace-scope"
 import { matchTitles, type TitleHit } from "./helpers"
 
 export interface ListProviderSpec<T> {
@@ -31,6 +32,29 @@ export interface ListProviderSpec<T> {
   fuzzy?: boolean
   /** Rows to skip entirely (e.g. archived workspaces). */
   include?: (row: T, ctx: GlobalSearchContext) => boolean
+  /**
+   * How this list relates to workspaces. Omitted means "global" — settings,
+   * navigation, devices — and nothing is filtered or re-ranked.
+   *
+   * `"filter"` for entities that BELONG to a workspace: out of scope they are
+   * noise. `"demote"` for the definition layer, which is machine-wide and only
+   * has a per-workspace preference — hiding a skill because this workspace
+   * switched it off produces the worst search result there is, "I know I have
+   * this and it is not there". See `lib/global-search/workspace-scope.ts`.
+   */
+  workspaceScope?: {
+    mode: "filter" | "demote"
+    /**
+     * Whether the row belongs to the workspace being searched. `scopeId` is
+     * `null` for "every workspace", which this is never asked about.
+     *
+     * One predicate rather than a column reader plus an escape hatch: a skill's
+     * relationship to a workspace is the capability overlay, not a foreign key,
+     * and two ways to express "belongs here" is how the two answers start
+     * disagreeing. `byProjectId` builds the common column-backed case.
+     */
+    belongs: (row: T, ctx: GlobalSearchContext, scopeId: string) => boolean
+  }
   toItem: (
     hit: TitleHit<T>,
     ctx: GlobalSearchContext,
@@ -67,8 +91,13 @@ export function createListProvider<T>(spec: ListProviderSpec<T>): ListProvider<T
     kind: spec.kind,
     cache,
     async search({ query, ctx, limit, signal }: GlobalSearchProviderInput) {
-      const rows = visible(await loadRows(ctx), ctx)
+      const loaded = visible(await loadRows(ctx), ctx)
       if (signal.aborted) return { items: [] }
+      const scopeId = spec.workspaceScope ? scopedWorkspaceId(query, ctx) : null
+      const rows =
+        spec.workspaceScope?.mode === "filter" && scopeId != null
+          ? loaded.filter((row) => spec.workspaceScope!.belongs(row, ctx, scopeId))
+          : loaded
       const { hits, total, truncated } = matchTitles(rows, query.needle, {
         getTitle: (row) => spec.getTitle(row, ctx),
         getSecondary: spec.getSecondary ? (row) => spec.getSecondary!(row, ctx) : undefined,
@@ -78,7 +107,16 @@ export function createListProvider<T>(spec: ListProviderSpec<T>): ListProvider<T
         limit,
         fuzzy: spec.fuzzy,
       })
-      return { items: hits.map((hit) => spec.toItem(hit, ctx, query)), total, truncated }
+      const items = hits.map((hit) => {
+        const item = spec.toItem(hit, ctx, query)
+        if (spec.workspaceScope?.mode !== "demote" || scopeId == null) return item
+        // Demote by re-scoring the item rather than dropping the row: it stays
+        // findable, just below everything this workspace actually uses.
+        return spec.workspaceScope.belongs(hit.row, ctx, scopeId)
+          ? item
+          : { ...item, score: item.score * DEMOTED_SCORE_FACTOR }
+      })
+      return { items, total, truncated }
     },
     ...(spec.suggest
       ? {

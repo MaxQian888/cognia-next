@@ -156,5 +156,7 @@
     "updateFailed": "Update check failed: {message}",
     "updatesDesktopOnly": "Updates are only available in the desktop build."
   },
-  "untitledConversation": "Untitled conversation"
+  "untitledConversation": "Untitled conversation",
+  "scopeWiden": "search all",
+  "scopeWidenHint": "Results are limited to this workspace. Search every workspace instead."
 }

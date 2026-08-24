@@ -17,6 +17,7 @@ import type { LucideIcon } from "lucide-react"
 import type { AvatarSubject } from "@/lib/ui/avatar"
 import type { Snippet } from "@/lib/chat/search/snippet"
 import type { Platform } from "@/lib/platform/detect"
+import type { WorkspaceCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import type { QuickActionEntry } from "@/lib/plugin/registries/quick-action-registry"
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
@@ -219,7 +220,16 @@ export interface GlobalSearchFilters {
   after?: number
   /** `before:` exclusive upper bound, epoch ms. */
   before?: number
-  /** `workspace:current` restricts to the active workspace; default `all`. */
+  /**
+   * `workspace:current` restricts to the active workspace, `workspace:all`
+   * widens to every one. **Defaults to `current`** — the parser normalizes it,
+   * so a provider that reads this always sees an explicit value.
+   *
+   * It used to default to `all`, and only two of nineteen providers honoured
+   * it, so every search leaked other workspaces' conversations, memories and
+   * issues with nothing to mark them as foreign. See
+   * `lib/global-search/workspace-scope.ts` for the filter-vs-demote rule.
+   */
   workspace?: "current" | "all"
   /** `title:` — match conversation titles only (skip message content). */
   titleOnly?: boolean
@@ -266,6 +276,13 @@ export interface GlobalSearchContext {
   sessions: readonly ChatSession[]
   /** Every workspace (project) the store knows, archived ones included. */
   workspaces: readonly Project[]
+  /**
+   * The active workspace's capability overlay — which globally-defined skills
+   * and MCP servers it actually uses (`lib/workspace/capability-overlay.ts`).
+   * Search does not hide what a workspace switched off; it ranks it below what
+   * the workspace uses, so "I know I have this skill" still finds it.
+   */
+  capabilityOverlay?: WorkspaceCapabilityOverlay
   /** The scope the dialog is showing — providers may project differently. */
   scope: GlobalSearchScope
   /** Host capabilities the dialog resolved (settings reachability etc.). */

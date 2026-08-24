@@ -66,6 +66,11 @@ export function useGlobalSearchContext({
   const recorderAvailable = useRecorderAvailable()
   const pluginQuickActions = usePluginQuickActions("palette")
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
+  // Which skills this workspace actually loads. Search demotes rather than
+  // hides the rest — see `lib/global-search/workspace-scope.ts`.
+  const capabilityOverlay = useProjectStore(
+    (s) => s.projects.find((p) => p.id === s.activeProjectId)?.capabilityOverlay
+  )
   const workspaces = useProjectStore((s) => s.projects)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
   const hasApiKey = useSettingsStore((s) => Boolean(s.settings?.apiKey))
@@ -102,6 +107,7 @@ export function useGlobalSearchContext({
       activeSessionId: activeSessionId ?? null,
       sessions,
       workspaces,
+      capabilityOverlay,
       scope,
       host: {
         reachableSettingsSections: sections as ReadonlySet<string>,
@@ -121,6 +127,7 @@ export function useGlobalSearchContext({
       activeSessionId,
       sessions,
       workspaces,
+      capabilityOverlay,
       scope,
       sections,
       recorderAvailable,

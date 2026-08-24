@@ -148,6 +148,57 @@ describe("library providers", () => {
     expect(fuzzy.items).toEqual([])
   })
 
+  it("memories: hides another workspace's, keeps the shared ones", async () => {
+    const rows = [
+      { ...memories[0]!, id: "mine", projectId: "p1" },
+      { ...memories[0]!, id: "theirs", projectId: "p2" },
+      { ...memories[0]!, id: "shared" },
+    ] as typeof memories
+    const provider = createMemoriesProvider({ listMemories: async () => rows })
+    const out = await provider.search(makeProviderInput("deploy key"))
+    expect(out.items.map((i) => i.id)).toEqual(["memory:mine", "memory:shared"])
+
+    const everywhere = await provider.search(makeProviderInput("workspace:all deploy key"))
+    expect(everywhere.items.map((i) => i.id)).toEqual([
+      "memory:mine",
+      "memory:theirs",
+      "memory:shared",
+    ])
+  })
+
+  it("skills: ranks one this workspace switched off below the rest, never hides it", async () => {
+    // "I know I have this skill and it is not there" is the worst possible
+    // search result, so the definition layer is demoted rather than filtered.
+    const rows = [
+      { ...skills[0]!, id: "on", name: "Summarize alpha" },
+      { ...skills[0]!, id: "off", name: "Summarize beta" },
+    ] as typeof skills
+    const provider = createSkillsProvider({ listSkills: async () => rows })
+    const ctx = makeTestContext({ capabilityOverlay: { skill: { off: false } } })
+
+    const out = await provider.search(makeProviderInput("summarize", { ctx }))
+    const ids = out.items.map((i) => i.id)
+    expect(ids).toContain("skill:off")
+    expect(ids.indexOf("skill:on")).toBeLessThan(ids.indexOf("skill:off"))
+
+    const on = out.items.find((i) => i.id === "skill:on")!
+    const off = out.items.find((i) => i.id === "skill:off")!
+    expect(off.score).toBeLessThan(on.score)
+  })
+
+  it("skills: leaves the ranking alone when the search spans every workspace", async () => {
+    const rows = [
+      { ...skills[0]!, id: "on", name: "Summarize alpha" },
+      { ...skills[0]!, id: "off", name: "Summarize beta" },
+    ] as typeof skills
+    const provider = createSkillsProvider({ listSkills: async () => rows })
+    const ctx = makeTestContext({ capabilityOverlay: { skill: { off: false } } })
+    const out = await provider.search(makeProviderInput("workspace:all summarize", { ctx }))
+    const on = out.items.find((i) => i.id === "skill:on")!
+    const off = out.items.find((i) => i.id === "skill:off")!
+    expect(off.score).toBe(on.score)
+  })
+
   it("templates: localized name, deprecated hidden, domain label meta, no cache", async () => {
     const provider = createTemplatesProvider({ listTemplates: () => templates })
     expect(provider.cache).toBeNull()
