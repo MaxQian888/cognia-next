@@ -14,7 +14,7 @@ describe("plugin interface catalog", () => {
   it("indexes the canonical ctx method surface", () => {
     // A canary, not a fact worth memorising: any catalog edit lands here so
     // the method surface cannot grow or shrink without someone noticing.
-    expect(listPluginApiMethodContracts()).toHaveLength(651)
+    expect(listPluginApiMethodContracts()).toHaveLength(655)
     expect(getPluginApiMethodContract("session.listSessions")).toMatchObject({
       name: "listSessions",
       namespace: { authorPath: "ctx.session" },
@@ -72,6 +72,7 @@ describe("plugin interface catalog", () => {
     recordPluginApiAudit({
       pluginId: "example",
       methodId: "session.listSessions",
+      runtime: "frontend",
       outcome: "allowed",
       durationMs: 2,
       dataClassification: "sensitive",
@@ -91,6 +92,7 @@ describe("plugin interface catalog", () => {
     const event = {
       pluginId: "example",
       methodId: "session.listSessions",
+      runtime: "frontend" as const,
       outcome: "allowed" as const,
       durationMs: 2,
       dataClassification: "sensitive" as const,
@@ -107,6 +109,7 @@ describe("plugin interface catalog", () => {
       recordPluginApiAudit({
         pluginId: "example",
         methodId: `session.listSessions.${index}`,
+        runtime: "frontend",
         outcome: "allowed",
         durationMs: index,
         dataClassification: "sensitive",

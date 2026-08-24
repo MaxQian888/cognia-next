@@ -1434,7 +1434,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
     support: "supported",
     manifestFields: ["contextPanels"],
     runtimeBinding:
-      "manifest.contextPanels → context-panels module bridge → Context Workbench panel registry (module-backed defs import entry/export; webview-backed defs render the referenced manifest webview via plugin-context-panel-webview + a per-webview RPC server mirroring the API into the iframe); ctx.contextPanels.* → context-panel-api → panel registry + workbench layout store",
+      'manifest.contextPanels → context-panels module bridge → Context Workbench panel registry (module-backed defs import entry/export; webview-backed defs render the referenced manifest webview via plugin-context-panel-webview + a per-webview RPC server mirroring the API into the iframe; declarative `kind: "a2ui" | "chat"` defs render an A2UI surface or the resource conversation with no module at all, which is what makes the capability reachable from a Python plugin); ctx.contextPanels.* → context-panel-api → panel registry + workbench layout store',
     hostBindings: [
       "lib/plugin/bridge/context-panels-bridge.ts",
       "lib/plugin/bridge/context-panel-webview-protocol.ts",
@@ -1446,6 +1446,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/context-workbench/active-context.ts",
       "components/context-workbench/context-workbench.tsx",
       "components/plugins/plugin-context-panel-webview.tsx",
+      "components/plugins/plugin-declarative-context-panel.tsx",
       "lib/plugin/contracts/module-bridge-map.ts",
     ],
     typescriptSdk: [
@@ -1469,6 +1470,7 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
       "lib/context-workbench/panel-icons.test.ts",
       "lib/context-workbench/active-context.test.ts",
       "components/plugins/plugin-context-panel-webview.test.tsx",
+      "components/plugins/plugin-declarative-context-panel.test.tsx",
       "packages/plugin-sdk/src/define/define-context-panel.test.ts",
     ],
   },

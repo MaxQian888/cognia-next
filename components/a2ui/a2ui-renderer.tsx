@@ -99,6 +99,7 @@ import { A2UIScrollArea } from "./navigation/a2ui-scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { A2UIPagination } from "./navigation/a2ui-pagination"
 import { A2UISidebar } from "./navigation/a2ui-sidebar"
+import { A2UITree } from "./navigation/a2ui-tree"
 
 // P1 layout
 import { A2UICollapsible } from "./layout/a2ui-collapsible"
@@ -110,6 +111,12 @@ const A2UIAnimation = lazy(() =>
 )
 const A2UIInteractiveGuide = lazy(() =>
   import("./display/a2ui-interactive-guide").then((m) => ({ default: m.A2UIInteractiveGuide }))
+)
+// Markdown pulls react-markdown + remark/rehype + the chat block renderers.
+// Lazy for the same reason Chart is: a surface that has no prose must not pay
+// the parse cost.
+const A2UIMarkdown = lazy(() =>
+  import("./display/a2ui-markdown").then((m) => ({ default: m.A2UIMarkdown }))
 )
 
 /**
@@ -143,6 +150,7 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["RichOutput", A2UIRichOutput as A2UIComponentType],
   ["ComparisonCards", A2UIComparisonCards as A2UIComponentType],
   ["WidgetStatus", A2UIWidgetStatus as A2UIComponentType],
+  ["Markdown", A2UIMarkdown as unknown as A2UIComponentType],
   // Form components
   ["Button", A2UIButton as A2UIComponentType],
   ["TextField", A2UITextField as A2UIComponentType],
@@ -198,6 +206,7 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["ScrollArea", A2UIScrollArea as unknown as A2UIComponentType],
   ["Pagination", A2UIPagination as unknown as A2UIComponentType],
   ["Sidebar", A2UISidebar as unknown as A2UIComponentType],
+  ["Tree", A2UITree as unknown as A2UIComponentType],
   // P1 layout
   ["Collapsible", A2UICollapsible as unknown as A2UIComponentType],
 ])

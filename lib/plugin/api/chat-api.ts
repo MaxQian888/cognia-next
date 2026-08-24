@@ -1,5 +1,5 @@
 /**
- * Plugin Chat Middleware API.
+ * Plugin Chat API — middleware registration, plus the composer write surface.
  *
  * Lets a plugin register an around-style middleware via `ctx.chat.use(...)`.
  * Each middleware can inspect/transform the outgoing chat request, short-
@@ -21,6 +21,44 @@ import {
   unregisterChatMiddleware,
   type ChatMiddlewareRegistration as _Reg,
 } from "@/lib/claude/chat-middleware/registry"
+import { useChatStore } from "@/stores/chat"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
+import type { PluginSelectionRef } from "@/types/artifact/artifact"
+
+/**
+ * What a plugin stages as chat context.
+ *
+ * `kind` and `pluginId` are absent on purpose: the host stamps both, so a
+ * plugin cannot stage a selection attributed to another plugin or forge one of
+ * the host's own kinds.
+ */
+export interface PluginChatSelectionInput {
+  /** Chip label and prompt heading subject. */
+  title: string
+  /** The text itself — what the assistant actually sees. */
+  snapshot: string
+  /** The user's note on it, if the plugin collected one. */
+  comment?: string
+  /** What the plugin calls this thing, e.g. `"wiki page"`. English. */
+  sourceLabel: string
+  /** The plugin's own address for the selection, echoed back on jump-to-source. */
+  ref?: string
+  /** Workspace lines the excerpt came from. */
+  citations?: Array<{ path: string; startLine?: number; endLine?: number }>
+}
+
+export interface PluginComposerIntentOptions {
+  /** Composer to address. Defaults to the active session. */
+  sessionId?: string
+  /**
+   * Send immediately instead of leaving the text for the user to edit.
+   *
+   * Opt-in, and it stays opt-in: a plugin that stages a prompt is suggesting a
+   * turn, and turning that into "the app just messaged the model on your
+   * behalf" is a different act the author has to ask for.
+   */
+  autoSend?: boolean
+}
 
 export interface PluginChatAPI {
   /**
@@ -34,6 +72,34 @@ export interface PluginChatAPI {
     fn: ChatMiddleware,
     options?: { id?: string; priority?: number; timeoutMs?: number }
   ): () => void
+
+  /**
+   * Stage a selection as context for the user's next message.
+   *
+   * The composer already renders one chip per staged ref, folds them into the
+   * outgoing prompt and clears them after send — this puts a plugin's own
+   * surfaces on that same pipeline instead of asking every plugin to paste
+   * text into the composer and hope the formatting survives.
+   *
+   * Requires `session:write`.
+   */
+  addContextSelection(selection: PluginChatSelectionInput): void
+
+  /**
+   * Append text to a composer's draft, leaving the caret after it.
+   *
+   * Additive, never destructive: whatever the user had typed stays. Requires
+   * `session:write`.
+   */
+  appendToComposer(text: string, options?: { sessionId?: string }): void
+
+  /**
+   * Stage a prompt for a composer to pick up, optionally sending it.
+   *
+   * Returns the candidate id the composer consumes, so a plugin that stages
+   * twice can tell which one was taken. Requires `session:write`.
+   */
+  stageIntent(prompt: string, options?: PluginComposerIntentOptions): string
 }
 
 const ownedByPlugin = new Map<string, Set<string>>()
@@ -68,7 +134,54 @@ export function createChatAPI(pluginId: string): PluginChatAPI {
         logger.info(`[chat] unregistered middleware "${fullId}"`)
       }
     },
+
+    addContextSelection(selection) {
+      const ref: PluginSelectionRef = {
+        kind: "plugin",
+        pluginId,
+        title: selection.title,
+        snapshot: selection.snapshot,
+        comment: selection.comment ?? "",
+        sourceLabel: selection.sourceLabel,
+        ...(selection.ref ? { ref: selection.ref } : {}),
+        ...(selection.citations?.length ? { citations: selection.citations } : {}),
+      }
+      useChatStore.getState().addContextSelection(ref)
+      logger.info(`[chat] staged a ${selection.sourceLabel} selection`)
+    },
+
+    appendToComposer(text, options) {
+      if (!text) return
+      void dispatchAppend(text, options?.sessionId)
+    },
+
+    stageIntent(prompt, options) {
+      const sessionId = options?.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) {
+        throw new Error("[chat-api] no session to stage an intent for")
+      }
+      const candidateId = `plugin_${pluginId}_${nanoid(8)}`
+      useComposerIntentStore.getState().stage(sessionId, {
+        candidateId,
+        prompt,
+        ...(options?.autoSend ? { autoSend: true } : {}),
+      })
+      logger.info(`[chat] staged an intent for session ${sessionId}`)
+      return candidateId
+    },
   }
+}
+
+/**
+ * Append through the composer's window-event seam.
+ *
+ * Imported lazily because `components/chat/composer` is the whole composer
+ * module: a static import would drag it — and everything it renders — into
+ * every import graph that merely builds a plugin context, including headless.
+ */
+async function dispatchAppend(text: string, sessionId?: string): Promise<void> {
+  const { dispatchComposerAppend } = await import("@/components/chat/composer")
+  dispatchComposerAppend({ text, ...(sessionId ? { sessionId } : {}) })
 }
 
 /** Plugin-disable hook — drop every middleware the plugin owns. */

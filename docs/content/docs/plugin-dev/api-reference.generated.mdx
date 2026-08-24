@@ -11,7 +11,7 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
-| `ctx.a2ui` | 7 | None | frontend, hybrid | internal |
+| `ctx.a2ui` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.agent` | 27 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
 | `ctx.ai` | 7 | None | frontend, hybrid | sensitive |
 | `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
@@ -20,13 +20,13 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.backup` | 6 | `backup:read`, `backup:write` | frontend, hybrid | internal |
 | `ctx.canvas` | 32 | `canvas:write`, `canvas:read` | frontend, hybrid | internal |
 | `ctx.capabilities` | 0 | None | frontend, hybrid | internal |
-| `ctx.chat` | 1 | None | frontend, hybrid | internal |
+| `ctx.chat` | 4 | `session:write` | frontend, hybrid, python | internal |
 | `ctx.clipboard` | 7 | `clipboard:write`, `clipboard:read` | frontend, hybrid | sensitive |
 | `ctx.companion` | 10 | `companion:read`, `companion:control` | frontend, hybrid | internal |
 | `ctx.configuration` | 5 | `settings:read`, `settings:write` | frontend, hybrid | internal |
 | `ctx.connectors` | 48 | `connectors:send`, `connectors:manage`, `connectors:read` | frontend, hybrid | sensitive |
 | `ctx.contextMenu` | 2 | None | frontend, hybrid | internal |
-| `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid | internal |
+| `ctx.contextPanels` | 10 | `extension:ui` | frontend, hybrid, python | internal |
 | `ctx.db` | 6 | `database:write`, `database:read` | frontend, hybrid | internal |
 | `ctx.dexie` | 2 | None | frontend, hybrid | internal |
 | `ctx.editor` | 9 | `editor:read`, `editor:write` | frontend, hybrid | internal |
@@ -103,6 +103,7 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 | `a2ui.getSurface` | None | low | Yes |
 | `a2ui.registerComponent` | None | low | No |
 | `a2ui.registerTemplate` | None | low | No |
+| `a2ui.setReady` | None | low | Yes |
 | `a2ui.updateComponents` | None | low | No |
 | `a2ui.updateDataModel` | None | low | No |
 
@@ -250,6 +251,9 @@ Canonical error-code taxonomy raised by adapter runtimes (CLI tools, OpenAPI int
 
 | Method | Permissions | Risk | Idempotent |
 | --- | --- | --- | --- |
+| `chat.addContextSelection` | `session:write` | low | No |
+| `chat.appendToComposer` | `session:write` | low | No |
+| `chat.stageIntent` | `session:write` | medium | No |
 | `chat.use` | None | low | No |
 
 ## `ctx.clipboard`

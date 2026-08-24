@@ -87,6 +87,8 @@ export type A2UIComponentType =
   | "ButtonGroup"
   | "InputGroup"
   | "Collapsible"
+  | "Tree"
+  | "Markdown"
   | string // Allow custom component types
 
 /**
@@ -934,6 +936,75 @@ export interface A2UISidebarComponent extends A2UIBaseComponent {
   side?: "left" | "right"
 }
 
+/**
+ * One row of a `Tree`. Children are more nodes, never component ids: the tree
+ * is data, so an outline of any depth costs a single component instead of one
+ * per row.
+ */
+export interface A2UITreeNode {
+  id: string
+  label: string
+  /** Lucide icon name; falls back to the kebab-case spelling. */
+  icon?: string
+  /** Short trailing annotation, e.g. a count or a status word. */
+  badge?: string
+  children?: A2UITreeNode[]
+  /** Overrides `defaultExpandedDepth` for this branch. */
+  defaultExpanded?: boolean
+  disabled?: boolean
+}
+
+export interface A2UITreeComponent extends A2UIBaseComponent {
+  component: "Tree"
+  nodes: A2UITreeNode[]
+  /** Emitted with `{ nodeId }` when a node is activated. */
+  action?: string
+  /**
+   * Emitted with `{ nodeId, expanded }` when a branch toggles. Declared
+   * separately from `action` so lazy-loading children never looks like a
+   * selection to the plugin.
+   */
+  expandAction?: string
+  /** Id of the node to mark current, or a data-model path holding it. */
+  selectedId?: A2UIStringOrPath
+  /** Branch depth expanded on first render. Default 1 (roots only). */
+  defaultExpandedDepth?: number
+  /** Shown when `nodes` is empty; falls back to a host-localized string. */
+  emptyLabel?: string
+}
+
+/**
+ * Markdown body, rendered by the same pipeline as a chat message so the
+ * sanitize schema, Shiki code blocks, Mermaid diagrams and math are shared
+ * rather than forked.
+ */
+export interface A2UIMarkdownComponent extends A2UIBaseComponent {
+  component: "Markdown"
+  /** Markdown source, or a data-model path holding it. */
+  content: A2UIStringOrPath
+  /**
+   * Typeset preset. `"document"` (default) keeps article rhythm; `"chat"`
+   * tightens block flow the way an assistant turn does.
+   */
+  rhythm?: "chat" | "document"
+  /** Root used to resolve workspace-relative file links inside the body. */
+  projectRoot?: string
+  /** Render ```mermaid fences as diagrams. Default true. */
+  mermaid?: boolean
+  /** Render `$…$` / `$$…$$` as math. Default true. */
+  math?: boolean
+  /** Gutter line numbers on fenced code. Default true. */
+  codeLineNumbers?: boolean
+  /** Soft-wrap fenced code by default. Default false. */
+  codeWrap?: boolean
+  /**
+   * When set, clicking a workspace file link emits this action with
+   * `{ path, line?, column? }` instead of letting the host open the file
+   * itself. This is how a plugin routes a citation to its own navigation.
+   */
+  openFileAction?: string
+}
+
 export interface A2UIInputOTPComponent extends A2UIBaseComponent {
   component: "InputOTP"
   value: A2UIStringOrPath
@@ -1052,6 +1123,8 @@ export type A2UIComponent =
   | A2UIButtonGroupComponent
   | A2UIInputGroupComponent
   | A2UICollapsibleComponent
+  | A2UITreeComponent
+  | A2UIMarkdownComponent
   | A2UIBaseComponent // Fallback for custom components
 
 // =============================================================================

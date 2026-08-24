@@ -1189,7 +1189,11 @@
     {
       "field": "contextPanels",
       "capabilities": ["context-panel"],
-      "execution": "javascript",
+      "execution": "conditional",
+      "pythonExecution": "supported",
+      "javascriptWhen": {
+        "path": "entry"
+      },
       "entryPath": "contextPanels[].entry"
     },
     {
@@ -1289,7 +1293,7 @@
       "type": "PluginA2UIAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.a2ui",
@@ -1358,6 +1362,18 @@
           "cancellable": false,
           "resourceEffect": {
             "kind": "returned-disposer"
+          }
+        },
+        {
+          "id": "a2ui.setReady",
+          "name": "setReady",
+          "requiredPermissions": [],
+          "consentTier": "none",
+          "risk": "low",
+          "idempotent": true,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
           }
         },
         {
@@ -2803,7 +2819,7 @@
       "type": "PluginChatAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.chat",
@@ -2815,6 +2831,42 @@
       "lifecycle": "plugin",
       "methods": [
         {
+          "id": "chat.addContextSelection",
+          "name": "addContextSelection",
+          "requiredPermissions": ["session:write"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "chat.appendToComposer",
+          "name": "appendToComposer",
+          "requiredPermissions": ["session:write"],
+          "consentTier": "policy",
+          "risk": "low",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
+          "id": "chat.stageIntent",
+          "name": "stageIntent",
+          "requiredPermissions": ["session:write"],
+          "consentTier": "policy",
+          "risk": "medium",
+          "idempotent": false,
+          "cancellable": false,
+          "resourceEffect": {
+            "kind": "none"
+          }
+        },
+        {
           "id": "chat.use",
           "name": "use",
           "requiredPermissions": [],
@@ -2823,7 +2875,7 @@
           "idempotent": false,
           "cancellable": false,
           "resourceEffect": {
-            "kind": "none"
+            "kind": "returned-disposer"
           }
         }
       ]
@@ -3793,7 +3845,7 @@
       "type": "PluginContextPanelAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.contextPanels",

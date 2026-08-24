@@ -157,17 +157,18 @@ jest.mock("@/stores/plugin-runtime", () => ({
   },
 }))
 
-// Mock a2ui store
+// Mock a2ui store. One shared object rather than a fresh one per `getState()`
+// so a test can assert on what the API actually dispatched.
+const a2uiStoreState = {
+  createSurface: jest.fn(),
+  deleteSurface: jest.fn(),
+  updateComponents: jest.fn(),
+  updateDataModel: jest.fn(),
+  getSurface: jest.fn(),
+  processMessage: jest.fn(),
+}
 jest.mock("@/stores/a2ui", () => ({
-  useA2UIStore: {
-    getState: () => ({
-      createSurface: jest.fn(),
-      deleteSurface: jest.fn(),
-      updateComponents: jest.fn(),
-      updateDataModel: jest.fn(),
-      getSurface: jest.fn(),
-    }),
-  },
+  useA2UIStore: { getState: () => a2uiStoreState },
 }))
 
 // Mock settings store
@@ -742,6 +743,30 @@ describe("createPluginContext", () => {
       const plugin = createMockPlugin()
       const context = createPluginContext(plugin, mockManager)
       expect(typeof context.a2ui.registerComponent).toBe("function")
+    })
+
+    it("marks a surface renderable through the protocol's own surfaceReady message", () => {
+      // Without this a plugin could push a complete component tree and still
+      // only ever render a spinner: surfaces are created `ready: false` and
+      // nothing else in the plugin API flips it.
+      a2uiStoreState.processMessage.mockClear()
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      context.a2ui.createSurface("wiki:doc-1", "panel")
+      context.a2ui.updateComponents("wiki:doc-1", [
+        { id: "root", component: "Markdown", content: "# Hi" },
+      ] as never)
+      context.a2ui.setReady("wiki:doc-1")
+
+      expect(a2uiStoreState.createSurface).toHaveBeenCalledWith("wiki:doc-1", "panel", undefined)
+      expect(a2uiStoreState.processMessage.mock.calls.map(([message]) => message)).toEqual([
+        {
+          type: "updateComponents",
+          surfaceId: "wiki:doc-1",
+          components: [{ id: "root", component: "Markdown", content: "# Hi" }],
+        },
+        { type: "surfaceReady", surfaceId: "wiki:doc-1" },
+      ])
     })
   })
 
@@ -1986,7 +2011,23 @@ describe("python host-call parity (ADR-0143)", () => {
 
   it("opens at least the namespaces the reverse RPC channel was built for", () => {
     expect(pythonNamespaces.map((namespace) => namespace.id).sort()).toEqual(
-      ["agent", "fs", "git", "logger", "secrets", "storage", "ui", "workspace"].sort()
+      [
+        // The three declarative-panel namespaces are what make a
+        // `contextPanels: [{ kind: "a2ui" }]` entry more than a manifest line:
+        // the plugin builds the surface with `a2ui`, reveals the panel with
+        // `contextPanels`, and hands selections back with `chat`.
+        "a2ui",
+        "agent",
+        "chat",
+        "contextPanels",
+        "fs",
+        "git",
+        "logger",
+        "secrets",
+        "storage",
+        "ui",
+        "workspace",
+      ].sort()
     )
   })
 

@@ -1,5 +1,10 @@
 import type { ComponentType } from "react"
 import { createContextPanelWebviewRenderer } from "@/components/plugins/plugin-context-panel-webview"
+import {
+  createA2UIContextPanelRenderer,
+  createChatContextPanelRenderer,
+  declarativeFirstActivate,
+} from "@/components/plugins/plugin-declarative-context-panel"
 import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 import { attachContextPanelWebviewRpc } from "@/lib/plugin/bridge/context-panel-webview-rpc"
 import { resolveContextPanelIcon } from "@/lib/context-workbench/panel-icons"
@@ -82,7 +87,14 @@ export async function registerContextPanelsForPlugin(
       let onFirstActivate: ContextPanelDefinition["onFirstActivate"]
       let onRestore: ContextPanelDefinition["onRestore"]
       let getBadge: ContextPanelDefinition["getBadge"]
-      if (def.webview) {
+      if (def.kind === "a2ui") {
+        // Declarative: nothing to import. The body is a surface the plugin
+        // pushes with `ctx.a2ui.*`, and `activateTool` is what tells it to.
+        exported = createA2UIContextPanelRenderer(manifest.id, def)
+        onFirstActivate = declarativeFirstActivate(manifest.id, def)
+      } else if (def.kind === "chat") {
+        exported = createChatContextPanelRenderer(manifest.id, def)
+      } else if (def.webview) {
         // Webview-backed: no module to import — the body is the referenced
         // webview's iframe, resolved lazily from the registry at render time
         // (the webview bridge runs AFTER this one in the module-bridge map).
@@ -138,7 +150,10 @@ export async function registerContextPanelsForPlugin(
         hasRequiredPermissions: () =>
           permissions.every((permission) => options.hasPermission(permission)),
         getBadge,
-        requiresChatScope: def.requiresChatScope,
+        // A chat panel renders a conversation, so the scope is not the
+        // author's to decline: without it the panel mounts with no session and
+        // renders an empty pane. Every other kind keeps the manifest's answer.
+        requiresChatScope: def.kind === "chat" ? true : def.requiresChatScope,
         preferredMode: def.preferredMode,
         retention: def.retention ?? "stateful",
         renderer: exported,

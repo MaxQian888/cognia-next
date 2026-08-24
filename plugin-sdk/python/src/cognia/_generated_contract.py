@@ -983,7 +983,11 @@ MANIFEST_CONTRIBUTIONS = [
         "capabilities": [
             "context-panel",
         ],
-        "execution": "javascript",
+        "execution": "conditional",
+        "pythonExecution": "supported",
+        "javascriptWhen": {
+            "path": "entry",
+        },
         "entryPath": "contextPanels[].entry",
     },
     {
@@ -3549,6 +3553,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -3622,6 +3627,18 @@ API_NAMESPACE_CONTRACTS = [
                 "cancellable": False,
                 "resourceEffect": {
                     "kind": "returned-disposer",
+                },
+            },
+            {
+                "id": "a2ui.setReady",
+                "name": "setReady",
+                "requiredPermissions": [],
+                "consentTier": "none",
+                "risk": "low",
+                "idempotent": True,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
                 },
             },
             {
@@ -5291,6 +5308,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",
@@ -5307,6 +5325,48 @@ API_NAMESPACE_CONTRACTS = [
         "lifecycle": "plugin",
         "methods": [
             {
+                "id": "chat.addContextSelection",
+                "name": "addContextSelection",
+                "requiredPermissions": [
+                    "session:write",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "chat.appendToComposer",
+                "name": "appendToComposer",
+                "requiredPermissions": [
+                    "session:write",
+                ],
+                "consentTier": "policy",
+                "risk": "low",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
+                "id": "chat.stageIntent",
+                "name": "stageIntent",
+                "requiredPermissions": [
+                    "session:write",
+                ],
+                "consentTier": "policy",
+                "risk": "medium",
+                "idempotent": False,
+                "cancellable": False,
+                "resourceEffect": {
+                    "kind": "none",
+                },
+            },
+            {
                 "id": "chat.use",
                 "name": "use",
                 "requiredPermissions": [],
@@ -5315,7 +5375,7 @@ API_NAMESPACE_CONTRACTS = [
                 "idempotent": False,
                 "cancellable": False,
                 "resourceEffect": {
-                    "kind": "none",
+                    "kind": "returned-disposer",
                 },
             },
         ],
@@ -6463,6 +6523,7 @@ API_NAMESPACE_CONTRACTS = [
         "runtimes": [
             "frontend",
             "hybrid",
+            "python",
         ],
         "platforms": [
             "desktop",

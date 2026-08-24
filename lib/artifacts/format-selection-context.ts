@@ -3,7 +3,8 @@
  * message, so the assistant sees the exact material the user pointed at plus
  * their comment. Pure + framework-free for easy testing.
  *
- * Four kinds share this pipeline (artifact / file / comment / web). Each gets
+ * Six kinds share this pipeline (artifact / file / comment / web / external /
+ * plugin). Each gets
  * its own heading so the assistant can tell a snippet it may be asked to revise
  * from a page it may only cite — the artifact heading is load-bearing for that
  * reason, not decoration.
@@ -54,6 +55,13 @@ export function commentAnchorLabel(anchor: ContextCommentAnchor): string | undef
   }
 }
 
+/** `:12`, `:12-18`, or nothing when the citation names a whole file. */
+function citationLines(citation: { startLine?: number; endLine?: number }): string {
+  if (citation.startLine === undefined) return ""
+  const end = citation.endLine ?? citation.startLine
+  return end > citation.startLine ? `:${citation.startLine}-${end}` : `:${citation.startLine}`
+}
+
 function headingFor(sel: ContextSelectionRef): string {
   switch (sel.kind) {
     case "artifact":
@@ -72,6 +80,15 @@ function headingFor(sel: ContextSelectionRef): string {
       const sourceTitle = sel.sourceTitle ? `, window "${sel.sourceTitle}"` : ""
       const truncation = sel.truncated ? " (truncated to 20,000 characters)" : ""
       return `Selection from app "${sel.sourceApp}"${sourceTitle}${truncation}:`
+    }
+    case "plugin": {
+      // Citations are the point of this kind: without them the assistant is
+      // told some prose and cannot tell which code it describes.
+      const cited = (sel.citations ?? [])
+        .map((citation) => `${citation.path}${citationLines(citation)}`)
+        .filter((entry, index, all) => all.indexOf(entry) === index)
+      const from = cited.length > 0 ? ` [from ${cited.join(", ")}]` : ""
+      return `Selection from ${sel.sourceLabel} "${sel.title}"${from}:`
     }
   }
 }

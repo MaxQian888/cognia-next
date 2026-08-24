@@ -23,3 +23,4 @@ export type {
   A2UIInteractiveGuideComponentDef,
   A2UIGuideStep,
 } from "@/types/a2ui/interactive-guide"
+export { A2UIMarkdown, type A2UIMarkdownComponent } from "./a2ui-markdown"

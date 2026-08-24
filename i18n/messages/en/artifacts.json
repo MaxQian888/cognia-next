@@ -108,6 +108,7 @@
     "selectionChipExternalTruncatedLabel": "{app} · {title} · truncated",
     "selectionChipFileLabel": "{path} · whole file",
     "selectionChipLabel": "{title} · lines {start}-{end}",
+    "selectionChipPluginLabel": "{source}: {title}",
     "selectionChipWebLabel": "{title} · page",
     "selectionChipWholeLabel": "{title} · whole artifact",
     "selectionCommentPlaceholder": "What should change here?",

@@ -150,6 +150,9 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.a2ui.registerTemplate": {
     kind: "returned-disposer",
   },
+  "ctx.a2ui.setReady": {
+    kind: "none",
+  },
   "ctx.a2ui.updateComponents": {
     kind: "none",
   },
@@ -471,8 +474,17 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.canvas.updateDocument": {
     kind: "none",
   },
-  "ctx.chat.use": {
+  "ctx.chat.addContextSelection": {
     kind: "none",
+  },
+  "ctx.chat.appendToComposer": {
+    kind: "none",
+  },
+  "ctx.chat.stageIntent": {
+    kind: "none",
+  },
+  "ctx.chat.use": {
+    kind: "returned-disposer",
   },
   "ctx.clipboard.clear": {
     kind: "none",
@@ -2070,14 +2082,30 @@ export const PLUGIN_API_RESOURCE_EFFECTS = {
   "ctx.workflow.registerTrigger": {
     kind: "returned-disposer",
   },
+  "ctx.workspace.acquire": {
+    kind: "returned-handle",
+    disposeMethod: "release",
+  },
+  "ctx.workspace.changedSince": {
+    kind: "none",
+  },
   "ctx.workspace.getBackend": {
     kind: "none",
   },
   "ctx.workspace.listRegistered": {
     kind: "none",
   },
+  "ctx.workspace.read": {
+    kind: "none",
+  },
   "ctx.workspace.registerBackend": {
     kind: "returned-handle",
     disposeMethod: "unregister",
+  },
+  "ctx.workspace.release": {
+    kind: "none",
+  },
+  "ctx.workspace.walk": {
+    kind: "none",
   },
 } as const

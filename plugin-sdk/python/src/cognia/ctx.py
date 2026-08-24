@@ -36,6 +36,7 @@ from ._generated_contract import API_NAMESPACE_CONTRACTS
 from .runtime import HostCallError, Runtime, get_active_runtime
 
 __all__ = [
+    "CALLBACK_HOST_METHODS",
     "Ctx",
     "HostCallError",
     "HostNamespace",
@@ -56,10 +57,38 @@ def _python_namespaces() -> Dict[str, FrozenSet[str]]:
     }
 
 
+def _callback_methods() -> Dict[str, FrozenSet[str]]:
+    """Namespace -> methods that hand the host a function.
+
+    A namespace is open to python as a whole, but a *method* that registers a
+    callback (and hands back a disposer to unregister it) cannot work over
+    NDJSON in either direction: the function does not serialize on the way in,
+    and neither does the disposer on the way out. The contract already marks
+    these — ``resourceEffect.kind == "returned-disposer"`` — so the rule is read
+    from the same catalog as everything else rather than kept as a list here.
+
+    Python plugins register through the **manifest** instead, which is the whole
+    design: a declared contribution is data the host resolves itself.
+    """
+    return {
+        namespace["id"]: frozenset(
+            method["name"]
+            for method in namespace.get("methods", [])
+            if (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
+        )
+        for namespace in API_NAMESPACE_CONTRACTS
+        if "python" in (namespace.get("runtimes") or ())
+    }
+
+
 #: The contract's answer to "what can a Python plugin call?". Computed once at
 #: import; the catalog is a frozen generated artifact, so it cannot change
 #: under a running process.
 PYTHON_HOST_NAMESPACES: Dict[str, FrozenSet[str]] = _python_namespaces()
+
+#: Methods inside those namespaces that register a host-side callback. Reachable
+#: by name, refused when called — see :func:`_callback_methods`.
+CALLBACK_HOST_METHODS: Dict[str, FrozenSet[str]] = _callback_methods()
 
 
 def pack_params(args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -79,41 +108,91 @@ def pack_params(args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class HostNamespace:
-    """One ``ctx.<namespace>``, validated against the contract."""
+    """One ``ctx.<namespace>``, or a group inside it, validated against the contract.
 
-    __slots__ = ("_name", "_methods", "_runtime")
+    The contract spells nested groups as dotted method names — ``sessions.create``
+    on the ``agent`` namespace — because that is what the TypeScript surface is:
+    ``ctx.agent.sessions.create(...)``. Attribute access walks the same shape, so
+    a group resolves to another :class:`HostNamespace` and only a leaf resolves
+    to a callable. Without this, every grouped method was reachable *only*
+    through :meth:`Ctx.call`, and the author surface silently stopped mirroring
+    the TypeScript one at the first dot.
+    """
 
-    def __init__(self, name: str, methods: FrozenSet[str], runtime: Runtime) -> None:
+    __slots__ = ("_name", "_methods", "_callbacks", "_runtime", "_prefix")
+
+    def __init__(
+        self,
+        name: str,
+        methods: FrozenSet[str],
+        runtime: Runtime,
+        callbacks: FrozenSet[str] = frozenset(),
+        prefix: str = "",
+    ) -> None:
         self._name = name
         self._methods = methods
+        self._callbacks = callbacks
         self._runtime = runtime
+        self._prefix = prefix
 
-    def __getattr__(self, method: str) -> Any:
-        if method.startswith("_"):
-            raise AttributeError(method)
-        if method not in self._methods:
+    def _children(self) -> FrozenSet[str]:
+        """Immediate attribute names at this level: leaves and group heads."""
+        depth = len(self._prefix)
+        return frozenset(
+            method[depth:].split(".", 1)[0]
+            for method in self._methods
+            if method.startswith(self._prefix)
+        )
+
+    def __getattr__(self, attribute: str) -> Any:
+        if attribute.startswith("_"):
+            raise AttributeError(attribute)
+        path = f"{self._prefix}{attribute}"
+
+        if path not in self._methods:
+            if any(method.startswith(f"{path}.") for method in self._methods):
+                return HostNamespace(
+                    self._name,
+                    self._methods,
+                    self._runtime,
+                    self._callbacks,
+                    f"{path}.",
+                )
+            group = "." + self._prefix.rstrip(".") if self._prefix else ""
             raise AttributeError(
-                f"ctx.{self._name} has no method '{method}'. Available: "
-                + ", ".join(sorted(self._methods))
+                f"ctx.{self._name}{group} has no member '{attribute}'. Available: "
+                + ", ".join(sorted(self._children()))
             )
+
+        if path in self._callbacks:
+            # Named rather than hidden: the method *is* on the namespace, and
+            # saying why it cannot be called beats an "unknown method" error
+            # that sends the author looking for a typo.
+            raise AttributeError(
+                f"ctx.{self._name}.{path} registers a host-side callback, which "
+                "cannot cross the plugin's stdio boundary. Declare the "
+                "contribution in plugin.json instead."
+            )
+
         namespace = self._name
         runtime = self._runtime
 
         async def call(*args: Any, **kwargs: Any) -> Any:
             return await runtime.host_call(
-                f"{namespace}.{method}", pack_params(args, kwargs)
+                f"{namespace}.{path}", pack_params(args, kwargs)
             )
 
-        call.__name__ = method
-        call.__qualname__ = f"cognia.ctx.{namespace}.{method}"
-        call.__doc__ = f"Host call ``ctx.{namespace}.{method}``. Returns a coroutine."
+        call.__name__ = attribute
+        call.__qualname__ = f"cognia.ctx.{namespace}.{path}"
+        call.__doc__ = f"Host call ``ctx.{namespace}.{path}``. Returns a coroutine."
         return call
 
     def __dir__(self):
-        return sorted(self._methods)
+        return sorted(self._children())
 
     def __repr__(self) -> str:
-        return f"<cognia.ctx.{self._name} ({len(self._methods)} methods)>"
+        path = f".{self._prefix.rstrip('.')}" if self._prefix else ""
+        return f"<cognia.ctx.{self._name}{path} ({len(self._children())} members)>"
 
 
 class Ctx:
@@ -140,7 +219,12 @@ class Ctx:
                 f"ctx has no namespace '{namespace}' available to python plugins. "
                 "Available: " + ", ".join(sorted(PYTHON_HOST_NAMESPACES))
             )
-        return HostNamespace(namespace, methods, self.runtime)
+        return HostNamespace(
+            namespace,
+            methods,
+            self.runtime,
+            CALLBACK_HOST_METHODS.get(namespace, frozenset()),
+        )
 
     def __dir__(self):
         return sorted(PYTHON_HOST_NAMESPACES)

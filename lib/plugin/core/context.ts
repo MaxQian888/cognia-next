@@ -690,6 +690,10 @@ function createA2UIAPI(pluginId: string, manager: PluginManager): PluginA2UIAPI 
       })
     },
 
+    setReady: (surfaceId: string) => {
+      a2uiStore.processMessage({ type: "surfaceReady", surfaceId })
+    },
+
     updateDataModel: (surfaceId: string, data: Record<string, unknown>, merge = true) => {
       a2uiStore.processMessage({
         type: "dataModelUpdate",

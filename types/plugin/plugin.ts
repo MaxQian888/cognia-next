@@ -2456,9 +2456,28 @@ export interface PluginConfirmDialog {
 }
 
 export interface PluginA2UIAPI {
+  /**
+   * Create an empty surface.
+   *
+   * The surface's root component id is `"root"`: the store fixes it at create
+   * time and there is no message that changes it, so the component tree pushed
+   * to `updateComponents` must contain one with that id or the surface renders
+   * its "no content" state. Pinned by `lib/plugin/core/context.test.ts`.
+   */
   createSurface: (id: string, type: A2UISurfaceType, options?: { title?: string }) => void
   deleteSurface: (id: string) => void
   updateComponents: (surfaceId: string, components: A2UIComponent[]) => void
+  /**
+   * Mark the surface renderable.
+   *
+   * A surface is created `ready: false` and every consumer — the panel host,
+   * the message renderer, the artifact preview — shows a spinner until this
+   * flips. Without it a plugin could build a complete component tree and still
+   * only ever render a spinner, which is what `ctx.a2ui` did before ADR-0143:
+   * the protocol has always carried a `surfaceReady` message, but the plugin
+   * API exposed no way to send one.
+   */
+  setReady: (surfaceId: string) => void
   updateDataModel: (surfaceId: string, data: Record<string, unknown>, merge?: boolean) => void
   getSurface: (id: string) => unknown | undefined
   registerComponent: (component: PluginA2UIComponent) => void

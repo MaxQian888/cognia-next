@@ -1,4 +1,5 @@
 {
+  "a2uiPanelPending": "This panel is waiting for the plugin to build its view.",
   "actions": {
     "close": "Close",
     "closeSplit": "Close split pane",

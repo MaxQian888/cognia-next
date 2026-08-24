@@ -12,7 +12,7 @@ import pytest
 
 import cognia
 from cognia._generated_contract import API_NAMESPACE_CONTRACTS
-from cognia.ctx import PYTHON_HOST_NAMESPACES, Ctx, pack_params
+from cognia.ctx import CALLBACK_HOST_METHODS, PYTHON_HOST_NAMESPACES, Ctx, pack_params
 from cognia.runtime import HostCallError, Runtime, reset_active_runtime
 
 
@@ -45,7 +45,19 @@ def test_namespaces_are_exactly_the_contracts_python_entries():
     assert set(PYTHON_HOST_NAMESPACES) == expected
     # Guards the direction that matters: someone dropping "python" from the
     # catalog silently removes a capability plugins already depend on.
-    assert expected >= {"agent", "storage", "secrets", "fs", "git", "ui", "logger", "workspace"}
+    assert expected >= {
+        "a2ui",
+        "agent",
+        "chat",
+        "contextPanels",
+        "fs",
+        "git",
+        "logger",
+        "secrets",
+        "storage",
+        "ui",
+        "workspace",
+    }
 
 
 def test_methods_are_exactly_the_contracts_methods():
@@ -54,7 +66,70 @@ def test_methods_are_exactly_the_contracts_methods():
             continue
         expected = {method["name"] for method in namespace["methods"]}
         assert PYTHON_HOST_NAMESPACES[namespace["id"]] == expected
-        assert set(dir(getattr(cognia.ctx, namespace["id"]))) == expected
+        # `dir()` lists what attribute access resolves at THIS level, so a
+        # grouped method contributes its group head (`sessions`) rather than
+        # the dotted name — the same shape as the TypeScript object.
+        assert set(dir(getattr(cognia.ctx, namespace["id"]))) == {
+            name.split(".", 1)[0] for name in expected
+        }
+
+
+def test_grouped_methods_are_reachable_the_way_typescript_spells_them(fresh_runtime):
+    # `ctx.agent.sessions.create(...)`, not `ctx.call("agent.sessions.create")`.
+    seen = _record_calls(fresh_runtime, result={"id": "s1"})
+    assert asyncio.run(cognia.ctx.agent.sessions.create(title="Wiki Q&A")) == {"id": "s1"}
+    assert seen == [("agent.sessions.create", {"title": "Wiki Q&A"})]
+
+    group = cognia.ctx.agent.sessions
+    assert "create" in dir(group)
+    assert "agent.sessions" in repr(group)
+
+    with pytest.raises(AttributeError) as unknown:
+        cognia.ctx.agent.sessions.nope
+    assert "ctx.agent.sessions has no member 'nope'" in str(unknown.value)
+
+
+def test_callback_methods_are_named_but_refused():
+    # A namespace is open to python as a whole; a method that hands the host a
+    # function is not, in either direction. Refusing by name beats a confusing
+    # host-side failure after a round trip.
+    assert CALLBACK_HOST_METHODS["chat"] == {"use"}
+    assert CALLBACK_HOST_METHODS["a2ui"] == {"registerComponent", "registerTemplate"}
+    assert "register" in CALLBACK_HOST_METHODS["contextPanels"]
+
+    with pytest.raises(AttributeError) as excinfo:
+        cognia.ctx.chat.use
+    assert "registers a host-side callback" in str(excinfo.value)
+    assert "plugin.json" in str(excinfo.value)
+
+
+def test_callback_methods_are_derived_from_the_contract_not_a_local_list():
+    for namespace in API_NAMESPACE_CONTRACTS:
+        if "python" not in (namespace.get("runtimes") or ()):
+            continue
+        expected = {
+            method["name"]
+            for method in namespace["methods"]
+            if (method.get("resourceEffect") or {}).get("kind") == "returned-disposer"
+        }
+        assert CALLBACK_HOST_METHODS[namespace["id"]] == expected
+
+
+def test_the_declarative_panel_surface_is_callable_from_python(fresh_runtime):
+    # The half of `contextPanels` / `a2ui` that carries only data is what makes
+    # a `kind: "a2ui"` panel work from a Python plugin. If either of these
+    # regressed to "namespace withheld", that panel class would be dormant.
+    seen = _record_calls(fresh_runtime, result=None)
+    asyncio.run(cognia.ctx.a2ui.createSurface(surfaceId="wiki", surfaceType="panel"))
+    asyncio.run(cognia.ctx.a2ui.updateComponents(surfaceId="wiki", components=[]))
+    asyncio.run(cognia.ctx.contextPanels.reveal(panelId="reader"))
+    asyncio.run(cognia.ctx.chat.addContextSelection(title="Overview", snapshot="..."))
+    assert [method for method, _ in seen] == [
+        "a2ui.createSurface",
+        "a2ui.updateComponents",
+        "contextPanels.reveal",
+        "chat.addContextSelection",
+    ]
 
 
 def test_unknown_namespace_and_method_fail_fast_with_alternatives():
@@ -65,15 +140,15 @@ def test_unknown_namespace_and_method_fail_fast_with_alternatives():
 
     with pytest.raises(AttributeError) as unknown_method:
         cognia.ctx.storage.nope
-    assert "has no method 'nope'" in str(unknown_method.value)
+    assert "has no member 'nope'" in str(unknown_method.value)
     assert "getOrDefault" in str(unknown_method.value)
 
 
 def test_namespaces_the_contract_withholds_are_not_reachable():
-    # contextPanels and chat exist on the TS context but their python-routable
-    # surfaces do not exist yet. The catalog says so; this proves the SDK
-    # honours it rather than exposing them optimistically.
-    for withheld in ("contextPanels", "chat"):
+    # `ai` and `db` exist on the TS context but have no python-routable surface.
+    # The catalog says so; this proves the SDK honours it rather than exposing
+    # them optimistically.
+    for withheld in ("ai", "db"):
         assert withheld not in PYTHON_HOST_NAMESPACES
         with pytest.raises(AttributeError):
             getattr(cognia.ctx, withheld)
@@ -135,8 +210,8 @@ def test_run_sync_refuses_inside_a_running_loop(fresh_runtime):
 
 def test_call_escape_hatch_bypasses_validation(fresh_runtime):
     seen = _record_calls(fresh_runtime, result=None)
-    asyncio.run(cognia.ctx.call("chat.addContextSelection", {"kind": "wiki"}))
-    assert seen == [("chat.addContextSelection", {"kind": "wiki"})]
+    asyncio.run(cognia.ctx.call("ai.generateText", {"prompt": "hi"}))
+    assert seen == [("ai.generateText", {"prompt": "hi"})]
 
 
 # -- no host attached -------------------------------------------------------

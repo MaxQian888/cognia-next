@@ -1,4 +1,5 @@
 {
+  "a2uiPanelPending": "此面板正在等待插件生成内容。",
   "actions": {
     "close": "关闭",
     "closeSplit": "关闭分屏",

@@ -142,6 +142,37 @@ export interface ExternalSelectionRef extends ContextSelectionBase {
 }
 
 /**
+ * Something a plugin's own surface produced — a wiki page, a search hit, a
+ * rendered report — staged from that plugin's panel.
+ *
+ * Deliberately *not* one variant per plugin. The host cannot know a plugin's
+ * vocabulary, and a `kind: "wiki"` in this union would put one plugin's nouns
+ * in the host's type system and force a recompile for the next one. What the
+ * host does need is the same three things it needs from every other kind: what
+ * to draw on the chip, how to head the prompt block, and where the excerpt came
+ * from — so those are the fields, and everything else stays inside `ref`.
+ */
+export interface PluginSelectionRef extends ContextSelectionBase {
+  kind: "plugin"
+  /** Plugin that staged it; the chip attributes the excerpt to it. */
+  pluginId: string
+  /**
+   * What the plugin calls this thing ("wiki page", "search result"). Goes into
+   * the prompt heading verbatim, so it is English prompt scaffolding rather
+   * than UI copy — the chip itself is localized around it.
+   */
+  sourceLabel: string
+  /** The plugin's own address for the selection, echoed back on jump-to-source. */
+  ref?: string
+  /**
+   * Where in the workspace the excerpt came from. This is the difference
+   * between "the assistant was told some prose" and "the assistant can open the
+   * code that prose is about".
+   */
+  citations?: Array<{ path: string; startLine?: number; endLine?: number }>
+}
+
+/**
  * Anything the user can stage as context for their next message.
  *
  * A discriminated union rather than four parallel staging arrays: the composer
@@ -156,6 +187,7 @@ export type ContextSelectionRef =
   | CommentSelectionRef
   | WebSelectionRef
   | ExternalSelectionRef
+  | PluginSelectionRef
 
 export interface ArtifactWorkspaceState {
   scope: ArtifactWorkspaceScope

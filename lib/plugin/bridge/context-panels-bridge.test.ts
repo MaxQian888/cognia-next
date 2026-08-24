@@ -259,3 +259,116 @@ it("rejects an unsafe entry even when runtime registration bypasses manifest val
   expect(result.errors[0]?.message).toMatch(/unsafe plugin-relative path/i)
   expect(importer).not.toHaveBeenCalled()
 })
+
+// -- declarative kinds (ADR-0143) -------------------------------------------
+
+const pythonManifest = {
+  id: "wiki-plugin",
+  name: "Wiki Plugin",
+  description: "A Python plugin that contributes panels without a JS module.",
+  version: "1.0.0",
+  type: "python",
+  permissions: ["extension:ui", "canvas:read"],
+  capabilities: ["context-panel"],
+  contextPanels: [
+    {
+      id: "reader",
+      kind: "a2ui",
+      surface: "wiki:{resourceKey}",
+      activateTool: "build_wiki_surface",
+      resourceKinds: ["canvas-document"],
+      activity: "inspect",
+      labelKey: "panels.reader",
+      label: "Wiki",
+    },
+    {
+      id: "sidechat",
+      kind: "chat",
+      contextTool: "wiki_context",
+      resourceKinds: ["canvas-document"],
+      activity: "inspect",
+      labelKey: "panels.sidechat",
+      label: "Ask the wiki",
+    },
+  ],
+} satisfies PluginManifest
+
+const canvasResource = {
+  kind: "canvas-document" as const,
+  documentId: "doc-1",
+  revision: "1",
+  capabilities: [],
+}
+
+afterEach(() => unregisterContextPanelsForPlugin(pythonManifest.id))
+
+it("registers a2ui and chat panels without importing anything", async () => {
+  const importer = jest.fn(async () => ({}))
+
+  const result = await registerContextPanelsForPlugin(pythonManifest, "/plugins/wiki", {
+    importer,
+    hasPermission: () => true,
+  })
+
+  expect(result).toEqual({ registered: 2, errors: [] })
+  // The whole point: a Python plugin has no module to import, and the bridge
+  // must not go looking for one.
+  expect(importer).not.toHaveBeenCalled()
+  expect(contextPanelRegistry.resolve(canvasResource).map((panel) => panel.id)).toEqual(
+    expect.arrayContaining(["wiki-plugin:reader", "wiki-plugin:sidechat"])
+  )
+})
+
+it("gives an a2ui panel an onFirstActivate only when it declares a build tool", async () => {
+  await registerContextPanelsForPlugin(pythonManifest, "/plugins/wiki", {
+    hasPermission: () => true,
+  })
+  const reader = contextPanelRegistry
+    .resolve(canvasResource)
+    .find((panel) => panel.id === "wiki-plugin:reader")
+  expect(typeof reader?.onFirstActivate).toBe("function")
+
+  unregisterContextPanelsForPlugin(pythonManifest.id)
+  await registerContextPanelsForPlugin(
+    {
+      ...pythonManifest,
+      contextPanels: [
+        { ...pythonManifest.contextPanels[0], activateTool: undefined },
+        pythonManifest.contextPanels[1],
+      ],
+    } as PluginManifest,
+    "/plugins/wiki",
+    { hasPermission: () => true }
+  )
+  expect(
+    contextPanelRegistry.resolve(canvasResource).find((panel) => panel.id === "wiki-plugin:reader")
+      ?.onFirstActivate
+  ).toBeUndefined()
+})
+
+it("forces chat scope on a chat panel even when the manifest declines it", async () => {
+  // A conversation with no provisioned session renders an empty pane, so this
+  // is not the author's call to make.
+  await registerContextPanelsForPlugin(
+    {
+      ...pythonManifest,
+      contextPanels: [{ ...pythonManifest.contextPanels[1], requiresChatScope: false }],
+    } as PluginManifest,
+    "/plugins/wiki",
+    { hasPermission: () => true }
+  )
+  expect(
+    contextPanelRegistry
+      .resolve(canvasResource)
+      .find((panel) => panel.id === "wiki-plugin:sidechat")?.requiresChatScope
+  ).toBe(true)
+})
+
+it("still gates a declarative panel on the resource permission", async () => {
+  const result = await registerContextPanelsForPlugin(pythonManifest, "/plugins/wiki", {
+    hasPermission: (permission) => permission !== "canvas:read",
+  })
+  expect(result.registered).toBe(0)
+  expect(result.errors).toHaveLength(2)
+  expect(result.errors[0]?.message).toMatch(/canvas:read/)
+})

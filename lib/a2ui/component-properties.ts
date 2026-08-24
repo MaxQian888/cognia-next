@@ -28,6 +28,7 @@ import type {
   A2UILoadingComponent,
   A2UIPopoverComponent,
   A2UISheetComponent,
+  A2UIMarkdownComponent,
   A2UISidebarComponent,
   A2UISkeletonComponent,
   A2UISpinnerComponent,
@@ -247,6 +248,9 @@ const ENUM_PROPERTY_DEFINITIONS: Readonly<Record<string, readonly A2UIEnumProper
   ],
   Sheet: [enumProperty<NonNullable<A2UISheetComponent["side"]>>("side", SIDE_OPTIONS)],
   Sidebar: [enumProperty<NonNullable<A2UISidebarComponent["side"]>>("side", ["left", "right"])],
+  Markdown: [
+    enumProperty<NonNullable<A2UIMarkdownComponent["rhythm"]>>("rhythm", ["document", "chat"]),
+  ],
   ToggleGroup: [
     enumProperty<NonNullable<A2UIToggleGroupComponent["size"]>>("size", ["sm", "default", "lg"]),
   ],

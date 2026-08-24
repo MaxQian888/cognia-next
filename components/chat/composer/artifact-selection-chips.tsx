@@ -21,6 +21,7 @@ import {
   FileCodeIcon,
   GlobeIcon,
   MessageSquareIcon,
+  PuzzleIcon,
   ScanTextIcon,
   XIcon,
 } from "lucide-react"
@@ -41,6 +42,7 @@ const KIND_ICONS = {
   comment: MessageSquareIcon,
   web: GlobeIcon,
   external: ScanTextIcon,
+  plugin: PuzzleIcon,
 } as const
 
 /** Stable-ish identity for the React key; the index disambiguates repeats. */
@@ -56,6 +58,8 @@ function selectionKey(sel: ContextSelectionRef): string {
       return `comment:${sel.title}`
     case "external":
       return `external:${sel.candidateId}`
+    case "plugin":
+      return `plugin:${sel.pluginId}:${sel.ref ?? sel.title}`
   }
 }
 
@@ -110,6 +114,11 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
               title: sel.sourceTitle,
             })
           : t("selectionChipExternalAppLabel", { app: sel.sourceApp })
+      case "plugin":
+        return t("selectionChipPluginLabel", {
+          source: sel.sourceLabel,
+          title: sel.title,
+        })
     }
   }
 

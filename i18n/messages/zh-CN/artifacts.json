@@ -108,6 +108,7 @@
     "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
     "selectionChipFileLabel": "{path} · 整个文件",
     "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+    "selectionChipPluginLabel": "{source}：{title}",
     "selectionChipWebLabel": "{title} · 网页",
     "selectionChipWholeLabel": "{title} · 整份产物",
     "selectionCommentPlaceholder": "这里希望怎么改？",

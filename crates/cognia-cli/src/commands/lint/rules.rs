@@ -1464,4 +1464,80 @@ mod tests {
         // `..foo` is not a `..` path segment.
         assert_eq!(lazy_factory_entry_violations("..foo/bar"), none);
     }
+
+    fn python_manifest_with_panels(panels: Value) -> Value {
+        serde_json::json!({
+            "id": "wiki-plugin",
+            "name": "Wiki",
+            "version": "1.0.0",
+            "description": "A python plugin contributing panels.",
+            "type": "python",
+            "pythonMain": "main.py",
+            "capabilities": ["context-panel"],
+            "permissions": ["extension:ui", "session:read"],
+            "contextPanels": panels,
+        })
+    }
+
+    #[test]
+    fn declarative_context_panels_are_allowed_on_a_python_plugin() {
+        // ADR-0143. Before the contract made `contextPanels` conditional, a
+        // python plugin declaring one was rejected outright, whatever the panel
+        // actually rendered — which is why `kind: "a2ui"` had to exist.
+        let manifest = python_manifest_with_panels(serde_json::json!([
+            {
+                "id": "reader",
+                "label": "Wiki",
+                "labelKey": "panels.reader",
+                "kind": "a2ui",
+                "surface": "wiki:{resourceKey}",
+                "resourceKinds": ["session"],
+                "activity": "inspect",
+            },
+            {
+                "id": "sidechat",
+                "label": "Ask",
+                "labelKey": "panels.sidechat",
+                "kind": "chat",
+                "resourceKinds": ["session"],
+                "activity": "inspect",
+            }
+        ]));
+
+        let codes: Vec<String> = validate_manifest(&manifest)
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        assert!(
+            !codes
+                .iter()
+                .any(|code| code.starts_with("manifest.contributions.javascript.unsupported")),
+            "unexpected diagnostics: {codes:?}"
+        );
+    }
+
+    #[test]
+    fn a_module_backed_context_panel_still_needs_javascript() {
+        // The other half of the same rule: naming an `entry` is a declaration
+        // of JS intent, and the conditional contract must not wave it through
+        // just because the plugin is python.
+        let manifest = python_manifest_with_panels(serde_json::json!([{
+            "id": "reader",
+            "label": "Wiki",
+            "labelKey": "panels.reader",
+            "entry": "dist/panel.js",
+            "export": "Panel",
+            "resourceKinds": ["session"],
+            "activity": "inspect",
+        }]));
+
+        let codes: Vec<String> = validate_manifest(&manifest)
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        assert!(
+            codes.contains(&"manifest.contributions.javascript.unsupported_for_python".to_string()),
+            "expected a javascript-unsupported diagnostic, got: {codes:?}"
+        );
+    }
 }

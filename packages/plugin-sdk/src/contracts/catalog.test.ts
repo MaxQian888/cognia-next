@@ -44,9 +44,14 @@ describe("canonical plugin author contract", () => {
     expect(new Set(fields).size).toBe(fields.length)
     expect(PLUGIN_MANIFEST_CONTRIBUTIONS).toEqual(
       expect.arrayContaining([
+        // Conditional, not "javascript": a context panel needs a JS module only
+        // when it names one. A webview panel, and the two declarative kinds a
+        // Python plugin can declare, have no module to load.
         expect.objectContaining({
           field: "contextPanels",
-          execution: "javascript",
+          execution: "conditional",
+          pythonExecution: "supported",
+          javascriptWhen: { path: "entry" },
           entryPath: "contextPanels[].entry",
         }),
         expect.objectContaining({ field: "sessionImporters", execution: "javascript" }),

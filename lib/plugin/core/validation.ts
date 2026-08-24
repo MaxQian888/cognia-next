@@ -31,6 +31,7 @@ import {
   CANONICAL_CONTEXT_ACTIVITIES,
   CONTEXT_RESOURCE_READ_PERMISSIONS,
 } from "@/types/context-workbench"
+import { DECLARATIVE_CONTEXT_PANEL_KINDS } from "@/types/plugin/plugin-context-panel"
 import { PLUGIN_MODAL_SIZES, PLUGIN_MODAL_VARIANTS } from "@/types/plugin/plugin-modal"
 import { getPluginPathViolations, type PluginPathViolation } from "@/lib/plugin/core/plugin-path"
 import { IdeManifestError, normalizeIdeManifest } from "@/lib/plugin/ide/manifest"
@@ -2394,10 +2395,78 @@ export function validatePluginManifest(
     m.contextPanels,
     {
       field: "contextPanels",
-      // A `webview`-backed panel has no JS module: its body is a sandboxed
-      // iframe resolved from `manifest.webviews[]` at render time.
-      moduleOptional: (entry) => typeof entry.webview === "string" && entry.webview.length > 0,
+      // A panel has no JS module when its body comes from somewhere else: a
+      // sandboxed iframe resolved from `manifest.webviews[]`, an A2UI surface
+      // the plugin pushes, or the host's own resource conversation.
+      moduleOptional: (entry) =>
+        (typeof entry.webview === "string" && entry.webview.length > 0) ||
+        DECLARATIVE_CONTEXT_PANEL_KINDS.includes(
+          entry.kind as (typeof DECLARATIVE_CONTEXT_PANEL_KINDS)[number]
+        ),
       extra: (entry, _i, push) => {
+        if (entry.kind !== undefined) {
+          const kinds = ["module", "webview", ...DECLARATIVE_CONTEXT_PANEL_KINDS]
+          if (typeof entry.kind !== "string" || !kinds.includes(entry.kind)) {
+            push("error", "kind.invalid", `contextPanels "kind" must be one of ${kinds.join(", ")}`)
+          }
+        }
+        if (
+          typeof entry.kind === "string" &&
+          DECLARATIVE_CONTEXT_PANEL_KINDS.includes(
+            entry.kind as (typeof DECLARATIVE_CONTEXT_PANEL_KINDS)[number]
+          )
+        ) {
+          // A declarative panel has no module and no webview, so naming either
+          // is a manifest that cannot be honoured — the host would have two
+          // candidate bodies and no rule for picking one.
+          const conflicting = (
+            [
+              "entry",
+              "export",
+              "webview",
+              "onFirstActivateExport",
+              "onRestoreExport",
+              "getBadgeExport",
+            ] as const
+          ).filter((f) => entry[f] !== undefined)
+          if (conflicting.length > 0) {
+            push(
+              "error",
+              "kind.conflict",
+              `contextPanels "kind": "${entry.kind}" is mutually exclusive with ${conflicting.join(", ")}`
+            )
+          }
+          if (entry.kind === "a2ui") {
+            if (typeof entry.surface !== "string" || entry.surface.length === 0) {
+              push(
+                "error",
+                "surface.missing",
+                `contextPanels "kind": "a2ui" requires a non-empty "surface" id`
+              )
+            }
+            if (
+              entry.activateTool !== undefined &&
+              (typeof entry.activateTool !== "string" || entry.activateTool.length === 0)
+            ) {
+              push(
+                "error",
+                "activateTool.invalid",
+                `contextPanels "activateTool" must be a non-empty tool name`
+              )
+            }
+          }
+          if (
+            entry.kind === "chat" &&
+            entry.contextTool !== undefined &&
+            (typeof entry.contextTool !== "string" || entry.contextTool.length === 0)
+          ) {
+            push(
+              "error",
+              "contextTool.invalid",
+              `contextPanels "contextTool" must be a non-empty tool name`
+            )
+          }
+        }
         if (entry.webview !== undefined) {
           if (typeof entry.webview !== "string" || entry.webview.length === 0) {
             push(

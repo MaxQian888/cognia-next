@@ -41,6 +41,8 @@ interface PluginContextPanelDefBase {
 
 /** Panel backed by a JS module: `entry`'s `export` is the React renderer. */
 export interface PluginModuleContextPanelDef extends PluginContextPanelDefBase {
+  /** Optional, and only for symmetry with the declarative kinds. */
+  kind?: "module"
   entry: string
   export: string
   /**
@@ -63,6 +65,7 @@ export interface PluginModuleContextPanelDef extends PluginContextPanelDefBase {
  * lifecycle exports from — hence the `never` fields.
  */
 export interface PluginWebviewContextPanelDef extends PluginContextPanelDefBase {
+  kind?: "webview"
   webview: string
   entry?: never
   export?: never
@@ -71,6 +74,80 @@ export interface PluginWebviewContextPanelDef extends PluginContextPanelDefBase 
   getBadgeExport?: never
 }
 
-export type PluginContextPanelDef = PluginModuleContextPanelDef | PluginWebviewContextPanelDef
+/**
+ * Fields the declarative kinds must not carry.
+ *
+ * Written once rather than per interface because the point of a declarative
+ * panel is that there is no module to resolve anything from: a `kind: "a2ui"`
+ * entry that also named an `entry` would be ambiguous about which body wins,
+ * and the manifest validator would have to guess.
+ */
+interface NoModuleFields {
+  entry?: never
+  export?: never
+  webview?: never
+  onFirstActivateExport?: never
+  onRestoreExport?: never
+  getBadgeExport?: never
+}
+
+/**
+ * Panel whose body is an A2UI surface the plugin builds and updates.
+ *
+ * This is the first panel class a Python plugin can declare. Every other kind
+ * needs the plugin to hand the host a React component or an HTML document,
+ * neither of which survives the NDJSON wire; an A2UI surface is data, pushed
+ * with `ctx.a2ui.updateComponents` and answered through the `onA2UIAction`
+ * hook the Python runtime has always supported.
+ */
+export interface PluginA2UIContextPanelDef extends PluginContextPanelDefBase, NoModuleFields {
+  kind: "a2ui"
+  /**
+   * Surface id to render. A `{resourceKey}` placeholder is replaced with the
+   * active resource's key (`getContextResourceKey`), so one declaration backs a
+   * per-resource surface without the plugin subscribing to anything — it
+   * computes the same id and pushes to it.
+   */
+  surface: string
+  /**
+   * Tool invoked when the panel is first shown for a resource, with
+   * `{ resource, surfaceId }`. This is how a declarative panel gets built:
+   * without it the plugin would need a host→plugin callback, which is exactly
+   * what a Python plugin cannot receive.
+   */
+  activateTool?: string
+}
+
+/**
+ * Panel whose body is a conversation scoped to the active resource — the same
+ * side-chat the artifact and canvas surfaces host, contributed by a plugin.
+ */
+export interface PluginChatContextPanelDef extends PluginContextPanelDefBase, NoModuleFields {
+  kind: "chat"
+  /**
+   * Tool invoked with `{ resource }` to obtain the text the conversation is
+   * grounded in. It may return a string, or an object with a `text` field.
+   * Without it the panel is an ordinary chat with no resource context.
+   */
+  contextTool?: string
+}
+
+export type PluginContextPanelDef =
+  | PluginModuleContextPanelDef
+  | PluginWebviewContextPanelDef
+  | PluginA2UIContextPanelDef
+  | PluginChatContextPanelDef
+
+/** The kinds that carry no module and no webview. */
+export const DECLARATIVE_CONTEXT_PANEL_KINDS = ["a2ui", "chat"] as const
+
+export type DeclarativeContextPanelKind = (typeof DECLARATIVE_CONTEXT_PANEL_KINDS)[number]
+
+/** Narrow a manifest entry to a declarative panel. */
+export function isDeclarativeContextPanelDef(
+  def: PluginContextPanelDef
+): def is PluginA2UIContextPanelDef | PluginChatContextPanelDef {
+  return def.kind === "a2ui" || def.kind === "chat"
+}
 
 export type PluginContextPanelRenderer = ComponentType<ContextPanelRenderProps>

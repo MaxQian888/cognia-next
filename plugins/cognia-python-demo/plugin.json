@@ -2,10 +2,23 @@
   "id": "cognia-python-demo",
   "name": "Python Demo",
   "version": "0.1.0",
-  "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, and config.",
+  "description": "First-party reference plugin for the Python runtime: tools, streaming, hooks, lifecycle, config, and a declarative A2UI context panel.",
   "type": "python",
-  "capabilities": ["tools", "hooks"],
+  "capabilities": ["tools", "hooks", "context-panel"],
   "pythonMain": "main.py",
+  "contextPanels": [
+    {
+      "id": "python-demo",
+      "kind": "a2ui",
+      "label": "Python demo",
+      "labelKey": "panel.demo",
+      "surface": "cognia-python-demo:{resourceKey}",
+      "activateTool": "build_demo_panel",
+      "resourceKinds": ["session"],
+      "activity": "inspect",
+      "icon": "Braces"
+    }
+  ],
   "author": "cognia-next",
   "license": "MIT",
   "minAppVersion": "0.1.0",
@@ -13,7 +26,17 @@
     "cognia": ">=0.1.0",
     "python": ">=3.9"
   },
-  "permissions": ["python:execute", "hooks:chat-intercept"],
+  "i18n": {
+    "locales": {
+      "en": {
+        "panel.demo": "Python demo"
+      },
+      "zh-CN": {
+        "panel.demo": "Python 示例"
+      }
+    }
+  },
+  "permissions": ["python:execute", "hooks:chat-intercept", "extension:ui", "session:read"],
   "configSchema": {
     "type": "object",
     "properties": {

@@ -225,6 +225,12 @@ export function createA2UIComponentBundle(type: string, id: string): A2UICompone
     case "Sidebar":
       root = descriptor(id, type, { groups: [] })
       break
+    case "Tree":
+      root = descriptor(id, type, { nodes: [{ id: "node-1", label: "Node 1" }] })
+      break
+    case "Markdown":
+      root = descriptor(id, type, { content: `# ${type}` })
+      break
     case "Toast":
       root = descriptor(id, type, { message: type })
       break

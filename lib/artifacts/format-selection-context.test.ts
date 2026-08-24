@@ -228,3 +228,60 @@ describe("commentAnchorLabel", () => {
     expect(out).toContain('Comment on "Spec" (lines 3-9):')
   })
 })
+
+describe("plugin selections", () => {
+  it("names the plugin's own vocabulary and the lines the excerpt came from", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "plugin",
+        pluginId: "cognia-repowiki",
+        sourceLabel: "wiki page",
+        title: "Plugin runtime",
+        snapshot: "The Python host speaks NDJSON.",
+        comment: "",
+        citations: [
+          { path: "crates/cognia-plugin-runtime/src/python/host.py", startLine: 12, endLine: 40 },
+          { path: "README.md" },
+        ],
+      },
+    ])
+    expect(out).toContain(
+      'Selection from wiki page "Plugin runtime" [from crates/cognia-plugin-runtime/src/python/host.py:12-40, README.md]:'
+    )
+    expect(out).toContain("The Python host speaks NDJSON.")
+  })
+
+  it("collapses a single-line citation and de-duplicates repeats", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "plugin",
+        pluginId: "p",
+        sourceLabel: "report",
+        title: "Findings",
+        snapshot: "x",
+        comment: "",
+        citations: [
+          { path: "a.ts", startLine: 7 },
+          { path: "a.ts", startLine: 7, endLine: 7 },
+        ],
+      },
+    ])
+    expect(out).toContain("[from a.ts:7]")
+  })
+
+  it("heads an uncited plugin selection without an empty bracket", () => {
+    const out = formatContextSelectionsForLLM([
+      {
+        kind: "plugin",
+        pluginId: "p",
+        sourceLabel: "search result",
+        title: "Hit",
+        snapshot: "x",
+        comment: "look here",
+      },
+    ])
+    expect(out).toContain('Selection from search result "Hit":')
+    expect(out).not.toContain("[from")
+    expect(out).toContain("Comment: look here")
+  })
+})

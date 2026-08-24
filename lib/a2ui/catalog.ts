@@ -95,6 +95,8 @@ const standardCatalogDefinition: Omit<A2UIComponentCatalog, "components"> & {
     "FormGroup",
     "AcademicAnalysis",
     "AcademicSearchResults",
+    "Markdown",
+    "Tree",
   ],
 }
 
@@ -336,6 +338,7 @@ export const componentCategories = {
     "Error",
     "Empty",
     "Animation",
+    "Markdown",
   ] as A2UIComponentType[],
   input: [
     "TextField",
@@ -390,6 +393,7 @@ export const componentCategories = {
     "Drawer",
     "Sheet",
     "Sidebar",
+    "Tree",
     "InteractiveGuide",
   ] as A2UIComponentType[],
 }

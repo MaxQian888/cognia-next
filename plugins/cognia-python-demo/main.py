@@ -31,6 +31,28 @@ def _format(text):
     return message.upper() if config.get("shout") else message
 
 
+_PANEL_BODY = """## Python demo panel
+
+This panel is **declarative**: `plugin.json` says
+
+```json
+{ "kind": "a2ui", "surface": "cognia-python-demo:{resourceKey}", "activateTool": "build_demo_panel" }
+```
+
+and the host renders an A2UI surface. No JavaScript module, no webview — the
+body above and the tree beside it are component data pushed from
+`build_demo_panel` over the same stdio channel every other `ctx.*` call uses.
+
+```mermaid
+sequenceDiagram
+    Host->>Plugin: call build_demo_panel(surfaceId)
+    Plugin->>Host: a2ui.createSurface / updateComponents
+    Plugin->>Host: a2ui.setReady
+    Host-->>Plugin: onA2UIAction (clicks)
+```
+"""
+
+
 def on_startup():
     print(f"cognia-python-demo started with config: {get_config()}")
 
@@ -133,3 +155,80 @@ async def host_fanout(count: int = 3) -> list:
         *[cognia.ctx.logger.info(f"fanout {index}") for index in range(count)]
     )
     return [str(item) for item in results]
+
+
+@tool(
+    name="build_demo_panel",
+    description="Build the plugin's context-panel surface. Invoked by the host on first activation.",
+    parameters={
+        "surfaceId": {
+            "type": "string",
+            "required": True,
+            "description": "Surface the panel renders",
+        },
+        "resource": {
+            "type": "object",
+            "required": False,
+            "description": "The resource the panel is scoped to",
+        },
+    },
+)
+async def build_demo_panel(surfaceId, resource=None):
+    """The Python half of a declarative `kind: "a2ui"` context panel.
+
+    The manifest names this tool as the panel's ``activateTool``; the host calls
+    it the first time the panel is shown for a resource, with the surface id it
+    resolved from ``surface: "cognia-python-demo:{resourceKey}"``. There is no
+    callback and no JavaScript anywhere in the path — the panel body is data
+    this function pushes.
+
+    The root component's id must be ``"root"``: that is what the surface is
+    created with, and no message changes it.
+    """
+    kind = (resource or {}).get("kind", "unknown")
+    await cognia.ctx.a2ui.createSurface(surfaceId, "panel", {"title": "Python demo"})
+    await cognia.ctx.a2ui.updateComponents(
+        surfaceId,
+        [
+            {"id": "root", "component": "Column", "children": ["outline", "body"], "gap": 12},
+            {
+                "id": "outline",
+                "component": "Tree",
+                "action": "open-section",
+                "defaultExpandedDepth": 1,
+                "nodes": [
+                    {
+                        "id": "runtime",
+                        "label": "Runtime",
+                        "icon": "cpu",
+                        "children": [
+                            {"id": "runtime/frames", "label": "Frames", "icon": "file-text"},
+                            {"id": "runtime/venv", "label": "Environments", "icon": "package"},
+                        ],
+                    },
+                    {"id": "resource", "label": kind, "icon": "link"},
+                ],
+            },
+            {
+                "id": "body",
+                "component": "Markdown",
+                "content": _PANEL_BODY,
+            },
+        ],
+    )
+    # Surfaces are created `ready: false`; without this the panel spins forever.
+    await cognia.ctx.a2ui.setReady(surfaceId)
+    return {"surfaceId": surfaceId, "resourceKind": kind}
+
+
+@hook("onA2UIAction")
+def demo_panel_action(payload):
+    """Clicks in the panel arrive here — the return trip, with no JS either.
+
+    A2UI actions are dispatched to every plugin's ``onA2UIAction`` hook, which
+    the Python runtime has always supported; the panel class added in ADR-0143
+    is what finally gives a Python plugin a surface to receive them from.
+    """
+    if isinstance(payload, dict) and payload.get("action") == "open-section":
+        print(f"python demo panel: section {payload.get('data', {}).get('nodeId')}")
+    return payload

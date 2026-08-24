@@ -618,6 +618,129 @@ describe("Plugin Validation", () => {
       )
     })
 
+    it("accepts a python plugin's declarative context panels with no JS entry", () => {
+      // Before ADR-0143 this was a hard error: `contextPanels` was
+      // `execution: "javascript"`, so declaring one on a python plugin failed
+      // validation whatever the panel actually rendered.
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.permissions = ["extension:ui", "session:read"]
+      manifest.contextPanels = [
+        {
+          id: "reader",
+          label: "Wiki",
+          labelKey: "panels.reader",
+          kind: "a2ui",
+          surface: "wiki:{resourceKey}",
+          activateTool: "build_surface",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+        {
+          id: "sidechat",
+          label: "Ask",
+          labelKey: "panels.sidechat",
+          kind: "chat",
+          contextTool: "wiki_context",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      const codes = (
+        validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics ?? []
+      ).map((diagnostic) => diagnostic.code)
+      expect(codes).not.toContain("manifest.contributions.javascript.unsupported_for_plugin_type")
+      expect(codes.filter((code) => code.startsWith("manifest.contextPanels."))).toEqual([])
+    })
+
+    it("rejects a declarative context panel that also names a module or webview", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.permissions = ["extension:ui", "session:read"]
+      manifest.contextPanels = [
+        {
+          id: "reader",
+          label: "Wiki",
+          labelKey: "panels.reader",
+          kind: "a2ui",
+          surface: "wiki",
+          entry: "dist/panel.js",
+          export: "Panel",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.kind.conflict",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("requires a surface id on an a2ui panel and a real tool name on either kind", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.permissions = ["extension:ui", "session:read"]
+      manifest.contextPanels = [
+        {
+          id: "reader",
+          label: "Wiki",
+          labelKey: "panels.reader",
+          kind: "a2ui",
+          activateTool: "",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+        {
+          id: "sidechat",
+          label: "Ask",
+          labelKey: "panels.sidechat",
+          kind: "chat",
+          contextTool: "",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      const codes = (
+        validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics ?? []
+      ).map((diagnostic) => diagnostic.code)
+      expect(codes).toContain("manifest.contextPanels.surface.missing")
+      expect(codes).toContain("manifest.contextPanels.activateTool.invalid")
+      expect(codes).toContain("manifest.contextPanels.contextTool.invalid")
+    })
+
+    it("rejects an unknown context panel kind rather than silently loading a module", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.permissions = ["extension:ui", "session:read"]
+      manifest.contextPanels = [
+        {
+          id: "reader",
+          label: "Wiki",
+          labelKey: "panels.reader",
+          kind: "hologram",
+          entry: "dist/panel.js",
+          export: "Panel",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.kind.invalid",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
     it("rejects a context panel declaring both webview and entry/export", () => {
       const manifest = createValidManifest()
       manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]

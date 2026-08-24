@@ -179,6 +179,24 @@ describe("ArtifactSelectionChips", () => {
     )
   })
 
+  it("attributes a plugin selection to the plugin's own source label", () => {
+    act(() =>
+      useChatStore.getState().addContextSelection({
+        kind: "plugin",
+        pluginId: "cognia-repowiki",
+        sourceLabel: "wiki page",
+        title: "Plugin runtime",
+        snapshot: "body",
+        comment: "",
+        ref: "wiki:repo#runtime",
+      })
+    )
+    render(<ArtifactSelectionChips />)
+    const chip = screen.getByTestId("artifact-selection-chip")
+    expect(chip).toHaveAttribute("data-selection-kind", "plugin")
+    expect(chip).toHaveTextContent("selectionChipPluginLabel")
+  })
+
   it("renders bare (no container) and falls back to the label when no comment", () => {
     act(() => useChatStore.getState().addContextSelection(sel({ comment: "" })))
     const { container } = render(<ArtifactSelectionChips bare />)
