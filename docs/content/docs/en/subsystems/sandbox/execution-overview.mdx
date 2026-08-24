@@ -41,17 +41,31 @@ const sandboxEnabled =
   false
 ```
 
-The tier is resolved separately. Note there is **no `session.sandboxTier`** — the chain starts at
-the character:
+The shell tier and the Computer Use target are resolved together into one
+`SandboxSessionBinding` (`lib/sandbox/binding.ts`), each axis walking session → character →
+app-settings. They are resolved together because choosing the `cua-desktop` tier means "run shell,
+files AND GUI in that desktop", so it forces the GUI axis to the same connection.
 
-```ts title="lib/claude/build-options.ts:1152-1153"
-const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
-setActiveSandboxTier(session?.id, sandboxTier)
+That binding, plus the resolved resource policy and confinement, is then **bound once per send**
+into an immutable placement record. `resolveSendOptions` puts the resulting reference on the send
+envelope; it is host-only and never reaches a model provider:
+
+```ts title="lib/claude/build-options.ts"
+opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
+  sessionId: session.id,
+  binding: sandboxBinding,
+  policy: sandboxEnabled ? resolvedSandboxPolicy : null,
+  confine: /* writable / readable / network ceiling */,
+  sandboxEnabled,
+  computerUseEnabled: computerUseAllowedForChat,
+  workspaceRoot: opts.cwd,
+})
 ```
 
-`setActiveSandboxTier` (imported from `@/lib/sandbox/microvm-bridge` at `build-options.ts:13`) stamps
-the tier so the `cognia-sandboxed-tools` plugin can read it inside its `execute()` — see
-[microVM & Web](./microvm-and-web).
+The per-session `setActiveSandboxTier` / `setActiveSandboxPolicy` / `setActiveSandboxConfine`
+registries this replaced are **gone**. They were three maps keyed by session id that each surface
+read back independently, which let the tier, the ceiling and the GUI target drift apart mid-send.
+One reference now carries all three — see [microVM & Web](./microvm-and-web).
 
 ### Config field map
 
@@ -97,16 +111,46 @@ const existing = opts.appendSystemPrompt?.trim() ?? ""
 opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
 ```
 
-When the sandbox is **disabled**, the else branch resets the tier so a stale value from a previous
-send on the same session id cannot leak forward:
+When neither the sandbox nor Computer Use is on for the session, the binding is **released** rather
+than reset, so no stale placement from a previous send survives:
 
-```ts title="lib/claude/build-options.ts:1162-1166"
-} else {
-  // Sandbox disabled — make sure stale tier state from a previous send
-  // on the same session id doesn't leak into the next call.
-  setActiveSandboxTier(session?.id, "os")
+```ts title="lib/claude/build-options.ts"
+} else if (session?.id) {
+  // Release failures are logged, not thrown: a provider that refuses to close
+  // must not make the session unable to send.
+  try {
+    await sandboxSessionRuntime.releaseSession(session.id)
+  } catch (err) {
+    loggers.app.warn("sandbox runtime release failed", { sessionId: session.id, error: String(err) })
+  }
+  delete opts.sandboxRuntimeRef
 }
 ```
+
+### When the binding cannot be established
+
+A binding can be refused by state the user changed elsewhere — a deleted sandbox connection, a
+character pinned to the withdrawn `cua-desktop` tier, a microVM preflight with no remote workspace
+to claim. That must not take the send down, and it must **not** silently answer "I could not
+isolate this" with "then run it here, unrestricted":
+
+```ts title="lib/claude/build-options.ts"
+} catch (err) {
+  loggers.app.warn("unusable sandbox binding", { sessionId: session.id, error: String(err) })
+  opts.sandboxRuntimeRef = sandboxSessionRuntime.bindUnplacedSession(bindInput, err)
+}
+```
+
+`bindUnplacedSession` records the placement the session *asked* for. The resolved ceiling still
+clamps every surface that legitimately runs on this host, and the surfaces that were supposed to
+leave it refuse at call time with `placement-unavailable`:
+
+| Requested                             | After a failed bind                                      |
+| ------------------------------------- | -------------------------------------------------------- |
+| `shellTier: "os"`                     | still runs, still clamped to the resolved policy          |
+| `shellTier: "microvm" \| "cua-desktop"` | `executeSandbox` throws — no host fallback              |
+| `computerTarget: "local"`             | still drives the local desktop                            |
+| `computerTarget: "bound"`             | `decorateComputerUseContext` throws — never retargets local |
 
 ## End-to-end flow
 
@@ -117,21 +161,25 @@ flowchart TD
 
   Gate -->|true| Deny["disallowedTools += Bash / Edit / Write<br/>(1140-1142)"]
   Deny --> Filter["strip text_editor &<br/>str_replace_based_edit_tool<br/>from anthropicTools (1143-1147)"]
-  Filter --> Tier["sandboxTier =<br/>character ?? appSettings ?? 'os' (1152)"]
-  Tier --> Stamp["setActiveSandboxTier(session.id, tier) (1153)"]
-  Stamp --> Hint["append sandboxHint (1154-1161)"]
+  Filter --> Tier["resolveSandboxSessionBinding()<br/>shell tier + GUI target"]
+  Tier --> Bind{"sandboxSessionRuntime.bindSession()"}
+  Bind -->|bound| Stamp["opts.sandboxRuntimeRef = ref"]
+  Bind -->|refused| Unplaced["bindUnplacedSession()<br/>keeps the ceiling, refuses the<br/>surfaces that must leave this host"]
+  Stamp --> Hint["append sandboxHint"]
+  Unplaced --> Hint
   Hint --> Done([send])
 
-  Gate -->|false| Reset["setActiveSandboxTier(session.id, 'os') (1165)"]
+  Gate -->|false| Reset["releaseSession(session.id)"]
   Reset --> Done
 
   Done -.->|"model calls sandbox_bash"| Plugin["cognia-sandboxed-tools.execute()"]
-  Plugin --> Router{"getActiveSandboxTier(sessionId)"}
+  Plugin --> Router{"executeSandbox(ref, payload)"}
   Router -->|os| OSExec["transport.call('sandbox_exec') → Rust backend"]
   Router -->|microvm| MV["getMicrovmExec() → e2b (strict: throw if unregistered)"]
+  Router -->|unplaced| Refuse["throw placement-unavailable"]
 
   classDef on fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  class Deny,Filter,Tier,Stamp,Hint on
+  class Deny,Filter,Tier,Bind,Stamp,Hint on
 ```
 
 ## Strict mode — no bypass

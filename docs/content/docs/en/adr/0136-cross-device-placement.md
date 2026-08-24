@@ -150,19 +150,62 @@ even though its executor was demonstrably gone.
   nowhere to fail over to.
 - `PlacementReason` and `RemoteWorkerPlacementReason` are both append-only.
 
+## Since accepted
+
+The three gaps this ADR recorded as `## Not done` have been closed, except the
+one that was deliberate. What shipped, and where it deviates from the original
+sketch:
+
+- **Placement is workflow-level, not node-level.** `WorkflowSettings.runOn`
+  carries the constraint, the Workflow Editor's Run Policy field sets it, and
+  `dispatchPlacedWorkflowTrigger` resolves it. **Node-level `runOn` is no longer
+  part of this decision** — a node cannot be placed independently of the run it
+  belongs to without splitting one run's journal across two Hosts, and a run has
+  exactly one event log. It applies only to top-level *asynchronous*
+  entrypoints (manual, schedule, webhook/event, async HTTP); Skill, MCP,
+  agent-tool and subworkflow calls stay colocated with their caller and keep
+  their synchronous return contract. An absent `runOn` is strictly equivalent to
+  `colocate`, so every workflow written before this field behaves exactly as it
+  did.
+- **The `hostDispatchQueue` runner exists** (`lib/placement/host-dispatch-runner.ts`,
+  installed once per host by `installHostDispatchRuntime`) and drains the two
+  domains that have a producer: `mobile-step` and `schedule-handoff`. Claiming
+  is a conditional lease inside one Dexie transaction, an expired lease is
+  recoverable, and `expiresAt` is minted once at enqueue so neither a retry nor a
+  restart extends the deadline. `remote-step` keeps its domain and no runner: a
+  runner with nothing to deliver is worse than an honest gap.
+- **A terminal dispatch is now visible.** `recordHostDispatchFailure` puts every
+  dead-letter and non-retryable refusal in the notification center, and attaches
+  it to the run's own event log when the dispatch belongs to one. A
+  `schedule-handoff` has no local run, so it gets the notification only — that is
+  the honest projection, not an omission. Only the attempt that exhausts the
+  budget is audited; the retries before it are not something to page a human for.
+- **The execution authority is configurable** from the Scheduled Tasks host area
+  (`SchedulerAuthorityControl`): this host or a paired remote host, with a 1 / 5 /
+  15 minute unreachability grace, defaulting to 5. Handing timing away also
+  disarms what this host already armed (`reconcileTimingAuthority`), and
+  `handleTaskDue` re-checks the authority before firing — a slot armed before the
+  handover must not fire here, and must not consume the occurrence or advance
+  `nextRunAt`, or the two schedules desynchronise.
+- **Headless hosts publish host events.** The `host-event-publisher` runtime
+  registers the bridge publisher before any authoritative runtime can emit, and
+  `ws_bridge.rs` gates it on a closed topic allowlist. Push frames stay IDs-only;
+  full approval and step parameters travel on the authenticated WS only.
+- **The source projects a handoff, it does not mirror it.** `WorkflowHandoffPanel`
+  shows dispatch status, target Host, the run the target minted, and the failure
+  reason, and offers to open the target Host. Cancelling splits on admission:
+  before `remoteRunId` exists the source owns the occurrence and can cancel;
+  after, the run is the target's and cancelling here would strand it.
+
 ## Not done
 
-- **`runOn` on workflow nodes.** The vocabulary
-  (`PlacementConstraint`: `colocate | pinned | auto`) exists and is exercised by
-  the resolver, but no node schema field, editor control, or per-target preflight
-  consumes it yet. Preflight still approximates with the (now liveness-filtered)
-  capability union.
-- **A `hostDispatchQueue` runner.** The table, accessors, backoff, dead-letter,
-  and stranded-row recovery are in place and tested; the three domain runners
-  that would drain it still dispatch in-memory.
 - **Inter-host authority negotiation.** Deliberately absent — the authority is
   explicit configuration, and the deterministic idempotency key is what makes a
-  race harmless rather than an election.
+  race harmless rather than an election. The grace window is likewise a local
+  preference: no election, no lease negotiation, no host-config replication.
+- **A `remote-step` domain runner.** The domain is reserved; nothing enqueues it
+  yet, and inventing a worker step protocol to fill it would freeze a contract
+  before it has a caller.
 
 ## Amends
 

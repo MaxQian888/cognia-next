@@ -7,13 +7,13 @@ description: Unify worktree ownership, base-ref selection, cross-root atomic app
 
 ## Status
 
-Proposed, partially implemented (2026-08-23). Amends ADR-0086 and ADR-0108.
+Proposed, partially implemented (2026-08-24). Amends ADR-0086 and ADR-0108.
 
 ADR-0111 is **not accepted**. Acceptance requires the end-to-end matrix in
 Verification to pass, including background isolation, both handoff modes,
 archive/restore, imported discovery, and real Tauri smoke coverage.
 
-## Rollout correction (2026-08-23)
+## Implementation update (2026-08-24)
 
 The 2026-08-13 statement that Registry storage, bundles, scheduler isolation,
 and AgentTeam leases were implemented was inaccurate. The current tree now has
@@ -22,21 +22,25 @@ multi-root acquisition (including non-Git shadows), canonical session bindings,
 repository configuration validation, lifecycle policy persistence/capacity
 enforcement, archive/restore/delete, protected permanent/imported
 classification, startup import plus explicit adoption, provider-neutral PR base
-resolution, Tauri/Companion commands, canonical scheduled-chat bundle leases,
-new-chat/header controls, and unified Overview/Environments/Source Control
-views. The manual Worktree panel now consumes Registry ownership and refuses
-removal of owned or imported rows. The Tauri and Companion removal command is
-also Registry-guarded: it reconciles the target repository, imports previously
-unknown external worktrees, and rejects every Registry-owned path before Git
-can mutate it.
+resolution, canonical inventory summaries with server-computed actions,
+multi-root Bundle Turn leases, persisted atomic handoff/retry/undo outcomes,
+Tauri/Companion commands, generated headless/OpenAPI/CLI contract parity, and
+host-owned startup plus 24-hour maintenance. Chat, Scheduler, Agent Team,
+external agents, connectors, and local Tauri execution now acquire Registry
+Bundles and fail closed instead of writing through to the live project root.
+The legacy Agent Team allocator/reconciler/judge have been removed. The manual
+Worktree panel consumes Registry ownership and refuses removal of owned or
+imported rows; the host repeats this check after reconcile.
 
-The rollout is still incomplete: all writable agent entry points are not yet
-proven to acquire Registry Bundles; Agent Team still constructs its legacy
-allocator, persisted multi-root Selective Apply and Continue Branch handoff are
-open, generated headless catalogs lag the canonical protocol, and cleanup
-scheduling/history, grant UX, grouped delivery, and the acceptance E2E matrix
-remain open. No legacy allocator or live-tree fallback may be described as
-migrated until those consumers and tests are closed. See the dated
+The rollout remains incomplete. `.cognia/workspace.json` parsing and the
+existing Project Environment executor have not yet been joined into one
+production provisioning transaction (sparse paths, cache links, root binding,
+and grant checks included). Atomic multi-repository Continue Branch and the
+host-side Agent Team merge-all promotion transaction remain open and therefore
+fail closed. Grant UX, grouped delivery, and the acceptance E2E/Tauri smoke
+matrix also remain open. The current tree removed `developer.taskWorkspace`
+during ADR-0090 GA; there is no existing rollback flag to preserve, so this ADR
+must not claim the new work is protected by that switch. See the dated
 implementation audit in
 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`.
 
@@ -44,7 +48,7 @@ implementation audit in
 
 Cognia already owns Task Workspace snapshots and patches, the Git worktree seam, Workspace Trust, per-`Project` multi-root, and per-agent Git isolation. Compared with Codex Worktrees, Claude Code Worktrees, VS Code Worktrees, and native `git-worktree`, the missing capabilities are not new patch primitives — they are unified ownership, versioned execution context, cross-root composition, sensitive-resource authorization, and product-level discoverability. Evidence is in `docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`.
 
-Three separate owners create and remove Git worktrees today (`crates/cognia-task-workspace::create_execution`, Agent Team dispatch's three parallel paths, and the user-facing `worktree-panel.tsx`) with no coordination. `SessionExecutionContext.baseRef` is a hint that the backend never consumes. Scheduled `location === "local"` runs land on the user's live tree. Multi-root exists only inside a single `Project`. `.cognia/workspace.json` does not exist. `WorktreeCreate` / `WorktreeRemove` hook events are declared but dormant.
+Before this amendment, three separate owners created and removed Git worktrees (`crates/cognia-task-workspace::create_execution`, Agent Team dispatch's parallel paths, and the user-facing `worktree-panel.tsx`) with no coordination. `SessionExecutionContext.baseRef` was a hint that the backend did not consume, scheduled `location === "local"` runs landed on the user's live tree, and `WorktreeCreate` / `WorktreeRemove` hook events were dormant. The implementation update above records which of those gaps are now closed; `.cognia/workspace.json` exists today, but its production provisioning integration remains open.
 
 ## Decision
 
@@ -64,7 +68,7 @@ Three separate owners create and remove Git worktrees today (`crates/cognia-task
 
 8. **Sensitive resources are grant-based.** Include patterns accept relative paths only and reject `..`, absolute paths, and escaping symlinks. Sensitive paths default to deny. Interactive tasks may grant a path (persisted, audited). Background tasks may only use paths previously granted; missing grants fail closed with no silent degradation. Sensitive copies pass through `packages/redact/src/index.ts::hasNoLeakingPii` before the boundary.
 
-9. **`WorktreeCreate` / `WorktreeRemove` hooks activated.** _(Wording revised by ADR-0132 slice ④, which shipped the producers.)_ There are two producers, not one: the Registry state machine emits through an injected `WorktreeLifecycleSink` (`crates/cognia-task-workspace/src/lifecycle.rs`, installed by `src-tauri/src/task_workspace.rs`) once a `GitWorktree` execution becomes `active` and when it is discarded or pruned; and the renderer's `lib/git/commands.ts` fires the same events after `git_worktree_add` / `git_worktree_remove` succeed, which covers the Agent Team allocator and the source-control worktree panel — the two owners the Registry does not sit in front of. Materialized shadows of non-Git roots do not emit. Both events are observational (they never block the git operation) and run through the ordinary session-scoped hook runner; they do **not** add a Workspace Trust check of their own — the trust gate is applied where the worktree is opened, not where the hook fires.
+9. **`WorktreeCreate` / `WorktreeRemove` hooks activated.** _(Wording revised by ADR-0132 slice ④, which shipped the producers.)_ There are two producers, not one: the Registry state machine emits through an injected `WorktreeLifecycleSink` (`crates/cognia-task-workspace/src/lifecycle.rs`, installed by `src-tauri/src/task_workspace.rs`) once a `GitWorktree` execution becomes `active` and when it is discarded or pruned; and the renderer's `lib/git/commands.ts` fires the same events after manual `git_worktree_add` / `git_worktree_remove` succeeds in the source-control panel. Agent Team now goes through the Registry producer. Materialized shadows of non-Git roots do not emit. Both events are observational (they never block the git operation) and run through the ordinary session-scoped hook runner; they do **not** add a Workspace Trust check of their own — the trust gate is applied where the worktree is opened, not where the hook fires.
 
 10. **Retention.** Default active-managed directory cap: 15. Snapshot retention: 30 days. Blob budget: 1 GiB. All three are user-adjustable in settings. Directory reclaim and snapshot expiration are separate, both consult the ineligibility list in decision (2), and each records an audit row.
 
@@ -74,7 +78,7 @@ Three separate owners create and remove Git worktrees today (`crates/cognia-task
 
 13. **Publish stays behind `PullRequestProvider`.** The Registry's Push / Create draft PR actions call `types/review.ts::PullRequestProvider` `.push` / `.create` per repository. `lib/ai/agent/team/pr-feedback/*` remains directly Octokit-shaped and is not touched by this workstream.
 
-14. **Kill switch.** `developer.taskWorkspace` becomes a rollback kill switch for one release cycle. When off, the Registry is bypassed and legacy paths (that read from the retained mirror fields in decision (5)) run. Registry data is retained across the toggle. The kill switch and the mirror fields are removed in the following release.
+14. **Rollout correction.** ADR-0090 removed `developer.taskWorkspace` when Task Workspace isolation became GA. This implementation therefore cannot be guarded by an "existing" switch without reintroducing a second live-root execution path, which would violate decision (12). Rollback is binary rollback with Registry data retained; legacy mirror fields remain read-only compatibility data and must not become writable execution authority again.
 
 ## Consequences
 
@@ -101,6 +105,7 @@ Preflight and gates: `test-gap-auditor`, `i18n-reviewer`, `static-export-auditor
 ## References
 
 - Research: `docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`
+- Cursor Worktrees: [cursor.com/docs/configuration/worktrees](https://cursor.com/docs/configuration/worktrees)
 - Codex Worktrees: [developers.openai.com/codex/app/worktrees](https://developers.openai.com/codex/app/worktrees)
 - Claude Code Worktrees: [code.claude.com/docs/en/worktrees](https://code.claude.com/docs/en/worktrees)
 - VS Code Worktrees: [code.visualstudio.com/docs/sourcecontrol/branches-worktrees](https://code.visualstudio.com/docs/sourcecontrol/branches-worktrees)

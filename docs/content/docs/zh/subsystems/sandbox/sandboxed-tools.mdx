@@ -60,32 +60,33 @@ maxMemoryMb: { type: "integer", minimum: 0 },
 
 ## 层级路由 —— `dispatchSandbox`
 
-每次调用都汇聚到 `dispatchSandbox`，它读取当前激活的层级（由
-`build-options.ts` 打戳 —— 见 [执行总览](./execution-overview)），随后要么调用 Rust 的
-`sandbox_exec` 命令，要么调用已注册的 e2b exec。
+每次调用都汇聚到 `dispatchSandbox`，它把 payload 交给本次发送已解析出的**运行时引用**（见
+[执行总览](./execution-overview)）。插件不再自行查任何按会话存储的层级或策略状态：该引用指向唯一一份
+不可变的放置记录，由 `SandboxSessionRuntime` 决定走 Rust 的 `sandbox_exec` 命令还是已注册的 E2B 适配器。
 
-```ts title="plugins/cognia-sandboxed-tools/src/index.ts:158-177"
+```ts title="plugins/cognia-sandboxed-tools/src/index.ts"
 async function dispatchSandbox(
   payload: MicrovmExecPayload,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
-  const tier = getActiveSandboxTier(ctx.sessionId)
-  if (tier === "microvm") {
-    const impl = getMicrovmExec()
-    if (!impl) {
-      throw new Error(
-        "sandbox tier resolved to 'microvm' but no microVM exec is registered. " +
-          "Enable the cognia-e2b-sandbox plugin or set the character / app tier to 'os'."
-      )
-    }
-    return impl(payload)
-  }
-  return transport.call<SandboxResultShape>(
-    "sandbox_exec",
-    payload as unknown as Record<string, unknown>
-  )
+  return sandboxSessionRuntime.executeSandbox(requireRuntimeRef(ctx), payload)
+}
+
+/**
+ * 聊天发送始终携带已解析的放置信息。没有发送信封的调用方 —— 工作流节点、计划步骤、
+ * External Bridge 编排、插件间调用 —— 拿到宿主 OS 层的放置。
+ */
+function requireRuntimeRef(ctx: PluginToolContext): string {
+  return ctx.sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF
 }
 ```
+
+<Callout type="warn">
+  宿主回退是一种**放置**，不是绕过。当某次发送的绑定无法建立时，`resolveSendOptions`
+  不会丢弃引用，而是调用 `bindUnplacedSession`：它保留已解析的上限，并让那些本应离开本机的面
+  （非 `os` 的 shell 层级、绑定到远端的 GUI 目标）以 `placement-unavailable` 拒绝执行。
+  一个要求隔离的会话，绝不会被静默地放到宿主上运行。
+</Callout>
 
 `execBash` 构建 OS 后端的 payload，将 `writable` 默认为 `[cwd]`、超时默认为 300 秒：
 
@@ -116,9 +117,11 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
 flowchart LR
   M["model calls<br/>sandbox_bash"] --> E["execBash<br/>(builds payload)"]
   E --> D["dispatchSandbox"]
-  D --> T{"getActiveSandboxTier"}
+  D --> R["sandboxSessionRuntime.executeSandbox(ref, payload)"]
+  R --> T{"record.binding.shellTier"}
   T -->|os| OS["transport.call('sandbox_exec')<br/>→ Rust current_backend()"]
   T -->|microvm| MV{"getMicrovmExec()"}
+  T -->|unplaced| REFUSE["throw placement-unavailable<br/>(绝不回退到宿主)"]
   MV -->|registered| E2B["e2b microVM exec"]
   MV -->|null| THROW["throw (strict mode)"]
 

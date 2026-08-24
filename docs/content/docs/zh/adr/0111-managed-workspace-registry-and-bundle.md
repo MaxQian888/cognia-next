@@ -7,21 +7,21 @@ description: 在复用现有 Task Workspace patch 引擎的前提下，统一 wo
 
 ## 状态
 
-提议、部分实现（2026-08-23）。修订 ADR-0086 与 ADR-0108。
+提议、部分实现（2026-08-24）。修订 ADR-0086 与 ADR-0108。
 
 ADR-0111 **尚未接受**。只有“验证”章节的端到端矩阵全部通过后才能接受，其中包括后台隔离、两种 handoff、archive/restore、imported discovery 与真实 Tauri smoke。
 
-## Rollout 更正（2026-08-23）
+## 实现更新（2026-08-24）
 
-2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、启动导入与显式 Adopt、provider-neutral PR base resolution、Tauri/Companion 命令、scheduled chat 的 canonical bundle lease、new-chat/header 控件，以及统一的 Overview/Environments/Source Control 视图。手动 Worktree 面板会读取 Registry 所有权并拒绝移除受管或导入环境；Tauri 与 Companion 的删除命令也会先 reconcile 目标仓库、导入未知外部 worktree，再在 Git 变更前拒绝任何 Registry 所有路径。
+2026-08-13 关于 Registry storage、bundle、scheduler isolation 与 AgentTeam lease 已实现的表述不准确。当前代码已经具备持久化 Registry/Bundle 行、带签名锁的原子 Git 创建、事务式多根申请（含非 Git shadow）、canonical session binding、仓库配置校验、生命周期策略持久化与容量门禁、archive/restore/delete、受保护的 permanent/imported 分类、启动导入与显式 Adopt、provider-neutral PR base resolution、服务端计算动作的统一环境清单、multi-root Bundle Turn lease、持久化原子 handoff/retry/undo、Tauri/Companion 命令、生成的 headless/OpenAPI/CLI 契约一致性，以及宿主启动时与每 24 小时一次的维护。Chat、Scheduler、Agent Team、external agent、connector 与 local Tauri execution 现已统一申请 Registry Bundle，失败时关闭执行，不再回退写入 live project root。旧 Agent Team allocator/reconciler/judge 已删除。手动 Worktree 面板读取 Registry ownership 并拒绝移除受管或 imported 行，host 在 reconcile 后重复执行同一保护。
 
-Rollout 仍未完成：尚未证明所有可写 agent 入口都经过 Registry Bundle；Agent Team 仍会构造 legacy allocator，持久化多根 Selective Apply 与 Continue Branch handoff 尚未完成，生成的 headless catalog 落后于 canonical protocol，定时 cleanup/history、grant UX、聚合交付与验收 E2E 矩阵仍是开放项。在这些 consumer 与测试闭环前，不得宣称 legacy allocator 或 live-tree fallback 已完成迁移。详见 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`。
+Rollout 仍未完成：`.cognia/workspace.json` parser 与现有 Project Environment executor 尚未组成一个 production provisioning transaction，其中包括 sparse paths、cache links、root binding 与 grant 校验。跨多仓库 Continue Branch 事务，以及 Agent Team merge-all 的 host promotion transaction 仍是开放项，因此当前明确 fail closed。grant UX、聚合交付与验收 E2E/Tauri smoke 矩阵也未闭环。当前代码已在 ADR-0090 GA 阶段移除 `developer.taskWorkspace`，没有可继续沿用的既有 rollback flag，因此本 ADR 不得宣称这些新路径受该开关保护。详见 `docs/research/workspace-worktree-implementation-audit-2026-08-23.md`。
 
 ## 背景
 
 Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Workspace Trust、`Project` 级多根，以及 Agent Team 的 Git 隔离。对照 Codex Worktrees、Claude Code Worktrees、VS Code Worktrees 与原生 `git-worktree`，真正缺失的不是新的 patch 原语，而是统一的所有权、版本化的执行上下文、跨根的组合、敏感资源授权与产品级可发现性。证据见 `docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`。
 
-今天有三个所有者在互不协调地创建和移除 Git worktree（`crates/cognia-task-workspace::create_execution`、Agent Team dispatch 的三条并行通路、以及用户端 `worktree-panel.tsx`）。`SessionExecutionContext.baseRef` 只是一个提示，后端并不消费。scheduled 且 `location === "local"` 的运行会直接落在用户 live tree 上。多根只存在于单个 `Project` 内部。`.cognia/workspace.json` 不存在。`WorktreeCreate` / `WorktreeRemove` hook 事件已声明但 dormant。
+在本修订之前，有三个所有者在互不协调地创建和移除 Git worktree（`crates/cognia-task-workspace::create_execution`、Agent Team dispatch 的并行通路、以及用户端 `worktree-panel.tsx`）；`SessionExecutionContext.baseRef` 只是后端未消费的提示，scheduled 且 `location === "local"` 的运行会落在用户 live tree，`WorktreeCreate` / `WorktreeRemove` hook 也处于 dormant。上方实现更新记录了已经关闭的缺口；`.cognia/workspace.json` 当前已存在，但 production provisioning 集成仍未完成。
 
 ## 决策
 
@@ -41,7 +41,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 8. **敏感资源基于显式授权。** Include pattern 仅接受相对路径，拒绝 `..`、绝对路径与逃逸 symlink。敏感路径默认拒绝。交互任务可对某路径持久授权（记录审计）。后台任务只能使用**已有授权**的路径；缺少授权即 fail closed，不做静默降级。跨边界复制必须先过 `packages/redact/src/index.ts::hasNoLeakingPii`。
 
-9. **激活 `WorktreeCreate` / `WorktreeRemove` hook。** _（措辞由 ADR-0132 切片 ④ 修订，生产者随之落地。）_ 生产者有两个而非一个：Registry 状态机通过注入的 `WorktreeLifecycleSink`（`crates/cognia-task-workspace/src/lifecycle.rs`，由 `src-tauri/src/task_workspace.rs` 安装）在 `GitWorktree` 执行进入 `active` 以及被 discard / prune 时发出；渲染端 `lib/git/commands.ts` 在 `git_worktree_add` / `git_worktree_remove` 成功后发出同样的事件，覆盖 Registry 前面没有站着的另外两个所有者——Agent Team allocator 与源代码管理 worktree 面板。非 Git 根的 materialized shadow 不发事件。两个事件都是观察性的（绝不阻塞 git 操作），走普通的会话作用域 hook runner；它们**不**额外做 Workspace Trust 检查——信任门禁施加在打开 worktree 的位置，而不是 hook 触发的位置。
+9. **激活 `WorktreeCreate` / `WorktreeRemove` hook。** _（措辞由 ADR-0132 切片 ④ 修订，生产者随之落地。）_ 生产者有两个而非一个：Registry 状态机通过注入的 `WorktreeLifecycleSink`（`crates/cognia-task-workspace/src/lifecycle.rs`，由 `src-tauri/src/task_workspace.rs` 安装）在 `GitWorktree` 执行进入 `active` 以及被 discard / prune 时发出；渲染端 `lib/git/commands.ts` 在 Source Control 面板中的手动 `git_worktree_add` / `git_worktree_remove` 成功后发出同样的事件。Agent Team 现在统一走 Registry producer。非 Git 根的 materialized shadow 不发事件。两个事件都是观察性的（绝不阻塞 git 操作），走普通的会话作用域 hook runner；它们**不**额外做 Workspace Trust 检查——信任门禁施加在打开 worktree 的位置，而不是 hook 触发的位置。
 
 10. **保留策略。** 默认活跃受管目录上限 15；快照保留 30 天；blob 预算 1 GiB。三者均可在设置里调整。目录回收与快照过期分开执行，共同遵守决策 (2) 的"不可 prune"清单，各自写一条审计。
 
@@ -51,7 +51,7 @@ Cognia 已经拥有 Task Workspace 的快照与 patch、Git worktree 通道、Wo
 
 13. **发布路径继续走 `PullRequestProvider`。** Registry 的 Push / Create draft PR 按仓库调用 `types/review.ts::PullRequestProvider` 的 `.push` / `.create`。`lib/ai/agent/team/pr-feedback/*` 保持现状（仍直接依赖 Octokit），不在本次工作范围。
 
-14. **Kill switch。** `developer.taskWorkspace` 在一个发布周期内保留为 rollback kill switch。关闭时 Registry 被绕过，旧路径读取决策 (5) 中保留的镜像字段运行；Registry 数据保留。下个发布周期同时移除 kill switch 与镜像字段。
+14. **Rollout 更正。** ADR-0090 在 Task Workspace isolation GA 时已经移除 `developer.taskWorkspace`。如果为了本次实现重新引入该开关，就必须恢复第二条 live-root execution path，违反决策 (12)。因此回滚方式是二进制版本回滚并保留 Registry 数据；legacy mirror fields 只作为只读兼容数据，不能再次成为可写执行权威。
 
 ## 影响
 
@@ -78,6 +78,7 @@ Rust 单元与集成测试（`cargo test`）：状态机迁移与非法迁移拒
 ## 参考
 
 - 研究：`docs/research/managed-workspace-registry-gap-analysis-2026-08-07.md`
+- Cursor Worktrees：[cursor.com/docs/configuration/worktrees](https://cursor.com/docs/configuration/worktrees)
 - Codex Worktrees：[developers.openai.com/codex/app/worktrees](https://developers.openai.com/codex/app/worktrees)
 - Claude Code Worktrees：[code.claude.com/docs/en/worktrees](https://code.claude.com/docs/en/worktrees)
 - VS Code Worktrees：[code.visualstudio.com/docs/sourcecontrol/branches-worktrees](https://code.visualstudio.com/docs/sourcecontrol/branches-worktrees)

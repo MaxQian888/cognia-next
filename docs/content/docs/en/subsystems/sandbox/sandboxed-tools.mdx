@@ -61,32 +61,37 @@ maxMemoryMb: { type: "integer", minimum: 0 },
 
 ## Tier routing — `dispatchSandbox`
 
-Every call funnels through `dispatchSandbox`, which reads the active tier (stamped by
-`build-options.ts` — see [Execution overview](./execution-overview)) and either calls the Rust
-`sandbox_exec` command or the registered e2b exec.
+Every call funnels through `dispatchSandbox`, which hands the payload to the **runtime reference**
+the send resolved (see [Execution overview](./execution-overview)). The plugin no longer looks up
+per-session tier or policy state of its own: the ref names one immutable placement, and
+`SandboxSessionRuntime` owns the branch to the Rust `sandbox_exec` command or the registered E2B
+adapter.
 
-```ts title="plugins/cognia-sandboxed-tools/src/index.ts:158-177"
+```ts title="plugins/cognia-sandboxed-tools/src/index.ts"
 async function dispatchSandbox(
   payload: MicrovmExecPayload,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
-  const tier = getActiveSandboxTier(ctx.sessionId)
-  if (tier === "microvm") {
-    const impl = getMicrovmExec()
-    if (!impl) {
-      throw new Error(
-        "sandbox tier resolved to 'microvm' but no microVM exec is registered. " +
-          "Enable the cognia-e2b-sandbox plugin or set the character / app tier to 'os'."
-      )
-    }
-    return impl(payload)
-  }
-  return transport.call<SandboxResultShape>(
-    "sandbox_exec",
-    payload as unknown as Record<string, unknown>
-  )
+  return sandboxSessionRuntime.executeSandbox(requireRuntimeRef(ctx), payload)
+}
+
+/**
+ * A chat send always carries its resolved placement. Callers with no send
+ * envelope — workflow nodes, plan steps, External Bridge orchestration,
+ * plugin-to-plugin calls — get the host OS-tier placement.
+ */
+function requireRuntimeRef(ctx: PluginToolContext): string {
+  return ctx.sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF
 }
 ```
+
+<Callout type="warn">
+  The host fallback is a *placement*, not a bypass. When a send's binding cannot be established,
+  `resolveSendOptions` does not drop the ref — it calls `bindUnplacedSession`, which keeps the
+  resolved ceiling and makes the surfaces that were supposed to leave this machine (a non-`os`
+  shell tier, a bound GUI target) refuse with `placement-unavailable`. A session that asked for
+  isolation never silently executes on the host.
+</Callout>
 
 `execBash` builds the OS-backend payload, defaulting `writable` to `[cwd]` and the timeout to 300 s:
 
@@ -117,9 +122,11 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
 flowchart LR
   M["model calls<br/>sandbox_bash"] --> E["execBash<br/>(builds payload)"]
   E --> D["dispatchSandbox"]
-  D --> T{"getActiveSandboxTier"}
+  D --> R["sandboxSessionRuntime.executeSandbox(ref, payload)"]
+  R --> T{"record.binding.shellTier"}
   T -->|os| OS["transport.call('sandbox_exec')<br/>→ Rust current_backend()"]
   T -->|microvm| MV{"getMicrovmExec()"}
+  T -->|unplaced| REFUSE["throw placement-unavailable<br/>(never falls back to the host)"]
   MV -->|registered| E2B["e2b microVM exec"]
   MV -->|null| THROW["throw (strict mode)"]
 

@@ -118,15 +118,46 @@ invocation 账本吸收掉第二次。
   没有可转移的余地。
 - `PlacementReason` 与 `RemoteWorkerPlacementReason` 均为追加式联合。
 
+## 落地之后
+
+本 ADR 当初记在 `## 未完成` 里的三项，除刻意保留的那一项外都已补齐。已交付的内容，
+以及与最初设想的偏差：
+
+- **放置是整条工作流级的，不是节点级的。** 约束存放在 `WorkflowSettings.runOn`，
+  由工作流编辑器 Run Policy 字段设置，`dispatchPlacedWorkflowTrigger` 负责解析。
+  **节点级 `runOn` 不再属于本决策** —— 单个节点无法脱离它所属的运行被独立放置，否则
+  一次运行的日志会被劈成两台宿主，而一次运行只有一份事件日志。它只作用于顶层**异步**
+  入口（手动、调度、Webhook/事件、异步 HTTP）；Skill、MCP、agent-tool 与子工作流仍与
+  调用方同址，并保持原有的同步返回契约。字段缺省严格等价于 `colocate`，因此此前写下的
+  每条工作流行为不变。
+- **`hostDispatchQueue` 的 runner 已存在**（`lib/placement/host-dispatch-runner.ts`，
+  由 `installHostDispatchRuntime` 每宿主安装一次），并只驱动真正有生产者的两个域：
+  `mobile-step` 与 `schedule-handoff`。领取是单个 Dexie 事务内的条件租约，过期租约可
+  恢复；`expiresAt` 在入队时铸造一次，重试与重启都不会延长它。`remote-step` 保留域但
+  不配 runner：一个无物可送的 runner 比一个诚实的缺口更糟。
+- **终态派发现在是可见的。** `recordHostDispatchFailure` 把每一次死信与不可重试拒绝
+  写入通知中心；当派发属于某次运行时，同时附到该运行自己的事件日志上。
+  `schedule-handoff` 本地并没有运行，因此它只有通知 —— 这是诚实的投影，不是遗漏。
+  只有耗尽预算的那一次尝试会被审计；在此之前的重试不值得叫醒任何人。
+- **执行权可配置**，入口在 Scheduled Tasks 的宿主区域（`SchedulerAuthorityControl`）：
+  本机或某台已配对的远端宿主，配 1 / 5 / 15 分钟的不可达宽限期，默认 5 分钟。交出执行权
+  同时会解除本机已武装的任务（`reconcileTimingAuthority`），且 `handleTaskDue` 在触发前
+  会重新校验执行权 —— 在交接之前武装的时槽不得在本机触发，也不得消费该次发生或推进
+  `nextRunAt`，否则两侧调度会失步。
+- **Headless 宿主可以发布宿主事件。** `host-event-publisher` 运行时在任何权威运行时
+  发出事件之前注册桥接发布器，`ws_bridge.rs` 用封闭主题 allowlist 把关。Push 帧仍只带
+  ID；完整审批与 step 参数只走认证 WS。
+- **源端投影 handoff，而不镜像它。** `WorkflowHandoffPanel` 展示派发状态、目标宿主、
+  目标铸造的运行以及失败原因，并提供切换到目标宿主的入口。取消以 admission 为界：
+  在 `remoteRunId` 出现之前，这次发生归源端所有，可以取消；之后运行归目标所有，在源端
+  取消只会让它变成孤儿。
+
 ## 未完成
 
-- **工作流节点上的 `runOn`。** 词汇（`PlacementConstraint`：`colocate | pinned | auto`）
-  已存在并被解析器使用，但还没有节点 schema 字段、编辑器控件或按目标的预检消费它。预检
-  仍用（现已按活性过滤的）能力并集近似。
-- **`hostDispatchQueue` 的 runner。** 表、访问器、退避、死信、滞留行恢复都已就位并有
-  测试；三个域的 runner 仍在内存里派发。
 - **宿主间权威协商。** 刻意不做 —— 权威是显式配置，而确定性幂等键才是让竞态无害的东西，
-  不是选举。
+  不是选举。宽限期同样只是本机偏好：没有选举、没有租约协商、没有宿主配置同步。
+- **`remote-step` 域的 runner。** 该域是预留的；目前没有任何生产者向它入队，为了填满它
+  而臆造一套 worker step 协议，等于在还没有调用方之前就冻结契约。
 
 ## 修订
 

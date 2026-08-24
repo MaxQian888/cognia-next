@@ -41,16 +41,29 @@ const sandboxEnabled =
   false
 ```
 
-层级则单独解析。注意这里**没有 `session.sandboxTier`**——该链从
-character 开始：
+shell 层级与 Computer Use 目标会被一起解析成同一个 `SandboxSessionBinding`
+（`lib/sandbox/binding.ts`），每条轴各自沿 session → character → app-settings 下行。
+两者必须一起解析：选择 `cua-desktop` 层级意味着"shell、文件和 GUI 都在那台桌面里跑"，
+因此它会把 GUI 轴强制指向同一个连接。
 
-```ts title="lib/claude/build-options.ts:1152-1153"
-const sandboxTier: "os" | "microvm" = character?.sandboxTier ?? appSettings?.sandboxTier ?? "os"
-setActiveSandboxTier(session?.id, sandboxTier)
+该 binding 连同已解析的资源策略与限制，会**每次发送绑定一次**，写入一份不可变的放置记录。
+`resolveSendOptions` 把得到的引用挂在发送信封上；它仅限宿主使用，绝不会到达任何模型提供方：
+
+```ts title="lib/claude/build-options.ts"
+opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
+  sessionId: session.id,
+  binding: sandboxBinding,
+  policy: sandboxEnabled ? resolvedSandboxPolicy : null,
+  confine: /* writable / readable / network 上限 */,
+  sandboxEnabled,
+  computerUseEnabled: computerUseAllowedForChat,
+  workspaceRoot: opts.cwd,
+})
 ```
 
-`setActiveSandboxTier`（在 `build-options.ts:13` 处从 `@/lib/sandbox/microvm-bridge` 导入）会写入
-该层级，以便 `cognia-sandboxed-tools` 插件能在其 `execute()` 内部读取它——见
+被它取代的按会话注册表 `setActiveSandboxTier` / `setActiveSandboxPolicy` /
+`setActiveSandboxConfine` 已经**移除**。它们原本是三张以 session id 为键的 Map，各个面各自回读，
+这让层级、上限与 GUI 目标可能在同一次发送中彼此漂移。现在一个引用同时承载三者——见
 [microVM 与 Web](./microvm-and-web)。
 
 ### 配置字段映射
@@ -97,16 +110,43 @@ const existing = opts.appendSystemPrompt?.trim() ?? ""
 opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
 ```
 
-当沙盒被**禁用**时，else 分支会重置该层级，以免同一 session id 上一次发送
-留下的过期值泄漏到下一次调用：
+当会话既未启用沙盒也未启用 Computer Use 时，绑定会被**释放**而不是重置，
+这样上一次发送留下的放置不会残留：
 
-```ts title="lib/claude/build-options.ts:1162-1166"
-} else {
-  // Sandbox disabled — make sure stale tier state from a previous send
-  // on the same session id doesn't leak into the next call.
-  setActiveSandboxTier(session?.id, "os")
+```ts title="lib/claude/build-options.ts"
+} else if (session?.id) {
+  // 释放失败只记录、不抛出：某个拒绝关闭的 provider 不能让会话连消息都发不出去。
+  try {
+    await sandboxSessionRuntime.releaseSession(session.id)
+  } catch (err) {
+    loggers.app.warn("sandbox runtime release failed", { sessionId: session.id, error: String(err) })
+  }
+  delete opts.sandboxRuntimeRef
 }
 ```
+
+### 当绑定无法建立时
+
+绑定可能被用户在别处改动的状态拒绝——被删除的沙盒连接、仍钉在已撤回的 `cua-desktop` 层级上的
+character、找不到远端工作区可认领的 microVM 预检。这既不能让整次发送失败，也**绝不能**把
+"我无法隔离它"静默地回答成"那就在这里无限制地跑"：
+
+```ts title="lib/claude/build-options.ts"
+} catch (err) {
+  loggers.app.warn("unusable sandbox binding", { sessionId: session.id, error: String(err) })
+  opts.sandboxRuntimeRef = sandboxSessionRuntime.bindUnplacedSession(bindInput, err)
+}
+```
+
+`bindUnplacedSession` 记录会话*请求*的那份放置。已解析的上限仍会约束每一个合法在本机运行的面，
+而那些本应离开本机的面则在调用时以 `placement-unavailable` 拒绝：
+
+| 请求的放置                              | 绑定失败后的行为                                     |
+| --------------------------------------- | ---------------------------------------------------- |
+| `shellTier: "os"`                       | 仍然运行，仍受已解析策略约束                         |
+| `shellTier: "microvm" \| "cua-desktop"` | `executeSandbox` 抛错——不回退到宿主                  |
+| `computerTarget: "local"`               | 仍然驱动本地桌面                                     |
+| `computerTarget: "bound"`               | `decorateComputerUseContext` 抛错——绝不改指本地      |
 
 ## 端到端流程
 
@@ -117,21 +157,25 @@ flowchart TD
 
   Gate -->|true| Deny["disallowedTools += Bash / Edit / Write<br/>(1140-1142)"]
   Deny --> Filter["strip text_editor &<br/>str_replace_based_edit_tool<br/>from anthropicTools (1143-1147)"]
-  Filter --> Tier["sandboxTier =<br/>character ?? appSettings ?? 'os' (1152)"]
-  Tier --> Stamp["setActiveSandboxTier(session.id, tier) (1153)"]
-  Stamp --> Hint["append sandboxHint (1154-1161)"]
+  Filter --> Tier["resolveSandboxSessionBinding()<br/>shell 层级 + GUI 目标"]
+  Tier --> Bind{"sandboxSessionRuntime.bindSession()"}
+  Bind -->|已绑定| Stamp["opts.sandboxRuntimeRef = ref"]
+  Bind -->|被拒绝| Unplaced["bindUnplacedSession()<br/>保留上限，拒绝那些<br/>本应离开本机的面"]
+  Stamp --> Hint["append sandboxHint"]
+  Unplaced --> Hint
   Hint --> Done([send])
 
-  Gate -->|false| Reset["setActiveSandboxTier(session.id, 'os') (1165)"]
+  Gate -->|false| Reset["releaseSession(session.id)"]
   Reset --> Done
 
   Done -.->|"model calls sandbox_bash"| Plugin["cognia-sandboxed-tools.execute()"]
-  Plugin --> Router{"getActiveSandboxTier(sessionId)"}
+  Plugin --> Router{"executeSandbox(ref, payload)"}
   Router -->|os| OSExec["transport.call('sandbox_exec') → Rust backend"]
   Router -->|microvm| MV["getMicrovmExec() → e2b (strict: throw if unregistered)"]
+  Router -->|unplaced| Refuse["throw placement-unavailable"]
 
   classDef on fill:#7c2d12,stroke:#fb923c,color:#fed7aa
-  class Deny,Filter,Tier,Stamp,Hint on
+  class Deny,Filter,Tier,Bind,Stamp,Hint on
 ```
 
 ## 严格模式——没有旁路
