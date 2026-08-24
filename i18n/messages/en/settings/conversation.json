@@ -15,7 +15,8 @@
     },
     "compactLayout": {
       "hint": "Use a denser composer layout that leaves more room for the conversation.",
-      "label": "Use compact composer layout"
+      "label": "Use compact composer layout",
+      "supersededBySkin": "Superseded by the composer style you picked — that style decides the layout."
     },
     "description": "Control how the message composer handles typing, sending, and drafts.",
     "effortSelectorMode": {
@@ -179,6 +180,47 @@
     "visibleTiers": {
       "label": "Tiers to offer",
       "hint": "Hide the depths you never use to shorten the track. Conversations already using a hidden tier keep running at that depth."
+    }
+  },
+  "composerSkin": {
+    "title": "Composer style",
+    "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
+    "skinLabel": "Style",
+    "adjustLabel": "Adjust",
+    "adjustHint": "Fine-tune the chosen style. Mobile keeps its minimum touch targets whatever you set here.",
+    "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
+    "radiusLabel": "Corner radius",
+    "paddingLabel": "Padding",
+    "sendShapeLabel": "Send button",
+    "monoLabel": "Monospace input",
+    "monoHint": "Type in the code font instead of the interface font.",
+    "reachabilityNote": "No style removes a control. A quieter style folds them behind the “⋯” button on the status row.",
+    "resetOverrides": "Reset {skin} to its defaults",
+    "sendShapes": {
+      "circle": "Circle",
+      "rounded": "Rounded square"
+    },
+    "skins": {
+      "classic": {
+        "label": "Classic (current look)",
+        "hint": "The composer as it is today. This is the default and stays untouched."
+      },
+      "airy": {
+        "label": "Airy",
+        "hint": "Roomy and rounded, with the status row inside the box under the text."
+      },
+      "dense": {
+        "label": "Dense",
+        "hint": "Tight and squared, with a quiet monospace status line inside the box."
+      },
+      "full": {
+        "label": "Detailed",
+        "hint": "Every control spelled out inline, with cost and context on their own rail."
+      },
+      "focus": {
+        "label": "Minimal",
+        "hint": "Just the text and the model. Everything else folds behind “⋯”."
+      }
     }
   }
 }

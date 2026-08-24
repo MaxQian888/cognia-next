@@ -3376,7 +3376,35 @@ export interface AppSettings {
    * `components/chat/composer.tsx` and `components/chat/message-list.tsx`.
    */
   composerBehavior?: {
-    /** Render the message composer as a compact, vertically stacked control surface. Default false. */
+    /**
+     * Which composer skin to render. `"classic"` (default) is the composer as
+     * it has always looked and is preserved by construction — it renders its
+     * original literal classes and ignores `skinOverrides` entirely. The other
+     * four re-arrange the SAME roster of controls; none of them removes one.
+     * See `lib/chat/composer-skin.ts` for the table and its invariants.
+     */
+    skin?: import("@/lib/chat/composer-skin").ComposerSkinId
+    /**
+     * Per-knob adjustments layered on the chosen skin (corner radius, padding,
+     * monospace input, send-button shape, toolbar arrangement). Clamped on
+     * read, so a hand-edited row cannot produce an unusable box.
+     *
+     * Deliberately ignored under `"classic"`: its whole contract is "today's
+     * composer, untouched", and honouring a radius knob there would break that
+     * silently. Pick another skin to adjust anything.
+     */
+    skinOverrides?: import("@/lib/chat/composer-skin").ComposerSkinOverrides
+    /**
+     * Render the message composer as a compact, vertically stacked control
+     * surface. Default false.
+     *
+     * INTENTIONALLY DORMANT outside `skin: "classic"`. Under any other skin the
+     * skin owns the box geometry and the toolbar placement, so this flag has
+     * nothing left to decide; `resolveComposerSkin` ignores it, the settings
+     * card disables it with a hint, and `composer-skin.test.ts` pins that it
+     * changes nothing. It is NOT the same thing as running on a phone — mobile
+     * stacking rides the composer box's `isMobile` prop and always has.
+     */
     compactLayout?: boolean
     /**
      * Plain Enter submits (default). When false, Enter inserts a newline and

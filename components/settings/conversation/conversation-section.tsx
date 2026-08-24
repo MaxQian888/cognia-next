@@ -8,6 +8,7 @@ import { SettingsCard, SettingsDivider } from "../common/settings-section"
 import { ModelOverrideFields, useUtilityProviderOptions } from "../common/model-override-fields"
 import { CompactionSettings } from "./compaction-settings"
 import { ComposerBehaviorCard } from "./composer-behavior-card"
+import { ComposerSkinCard } from "./composer-skin-card"
 import { EffortPreferencesCard } from "./effort-preferences-card"
 import { ConversationSidebarCard } from "./conversation-sidebar-card"
 import { RunStatusBarCard } from "./run-status-bar-card"
@@ -144,6 +145,11 @@ export function ConversationSection() {
         description={t("inputSend.description")}
       >
         <div className="space-y-6">
+          {/* Which composer to render comes before how it behaves: the skin
+              decides what the following toggles are even talking about, and
+              one of them goes inert depending on the answer. */}
+          <ComposerSkinCard />
+          <SettingsDivider />
           <ComposerBehaviorCard />
           <SettingsDivider />
           {/* Thinking-level defaults sit with the composer behaviour that

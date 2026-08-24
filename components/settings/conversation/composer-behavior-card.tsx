@@ -10,7 +10,9 @@
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings/settings-store"
+import { DEFAULT_COMPOSER_SKIN } from "@/lib/chat/composer-skin"
 import { DEFAULT_EFFORT_SELECTOR_MODE } from "@/components/chat/composer/effort-selector-view"
 import type { AppSettings } from "@cognia/agent-config-types"
 
@@ -22,22 +24,31 @@ function ToggleRow({
   hint,
   checked,
   onChange,
+  disabled,
 }: {
   id: string
   label: string
   hint: string
   checked: boolean
   onChange: (next: boolean) => void
+  /** Rendered inert with this reason in place of the usual hint. */
+  disabled?: string
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className={cn("flex items-center justify-between gap-4", disabled && "opacity-60")}>
       <div className="space-y-0.5">
         <Label htmlFor={id} className="text-sm">
           {label}
         </Label>
-        <p className="text-xs text-muted-foreground">{hint}</p>
+        <p className="text-xs text-muted-foreground">{disabled ?? hint}</p>
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onChange} aria-label={label} />
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={onChange}
+        aria-label={label}
+        disabled={Boolean(disabled)}
+      />
     </div>
   )
 }
@@ -49,6 +60,8 @@ export function ComposerBehaviorCard() {
 
   const cb: ComposerBehavior = settings?.composerBehavior ?? {}
   const compactLayout = cb.compactLayout === true
+  // A non-classic skin decides the layout itself; see the row below.
+  const skinOwnsLayout = (cb.skin ?? DEFAULT_COMPOSER_SKIN) !== "classic"
   const sendOnEnter = cb.sendOnEnter !== false
   const clearAfterSend = cb.clearAfterSend !== false
   const autoScrollOnStream = cb.autoScrollOnStream !== false
@@ -72,12 +85,18 @@ export function ComposerBehaviorCard() {
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
+      {/* Intentional dormancy, labelled where the user would otherwise reach
+          for it: under any non-classic skin the skin owns the box geometry and
+          the toolbar placement, so this flag has nothing left to decide.
+          `resolveComposerSkin` ignores it and `composer-skin.test.ts` pins
+          that. */}
       <ToggleRow
         id="composer-compact-layout"
         label={t("compactLayout.label")}
         hint={t("compactLayout.hint")}
         checked={compactLayout}
         onChange={(next) => update({ compactLayout: next })}
+        disabled={skinOwnsLayout ? t("compactLayout.supersededBySkin") : undefined}
       />
 
       <ToggleRow

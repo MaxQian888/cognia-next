@@ -15,7 +15,8 @@
     },
     "compactLayout": {
       "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
-      "label": "使用紧凑输入区布局"
+      "label": "使用紧凑输入区布局",
+      "supersededBySkin": "已由所选的输入框风格接管，由它决定布局。"
     },
     "description": "控制消息输入框的输入、发送与草稿行为。",
     "effortSelectorMode": {
@@ -179,6 +180,47 @@
     "visibleTiers": {
       "label": "可选档位",
       "hint": "隐藏用不到的档位可以缩短滑轨。已经在使用隐藏档位的会话仍按原深度运行。"
+    }
+  },
+  "composerSkin": {
+    "title": "输入框风格",
+    "description": "选择输入框的排布方式。每种风格都能触及全部控件，区别只在于哪些直接摆在行上、哪些收起来。",
+    "skinLabel": "风格",
+    "adjustLabel": "微调",
+    "adjustHint": "微调所选风格。无论这里怎么设，移动端都会保留最小触控区域。",
+    "adjustLockedHint": "“经典”保持与现在完全一致，因此不接受微调。需要自定义请先换一种风格。",
+    "radiusLabel": "圆角半径",
+    "paddingLabel": "内边距",
+    "sendShapeLabel": "发送按钮",
+    "monoLabel": "等宽输入",
+    "monoHint": "用代码字体而非界面字体输入。",
+    "reachabilityNote": "任何风格都不会删控件。更简洁的风格只是把它们收进状态行的“⋯”里。",
+    "resetOverrides": "将{skin}恢复为默认值",
+    "sendShapes": {
+      "circle": "圆形",
+      "rounded": "圆角方形"
+    },
+    "skins": {
+      "classic": {
+        "label": "经典（当前外观）",
+        "hint": "就是你现在看到的输入框。默认选项，保持原样。"
+      },
+      "airy": {
+        "label": "宽松",
+        "hint": "圆润宽敞，状态行放在框内、文字下方。"
+      },
+      "dense": {
+        "label": "紧凑",
+        "hint": "方正紧凑，框内带一条安静的等宽状态行。"
+      },
+      "full": {
+        "label": "详细",
+        "hint": "所有控件都展开写明，花费与上下文单独占一行。"
+      },
+      "focus": {
+        "label": "极简",
+        "hint": "只留文字和模型，其余全部收进“⋯”。"
+      }
     }
   }
 }

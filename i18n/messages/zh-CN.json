@@ -8283,6 +8283,7 @@
       "foreground": "前台",
       "unknown": "未知"
     },
+    "attentionCount": "{count, plural, other {# 台需要处理}}",
     "capabilities": {
       "group": {
         "host-execution": "主机执行特性",
@@ -8468,7 +8469,6 @@
     "standalonePair": "与主机配对",
     "standaloneTitle": "只有本机",
     "summary": "{total} 台中 {online} 台在线",
-    "attentionCount": "{count, plural, other {# 台需要处理}}",
     "title": "设备"
   },
   "diagnostics": {
@@ -29384,7 +29384,8 @@
         },
         "compactLayout": {
           "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
-          "label": "使用紧凑输入区布局"
+          "label": "使用紧凑输入区布局",
+          "supersededBySkin": "已由所选的输入框风格接管，由它决定布局。"
         },
         "description": "控制消息输入框的输入、发送与草稿行为。",
         "effortSelectorMode": {
@@ -29404,6 +29405,47 @@
           "label": "按 Enter 发送"
         },
         "title": "输入框行为"
+      },
+      "composerSkin": {
+        "adjustHint": "微调所选风格。无论这里怎么设，移动端都会保留最小触控区域。",
+        "adjustLabel": "微调",
+        "adjustLockedHint": "“经典”保持与现在完全一致，因此不接受微调。需要自定义请先换一种风格。",
+        "description": "选择输入框的排布方式。每种风格都能触及全部控件，区别只在于哪些直接摆在行上、哪些收起来。",
+        "monoHint": "用代码字体而非界面字体输入。",
+        "monoLabel": "等宽输入",
+        "paddingLabel": "内边距",
+        "radiusLabel": "圆角半径",
+        "reachabilityNote": "任何风格都不会删控件。更简洁的风格只是把它们收进状态行的“⋯”里。",
+        "resetOverrides": "将{skin}恢复为默认值",
+        "sendShapeLabel": "发送按钮",
+        "sendShapes": {
+          "circle": "圆形",
+          "rounded": "圆角方形"
+        },
+        "skinLabel": "风格",
+        "skins": {
+          "airy": {
+            "hint": "圆润宽敞，状态行放在框内、文字下方。",
+            "label": "宽松"
+          },
+          "classic": {
+            "hint": "就是你现在看到的输入框。默认选项，保持原样。",
+            "label": "经典（当前外观）"
+          },
+          "dense": {
+            "hint": "方正紧凑，框内带一条安静的等宽状态行。",
+            "label": "紧凑"
+          },
+          "focus": {
+            "hint": "只留文字和模型，其余全部收进“⋯”。",
+            "label": "极简"
+          },
+          "full": {
+            "hint": "所有控件都展开写明，花费与上下文单独占一行。",
+            "label": "详细"
+          }
+        },
+        "title": "输入框风格"
       },
       "description": "自动生成标题并配置时间线缩略图。",
       "effortPreferences": {

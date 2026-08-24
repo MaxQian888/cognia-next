@@ -8283,6 +8283,7 @@
       "foreground": "In the foreground",
       "unknown": "Unknown"
     },
+    "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
     "capabilities": {
       "group": {
         "host-execution": "Host execution features",
@@ -8468,7 +8469,6 @@
     "standalonePair": "Pair with a host",
     "standaloneTitle": "Only this device",
     "summary": "{online} of {total} online",
-    "attentionCount": "{count, plural, =1 {1 needs attention} other {# need attention}}",
     "title": "Devices"
   },
   "diagnostics": {
@@ -29384,7 +29384,8 @@
         },
         "compactLayout": {
           "hint": "Use a denser composer layout that leaves more room for the conversation.",
-          "label": "Use compact composer layout"
+          "label": "Use compact composer layout",
+          "supersededBySkin": "Superseded by the composer style you picked — that style decides the layout."
         },
         "description": "Control how the message composer handles typing, sending, and drafts.",
         "effortSelectorMode": {
@@ -29404,6 +29405,47 @@
           "label": "Send on Enter"
         },
         "title": "Composer behavior"
+      },
+      "composerSkin": {
+        "adjustHint": "Fine-tune the chosen style. Mobile keeps its minimum touch targets whatever you set here.",
+        "adjustLabel": "Adjust",
+        "adjustLockedHint": "Classic renders exactly as it always has, so it takes no adjustments. Pick another style to customise the box.",
+        "description": "Pick how the input box is arranged. Every style reaches the same controls — they differ in what sits on the row and what folds away.",
+        "monoHint": "Type in the code font instead of the interface font.",
+        "monoLabel": "Monospace input",
+        "paddingLabel": "Padding",
+        "radiusLabel": "Corner radius",
+        "reachabilityNote": "No style removes a control. A quieter style folds them behind the “⋯” button on the status row.",
+        "resetOverrides": "Reset {skin} to its defaults",
+        "sendShapeLabel": "Send button",
+        "sendShapes": {
+          "circle": "Circle",
+          "rounded": "Rounded square"
+        },
+        "skinLabel": "Style",
+        "skins": {
+          "airy": {
+            "hint": "Roomy and rounded, with the status row inside the box under the text.",
+            "label": "Airy"
+          },
+          "classic": {
+            "hint": "The composer as it is today. This is the default and stays untouched.",
+            "label": "Classic (current look)"
+          },
+          "dense": {
+            "hint": "Tight and squared, with a quiet monospace status line inside the box.",
+            "label": "Dense"
+          },
+          "focus": {
+            "hint": "Just the text and the model. Everything else folds behind “⋯”.",
+            "label": "Minimal"
+          },
+          "full": {
+            "hint": "Every control spelled out inline, with cost and context on their own rail.",
+            "label": "Detailed"
+          }
+        },
+        "title": "Composer style"
       },
       "description": "Auto-generate titles and configure the timeline minimap.",
       "effortPreferences": {
