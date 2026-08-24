@@ -203,7 +203,14 @@ export function createCliContextAssembler(params: CliContextAssemblerParams): Cl
     params.resolveLoadableSkills ??
     (async (ids: string[]): Promise<LoadableSkill[]> => {
       const { listEnabledSkillsByIds } = await import("@/lib/db/skills")
-      const rows = await listEnabledSkillsByIds(ids)
+      const { findWorkspaceIdForPath } = await import("@/lib/db/projects")
+      // The CLI runs in a directory, not in a UI selection. Resolving the
+      // workspace from that directory is what keeps `cognia-agent --cwd
+      // ~/other-repo` from inheriting whichever workspace the desktop app was
+      // last looking at; when no workspace mounts the cwd, the shared default
+      // (active, then Default) still applies.
+      const projectId = await findWorkspaceIdForPath(config.cwd)
+      const rows = await listEnabledSkillsByIds(ids, { projectId })
       return rows.map((s) => ({ id: s.id, name: s.name, description: s.description }))
     })
   const resolveDisabledMcpTools = params.resolveDisabledMcpTools ?? (() => readDisabledTools(home))

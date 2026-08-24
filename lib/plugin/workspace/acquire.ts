@@ -26,6 +26,7 @@ import {
   type WorkspaceWalkOptions,
   type WorkspaceWalkResult,
 } from "@/lib/files/workspace-fs"
+import { isDescendant } from "@/lib/claude/instructions/paths"
 import { gitCloneGuarded, gitDiffRefsFiles, gitReadBlobAtRef } from "@/lib/git/commands"
 import { transport } from "@/lib/tauri"
 
@@ -69,21 +70,16 @@ export interface AcquireDeps {
   clone: typeof gitCloneGuarded
 }
 
-function normalizeRootPath(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "")
-  return trimmed.length > 0 ? trimmed : path
-}
-
-/** Whether `candidate` is a root the user opened, or lives inside one. */
+/**
+ * Whether `candidate` is a root the user opened, or lives inside one.
+ *
+ * Delegates to the repo's one path-containment primitive rather than repeating
+ * the separator-boundary comparison: `isDescendant` already handles both
+ * separators, trailing slashes, and the Windows case-insensitivity this used to
+ * get wrong (`C:\Repo` vs `c:\repo` read as an escape attempt).
+ */
 export function isInsideOpenRoot(candidate: string, roots: readonly string[]): boolean {
-  const target = normalizeRootPath(candidate)
-  return roots.some((raw) => {
-    const root = normalizeRootPath(raw)
-    if (!root) return false
-    if (target === root) return true
-    // Compare on a separator boundary so `/repo-two` is not inside `/repo`.
-    return target.startsWith(`${root}/`) || target.startsWith(`${root}\\`)
-  })
+  return roots.some((root) => Boolean(root?.trim()) && isDescendant(root, candidate))
 }
 
 type ResolvedSpec =

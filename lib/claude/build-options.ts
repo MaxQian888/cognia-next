@@ -997,6 +997,12 @@ async function proIdeWriteToolsAvailable(ctx: BuildOptionsContext): Promise<bool
 
 export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<SendOptions> {
   const { session, appSettings, memberOverride } = ctx
+  // Which workspace's capability overlay this turn obeys. The session's own
+  // workspace wins over the UI pointer for the same reason the cwd does: a
+  // background turn in a conversation the user has navigated away from must
+  // keep the skills and servers of the repo it is working in, not of whatever
+  // is on screen. Only a turn with no workspace at all falls back.
+  const capabilityScope = { projectId: session?.projectId ?? ctx.activeProject?.id ?? null }
   // Name the turn for lifecycle-hook scoping. Everything resolved here is a
   // chat-session turn; the surfaces that are NOT (teammate dispatch, plan
   // steps, dispatched subagents) overwrite `agentKind` on the options they
@@ -1038,7 +1044,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       disabledIds: session?.disabledSkillIds ?? [],
     })
     if (wantedIds.length) {
-      skills = await listEnabledSkillsByIds(wantedIds)
+      skills = await listEnabledSkillsByIds(wantedIds, capabilityScope)
     }
   }
   // ADR-0106 controlled trial. The recorded skill is saved `disabled` on
@@ -1786,7 +1792,10 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     try {
       const { resolveSkillsForCharacter, extractContainerSkillIds, renderResolvedSkillsSection } =
         await import("@/lib/claude/skills-bridge")
-      const resolvedPlugin = await resolveSkillsForCharacter(character.pluginSkillIds)
+      const resolvedPlugin = await resolveSkillsForCharacter(
+        character.pluginSkillIds,
+        capabilityScope
+      )
       // Anthropic-managed ("container") skills cannot be delivered through the
       // Claude Agent SDK: no `query()` option attaches uploaded skill_ids
       // (verified against sdk 0.3.x — see `skills-bridge.ts`). Rather than
@@ -2225,7 +2234,9 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
   try {
     // CLI / headless callers inject `preloadedMcpServers` (incl. `[]`) so the
     // resolver never touches Dexie; desktop leaves it undefined → Dexie lookup.
-    const enabled = supportAgent ? [] : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers()))
+    const enabled = supportAgent
+      ? []
+      : (ctx.preloadedMcpServers ?? (await listEnabledMcpServers(capabilityScope)))
     let chosen = enabled
     const memberMcp = memberOverride?.mcpServerIdsOverride
 

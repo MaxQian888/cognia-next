@@ -224,6 +224,22 @@ export interface Project {
     enableProjectRag?: boolean
     ragTopK?: number
   }
+  /**
+   * Per-workspace enablement deltas for globally-defined capabilities —
+   * capability id -> `true` (on here) / `false` (off here); absent inherits the
+   * definition's own flag. Structural mirror of `WorkspaceCapabilityOverlay`
+   * (`@/lib/workspace/capability-overlay`), kept inline here for the same
+   * reason `knowledgeSettings` is: this module must not import from `lib/`.
+   *
+   * Read through `resolveCapabilityEnabled` / `applyCapabilityOverlay`, never
+   * by indexing directly — the resolver is what makes a malformed bucket read
+   * as "no opinion" instead of throwing inside a send path. Plugins are
+   * deliberately absent; see that module's header for why.
+   */
+  capabilityOverlay?: {
+    skill?: Record<string, boolean>
+    mcpServer?: Record<string, boolean>
+  }
 }
 
 export interface CreateProjectInput {

@@ -8,6 +8,7 @@
 // second one-row table) — it reuses the already-hydrated settings store and
 // its companion-sync `updatedAt` bump.
 
+import { locateWorkspaceForPath } from "@/lib/workspace/locate-workspace"
 import type { Project } from "@/types"
 import { getDb } from "./schema"
 import { getSettings, saveSettings } from "./settings"
@@ -35,4 +36,22 @@ export async function loadActiveProjectId(): Promise<string | null> {
 /** Persist the active-workspace pointer onto the settings singleton. */
 export async function persistActiveProjectId(id: string | null): Promise<void> {
   await saveSettings({ activeProjectId: id })
+}
+
+/**
+ * The workspace that mounts `path`, or null when none does.
+ *
+ * For callers that know a directory and nothing else — a CLI `--cwd`, a
+ * terminal tab, an adopted worktree. Reads Dexie rather than the store because
+ * those callers run in shells where no store is hydrated.
+ */
+export async function findWorkspaceIdForPath(
+  path: string | null | undefined
+): Promise<string | null> {
+  if (!path?.trim()) return null
+  try {
+    return locateWorkspaceForPath(path, await getAllProjects())?.project.id ?? null
+  } catch {
+    return null
+  }
 }

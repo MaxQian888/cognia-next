@@ -1,7 +1,12 @@
 import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
+import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import { getDb } from "./schema"
+import {
+  loadWorkspaceCapabilityOverlay,
+  type WorkspaceCapabilityScope,
+} from "./workspace-capabilities"
 import {
   deleteResourcesForSkill,
   listResourcesForSkill,
@@ -285,13 +290,28 @@ export function activeEffectiveSkillIds(input: {
 }
 
 /**
- * Return only the skills currently flagged enabled (or with no status set,
- * for back-compat). Used by `build-options` to choose what to inject into
+ * Return only the skills live for one workspace: flagged enabled globally (or
+ * with no status set, for back-compat) and not switched off by the workspace's
+ * capability overlay. Used by `build-options` to choose what to inject into
  * the system prompt at send time.
+ *
+ * The overlay is applied against the unfiltered rows, so a workspace can also
+ * turn ON a skill it keeps disabled everywhere else — the case that makes a
+ * per-repo house-style skill worth having at all. Pass
+ * `{ workspaceScoped: false }` from surfaces that must report the machine-wide
+ * library rather than this workspace's slice of it.
  */
-export async function listEnabledSkillsByIds(ids: string[]): Promise<Skill[]> {
+export async function listEnabledSkillsByIds(
+  ids: string[],
+  scope?: WorkspaceCapabilityScope
+): Promise<Skill[]> {
   const rows = await listSkillsByIds(ids)
-  return rows.filter((r) => (r.status ?? "enabled") === "enabled")
+  const overlay = await loadWorkspaceCapabilityOverlay(scope)
+  return applyCapabilityOverlay(rows, "skill", overlay, {
+    idOf: (row) => row.id,
+    enabledOf: (row) => (row.status ?? "enabled") === "enabled",
+    alreadyFiltered: false,
+  })
 }
 
 /** Inferred skill category — useful for normalising legacy rows on read. */

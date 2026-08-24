@@ -8,6 +8,7 @@ jest.mock("@/lib/mcp/sync-coordinator", () => ({
   scheduleMcpSyncDrain: scheduleMcpSyncDrainMock,
 }))
 
+import type { Project } from "@/types"
 import {
   listMcpServers,
   listEnabledMcpServers,
@@ -212,6 +213,67 @@ describe("listMcpServers / listEnabledMcpServers / getMcpServer", () => {
     })
     const enabled = await listEnabledMcpServers()
     expect(enabled.map((s) => s.name)).toEqual(["on"])
+  })
+
+  describe("workspace capability overlay", () => {
+    async function workspace(id: string, capabilityOverlay?: Record<string, unknown>) {
+      await getDb().projects.put({
+        id,
+        name: id,
+        roots: [],
+        knowledgeBase: [],
+        sessionIds: [],
+        sessionCount: 0,
+        messageCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastAccessedAt: new Date(),
+        ...(capabilityOverlay ? { capabilityOverlay } : {}),
+      } as unknown as Project)
+    }
+
+    async function reviewedServer(name: string) {
+      return createReviewed({
+        name,
+        transport: "stdio",
+        config: { command: "x" },
+        enabled: true,
+      })
+    }
+
+    it("drops a server the named workspace switched off", async () => {
+      const server = await reviewedServer("jira")
+      await workspace("w1", { mcpServer: { [server.id]: false } })
+      expect(await listEnabledMcpServers({ projectId: "w1" })).toEqual([])
+    })
+
+    it("keeps it for a workspace that has no opinion", async () => {
+      const server = await reviewedServer("jira")
+      await workspace("w1", { mcpServer: { [server.id]: false } })
+      await workspace("w2")
+      const out = await listEnabledMcpServers({ projectId: "w2" })
+      expect(out.map((s) => s.name)).toEqual(["jira"])
+    })
+
+    it("cannot use an override to bypass the trust gate", async () => {
+      // An override is a scoping preference, not an escape hatch: an unreviewed
+      // server never reaches the overlay, so "on" has nothing to turn on.
+      const pending = await createMcpServer({
+        name: "untrusted",
+        transport: "stdio",
+        config: { command: "x" },
+      })
+      await getDb().mcpServers.update(pending.id, { enabled: true })
+      await workspace("w1", { mcpServer: { [pending.id]: true } })
+      expect(await listEnabledMcpServers({ projectId: "w1" })).toEqual([])
+    })
+
+    it("reports the machine-wide answer when the caller opts out of scoping", async () => {
+      const server = await reviewedServer("jira")
+      await workspace("w1", { mcpServer: { [server.id]: false } })
+      const out = await listEnabledMcpServers({ projectId: "w1", workspaceScoped: false })
+      expect(out.map((s) => s.name)).toEqual(["jira"])
+    })
   })
 
   it("fails closed for enabled pending or blocked rows", async () => {

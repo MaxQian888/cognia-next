@@ -25,6 +25,7 @@ import { createResource, listResourcesForSkill } from "./skill-resources"
 import { getDb } from "./schema"
 import { createDbTestFixture } from "./test-fixture"
 import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
+import type { Project } from "@/types"
 
 const dbFixture = createDbTestFixture()
 
@@ -266,6 +267,59 @@ describe("listEnabledSkillsByIds", () => {
     await getDb().skills.update(a.id, { status: undefined })
     const out = await listEnabledSkillsByIds([a.id])
     expect(out.map((r) => r.id)).toEqual([a.id])
+  })
+
+  describe("workspace capability overlay", () => {
+    async function workspace(id: string, capabilityOverlay?: Record<string, unknown>) {
+      await getDb().projects.put({
+        id,
+        name: id,
+        roots: [],
+        knowledgeBase: [],
+        sessionIds: [],
+        sessionCount: 0,
+        messageCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastAccessedAt: new Date(),
+        ...(capabilityOverlay ? { capabilityOverlay } : {}),
+      } as unknown as Project)
+    }
+
+    it("drops a skill the named workspace switched off", async () => {
+      const a = await createSkill({ name: "A", content: "x" })
+      await workspace("w1", { skill: { [a.id]: false } })
+      expect(await listEnabledSkillsByIds([a.id], { projectId: "w1" })).toEqual([])
+    })
+
+    it("keeps it for a workspace that has no opinion", async () => {
+      const a = await createSkill({ name: "A", content: "x" })
+      await workspace("w1", { skill: { [a.id]: false } })
+      await workspace("w2")
+      const out = await listEnabledSkillsByIds([a.id], { projectId: "w2" })
+      expect(out.map((r) => r.id)).toEqual([a.id])
+    })
+
+    it("lets a workspace turn on a skill that is disabled everywhere else", async () => {
+      // The case that makes a per-repo house-style skill worth having: kept off
+      // globally so it never leaks into other work, on in the repo it is for.
+      const a = await createSkill({ name: "A", content: "x" })
+      await setSkillStatus(a.id, "disabled")
+      await workspace("w1", { skill: { [a.id]: true } })
+      const out = await listEnabledSkillsByIds([a.id], { projectId: "w1" })
+      expect(out.map((r) => r.id)).toEqual([a.id])
+      expect(await listEnabledSkillsByIds([a.id], { projectId: "w2" })).toEqual([])
+    })
+
+    it("reports the machine-wide answer when the caller opts out of scoping", async () => {
+      const a = await createSkill({ name: "A", content: "x" })
+      await workspace("w1", { skill: { [a.id]: false } })
+      const out = await listEnabledSkillsByIds([a.id], {
+        projectId: "w1",
+        workspaceScoped: false,
+      })
+      expect(out.map((r) => r.id)).toEqual([a.id])
+    })
   })
 })
 

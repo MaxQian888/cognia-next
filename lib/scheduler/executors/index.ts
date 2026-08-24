@@ -81,6 +81,7 @@ import {
 } from "@/lib/db/agent-tasks"
 import { getSettings } from "@/lib/db/settings"
 import { listEnabledMcpServers, buildMcpServerMapResolved } from "@/lib/db/mcp-servers"
+import type { WorkspaceCapabilityScope } from "@/lib/db/workspace-capabilities"
 import { resolveSendOptions } from "@/lib/claude/build-options"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
@@ -271,7 +272,8 @@ function unionStrings(...sources: (readonly string[] | undefined)[]): string[] {
 async function applyPayloadOverrides(
   base: SendOptions,
   payload: ChatLikeTaskPayload,
-  appSettings: AppSettings | null
+  appSettings: AppSettings | null,
+  capabilityScope: WorkspaceCapabilityScope
 ): Promise<SendOptions> {
   const out: SendOptions = { ...base }
 
@@ -304,7 +306,7 @@ async function applyPayloadOverrides(
 
   if (payload.mcpServerIds) {
     try {
-      const enabled = await listEnabledMcpServers()
+      const enabled = await listEnabledMcpServers(capabilityScope)
       const wanted = new Set(payload.mcpServerIds)
       const subset = enabled.filter((srv) => wanted.has(srv.id))
       if (subset.length > 0) {
@@ -375,10 +377,11 @@ async function resolveOrCreateSession(
  */
 async function applyAdHocSkill(
   base: SendOptions,
-  skillId: string | undefined
+  skillId: string | undefined,
+  capabilityScope: WorkspaceCapabilityScope
 ): Promise<SendOptions> {
   if (!skillId) return base
-  const skills = await listEnabledSkillsByIds([skillId])
+  const skills = await listEnabledSkillsByIds([skillId], capabilityScope)
   if (skills.length === 0) return base
 
   const out: SendOptions = { ...base }
@@ -467,11 +470,19 @@ async function runChatPrompt(
     }
   }
 
+  // A schedule fires for the workspace that owns its conversation, which is
+  // almost never the one the user happens to be looking at when it fires — and
+  // often nothing is on screen at all. Resolving capabilities against the UI
+  // pointer here would hand a cron job someone else's skills and servers.
+  const capabilityScope: WorkspaceCapabilityScope = {
+    projectId: payload.executionContext?.projectId ?? session.projectId ?? null,
+  }
+
   // 3. Layer payload-level overrides on top.
-  let finalOptions = await applyPayloadOverrides(resolved, payload, appSettings)
+  let finalOptions = await applyPayloadOverrides(resolved, payload, appSettings, capabilityScope)
 
   // 4. Skill-task ad-hoc skill: splice into system prompt + allowedTools.
-  finalOptions = await applyAdHocSkill(finalOptions, options.skillId)
+  finalOptions = await applyAdHocSkill(finalOptions, options.skillId, capabilityScope)
 
   // Scheduled managed-worktree runs fail closed: unlike an interactive run,
   // there is nobody present to approve bypassing failed isolation/setup. The

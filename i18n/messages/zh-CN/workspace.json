@@ -199,5 +199,27 @@
     "undoFollow": "撤销",
     "unpin": "取消置顶 {name}",
     "untrustedHint": "未受信任的工作区"
+  },
+  "capabilities": {
+    "tab": "能力",
+    "title": "本工作区启用的能力",
+    "description": "技能与 MCP 服务器在本机统一定义，这里只记录本工作区的取舍：保持「继承」的条目会跟随全局设置，包括之后的改动。",
+    "overrideCount": "{count, plural, =0 {没有覆盖} other {# 项覆盖}}",
+    "skills": "技能",
+    "mcpServers": "MCP 服务器",
+    "noSkills": "尚未定义任何技能。可在「设置 → 技能」中添加。",
+    "noMcpServers": "尚未配置任何 MCP 服务器。可在「设置 → MCP」中添加。",
+    "effectiveOn": "在此加载",
+    "effectiveOff": "在此不加载",
+    "globallyOn": "全局已启用",
+    "globallyOff": "全局已禁用",
+    "stateLabel": "{name} 在本工作区的可用性",
+    "state": {
+      "inherit": "继承",
+      "on": "启用",
+      "off": "禁用"
+    },
+    "pluginsAreGlobal": "插件保持全机范围：它的启用标记记录的是「当前实际在运行什么」，而不是一项偏好，因此工作区无法对它另持一份意见。请在「设置 → 插件」中管理。",
+    "unavailable": "不可用 — 请先在「设置 → MCP」中信任它"
   }
 }

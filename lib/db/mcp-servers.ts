@@ -22,7 +22,12 @@ import {
   normalizeToolRuleList,
   resolveDeniedToolNames,
 } from "@/lib/mcp/tool-rules"
+import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import { getDb } from "./schema"
+import {
+  loadWorkspaceCapabilityOverlay,
+  type WorkspaceCapabilityScope,
+} from "./workspace-capabilities"
 
 function newId() {
   return "mcp_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -32,14 +37,28 @@ export async function listMcpServers(): Promise<McpServer[]> {
   return getDb().mcpServers.orderBy("name").toArray()
 }
 
-export async function listEnabledMcpServers(): Promise<McpServer[]> {
+/**
+ * Servers live for one workspace: globally enabled, trusted, and not switched
+ * off by the workspace's capability overlay.
+ *
+ * The overlay can only subtract here. A server the user disabled globally, or
+ * has not trusted, stays out however the workspace votes — an override is a
+ * scoping preference, not a bypass of the trust gate. Pass
+ * `{ workspaceScoped: false }` from surfaces that must report what is
+ * installed on the machine rather than what is live in this workspace.
+ */
+export async function listEnabledMcpServers(
+  scope?: WorkspaceCapabilityScope
+): Promise<McpServer[]> {
   // `enabled` is indexed but we treat the boolean stored value as 1/0 via
   // Dexie's filtering — equality on booleans is supported.
-  return getDb()
+  const rows = await getDb()
     .mcpServers.filter(
       (s) => s.enabled && (!s.trust || s.trust.state === "legacy" || s.trust.state === "trusted")
     )
     .toArray()
+  const overlay = await loadWorkspaceCapabilityOverlay(scope)
+  return applyCapabilityOverlay(rows, "mcpServer", overlay, { idOf: (row) => row.id })
 }
 
 export async function getMcpServer(id: string): Promise<McpServer | undefined> {

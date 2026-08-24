@@ -24,6 +24,14 @@ jest.mock("@/lib/platform/detect", () => {
   }
 })
 import * as platformDetect from "@/lib/platform/detect"
+
+/**
+ * The capability scope these helpers take. A schedule resolves skills and MCP
+ * servers against the workspace that owns its conversation; `{}` here means
+ * "whatever `resolveScopeProjectId` decides", which is what these unit cases
+ * exercise — the threading itself is covered by the run-level tests.
+ */
+const SCOPE = {}
 const hostState = (platformDetect as unknown as { __hostState: { tauri: boolean } }).__hostState
 jest.mock("@/lib/tauri", () => ({
   // Delegate to the detect mock's state so both modules agree at import time.
@@ -415,7 +423,8 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       {},
       { prompt: "p", model: "m", permissionMode: "plan", maxTurns: 5, effort: "high" },
-      null
+      null,
+      SCOPE
     )
     expect(out).toMatchObject({
       model: "m",
@@ -428,19 +437,26 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       { appendSystemPrompt: "base" },
       { prompt: "p", appendSystemPrompt: "extra" },
-      null
+      null,
+      SCOPE
     )
     expect(out.appendSystemPrompt).toBe("base\n\nextra")
   })
   it("uses payload appendSystemPrompt verbatim when base is empty", async () => {
-    const out = await applyPayloadOverrides({}, { prompt: "p", appendSystemPrompt: "extra" }, null)
+    const out = await applyPayloadOverrides(
+      {},
+      { prompt: "p", appendSystemPrompt: "extra" },
+      null,
+      SCOPE
+    )
     expect(out.appendSystemPrompt).toBe("extra")
   })
   it("unions allowedTools", async () => {
     const out = await applyPayloadOverrides(
       { allowedTools: ["Read", "Write"] },
       { prompt: "p", allowedTools: ["Bash", "Read"] },
-      null
+      null,
+      SCOPE
     )
     expect(out.allowedTools).toEqual(expect.arrayContaining(["Read", "Write", "Bash"]))
     expect(out.allowedTools).toHaveLength(3)
@@ -449,7 +465,8 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       { additionalDirectories: ["/a"] },
       { prompt: "p", additionalDirectories: ["/b", "/a"] },
-      null
+      null,
+      SCOPE
     )
     expect(out.additionalDirectories).toHaveLength(2)
   })
@@ -457,7 +474,8 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       { disallowedTools: ["Old"] },
       { prompt: "p", disallowedTools: ["New"] },
-      null
+      null,
+      SCOPE
     )
     expect(out.disallowedTools).toEqual(["New"])
   })
@@ -466,7 +484,7 @@ describe("applyPayloadOverrides", () => {
       { id: "a", enabled: true },
       { id: "b", enabled: true },
     ])
-    const out = await applyPayloadOverrides({}, { prompt: "p", mcpServerIds: ["a"] }, null)
+    const out = await applyPayloadOverrides({}, { prompt: "p", mcpServerIds: ["a"] }, null, SCOPE)
     expect(out.mcpServers).toMatchObject({ a: { id: "a" } })
   })
   it("strips mcpServers when payload requests an empty subset", async () => {
@@ -474,7 +492,8 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       { mcpServers: { x: {} } },
       { prompt: "p", mcpServerIds: [] },
-      null
+      null,
+      SCOPE
     )
     expect(out.mcpServers).toBeUndefined()
   })
@@ -483,22 +502,28 @@ describe("applyPayloadOverrides", () => {
     const out = await applyPayloadOverrides(
       { mcpServers: { x: {} } },
       { prompt: "p", mcpServerIds: ["a"] },
-      null
+      null,
+      SCOPE
     )
     expect(out).toBeDefined()
   })
   it("shallow-merges builtinTools over the resolved AppSettings", async () => {
-    const out = await applyPayloadOverrides({}, { prompt: "p", builtinTools: { git: false } }, {
-      id: "singleton",
-      alwaysAllowTools: [],
-      builtinTools: {
-        fileExtras: true,
-        git: true,
-        process: false,
-        environment: true,
-        shellAdvanced: false,
-      },
-    } as unknown as Parameters<typeof applyPayloadOverrides>[2])
+    const out = await applyPayloadOverrides(
+      {},
+      { prompt: "p", builtinTools: { git: false } },
+      {
+        id: "singleton",
+        alwaysAllowTools: [],
+        builtinTools: {
+          fileExtras: true,
+          git: true,
+          process: false,
+          environment: true,
+          shellAdvanced: false,
+        },
+      } as unknown as Parameters<typeof applyPayloadOverrides>[2],
+      SCOPE
+    )
     expect(out.builtinTools).toMatchObject({
       fileExtras: true,
       git: false,
@@ -509,18 +534,18 @@ describe("applyPayloadOverrides", () => {
 
 describe("applyAdHocSkill", () => {
   it("is a no-op when no skillId is given", async () => {
-    const out = await applyAdHocSkill({}, undefined)
+    const out = await applyAdHocSkill({}, undefined, SCOPE)
     expect(out).toEqual({})
   })
   it("is a no-op when the skill is not found", async () => {
     listEnabledSkillsByIdsMock.mockResolvedValueOnce([])
-    const out = await applyAdHocSkill({}, "missing")
+    const out = await applyAdHocSkill({}, "missing", SCOPE)
     expect(out).toEqual({})
   })
   it("appends the skill section and unions allowedTools", async () => {
     listEnabledSkillsByIdsMock.mockResolvedValueOnce([{ id: "s1", allowedTools: ["TodoWrite"] }])
     renderSkillsSectionMock.mockReturnValueOnce("SKILL_SECTION")
-    const out = await applyAdHocSkill({ systemPrompt: "base", allowedTools: ["Read"] }, "s1")
+    const out = await applyAdHocSkill({ systemPrompt: "base", allowedTools: ["Read"] }, "s1", SCOPE)
     expect(out.systemPrompt).toContain("base")
     expect(out.systemPrompt).toContain("SKILL_SECTION")
     expect(out.allowedTools).toEqual(expect.arrayContaining(["Read", "TodoWrite"]))
@@ -528,7 +553,7 @@ describe("applyAdHocSkill", () => {
   it("uses skill section verbatim when base systemPrompt is absent", async () => {
     listEnabledSkillsByIdsMock.mockResolvedValueOnce([{ id: "s1" }])
     renderSkillsSectionMock.mockReturnValueOnce("SKILL")
-    const out = await applyAdHocSkill({}, "s1")
+    const out = await applyAdHocSkill({}, "s1", SCOPE)
     expect(out.systemPrompt).toBe("SKILL")
   })
 })
@@ -698,7 +723,7 @@ describe("executeChatTask", () => {
     }
     resolveSendOptionsMock.mockResolvedValueOnce({
       additionalDirectories: ["/live/docs"],
-    } as SendOptions)
+    } as unknown as Record<string, unknown>)
     getSessionMock.mockResolvedValueOnce({ id: "session-1", executionContext })
     emitTerminalResult("session-1")
 

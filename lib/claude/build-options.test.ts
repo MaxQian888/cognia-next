@@ -1776,6 +1776,35 @@ describe("resolveSendOptions — character + skills", () => {
     expect(opts.systemPrompt).toBeUndefined()
   })
 
+  it("resolves capabilities against the session's workspace, not the UI pointer", async () => {
+    // A background turn in a conversation the user has navigated away from must
+    // keep the skills of the repo it is working in. `activeProject` is what the
+    // shell is showing; the session's own workspace outranks it.
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([])
+    await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "s1", projectId: "owner-workspace" }),
+      activeProject: { id: "on-screen-workspace" } as unknown as Parameters<
+        typeof resolveSendOptions
+      >[0]["activeProject"],
+    })
+    expect(mListSkills).toHaveBeenCalledWith(["sk1"], { projectId: "owner-workspace" })
+  })
+
+  it("falls back to the shown workspace only when the session names none", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([])
+    await resolveSendOptions({
+      character: ch,
+      session: makeSession({ id: "s1" }),
+      activeProject: { id: "on-screen-workspace" } as unknown as Parameters<
+        typeof resolveSendOptions
+      >[0]["activeProject"],
+    })
+    expect(mListSkills).toHaveBeenCalledWith(["sk1"], { projectId: "on-screen-workspace" })
+  })
+
   it("loads skills attached to the character and respects session-disable list", async () => {
     const ch = makeChar({ id: "c1", skillIds: ["sk1", "sk2"] })
     const skills: Skill[] = [
@@ -1796,7 +1825,7 @@ describe("resolveSendOptions — character + skills", () => {
     })
 
     // Only sk1 was passed to the loader (sk2 was disabled on the session).
-    expect(mListSkills).toHaveBeenCalledWith(["sk1"])
+    expect(mListSkills).toHaveBeenCalledWith(["sk1"], { projectId: null })
     expect(mRecordUsage).toHaveBeenCalledWith(["sk1"])
     expect(opts.systemPrompt).toContain("Skill 1")
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
@@ -1985,7 +2014,7 @@ describe("resolveSendOptions — character + skills", () => {
     mRender.mockReturnValueOnce("rendered")
     await resolveSendOptions({ character: ch, ephemeralSkillIds: ["sk1", "sk2"] })
     // Character + ephemeral merged, de-duped — sk1 appears once.
-    expect(mListSkills).toHaveBeenCalledWith(["sk1", "sk2"])
+    expect(mListSkills).toHaveBeenCalledWith(["sk1", "sk2"], { projectId: null })
   })
 
   it("respects session-disable list against ephemeral skills too", async () => {
@@ -1999,7 +2028,7 @@ describe("resolveSendOptions — character + skills", () => {
       ephemeralSkillIds: ["sk1", "sk2"],
       session: makeSession({ id: "s1", disabledSkillIds: ["sk1"] }),
     })
-    expect(mListSkills).toHaveBeenCalledWith(["sk2"])
+    expect(mListSkills).toHaveBeenCalledWith(["sk2"], { projectId: null })
   })
 
   it("calls recordSkillUsage on the merged ephemeral + character set", async () => {

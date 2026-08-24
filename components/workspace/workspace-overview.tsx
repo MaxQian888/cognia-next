@@ -38,6 +38,7 @@ import { ISSUE_STATUSES, statusCategoryOf } from "@/types/issues"
 import type { IssueProject, IssueStatus } from "@/types/issues"
 import { useProjectStore } from "@/stores/project/project-store"
 import { IssueStatusIcon } from "@/components/issues/issue-glyphs"
+import { WorkspaceCapabilities } from "./workspace-capabilities"
 import { WorkspaceEnvironmentList } from "./workspace-environment-list"
 
 /** Trailing-separator-insensitive, matching `lib/db/trusted-workspaces.ts`. */
@@ -49,6 +50,9 @@ function normalizePath(path: string): string {
 
 export function WorkspaceOverview() {
   const t = useTranslations("issues")
+  // The Capabilities tab has its own namespace: it is about the workspace's
+  // relationship to the skill/MCP libraries, not about issues.
+  const tCapabilities = useTranslations("workspace.capabilities")
   const workspaceId = useProjectStore((s) => s.activeProjectId)
   const workspaces = useProjectStore((s) => s.projects)
   const workspace = workspaces.find((candidate) => candidate.id === workspaceId)
@@ -105,6 +109,7 @@ export function WorkspaceOverview() {
         <TabsList className="w-fit" aria-label={t("workspace.viewsLabel")}>
           <TabsTrigger value="overview">{t("workspace.overview")}</TabsTrigger>
           <TabsTrigger value="environments">{t("workspace.environments")}</TabsTrigger>
+          <TabsTrigger value="capabilities">{tCapabilities("tab")}</TabsTrigger>
           <TabsTrigger value="source-control">{t("workspace.sourceControl")}</TabsTrigger>
         </TabsList>
 
@@ -250,6 +255,11 @@ export function WorkspaceOverview() {
               as "this workspace owns all of these". Rows it does not own stay
               one click away. */}
           <WorkspaceEnvironmentList projectId={workspaceId ?? undefined} />
+        </TabsContent>
+
+        <TabsContent value="capabilities" className="mt-0">
+          {/* Deltas only — the definitions stay in Settings. See the component. */}
+          <WorkspaceCapabilities workspaceId={workspaceId} />
         </TabsContent>
 
         <TabsContent

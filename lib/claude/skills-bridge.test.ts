@@ -64,7 +64,9 @@ describe("resolveSkillsForCharacter", () => {
     ])
 
     const result = await resolveSkillsForCharacter(["s1", "s2"])
-    expect(mListSkills).toHaveBeenCalledWith(["s1", "s2"])
+    // The scope is forwarded verbatim: `undefined` here means "the active
+    // workspace", which is what a caller that names no workspace gets.
+    expect(mListSkills).toHaveBeenCalledWith(["s1", "s2"], undefined)
     expect(result).toHaveLength(2)
     expect(result[0]).toMatchObject({
       id: "s1",

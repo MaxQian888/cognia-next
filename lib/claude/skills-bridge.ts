@@ -34,6 +34,7 @@
  */
 
 import { listEnabledSkillsByIds } from "@/lib/db/skills"
+import type { WorkspaceCapabilityScope } from "@/lib/db/workspace-capabilities"
 import { getSkill, getSkillEntry } from "@/lib/plugin/registries/skill-registry"
 import type { Skill } from "@cognia/agent-config-types"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
@@ -72,7 +73,10 @@ export interface ResolvedSkill {
  * Dexie outage or a missing SKILL.md degrades the prompt rather than
  * blocking the send.
  */
-export async function resolveSkillsForCharacter(skillIds: string[]): Promise<ResolvedSkill[]> {
+export async function resolveSkillsForCharacter(
+  skillIds: string[],
+  scope?: WorkspaceCapabilityScope
+): Promise<ResolvedSkill[]> {
   const resolved: ResolvedSkill[] = []
   const remainingChatIds: string[] = []
 
@@ -106,7 +110,7 @@ export async function resolveSkillsForCharacter(skillIds: string[]): Promise<Res
   }
 
   if (remainingChatIds.length > 0) {
-    const chatSkills = await listEnabledSkillsByIds(remainingChatIds)
+    const chatSkills = await listEnabledSkillsByIds(remainingChatIds, scope)
     for (const skill of chatSkills) {
       resolved.push({
         id: skill.id,
