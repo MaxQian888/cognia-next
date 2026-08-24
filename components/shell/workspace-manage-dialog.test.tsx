@@ -100,12 +100,6 @@ describe("WorkspaceManageDialog", () => {
     expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
   })
 
-  it("auto-creates and selects a workspace when opened with autoCreateOnOpen", () => {
-    render(<WorkspaceManageDialog open autoCreateOnOpen onOpenChange={jest.fn()} />)
-    expect(useProjectStore.getState().projects).toHaveLength(1)
-    expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
-  })
-
   it("renames + adds roots and persists via updateProject on save", () => {
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))

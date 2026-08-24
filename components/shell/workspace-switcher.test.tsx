@@ -167,13 +167,14 @@ describe("WorkspaceSwitcher", () => {
     expect(useProjectStore.getState().projects).toHaveLength(0)
   })
 
-  it("'New workspace' creates a workspace and jumps into the editor", () => {
+  it("'New workspace' opens the create dialog instead of minting an empty row", () => {
     renderSwitcher()
     fireEvent.click(screen.getByTestId("workspace-switcher"))
     fireEvent.click(screen.getByTestId("workspace-switcher-new"))
-    expect(useProjectStore.getState().projects).toHaveLength(1)
-    // Editor for the new workspace is shown.
-    expect(screen.getByLabelText("nameLabel")).toBeInTheDocument()
+    // It used to create a rootless workspace you then had to point at an
+    // existing folder; it now creates the folder too.
+    expect(screen.getByTestId("new-workspace-dialog")).toBeInTheDocument()
+    expect(useProjectStore.getState().projects).toHaveLength(0)
   })
 
   it("shows the folder count for a multi-root workspace", () => {

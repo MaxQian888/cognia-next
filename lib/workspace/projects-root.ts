@@ -53,13 +53,12 @@ export function sanitizeWorkspaceFolderName(name: string): string {
     .replace(CONTROL_CHARS, "")
     .replace(/[/\\:*?"<>|]/g, "-")
     .replace(/\s+/g, " ")
-    .replace(/^[.~]+/, "")
-    .replace(/[.\s]+$/, "")
-    // Collapse the runs the substitutions above create and trim them off the
-    // ends, so `~/secrets` lands on `secrets` rather than `-secrets` and a name
-    // that was nothing but separators has nothing left to keep.
+    // Collapse the runs the substitution above creates, THEN trim the ends.
+    // Order matters: trimming first leaves the next segment's leading dots
+    // behind, so `../../etc` would keep a `..` in the middle of the result.
     .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/^[-.~\s]+/, "")
+    .replace(/[-.\s]+$/, "")
   return collapsed || "workspace"
 }
 

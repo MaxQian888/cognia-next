@@ -18,7 +18,4 @@ type Story = StoryObj<typeof meta>
 
 export const Open: Story = {}
 
-// `autoCreateOnOpen` jumps straight into editing a fresh workspace.
-export const AutoCreate: Story = {
-  args: { autoCreateOnOpen: true },
-}
+export const AutoCreate: Story = {}

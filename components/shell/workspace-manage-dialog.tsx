@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { toast } from "sonner"
@@ -50,7 +50,6 @@ interface Props {
    * for editing. Lets the rail's "New workspace" action jump straight into the
    * editor instead of opening an empty manager. Default: false (plain manage).
    */
-  autoCreateOnOpen?: boolean
 }
 
 /** Last path segment, for the default per-root label. */
@@ -69,7 +68,7 @@ function basename(path: string): string {
  * outside the desktop shell; a manual path input is always available so the
  * web/mobile surfaces can still read and (text-)edit paths.
  */
-export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: Props) {
+export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
   const t = useTranslations("workspace.manage")
   const projects = useProjectStore((s) => s.projects)
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
@@ -129,17 +128,6 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
     const created = createProject({ name: t("defaultName") })
     setEditingId(created.id)
   }
-
-  // Auto-create a workspace on open when the caller (rail "New workspace")
-  // asked for it — fires once per open transition, then resets.
-  const wasOpen = useRef(false)
-  useEffect(() => {
-    if (open && !wasOpen.current && autoCreateOnOpen) {
-      const created = createProject({ name: t("defaultName") })
-      setEditingId(created.id)
-    }
-    wasOpen.current = open
-  }, [open, autoCreateOnOpen, createProject, t])
 
   const addRoot = (path: string) => {
     const trimmed = path.trim()

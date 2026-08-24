@@ -17,9 +17,12 @@ function basename(path: string): string {
  * Dedupes: if a non-archived workspace already has `path` as its primary root,
  * that workspace is re-activated instead of creating a duplicate. This is the
  * shared sink for every "open" entry point (menu / Cmd+O / title-bar / deep
- * link / Source Control), so re-opening a folder never piles up workspaces.
+ * link / Source Control / New workspace), so re-opening a folder never piles up
+ * workspaces.
+ *
+ * `name` overrides the folder-derived default; only creation passes it.
  */
-export function openPathAsWorkspace(path: string): Project | null {
+export function openPathAsWorkspace(path: string, name?: string): Project | null {
   const trimmed = path.trim()
   if (!trimmed) return null
   const { projects, createProject, setActiveProject } = useProjectStore.getState()
@@ -29,7 +32,10 @@ export function openPathAsWorkspace(path: string): Project | null {
     return existing
   }
   const created = createProject({
-    name: basename(trimmed),
+    // "New workspace" passes the name the user typed, which the folder name is
+    // only a sanitized derivative of ("My App: v2" becomes `My App- v2` on
+    // disk). Opening an existing folder passes nothing and keeps the basename.
+    name: name?.trim() || basename(trimmed),
     roots: [{ id: `root-${nanoid()}`, path: trimmed, isPrimary: true }],
   })
   setActiveProject(created.id)

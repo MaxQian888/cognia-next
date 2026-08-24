@@ -28,6 +28,7 @@ import { isWorkspaceTrusted } from "@/lib/db/trusted-workspaces"
 import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import type { Project } from "@/types"
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
+import { NewWorkspaceDialog } from "@/components/workspace/new-workspace-dialog"
 
 // Above this count the flat list stops being scannable, so we surface the
 // search field and a "Recent" quick-access group. Below it the whole list fits
@@ -67,7 +68,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [manageOpen, setManageOpen] = useState(false)
-  const [manageAutoCreate, setManageAutoCreate] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   // project id → has any untrusted root (desktop only).
   const [untrustedMap, setUntrustedMap] = useState<Record<string, boolean>>({})
 
@@ -135,9 +136,8 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
     setActiveProject(id)
     handleOpenChange(false)
   }
-  const openManage = (autoCreate: boolean) => {
+  const openManage = () => {
     handleOpenChange(false)
-    setManageAutoCreate(autoCreate)
     setManageOpen(true)
   }
   const handleOpenFolder = async () => {
@@ -346,7 +346,10 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
           )}
           <button
             type="button"
-            onClick={() => openManage(true)}
+            onClick={() => {
+              setOpen(false)
+              setCreateOpen(true)
+            }}
             data-testid="workspace-switcher-new"
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
           >
@@ -355,7 +358,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
           </button>
           <button
             type="button"
-            onClick={() => openManage(false)}
+            onClick={openManage}
             data-testid="workspace-switcher-manage"
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
           >
@@ -365,11 +368,8 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
         </PopoverContent>
       </Popover>
 
-      <WorkspaceManageDialog
-        open={manageOpen}
-        onOpenChange={setManageOpen}
-        autoCreateOnOpen={manageAutoCreate}
-      />
+      <NewWorkspaceDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <WorkspaceManageDialog open={manageOpen} onOpenChange={setManageOpen} />
     </>
   )
 }

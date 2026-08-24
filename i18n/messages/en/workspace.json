@@ -1,4 +1,23 @@
 {
+  "create": {
+    "browse": "Browse…",
+    "cancel": "Cancel",
+    "description": "Creates the folder and adds it as a workspace. On a paired device the folder is created on the host that runs the agent.",
+    "errors": {
+      "empty-name": "Give the workspace a name.",
+      "escapes-parent": "That name cannot be used as a folder name.",
+      "gitInitFailed": "The folder was created, but Git could not be initialised. You can initialise it later from Source Control.",
+      "mkdir-failed": "The folder could not be created. Check the parent directory and its permissions.",
+      "no-parent": "Choose a folder to create the workspace in.",
+      "not-registered": "The folder was created, but the workspace could not be added."
+    },
+    "initGit": "Initialise a Git repository",
+    "nameLabel": "Workspace name",
+    "namePlaceholder": "My App",
+    "parentLabel": "Create in",
+    "submit": "Create workspace",
+    "title": "New workspace"
+  },
   "environments": {
     "actions": "Actions",
     "adopt": "Adopt imported environment",

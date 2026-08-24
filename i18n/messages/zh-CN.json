@@ -43865,6 +43865,25 @@
     }
   },
   "workspace": {
+    "create": {
+      "browse": "浏览…",
+      "cancel": "取消",
+      "description": "创建该文件夹并将其加为工作区。在配对设备上，文件夹会创建在实际运行 agent 的主机上。",
+      "errors": {
+        "empty-name": "请为工作区起个名字。",
+        "escapes-parent": "该名称无法用作文件夹名。",
+        "gitInitFailed": "文件夹已创建，但 Git 初始化失败。你可以稍后在源代码管理中初始化。",
+        "mkdir-failed": "文件夹创建失败。请检查父目录及其权限。",
+        "no-parent": "请选择要在哪个目录下创建工作区。",
+        "not-registered": "文件夹已创建，但工作区添加失败。"
+      },
+      "initGit": "初始化 Git 仓库",
+      "nameLabel": "工作区名称",
+      "namePlaceholder": "My App",
+      "parentLabel": "创建位置",
+      "submit": "创建工作区",
+      "title": "新建工作区"
+    },
     "environments": {
       "actions": "操作",
       "adopt": "接管已导入环境",
