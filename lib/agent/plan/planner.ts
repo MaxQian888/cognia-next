@@ -12,12 +12,7 @@
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
-import type {
-  AgentPlan,
-  CreatePlanInput,
-  CreatePlanStepInput,
-  PlanRefinementRequest,
-} from "@/types/agent/plan"
+import type { AgentPlan, CreatePlanInput, PlanRefinementRequest } from "@/types/agent/plan"
 import { PLAN_REFINEMENT_PROMPTS } from "@/types/agent/plan"
 import { linearAgentTurnSteps } from "./steps"
 

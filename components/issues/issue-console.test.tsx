@@ -88,10 +88,8 @@ jest.mock("./list/issue-bulk-toolbar", () => ({
     return items.length > 0 ? <div data-testid="bulk-stub">{items.length}</div> : null
   },
 }))
-let contextMenuProps: Record<string, unknown> = {}
 jest.mock("./issue-context-menu", () => ({
   IssueContextMenu: (props: Record<string, unknown>) => {
-    contextMenuProps = props
     const { item, children } = props as { item: { unifiedId: string }; children: React.ReactNode }
     return <div data-testid={`context-${item.unifiedId}`}>{children}</div>
   },
@@ -234,7 +232,6 @@ beforeEach(() => {
   bulkProps = {}
   deleteDialogProps = {}
   detailProps = {}
-  contextMenuProps = {}
   toastCalls.length = 0
   activeProjectId = "w1"
   projectsForTest = EMPTY_ROWS
