@@ -1,6 +1,7 @@
 {
   "applyTask": "Use Worktree version",
   "branch": "Branch: {branch}",
+  "bundleTurnMissing": "This managed Worktree has no completed Bundle turn.",
   "busy": "Updating execution workspace…",
   "cancel": "Cancel",
   "confirmApply": "Apply selected changes",
@@ -45,6 +46,7 @@
   "prune": "Prune expired Worktrees",
   "restore": "Restore snapshot from {date}",
   "retryMerge": "Retry merge",
+  "runMissing": "This managed Worktree has no completed run.",
   "snapshots": "Historical snapshots",
   "state": "State: {state}",
   "switchLocal": "Apply to Local",

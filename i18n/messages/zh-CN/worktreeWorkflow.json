@@ -1,6 +1,7 @@
 {
   "applyTask": "使用 Worktree 版本",
   "branch": "分支：{branch}",
+  "bundleTurnMissing": "此托管 Worktree 没有已完成的 Bundle Turn。",
   "busy": "正在更新执行工作区…",
   "cancel": "取消",
   "confirmApply": "应用所选改动",
@@ -45,6 +46,7 @@
   "prune": "清理过期 Worktree",
   "restore": "恢复 {date} 的快照",
   "retryMerge": "重试合并",
+  "runMissing": "此托管 Worktree 没有已完成的运行记录。",
   "snapshots": "历史快照",
   "state": "状态：{state}",
   "switchLocal": "应用到本地",

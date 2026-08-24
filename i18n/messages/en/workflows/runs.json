@@ -51,6 +51,25 @@
     "totalTokens": "{tokens} tok",
     "unknownError": "unknown error"
   },
+  "handoff": {
+    "cancel": "Cancel",
+    "cancelled": "Handoff cancelled",
+    "description": "Runs dispatched to another host",
+    "openTarget": "Open on host",
+    "reason": "{code}: {error}",
+    "remoteRun": "run {runId}",
+    "status": {
+      "awaiting-result": "Awaiting result",
+      "cancelled": "Cancelled",
+      "deadletter": "Gave up",
+      "failed": "Failed",
+      "inflight": "Sending",
+      "pending": "Queued",
+      "succeeded": "Handed off"
+    },
+    "targetNotPaired": "host not paired here",
+    "title": "Handoffs"
+  },
   "list": {
     "backToEditor": "Back to editor",
     "bulk": {

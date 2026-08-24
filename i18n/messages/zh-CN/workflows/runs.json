@@ -51,6 +51,25 @@
     "totalTokens": "{tokens} tok",
     "unknownError": "未知错误"
   },
+  "handoff": {
+    "cancel": "取消",
+    "cancelled": "已取消移交",
+    "description": "已派发到其他主机执行的运行",
+    "openTarget": "在该主机中打开",
+    "reason": "{code}：{error}",
+    "remoteRun": "运行 {runId}",
+    "status": {
+      "awaiting-result": "等待结果",
+      "cancelled": "已取消",
+      "deadletter": "已放弃",
+      "failed": "失败",
+      "inflight": "发送中",
+      "pending": "排队中",
+      "succeeded": "已移交"
+    },
+    "targetNotPaired": "本机未配对该主机",
+    "title": "跨主机移交"
+  },
   "list": {
     "backToEditor": "返回编辑器",
     "bulk": {

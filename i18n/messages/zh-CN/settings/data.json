@@ -27,6 +27,21 @@
     },
     "title": "本地持久化运行时"
   },
+  "workspaceMaintenance": {
+    "description": "按照宿主生命周期策略协调受管工作区、回收受保护快照并清理过期 blob。",
+    "error": "工作区维护失败：{error}",
+    "kinds": {
+      "directoryReclaimed": "目录已回收",
+      "failed": "失败",
+      "reconciled": "Registry 已协调",
+      "snapshotExpired": "快照已过期"
+    },
+    "lastEvent": "{kind}：{detail}",
+    "noEvents": "尚无维护事件记录。",
+    "runNow": "运行工作区维护",
+    "running": "运行中…",
+    "title": "受管工作区维护"
+  },
   "backup": {
     "encryptedFileDetected": "检测到加密备份",
     "encryption": {

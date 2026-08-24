@@ -26,6 +26,17 @@
   "appPath": "Application Path",
   "appScheduler": "App Scheduler",
   "appTasks": "App Tasks",
+  "authority": {
+    "graceLabel": "Grace",
+    "graceMinutes": "{minutes} min",
+    "label": "Fires on",
+    "statusStoodDown": "{host} owns timing — this host stands down",
+    "statusTakenOver": "{host} unreachable for {minutes} min — running here",
+    "statusUnknown": "{host} has never connected here — running here",
+    "statusWaiting": "{host} unreachable — taking over in {minutes} min",
+    "thisHost": "This host",
+    "unknownHost": "Unavailable host ({host})"
+  },
   "back": "Back",
   "backfill": {
     "confirm": "Run backfill",

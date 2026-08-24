@@ -26,6 +26,17 @@
   "appPath": "应用路径",
   "appScheduler": "应用调度器",
   "appTasks": "应用任务",
+  "authority": {
+    "graceLabel": "宽限期",
+    "graceMinutes": "{minutes} 分钟",
+    "label": "执行权",
+    "statusStoodDown": "由 {host} 负责触发，本机不触发",
+    "statusTakenOver": "{host} 已不可达 {minutes} 分钟，暂由本机运行",
+    "statusUnknown": "本机从未连接过 {host}，暂由本机运行",
+    "statusWaiting": "{host} 暂不可达，{minutes} 分钟后由本机接管",
+    "thisHost": "本机",
+    "unknownHost": "不可用主机（{host}）"
+  },
   "back": "返回",
   "backfill": {
     "confirm": "执行回填",

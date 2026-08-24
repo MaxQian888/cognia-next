@@ -521,13 +521,13 @@
     "removePastedChip": "移除粘贴的文本",
     "sandboxShield": {
       "label": {
-        "cua-desktop": "沙箱已启用——绑定桌面",
+        "cua-desktop": "沙盒层级不可用 — 绑定桌面",
         "microvm": "沙盒已开启 — microVM 层",
         "off": "沙盒未开启",
         "os": "沙盒已开启 — OS 层"
       },
       "tooltip": {
-        "cua-desktop": "Bash / Edit / Write 与 Computer Use 全部在绑定的沙箱连接中运行，而不是本机。",
+        "cua-desktop": "该层级已停用：绑定桌面目前仅能证明远程 GUI 隔离，shell 与文件操作并未进入沙盒。请改用 OS 或 microVM 层级。",
         "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
         "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
         "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
@@ -706,12 +706,21 @@
     "execution": {
       "baseLabel": "基准",
       "bases": {
+        "gitRef": "Git 引用",
         "localHead": "本地 HEAD",
+        "pullRequest": "拉取请求",
         "remoteDefault": "远端默认分支",
         "workingState": "当前工作状态"
       },
+      "gitRefLabel": "Git 引用",
+      "gitRefPlaceholder": "选择 Git 引用",
       "local": "本地",
       "locationLabel": "执行环境",
+      "providerLabel": "提供方",
+      "providerPlaceholder": "提供方",
+      "pullRequestNumberLabel": "拉取请求编号",
+      "repositoryLabel": "仓库",
+      "repositoryPlaceholder": "所有者/仓库",
       "worktree": "工作树"
     },
     "greeting": {

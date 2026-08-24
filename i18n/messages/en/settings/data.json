@@ -27,6 +27,21 @@
     },
     "title": "Local persistence runtime"
   },
+  "workspaceMaintenance": {
+    "description": "Reconcile managed workspaces, reclaim protected snapshots, and expire blobs using the host-owned lifecycle policy.",
+    "error": "Workspace maintenance failed: {error}",
+    "kinds": {
+      "directoryReclaimed": "Directory reclaimed",
+      "failed": "Failed",
+      "reconciled": "Registry reconciled",
+      "snapshotExpired": "Snapshot expired"
+    },
+    "lastEvent": "{kind}: {detail}",
+    "noEvents": "No maintenance events recorded yet.",
+    "runNow": "Run workspace maintenance",
+    "running": "Running…",
+    "title": "Managed workspace maintenance"
+  },
   "backup": {
     "encryptedFileDetected": "Encrypted backup detected",
     "encryption": {

@@ -5439,12 +5439,21 @@
       "execution": {
         "baseLabel": "Base",
         "bases": {
+          "gitRef": "Git ref",
           "localHead": "Local HEAD",
+          "pullRequest": "Pull request",
           "remoteDefault": "Remote default",
           "workingState": "Working state"
         },
+        "gitRefLabel": "Git ref",
+        "gitRefPlaceholder": "Select a Git ref",
         "local": "Local",
         "locationLabel": "Execution environment",
+        "providerLabel": "Provider",
+        "providerPlaceholder": "Provider",
+        "pullRequestNumberLabel": "Pull request number",
+        "repositoryLabel": "Repository",
+        "repositoryPlaceholder": "owner/repository",
         "worktree": "Worktree"
       },
       "greeting": {
@@ -23123,6 +23132,17 @@
     "appPath": "Application Path",
     "appScheduler": "App Scheduler",
     "appTasks": "App Tasks",
+    "authority": {
+      "graceLabel": "Grace",
+      "graceMinutes": "{minutes} min",
+      "label": "Fires on",
+      "statusStoodDown": "{host} owns timing — this host stands down",
+      "statusTakenOver": "{host} unreachable for {minutes} min — running here",
+      "statusUnknown": "{host} has never connected here — running here",
+      "statusWaiting": "{host} unreachable — taking over in {minutes} min",
+      "thisHost": "This host",
+      "unknownHost": "Unavailable host ({host})"
+    },
     "back": "Back",
     "backfill": {
       "confirm": "Run backfill",
@@ -29897,6 +29917,21 @@
         "urlPlaceholder": "https://dav.example.com",
         "usernameLabel": "Username",
         "usernamePlaceholder": "your-username"
+      },
+      "workspaceMaintenance": {
+        "description": "Reconcile managed workspaces, reclaim protected snapshots, and expire blobs using the host-owned lifecycle policy.",
+        "error": "Workspace maintenance failed: {error}",
+        "kinds": {
+          "directoryReclaimed": "Directory reclaimed",
+          "failed": "Failed",
+          "reconciled": "Registry reconciled",
+          "snapshotExpired": "Snapshot expired"
+        },
+        "lastEvent": "{kind}: {detail}",
+        "noEvents": "No maintenance events recorded yet.",
+        "runNow": "Run workspace maintenance",
+        "running": "Running…",
+        "title": "Managed workspace maintenance"
       }
     },
     "description": "Configure defaults, your API key, prompt presets, MCP servers and more.",
@@ -30948,8 +30983,10 @@
       "orPasteModelId": "Or paste a custom model id",
       "permission": {
         "acceptEdits": "acceptEdits",
+        "auto": "Auto",
         "bypassPermissions": "bypassPermissions",
         "default": "default",
+        "dontAsk": "Don't ask",
         "plan": "plan"
       },
       "permissionMode": "Permission mode",
@@ -43279,6 +43316,25 @@
         "totalTokens": "{tokens} tok",
         "unknownError": "unknown error"
       },
+      "handoff": {
+        "cancel": "Cancel",
+        "cancelled": "Handoff cancelled",
+        "description": "Runs dispatched to another host",
+        "openTarget": "Open on host",
+        "reason": "{code}: {error}",
+        "remoteRun": "run {runId}",
+        "status": {
+          "awaiting-result": "Awaiting result",
+          "cancelled": "Cancelled",
+          "deadletter": "Gave up",
+          "failed": "Failed",
+          "inflight": "Sending",
+          "pending": "Queued",
+          "succeeded": "Handed off"
+        },
+        "targetNotPaired": "host not paired here",
+        "title": "Handoffs"
+      },
       "list": {
         "backToEditor": "Back to editor",
         "bulk": {
@@ -43551,6 +43607,7 @@
       "adopt": "Adopt imported environment",
       "archive": "Archive environment",
       "base": "Base",
+      "baseNone": "—",
       "bases": {
         "gitRef": "Git ref",
         "localHead": "Local HEAD",
@@ -43558,14 +43615,24 @@
         "remoteDefault": "Remote default",
         "workingState": "Working state"
       },
+      "branchName": "Branch name",
+      "branchNamePlaceholder": "feature/my-branch",
       "cancel": "Cancel",
+      "confirmCreateBranch": "Create branch",
       "confirmDelete": "Delete environment",
+      "confirmRemove": "Remove worktree",
+      "count": "{count, plural, one {# environment} other {# environments}}",
+      "createBranch": "Create branch here",
+      "createBranchDescription": "Create and check out a branch in the detached environment at {path}.",
+      "createBranchTitle": "Create branch here",
       "delete": "Delete environment",
+      "deleteBranch": "Also delete the branch",
       "deleteDescription": "Permanently delete the archived environment at {path}. Its snapshot cannot be recovered.",
       "deleteTitle": "Delete archived environment?",
-      "description": "Managed, permanent, and imported execution environments on this device.",
-      "emptyDescription": "An isolated environment appears here after a Worktree chat starts.",
-      "emptyTitle": "No execution environments",
+      "description": "Git worktrees and Registry-managed execution environments on this device.",
+      "emptyDescription": "Create a worktree or start an isolated Worktree chat to add one.",
+      "emptyTitle": "No workspace environments",
+      "forceRemove": "Discard uncommitted changes",
       "kind": "Kind",
       "kinds": {
         "imported": "Imported",
@@ -43574,12 +43641,35 @@
       },
       "loadError": "Environments could not be loaded: {error}",
       "loading": "Loading execution environments",
+      "locked": "Locked",
       "makePermanent": "Make environment permanent",
+      "open": "Open environment",
+      "ownerTypes": {
+        "imported": "Imported discovery",
+        "scheduled": "Scheduled task",
+        "session": "Session",
+        "team": "Agent Team",
+        "user": "User"
+      },
+      "ownership": {
+        "imported": "Imported",
+        "main": "Main",
+        "managed": "Managed",
+        "manual": "Manual",
+        "permanent": "Permanent"
+      },
       "path": "Path",
       "pin": "Pin environment",
+      "prunable": "Prunable",
+      "prune": "Prune stale worktrees",
       "refresh": "Refresh environments",
+      "registryProtected": "Registry ownership changed; removal was blocked.",
+      "remove": "Remove worktree",
+      "removeDescription": "Remove the linked worktree at {path}?",
+      "removeTitle": "Remove worktree?",
       "restore": "Restore environment",
       "state": "State",
+      "stateNone": "—",
       "states": {
         "active": "Active",
         "archived": "Archived",
@@ -43692,6 +43782,7 @@
   "worktreeWorkflow": {
     "applyTask": "Use Worktree version",
     "branch": "Branch: {branch}",
+    "bundleTurnMissing": "This managed Worktree has no completed Bundle turn.",
     "busy": "Updating execution workspace…",
     "cancel": "Cancel",
     "confirmApply": "Apply selected changes",
@@ -43736,6 +43827,7 @@
     "prune": "Prune expired Worktrees",
     "restore": "Restore snapshot from {date}",
     "retryMerge": "Retry merge",
+    "runMissing": "This managed Worktree has no completed run.",
     "snapshots": "Historical snapshots",
     "state": "State: {state}",
     "switchLocal": "Apply to Local",

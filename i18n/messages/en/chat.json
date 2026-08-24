@@ -521,13 +521,13 @@
     "removePastedChip": "Remove pasted text",
     "sandboxShield": {
       "label": {
-        "cua-desktop": "Sandbox active — bound desktop",
+        "cua-desktop": "Sandbox tier unavailable — bound desktop",
         "microvm": "Sandbox active — microVM tier",
         "off": "Sandbox off",
         "os": "Sandbox active — OS tier"
       },
       "tooltip": {
-        "cua-desktop": "Bash / Edit / Write and Computer Use all run inside the bound sandbox connection, not on this machine.",
+        "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
         "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
         "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
         "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
@@ -706,12 +706,21 @@
     "execution": {
       "baseLabel": "Base",
       "bases": {
+        "gitRef": "Git ref",
         "localHead": "Local HEAD",
+        "pullRequest": "Pull request",
         "remoteDefault": "Remote default",
         "workingState": "Working state"
       },
+      "gitRefLabel": "Git ref",
+      "gitRefPlaceholder": "Select a Git ref",
       "local": "Local",
       "locationLabel": "Execution environment",
+      "providerLabel": "Provider",
+      "providerPlaceholder": "Provider",
+      "pullRequestNumberLabel": "Pull request number",
+      "repositoryLabel": "Repository",
+      "repositoryPlaceholder": "owner/repository",
       "worktree": "Worktree"
     },
     "greeting": {

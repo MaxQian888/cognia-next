@@ -5439,12 +5439,21 @@
       "execution": {
         "baseLabel": "基准",
         "bases": {
+          "gitRef": "Git 引用",
           "localHead": "本地 HEAD",
+          "pullRequest": "拉取请求",
           "remoteDefault": "远端默认分支",
           "workingState": "当前工作状态"
         },
+        "gitRefLabel": "Git 引用",
+        "gitRefPlaceholder": "选择 Git 引用",
         "local": "本地",
         "locationLabel": "执行环境",
+        "providerLabel": "提供方",
+        "providerPlaceholder": "提供方",
+        "pullRequestNumberLabel": "拉取请求编号",
+        "repositoryLabel": "仓库",
+        "repositoryPlaceholder": "所有者/仓库",
         "worktree": "工作树"
       },
       "greeting": {
@@ -23123,6 +23132,17 @@
     "appPath": "应用路径",
     "appScheduler": "应用调度器",
     "appTasks": "应用任务",
+    "authority": {
+      "graceLabel": "宽限期",
+      "graceMinutes": "{minutes} 分钟",
+      "label": "执行权",
+      "statusStoodDown": "由 {host} 负责触发，本机不触发",
+      "statusTakenOver": "{host} 已不可达 {minutes} 分钟，暂由本机运行",
+      "statusUnknown": "本机从未连接过 {host}，暂由本机运行",
+      "statusWaiting": "{host} 暂不可达，{minutes} 分钟后由本机接管",
+      "thisHost": "本机",
+      "unknownHost": "不可用主机（{host}）"
+    },
     "back": "返回",
     "backfill": {
       "confirm": "执行回填",
@@ -29897,6 +29917,21 @@
         "urlPlaceholder": "https://dav.example.com",
         "usernameLabel": "用户名",
         "usernamePlaceholder": "你的用户名"
+      },
+      "workspaceMaintenance": {
+        "description": "按照宿主生命周期策略协调受管工作区、回收受保护快照并清理过期 blob。",
+        "error": "工作区维护失败：{error}",
+        "kinds": {
+          "directoryReclaimed": "目录已回收",
+          "failed": "失败",
+          "reconciled": "Registry 已协调",
+          "snapshotExpired": "快照已过期"
+        },
+        "lastEvent": "{kind}：{detail}",
+        "noEvents": "尚无维护事件记录。",
+        "runNow": "运行工作区维护",
+        "running": "运行中…",
+        "title": "受管工作区维护"
       }
     },
     "description": "配置默认值、API 密钥、提示词预设、MCP 服务器等。",
@@ -30948,8 +30983,10 @@
       "orPasteModelId": "或粘贴自定义模型 id",
       "permission": {
         "acceptEdits": "acceptEdits",
+        "auto": "自动",
         "bypassPermissions": "bypassPermissions",
         "default": "default",
+        "dontAsk": "不询问",
         "plan": "plan"
       },
       "permissionMode": "权限模式",
@@ -43279,6 +43316,25 @@
         "totalTokens": "{tokens} tok",
         "unknownError": "未知错误"
       },
+      "handoff": {
+        "cancel": "取消",
+        "cancelled": "已取消移交",
+        "description": "已派发到其他主机执行的运行",
+        "openTarget": "在该主机中打开",
+        "reason": "{code}：{error}",
+        "remoteRun": "运行 {runId}",
+        "status": {
+          "awaiting-result": "等待结果",
+          "cancelled": "已取消",
+          "deadletter": "已放弃",
+          "failed": "失败",
+          "inflight": "发送中",
+          "pending": "排队中",
+          "succeeded": "已移交"
+        },
+        "targetNotPaired": "本机未配对该主机",
+        "title": "跨主机移交"
+      },
       "list": {
         "backToEditor": "返回编辑器",
         "bulk": {
@@ -43551,6 +43607,7 @@
       "adopt": "接管已导入环境",
       "archive": "归档环境",
       "base": "基线",
+      "baseNone": "—",
       "bases": {
         "gitRef": "Git 引用",
         "localHead": "本地 HEAD",
@@ -43558,14 +43615,24 @@
         "remoteDefault": "远端默认分支",
         "workingState": "当前工作状态"
       },
+      "branchName": "分支名称",
+      "branchNamePlaceholder": "feature/my-branch",
       "cancel": "取消",
+      "confirmCreateBranch": "创建分支",
       "confirmDelete": "删除环境",
+      "confirmRemove": "移除工作树",
+      "count": "{count} 个环境",
+      "createBranch": "在此创建分支",
+      "createBranchDescription": "在位于 {path} 的 detached 环境中创建并切换到新分支。",
+      "createBranchTitle": "在此创建分支",
       "delete": "删除环境",
+      "deleteBranch": "同时删除分支",
       "deleteDescription": "永久删除位于 {path} 的已归档环境，其快照将无法恢复。",
       "deleteTitle": "删除已归档环境？",
-      "description": "此设备上的受管、永久和已导入执行环境。",
-      "emptyDescription": "启动 Worktree 会话后，隔离环境会显示在这里。",
-      "emptyTitle": "暂无执行环境",
+      "description": "此设备上的 Git 工作树和 Registry 受管执行环境。",
+      "emptyDescription": "创建工作树或启动隔离的 Worktree 会话后，环境会显示在这里。",
+      "emptyTitle": "暂无工作区环境",
+      "forceRemove": "丢弃未提交更改",
       "kind": "类型",
       "kinds": {
         "imported": "已导入",
@@ -43574,12 +43641,35 @@
       },
       "loadError": "无法加载执行环境：{error}",
       "loading": "正在加载执行环境",
+      "locked": "已锁定",
       "makePermanent": "设为永久环境",
+      "open": "打开环境",
+      "ownerTypes": {
+        "imported": "导入发现",
+        "scheduled": "定时任务",
+        "session": "会话",
+        "team": "Agent Team",
+        "user": "用户"
+      },
+      "ownership": {
+        "imported": "已导入",
+        "main": "主工作树",
+        "managed": "受管",
+        "manual": "手动",
+        "permanent": "永久"
+      },
       "path": "路径",
       "pin": "固定环境",
+      "prunable": "可清理",
+      "prune": "清理失效工作树",
       "refresh": "刷新环境",
+      "registryProtected": "Registry 所有权已变化，已阻止移除。",
+      "remove": "移除工作树",
+      "removeDescription": "移除位于 {path} 的关联工作树？",
+      "removeTitle": "移除工作树？",
       "restore": "恢复环境",
       "state": "状态",
+      "stateNone": "—",
       "states": {
         "active": "活跃",
         "archived": "已归档",
@@ -43692,6 +43782,7 @@
   "worktreeWorkflow": {
     "applyTask": "使用 Worktree 版本",
     "branch": "分支：{branch}",
+    "bundleTurnMissing": "此托管 Worktree 没有已完成的 Bundle Turn。",
     "busy": "正在更新执行工作区…",
     "cancel": "取消",
     "confirmApply": "应用所选改动",
@@ -43736,6 +43827,7 @@
     "prune": "清理过期 Worktree",
     "restore": "恢复 {date} 的快照",
     "retryMerge": "重试合并",
+    "runMissing": "此托管 Worktree 没有已完成的运行记录。",
     "snapshots": "历史快照",
     "state": "状态：{state}",
     "switchLocal": "应用到本地",

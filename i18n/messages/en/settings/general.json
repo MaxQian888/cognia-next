@@ -25,8 +25,10 @@
   "orPasteModelId": "Or paste a custom model id",
   "permission": {
     "acceptEdits": "acceptEdits",
+    "auto": "Auto",
     "bypassPermissions": "bypassPermissions",
     "default": "default",
+    "dontAsk": "Don't ask",
     "plan": "plan"
   },
   "permissionMode": "Permission mode",
