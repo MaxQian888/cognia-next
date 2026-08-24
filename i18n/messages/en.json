@@ -5710,6 +5710,19 @@
         "summary": {
           "defaults": "Using defaults",
           "overrides": "{count, plural, one {# override} other {# overrides}}"
+        },
+        "workspaceMove": {
+          "failed": "Could not move the conversation: {error}",
+          "hint": "The conversation is re-bound to the new workspace. Anything it left in the old worktree stays on disk.",
+          "label": "Workspace",
+          "moved": "Conversation moved",
+          "placeholder": "Choose a workspace",
+          "refused": {
+            "same-workspace": "The conversation is already in that workspace.",
+            "session-locked": "This conversation was handed off to another host and is read-only here.",
+            "session-running": "Stop the running turn before moving the conversation.",
+            "unknown-workspace": "That workspace no longer exists."
+          }
         }
       },
       "showArtifacts": "Show artifacts panel",
@@ -43937,6 +43950,7 @@
       "locked": "Locked",
       "makePermanent": "Make environment permanent",
       "open": "Open environment",
+      "otherWorkspaces": "{count, plural, one {# environment outside this workspace} other {# environments outside this workspace}}",
       "ownerTypes": {
         "imported": "Imported discovery",
         "scheduled": "Scheduled task",
@@ -43961,6 +43975,7 @@
       "removeDescription": "Remove the linked worktree at {path}?",
       "removeTitle": "Remove worktree?",
       "restore": "Restore environment",
+      "scopeToWorkspace": "Show only this workspace",
       "state": "State",
       "stateNone": "—",
       "states": {
@@ -43984,11 +43999,13 @@
       "additionalDirsHint": "Extra folders mounted into this workspace so the agent can read and edit them.",
       "additionalDirsLabel": "Additional directories",
       "browseServer": "Browse server",
-      "confirmDelete": "Confirm delete",
+      "confirmDelete": "Remove and delete everything",
+      "confirmDetach": "Remove, keep conversations",
       "defaultName": "New Workspace",
       "delete": "Delete",
       "deleted": "Workspace deleted",
       "description": "A workspace bundles a primary directory and extra mounted folders. The active workspace drives the working directory, the Source Control panel, and the terminal scope.",
+      "detached": "Workspace removed — its conversations moved to Default",
       "empty": "No workspaces yet",
       "knowledge": {
         "addFile": "Upload files",

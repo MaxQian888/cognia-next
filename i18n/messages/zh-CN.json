@@ -5710,6 +5710,19 @@
         "summary": {
           "defaults": "使用默认值",
           "overrides": "{count} 项覆盖"
+        },
+        "workspaceMove": {
+          "failed": "迁移会话失败：{error}",
+          "hint": "会话会重新绑定到新工作区。它在旧工作树里留下的内容仍保留在磁盘上。",
+          "label": "工作区",
+          "moved": "会话已迁移",
+          "placeholder": "选择工作区",
+          "refused": {
+            "same-workspace": "会话已经在该工作区了。",
+            "session-locked": "该会话已移交给另一台主机，在此为只读。",
+            "session-running": "请先停止正在进行的回合再迁移会话。",
+            "unknown-workspace": "该工作区已不存在。"
+          }
         }
       },
       "showArtifacts": "展开产物面板",
@@ -43937,6 +43950,7 @@
       "locked": "已锁定",
       "makePermanent": "设为永久环境",
       "open": "打开环境",
+      "otherWorkspaces": "{count, plural, other {另有 # 个环境不属于本工作区}}",
       "ownerTypes": {
         "imported": "导入发现",
         "scheduled": "定时任务",
@@ -43961,6 +43975,7 @@
       "removeDescription": "移除位于 {path} 的关联工作树？",
       "removeTitle": "移除工作树？",
       "restore": "恢复环境",
+      "scopeToWorkspace": "只看本工作区",
       "state": "状态",
       "stateNone": "—",
       "states": {
@@ -43984,11 +43999,13 @@
       "additionalDirsHint": "挂载到该工作区的额外文件夹，便于智能体读取和编辑。",
       "additionalDirsLabel": "附加目录",
       "browseServer": "浏览服务器",
-      "confirmDelete": "确认删除",
+      "confirmDelete": "移除并删除全部内容",
+      "confirmDetach": "移除，保留会话",
       "defaultName": "新工作区",
       "delete": "删除",
       "deleted": "工作区已删除",
       "description": "工作区包含一个主目录和额外挂载的文件夹。活动工作区决定工作目录、源代码管理面板和终端范围。",
+      "detached": "工作区已移除——其会话已迁到 Default",
       "empty": "暂无工作区",
       "knowledge": {
         "addFile": "上传文件",
