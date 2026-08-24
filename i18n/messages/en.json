@@ -5254,13 +5254,13 @@
       "removePastedChip": "Remove pasted text",
       "sandboxShield": {
         "label": {
-          "cua-desktop": "Sandbox active — bound desktop",
+          "cua-desktop": "Sandbox tier unavailable — bound desktop",
           "microvm": "Sandbox active — microVM tier",
           "off": "Sandbox off",
           "os": "Sandbox active — OS tier"
         },
         "tooltip": {
-          "cua-desktop": "Bash / Edit / Write and Computer Use all run inside the bound sandbox connection, not on this machine.",
+          "cua-desktop": "This tier is withdrawn: a bound desktop currently proves remote GUI isolation only, so shell and file work is not sandboxed. Pick the OS or microVM tier.",
           "microvm": "Bash / Edit / Write run inside an ephemeral Firecracker microVM via cognia-e2b-sandbox.",
           "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
@@ -8451,6 +8451,9 @@
       "pairedBody": "{count, plural, =0 {No devices are paired.} =1 {One device is paired.} other {# devices are paired.}} Grants, capabilities and lifecycle are managed in the device console.",
       "pairedTitle": "Paired devices"
     },
+    "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
+    "standalonePair": "Pair with a host",
+    "standaloneTitle": "Only this device",
     "summary": "{online} of {total} online",
     "title": "Devices"
   },
@@ -10959,6 +10962,7 @@
     "kinds": {
       "action": "Commands",
       "character": "Characters",
+      "device": "Devices",
       "inbox-contact": "Contacts",
       "inbox-conversation": "Inbox conversations",
       "issue": "Issues",
@@ -18271,7 +18275,14 @@
       "skipExisting": "I've done this before",
       "sub": "About a minute either way. Both paths end with the agent finishing one real task."
     },
-    "wordmark": "Cognia"
+    "wordmark": "Cognia",
+    "workspace": {
+      "create": "New workspace",
+      "emptyDescription": "Pick one so file work has somewhere to happen.",
+      "emptyTitle": "No project folder yet",
+      "open": "Open folder…",
+      "readyTitle": "Project folder"
+    }
   },
   "page": {
     "deployNow": "Deploy now",

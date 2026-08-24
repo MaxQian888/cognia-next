@@ -24,6 +24,53 @@
   },
   "continue": "继续",
   "done": "完成",
+  "express": {
+    "title": "我们准备这样帮你配好",
+    "freshTitle": "两件事，然后就能开跑",
+    "description": "下面这些都是在这台机器上找到的。不想要的取消勾选就行 —— 在你按下按钮之前，什么都不会执行。",
+    "applyingTitle": "正在设置",
+    "applyingDescription": "几秒钟就好，你可以看着它跑完。",
+    "apply": "开始设置",
+    "needsModel": "先在上面接一个模型 —— 现在还没有东西能跑第一个任务。",
+    "item": {
+      "migrate": {
+        "title": "把你的 {vendor} 配置带过来",
+        "description": "命令、设置、技能、子智能体和 MCP 服务器。已有的条目会保留。"
+      },
+      "history": {
+        "title": "{count, plural, one {导入 # 条历史对话} other {导入 # 条历史对话}}",
+        "description": "这块磁盘上所有能读到的记录，覆盖全部 agent —— 不只是装了配置的那几个。"
+      },
+      "runtime": {
+        "title": "通过 {runtime} 访问模型",
+        "description": "它在这台机器上已经登录过了，Cognia 不需要另外的凭据。"
+      },
+      "signIn": {
+        "title": "接上一个模型",
+        "description": "唯一没法替你完成的一步，大约二十秒。"
+      },
+      "capabilities": {
+        "title": "你的第一个任务能用到什么"
+      },
+      "pair": {
+        "title": "与桌面配对",
+        "description": "重活和凭据都在桌面端，这台手机成为它的遥控器。"
+      }
+    },
+    "capability": {
+      "fs": "读你的文件",
+      "ocr": "从图片里提取文字",
+      "web": "读网页"
+    },
+    "needsPairing": "先与一台桌面配对 —— 这台手机本身没有东西能跑任务。",
+    "signIn": {
+      "connected": "已连接：{account}",
+      "more": "更多连接方式",
+      "collapse": "回到快捷方式",
+      "save": "连接"
+    },
+    "freshDescription": "这台机器上没有可以带过来的东西，所以设置很短：接上一个模型，Cognia 就可以开始干活了。"
+  },
   "finishBar": {
     "provider_skipped": "Cognia 还无法访问模型 —— 请完成登录。",
     "runtime_skipped": "这台机器上还没有配置 agent 运行时。",
@@ -41,6 +88,32 @@
     "runtimeLine": "正在使用 {runtime}",
     "starting": "正在启动…",
     "title": "先真做一件事"
+  },
+  "narrative": {
+    "welcome": {
+      "headline": "它面对的是这台机器上真实存在的东西。",
+      "body": "文件、屏幕、浏览器 —— 聊天框够不到的那些。"
+    },
+    "express": {
+      "headline": "你不点，就什么都不会发生。",
+      "body": "下面每一条都是扫描真实找到的东西，任何一条都可以去掉。"
+    },
+    "scan": {
+      "headline": "先看看你已经有什么。",
+      "body": "Agent CLI、它们的配置，以及这块磁盘上的历史对话。这些都不会离开你的电脑。"
+    },
+    "provider": {
+      "headline": "接上一个凭据就好了。",
+      "body": "用你已经在付费的订阅，或者带上自己的 key。"
+    },
+    "first-run": {
+      "headline": "现在看它真的做完一件事。",
+      "body": "挑一个任务，结果由你自己判断。"
+    },
+    "express-applying": {
+      "headline": "正在执行。",
+      "body": "每一条完成就会亮起来。这一段不需要你操作。"
+    }
   },
   "provider": {
     "apiKey": {
@@ -138,6 +211,13 @@
     "scanning": "正在查看…",
     "title": "这台机器上已经有什么"
   },
+  "scene": {
+    "welcome": "一个装在你机器里的 agent，能碰到你的文件、屏幕和网页",
+    "scan": "扫描在这台机器上找到的东西",
+    "express": "设置计划，以及它进行到哪一步",
+    "provider": "一个凭据接通了到 Cognia 的链路",
+    "firstRun": "Cognia 正在写出第一份结果"
+  },
   "skip": "暂时跳过",
   "toastNeedKey": "粘贴 API 密钥后才能继续。",
   "tour": {
@@ -196,84 +276,11 @@
     "customiseCta": "我要自己配"
   },
   "wordmark": "Cognia",
-  "scene": {
-    "welcome": "一个装在你机器里的 agent，能碰到你的文件、屏幕和网页",
-    "scan": "扫描在这台机器上找到的东西",
-    "express": "设置计划，以及它进行到哪一步",
-    "provider": "一个凭据接通了到 Cognia 的链路",
-    "firstRun": "Cognia 正在写出第一份结果"
-  },
-  "narrative": {
-    "welcome": {
-      "headline": "它面对的是这台机器上真实存在的东西。",
-      "body": "文件、屏幕、浏览器 —— 聊天框够不到的那些。"
-    },
-    "express": {
-      "headline": "你不点，就什么都不会发生。",
-      "body": "下面每一条都是扫描真实找到的东西，任何一条都可以去掉。"
-    },
-    "scan": {
-      "headline": "先看看你已经有什么。",
-      "body": "Agent CLI、它们的配置，以及这块磁盘上的历史对话。这些都不会离开你的电脑。"
-    },
-    "provider": {
-      "headline": "接上一个凭据就好了。",
-      "body": "用你已经在付费的订阅，或者带上自己的 key。"
-    },
-    "first-run": {
-      "headline": "现在看它真的做完一件事。",
-      "body": "挑一个任务，结果由你自己判断。"
-    },
-    "express-applying": {
-      "headline": "正在执行。",
-      "body": "每一条完成就会亮起来。这一段不需要你操作。"
-    }
-  },
-  "express": {
-    "title": "我们准备这样帮你配好",
-    "freshTitle": "两件事，然后就能开跑",
-    "description": "下面这些都是在这台机器上找到的。不想要的取消勾选就行 —— 在你按下按钮之前，什么都不会执行。",
-    "applyingTitle": "正在设置",
-    "applyingDescription": "几秒钟就好，你可以看着它跑完。",
-    "apply": "开始设置",
-    "needsModel": "先在上面接一个模型 —— 现在还没有东西能跑第一个任务。",
-    "item": {
-      "migrate": {
-        "title": "把你的 {vendor} 配置带过来",
-        "description": "命令、设置、技能、子智能体和 MCP 服务器。已有的条目会保留。"
-      },
-      "history": {
-        "title": "{count, plural, one {导入 # 条历史对话} other {导入 # 条历史对话}}",
-        "description": "这块磁盘上所有能读到的记录，覆盖全部 agent —— 不只是装了配置的那几个。"
-      },
-      "runtime": {
-        "title": "通过 {runtime} 访问模型",
-        "description": "它在这台机器上已经登录过了，Cognia 不需要另外的凭据。"
-      },
-      "signIn": {
-        "title": "接上一个模型",
-        "description": "唯一没法替你完成的一步，大约二十秒。"
-      },
-      "capabilities": {
-        "title": "你的第一个任务能用到什么"
-      },
-      "pair": {
-        "title": "与桌面配对",
-        "description": "重活和凭据都在桌面端，这台手机成为它的遥控器。"
-      }
-    },
-    "capability": {
-      "fs": "读你的文件",
-      "ocr": "从图片里提取文字",
-      "web": "读网页"
-    },
-    "needsPairing": "先与一台桌面配对 —— 这台手机本身没有东西能跑任务。",
-    "signIn": {
-      "connected": "已连接：{account}",
-      "more": "更多连接方式",
-      "collapse": "回到快捷方式",
-      "save": "连接"
-    },
-    "freshDescription": "这台机器上没有可以带过来的东西，所以设置很短：接上一个模型，Cognia 就可以开始干活了。"
+  "workspace": {
+    "create": "新建工作区",
+    "emptyDescription": "选一个，文件相关的工作才有地方发生。",
+    "emptyTitle": "还没有项目文件夹",
+    "open": "打开文件夹…",
+    "readyTitle": "项目文件夹"
   }
 }

@@ -5254,13 +5254,13 @@
       "removePastedChip": "移除粘贴的文本",
       "sandboxShield": {
         "label": {
-          "cua-desktop": "沙箱已启用——绑定桌面",
+          "cua-desktop": "沙盒层级不可用 — 绑定桌面",
           "microvm": "沙盒已开启 — microVM 层",
           "off": "沙盒未开启",
           "os": "沙盒已开启 — OS 层"
         },
         "tooltip": {
-          "cua-desktop": "Bash / Edit / Write 与 Computer Use 全部在绑定的沙箱连接中运行，而不是本机。",
+          "cua-desktop": "该层级已停用：绑定桌面目前仅能证明远程 GUI 隔离，shell 与文件操作并未进入沙盒。请改用 OS 或 microVM 层级。",
           "microvm": "Bash / Edit / Write 通过 cognia-e2b-sandbox 在临时 Firecracker microVM 中执行。",
           "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
           "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
@@ -8451,6 +8451,9 @@
       "pairedBody": "{count, plural, =0 {尚未配对任何设备。} other {已配对 # 台设备。}}授权、能力与生命周期在设备控制台中管理。",
       "pairedTitle": "配对设备"
     },
+    "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
+    "standalonePair": "与主机配对",
+    "standaloneTitle": "只有本机",
     "summary": "{total} 台中 {online} 台在线",
     "title": "设备"
   },
@@ -10959,6 +10962,7 @@
     "kinds": {
       "action": "命令",
       "character": "角色",
+      "device": "设备",
       "inbox-contact": "联系人",
       "inbox-conversation": "收件箱会话",
       "issue": "议题",
@@ -18271,7 +18275,14 @@
       "skipExisting": "我以前用过",
       "sub": "两条路都是一分钟左右，结束时 agent 都会替你做完一件真实的事。"
     },
-    "wordmark": "Cognia"
+    "wordmark": "Cognia",
+    "workspace": {
+      "create": "新建工作区",
+      "emptyDescription": "选一个，文件相关的工作才有地方发生。",
+      "emptyTitle": "还没有项目文件夹",
+      "open": "打开文件夹…",
+      "readyTitle": "项目文件夹"
+    }
   },
   "page": {
     "deployNow": "立即部署",

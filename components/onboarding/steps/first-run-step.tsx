@@ -9,6 +9,7 @@ import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { StepHeading } from "../step-shell"
+import { WorkspaceSetup } from "../workspace-setup"
 import { cn } from "@/lib/utils"
 import { starterCardsWithFallback, type StarterCard } from "@/lib/onboarding/starter-cards"
 import type { OnboardingCapability } from "@/lib/onboarding/scan"
@@ -121,6 +122,13 @@ export function FirstRunStep({
           )}
         </div>
       )}
+
+      {/* A fresh install has no project folder, so `resolveEffectiveCwd`
+          resolves to nothing and the first file the agent is asked to touch
+          has nowhere to be. Offered here rather than as its own step: both
+          paths through setup render this element, and picking a folder is not
+          progress through setup — it is what makes the first run possible. */}
+      <WorkspaceSetup />
 
       {/* Static class names, so the column count has to be a lookup rather
           than interpolation. One available card stretched across a third of
