@@ -1,4 +1,4 @@
-import { DEVICE_DETAIL_TABS, useDeviceConsoleStore } from "./device-console-store"
+import { useDeviceConsoleStore } from "./device-console-store"
 
 const initial = useDeviceConsoleStore.getState()
 
@@ -7,32 +7,30 @@ beforeEach(() => {
 })
 
 describe("device console store", () => {
-  it("starts with nothing selected on Overview", () => {
+  it("starts with nothing selected and no filter", () => {
     const state = useDeviceConsoleStore.getState()
     expect(state.selectedRef).toBeNull()
-    expect(state.activeTab).toBe("overview")
     expect(state.kindFilter).toBe("all")
   })
 
   /**
-   * Runtime for a phone is a tab whose whole content is "this kind of device
-   * hosts nothing", so carrying the tab across a selection change makes the
-   * console look broken exactly while it is being explored.
+   * The detail pane is one scroll, so there is no per-section state to carry
+   * or reset here. Pinning that down: a future re-addition of view state to this
+   * store has to justify itself against the scroll position the pane already
+   * manages, rather than quietly reintroducing two sources of "where am I".
    */
-  it("returns to Overview when a different device is selected", () => {
-    const { select, setActiveTab } = useDeviceConsoleStore.getState()
-    select("local")
-    setActiveTab("runtime")
-    select("device:a")
-    expect(useDeviceConsoleStore.getState().activeTab).toBe("overview")
-  })
-
-  it("keeps the tab when the same device is re-selected", () => {
-    const { select, setActiveTab } = useDeviceConsoleStore.getState()
-    select("device:a")
-    setActiveTab("access")
-    select("device:a")
-    expect(useDeviceConsoleStore.getState().activeTab).toBe("access")
+  it("holds no view state beyond selection, search and filter", () => {
+    expect(Object.keys(useDeviceConsoleStore.getState()).sort()).toEqual([
+      "kindFilter",
+      "listSheetOpen",
+      "reset",
+      "search",
+      "select",
+      "selectedRef",
+      "setKindFilter",
+      "setListSheetOpen",
+      "setSearch",
+    ])
   })
 
   it("closes the mobile list sheet on selection", () => {
@@ -53,15 +51,5 @@ describe("device console store", () => {
       search: "",
       kindFilter: "all",
     })
-  })
-
-  it("lists the detail tabs in reading order", () => {
-    expect(DEVICE_DETAIL_TABS).toEqual([
-      "overview",
-      "capabilities",
-      "access",
-      "runtime",
-      "activity",
-    ])
   })
 })

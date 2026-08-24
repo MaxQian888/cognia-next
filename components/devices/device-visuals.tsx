@@ -253,18 +253,16 @@ export function shortenFingerprint(value: string | undefined): string | null {
 }
 
 /**
- * One labelled fact in a detail pane: label above value, in its own tile.
+ * One labelled fact, stacked label-over-value.
  *
  * A definition list rather than a grid of plain divs, because these really are
  * term/description pairs — a screen reader reading "Paired · 3 days ago" as a
  * pair is the difference between a fact and two loose strings.
  *
- * Stacked rather than label-left/value-right. The detail pane is the wide half
- * of a two-pane shell, and a `justify-between` row there strands the value
- * against the far edge with several hundred pixels of nothing in between, so
- * the eye has to travel the full width to bind each pair. `FactGrid` in
- * `components/servers/server-detail.tsx` settled the same question the same
- * way; this follows it rather than inventing a second look for one fact.
+ * Stacked rather than label-left/value-right: the detail pane is the wide half
+ * of the console, and a `justify-between` row there strands the value against
+ * the far edge with several hundred pixels of nothing in between, so the eye
+ * has to cross the full width to bind each pair.
  *
  * Values wrap instead of truncating. A fingerprint or a base URL is exactly
  * the fact someone opened this pane to read, and half of one is not useful.
@@ -279,11 +277,11 @@ export function DeviceFactRow({
   mono?: boolean
 }) {
   return (
-    <div className="min-w-0 bg-card px-3 py-2">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+    <div className="min-w-0">
+      <dt className="text-[11px] leading-tight text-muted-foreground">{label}</dt>
       <dd
         className={cn(
-          "mt-0.5 min-w-0 break-words text-xs font-medium",
+          "mt-0.5 min-w-0 break-words text-xs font-medium leading-snug",
           mono && "font-mono text-[11px] font-normal break-all"
         )}
       >
@@ -296,9 +294,9 @@ export function DeviceFactRow({
 /**
  * Wraps a group of {@link DeviceFactRow}s in the `<dl>` they belong to.
  *
- * `gap-px` over a `bg-border` fill draws the hairlines between tiles without a
- * border per tile, which is what keeps the grid from doubling its rules where
- * two tiles meet.
+ * Frameless on purpose: these live inside a {@link DeviceSection} card, which
+ * already draws the border. A second one here is the classic nested-panel
+ * look, and it makes the card read as two cards.
  */
 export function DeviceFactList({
   children,
@@ -310,8 +308,7 @@ export function DeviceFactList({
   return (
     <dl
       className={cn(
-        "grid gap-px overflow-hidden rounded-lg border bg-border",
-        "@md/device-pane:grid-cols-2 @3xl/device-pane:grid-cols-3",
+        "grid gap-x-5 gap-y-3 @sm/device-card:grid-cols-2 @3xl/device-card:grid-cols-3",
         className
       )}
     >

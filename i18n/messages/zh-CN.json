@@ -8214,6 +8214,7 @@
   },
   "devices": {
     "access": {
+      "heldCount": "已授权 {held}/{total}",
       "lifecycle": "生命周期",
       "lifecycleHint": "暂停会阻断该设备，直到你恢复它。吊销不可逆——设备必须重新配对。",
       "notApplicable": {
@@ -8233,7 +8234,8 @@
       "resume": "恢复",
       "revoke": "吊销",
       "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
-      "revokedTitle": "该设备已被吊销"
+      "revokedTitle": "该设备已被吊销",
+      "title": "访问授权"
     },
     "actions": {
       "addHost": "添加主机",
@@ -8300,7 +8302,8 @@
       },
       "noVocabularyTitle": "该设备没有可展示的能力词表",
       "reportedAt": "上报于{when}",
-      "reportedCount": "已上报 {reported}/{total}"
+      "reportedCount": "已上报 {reported}/{total}",
+      "title": "能力"
     },
     "capabilityState": {
       "absent": "不具备",
@@ -8319,14 +8322,7 @@
     "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
     "detail": {
       "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
-      "noSelectionTitle": "未选择设备",
-      "tab": {
-        "access": "权限",
-        "activity": "活动",
-        "capabilities": "能力",
-        "overview": "概览",
-        "runtime": "运行时"
-      }
+      "noSelectionTitle": "未选择设备"
     },
     "eventPlane": {
       "connecting": "连接中",
@@ -8408,7 +8404,8 @@
       "reachability": "可达性",
       "ref": "标识",
       "role": "角色",
-      "serverVersion": "服务端版本"
+      "serverVersion": "服务端版本",
+      "streamCount": "{count, plural, other {# 条事件流}}"
     },
     "placementReason": {
       "capability_mismatch": "缺少所需能力",
@@ -8441,10 +8438,12 @@
         "workspaceNotHosted": "这类设备不承载工作区环境。"
       },
       "routeLocally": "路由回本机",
+      "routing": "执行路由",
       "sandbox": "沙盒连接",
       "sandboxUnsupportedTitle": "这里没有沙盒连接",
       "shellTiers": "Shell 档位",
       "tierAvailable": "可用",
+      "tierCount": "可用 {available}/{total}",
       "tierReason": {
         "cuaDesktopRetired": "已撤回。绑定桌面只能证明远程 GUI 隔离，shell 与文件操作并未被沙盒化。仍带有该档位的历史会话会在绑定时被拒绝。",
         "microvmAdapterMissing": "未注册 microVM 适配器。请启用 E2B 沙盒插件；没有它时 microVM 请求会被直接拒绝，而不会回退到宿主执行。",
@@ -8468,6 +8467,12 @@
     "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
     "standalonePair": "与主机配对",
     "standaloneTitle": "只有本机",
+    "stat": {
+      "capabilities": "已上报能力",
+      "grants": "已授权项",
+      "placement": "可参与调度维度",
+      "shellTiers": "可用 Shell 档位"
+    },
     "summary": "{total} 台中 {online} 台在线",
     "title": "设备"
   },

@@ -8214,6 +8214,7 @@
   },
   "devices": {
     "access": {
+      "heldCount": "{held}/{total} granted",
       "lifecycle": "Lifecycle",
       "lifecycleHint": "Pausing blocks this device until you resume it. Revoking is permanent — the device has to pair again.",
       "notApplicable": {
@@ -8233,7 +8234,8 @@
       "resume": "Resume",
       "revoke": "Revoke",
       "revokedBody": "It holds no capabilities and cannot reconnect without pairing again.",
-      "revokedTitle": "This device is revoked"
+      "revokedTitle": "This device is revoked",
+      "title": "Access"
     },
     "actions": {
       "addHost": "Add a host",
@@ -8300,7 +8302,8 @@
       },
       "noVocabularyTitle": "No capability vocabulary for this device",
       "reportedAt": "Reported {when}",
-      "reportedCount": "{reported}/{total} reported"
+      "reportedCount": "{reported}/{total} reported",
+      "title": "Capabilities"
     },
     "capabilityState": {
       "absent": "Not available",
@@ -8319,14 +8322,7 @@
     "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
     "detail": {
       "noSelectionBody": "Pick a device from the list to see what it can do.",
-      "noSelectionTitle": "No device selected",
-      "tab": {
-        "access": "Access",
-        "activity": "Activity",
-        "capabilities": "Capabilities",
-        "overview": "Overview",
-        "runtime": "Runtime"
-      }
+      "noSelectionTitle": "No device selected"
     },
     "eventPlane": {
       "connecting": "Connecting",
@@ -8408,7 +8404,8 @@
       "reachability": "Reachability",
       "ref": "Reference",
       "role": "Role",
-      "serverVersion": "Server version"
+      "serverVersion": "Server version",
+      "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
     },
     "placementReason": {
       "capability_mismatch": "Missing a required capability",
@@ -8441,10 +8438,12 @@
         "workspaceNotHosted": "This kind of device does not host workspace environments."
       },
       "routeLocally": "Route locally",
+      "routing": "Execution routing",
       "sandbox": "Sandbox connections",
       "sandboxUnsupportedTitle": "No sandbox connections here",
       "shellTiers": "Shell tiers",
       "tierAvailable": "Available",
+      "tierCount": "{available}/{total} available",
       "tierReason": {
         "cuaDesktopRetired": "Withdrawn. A bound desktop proves remote GUI isolation only, so shell and file work would not be sandboxed. Existing sessions that still carry this tier are refused at bind time.",
         "microvmAdapterMissing": "No microVM adapter is registered. Activate the E2B sandbox plugin; without it a microVM request is refused outright rather than falling back to the host.",
@@ -8468,6 +8467,12 @@
     "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
     "standalonePair": "Pair with a host",
     "standaloneTitle": "Only this device",
+    "stat": {
+      "capabilities": "Capabilities reported",
+      "grants": "Grants held",
+      "placement": "Placement dimensions",
+      "shellTiers": "Shell tiers usable"
+    },
     "summary": "{online} of {total} online",
     "title": "Devices"
   },

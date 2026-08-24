@@ -42,11 +42,9 @@ export function DeviceConsole() {
   const actions = useDeviceGrantActions(refresh)
 
   const selectedRef = useDeviceConsoleStore((state) => state.selectedRef)
-  const activeTab = useDeviceConsoleStore((state) => state.activeTab)
   const search = useDeviceConsoleStore((state) => state.search)
   const kindFilter = useDeviceConsoleStore((state) => state.kindFilter)
   const select = useDeviceConsoleStore((state) => state.select)
-  const setActiveTab = useDeviceConsoleStore((state) => state.setActiveTab)
   const setSearch = useDeviceConsoleStore((state) => state.setSearch)
   const setKindFilter = useDeviceConsoleStore((state) => state.setKindFilter)
 
@@ -182,12 +180,7 @@ export function DeviceConsole() {
           </Alert>
         ) : null}
         <div className="min-h-0 flex-1">
-          <DeviceDetail
-            row={selected}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            actions={actions}
-          />
+          <DeviceDetail row={selected} actions={actions} />
         </div>
       </div>
     </FeaturePageShell>

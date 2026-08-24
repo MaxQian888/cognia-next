@@ -14,33 +14,17 @@ import { create } from "zustand"
 
 import type { DeviceKind } from "@/lib/devices/types"
 
-/**
- * The detail tabs, in reading order: who it is, what it can do, what it is
- * allowed to do, what it can run, and what it has been doing.
- */
-export type DeviceDetailTab = "overview" | "capabilities" | "access" | "runtime" | "activity"
-
-export const DEVICE_DETAIL_TABS: readonly DeviceDetailTab[] = [
-  "overview",
-  "capabilities",
-  "access",
-  "runtime",
-  "activity",
-]
-
 export type DeviceKindFilter = "all" | DeviceKind
 
 interface DeviceConsoleState {
   /** `DeviceRow.ref` of the row shown in the detail pane; `null` = none yet. */
   selectedRef: string | null
-  activeTab: DeviceDetailTab
   search: string
   kindFilter: DeviceKindFilter
   /** Mobile-only: the list rail is a Sheet below `md`. */
   listSheetOpen: boolean
 
   select: (ref: string | null) => void
-  setActiveTab: (tab: DeviceDetailTab) => void
   setSearch: (search: string) => void
   setKindFilter: (filter: DeviceKindFilter) => void
   setListSheetOpen: (open: boolean) => void
@@ -49,7 +33,6 @@ interface DeviceConsoleState {
 
 const INITIAL = {
   selectedRef: null,
-  activeTab: "overview" as const,
   search: "",
   kindFilter: "all" as const,
   listSheetOpen: false,
@@ -59,19 +42,13 @@ export const useDeviceConsoleStore = create<DeviceConsoleState>((set) => ({
   ...INITIAL,
 
   /**
-   * Selecting a different device returns to Overview.
+   * Picking a device closes the rail Sheet on mobile, where the rail covers
+   * the very pane the choice was meant to reveal.
    *
-   * Keeping the tab would land the user on, say, Runtime for a phone — a tab
-   * whose entire content is "this kind of device hosts nothing" — and make the
-   * console look broken at the moment it is being explored.
+   * No section state to reset: the detail pane is one scroll, and it returns
+   * to the top on its own when the device changes.
    */
-  select: (ref) =>
-    set((state) => ({
-      selectedRef: ref,
-      activeTab: ref === state.selectedRef ? state.activeTab : "overview",
-      listSheetOpen: false,
-    })),
-  setActiveTab: (activeTab) => set({ activeTab }),
+  select: (ref) => set({ selectedRef: ref, listSheetOpen: false }),
   setSearch: (search) => set({ search }),
   setKindFilter: (kindFilter) => set({ kindFilter }),
   setListSheetOpen: (listSheetOpen) => set({ listSheetOpen }),

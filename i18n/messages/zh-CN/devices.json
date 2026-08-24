@@ -97,7 +97,8 @@
     "fingerprintCopied": "指纹已复制",
     "conflictTitle": "主机与本地记录不一致",
     "conflictBody": "上方显示的是主机的判定，也是实际生效的那一个。本地镜像已过期——通常是通过 CLI 或 Owner API 改动的。",
-    "connectionErrorTitle": "上次连接失败"
+    "connectionErrorTitle": "上次连接失败",
+    "streamCount": "{count, plural, other {# 条事件流}}"
   },
   "capabilities": {
     "group": {
@@ -115,7 +116,8 @@
       "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
       "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
       "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
-    }
+    },
+    "title": "能力"
   },
   "title": "设备",
   "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
@@ -130,14 +132,7 @@
   },
   "detail": {
     "noSelectionTitle": "未选择设备",
-    "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
-    "tab": {
-      "overview": "概览",
-      "capabilities": "能力",
-      "access": "权限",
-      "runtime": "运行时",
-      "activity": "活动"
-    }
+    "noSelectionBody": "从左侧选择一台设备，查看它能做什么。"
   },
   "access": {
     "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",
@@ -159,7 +154,9 @@
       "remote-host": "远程主机自行决定本客户端可做什么；授权在主机侧管理，不在这里。",
       "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。",
       "paired-device": "没有可管理的授权。"
-    }
+    },
+    "title": "访问授权",
+    "heldCount": "已授权 {held}/{total}"
   },
   "runtime": {
     "shellTiers": "Shell 档位",
@@ -188,7 +185,9 @@
     "isRoutingTarget": "本窗口的执行当前路由到这里。",
     "timingAuthority": "定时调度权威",
     "timingAuthorityHint": "设置后，只有这台机器会武装定时任务。保持关闭则每台主机各自武装；重复触发会被确定性幂等键吸收。",
-    "timingAuthorityAria": "将 {label} 设为定时调度权威"
+    "timingAuthorityAria": "将 {label} 设为定时调度权威",
+    "routing": "执行路由",
+    "tierCount": "可用 {available}/{total}"
   },
   "activity": {
     "dispatch": "派发队列",
@@ -255,5 +254,11 @@
   },
   "standaloneTitle": "只有本机",
   "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
-  "standalonePair": "与主机配对"
+  "standalonePair": "与主机配对",
+  "stat": {
+    "capabilities": "已上报能力",
+    "grants": "已授权项",
+    "shellTiers": "可用 Shell 档位",
+    "placement": "可参与调度维度"
+  }
 }

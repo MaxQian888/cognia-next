@@ -97,7 +97,8 @@
     "fingerprintCopied": "Fingerprint copied",
     "conflictTitle": "This host and the local record disagree",
     "conflictBody": "The host's answer is shown above and is the one enforced. The local mirror is stale — it was most likely changed from the CLI or the Owner API.",
-    "connectionErrorTitle": "Last connection attempt failed"
+    "connectionErrorTitle": "Last connection attempt failed",
+    "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
   },
   "capabilities": {
     "group": {
@@ -115,7 +116,8 @@
       "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
       "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
       "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
-    }
+    },
+    "title": "Capabilities"
   },
   "title": "Devices",
   "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
@@ -130,14 +132,7 @@
   },
   "detail": {
     "noSelectionTitle": "No device selected",
-    "noSelectionBody": "Pick a device from the list to see what it can do.",
-    "tab": {
-      "overview": "Overview",
-      "capabilities": "Capabilities",
-      "access": "Access",
-      "runtime": "Runtime",
-      "activity": "Activity"
-    }
+    "noSelectionBody": "Pick a device from the list to see what it can do."
   },
   "access": {
     "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",
@@ -159,7 +154,9 @@
       "remote-host": "A remote host decides what this client may do; grants are administered on the host, not here.",
       "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them.",
       "paired-device": "No grants to manage."
-    }
+    },
+    "title": "Access",
+    "heldCount": "{held}/{total} granted"
   },
   "runtime": {
     "shellTiers": "Shell tiers",
@@ -188,7 +185,9 @@
     "isRoutingTarget": "Execution from this window currently routes here.",
     "timingAuthority": "Scheduled timing authority",
     "timingAuthorityHint": "When set, only this machine arms scheduled work. Leave it off and every host arms its own; duplicates are absorbed by the deterministic idempotency key.",
-    "timingAuthorityAria": "Make {label} the scheduled timing authority"
+    "timingAuthorityAria": "Make {label} the scheduled timing authority",
+    "routing": "Execution routing",
+    "tierCount": "{available}/{total} available"
   },
   "activity": {
     "dispatch": "Dispatch queue",
@@ -255,5 +254,11 @@
   },
   "standaloneTitle": "Only this device",
   "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
-  "standalonePair": "Pair with a host"
+  "standalonePair": "Pair with a host",
+  "stat": {
+    "capabilities": "Capabilities reported",
+    "grants": "Grants held",
+    "shellTiers": "Shell tiers usable",
+    "placement": "Placement dimensions"
+  }
 }
