@@ -293,3 +293,35 @@ describe("deactivate", () => {
     expect(removed.sort()).toEqual([...SANDBOXED_TOOL_NAMES].sort())
   })
 })
+
+describe("placement recovery — a lost envelope ref never becomes an unpoliced host run", () => {
+  it("recovers the session's own placement when the envelope field is missing", async () => {
+    const { calls } = installTransport()
+    const tools = await collectTools()
+    // Same session, ref dropped somewhere on the hop to the tool.
+    await tools
+      .get("sandbox_write")!
+      .execute({ path: "/repo/out.txt", content: "hi" }, { sessionId: "s1", config: {} })
+    expect(calls).toHaveLength(1)
+  })
+
+  it("refuses a session-bound call whose placement is gone", async () => {
+    installTransport()
+    const tools = await collectTools()
+    await sandboxSessionRuntime.releaseSession("s1")
+    await expect(
+      tools
+        .get("sandbox_write")!
+        .execute({ path: "/repo/out.txt", content: "hi" }, { sessionId: "s1", config: {} })
+    ).rejects.toThrow(/placement is unavailable/i)
+  })
+
+  it("still lets a caller with no session at all use the host placement", async () => {
+    const { calls } = installTransport()
+    const tools = await collectTools()
+    await tools
+      .get("sandbox_write")!
+      .execute({ path: "/repo/out.txt", content: "hi" }, { config: {} })
+    expect(calls).toHaveLength(1)
+  })
+})

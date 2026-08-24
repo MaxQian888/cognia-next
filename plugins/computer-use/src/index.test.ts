@@ -39,6 +39,7 @@ jest.mock("@/lib/sandbox/session-runtime", () => ({
       sandboxConnectionId: "connection-1",
       sandboxConfine: { writable: ["/workspace"], network: "off" },
     })),
+    activeRefForSession: jest.fn(() => undefined),
   },
 }))
 
@@ -235,6 +236,25 @@ describe("computer-use plugin activate()", () => {
         sandboxConnectionId: "connection-1",
         sandboxConfine: { writable: ["/workspace"], network: "off" },
       }
+    )
+  })
+
+  it("recovers the origin session's placement when the envelope ref was dropped", async () => {
+    const tool = await getTool("list_apps")
+    // A session bound to a REMOTE target must not answer a lost envelope field
+    // by driving the operator's own desktop.
+    jest
+      .mocked(sandboxSessionRuntime.activeRefForSession)
+      .mockReturnValueOnce("sandbox-runtime:bound" as never)
+
+    await tool.execute({}, { config: {}, sessionId: "origin-session" })
+
+    expect(jest.mocked(sandboxSessionRuntime.activeRefForSession)).toHaveBeenCalledWith(
+      "origin-session"
+    )
+    expect(mockedDecorate).toHaveBeenCalledWith(
+      "sandbox-runtime:bound",
+      expect.objectContaining({ surface: "computerUse" })
     )
   })
 

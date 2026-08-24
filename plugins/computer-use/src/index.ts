@@ -58,14 +58,21 @@ async function buildChatCallContext(
   if (originMessageId) {
     ctx.turnKey = originMessageId
   }
-  // A chat send always carries its resolved placement. Callers with no send
-  // envelope — workflow nodes, plan steps, External Bridge orchestration,
-  // plugin-to-plugin calls, the CLI rail — get the host/local placement, which
-  // is exactly where they ran before the runtime reference existed.
-  return sandboxSessionRuntime.decorateComputerUseContext(
-    sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF,
-    ctx
-  )
+  // A chat send carries its resolved placement. When the envelope field did not
+  // survive the hop, recover the ORIGIN session's binding — deliberately not
+  // the focused-session fallback above, which is fine for scoping consent but
+  // would borrow another conversation's placement here. Without the recovery a
+  // dropped ref answers a session bound to a remote target by driving the
+  // operator's own desktop.
+  //
+  // Callers with no session at all — workflow nodes, plan steps, External
+  // Bridge orchestration, plugin-to-plugin calls — keep the host/local
+  // placement, which is exactly where they ran before the runtime ref existed.
+  const placementRef =
+    sandboxRuntimeRef ??
+    sandboxSessionRuntime.activeRefForSession(originSessionId) ??
+    HOST_FALLBACK_RUNTIME_REF
+  return sandboxSessionRuntime.decorateComputerUseContext(placementRef, ctx)
 }
 
 /**

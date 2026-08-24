@@ -26,7 +26,11 @@
 
 import type { PluginContext, PluginDefinition, PluginTool, PluginToolContext } from "@/types/plugin"
 import type { MicrovmExecPayload } from "@/lib/sandbox/microvm-bridge"
-import { HOST_FALLBACK_RUNTIME_REF, sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import {
+  HOST_FALLBACK_RUNTIME_REF,
+  SandboxRuntimeError,
+  sandboxSessionRuntime,
+} from "@/lib/sandbox/session-runtime"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
@@ -284,13 +288,38 @@ function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "p
 }
 
 /**
- * A chat send always carries its resolved placement. Callers that have no send
- * envelope — workflow nodes, plan steps, External Bridge orchestration,
- * plugin-to-plugin calls, the CLI rail — get the host OS-tier placement, which
- * is exactly where they ran before the runtime reference existed.
+ * The placement this call runs under.
+ *
+ * A chat send carries its resolved ref in the envelope. When the field did not
+ * survive the hop but the call still names a session, recover that session's
+ * own binding — the CLI rail already does exactly this
+ * (`cli/src/plugin/plugin-tool-dispatch.ts`), and doing it here means the
+ * renderer rail cannot drop a session's ceiling on the way to the tool.
+ *
+ * A session-bound call that finds NO placement is refused. These tools are only
+ * surfaced to the model when the session has the sandbox enabled
+ * (`build-options.ts` puts them in `opts.pluginTools` and disallows the
+ * builtins), so reaching here without a binding means the placement was lost,
+ * not declined — and answering that with an unpoliced host run is precisely the
+ * silent fallback this plugin exists to prevent.
+ *
+ * Only a call that names no session at all — a workflow node, a plan step, an
+ * External Bridge orchestration, a plugin-to-plugin call — takes the host
+ * OS-tier placement, which is exactly where those ran before the runtime
+ * reference existed.
  */
 function requireRuntimeRef(ctx: PluginToolContext): string {
-  return ctx.sandboxRuntimeRef ?? HOST_FALLBACK_RUNTIME_REF
+  if (ctx.sandboxRuntimeRef) return ctx.sandboxRuntimeRef
+  const recovered = sandboxSessionRuntime.activeRefForSession(ctx.sessionId)
+  if (recovered) return recovered
+  if (ctx.sessionId) {
+    throw new SandboxRuntimeError(
+      "placement-unavailable",
+      "This session's sandbox placement is unavailable, so the command was not run. " +
+        "Reopen the conversation or re-send to re-establish it."
+    )
+  }
+  return HOST_FALLBACK_RUNTIME_REF
 }
 
 function parentDir(p: string): string {
