@@ -35,6 +35,7 @@ export async function ensureSessionExecutionBundle(input: {
     bundle = await acquireWorkspaceBundle({
       ownerType: "session",
       ownerRef: sessionId,
+      projectId: project.id,
       environmentKind: context.execution?.mode === "permanent" ? "permanent" : "managed",
       base: resolvedBase,
       roots: project.roots.map((root) => ({

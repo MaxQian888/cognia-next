@@ -79,6 +79,9 @@ describe("ensureSessionExecutionBundle", () => {
     expect(acquireWorkspaceBundle).toHaveBeenCalledWith({
       ownerType: "session",
       ownerRef: "session-1",
+      // Stamped onto every Registry row the bundle provisions, so deleting the
+      // workspace can find the directories it produced.
+      projectId: project.id,
       environmentKind: "managed",
       base: { kind: "remoteDefault" },
       roots: [

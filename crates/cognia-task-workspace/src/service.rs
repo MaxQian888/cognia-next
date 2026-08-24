@@ -1921,6 +1921,13 @@ impl TaskWorkspaceService {
                     .registry
                     .set_environment_kind(&record.workspace_id, input.environment_kind)
                     .map_err(|error| error.to_string())?;
+                // Stamp the owning Workspace, so "which execution slots does
+                // this project own" is answerable — deleting a project can then
+                // find the directories it produced, and the inventory can be
+                // scoped instead of only shown machine-wide.
+                self.registry
+                    .set_project(&record.workspace_id, input.project_id.as_deref())
+                    .map_err(|error| error.to_string())?;
                 if let Err(error) = create_execution(
                     source_root,
                     &execution_root,
@@ -6126,6 +6133,45 @@ mod tests {
     }
 
     #[test]
+    fn a_bundle_stamps_its_owning_workspace_on_every_registry_row_it_provisions() {
+        // Without this, deleting a project cannot find the directories it
+        // produced: rows are addressed by path and `(owner_type, owner_ref)`,
+        // and an owner ref is a session, never a project.
+        let data = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+        seed_git_repository(repo.path());
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: Some("project-a".into()),
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repo.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+
+        for lease in &bundle.leases {
+            let record = service.registry.get(&lease.workspace_id).unwrap().unwrap();
+            assert_eq!(record.project_id, Some("project-a".into()));
+        }
+        let owned = service.registry.list_for_project("project-a").unwrap();
+        assert_eq!(owned.len(), bundle.leases.len());
+        assert!(service
+            .registry
+            .list_for_project("project-b")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn acquires_multi_repository_and_shadow_roots_as_one_bundle() {
         let data = TempDir::new().unwrap();
         let primary = TempDir::new().unwrap();
@@ -6144,6 +6190,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-bundle".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6221,6 +6268,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6269,6 +6317,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-other".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6304,6 +6353,7 @@ mod tests {
 
         let error = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-rollback".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6350,6 +6400,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-lifecycle".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6403,6 +6454,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::User,
                 owner_ref: Some("project-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Permanent,
@@ -6442,6 +6494,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-lifecycle-mutation".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6479,6 +6532,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-git-archive".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6791,6 +6845,7 @@ mod tests {
                 TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
             let bundle = service
                 .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                    project_id: None,
                     owner_type: WorkspaceOwnerType::Session,
                     owner_ref: Some("session-1".into()),
                     environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6856,6 +6911,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6934,6 +6990,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -6980,6 +7037,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -7113,6 +7171,7 @@ mod tests {
             .unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,
@@ -7191,6 +7250,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
                 environment_kind: crate::WorkspaceEnvironmentKind::Managed,

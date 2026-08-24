@@ -82,6 +82,14 @@ export interface WorkspaceRootLease {
 export interface AcquireWorkspaceBundle {
   ownerType: Exclude<WorkspaceOwnerType, "imported">
   ownerRef: string | null
+  /**
+   * Owning Workspace, stamped onto every Registry row this bundle provisions.
+   * Registry rows are addressed by path and `(ownerType, ownerRef)`, and an
+   * owner ref is a session or a team — never a project — so without this
+   * "which execution slots does this project own" is unanswerable and deleting
+   * a workspace cannot find the directories it produced.
+   */
+  projectId?: string
   environmentKind: Exclude<WorkspaceEnvironmentKind, "imported">
   base: WorkspaceBaseSpec
   roots: Array<{

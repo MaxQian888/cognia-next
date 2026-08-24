@@ -591,6 +591,20 @@ pub struct WorkspaceRecord {
     pub workspace_id: String,
     #[serde(default)]
     pub environment_kind: WorkspaceEnvironmentKind,
+    /// Owning Workspace (the frontend `Project.id`), when it is known.
+    ///
+    /// The crate addresses rows by path and `(owner_type, owner_ref)`, neither
+    /// of which can answer "which execution slots does this project own" —
+    /// several worktrees of one repository share a `git_common_dir`, and an
+    /// owner ref is a session or a team, never a project. Without it, deleting
+    /// a workspace cannot find the directories it produced and the inventory
+    /// can only be shown machine-wide.
+    ///
+    /// Optional because the frontend owns the Project table: rows created
+    /// before this column, or found on disk with no matching project, stay
+    /// `None` and are classified `imported` — never auto-pruned (ADR-0111).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub owner_type: WorkspaceOwnerType,
     pub owner_ref: Option<String>,
     pub state: WorkspaceState,
@@ -723,6 +737,11 @@ pub struct WorkspaceBundleRootInput {
 pub struct AcquireWorkspaceBundle {
     pub owner_type: WorkspaceOwnerType,
     pub owner_ref: Option<String>,
+    /// Owning Workspace (frontend `Project.id`) stamped onto every Registry row
+    /// this bundle provisions. Optional: a caller with no Workspace (a headless
+    /// worker, an imported repository) leaves the rows unowned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     #[serde(default)]
     pub environment_kind: WorkspaceEnvironmentKind,
     #[serde(default)]

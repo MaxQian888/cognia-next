@@ -109,6 +109,7 @@ impl WorkspaceStore {
                 "CREATE TABLE IF NOT EXISTS workspace_registry (
                    workspace_id TEXT PRIMARY KEY,
                    environment_kind TEXT NOT NULL DEFAULT 'managed',
+                   project_id TEXT,
                    owner_type TEXT NOT NULL,
                    owner_ref TEXT,
                    state TEXT NOT NULL,
@@ -252,6 +253,35 @@ impl WorkspaceStore {
                 )
                 .map_err(|error| format!("add workspace environment kind: {error}"))?;
         }
+        // Nullable with no default: an existing row's owning workspace is not
+        // knowable here (the Project table lives in the frontend), so it stays
+        // NULL until a reconcile pass matches its `source_root` to a project.
+        let has_project_id: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('workspace_registry') WHERE name='project_id')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("inspect workspace project column: {error}"))?;
+        if !has_project_id {
+            self.connection
+                .execute(
+                    "ALTER TABLE workspace_registry ADD COLUMN project_id TEXT",
+                    [],
+                )
+                .map_err(|error| format!("add workspace project id: {error}"))?;
+        }
+        // Indexed here rather than in the batch above: on an existing install
+        // `CREATE TABLE IF NOT EXISTS` is a no-op, so an index declared there
+        // would run against a column the ALTER has not added yet and fail the
+        // whole migration. By this point the column exists either way.
+        self.connection
+            .execute(
+                "CREATE INDEX IF NOT EXISTS idx_workspace_registry_project ON workspace_registry(project_id)",
+                [],
+            )
+            .map_err(|error| format!("index workspace project id: {error}"))?;
         Ok(())
     }
 
@@ -861,13 +891,14 @@ impl WorkspaceStore {
         self.connection
             .execute(
                 "INSERT INTO workspace_registry (
-                   workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
-                   git_common_dir, base_kind, base_ref, head, branch,
+                   workspace_id, environment_kind, project_id, owner_type, owner_ref, state,
+                   source_root, git_common_dir, base_kind, base_ref, head, branch,
                    isolation_kind, execution_root, snapshot_task_id, size_bytes,
                    last_used_at, locked_by, pinned, created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
                  ON CONFLICT(workspace_id) DO UPDATE SET
                    environment_kind=excluded.environment_kind,
+                   project_id=excluded.project_id,
                    owner_type=excluded.owner_type,
                    owner_ref=excluded.owner_ref,
                    state=excluded.state,
@@ -888,6 +919,7 @@ impl WorkspaceStore {
                 params![
                     record.workspace_id,
                     environment_kind,
+                    record.project_id,
                     owner_type,
                     record.owner_ref,
                     state,
@@ -918,8 +950,8 @@ impl WorkspaceStore {
     ) -> Result<Option<crate::WorkspaceRecord>, String> {
         self.connection
             .query_row(
-                "SELECT workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
-                        git_common_dir, base_kind, base_ref, head, branch,
+                "SELECT workspace_id, environment_kind, project_id, owner_type, owner_ref, state,
+                        source_root, git_common_dir, base_kind, base_ref, head, branch,
                         isolation_kind, execution_root, snapshot_task_id, size_bytes,
                         last_used_at, locked_by, pinned, created_at
                    FROM workspace_registry WHERE workspace_id=?1",
@@ -931,13 +963,50 @@ impl WorkspaceStore {
             .transpose()
     }
 
+    /// Set (or clear) the owning Workspace for one row.
+    pub fn set_workspace_project(
+        &self,
+        workspace_id: &str,
+        project_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.connection
+            .execute(
+                "UPDATE workspace_registry SET project_id=?2 WHERE workspace_id=?1",
+                params![workspace_id, project_id],
+            )
+            .map_err(|error| format!("set workspace project {workspace_id}: {error}"))?;
+        Ok(())
+    }
+
+    /// Registry rows owned by one Workspace, ordered by `last_used_at DESC`.
+    pub fn list_workspaces_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<crate::WorkspaceRecord>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT workspace_id, environment_kind, project_id, owner_type, owner_ref, state,
+                        source_root, git_common_dir, base_kind, base_ref, head, branch,
+                        isolation_kind, execution_root, snapshot_task_id, size_bytes,
+                        last_used_at, locked_by, pinned, created_at
+                   FROM workspace_registry WHERE project_id=?1 ORDER BY last_used_at DESC",
+            )
+            .map_err(|error| format!("prepare list_workspaces_for_project: {error}"))?;
+        let rows = statement
+            .query_map([project_id], map_workspace_row)
+            .map_err(|error| format!("query list_workspaces_for_project: {error}"))?;
+        rows.collect::<Result<Result<Vec<_>, String>, _>>()
+            .map_err(|error| format!("read list_workspaces_for_project: {error}"))?
+    }
+
     /// Enumerate every Registry row, ordered by `last_used_at DESC`.
     pub fn list_workspaces(&self) -> Result<Vec<crate::WorkspaceRecord>, String> {
         let mut statement = self
             .connection
             .prepare(
-                "SELECT workspace_id, environment_kind, owner_type, owner_ref, state, source_root,
-                        git_common_dir, base_kind, base_ref, head, branch,
+                "SELECT workspace_id, environment_kind, project_id, owner_type, owner_ref, state,
+                        source_root, git_common_dir, base_kind, base_ref, head, branch,
                         isolation_kind, execution_root, snapshot_task_id, size_bytes,
                         last_used_at, locked_by, pinned, created_at
                    FROM workspace_registry ORDER BY last_used_at DESC",
@@ -1583,23 +1652,24 @@ fn map_workspace_row(
 ) -> rusqlite::Result<Result<crate::WorkspaceRecord, String>> {
     let workspace_id: String = row.get(0)?;
     let environment_kind_raw: String = row.get(1)?;
-    let owner_type_raw: String = row.get(2)?;
-    let owner_ref: Option<String> = row.get(3)?;
-    let state_raw: String = row.get(4)?;
-    let source_root: String = row.get(5)?;
-    let git_common_dir: Option<String> = row.get(6)?;
-    let base_kind_raw: String = row.get(7)?;
-    let base_ref: Option<String> = row.get(8)?;
-    let head: Option<String> = row.get(9)?;
-    let branch: Option<String> = row.get(10)?;
-    let isolation_kind_raw: String = row.get(11)?;
-    let execution_root: String = row.get(12)?;
-    let snapshot_task_id: Option<String> = row.get(13)?;
-    let size_bytes: Option<i64> = row.get(14)?;
-    let last_used_at: i64 = row.get(15)?;
-    let locked_by: Option<String> = row.get(16)?;
-    let pinned: i64 = row.get(17)?;
-    let created_at: i64 = row.get(18)?;
+    let project_id: Option<String> = row.get(2)?;
+    let owner_type_raw: String = row.get(3)?;
+    let owner_ref: Option<String> = row.get(4)?;
+    let state_raw: String = row.get(5)?;
+    let source_root: String = row.get(6)?;
+    let git_common_dir: Option<String> = row.get(7)?;
+    let base_kind_raw: String = row.get(8)?;
+    let base_ref: Option<String> = row.get(9)?;
+    let head: Option<String> = row.get(10)?;
+    let branch: Option<String> = row.get(11)?;
+    let isolation_kind_raw: String = row.get(12)?;
+    let execution_root: String = row.get(13)?;
+    let snapshot_task_id: Option<String> = row.get(14)?;
+    let size_bytes: Option<i64> = row.get(15)?;
+    let last_used_at: i64 = row.get(16)?;
+    let locked_by: Option<String> = row.get(17)?;
+    let pinned: i64 = row.get(18)?;
+    let created_at: i64 = row.get(19)?;
     Ok((|| -> Result<crate::WorkspaceRecord, String> {
         let owner_type = deserialize_enum(&owner_type_raw, "owner type")?;
         let state = deserialize_enum(&state_raw, "workspace state")?;
@@ -1608,6 +1678,7 @@ fn map_workspace_row(
         let base = crate::WorkspaceBaseSpec::from_storage(base_kind, base_ref.as_deref())?;
         Ok(crate::WorkspaceRecord {
             workspace_id,
+            project_id,
             environment_kind: deserialize_enum(&environment_kind_raw, "environment kind")?,
             owner_type,
             owner_ref,
@@ -1776,6 +1847,7 @@ mod tests {
 
     fn sample_record(id: &str) -> crate::WorkspaceRecord {
         crate::WorkspaceRecord {
+            project_id: None,
             workspace_id: id.into(),
             environment_kind: crate::WorkspaceEnvironmentKind::Managed,
             owner_type: crate::WorkspaceOwnerType::Session,
@@ -1795,6 +1867,107 @@ mod tests {
             pinned: false,
             created_at: 100,
         }
+    }
+
+    #[test]
+    fn workspace_project_survives_a_round_trip_and_scopes_the_listing() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+
+        let mut owned = sample_record("ws-owned");
+        owned.project_id = Some("project-a".into());
+        store.put_workspace(&owned).unwrap();
+
+        let mut other = sample_record("ws-other");
+        other.project_id = Some("project-b".into());
+        store.put_workspace(&other).unwrap();
+
+        // Unowned rows exist by design: a worktree found on disk has no
+        // project until a reconcile pass matches it.
+        store.put_workspace(&sample_record("ws-unowned")).unwrap();
+
+        assert_eq!(
+            store.get_workspace("ws-owned").unwrap().unwrap().project_id,
+            Some("project-a".into())
+        );
+        assert_eq!(
+            store
+                .get_workspace("ws-unowned")
+                .unwrap()
+                .unwrap()
+                .project_id,
+            None
+        );
+
+        let listed = store.list_workspaces_for_project("project-a").unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|r| r.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            ["ws-owned"]
+        );
+        assert_eq!(store.list_workspaces().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn setting_and_clearing_the_project_leaves_the_rest_of_the_row_alone() {
+        let dir = TempDir::new().unwrap();
+        let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let record = sample_record("ws-1");
+        store.put_workspace(&record).unwrap();
+
+        store
+            .set_workspace_project("ws-1", Some("project-a"))
+            .unwrap();
+        let stamped = store.get_workspace("ws-1").unwrap().unwrap();
+        assert_eq!(stamped.project_id, Some("project-a".into()));
+        assert_eq!(
+            crate::WorkspaceRecord {
+                project_id: None,
+                ..stamped.clone()
+            },
+            record
+        );
+
+        store.set_workspace_project("ws-1", None).unwrap();
+        assert_eq!(
+            store.get_workspace("ws-1").unwrap().unwrap().project_id,
+            None
+        );
+        assert!(store
+            .list_workspaces_for_project("project-a")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_registry_predating_the_project_column_gains_it_on_open() {
+        // The migration is what keeps an existing install readable; without it
+        // every row read fails on a missing column rather than reporting an
+        // unowned workspace.
+        let dir = TempDir::new().unwrap();
+        {
+            let store = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+            store.put_workspace(&sample_record("ws-legacy")).unwrap();
+            // Drop the index first — SQLite refuses to drop a column an index
+            // still references.
+            store
+                .connection
+                .execute("DROP INDEX idx_workspace_registry_project", [])
+                .unwrap();
+            store
+                .connection
+                .execute("ALTER TABLE workspace_registry DROP COLUMN project_id", [])
+                .unwrap();
+        }
+        let reopened = WorkspaceStore::open(dir.path(), 1024 * 1024).unwrap();
+        let loaded = reopened
+            .get_workspace("ws-legacy")
+            .unwrap()
+            .expect("row present");
+        assert_eq!(loaded.project_id, None);
+        assert_eq!(loaded.execution_root, "/tmp/ws-legacy");
     }
 
     #[test]

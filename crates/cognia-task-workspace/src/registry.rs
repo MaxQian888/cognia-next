@@ -346,6 +346,9 @@ impl WorkspaceRegistry {
         let record = WorkspaceRecord {
             workspace_id: workspace_id.clone(),
             environment_kind: WorkspaceEnvironmentKind::Managed,
+            // Stamped by the frontend after creation — see `set_project`. The
+            // crate has no Project table to resolve one from.
+            project_id: None,
             owner_type,
             owner_ref,
             state: WorkspaceState::Provisioning,
@@ -367,6 +370,36 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Associate a row with the Workspace (frontend `Project`) that owns it,
+    /// or clear the association with `None`.
+    ///
+    /// Kept separate from insertion on purpose: the Project table lives in the
+    /// frontend, so the crate can neither resolve nor validate an id at
+    /// creation time. The same call serves the backfill — matching an existing
+    /// row's `source_root` to a project root is a frontend decision too.
+    pub fn set_project(
+        &self,
+        workspace_id: &str,
+        project_id: Option<&str>,
+    ) -> Result<(), RegistryError> {
+        RegistryError::from_store(
+            self.store
+                .lock()
+                .set_workspace_project(workspace_id, project_id),
+        )
+    }
+
+    /// Every row owned by one Workspace. Answers "which execution slots does
+    /// this project have", which neither `source_root` nor `(owner_type,
+    /// owner_ref)` can: several worktrees of one repository share a
+    /// `git_common_dir`, and an owner ref is a session or a team.
+    pub fn list_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<WorkspaceRecord>, RegistryError> {
+        RegistryError::from_store(self.store.lock().list_workspaces_for_project(project_id))
+    }
+
     /// Insert an `Imported` row — a worktree already on disk that Registry
     /// discovered but did not create. Imported rows never participate in
     /// automatic prune and cannot be transitioned by Registry code.
@@ -379,6 +412,7 @@ impl WorkspaceRegistry {
         let record = WorkspaceRecord {
             workspace_id: workspace_id.clone(),
             environment_kind: WorkspaceEnvironmentKind::Imported,
+            project_id: None,
             owner_type: WorkspaceOwnerType::Imported,
             owner_ref: None,
             state: WorkspaceState::Active,
@@ -864,6 +898,7 @@ mod tests {
 
     fn record(id: &str, state: WorkspaceState, owner_type: WorkspaceOwnerType) -> WorkspaceRecord {
         WorkspaceRecord {
+            project_id: None,
             workspace_id: id.into(),
             environment_kind: if owner_type == WorkspaceOwnerType::Imported {
                 WorkspaceEnvironmentKind::Imported
