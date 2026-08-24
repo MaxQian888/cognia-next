@@ -188,6 +188,7 @@ import { CannedResponsePicker } from "@/components/inbox/canned-response-picker"
 import { EnhanceButton } from "./composer/enhance-button"
 import { WebSearchToggle } from "./composer/web-search-toggle"
 import { SkillPicker } from "./skill-picker"
+import { ComposerSessionProvider } from "./composer/composer-session-context"
 
 interface Props {
   session?: ChatSession | null
@@ -573,7 +574,7 @@ function ComposerInner(props: InnerProps) {
       return
     }
     pendingHydrationFor.current = props.session.id
-    setPermissionMode(props.session.permissionMode ?? null)
+    setPermissionMode(props.session.permissionMode ?? null, props.session.id)
   }, [props.session, setPermissionMode])
 
   // --- Persist active permission mode back to session row ---------------
@@ -901,9 +902,9 @@ function ComposerInner(props: InnerProps) {
             removeTriggerToken,
             addReferencedPath,
             toggleEphemeralSkill: (skillId) =>
-              useChatStore.getState().toggleEphemeralSkill(skillId),
+              useChatStore.getState().toggleEphemeralSkill(skillId, props.session?.id ?? null),
             addReferencedWorkflowElement: (el) =>
-              useChatStore.getState().addReferencedWorkflowElement(el),
+              useChatStore.getState().addReferencedWorkflowElement(el, props.session?.id ?? null),
             applyPreset: (preset, session) => applyPreset(preset, session).then(() => {}),
             stageRemoteDoc: (item) => stageRemoteDocRef.current(item),
             session: props.session,
@@ -1261,7 +1262,7 @@ function ComposerInner(props: InnerProps) {
       if (e.key === "Tab" && e.shiftKey) {
         e.preventDefault()
         const next = nextPermissionMode(permissionMode)
-        setPermissionMode(next)
+        setPermissionMode(next, props.session?.id ?? null)
         return
       }
       // While an IME composition is active, Enter / Arrow / Tab / Escape belong
@@ -1732,208 +1733,215 @@ function ComposerInner(props: InnerProps) {
   const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
 
   return (
-    <div ref={setContainerEl}>
-      {/* Every band stacked above the textarea shares one scroll container with
+    // Every composer control below writes its draft state through actions that
+    // otherwise default to "the focused conversation". In split view that made
+    // the unfocused pane edit the pane beside it — including the permission
+    // mode, which `resolveSendOptions` reads back, so the mistake reached the
+    // model and not just the chrome.
+    <ComposerSessionProvider value={props.session?.id ?? null}>
+      <div ref={setContainerEl}>
+        {/* Every band stacked above the textarea shares one scroll container with
           a height cap. Six attachments plus an active goal, an open loop and the
           plan-mode banner could otherwise push the input off the bottom of the
           screen. Each band still animates its own height inside it. */}
-      <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
-        <CommandQueueBar
-          segments={segments}
-          errors={commandErrors}
-          onRemove={removeCommandSegment}
-        />
-        <ContextChipBar
-          onRunOcr={handleRunOcrForPanel}
-          ocrBusy={ocr.status === "running"}
-          onExtractOcrToInput={handleExtractOcrToInput}
-          onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
-          text={controller.textInput.value}
-          onRemoveLink={removeLink}
-          preparingImageCount={preparingImageCount}
-        />
-        <Collapse>
-          <DraftRestoredAttachments
-            items={restoredAttachments}
-            onDismiss={() => setRestoredAttachments([])}
+        <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+          <CommandQueueBar
+            segments={segments}
+            errors={commandErrors}
+            onRemove={removeCommandSegment}
           />
-        </Collapse>
-        <OcrResultBubble
-          open={ocrBubbleOpen}
-          onOpenChange={setOcrBubbleOpen}
-          result={ocrBubbleResult}
-          imageSrc={ocrBubbleImageSrc ?? undefined}
-          onCopy={(text) => void navigator.clipboard?.writeText(text)}
-          onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
-        />
-        <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
-        <Collapse>
-          <SkillChipRow
-            ids={ephemeralSkillIds}
-            onRemove={toggleEphemeralSkill}
-            disabledIds={props.session?.disabledSkillIds}
+          <ContextChipBar
+            onRunOcr={handleRunOcrForPanel}
+            ocrBusy={ocr.status === "running"}
+            onExtractOcrToInput={handleExtractOcrToInput}
+            onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
+            text={controller.textInput.value}
+            onRemoveLink={removeLink}
+            preparingImageCount={preparingImageCount}
           />
-        </Collapse>
-        {/* Folded large-paste chips — only those whose placeholder is still in the
+          <Collapse>
+            <DraftRestoredAttachments
+              items={restoredAttachments}
+              onDismiss={() => setRestoredAttachments([])}
+            />
+          </Collapse>
+          <OcrResultBubble
+            open={ocrBubbleOpen}
+            onOpenChange={setOcrBubbleOpen}
+            result={ocrBubbleResult}
+            imageSrc={ocrBubbleImageSrc ?? undefined}
+            onCopy={(text) => void navigator.clipboard?.writeText(text)}
+            onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
+          />
+          <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
+          <Collapse>
+            <SkillChipRow
+              ids={ephemeralSkillIds}
+              onRemove={toggleEphemeralSkill}
+              disabledIds={props.session?.disabledSkillIds}
+            />
+          </Collapse>
+          {/* Folded large-paste chips — only those whose placeholder is still in the
           text (manual deletion drops the chip too). */}
-        <Collapse>
-          {(() => {
-            const chips = Object.entries(pastedBlocks).filter(([ph]) =>
-              controller.textInput.value.includes(ph)
-            )
-            if (chips.length === 0) return null
-            return (
-              <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
-                {chips.map(([ph, body]) => (
-                  <span
-                    key={ph}
-                    className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                  >
-                    <FileTextIcon className="size-3 shrink-0" aria-hidden />
-                    {t("pastedChip", { count: body.split("\n").length })}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => removePastedBlock(ph)}
-                      aria-label={t("removePastedChip")}
-                      className="-mr-1 size-4 rounded-sm text-muted-foreground/60 hover:bg-transparent hover:text-foreground"
+          <Collapse>
+            {(() => {
+              const chips = Object.entries(pastedBlocks).filter(([ph]) =>
+                controller.textInput.value.includes(ph)
+              )
+              if (chips.length === 0) return null
+              return (
+                <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
+                  {chips.map(([ph, body]) => (
+                    <span
+                      key={ph}
+                      className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
                     >
-                      <XIcon className="size-3" aria-hidden />
-                    </Button>
-                  </span>
-                ))}
-              </div>
-            )
-          })()}
-        </Collapse>
-        {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
+                      <FileTextIcon className="size-3 shrink-0" aria-hidden />
+                      {t("pastedChip", { count: body.split("\n").length })}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => removePastedBlock(ph)}
+                        aria-label={t("removePastedChip")}
+                        className="-mr-1 size-4 rounded-sm text-muted-foreground/60 hover:bg-transparent hover:text-foreground"
+                      >
+                        <XIcon className="size-3" aria-hidden />
+                      </Button>
+                    </span>
+                  ))}
+                </div>
+              )
+            })()}
+          </Collapse>
+          {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
           whose bodies weren't persisted. Nudge the user to re-paste (the
           placeholder text stays visible so they see exactly where). */}
-        <Collapse>
-          {(() => {
-            const orphans = findPastePlaceholders(controller.textInput.value).filter(
-              (ph) => !(ph in pastedBlocks)
-            )
-            if (orphans.length === 0) return null
-            return (
-              <div
-                className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
-                data-testid="composer-paste-reminder"
-              >
-                {t("pasteReminder", { count: orphans.length })}
-              </div>
-            )
-          })()}
-        </Collapse>
-        {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
-        <Collapse>
-          <GoalStatusPill sessionId={sessionId} />
-        </Collapse>
-        {/* /loop status + controls; self-hides when no open loop. */}
-        <Collapse>
-          <LoopStatusPill sessionId={sessionId} />
-        </Collapse>
-        {/* Plan-mode state banner; self-hides outside plan mode. */}
-        <Collapse>
-          <PlanModeBanner />
-        </Collapse>
-      </div>
-      <ComposerBox
-        skin={props.skin}
-        compactLayout={compactLayout}
-        isMobile={isMobile}
-        disabled={props.disabled}
-        permissionMode={permissionMode}
-        placeholder={props.placeholder}
-        textInput={controller.textInput}
-        textareaRef={textareaRef}
-        chipOverlayRef={chipOverlayRef}
-        ghostOverlayRef={ghostOverlayRef}
-        overlaySegments={overlaySegments}
-        maxHeightRem={COMPOSER_MAX_HEIGHT_REM}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onSelect={onSelect}
-        onCompositionStart={() => setIsComposing(true)}
-        onCompositionEnd={() => setIsComposing(false)}
-        ghost={ghost}
-        ghostSourceLabel={ghostSourceLabel}
-        acceptGhost={acceptGhost}
-        fileInputRef={fileInputRef}
-        attachmentAccept={ATTACHMENT_ACCEPT}
-        onFilePick={onFilePick}
-        openFileDialog={openFileDialog}
-        onPlusAttach={onPlusAttach}
-        captureSmartSnapshot={captureSmartSnapshot}
-        smartSnapshotPending={smartSnapshotPending}
-        capabilityMenu={capabilityMenu}
-        isDragging={isDragging}
-        onDragEnter={onDragEnter}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        sendButton={sendButton}
-        sendIconTransition={sendIconTransition}
-        isPreparingAttachments={isPreparingAttachments}
-        submit={() => void submit()}
-        onStop={() => void props.onStop()}
-        toolbar={props.toolbar}
-        bridges={
-          <>
-            <VoiceTranscriptionBridge disabled={props.disabled} />
-            <ComposerAppendBridge sessionId={props.session?.id} />
-          </>
-        }
-        t={t}
-        tAttach={tAttach}
-      />
+          <Collapse>
+            {(() => {
+              const orphans = findPastePlaceholders(controller.textInput.value).filter(
+                (ph) => !(ph in pastedBlocks)
+              )
+              if (orphans.length === 0) return null
+              return (
+                <div
+                  className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
+                  data-testid="composer-paste-reminder"
+                >
+                  {t("pasteReminder", { count: orphans.length })}
+                </div>
+              )
+            })()}
+          </Collapse>
+          {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
+          <Collapse>
+            <GoalStatusPill sessionId={sessionId} />
+          </Collapse>
+          {/* /loop status + controls; self-hides when no open loop. */}
+          <Collapse>
+            <LoopStatusPill sessionId={sessionId} />
+          </Collapse>
+          {/* Plan-mode state banner; self-hides outside plan mode. */}
+          <Collapse>
+            <PlanModeBanner />
+          </Collapse>
+        </div>
+        <ComposerBox
+          skin={props.skin}
+          compactLayout={compactLayout}
+          isMobile={isMobile}
+          disabled={props.disabled}
+          permissionMode={permissionMode}
+          placeholder={props.placeholder}
+          textInput={controller.textInput}
+          textareaRef={textareaRef}
+          chipOverlayRef={chipOverlayRef}
+          ghostOverlayRef={ghostOverlayRef}
+          overlaySegments={overlaySegments}
+          maxHeightRem={COMPOSER_MAX_HEIGHT_REM}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onSelect={onSelect}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
+          ghost={ghost}
+          ghostSourceLabel={ghostSourceLabel}
+          acceptGhost={acceptGhost}
+          fileInputRef={fileInputRef}
+          attachmentAccept={ATTACHMENT_ACCEPT}
+          onFilePick={onFilePick}
+          openFileDialog={openFileDialog}
+          onPlusAttach={onPlusAttach}
+          captureSmartSnapshot={captureSmartSnapshot}
+          smartSnapshotPending={smartSnapshotPending}
+          capabilityMenu={capabilityMenu}
+          isDragging={isDragging}
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          sendButton={sendButton}
+          sendIconTransition={sendIconTransition}
+          isPreparingAttachments={isPreparingAttachments}
+          submit={() => void submit()}
+          onStop={() => void props.onStop()}
+          toolbar={props.toolbar}
+          bridges={
+            <>
+              <VoiceTranscriptionBridge disabled={props.disabled} />
+              <ComposerAppendBridge sessionId={props.session?.id} />
+            </>
+          }
+          t={t}
+          tAttach={tAttach}
+        />
 
-      <CommandHintBar
-        trigger={desktopTrigger}
-        commandMap={commandMap}
-        value={controller.textInput.value}
-      />
+        <CommandHintBar
+          trigger={desktopTrigger}
+          commandMap={commandMap}
+          value={controller.textInput.value}
+        />
 
-      <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
+        <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
-      <ComposerPopover
-        ref={popoverRef}
-        trigger={desktopTrigger}
-        cwd={cwd}
-        slashCommands={slashCommands}
-        anchor={containerEl}
-        mentionables={props.mentionables}
-        chatAgents={chatAgents}
-        chatSkills={chatSkills}
-        chatPresets={chatPresets}
-        workflowElements={props.workflowMention?.elements}
-        onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
-        recentCommands={recentCommands}
-        pinnedCommands={pinnedCommands}
-        onTogglePin={togglePinnedCommand}
-        onPick={onPickPopoverItem}
-        onDismiss={dismissPopover}
-      />
-
-      {mobileMentionEnabled ? (
-        <MentionPopover
-          open={mobileMentionOpen}
-          query={mobileMentionQuery}
-          members={props.mobileMentionMembers ?? []}
-          composerHeight={composerHeight}
-          onPick={onPickMobileMember}
+        <ComposerPopover
+          ref={popoverRef}
+          trigger={desktopTrigger}
+          cwd={cwd}
+          slashCommands={slashCommands}
+          anchor={containerEl}
+          mentionables={props.mentionables}
+          chatAgents={chatAgents}
+          chatSkills={chatSkills}
+          chatPresets={chatPresets}
+          workflowElements={props.workflowMention?.elements}
+          onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
+          recentCommands={recentCommands}
+          pinnedCommands={pinnedCommands}
+          onTogglePin={togglePinnedCommand}
+          onPick={onPickPopoverItem}
           onDismiss={dismissPopover}
         />
-      ) : null}
 
-      <CommandParamForm
-        command={paramForm?.command ?? null}
-        onSubmit={handleParamFormSubmit}
-        onCancel={handleParamFormCancel}
-      />
-    </div>
+        {mobileMentionEnabled ? (
+          <MentionPopover
+            open={mobileMentionOpen}
+            query={mobileMentionQuery}
+            members={props.mobileMentionMembers ?? []}
+            composerHeight={composerHeight}
+            onPick={onPickMobileMember}
+            onDismiss={dismissPopover}
+          />
+        ) : null}
+
+        <CommandParamForm
+          command={paramForm?.command ?? null}
+          onSubmit={handleParamFormSubmit}
+          onCancel={handleParamFormCancel}
+        />
+      </div>
+    </ComposerSessionProvider>
   )
 }
 
@@ -2050,7 +2058,7 @@ function ComposerCapabilityMenu({
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         value={ephemeralSkillIds}
-        onChange={setEphemeralSkillIds}
+        onChange={(ids) => setEphemeralSkillIds(ids, session?.id ?? null)}
       />
     </>
   )
@@ -2102,7 +2110,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
-  const appendMessage = useChatStore((s) => s.appendMessage)
+  // Keyed by THIS composer's session, not by focus: in split view the
+  // unfocused pane echoed its slash-command results into the other pane's
+  // transcript, and those echoes are persisted messages.
+  const appendMessageToSession = useChatStore((s) => s.appendMessageToSession)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
   const clearContextSelections = useChatStore((s) => s.clearContextSelections)
 
@@ -2151,13 +2162,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         typeof payload === "string"
           ? [{ type: "text", text: payload }]
           : [{ type: DIAGNOSTICS_PART_TYPE, data: payload }]
-      appendMessage({
+      appendMessageToSession(session?.id ?? null, {
         id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "system",
         parts: parts as UIMessage["parts"],
       })
     },
-    [appendMessage]
+    [appendMessageToSession, session?.id]
   )
 
   const handleSlashCommand = useCallback(
@@ -2469,8 +2480,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         if (!ok) return false
       }
       await onSend(content, attachmentResult.manifest)
-      clearReferencedPaths()
-      clearContextSelections()
+      clearReferencedPaths(session?.id ?? null)
+      clearContextSelections(session?.id ?? null)
       useArtifactStore.getState().consumeReviewReceipts(sentReceipts)
       return true
     },

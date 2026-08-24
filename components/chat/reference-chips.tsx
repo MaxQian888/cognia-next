@@ -10,6 +10,7 @@ import { FileIcon, FolderIcon, XIcon } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { useComposerSessionId } from "./composer/composer-session-context"
 
 export interface ReferenceChipsProps {
   /**
@@ -24,6 +25,7 @@ export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
   const t = useTranslations("chat.composer.references")
   const refs = useChatStore((s) => s.referencedPaths)
   const remove = useChatStore((s) => s.removeReferencedPath)
+  const composerSessionId = useComposerSessionId()
 
   if (refs.length === 0) return null
   const chips = (
@@ -49,7 +51,7 @@ export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
             variant="ghost"
             size="icon-sm"
             aria-label={t("removeAria", { path: r.relative })}
-            onClick={() => remove(r.absolute)}
+            onClick={() => remove(r.absolute, composerSessionId)}
             className="size-5 opacity-60 transition-opacity hover:opacity-100"
           >
             <XIcon className="size-3" />

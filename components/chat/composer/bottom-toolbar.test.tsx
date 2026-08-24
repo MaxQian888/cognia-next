@@ -429,7 +429,10 @@ describe("BottomToolbar — agent-mode wiring", () => {
     renderWide(<BottomToolbar session={session} />)
     const onCycle = lastSelectorProps.onCycle as (next: string) => void
     onCycle("acceptEdits")
-    expect(chatStoreState.setPermissionMode).toHaveBeenCalledWith("acceptEdits")
+    // The trailing session id is what keeps an unfocused split pane's Shift+Tab
+    // off the pane beside it; `undefined` here is "no provider in this test",
+    // which the store reads as "the focused conversation".
+    expect(chatStoreState.setPermissionMode).toHaveBeenCalledWith("acceptEdits", undefined)
   })
 
   it("passes disabled=true to child controls when streaming", () => {

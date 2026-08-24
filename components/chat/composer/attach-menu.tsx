@@ -53,6 +53,7 @@ import {
   type FolderSummary,
 } from "@/lib/chat/folder-context"
 import { cn } from "@/lib/utils"
+import { useComposerSessionId } from "./composer-session-context"
 
 export interface ComposerAttachMenuProps {
   disabled?: boolean
@@ -77,13 +78,15 @@ export function ComposerAttachMenu({
   const t = useTranslations("chat.composer")
   const isDesktop = usePlatform() === "tauri"
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
+  const composerSessionId = useComposerSessionId()
   const attachments = usePromptInputAttachments()
   const [pending, setPending] = useState<FolderSummary | null>(null)
   const [open, setOpen] = useState(false)
 
   const triggerClassName = cn("size-9 text-muted-foreground hover:text-foreground", className)
 
-  const add = (summary: FolderSummary) => addReferencedPath(folderReference(summary))
+  const add = (summary: FolderSummary) =>
+    addReferencedPath(folderReference(summary), composerSessionId)
 
   const onPickFolder = async () => {
     try {

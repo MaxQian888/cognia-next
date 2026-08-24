@@ -58,6 +58,7 @@ import {
 import type { EditorState } from "@/lib/workflow/editor/store"
 import { buildMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
 import { dispatchWorkflowSlashAction } from "@/lib/slash-commands/actions/workflow"
+import { useComposerSessionId } from "./composer-session-context"
 
 interface WorkflowBottomToolbarProps {
   session: ChatSession | null
@@ -66,6 +67,7 @@ interface WorkflowBottomToolbarProps {
 export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
   const status = useChatStore((s) => s.status)
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
+  const composerSessionId = useComposerSessionId()
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
   const defaultProvider = useSettingsStore((s) => s.settings?.defaultProvider)
   const ctx = useWorkflowEditor()
@@ -87,7 +89,7 @@ export function WorkflowBottomToolbar({ session }: WorkflowBottomToolbarProps) {
         <ModelPicker session={session} disabled={isStreaming} />
         <EffortChip session={session} disabled={isStreaming} />
         <PermissionModeIndicator
-          onCycle={(next) => setPermissionMode(next)}
+          onCycle={(next) => setPermissionMode(next, composerSessionId)}
           disabled={isStreaming}
         />
         {ctx ? (

@@ -86,7 +86,7 @@ describe("useChatStore", () => {
   })
 
   describe("setActiveSession", () => {
-    it("sets the new session id and resets all transient session state", () => {
+    it("shows a freshly-focused conversation its own empty draft state", () => {
       const { result } = renderHook(() => useChatStore())
       act(() => {
         result.current.setMessages([msg("a")])
@@ -112,6 +112,58 @@ describe("useChatStore", () => {
       expect(result.current.pendingCommandOverrides).toBeNull()
       expect(result.current.bookmarkedIds).toEqual([])
       expect(result.current.webSearchOnForNextSend).toBe(false)
+    })
+
+    it("keeps each conversation's composer draft context and restores it on return", () => {
+      // These used to be wiped on every focus change, so glancing at another
+      // conversation threw away a half-built @-mention set — and in split view
+      // the unfocused pane's controls wrote into the pane beside it.
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setActiveSession("session-a")
+        result.current.setPermissionMode("acceptEdits")
+        result.current.addReferencedPath(ref("/a-file"))
+      })
+
+      act(() => result.current.setActiveSession("session-b"))
+      expect(result.current.permissionMode).toBeNull()
+      expect(result.current.referencedPaths).toEqual([])
+
+      act(() => result.current.setActiveSession("session-a"))
+      expect(result.current.permissionMode).toBe("acceptEdits")
+      expect(result.current.referencedPaths.map((r) => r.absolute)).toEqual(["/a-file"])
+    })
+
+    it("writes a named conversation's draft state without touching the focused one", () => {
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setActiveSession("session-a")
+        result.current.openSession("session-b")
+        // What the unfocused split pane's composer does.
+        result.current.setPermissionMode("plan", "session-b")
+        result.current.addReferencedPath(ref("/b-file"), "session-b")
+      })
+
+      expect(result.current.permissionMode).toBeNull()
+      expect(result.current.referencedPaths).toEqual([])
+
+      act(() => result.current.setActiveSession("session-b"))
+      expect(result.current.permissionMode).toBe("plan")
+      expect(result.current.referencedPaths.map((r) => r.absolute)).toEqual(["/b-file"])
+    })
+
+    it("appends a system message to the conversation that produced it", () => {
+      // Slash-command echoes are persisted messages, so landing one in the
+      // wrong pane outlives the session.
+      const { result } = renderHook(() => useChatStore())
+      act(() => {
+        result.current.setActiveSession("session-a")
+        result.current.openSession("session-b")
+        result.current.appendMessageToSession("session-b", msg("echo"))
+      })
+
+      expect(result.current.messages).toEqual([])
+      expect(result.current.sessions["session-b"]?.messages.map((m) => m.id)).toEqual(["echo"])
     })
 
     it("accepts null to clear the active session", () => {

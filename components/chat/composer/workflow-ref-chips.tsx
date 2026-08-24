@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { BoxIcon, SplineIcon, XIcon } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
+import { useComposerSessionId } from "./composer-session-context"
 
 export interface WorkflowRefChipsProps {
   /**
@@ -23,6 +24,7 @@ export function WorkflowRefChips({ bare = false }: WorkflowRefChipsProps = {}) {
   const t = useTranslations("chat.composer.workflowRefs")
   const refs = useChatStore((s) => s.referencedWorkflowElements)
   const remove = useChatStore((s) => s.removeReferencedWorkflowElement)
+  const composerSessionId = useComposerSessionId()
 
   if (refs.length === 0) return null
   const chips = (
@@ -48,7 +50,7 @@ export function WorkflowRefChips({ bare = false }: WorkflowRefChipsProps = {}) {
               variant="ghost"
               size="icon-sm"
               aria-label={t("removeAria", { label: r.label })}
-              onClick={() => remove(r.type, r.id)}
+              onClick={() => remove(r.type, r.id, composerSessionId)}
               className="size-5 opacity-60 transition-opacity hover:opacity-100"
             >
               <XIcon className="size-3" />

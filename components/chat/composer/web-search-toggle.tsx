@@ -16,6 +16,7 @@ import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
 } from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
+import { useComposerSessionId } from "./composer-session-context"
 
 interface WebSearchToggleProps {
   /** Disable the toggle externally (e.g. while a turn is streaming). */
@@ -28,6 +29,7 @@ export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggle
 
   const on = useChatStore((s) => s.webSearchOnForNextSend)
   const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
+  const composerSessionId = useComposerSessionId()
 
   const settings = useSettingsStore((s) => s.settings)
   const searchEnabled = settings?.searchEnabled ?? false
@@ -60,7 +62,7 @@ export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggle
       aria-label={tComposer("ariaToggleWebSearch")}
       aria-pressed={on}
       disabled={disabled}
-      onClick={() => setOn(!on)}
+      onClick={() => setOn(!on, composerSessionId)}
       className={cn(
         "h-6 gap-1 px-1.5 text-[11px] font-normal",
         on && "bg-primary/90 text-primary-foreground hover:bg-primary"

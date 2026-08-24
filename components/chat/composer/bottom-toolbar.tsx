@@ -67,6 +67,7 @@ import { resolveToolbarLayout, type ComposerToolbarLayout } from "@/lib/chat/com
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
+import { useComposerSessionId } from "./composer-session-context"
 
 interface BottomToolbarProps {
   session: ChatSession | null
@@ -132,6 +133,7 @@ function GenericBottomToolbar({
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
+  const composerSessionId = useComposerSessionId()
   const rootRef = useRef<HTMLDivElement>(null)
   const toolbarWidth = useElementWidth(rootRef)
   const defaultModel = useSettingsStore((s) => s.settings?.defaultModel)
@@ -282,7 +284,7 @@ function GenericBottomToolbar({
         </>
       )}
       <PermissionModeIndicator
-        onCycle={(next) => setPermissionMode(next)}
+        onCycle={(next) => setPermissionMode(next, composerSessionId)}
         disabled={isStreaming}
         className={cn(TOOLBAR_CHIP, "shrink-0")}
       />

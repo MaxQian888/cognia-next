@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { ContextSelectionRef } from "@/types/artifact/artifact"
+import { useComposerSessionId } from "./composer-session-context"
 
 export interface ArtifactSelectionChipsProps {
   /** Render bare (no padded container) for composition inside ContextChipBar. */
@@ -68,6 +69,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
   const selections = useChatStore((s) => s.contextSelections)
   const remove = useChatStore((s) => s.removeContextSelection)
   const promote = useChatStore((s) => s.promoteContextSelection)
+  const composerSessionId = useComposerSessionId()
 
   if (selections.length === 0) return null
 
@@ -154,7 +156,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
                 type="button"
                 data-testid="artifact-selection-promote"
                 aria-label={t("promoteSelectionAria", { title: sel.title })}
-                onClick={() => promote(index)}
+                onClick={() => promote(index, composerSessionId)}
                 className="max-w-[min(280px,calc(100vw-6rem))] truncate hover:underline"
               >
                 {label}
@@ -176,7 +178,7 @@ export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsP
               variant="ghost"
               size="icon-sm"
               aria-label={t("removeSelectionAria", { title: sel.title })}
-              onClick={() => remove(index)}
+              onClick={() => remove(index, composerSessionId)}
               className="size-5 opacity-60 transition-opacity hover:opacity-100"
             >
               <XIcon className="size-3" />

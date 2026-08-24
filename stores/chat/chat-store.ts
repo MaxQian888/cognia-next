@@ -170,6 +170,27 @@ export interface SessionChatSlice {
    * elapsed. Slice-only (not projected); cleared when a fresh turn starts.
    */
   toolTimestamps: Record<string, { startedAt: number; endedAt?: number }>
+
+  // --- Composer draft context -----------------------------------------------
+  // These used to be single top-level fields, wiped on every focus change by a
+  // `uiReset` that described them as belonging to "the pane you're typing in".
+  // With two panes there are two of those, and one conversation's @-mentions,
+  // staged context and permission mode landed in the other's composer. Even
+  // single-pane, switching away and back threw the draft's context away.
+  //
+  // They live in the slice for the same reason `messages` does, and project
+  // onto the store top level so existing readers are unchanged.
+
+  /** `null` means "fall back to character / app default". */
+  permissionMode: PermissionMode | null
+  referencedPaths: FileReference[]
+  referencedWorkflowElements: WorkflowElementRef[]
+  referencedDocs: ContextRef[]
+  contextSelections: ContextSelectionRef[]
+  pendingCommandOverrides: PendingCommandOverrides | null
+  bookmarkedIds: string[]
+  webSearchOnForNextSend: boolean
+  ephemeralSkillIds: string[]
 }
 
 /** Default-initialised slice. `loading` seeds the hydration spinner for a
@@ -189,6 +210,15 @@ export function makeSessionSlice(loading = false): SessionChatSlice {
     runTiming: IDLE_TIMING,
     runId: 0,
     toolTimestamps: {},
+    permissionMode: null,
+    referencedPaths: [],
+    referencedWorkflowElements: [],
+    referencedDocs: [],
+    contextSelections: [],
+    pendingCommandOverrides: null,
+    bookmarkedIds: [],
+    webSearchOnForNextSend: false,
+    ephemeralSkillIds: [],
   }
 }
 
@@ -215,6 +245,15 @@ type ProjectedField =
   | "messagesLoading"
   | "messagesLoadError"
   | "messagesReloadNonce"
+  | "permissionMode"
+  | "referencedPaths"
+  | "referencedWorkflowElements"
+  | "referencedDocs"
+  | "contextSelections"
+  | "pendingCommandOverrides"
+  | "bookmarkedIds"
+  | "webSearchOnForNextSend"
+  | "ephemeralSkillIds"
 
 /** Project a slice onto the store's top-level (active-session) fields. */
 function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> {
@@ -228,6 +267,15 @@ function projectSlice(slice: SessionChatSlice): Pick<ChatState, ProjectedField> 
     messagesLoading: slice.messagesLoading,
     messagesLoadError: slice.messagesLoadError,
     messagesReloadNonce: slice.messagesReloadNonce,
+    permissionMode: slice.permissionMode,
+    referencedPaths: slice.referencedPaths,
+    referencedWorkflowElements: slice.referencedWorkflowElements,
+    referencedDocs: slice.referencedDocs,
+    contextSelections: slice.contextSelections,
+    pendingCommandOverrides: slice.pendingCommandOverrides,
+    bookmarkedIds: slice.bookmarkedIds,
+    webSearchOnForNextSend: slice.webSearchOnForNextSend,
+    ephemeralSkillIds: slice.ephemeralSkillIds,
   }
 }
 
@@ -341,6 +389,15 @@ function sliceForId(state: ChatState, id: string): SessionChatSlice {
       messagesLoading: state.messagesLoading,
       messagesLoadError: state.messagesLoadError,
       messagesReloadNonce: state.messagesReloadNonce,
+      permissionMode: state.permissionMode,
+      referencedPaths: state.referencedPaths,
+      referencedWorkflowElements: state.referencedWorkflowElements,
+      referencedDocs: state.referencedDocs,
+      contextSelections: state.contextSelections,
+      pendingCommandOverrides: state.pendingCommandOverrides,
+      bookmarkedIds: state.bookmarkedIds,
+      webSearchOnForNextSend: state.webSearchOnForNextSend,
+      ephemeralSkillIds: state.ephemeralSkillIds,
       // steerQueue / runTiming / runId / toolTimestamps are slice-only (not
       // projected onto the top-level active mirror), so seed them from defaults
       // when materialising a slice for the active session before its first write.
@@ -389,6 +446,47 @@ function patchSliceState(
     return { sessions, ...projectSlice(nextSlice) }
   }
   return { sessions }
+}
+
+/**
+ * Write `patch` into a NAMED session's slice, or the active one when the
+ * caller does not name it. `null` is not "no session" — it is "whoever has
+ * focus", which is the historical behaviour every un-migrated caller relies on.
+ */
+function patchComposerState(
+  state: ChatState,
+  sessionId: string | null | undefined,
+  patch: Partial<SessionChatSlice>
+): Partial<ChatState> {
+  return sessionId == null
+    ? patchActiveState(state, patch)
+    : patchSliceState(state, sessionId, patch)
+}
+
+/**
+ * The slice a composer write reads from — the named session, else the active
+ * one, else the bare projection (the pre-session ephemeral case, where the
+ * top-level fields ARE the state).
+ */
+function composerSlice(state: ChatState, sessionId: string | null | undefined): SessionChatSlice {
+  const id = sessionId ?? state.activeSessionId
+  return id == null ? { ...makeSessionSlice(), ...projectionAsSlice(state) } : sliceForId(state, id)
+}
+
+/** The top-level projection read back as slice-shaped fields. */
+function projectionAsSlice(state: ChatState): Partial<SessionChatSlice> {
+  return {
+    messages: state.messages,
+    permissionMode: state.permissionMode,
+    referencedPaths: state.referencedPaths,
+    referencedWorkflowElements: state.referencedWorkflowElements,
+    referencedDocs: state.referencedDocs,
+    contextSelections: state.contextSelections,
+    pendingCommandOverrides: state.pendingCommandOverrides,
+    bookmarkedIds: state.bookmarkedIds,
+    webSearchOnForNextSend: state.webSearchOnForNextSend,
+    ephemeralSkillIds: state.ephemeralSkillIds,
+  }
 }
 
 /** Write `patch` into the *active* session's slice (or just the top-level
@@ -526,6 +624,16 @@ interface ChatState {
   setSplitSessionId: (id: string | null) => void
   setMessages: (msgs: UIMessage[]) => void
   appendMessage: (msg: UIMessage) => void
+  /**
+   * Append into a NAMED session's slice.
+   *
+   * `appendMessage` writes to whichever session has focus, which is right for
+   * the one-pane case and wrong for every surface that belongs to a specific
+   * conversation. In split view the unfocused pane's composer echoed its slash
+   * command results into the *other* pane's transcript, and those echoes are
+   * persisted messages — the mistake outlived the session.
+   */
+  appendMessageToSession: (sessionId: string | null, msg: UIMessage) => void
   replaceMessages: (msgs: UIMessage[]) => void
   setMessagesLoading: (v: boolean) => void
   setMessagesLoadError: (msg: string | null) => void
@@ -580,21 +688,32 @@ interface ChatState {
    * shows an honest notice instead of a silently vanishing dialog. Restores
    * `awaiting_approval` → `streaming` when no live approvals remain. */
   markApprovalInterrupted: (requestId: string, sessionId?: string, reason?: string) => void
-  setPermissionMode: (mode: PermissionMode | null) => void
-  addReferencedPath: (ref: FileReference) => void
-  removeReferencedPath: (absolute: string) => void
-  clearReferencedPaths: () => void
+  /**
+   * Every composer-draft action takes an optional trailing `sessionId`. Omitted
+   * it means "the focused conversation", which is what a single-pane surface
+   * wants. The composer passes its OWN id through `ComposerSessionContext`, so
+   * the unfocused split pane writes to its own conversation instead of the
+   * one beside it.
+   */
+  setPermissionMode: (mode: PermissionMode | null, sessionId?: string | null) => void
+  addReferencedPath: (ref: FileReference, sessionId?: string | null) => void
+  removeReferencedPath: (absolute: string, sessionId?: string | null) => void
+  clearReferencedPaths: (sessionId?: string | null) => void
   /** Stage a workflow element as a reference chip for the next copilot turn. */
-  addReferencedDoc: (ref: ContextRef) => void
-  removeReferencedDoc: (id: string) => void
-  clearReferencedDocs: () => void
-  addReferencedWorkflowElement: (ref: WorkflowElementRef) => void
-  removeReferencedWorkflowElement: (type: "node" | "edge", id: string) => void
-  clearReferencedWorkflowElements: () => void
+  addReferencedDoc: (ref: ContextRef, sessionId?: string | null) => void
+  removeReferencedDoc: (id: string, sessionId?: string | null) => void
+  clearReferencedDocs: (sessionId?: string | null) => void
+  addReferencedWorkflowElement: (ref: WorkflowElementRef, sessionId?: string | null) => void
+  removeReferencedWorkflowElement: (
+    type: "node" | "edge",
+    id: string,
+    sessionId?: string | null
+  ) => void
+  clearReferencedWorkflowElements: (sessionId?: string | null) => void
   /** Stage a selection (of any kind) as a context chip for the next send. */
-  addContextSelection: (selection: ContextSelectionRef) => void
+  addContextSelection: (selection: ContextSelectionRef, sessionId?: string | null) => void
   /** Remove a staged selection (by index, since snapshots can repeat). */
-  removeContextSelection: (index: number) => void
+  removeContextSelection: (index: number, sessionId?: string | null) => void
   /**
    * Move a staged selection to the front, making it the send's edit target.
    *
@@ -605,14 +724,17 @@ interface ChatState {
    * selection can never hold the target (there is nothing to diff a proposal
    * against), so the composer skips past those rather than reading index 0.
    */
-  promoteContextSelection: (index: number) => void
-  clearContextSelections: () => void
-  setPendingCommandOverrides: (overrides: PendingCommandOverrides | null) => void
+  promoteContextSelection: (index: number, sessionId?: string | null) => void
+  clearContextSelections: (sessionId?: string | null) => void
+  setPendingCommandOverrides: (
+    overrides: PendingCommandOverrides | null,
+    sessionId?: string | null
+  ) => void
   toggleBookmark: (messageId: string) => void
-  setWebSearchOnForNextSend: (v: boolean) => void
-  setEphemeralSkillIds: (ids: string[]) => void
-  toggleEphemeralSkill: (id: string) => void
-  clearEphemeralSkillIds: () => void
+  setWebSearchOnForNextSend: (v: boolean, sessionId?: string | null) => void
+  setEphemeralSkillIds: (ids: string[], sessionId?: string | null) => void
+  toggleEphemeralSkill: (id: string, sessionId?: string | null) => void
+  clearEphemeralSkillIds: (sessionId?: string | null) => void
   /** Drop ids from the ephemeral attachment list (e.g. after a skill is deleted). */
   removeEphemeralSkillIds: (ids: string[]) => void
   setLastSend: (sessionId: string, entry: LastSendCacheEntry) => void
@@ -657,26 +779,19 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setActiveSession: (id) =>
     set((s) => {
-      // Composer-scoped UI toggles always reset on a focus change — they belong
-      // to "the pane you're typing in", not the conversation. The per-session
-      // slices (messages/status/error/approvals/branches) are NOT touched, so a
-      // background session's in-flight stream survives the switch untouched.
-      const uiReset: Partial<ChatState> = {
-        permissionMode: null,
-        referencedPaths: [],
-        referencedWorkflowElements: [],
-        referencedDocs: [],
-        contextSelections: [],
-        pendingCommandOverrides: null,
-        bookmarkedIds: [],
-        webSearchOnForNextSend: false,
-        ephemeralSkillIds: [],
-      }
+      // No composer-state reset here any more. These fields used to be wiped on
+      // every focus change, on the theory that they belong to "the pane you're
+      // typing in" — but they belong to the CONVERSATION you were composing to,
+      // and throwing away a half-built @-mention set because the user glanced
+      // at another conversation was never what anyone wanted. They now live in
+      // the slice, so switching focus re-projects the target's own values and
+      // switching back finds the draft context intact. `EMPTY_PROJECTION`
+      // covers the no-session case.
       // Stamp the switch so the desktop workspace can tell whether the session
       // or the guild was the more recent navigation intent.
       const activeSessionEpoch = nextNavEpoch()
       if (id == null) {
-        return { activeSessionId: null, activeSessionEpoch, ...uiReset, ...EMPTY_PROJECTION }
+        return { activeSessionId: null, activeSessionEpoch, ...EMPTY_PROJECTION }
       }
       const existed = Boolean(s.sessions[id])
       // A freshly-focused (never-opened) session seeds a loading slice so the
@@ -692,7 +807,6 @@ export const useChatStore = create<ChatState>((set) => ({
         activeSessionEpoch,
         sessions,
         openSessionIds,
-        ...uiReset,
         ...projectSlice(slice),
       }
     }),
@@ -726,15 +840,28 @@ export const useChatStore = create<ChatState>((set) => ({
   setSplitSessionId: (id) => set({ splitSessionId: id }),
   // A successful hydration / replacement clears the transient load flags.
   setMessages: (msgs) =>
-    set((s) => ({
-      ...patchActiveState(s, { messages: msgs, messagesLoading: false, messagesLoadError: null }),
-      // History load is the one place bookmarks re-enter memory: `setActiveSession`
-      // cleared them, and only the persisted flag knows which turns were starred.
-      // The active session's own slice still holds the pre-load history here, so
-      // exclude it and take the incoming `msgs` as the truth for it.
-      bookmarkedIds: deriveBookmarkedIds(msgs, s.sessions, s.activeSessionId),
-    })),
+    set((s) =>
+      // History load is the one place bookmarks re-enter memory: only the
+      // persisted flag knows which turns were starred. It goes INTO the slice
+      // rather than onto the top level beside it — a top-level-only write
+      // looked right until the next focus switch re-projected the stale slice
+      // value over it and the stars vanished.
+      patchActiveState(s, {
+        messages: msgs,
+        messagesLoading: false,
+        messagesLoadError: null,
+        bookmarkedIds: deriveBookmarkedIds(msgs, s.sessions, s.activeSessionId),
+      })
+    ),
   appendMessage: (msg) => set((s) => patchActiveState(s, { messages: [...s.messages, msg] })),
+  appendMessageToSession: (sessionId, msg) =>
+    set((s) =>
+      // A null id is the pre-session ephemeral case, which only the projection
+      // has — deferring to `patchActiveState` keeps that path unchanged.
+      sessionId == null
+        ? patchActiveState(s, { messages: [...s.messages, msg] })
+        : patchSliceState(s, sessionId, { messages: [...sliceForId(s, sessionId).messages, msg] })
+    ),
   replaceMessages: (msgs) => set((s) => patchActiveState(s, { messages: msgs })),
   setMessagesLoading: (v) => set((s) => patchActiveState(s, { messagesLoading: v })),
   setMessagesLoadError: (msg) =>
@@ -928,62 +1055,96 @@ export const useChatStore = create<ChatState>((set) => ({
         ...statusPatch(s, resolvedBucket, nextStatus),
       })
     }),
-  setPermissionMode: (mode) => set({ permissionMode: mode }),
-  addReferencedPath: (ref) =>
-    set((s) =>
-      s.referencedPaths.some((r) => r.absolute === ref.absolute)
-        ? s
-        : { referencedPaths: [...s.referencedPaths, ref] }
-    ),
-  addContextSelection: (selection) =>
-    set((s) => ({ contextSelections: [...s.contextSelections, selection] })),
-  removeContextSelection: (index) =>
-    set((s) =>
-      index < 0 || index >= s.contextSelections.length
-        ? s
-        : { contextSelections: s.contextSelections.filter((_, i) => i !== index) }
-    ),
-  promoteContextSelection: (index) =>
+  setPermissionMode: (mode, sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { permissionMode: mode })),
+  addReferencedPath: (ref, sessionId) =>
     set((s) => {
-      if (index <= 0 || index >= s.contextSelections.length) return s
-      const next = [...s.contextSelections]
+      const current = composerSlice(s, sessionId).referencedPaths
+      return current.some((r) => r.absolute === ref.absolute)
+        ? s
+        : patchComposerState(s, sessionId, { referencedPaths: [...current, ref] })
+    }),
+  addContextSelection: (selection, sessionId) =>
+    set((s) =>
+      patchComposerState(s, sessionId, {
+        contextSelections: [...composerSlice(s, sessionId).contextSelections, selection],
+      })
+    ),
+  removeContextSelection: (index, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).contextSelections
+      return index < 0 || index >= current.length
+        ? s
+        : patchComposerState(s, sessionId, {
+            contextSelections: current.filter((_, i) => i !== index),
+          })
+    }),
+  promoteContextSelection: (index, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).contextSelections
+      if (index <= 0 || index >= current.length) return s
+      const next = [...current]
       const [promoted] = next.splice(index, 1)
       next.unshift(promoted)
-      return { contextSelections: next }
+      return patchComposerState(s, sessionId, { contextSelections: next })
     }),
-  clearContextSelections: () =>
-    set((s) => (s.contextSelections.length === 0 ? s : { contextSelections: [] })),
-  removeReferencedPath: (absolute) =>
-    set((s) => ({
-      referencedPaths: s.referencedPaths.filter((r) => r.absolute !== absolute),
-    })),
-  setPendingCommandOverrides: (overrides) => set({ pendingCommandOverrides: overrides }),
-  clearReferencedPaths: () => set({ referencedPaths: [] }),
-  addReferencedDoc: (ref) =>
+  clearContextSelections: (sessionId) =>
     set((s) =>
-      s.referencedDocs.some((r) => r.id === ref.id)
+      composerSlice(s, sessionId).contextSelections.length === 0
         ? s
-        : { referencedDocs: [...s.referencedDocs, ref] }
+        : patchComposerState(s, sessionId, { contextSelections: [] })
     ),
-  removeReferencedDoc: (id) =>
-    set((s) => ({ referencedDocs: s.referencedDocs.filter((r) => r.id !== id) })),
-  clearReferencedDocs: () =>
-    set((s) => (s.referencedDocs.length === 0 ? s : { referencedDocs: [] })),
-  addReferencedWorkflowElement: (ref) =>
+  removeReferencedPath: (absolute, sessionId) =>
     set((s) =>
-      s.referencedWorkflowElements.some((r) => r.type === ref.type && r.id === ref.id)
+      patchComposerState(s, sessionId, {
+        referencedPaths: composerSlice(s, sessionId).referencedPaths.filter(
+          (r) => r.absolute !== absolute
+        ),
+      })
+    ),
+  setPendingCommandOverrides: (overrides, sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { pendingCommandOverrides: overrides })),
+  clearReferencedPaths: (sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { referencedPaths: [] })),
+  addReferencedDoc: (ref, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).referencedDocs
+      return current.some((r) => r.id === ref.id)
         ? s
-        : { referencedWorkflowElements: [...s.referencedWorkflowElements, ref] }
-    ),
-  removeReferencedWorkflowElement: (type, id) =>
-    set((s) => ({
-      referencedWorkflowElements: s.referencedWorkflowElements.filter(
-        (r) => !(r.type === type && r.id === id)
-      ),
-    })),
-  clearReferencedWorkflowElements: () =>
+        : patchComposerState(s, sessionId, { referencedDocs: [...current, ref] })
+    }),
+  removeReferencedDoc: (id, sessionId) =>
     set((s) =>
-      s.referencedWorkflowElements.length === 0 ? s : { referencedWorkflowElements: [] }
+      patchComposerState(s, sessionId, {
+        referencedDocs: composerSlice(s, sessionId).referencedDocs.filter((r) => r.id !== id),
+      })
+    ),
+  clearReferencedDocs: (sessionId) =>
+    set((s) =>
+      composerSlice(s, sessionId).referencedDocs.length === 0
+        ? s
+        : patchComposerState(s, sessionId, { referencedDocs: [] })
+    ),
+  addReferencedWorkflowElement: (ref, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).referencedWorkflowElements
+      return current.some((r) => r.type === ref.type && r.id === ref.id)
+        ? s
+        : patchComposerState(s, sessionId, { referencedWorkflowElements: [...current, ref] })
+    }),
+  removeReferencedWorkflowElement: (type, id, sessionId) =>
+    set((s) =>
+      patchComposerState(s, sessionId, {
+        referencedWorkflowElements: composerSlice(s, sessionId).referencedWorkflowElements.filter(
+          (r) => !(r.type === type && r.id === id)
+        ),
+      })
+    ),
+  clearReferencedWorkflowElements: (sessionId) =>
+    set((s) =>
+      composerSlice(s, sessionId).referencedWorkflowElements.length === 0
+        ? s
+        : patchComposerState(s, sessionId, { referencedWorkflowElements: [] })
     ),
   toggleBookmark: (messageId) =>
     set((s) => {
@@ -997,7 +1158,9 @@ export const useChatStore = create<ChatState>((set) => ({
       // against the *active* id would write to the wrong conversation (or
       // nowhere), leaving a star that reads as saved and isn't.
       const owner = findMessageOwner(s, messageId)
-      if (owner == null) return { bookmarkedIds }
+      // No owner (a message not held by any open slice): the projected list is
+      // all there is to update.
+      if (owner == null) return patchActiveState(s, { bookmarkedIds })
 
       // Mirror onto the message's own metadata as well as writing it through.
       // `persistMessages` rewrites each row's metadata blob from the in-memory
@@ -1011,17 +1174,31 @@ export const useChatStore = create<ChatState>((set) => ({
       messages[idx] = { ...target, metadata: { ...meta, bookmarked: next } } as UIMessage
 
       writeBookmark(owner.sessionId, messageId, next)
-      return { ...patchSliceState(s, owner.sessionId, { messages }), bookmarkedIds }
+
+      // Two writes into possibly-different slices, so the second has to build
+      // on the first's `sessions` map or it drops the message update. The
+      // starred set stays a union across open panes — a background pane's
+      // renderer reads the focused projection, and narrowing it here would
+      // blank its stars.
+      const withMessage = patchSliceState(s, owner.sessionId, { messages })
+      const afterMessage = { ...s, ...withMessage } as ChatState
+      return { ...withMessage, ...patchActiveState(afterMessage, { bookmarkedIds }) }
     }),
-  setWebSearchOnForNextSend: (v) => set({ webSearchOnForNextSend: v }),
-  setEphemeralSkillIds: (ids) => set({ ephemeralSkillIds: ids }),
-  toggleEphemeralSkill: (id) =>
-    set((s) => ({
-      ephemeralSkillIds: s.ephemeralSkillIds.includes(id)
-        ? s.ephemeralSkillIds.filter((x) => x !== id)
-        : [...s.ephemeralSkillIds, id],
-    })),
-  clearEphemeralSkillIds: () => set({ ephemeralSkillIds: [] }),
+  setWebSearchOnForNextSend: (v, sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { webSearchOnForNextSend: v })),
+  setEphemeralSkillIds: (ids, sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { ephemeralSkillIds: ids })),
+  toggleEphemeralSkill: (id, sessionId) =>
+    set((s) => {
+      const current = composerSlice(s, sessionId).ephemeralSkillIds
+      return patchComposerState(s, sessionId, {
+        ephemeralSkillIds: current.includes(id)
+          ? current.filter((x) => x !== id)
+          : [...current, id],
+      })
+    }),
+  clearEphemeralSkillIds: (sessionId) =>
+    set((s) => patchComposerState(s, sessionId, { ephemeralSkillIds: [] })),
   removeEphemeralSkillIds: (ids) =>
     set((s) => {
       const drop = new Set(ids)
