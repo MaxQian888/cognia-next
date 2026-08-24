@@ -282,6 +282,11 @@ export function resolveToolbarLayout(
   toolbarWidth: number
 ): ComposerToolbarLayout {
   if (toolbarWidth <= 0 || toolbarWidth >= COMPACT_TOOLBAR_PX) return proposed
+  // `detached` keeps its OWN narrow packing — the two-row compact branch that
+  // predates skins. Rewriting it to `embedded` here would move the row from
+  // below the box to inside it the moment a pane narrowed, which is not what
+  // narrowing has ever meant for the classic composer.
+  if (proposed === "detached") return "detached"
   // `folded` is already the tightest arrangement — narrowing cannot improve it.
   if (proposed === "folded") return "folded"
   return "embedded"

@@ -503,12 +503,14 @@ describe("BottomToolbar — every layout keeps the whole roster reachable", () =
     expect(screen.queryByTestId("composer-toolbar-more")).toBeNull()
   })
 
-  it("keeps the full roster inline even in a narrow pane, once the skin asked for it", () => {
-    // `resolveToolbarLayout` is what protects a genuinely narrow pane; if the
-    // caller still says `expanded`, re-deciding here on raw width would undo it.
+  it("gives up the inline roster in a pane too narrow to hold it", () => {
+    // Skin proposes, width disposes: `expanded` cannot fit here, so it packs.
+    // Nothing is lost — the tail is under "⋯", which the roster test above
+    // already proves for this layout.
     mockToolbarWidth = 300
     render(<BottomToolbar session={session} variant="expanded" />)
-    expect(screen.getByTestId("composer-ambient-rail")).toBeInTheDocument()
+    expect(screen.queryByTestId("composer-ambient-rail")).toBeNull()
+    expect(screen.getByTestId("composer-toolbar-embedded")).toBeInTheDocument()
   })
 
   it("gives rail the same roster as embedded, only quieter", () => {

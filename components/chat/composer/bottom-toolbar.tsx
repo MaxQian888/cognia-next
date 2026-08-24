@@ -63,7 +63,7 @@ import { useAgentRuntimeStore } from "@/stores/agent"
 import { PluginExtensionSlotWithOverflow } from "@/components/plugins/plugin-extension-slot-with-overflow"
 import { PluginQuickActionsMenu } from "./plugin-quick-actions-menu"
 import { WorkflowBottomToolbar } from "./workflow-bottom-toolbar"
-import type { ComposerToolbarLayout } from "@/lib/chat/composer-skin"
+import { resolveToolbarLayout, type ComposerToolbarLayout } from "@/lib/chat/composer-skin"
 import { ComposerPresetChip } from "./preset-chip"
 import { ComposerCredentialBadge } from "./credential-badge"
 import { SessionCostBadgeLive } from "@/components/chat/session-cost-badge-live"
@@ -163,7 +163,11 @@ function GenericBottomToolbar({
   // Popover: re-mounting a trigger-owning control inside a `DropdownMenuItem`
   // desyncs its open state.) `toolbarWidth === 0` (pre-measure) takes the wide
   // branch, matching the common chat pane.
-  const layout: ComposerToolbarLayout = variant === "default" ? "detached" : variant
+  // Skin proposes, width disposes. The skin picked an arrangement for a
+  // comfortable pane; a genuinely narrow one cannot hold `expanded`'s labelled
+  // roster whatever the user chose.
+  const proposedLayout: ComposerToolbarLayout = variant === "default" ? "detached" : variant
+  const layout = resolveToolbarLayout(proposedLayout, toolbarWidth)
   /** Any arrangement that sits INSIDE the composer box rather than below it. */
   const inBox = layout !== "detached"
   const compact = toolbarWidth > 0 && toolbarWidth < COMPACT_TOOLBAR_PX
@@ -415,9 +419,9 @@ function GenericBottomToolbar({
   // Compact (mobile / narrow workflow sidebar): two rows at most — Tier 1 on
   // the first, context usage + overflow sharing the second.
   //
-  // `expanded` opts out: the skin explicitly asked for the full inline roster,
-  // and `resolveToolbarLayout` has already downgraded it if the pane is too
-  // narrow to hold one. Re-deciding here on raw width would undo that.
+  // `layout` can no longer BE `expanded` here — `resolveToolbarLayout` already
+  // downgraded it if the pane is this narrow — but the guard stays so the two
+  // width checks cannot drift apart.
   if (compact && layout !== "expanded") {
     return (
       <div

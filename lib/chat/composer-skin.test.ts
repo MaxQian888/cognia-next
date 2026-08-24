@@ -143,8 +143,13 @@ describe("skin proposes, width disposes", () => {
 
   it("packs a roster that cannot fit, whatever the user chose", () => {
     expect(resolveToolbarLayout("expanded", 300)).toBe("embedded")
-    expect(resolveToolbarLayout("detached", 300)).toBe("embedded")
     expect(resolveToolbarLayout("rail", 300)).toBe("embedded")
+  })
+
+  it("leaves detached alone — it owns its own narrow packing", () => {
+    // Rewriting it would move the row from below the box to inside it the
+    // moment a pane narrowed, which narrowing has never meant for classic.
+    expect(resolveToolbarLayout("detached", 300)).toBe("detached")
   })
 
   it("leaves the tightest arrangement alone — narrowing cannot improve it", () => {
