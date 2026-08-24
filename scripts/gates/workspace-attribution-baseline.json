@@ -1,0 +1,98 @@
+{
+  "components/agent/plan/plan-composer-dock.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/app-shell-mobile.tsx": {
+    "projection": 3,
+    "cwd": 0
+  },
+  "components/chat/composer.tsx": {
+    "projection": 2,
+    "cwd": 0
+  },
+  "components/chat/composer/artifact-selection-chips.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/composer/bottom-toolbar.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/composer/workflow-bottom-toolbar.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/dialogs/clear-conversation-trigger.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/message-parts/compact-boundary-part.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/message-parts/terminal-tool-part.tsx": {
+    "projection": 0,
+    "cwd": 1
+  },
+  "components/chat/minimap/conversation-timeline.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/permission-mode-indicator.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/plan-mode-banner.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/chat/reference-chips.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/desktop/desktop-chat-workspace.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "components/mobile/mobile-terminal-screen.tsx": {
+    "projection": 0,
+    "cwd": 1
+  },
+  "components/providers/initializers/context-keys-initializer.tsx": {
+    "projection": 2,
+    "cwd": 0
+  },
+  "hooks/chat/use-follow-up-suggestions.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "hooks/chat/use-message-permalink.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "hooks/chat/use-sdk-context-usage.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "hooks/chat/use-sdk-session-capabilities.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "hooks/chat/use-starter-suggestions.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "lib/ai/agent/team/durable-new-team.ts": {
+    "projection": 0,
+    "cwd": 1
+  },
+  "lib/terminal/run-in-dock.ts": {
+    "projection": 0,
+    "cwd": 1
+  },
+  "stores/project/project-store.ts": {
+    "projection": 0,
+    "cwd": 2
+  }
+}

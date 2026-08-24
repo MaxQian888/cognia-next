@@ -198,6 +198,7 @@ const REGISTRY = [
   { script: "audit:pro-ide-constants", group: "audit" },
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
+  { script: "audit:workspace-attribution", group: "audit" },
   // Hook contracts are synthesized from one literal, so a hook the host never
   // fires still advertises itself to plugin authors as stable + implemented.
   // This keeps the `VIRTUAL_HOOK_POINTS` dormancy label honest in both
