@@ -11,6 +11,7 @@ import { transport } from "@/lib/tauri"
 import { getEffectiveSchedulerHostTarget } from "./scheduler-host-target"
 import { schedulerDb } from "./scheduler-db"
 import { getTaskScheduler } from "./task-scheduler"
+import { resolveTaskWorkspace } from "./task-workspace-binding"
 
 export interface SchedulerDataSource {
   readonly host: "local" | "remote"
@@ -54,8 +55,14 @@ export interface SchedulerDataSource {
 class LocalSchedulerDataSource implements SchedulerDataSource {
   readonly host = "local" as const
 
-  createTask(input: CreateScheduledTaskInput) {
-    return getTaskScheduler().createTask(input)
+  async createTask(input: CreateScheduledTaskInput) {
+    // The boundary where the main database IS available. Resolving here rather
+    // than inside the scheduler keeps `SchedulerDatabase` independent of it,
+    // which is the whole reason it is a separate instance.
+    return getTaskScheduler().createTask({
+      ...input,
+      projectId: await resolveTaskWorkspace(input),
+    })
   }
 
   updateTask(taskId: string, input: UpdateScheduledTaskInput) {

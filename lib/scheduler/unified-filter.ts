@@ -46,6 +46,17 @@ export interface UnifiedFilterCriteria {
   loopOnly?: boolean
   /** Kinds to keep. An empty/omitted set means "every kind". */
   kinds?: ReadonlySet<ScheduledItemKind>
+  /**
+   * Keep only items belonging to this workspace, plus every unattributed and
+   * machine-wide one. Omitted disables the predicate entirely.
+   *
+   * A schedule belongs to the work it was set up for, and a list that mixes
+   * five repositories' schedules cannot be maintained. But an item with NO
+   * workspace — a backup, a system task, a row that predates the column — is
+   * unattributed, not foreign: hiding it would make it invisible in every
+   * workspace at once.
+   */
+  projectId?: string
 }
 
 function matchesStatus(item: UnifiedScheduledItem, status: UnifiedStatusFilter): boolean {
@@ -88,6 +99,7 @@ export function filterUnifiedItems(
   const status = criteria.status ?? "all"
   const loopOnly = criteria.loopOnly === true
   const kinds = criteria.kinds && criteria.kinds.size > 0 ? criteria.kinds : undefined
+  const projectId = criteria.projectId
 
   // A copy, not the caller's array. The signature takes `readonly` and the
   // result is handed to the sidebar as `visibleItems`; returning the input
@@ -95,10 +107,11 @@ export function filterUnifiedItems(
   // reorders `unifiedItems` itself — the memoized array behind the calendar,
   // the agenda, the statistics and the keyboard cursor — with no re-render to
   // make it visible. Every other branch allocates anyway.
-  if (!query && status === "all" && !loopOnly && !kinds) return items.slice()
+  if (!query && status === "all" && !loopOnly && !kinds && !projectId) return items.slice()
 
   return items.filter((item) => {
     if (kinds && !kinds.has(item.kind)) return false
+    if (projectId && item.projectId && item.projectId !== projectId) return false
     if (!matchesStatus(item, status)) return false
     if (loopOnly && !isLoopItem(item)) return false
     if (query && !matchesSearch(item, query)) return false

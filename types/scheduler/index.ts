@@ -624,6 +624,21 @@ export interface ScheduledTask {
    * backfilled to `{ kind: "user" }`.
    */
   createdBy?: ScheduledTaskCreator
+  /**
+   * Owning workspace — a SOFT foreign key onto the main database's `projects`
+   * table, which this database cannot reference (the scheduler has its own
+   * Dexie instance on purpose).
+   *
+   * A schedule belongs to the work it was set up for. Without this it had only
+   * a free-text `cwd` in its payload, so it could not be listed per workspace,
+   * could not resolve its execution root the way an interactive turn does, and
+   * fired against whatever directory the string happened to name.
+   *
+   * Undefined on rows that predate scheduler schema v5 and have no owning
+   * session to inherit from — treated as "belongs to every workspace" rather
+   * than guessed at, since a guess would silently rebind someone's schedule.
+   */
+  projectId?: string
   /** Tags for categorization */
   tags?: string[]
   /** Auto-expire the task once this instant passes (checked lazily at arm/fire). */
@@ -709,6 +724,12 @@ export interface CreateScheduledTaskInput {
   config?: Partial<TaskExecutionConfig>
   notification?: Partial<TaskNotificationConfig>
   createdBy?: ScheduledTaskCreator
+  /**
+   * Owning workspace. Omitted, it is resolved at creation — from the creating
+   * conversation's workspace when `createdBy.sessionId` names one, otherwise
+   * from the active workspace.
+   */
+  projectId?: string
   tags?: string[]
   endAt?: Date
   onSuccessTaskIds?: string[]
@@ -742,6 +763,12 @@ export interface TaskFilter {
   status?: ScheduledTaskStatus
   tags?: string[]
   search?: string
+  /**
+   * Restrict to one workspace. Rows with NO workspace always pass — they are
+   * unattributed rather than foreign, and hiding them would make a schedule
+   * that predates the column invisible everywhere at once.
+   */
+  projectId?: string
 }
 
 /**

@@ -770,7 +770,7 @@ describe("SchedulerDatabase", () => {
 
       const upgraded = new SchedulerDatabase(name)
       await upgraded.open()
-      expect(upgraded.verno).toBe(4)
+      expect(upgraded.verno).toBe(5)
       await expect(upgraded.getActiveEventTasks("job:exited")).resolves.toEqual([
         expect.objectContaining({ id: "legacy-event" }),
       ])

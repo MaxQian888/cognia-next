@@ -101,6 +101,12 @@ export interface UnifiedScheduledItem {
    * `lib/loop/interval.ts`). Sources with no tag concept leave this unset.
    */
   tags?: string[]
+  /**
+   * Owning workspace, for sources that have one (`app` schedules do; a backup
+   * or a system task is machine-wide). Undefined means unattributed rather
+   * than foreign — see `taskVisibleInWorkspace`.
+   */
+  projectId?: string
   origin: UnifiedItemOrigin
   capabilities: UnifiedItemCapabilities
 }

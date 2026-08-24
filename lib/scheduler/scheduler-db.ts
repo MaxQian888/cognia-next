@@ -29,6 +29,8 @@ interface DBScheduledTask {
   config: string // JSON serialized TaskExecutionConfig
   notification: string // JSON serialized TaskNotificationConfig
   createdBy?: string // JSON serialized ScheduledTaskCreator (v3)
+  /** Owning workspace — soft FK onto the main db's `projects` (v5). */
+  projectId?: string
   status: string
   tags?: string // JSON serialized string[]
   endAt?: string // ISO date string
@@ -143,6 +145,16 @@ class SchedulerDatabase extends Dexie {
             task.eventType = eventTypeFromSerializedTrigger(task.trigger)
           })
       )
+
+    // v5 — owning workspace. Index only: the backfill needs the MAIN database
+    // (to read a creating session's workspace), and reaching across Dexie
+    // instances from inside an upgrade transaction is how you get a deadlock.
+    // `backfillTaskWorkspaces` runs it at boot instead, where both are open.
+    this.version(5).stores({
+      tasks:
+        "id, name, type, status, nextRunAt, createdAt, projectId, [status+nextRunAt], [status+type], [status+eventType], [projectId+status]",
+      executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+    })
   }
 
   // ========== Task Operations ==========
@@ -266,6 +278,13 @@ class SchedulerDatabase extends Dexie {
     const dbTasks = await collection.toArray()
     let tasks = dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
 
+    // Filter by workspace. A task with no workspace passes every filter: it
+    // is unattributed, not foreign, and hiding it would make a schedule that
+    // predates the column invisible in every workspace at once.
+    if (filter.projectId) {
+      tasks = tasks.filter((t) => !t.projectId || t.projectId === filter.projectId)
+    }
+
     // Filter by types
     if (filter.types && filter.types.length > 0) {
       tasks = tasks.filter((t) => filter.types!.includes(t.type))
@@ -287,6 +306,54 @@ class SchedulerDatabase extends Dexie {
     }
 
     return tasks
+  }
+
+  /**
+   * Tasks owned by one workspace, plus the unattributed ones.
+   *
+   * Backed by the v5 `projectId` index for the owned half; the unattributed
+   * half needs a scan because IndexedDB cannot index "absent".
+   */
+  async getTasksByProject(projectId: string): Promise<ScheduledTask[]> {
+    const [owned, all] = await Promise.all([
+      this.tasks.where("projectId").equals(projectId).toArray(),
+      this.tasks.toArray(),
+    ])
+    const rows = [...owned, ...all.filter((row) => !row.projectId)]
+    return rows.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+  }
+
+  /**
+   * Stamp the owning workspace onto rows written before scheduler v5.
+   *
+   * Runs at boot rather than in the upgrade hook: the answer lives in the MAIN
+   * database (a creating session's workspace), and reaching across Dexie
+   * instances from inside an upgrade transaction is how you get a deadlock.
+   *
+   * A row whose creator names no session is LEFT ALONE. Stamping it with
+   * whatever workspace happened to be active at upgrade time would silently
+   * rebind someone's schedule to the wrong repository — for a user with five
+   * workspaces it would be wrong four times out of five. Unattributed rows show
+   * up everywhere instead, which is visible and correctable.
+   *
+   * Returns how many rows it stamped. Idempotent.
+   */
+  async backfillTaskWorkspaces(
+    resolveSessionWorkspace: (sessionId: string) => Promise<string | null | undefined>
+  ): Promise<number> {
+    const rows = await this.tasks.filter((row) => !row.projectId).toArray()
+    let stamped = 0
+    for (const row of rows) {
+      const sessionId = row.createdBy
+        ? ((JSON.parse(row.createdBy) as { sessionId?: string }).sessionId ?? null)
+        : null
+      if (!sessionId) continue
+      const projectId = await resolveSessionWorkspace(sessionId).catch(() => null)
+      if (!projectId) continue
+      await this.tasks.update(row.id, { projectId })
+      stamped += 1
+    }
+    return stamped
   }
 
   /** Get active event-triggered tasks, optionally filtered by eventType. */
@@ -540,6 +607,7 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
     createdBy: JSON.stringify(task.createdBy ?? { kind: "user" }),
+    projectId: task.projectId,
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
     endAt: task.endAt?.toISOString(),
@@ -616,6 +684,7 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
     config,
     notification: JSON.parse(dbTask.notification),
     createdBy: dbTask.createdBy ? JSON.parse(dbTask.createdBy) : { kind: "user" },
+    projectId: dbTask.projectId,
     status: dbTask.status as ScheduledTask["status"],
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
     endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,

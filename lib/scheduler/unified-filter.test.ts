@@ -321,3 +321,42 @@ describe("selectUpcomingItems", () => {
     expect(picked.map((i) => i.sourceId)).toEqual(["pending"])
   })
 })
+
+describe("workspace filtering", () => {
+  it("keeps items from the workspace being viewed", () => {
+    const items = [
+      item({ sourceId: "a", projectId: "w1" }),
+      item({ sourceId: "b", projectId: "w2" }),
+    ]
+    expect(filterUnifiedItems(items, { projectId: "w1" }).map((i) => i.unifiedId)).toEqual([
+      "app:a",
+    ])
+  })
+
+  it("keeps machine-wide and unattributed items in every workspace", () => {
+    // A backup or a row that predates the column is unattributed, not foreign;
+    // hiding it would make it invisible in every workspace at once.
+    const items = [
+      item({ sourceId: "x", kind: "backup" }),
+      item({ sourceId: "b", projectId: "w2" }),
+    ]
+    expect(filterUnifiedItems(items, { projectId: "w1" }).map((i) => i.unifiedId)).toEqual([
+      "backup:x",
+    ])
+  })
+
+  it("disables the predicate when no workspace is given", () => {
+    const items = [
+      item({ sourceId: "a", projectId: "w1" }),
+      item({ sourceId: "b", projectId: "w2" }),
+    ]
+    expect(filterUnifiedItems(items, {})).toHaveLength(2)
+  })
+
+  it("still returns a fresh array on the workspace-only path", () => {
+    // The no-op fast path must not hand back the caller's array, or a
+    // downstream `.sort()` reorders the memoized source list in place.
+    const items = [item({ sourceId: "a", projectId: "w1" })]
+    expect(filterUnifiedItems(items, { projectId: "w1" })).not.toBe(items)
+  })
+})

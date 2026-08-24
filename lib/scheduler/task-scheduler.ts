@@ -271,6 +271,7 @@ class TaskSchedulerImpl {
   /** Guards the one-shot boot reconcile so multiple authority transitions in a
    * single process don't re-cancel executions repeatedly. */
   private staleExecutionsReconciled = false
+  private taskWorkspacesBackfilled = false
   private checkInterval: ReturnType<typeof setInterval> | null = null
   private cleanupInterval: ReturnType<typeof setInterval> | null = null
   private leaderUnsubscribe: (() => void) | null = null
@@ -511,6 +512,23 @@ class TaskSchedulerImpl {
       } catch (err) {
         log.error("Failed to reconcile stale executions on boot:", err)
       }
+    }
+
+    // Stamp the owning workspace onto rows written before scheduler v5. Here
+    // rather than in the Dexie upgrade hook: the answer lives in the MAIN
+    // database, and reaching across instances from inside an upgrade
+    // transaction is how you get a deadlock. Best-effort — an unattributed
+    // schedule still fires, it just shows in every workspace.
+    if (!this.taskWorkspacesBackfilled) {
+      this.taskWorkspacesBackfilled = true
+      try {
+        const { backfillSessionWorkspace } = await import("./task-workspace-binding")
+        const stamped = await schedulerDb.backfillTaskWorkspaces(backfillSessionWorkspace)
+        if (stamped > 0) log.info(`Bound ${stamped} scheduled task(s) to their workspace`)
+      } catch (err) {
+        log.error("Failed to backfill scheduled-task workspaces on boot:", err)
+      }
+      if (version !== this.lifecycleVersion) return
     }
 
     // Deprecated task types (`sync`, `ai-generation`) have no executor: park
@@ -1025,6 +1043,12 @@ class TaskSchedulerImpl {
       notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
       status: "active",
       createdBy: input.createdBy ?? { kind: "user" },
+      // A schedule belongs to the work it was set up for. Resolved by the
+      // caller, NOT here: the scheduler keeps its own Dexie instance precisely
+      // so it does not depend on the main database, and reaching into it from
+      // the creation path made task creation wait on a database this layer has
+      // no business knowing about. `SchedulerDataSource` fills it in.
+      projectId: input.projectId,
       tags: input.tags,
       endAt: input.endAt,
       onSuccessTaskIds: input.onSuccessTaskIds,
