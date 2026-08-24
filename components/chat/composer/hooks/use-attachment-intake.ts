@@ -65,9 +65,9 @@ export interface UseAttachmentIntakeOptions {
   setCaret: (caret: number) => void
   isDesktop: boolean
   /** `useTranslations("chat.composer")` — smart-snapshot copy. */
-  t: (key: string, values?: Record<string, unknown>) => string
+  t: (key: string, values?: Record<string, string | number | Date>) => string
   /** `useTranslations("chat.composer.attachments")` — gate copy. */
-  tAttach: (key: string, values?: Record<string, unknown>) => string
+  tAttach: (key: string, values?: Record<string, string | number | Date>) => string
 }
 
 export function useAttachmentIntake({
