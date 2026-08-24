@@ -220,3 +220,45 @@ describe("notify — defaults", () => {
     expect(toast).toHaveBeenCalled()
   })
 })
+
+describe("source workspace label", () => {
+  it("keeps the workspace the caller named", async () => {
+    const deps = baseDeps()
+    await notify({ source: "system", level: "info", title: "x", projectId: "w1" }, deps)
+    expect(deps.db.rows.get("fixed-id")!.projectId).toBe("w1")
+  })
+
+  it("inherits the conversation's workspace when the caller names none", async () => {
+    const resolveSessionWorkspace = jest.fn(async () => "w-from-session")
+    const deps = baseDeps({ resolveSessionWorkspace })
+    await notify(
+      { source: "chat", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
+      deps
+    )
+    expect(resolveSessionWorkspace).toHaveBeenCalledWith("s1")
+    expect(deps.db.rows.get("fixed-id")!.projectId).toBe("w-from-session")
+  })
+
+  it("leaves a machine-wide notification unlabelled", async () => {
+    const resolveSessionWorkspace = jest.fn(async () => "nope")
+    const deps = baseDeps({ resolveSessionWorkspace })
+    await notify({ source: "system", level: "info", title: "update available" }, deps)
+    expect(resolveSessionWorkspace).not.toHaveBeenCalled()
+    expect(deps.db.rows.get("fixed-id")!.projectId).toBeUndefined()
+  })
+
+  it("delivers the notification even when the workspace cannot be resolved", async () => {
+    // An unlabelled notification is far better than a lost one.
+    const deps = baseDeps({
+      resolveSessionWorkspace: async () => {
+        throw new Error("db closed")
+      },
+    })
+    const id = await notify(
+      { source: "chat", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
+      deps
+    )
+    expect(id).toBe("fixed-id")
+    expect(deps.db.rows.get("fixed-id")!.projectId).toBeUndefined()
+  })
+})

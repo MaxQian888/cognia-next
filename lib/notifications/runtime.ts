@@ -195,6 +195,12 @@ function buildDeps(): NotifyDeps {
     push:
       platform === "tauri" ? pushToCompanions : headless ? publishRemoteNotification : undefined,
     imDeliver: imDeliverFn,
+    // Lazy so the notification runtime keeps no static Dexie import; a failure
+    // here only costs the workspace label on the row.
+    resolveSessionWorkspace: async (sessionId: string) => {
+      const { getDb } = await import("@/lib/db/schema")
+      return (await getDb().sessions.get(sessionId))?.projectId
+    },
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
   }
 }

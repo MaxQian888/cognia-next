@@ -106,6 +106,21 @@ export interface NotificationInput {
   actions?: NotificationAction[]
   sourceRef?: NotificationSourceRef
   pluginId?: string
+  /**
+   * The workspace this notification came FROM.
+   *
+   * Labels the source; it deliberately does not filter the feed. A cross-
+   * workspace reminder is the feedback loop that makes concurrent work
+   * possible — folding the notification centre down to the active workspace
+   * would throw away half of what it is for. What was missing is the other
+   * half: "needs approval" could not say which workspace or which conversation
+   * it came from, so the user clicked through and only then discovered the
+   * workbench had switched underneath them.
+   *
+   * Resolved from the session when the caller does not name one. Absent for
+   * genuinely machine-wide events (an update, a licence, a device pairing).
+   */
+  projectId?: string
   /** Lucide icon name (renderer maps to a component). */
   icon?: string
   /**
@@ -146,6 +161,21 @@ export interface NotificationRecord {
   actions?: NotificationAction[]
   sourceRef?: NotificationSourceRef
   pluginId?: string
+  /**
+   * The workspace this notification came FROM.
+   *
+   * Labels the source; it deliberately does not filter the feed. A cross-
+   * workspace reminder is the feedback loop that makes concurrent work
+   * possible — folding the notification centre down to the active workspace
+   * would throw away half of what it is for. What was missing is the other
+   * half: "needs approval" could not say which workspace or which conversation
+   * it came from, so the user clicked through and only then discovered the
+   * workbench had switched underneath them.
+   *
+   * Resolved from the session when the caller does not name one. Absent for
+   * genuinely machine-wide events (an update, a licence, a device pairing).
+   */
+  projectId?: string
   icon?: string
   directed: boolean
   /** Diagnostic: which fan-out channels actually fired. */

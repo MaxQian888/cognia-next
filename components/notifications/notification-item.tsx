@@ -22,8 +22,10 @@ import {
   WorkflowIcon,
   type LucideIcon,
   CircleDotIcon,
+  FolderIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useProjectStore } from "@/stores/project/project-store"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -95,6 +97,13 @@ export function NotificationItem({
   const now = useNow()
   const Icon = SOURCE_ICON[record.source] ?? BellIcon
   const unread = record.readState === "unseen" || record.readState === "seen"
+  // Label the source, never filter the feed: a cross-workspace reminder is the
+  // feedback loop that makes concurrent work possible.
+  const foreignWorkspaceName = useProjectStore((s) =>
+    record.projectId && record.projectId !== s.activeProjectId
+      ? s.projects.find((project) => project.id === record.projectId)?.name
+      : undefined
+  )
 
   return (
     <div
@@ -146,6 +155,22 @@ export function NotificationItem({
             )}
             <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
               <span className="truncate">{t(`sources.${record.source}`)}</span>
+              {/* Only when it came from SOMEWHERE ELSE. "Needs approval" used to
+                  be unattributable: the user clicked through and only then
+                  discovered the workbench had switched underneath them. On a row
+                  from the workspace already on screen the label is noise. */}
+              {foreignWorkspaceName ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span
+                    className="flex min-w-0 items-center gap-1 truncate"
+                    data-testid="notification-workspace"
+                  >
+                    <FolderIcon aria-hidden className="size-3 shrink-0" />
+                    {foreignWorkspaceName}
+                  </span>
+                </>
+              ) : null}
               <span aria-hidden>·</span>
               <time className="shrink-0" dateTime={new Date(record.createdAt).toISOString()}>
                 {format.relativeTime(new Date(record.createdAt), now)}

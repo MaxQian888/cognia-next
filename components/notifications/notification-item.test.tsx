@@ -9,7 +9,19 @@ jest.mock("next-intl", () => ({
   useNow: () => new Date("2024-01-01T00:00:00Z"),
 }))
 
+import { useProjectStore } from "@/stores/project/project-store"
+
 import { NotificationItem } from "./notification-item"
+
+function seedWorkspaces(activeProjectId: string | null) {
+  useProjectStore.setState({
+    activeProjectId,
+    projects: [
+      { id: "w1", name: "Work", roots: [] },
+      { id: "w2", name: "Hobby", roots: [] },
+    ],
+  } as unknown as Parameters<typeof useProjectStore.setState>[0])
+}
 
 function rec(over: Partial<NotificationRecord> = {}): NotificationRecord {
   return {
@@ -163,4 +175,32 @@ it("offers restore instead of active-feed triage for archived records", async ()
   await user.click(await screen.findByText("notificationCenter.center.restore"))
   expect(onRestore).toHaveBeenCalledWith("n1")
   expect(screen.queryByText("notificationCenter.center.markDone")).not.toBeInTheDocument()
+})
+
+describe("source workspace label", () => {
+  it("names the workspace a notification came from when it is not the one on screen", () => {
+    // "Needs approval" used to be unattributable: the user clicked through and
+    // only then discovered the workbench had switched underneath them.
+    seedWorkspaces("w1")
+    setup({ projectId: "w2" })
+    expect(screen.getByTestId("notification-workspace")).toHaveTextContent("Hobby")
+  })
+
+  it("says nothing for a notification from the workspace already on screen", () => {
+    seedWorkspaces("w1")
+    setup({ projectId: "w1" })
+    expect(screen.queryByTestId("notification-workspace")).toBeNull()
+  })
+
+  it("says nothing for a machine-wide notification", () => {
+    seedWorkspaces("w1")
+    setup({})
+    expect(screen.queryByTestId("notification-workspace")).toBeNull()
+  })
+
+  it("says nothing for a workspace that no longer exists", () => {
+    seedWorkspaces("w1")
+    setup({ projectId: "deleted" })
+    expect(screen.queryByTestId("notification-workspace")).toBeNull()
+  })
 })

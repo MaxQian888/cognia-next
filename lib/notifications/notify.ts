@@ -45,6 +45,13 @@ export interface NotifyDeps {
   tz?: string
   /** Override id generation (tests). */
   newId?: () => string
+  /**
+   * Which workspace a session belongs to, for stamping the record's source
+   * label. Injected rather than imported so `notify` keeps no Dexie
+   * dependency; absent (or throwing) simply leaves the label off, which is
+   * strictly better than losing the notification.
+   */
+  resolveSessionWorkspace?: (sessionId: string) => Promise<string | null | undefined>
 }
 
 async function runSafely(label: string, fn: () => void | Promise<void>): Promise<boolean> {
@@ -74,6 +81,18 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
     existing = await deps.db.findByDedupeKey(input.dedupeKey, coalesceSince(now))
   }
   const action = decideCoalesce(existing, { now, backoff: input.coalesceBackoff })
+
+  // Which workspace this came from. The caller knows best; failing that, a
+  // session-scoped notification inherits its conversation's workspace. Never
+  // fatal — an unlabelled notification is far better than a lost one.
+  let projectId = input.projectId
+  if (!projectId && input.sourceRef?.kind === "session" && deps.resolveSessionWorkspace) {
+    try {
+      projectId = (await deps.resolveSessionWorkspace(input.sourceRef.id)) ?? undefined
+    } catch {
+      projectId = undefined
+    }
+  }
 
   // 2. Build/merge the record (deliveredVia filled after fan-out).
   let record: NotificationRecord
@@ -110,6 +129,7 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
       actions: input.actions,
       sourceRef: input.sourceRef,
       pluginId: input.pluginId,
+      projectId,
       icon: input.icon,
       directed: input.directed === true,
       deliveredVia: ["center"],
