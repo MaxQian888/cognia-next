@@ -193,8 +193,12 @@ export function resolveComposerSkin(
       ...preset,
       id,
       isClassic: true,
-      // The legacy stacked-layout toggle keeps working exactly as it did.
-      compactLayout: settings?.compactLayout === true || opts.isMobile,
+      // The legacy stacked-layout toggle keeps working exactly as it did — and
+      // it is NOT the same thing as running on a phone. Mobile stacking is
+      // driven separately by the box's `isMobile` prop (the child clusters opt
+      // out of the container-query row layout); folding the platform in here
+      // would hand a phone the desktop compact skin's geometry as well.
+      compactLayout: settings?.compactLayout === true,
     }
   }
 
@@ -229,9 +233,10 @@ export function resolveComposerSkin(
     sendShape: o.sendShape ?? preset.sendShape,
     mono: o.mono ?? preset.mono,
     toolbarLayout,
-    // Every non-classic skin stacks on mobile; on desktop the skin's own
-    // toolbar layout decides, so the legacy flag stays out of it.
-    compactLayout: opts.isMobile,
+    // The skin owns its geometry, so the legacy stacked-layout flag has nothing
+    // to say here (see the dormancy note above). Mobile stacking still happens
+    // — it rides the box's `isMobile` prop, same as it did before skins.
+    compactLayout: false,
   }
 }
 

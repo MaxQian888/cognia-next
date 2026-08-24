@@ -125,9 +125,12 @@ describe("mobile floors", () => {
     expect(resolveComposerSkin({ skin: "full" }, { isMobile: true }).toolbarLayout).toBe("embedded")
   })
 
-  it("stacks every non-classic skin on mobile", () => {
+  it("does not conflate the legacy compact flag with running on a phone", () => {
+    // Mobile stacking is the box's `isMobile` prop, not this flag. Folding the
+    // platform in here would hand a phone the desktop compact skin's geometry.
+    expect(resolveComposerSkin({ skin: "classic" }, { isMobile: true }).compactLayout).toBe(false)
     for (const id of NON_CLASSIC) {
-      expect(resolveComposerSkin({ skin: id }, { isMobile: true }).compactLayout).toBe(true)
+      expect(resolveComposerSkin({ skin: id }, { isMobile: true }).compactLayout).toBe(false)
     }
   })
 })

@@ -38,8 +38,32 @@ import { ComposerAttachMenu } from "./attach-menu"
 import { ComposerPlusMenu } from "@/components/mobile/chat/composer-plus-menu"
 import type { ComposerAttachment } from "@/components/mobile/chat/composer-plus-menu"
 import type { SendButtonState } from "./send-button-mode"
+import { composerSkinVars, type ResolvedComposerSkin } from "@/lib/chat/composer-skin"
+
+/**
+ * Shared by every skin: layout mechanics, not looks.
+ *
+ * Claude-style stack on every platform when the container is narrow: the
+ * textarea fills the first row (w-full forces the wrap), the attach + send
+ * clusters share ONE bottom row. On web/desktop the children's @sm/composer:*
+ * classes reset order/width so the box re-forms the single-row
+ * [attach | textarea | send] layout; the flex-1 textarea (basis-0) then
+ * prevents any further wrapping. Mobile (Capacitor) keeps the stack at every
+ * width.
+ */
+const BOX_BASE =
+  "relative flex flex-wrap items-end border shadow-sm transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+
+/** Verbatim from the pre-skin composer. Pinned by the parity test. */
+const CLASSIC_BOX = "gap-2 rounded-2xl border-input/60 bg-background/70 px-2 py-2"
+
+/** Every other skin drives its geometry from the inline custom properties. */
+const SKIN_BOX =
+  "gap-[var(--composer-gap)] rounded-[var(--composer-radius)] border-input/60 bg-background/70 px-[var(--composer-pad-x)] py-[var(--composer-pad-y)]"
 
 export interface ComposerBoxProps {
+  /** Resolved skin — geometry + which toolbar arrangement to use. */
+  skin: ResolvedComposerSkin
   /** Stacked layout at every width (mobile, or the compact-layout setting). */
   compactLayout: boolean
   isMobile: boolean
@@ -100,6 +124,7 @@ export interface ComposerBoxProps {
 }
 
 export function ComposerBox({
+  skin,
   compactLayout,
   isMobile,
   disabled,
@@ -146,22 +171,22 @@ export function ComposerBox({
   return (
     <div
       className={cn(
-        // Claude-style stack on every platform when the container is narrow:
-        // the textarea fills the first row (w-full forces the wrap), the
-        // attach + send clusters share ONE bottom row. On web/desktop the
-        // children's @sm/composer:* classes reset order/width so the box
-        // re-forms the single-row [attach | textarea | send] layout; the
-        // flex-1 textarea (basis-0) then prevents any further wrapping.
-        // Mobile (Capacitor) keeps the stack at every width.
-        "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none",
-        "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
-        compactLayout &&
+        BOX_BASE,
+        // `classic` renders the literals it always rendered — not the same
+        // numbers re-expressed as variables. That is what makes "today's
+        // composer is unchanged" true by construction rather than by anyone
+        // getting a rem→px conversion right. See `composer-skin.ts`.
+        skin.isClassic ? CLASSIC_BOX : SKIN_BOX,
+        skin.isClassic &&
+          compactLayout &&
           "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md",
         // Plan mode: amber tint on the input surface (with the banner above)
         // so the read-only state is unmistakable (Claude Code parity).
         permissionMode === "plan" &&
           "border-amber-500/50 focus-within:border-amber-500/70 focus-within:ring-amber-500/15"
       )}
+      style={composerSkinVars(skin)}
+      data-composer-skin={skin.id}
       // Opt the input surface into the shared wallpaper-aware tonality system
       // (app/globals.css §5): when a background is active the hardcoded
       // bg-background/70 is replaced by the token-driven translucent surface

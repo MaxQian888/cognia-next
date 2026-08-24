@@ -5,6 +5,7 @@ import { createRef } from "react"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ComposerBox, type ComposerBoxProps } from "./composer-box"
+import { resolveComposerSkin, type ComposerSkinId } from "@/lib/chat/composer-skin"
 
 // The box is presentational, but its children are not: the attach menus, the
 // char counter and the overlays all reach for the prompt-input controller or a
@@ -30,6 +31,7 @@ jest.mock("sonner", () => ({ toast: { error: jest.fn() } }))
 
 function props(overrides: Partial<ComposerBoxProps> = {}): ComposerBoxProps {
   return {
+    skin: resolveComposerSkin({ skin: "classic" }, { isMobile: false }),
     compactLayout: false,
     isMobile: false,
     permissionMode: "default",
@@ -190,5 +192,73 @@ describe("ComposerBox — slots", () => {
   it("mounts the store-backed bridges passed from the composer", () => {
     render(<ComposerBox {...props({ bridges: <div data-testid="bridges" /> })} />)
     expect(screen.getByTestId("bridges")).toBeInTheDocument()
+  })
+})
+
+// ── The guard that keeps the original look the original ────────────────────
+//
+// Captured from the pre-skin composer (commit 73ef32c54) by reading the literal
+// `cn(...)` arguments, NOT by re-deriving them from the skin table. If a future
+// edit routes `classic` through the variable path, or nudges one of these
+// utilities, this fails loudly rather than shipping a silently different box.
+const CLASSIC_CLASS_STRING =
+  "relative flex flex-wrap items-end border shadow-sm " +
+  "transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none " +
+  "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15 " +
+  "gap-2 rounded-2xl border-input/60 bg-background/70 px-2 py-2"
+
+function classSet(source: HTMLElement | string) {
+  const raw = typeof source === "string" ? source : source.className
+  return new Set(raw.split(/\s+/).filter(Boolean))
+}
+
+describe("classic parity — today's composer is unchanged", () => {
+  it("renders exactly the pre-skin utility set", () => {
+    render(<ComposerBox {...props()} />)
+    expect(classSet(box())).toEqual(classSet(CLASSIC_CLASS_STRING))
+  })
+
+  it("emits NO inline custom properties, so nothing can drift", () => {
+    render(<ComposerBox {...props()} />)
+    expect(box().getAttribute("style")).toBeNull()
+    expect(box().className).not.toContain("var(--composer-")
+  })
+
+  it("keeps honouring compactLayout, which the legacy setting still drives", () => {
+    render(<ComposerBox {...props({ compactLayout: true })} />)
+    const cls = classSet(box())
+    expect(cls.has("rounded-[1.75rem]")).toBe(true)
+    expect(cls.has("px-3")).toBe(true)
+  })
+})
+
+describe("non-classic skins drive geometry from variables", () => {
+  it.each(["airy", "dense", "full", "focus"] as ComposerSkinId[])(
+    "%s sets the composer custom properties",
+    (id) => {
+      const skin = resolveComposerSkin({ skin: id }, { isMobile: false })
+      render(<ComposerBox {...props({ skin })} />)
+      const style = box().getAttribute("style") ?? ""
+      expect(style).toContain("--composer-radius")
+      expect(style).toContain("--composer-pad-x")
+      expect(box().className).toContain("rounded-[var(--composer-radius)]")
+      // and none of classic's hardcoded geometry survives
+      expect(classSet(box()).has("rounded-2xl")).toBe(false)
+    }
+  )
+
+  it("labels the surface so a skin is addressable from CSS and from a test", () => {
+    render(
+      <ComposerBox
+        {...props({ skin: resolveComposerSkin({ skin: "dense" }, { isMobile: false }) })}
+      />
+    )
+    expect(box()).toHaveAttribute("data-composer-skin", "dense")
+  })
+
+  it("ignores compactLayout's classic-only geometry", () => {
+    const skin = resolveComposerSkin({ skin: "airy" }, { isMobile: false })
+    render(<ComposerBox {...props({ skin, compactLayout: true })} />)
+    expect(classSet(box()).has("rounded-[1.75rem]")).toBe(false)
   })
 })

@@ -53,6 +53,7 @@ import { applyOrder } from "@/lib/chat/attachments/reorder"
 import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
 import { useAttachmentIntake } from "./composer/hooks/use-attachment-intake"
 import { ComposerBox } from "./composer/composer-box"
+import { resolveComposerSkin, type ResolvedComposerSkin } from "@/lib/chat/composer-skin"
 import { buildLinkContextBlocks, mergeContextBlocks } from "@/lib/chat/link-context"
 import {
   AlertDialog,
@@ -332,6 +333,8 @@ interface InnerProps {
   workflowMention?: ComposerWorkflowMention
   /** Compact mode embeds the model and agent controls into the input surface. */
   compactLayout?: boolean
+  /** Resolved by the outer `Composer` so one read feeds the whole tree. */
+  skin: ResolvedComposerSkin
   toolbar?: ReactNode
 }
 
@@ -1827,6 +1830,7 @@ function ComposerInner(props: InnerProps) {
         </Collapse>
       </div>
       <ComposerBox
+        skin={props.skin}
         compactLayout={compactLayout}
         isMobile={isMobile}
         disabled={props.disabled}
@@ -2070,9 +2074,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tInbox = useTranslations("inbox")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
-  const compactLayout = useSettingsStore(
-    (s) => s.settings?.composerBehavior?.compactLayout === true
+  const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  const isMobileShell = usePlatform() === "mobile"
+  // One resolver owns preset ← overrides ← mobile floors, so the box never has
+  // to reason about any of it. `classic` (the default) resolves to today's
+  // exact geometry and emits no variables at all.
+  const skin = useMemo(
+    () => resolveComposerSkin(composerBehavior, { isMobile: isMobileShell }),
+    [composerBehavior, isMobileShell]
   )
+  const compactLayout = skin.compactLayout
   const focusedStatus = useChatStore((s) => s.status)
   const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
@@ -2555,6 +2566,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               mobileMentionMembers={mobileMentionMembers}
               workflowMention={workflowMention}
               compactLayout={compactLayout}
+              skin={skin}
               toolbar={
                 compactLayout ? (
                   <BottomToolbar
