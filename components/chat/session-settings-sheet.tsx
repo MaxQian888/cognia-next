@@ -103,6 +103,8 @@ import { branchSessionAtMessage } from "@/lib/chat/branch-session"
 import { selectVisibleMessages } from "@/stores/chat/chat-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
+import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
 import { primaryRootOf } from "@/lib/workspace/roots"
@@ -273,12 +275,20 @@ export function SessionSettingsSheet({
   // What the session actually falls back to when no per-session dir is set:
   // active workspace primary root → character default → app default (the same
   // chain resolveSendOptions applies), so the hint never contradicts a send.
+  // THIS session's workspace, not whatever is focused: the sheet can be opened
+  // from a background pane or a cross-workspace list selection, and every hint
+  // it renders would otherwise describe a different project than the one the
+  // session runs in.
   const activeProject = useProjectStore((s) =>
-    s.activeProjectId ? (s.projects.find((p) => p.id === s.activeProjectId) ?? null) : null
+    resolveSessionWorkspace(session, s.projects, s.activeProjectId)
   )
   const defaultWorkingDir = useSettingsStore((s) => s.settings?.defaultWorkingDir)
   const globalMessageDisplay = useSettingsStore((s) => s.settings?.messageDisplay)
+  const executionRoot = session.executionContext
+    ? resolveSessionWorkspaceRoot(session.executionContext)
+    : undefined
   const fallbackCwd = resolveEffectiveCwd({
+    executionWorkspaceRoot: executionRoot,
     activeProject,
     characterWorkingDir: character?.workingDir,
     defaultWorkingDir,
@@ -941,7 +951,10 @@ export function SessionSettingsSheet({
               {activeProject && activeProjectRoot && (
                 <ProjectEnvironmentManager
                   projectId={activeProject.id}
-                  executionRoot={session.executionContext?.worktreePath ?? activeProjectRoot.path}
+                  // `worktreePath` is a legacy mirror the bundle path no longer
+                  // writes, so reading it silently ran environment setup in the
+                  // source checkout for every managed session.
+                  executionRoot={executionRoot ?? activeProjectRoot.path}
                   scope={
                     session.executionContext?.location === "managedWorktree"
                       ? "managedWorktree"

@@ -55,4 +55,51 @@ describe("SessionEnvironmentChip", () => {
 
     expect(screen.getByLabelText("Worktree execution environment")).toHaveClass("text-destructive")
   })
+  it("never names the source checkout for a managed workspace that is not on this device", async () => {
+    // `worktreePath` is a legacy mirror the bundle path no longer writes, and
+    // `projectRoot` is stripped from managed sync rows — reading either made
+    // the chip name a directory this device does not have.
+    render(
+      <SessionEnvironmentChip
+        executionContext={{
+          location: "managedWorktree",
+          workspaceBinding: { kind: "managed", workspaceId: "workspace-9" },
+          managedWorkspace: { availability: "missing-on-device" },
+          projectId: "project-1",
+          projectRoot: "/repo",
+          worktreePath: "/stale/worktree",
+          taskWorkspace: { taskId: "task-1", workspaceKey: "workspace-9" },
+        }}
+        onManage={jest.fn()}
+      />
+    )
+
+    fireEvent.focus(screen.getByLabelText("Worktree execution environment"))
+    expect(screen.queryByText("/stale/worktree")).not.toBeInTheDocument()
+    expect(screen.queryByText("/repo")).not.toBeInTheDocument()
+  })
+
+  it("prefers the leased alias over the legacy worktreePath mirror", async () => {
+    render(
+      <SessionEnvironmentChip
+        executionContext={{
+          location: "managedWorktree",
+          projectId: "project-1",
+          projectRoot: "/repo",
+          worktreePath: "/stale/worktree",
+          execution: {
+            mode: "managed",
+            base: { kind: "workingState" },
+            roots: [{ logicalRootId: "root-1", role: "primary", aliasPath: "/bundles/alias" }],
+          },
+          taskWorkspace: { taskId: "task-1", workspaceKey: "workspace-1" },
+        }}
+        onManage={jest.fn()}
+      />
+    )
+
+    fireEvent.focus(screen.getByLabelText("Worktree execution environment"))
+    expect(await screen.findByText("/bundles/alias")).toBeInTheDocument()
+    expect(screen.queryByText("/stale/worktree")).not.toBeInTheDocument()
+  })
 })

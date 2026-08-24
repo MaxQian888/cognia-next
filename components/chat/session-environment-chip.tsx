@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 import type { SessionExecutionContext, SessionWorkspaceBaseSpec } from "@/types/execution-context"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 
 interface SessionEnvironmentChipProps {
   executionContext?: SessionExecutionContext
@@ -38,9 +39,11 @@ export function SessionEnvironmentChip({
   const execution = executionContext?.execution
   const mode =
     execution?.mode ?? (executionContext?.location === "managedWorktree" ? "managed" : "local")
-  const primaryRoot = execution?.roots.find((root) => root.role === "primary")
-  const path =
-    primaryRoot?.aliasPath || executionContext?.worktreePath || executionContext?.projectRoot || ""
+  // One resolver for the displayed root, so the chip cannot name a directory
+  // the send would not use. A managed workspace that is not materialized on
+  // this device resolves to nothing rather than to a source root it does not
+  // have.
+  const path = executionContext ? (resolveSessionWorkspaceRoot(executionContext) ?? "") : ""
   const branch = executionContext?.branch
   const state = executionContext?.lifecycle?.state
   const conflict = state === "conflict"
