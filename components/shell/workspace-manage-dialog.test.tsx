@@ -233,14 +233,44 @@ describe("WorkspaceManageDialog", () => {
     expect(trustMock).toHaveBeenCalledWith("/trust/me")
   })
 
-  it("deletes a workspace after a confirm click", () => {
+  it("removes a workspace after a confirm click, keeping its conversations", () => {
+    const removals: unknown[][] = []
+    const original = useProjectStore.getState().deleteProject
+    useProjectStore.setState({
+      deleteProject: (...args: Parameters<typeof original>) => {
+        removals.push(args)
+        original(...args)
+      },
+    })
     renderDialog()
     fireEvent.click(screen.getByTestId("workspace-new"))
     expect(useProjectStore.getState().projects).toHaveLength(1)
-    // First click arms the confirm, second deletes.
+    // First click arms the confirm, second removes.
     fireEvent.click(screen.getByTestId("workspace-delete"))
     fireEvent.click(screen.getByTestId("workspace-delete"))
     expect(useProjectStore.getState().projects).toHaveLength(0)
+    // Removing a workspace is not the same decision as destroying what was in
+    // it, so the plain confirm must not take the destructive reading.
+    expect(removals.at(-1)?.[1]).toBe("detach")
+  })
+
+  it("offers destroying the contents as a separate, explicit action", () => {
+    const removals: unknown[][] = []
+    const original = useProjectStore.getState().deleteProject
+    useProjectStore.setState({
+      deleteProject: (...args: Parameters<typeof original>) => {
+        removals.push(args)
+        original(...args)
+      },
+    })
+    renderDialog()
+    fireEvent.click(screen.getByTestId("workspace-new"))
+    // The destructive option only appears once the confirm is armed.
+    expect(screen.queryByTestId("workspace-delete-data")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("workspace-delete"))
+    fireEvent.click(screen.getByTestId("workspace-delete-data"))
+    expect(useProjectStore.getState().projects).toHaveLength(0)
+    expect(removals.at(-1)?.[1]).toBe("delete-data")
   })
 
   it("sets the active workspace from the editor", () => {

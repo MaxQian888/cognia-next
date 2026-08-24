@@ -147,6 +147,55 @@ const SESSION_CHILD_TABLES = [
  * localStorage-backed artifact and agent-team buckets (dynamic import keeps
  * `lib/db` free of a store dependency).
  */
+/**
+ * How a workspace's contents are settled when the workspace is removed.
+ * Removing a workspace is not the same decision as destroying what was in it.
+ */
+export type ProjectRemovalMode = "detach" | "delete-data"
+
+/**
+ * Hand a workspace's contents to the Default workspace instead of destroying
+ * them — the default answer when a workspace is removed.
+ *
+ * Only the 15 top-level scoped tables are rewritten; child and event tables key
+ * off their parent's id, so they follow without a second sweep.
+ *
+ * Sessions additionally lose their `executionContext`. It names the workspace
+ * being removed, and leaving it would make every later send resolve against a
+ * project that no longer exists — `resolveSessionWorkspace` correctly refuses
+ * to substitute another one, so the turn would fail rather than run somewhere
+ * wrong, but failing forever is not a resting state. Dropping it lets the next
+ * send rebuild the binding the same way a fresh conversation does. Task
+ * Workspace history is addressed by session id on the host and is untouched.
+ *
+ * Returns the workspace the contents landed in.
+ */
+export async function detachProjectContents(projectId: string): Promise<string> {
+  const fallback = await ensureDefaultProject()
+  if (fallback.id === projectId) {
+    throw new Error("the Default workspace cannot be detached into itself")
+  }
+  const db = getDb()
+  const tables = PROJECT_SCOPED_TABLES.map((name) => db.table(name))
+  await db.transaction("rw", tables, async () => {
+    for (const name of PROJECT_SCOPED_TABLES) {
+      if (name === "sessions") {
+        await db
+          .table(name)
+          .where("projectId")
+          .equals(projectId)
+          .modify((row: Record<string, unknown>) => {
+            row.projectId = fallback.id
+            delete row.executionContext
+          })
+        continue
+      }
+      await db.table(name).where("projectId").equals(projectId).modify({ projectId: fallback.id })
+    }
+  })
+  return fallback.id
+}
+
 export async function deleteProjectCascade(projectId: string): Promise<void> {
   const db = getDb()
   const projectSessions = await scopedWhere(db.sessions, projectId).toArray()

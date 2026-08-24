@@ -205,8 +205,20 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
       setConfirmingDelete(true)
       return
     }
-    deleteProject(editing.id)
+    // Removing a workspace is not the same decision as destroying the
+    // conversations that were in it, so the confirming state asks which one
+    // this is instead of assuming the destructive reading.
+    deleteProject(editing.id, "detach")
     setEditingId(null)
+    setConfirmingDelete(false)
+    toast.success(t("detached"))
+  }
+
+  const handleDeleteWithData = () => {
+    if (!editing) return
+    deleteProject(editing.id, "delete-data")
+    setEditingId(null)
+    setConfirmingDelete(false)
     toast.success(t("deleted"))
   }
 
@@ -458,8 +470,20 @@ export function WorkspaceManageDialog({ open, onOpenChange }: Props) {
                       data-testid="workspace-delete"
                     >
                       <Trash2Icon className="size-4" />
-                      {confirmingDelete ? t("confirmDelete") : t("delete")}
+                      {confirmingDelete ? t("confirmDetach") : t("delete")}
                     </Button>
+                    {confirmingDelete && (
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="gap-1"
+                        onClick={handleDeleteWithData}
+                        data-testid="workspace-delete-data"
+                      >
+                        {t("confirmDelete")}
+                      </Button>
+                    )}
                   </div>
                   <Button type="button" onClick={handleSave} data-testid="workspace-save">
                     {t("save")}

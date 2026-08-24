@@ -32,7 +32,12 @@ import {
   deleteProjectRow,
   persistActiveProjectId,
 } from "@/lib/db/projects"
-import { deleteProjectCascade, ensureDefaultProject } from "@/lib/db/project-scope"
+import {
+  deleteProjectCascade,
+  detachProjectContents,
+  ensureDefaultProject,
+} from "@/lib/db/project-scope"
+import type { ProjectRemovalMode } from "@/lib/db/project-scope"
 
 export interface CreateProjectOptions {
   name?: string
@@ -62,7 +67,13 @@ interface ProjectState {
   /** Create a project, append it to the list, and return it. Pure: does NOT auto-activate. */
   createProject: (options: CreateProjectOptions) => Project
   updateProject: (id: string, updates: ProjectUpdates) => void
-  deleteProject: (id: string) => void
+  /**
+   * Remove a workspace. `"detach"` (the default) hands its contents to Default;
+   * `"delete-data"` destroys them. Removing a workspace is not the same
+   * decision as destroying the conversations that were in it, so the caller
+   * has to say which one it means.
+   */
+  deleteProject: (id: string, mode?: ProjectRemovalMode) => void
   setActiveProject: (id: string | null) => void
 
   archiveProject: (id: string) => void
@@ -203,7 +214,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       }
     },
 
-    deleteProject: (id) => {
+    deleteProject: (id, mode = "detach") => {
       let removed = false
       const previouslyActive = get().activeProjectId === id
       set((state) => {
@@ -214,12 +225,13 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       })
       if (removed) {
         if (get().loaded) {
-          // Cascade-delete the workspace's runtime data (sessions, messages,
+          // Settle the workspace's runtime data (sessions, messages,
           // goals/plans/loops, canvas, workflow runs, connector routing rows,
           // + artifact/agent-team buckets) BEFORE dropping the project row, so
-          // no orphaned per-project data survives. Best-effort + fire-and-forget
-          // to match the store's non-blocking persistence contract.
-          void deleteProjectCascade(id)
+          // nothing is left pointing at a workspace that no longer exists.
+          // `detach` hands it to Default; `delete-data` destroys it. Best-effort
+          // + fire-and-forget to match the store's non-blocking contract.
+          void (mode === "delete-data" ? deleteProjectCascade(id) : detachProjectContents(id))
             .catch(() => {})
             .finally(() => {
               void deleteProjectRow(id).catch(() => {})

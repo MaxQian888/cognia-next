@@ -13,6 +13,7 @@ import { tryBuildProjectKnowledgeDeps } from "@/lib/project-knowledge/runtime/bu
 const projectDepsMock = tryBuildProjectKnowledgeDeps as jest.Mock
 import {
   deleteProjectCascade,
+  detachProjectContents,
   ensureDefaultProject,
   resolveScopeProjectId,
   resolveSessionProjectId,
@@ -391,5 +392,48 @@ describe("project-scope helper", () => {
       // Local rows are still dropped despite the remote failure.
       expect(await db.projectChunks.get("pc")).toBeUndefined()
     }, 30000)
+  })
+  describe("detachProjectContents", () => {
+    it("hands the rows to Default instead of destroying them", async () => {
+      const db = getDb()
+      await db.projects.put({
+        id: "project-a",
+        name: "Alpha",
+        roots: [{ id: "ra", path: "/repos/a", isPrimary: true }],
+        sessionIds: [],
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      await db.sessions.put({
+        id: "s1",
+        title: "kept",
+        projectId: "project-a",
+        createdAt: 1,
+        updatedAt: 1,
+        // Names the workspace being removed, so every later send would resolve
+        // against a project that no longer exists.
+        executionContext: {
+          location: "local",
+          projectId: "project-a",
+          projectRoot: "/repos/a",
+          taskWorkspace: { taskId: "t", workspaceKey: "w" },
+        },
+      } as never)
+
+      const landedIn = await detachProjectContents("project-a")
+
+      expect(landedIn).toBe(DEFAULT_PROJECT_ID)
+      const moved = await db.sessions.get("s1")
+      expect(moved?.projectId).toBe(DEFAULT_PROJECT_ID)
+      // Dropped so the next send rebuilds the binding cleanly rather than
+      // failing forever against a workspace that is gone.
+      expect(moved?.executionContext).toBeUndefined()
+      expect(await db.sessions.count()).toBeGreaterThan(0)
+    })
+
+    it("refuses to detach Default into itself", async () => {
+      await ensureDefaultProject()
+      await expect(detachProjectContents(DEFAULT_PROJECT_ID)).rejects.toThrow(/Default/)
+    })
   })
 })

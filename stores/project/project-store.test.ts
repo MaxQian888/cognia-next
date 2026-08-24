@@ -21,6 +21,7 @@ const loadActiveProjectId = jest.fn()
 const persistActiveProjectId = jest.fn()
 const ensureDefaultProject = jest.fn()
 const deleteProjectCascade = jest.fn()
+const detachProjectContents = jest.fn()
 
 jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
   getPluginEventHooks: () => ({
@@ -46,6 +47,7 @@ jest.mock("@/lib/db/projects", () => ({
 jest.mock("@/lib/db/project-scope", () => ({
   ensureDefaultProject: (...args: unknown[]) => ensureDefaultProject(...args),
   deleteProjectCascade: (...args: unknown[]) => deleteProjectCascade(...args),
+  detachProjectContents: (...args: unknown[]) => detachProjectContents(...args),
 }))
 
 import { useProjectStore } from "./project-store"
@@ -86,6 +88,7 @@ beforeEach(() => {
   persistActiveProjectId.mockReset().mockResolvedValue(undefined)
   ensureDefaultProject.mockReset().mockResolvedValue(projectFixture())
   deleteProjectCascade.mockReset().mockResolvedValue(undefined)
+  detachProjectContents.mockReset().mockResolvedValue("project-default")
 })
 
 describe("load", () => {
@@ -432,5 +435,30 @@ describe("project-store roots", () => {
     const updated = useProjectStore.getState().projects.find((q) => q.id === p.id)!
     expect(primaryRootOf(updated)?.path).toBe("/root")
     expect(additionalDirsOf(updated)).toEqual(["/extra"])
+  })
+  describe("removing a workspace", () => {
+    it("hands its contents to Default by default, destroying nothing", async () => {
+      // Removing a workspace is not the same decision as destroying the
+      // conversations that were in it.
+      const project = projectFixture({ id: "p_gone" })
+      useProjectStore.setState({ projects: [project], loaded: true })
+
+      useProjectStore.getState().deleteProject("p_gone")
+      await Promise.resolve()
+
+      expect(detachProjectContents).toHaveBeenCalledWith("p_gone")
+      expect(deleteProjectCascade).not.toHaveBeenCalled()
+    })
+
+    it("destroys the contents only when asked to", async () => {
+      const project = projectFixture({ id: "p_gone" })
+      useProjectStore.setState({ projects: [project], loaded: true })
+
+      useProjectStore.getState().deleteProject("p_gone", "delete-data")
+      await Promise.resolve()
+
+      expect(deleteProjectCascade).toHaveBeenCalledWith("p_gone")
+      expect(detachProjectContents).not.toHaveBeenCalled()
+    })
   })
 })
