@@ -22,6 +22,8 @@ import {
 
 import { catalogModelIds } from "@/lib/ai/model-options"
 import { validateMcpDefinition } from "@/lib/mcp/server-definition"
+import { DEFAULT_SANDBOX_SESSION_BINDING } from "@/lib/sandbox/binding"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   compactSession,
   onClaudeMessage,
@@ -262,8 +264,16 @@ interface HostedSession {
   currentRunId: string | null
   currentAttemptId: string | null
   durableState: DurableRpcStateStore
+  /**
+   * In-flight bind of this session's sandbox ceiling into the shared runtime.
+   * Awaited before a turn runs so a tool dispatch cannot race ahead of the
+   * placement and fall back to the unpoliced host default.
+   */
+  sandboxBinding?: Promise<SandboxBindOutcome>
   workerHandoff?: HandoffEnvelope
 }
+
+type SandboxBindOutcome = { ok: true } | { ok: false; error: unknown }
 
 export interface AgentRuntimeServiceOptions {
   config: ResolvedConfig
@@ -454,7 +464,66 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       ...(agentDefinition ? { agentDefinition } : {}),
     }
     sessions.set(sessionId, session)
+    void bindSandboxRuntime(session)
     return session
+  }
+
+  /**
+   * Bind this session's persisted sandbox ceiling into the shared runtime so
+   * `cognia-sandboxed-tools` clamps headless calls to it. The CLI has no send
+   * envelope to carry the ref, so `plugin-tool-dispatch` looks it up by
+   * session id — see `activeRefForSession`.
+   *
+   * The outcome is retained rather than discarded: a bind that failed means
+   * the ceiling is NOT in force, and an operator who configured one is owed
+   * that fact (surfaced as a `runtime/diagnostic` when the next turn starts).
+   */
+  function bindSandboxRuntime(session: HostedSession): Promise<SandboxBindOutcome> {
+    const policy = session.durableState.read(session.id).sandboxPolicy as
+      SandboxResourcePolicy | null | undefined
+    const pending = sandboxSessionRuntime
+      .bindSession({
+        sessionId: session.id,
+        binding: DEFAULT_SANDBOX_SESSION_BINDING,
+        policy: policy ?? null,
+        confine: null,
+        sandboxEnabled: true,
+        // The CLI binding is the host/local placement (`DEFAULT_SANDBOX_SESSION_BINDING`
+        // is `os` + `local`), which is exactly where Computer Use ran on this
+        // rail before the runtime reference existed. Declaring the surface
+        // disabled would make `decorateComputerUseContext` reject every
+        // `perform_action` / `get_app_state` the dispatcher stamps this ref
+        // onto — a refusal with nothing behind it, since local IS the target.
+        computerUseEnabled: true,
+        ...(session.config.cwd ? { workspaceRoot: session.config.cwd } : {}),
+      })
+      .then<SandboxBindOutcome, SandboxBindOutcome>(
+        () => ({ ok: true }),
+        (error: unknown) => ({ ok: false, error })
+      )
+    session.sandboxBinding = pending
+    return pending
+  }
+
+  /**
+   * Settle the session's sandbox placement before work that can dispatch tools.
+   * Without this the bind is still in flight when the first tool frame arrives,
+   * `activeRefForSession` answers `undefined`, and the call runs against the
+   * unpoliced host default instead of the configured ceiling.
+   */
+  async function awaitSandboxBinding(
+    session: HostedSession,
+    context: AgentRpcServiceContext
+  ): Promise<void> {
+    const outcome = await session.sandboxBinding
+    if (!outcome || outcome.ok) return
+    session.sandboxBinding = undefined
+    await context.emit("runtime/diagnostic", {
+      level: "error",
+      message: `sandbox ceiling is not in force for session ${session.id}: ${
+        outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+      }`,
+    })
   }
 
   async function dispatch(
@@ -765,6 +834,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       }
       case "turn/run": {
         const session = materialize(requireString(params, "sessionId"))
+        await awaitSandboxBinding(session, context)
         if (session.status === "recovery_required") {
           throw structured(
             "recovery_required",
@@ -1354,6 +1424,19 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             session.durableState.update(session.id, (state) => {
               state.sandboxPolicy = record.policy ? { ...record.policy } : null
             })
+            // Re-bind so the restored ceiling is the one the sandbox tools
+            // clamp against, not just a value in durable state. A restore whose
+            // rebind failed did not restore anything enforceable, so it reports
+            // failure rather than acknowledging a ceiling that is not applied.
+            const rebound = await bindSandboxRuntime(session)
+            if (!rebound.ok) {
+              throw structured(
+                "internal_error",
+                `sandbox policy ${policyRecordId} was persisted but could not be bound: ${
+                  rebound.error instanceof Error ? rebound.error.message : String(rebound.error)
+                }`
+              )
+            }
             session.lease.current?.invalidateOptions?.()
             return { ...receipt(commandId), policyRecordId }
           })
@@ -1583,6 +1666,10 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       })
     }
     sessions.set(id, session)
+    // `createSessionOnce` registers the session itself instead of going through
+    // `materialize`, so without this a freshly created session never bound its
+    // ceiling at all — only one recovered from disk on a later call did.
+    void bindSandboxRuntime(session)
     const createdResult = {
       sessionId: id,
       spec,
@@ -1898,6 +1985,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     cancelPendingElicitations(session, "session closed")
     await session.activeRun?.catch(() => undefined)
     await session.lease.close()
+    await sandboxSessionRuntime.releaseSession(session.id).catch(() => undefined)
     session.status = "closed"
     sessions.delete(session.id)
   }

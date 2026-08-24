@@ -450,6 +450,7 @@ pub async fn claude_send_with_host_and_id(
     command_id: Option<String>,
 ) -> Result<(), String> {
     let _perf = crate::perf::guard("claude.send");
+    validate_send_request(&session_id, &prompt)?;
     spawn_sidecar(Arc::clone(&host), state.clone()).await?;
     let mut opts_value = match options {
         Some(o) => {
@@ -480,6 +481,10 @@ pub async fn claude_send_with_host_and_id(
         }
     }
 
+    let active_command_id = command_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
     let msg = with_command_id(
         json!({
           "type": "send",
@@ -489,7 +494,31 @@ pub async fn claude_send_with_host_and_id(
         }),
         command_id,
     );
-    state.write_command(&msg).await
+    write_active_run_command(&state, &msg, &session_id, active_command_id.as_deref()).await
+}
+
+fn validate_send_request(session_id: &str, prompt: &Value) -> Result<(), String> {
+    if session_id.is_empty() {
+        return Err("send: sessionId required".into());
+    }
+    if !prompt.is_string() && !prompt.is_array() {
+        return Err("send: prompt must be string or content-block array".into());
+    }
+    Ok(())
+}
+
+async fn write_active_run_command(
+    state: &SidecarState,
+    message: &Value,
+    session_id: &str,
+    command_id: Option<&str>,
+) -> Result<(), String> {
+    let token = state.begin_active_run(session_id, command_id);
+    if let Err(error) = state.write_command(message).await {
+        state.cancel_active_run(token);
+        return Err(error);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -701,14 +730,6 @@ pub async fn claude_set_mode(
     command_id: Option<String>,
 ) -> Result<(), String> {
     claude_set_mode_impl_with_id(&state, session_id, mode, command_id).await
-}
-
-pub async fn claude_set_mode_impl(
-    state: &SidecarState,
-    session_id: String,
-    mode: String,
-) -> Result<(), String> {
-    claude_set_mode_impl_with_id(state, session_id, mode, None).await
 }
 
 pub async fn claude_set_mode_impl_with_id(
@@ -1200,12 +1221,14 @@ mod tests {
     #[tokio::test]
     async fn claude_send_with_host_reaches_a_fake_echo_script() {
         use crate::claude::host::test_support::RecordingSidecarHost;
+        use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
 
         if !crate::external_agent::command_resolver::check_command_exists("node") {
             eprintln!("skip: node not on PATH");
             return;
         }
 
+        let _assertion_guard = ASSERTION_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let script = tmp.path().join("echo-host.mjs");
         std::fs::write(
@@ -1259,6 +1282,7 @@ mod tests {
         let state = SidecarState::new();
         crate::proxy_config::apply_current(Default::default())
             .expect("test sidecar must start with an explicit direct proxy policy");
+        let reason = WakeReason::ActiveRun("sess-echo".into());
 
         claude_send_with_host(
             host.clone(),
@@ -1286,6 +1310,7 @@ mod tests {
         assert_eq!(echoed["payload"]["type"], "send");
         assert_eq!(echoed["payload"]["sessionId"], "sess-echo");
         assert_eq!(echoed["payload"]["prompt"], "hello from headless");
+        assert!(active_reasons().contains(&reason));
         #[cfg(unix)]
         assert!(
             node_marker.is_file(),
@@ -1293,6 +1318,197 @@ mod tests {
         );
 
         super::super::sidecar::kill_sidecar(state).await;
+        for _ in 0..50 {
+            if !active_reasons().contains(&reason) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            !active_reasons().contains(&reason),
+            "sidecar exit must release holds for its generation"
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_send_holds_the_host_awake_until_the_turn_ends() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+        use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let _assertion_guard = ASSERTION_TEST_LOCK.lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("terminal-event-host.mjs");
+        std::fs::write(
+            &script,
+            concat!(
+                "process.stdout.write(JSON.stringify({type:'ready'})+'\\n');\n",
+                "process.stdin.setEncoding('utf8');\n",
+                "let buf='';\n",
+                "process.stdin.on('data',(d)=>{buf+=d;let i;\n",
+                "  while((i=buf.indexOf('\\n'))>=0){\n",
+                "    const line=buf.slice(0,i);buf=buf.slice(i+1);\n",
+                "    if(!line.trim())continue;\n",
+                "    const command=JSON.parse(line);\n",
+                "    if(command.type==='send'){\n",
+                "      setTimeout(()=>process.stdout.write(JSON.stringify({type:'session_ended',sessionId:command.sessionId})+'\\n'),250);\n",
+                "    }\n",
+                "  }});\n",
+                "process.stdin.on('end',()=>process.exit(0));\n",
+            ),
+        )
+        .expect("write terminal-event script");
+
+        let node = crate::external_agent::command_resolver::resolve_command_path("node")
+            .expect("node path after availability probe");
+        let host = RecordingSidecarHost::with_script_and_node(script, node);
+        let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
+        let reason = WakeReason::ActiveRun("sess-awake".into());
+
+        claude_send_with_host(
+            host,
+            state.clone(),
+            "sess-awake".into(),
+            json!("keep working"),
+            None,
+        )
+        .await
+        .expect("send must spawn + write");
+
+        let held_during_turn = active_reasons().contains(&reason);
+        if !held_during_turn {
+            super::super::sidecar::kill_sidecar(state).await;
+            panic!("an accepted agent turn must keep the host awake");
+        }
+
+        for _ in 0..50 {
+            if !active_reasons().contains(&reason) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let released_after_turn = !active_reasons().contains(&reason);
+        super::super::sidecar::kill_sidecar(state).await;
+        assert!(
+            released_after_turn,
+            "session_ended must release the agent turn's wake assertion"
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_send_ack_releases_only_the_retry_hold() {
+        use crate::claude::host::test_support::RecordingSidecarHost;
+        use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
+
+        if !crate::external_agent::command_resolver::check_command_exists("node") {
+            eprintln!("skip: node not on PATH");
+            return;
+        }
+
+        let _assertion_guard = ASSERTION_TEST_LOCK.lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let script = tmp.path().join("duplicate-send-host.mjs");
+        std::fs::write(
+            &script,
+            concat!(
+                "process.stdout.write(JSON.stringify({type:'ready'})+'\\n');\n",
+                "process.stdin.setEncoding('utf8');\n",
+                "const seen=new Set();let buf='';\n",
+                "process.stdin.on('data',(d)=>{buf+=d;let i;\n",
+                "  while((i=buf.indexOf('\\n'))>=0){\n",
+                "    const line=buf.slice(0,i);buf=buf.slice(i+1);\n",
+                "    if(!line.trim())continue;const command=JSON.parse(line);\n",
+                "    if(command.type!=='send')continue;\n",
+                "    if(seen.has(command.commandId)){\n",
+                "      process.stdout.write(JSON.stringify({type:'command_ack',sessionId:command.sessionId,commandId:command.commandId,duplicate:true})+'\\n');\n",
+                "    }else{seen.add(command.commandId);\n",
+                "      setTimeout(()=>process.stdout.write(JSON.stringify({type:'session_ended',sessionId:command.sessionId})+'\\n'),250);\n",
+                "    }\n",
+                "  }});\n",
+                "process.stdin.on('end',()=>process.exit(0));\n",
+            ),
+        )
+        .expect("write duplicate-send script");
+
+        let node = crate::external_agent::command_resolver::resolve_command_path("node")
+            .expect("node path after availability probe");
+        let host = RecordingSidecarHost::with_script_and_node(script, node);
+        let state = SidecarState::new();
+        crate::proxy_config::apply_current(Default::default())
+            .expect("test sidecar must start with an explicit direct proxy policy");
+        let reason = WakeReason::ActiveRun("sess-retry".into());
+
+        for _ in 0..2 {
+            claude_send_with_host_and_id(
+                host.clone(),
+                state.clone(),
+                "sess-retry".into(),
+                json!("retry-safe"),
+                None,
+                Some("cmd-retry".into()),
+            )
+            .await
+            .expect("both writes reach the sidecar");
+        }
+
+        for _ in 0..50 {
+            if !active_reasons().contains(&reason) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let duplicate_ack_seen = host
+            .events()
+            .into_iter()
+            .any(|(_, payload)| payload["type"] == "command_ack" && payload["duplicate"] == true);
+        let released_after_original_turn = !active_reasons().contains(&reason);
+        super::super::sidecar::kill_sidecar(state).await;
+
+        assert!(duplicate_ack_seen, "the retry must exercise duplicate ack");
+        assert!(
+            released_after_original_turn,
+            "one terminal event plus one duplicate ack must balance both holds"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_send_write_rolls_back_the_wake_hold() {
+        use crate::power_assertion::{active_reasons, WakeReason, ASSERTION_TEST_LOCK};
+
+        let _assertion_guard = ASSERTION_TEST_LOCK.lock();
+        let state = SidecarState::new();
+        let reason = WakeReason::ActiveRun("sess-write-fails".into());
+        let error = write_active_run_command(
+            &state,
+            &json!({ "type": "send", "sessionId": "sess-write-fails" }),
+            "sess-write-fails",
+            Some("cmd-write-fails"),
+        )
+        .await
+        .expect_err("missing sidecar stdin must reject the write");
+
+        assert_eq!(error, "sidecar not running");
+        assert!(!active_reasons().contains(&reason));
+    }
+
+    #[test]
+    fn send_request_validation_rejects_untrackable_inputs() {
+        assert_eq!(
+            validate_send_request("", &json!("hello")).unwrap_err(),
+            "send: sessionId required"
+        );
+        assert_eq!(
+            validate_send_request("s1", &json!({ "text": "hello" })).unwrap_err(),
+            "send: prompt must be string or content-block array"
+        );
+        assert!(validate_send_request("s1", &json!("hello")).is_ok());
+        assert!(validate_send_request("s1", &json!([{ "type": "text" }])).is_ok());
     }
 
     #[test]

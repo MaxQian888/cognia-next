@@ -567,6 +567,7 @@ pub fn run() {
             // raw read/write/ensure_dir commands). Pure in-memory inserts — the
             // renderer extends it with the active workspace roots once it loads.
             files::seed_default_allowed_roots();
+            task_workspace::start_workspace_maintenance();
 
             // Hand the WASM plugin host its Tauri-backed surfaces (ADR-0013,
             // api-version 0.2). Clipboard and notifications are served
@@ -897,20 +898,34 @@ pub fn run() {
             task_workspace::task_workspace_status,
             task_workspace::task_workspace_begin,
             task_workspace::task_workspace_bundle_begin,
+            task_workspace::task_workspace_bundle_turn_begin,
+            task_workspace::task_workspace_bundle_turn_settle,
+            task_workspace::task_workspace_bundle_turn_abort,
+            task_workspace::task_workspace_bundle_turn_get,
             task_workspace::task_workspace_settle,
             task_workspace::task_workspace_get,
             task_workspace::task_workspace_list,
             task_workspace::task_workspace_managed_get,
             task_workspace::task_workspace_managed_list,
+            task_workspace::task_workspace_environment_list,
             task_workspace::task_workspace_bundle_get,
             task_workspace::task_workspace_bundle_list,
             task_workspace::task_workspace_bundle_acquire,
+            task_workspace::task_workspace_bundle_apply,
+            task_workspace::task_workspace_bundle_handoff_retry,
+            task_workspace::task_workspace_bundle_handoff_get,
+            task_workspace::task_workspace_bundle_handoff_undo,
+            task_workspace::task_workspace_bundle_handoff_undo_get,
             task_workspace::task_workspace_reconcile,
             task_workspace::task_workspace_policy_get,
             task_workspace::task_workspace_policy_set,
+            task_workspace::task_workspace_maintenance_run,
+            task_workspace::task_workspace_maintenance_events,
             task_workspace::task_workspace_managed_pin,
             task_workspace::task_workspace_managed_permanent,
             task_workspace::task_workspace_managed_adopt,
+            task_workspace::task_workspace_environment_adopt,
+            task_workspace::task_workspace_environment_create_branch,
             task_workspace::task_workspace_managed_archive,
             task_workspace::task_workspace_managed_restore,
             task_workspace::task_workspace_managed_delete,

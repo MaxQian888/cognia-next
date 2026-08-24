@@ -15,18 +15,32 @@ pub(super) const COMMANDS: &[&str] = &[
     "task_workspace_status",
     "task_workspace_begin",
     "task_workspace_bundle_begin",
+    "task_workspace_bundle_turn_begin",
+    "task_workspace_bundle_turn_settle",
+    "task_workspace_bundle_turn_abort",
+    "task_workspace_bundle_turn_get",
     "task_workspace_managed_get",
     "task_workspace_managed_list",
+    "task_workspace_environment_list",
     "task_workspace_bundle_get",
     "task_workspace_bundle_list",
     "task_workspace_bundle_acquire",
+    "task_workspace_bundle_apply",
+    "task_workspace_bundle_handoff_retry",
+    "task_workspace_bundle_handoff_get",
+    "task_workspace_bundle_handoff_undo",
+    "task_workspace_bundle_handoff_undo_get",
     "task_workspace_reconcile",
     "task_workspace_policy_get",
     "task_workspace_policy_set",
+    "task_workspace_maintenance_run",
+    "task_workspace_maintenance_events",
     "task_workspace_managed_pin",
     "task_workspace_managed_permanent",
     "task_workspace_managed_archive",
     "task_workspace_managed_adopt",
+    "task_workspace_environment_adopt",
+    "task_workspace_environment_create_branch",
     "task_workspace_managed_restore",
     "task_workspace_managed_delete",
     "task_workspace_settle",
@@ -272,6 +286,54 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
             .and_then(to_json)
         }
+        "task_workspace_bundle_turn_begin" => {
+            let bundle_id: String = required(&args, "bundleId")?;
+            let request: cognia_task_workspace::BeginWorkspaceBundleTurn =
+                required(&args, "request")?;
+            let sink: std::sync::Arc<dyn cognia_task_workspace::TaskWorkspaceEventSink> =
+                std::sync::Arc::new(crate::task_workspace::BusResourceEventSink(
+                    std::sync::Arc::clone(&state.event_bus),
+                ));
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::begin_hosted_workspace_bundle_turn(bundle_id, request, sink)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_turn_settle" => {
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            let final_state: Option<cognia_task_workspace::RunState> =
+                optional(&args, "finalState")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.settle_workspace_bundle_turn(
+                    &bundle_turn_id,
+                    final_state.unwrap_or(cognia_task_workspace::RunState::Ready),
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_turn_abort" => {
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.abort_workspace_bundle_turn(&bundle_turn_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_turn_get" => {
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_workspace_bundle_turn(&bundle_turn_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
         "task_workspace_managed_get" => {
             let workspace_id: String = required(&args, "workspaceId")?;
             crate::task_workspace::service()
@@ -283,6 +345,19 @@ pub(super) async fn dispatch(
             .and_then(|service| service.list_managed_workspaces())
             .map_err(RpcError::internal)
             .and_then(to_json),
+        "task_workspace_environment_list" => {
+            let root_dir: Option<String> = optional(&args, "rootDir")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service().and_then(|service| {
+                    service
+                        .list_workspace_environments(root_dir.as_deref().map(std::path::Path::new))
+                })
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
         "task_workspace_bundle_get" => {
             let bundle_id: String = required(&args, "bundleId")?;
             crate::task_workspace::service()
@@ -304,6 +379,55 @@ pub(super) async fn dispatch(
             .map_err(RpcError::internal)
             .and_then(to_json)
         }
+        "task_workspace_bundle_apply" => {
+            let bundle_id: String = required(&args, "bundleId")?;
+            let request: cognia_task_workspace::BundleHandoffRequest = required(&args, "request")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.apply_workspace_bundle(&bundle_id, request)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_handoff_retry" => {
+            let bundle_id: String = required(&args, "bundleId")?;
+            let request: cognia_task_workspace::BundleHandoffRequest = required(&args, "request")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?
+                    .retry_workspace_bundle_handoff(&bundle_id, request)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_handoff_get" => {
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_bundle_handoff_outcome(&bundle_turn_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_bundle_handoff_undo" => {
+            let bundle_id: String = required(&args, "bundleId")?;
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?
+                    .undo_workspace_bundle_handoff(&bundle_id, &bundle_turn_id)
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_bundle_handoff_undo_get" => {
+            let bundle_turn_id: String = required(&args, "bundleTurnId")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.get_bundle_handoff_undo_outcome(&bundle_turn_id))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
         "task_workspace_reconcile" => tokio::task::spawn_blocking(move || {
             crate::task_workspace::service()?.reconcile_known_worktrees()
         })
@@ -320,6 +444,28 @@ pub(super) async fn dispatch(
                 required(&args, "policy")?;
             crate::task_workspace::service()
                 .and_then(|service| service.set_workspace_lifecycle_policy(policy))
+                .map_err(RpcError::internal)
+                .and_then(to_json)
+        }
+        "task_workspace_maintenance_run" => {
+            let request: Option<cognia_task_workspace::WorkspaceMaintenanceRequest> =
+                optional(&args, "request")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.run_workspace_maintenance(
+                    request.unwrap_or(cognia_task_workspace::WorkspaceMaintenanceRequest {
+                        now: None,
+                    }),
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_maintenance_events" => {
+            let limit: Option<u32> = optional(&args, "limit")?;
+            crate::task_workspace::service()
+                .and_then(|service| service.list_workspace_maintenance_events(limit.unwrap_or(100)))
                 .map_err(RpcError::internal)
                 .and_then(to_json)
         }
@@ -357,6 +503,30 @@ pub(super) async fn dispatch(
             .map_err(|error| RpcError::internal(error.to_string()))?
             .map_err(RpcError::internal)
             .and_then(to_json)
+        }
+        "task_workspace_environment_adopt" => {
+            let environment_id: String = required(&args, "environmentId")?;
+            let source_root: String = required(&args, "sourceRoot")?;
+            let path: String = required(&args, "path")?;
+            tokio::task::spawn_blocking(move || {
+                crate::task_workspace::service()?.adopt_workspace_environment(
+                    &environment_id,
+                    std::path::Path::new(&source_root),
+                    std::path::Path::new(&path),
+                )
+            })
+            .await
+            .map_err(|error| RpcError::internal(error.to_string()))?
+            .map_err(RpcError::internal)
+            .and_then(to_json)
+        }
+        "task_workspace_environment_create_branch" => {
+            let workspace_id: String = required(&args, "workspaceId")?;
+            let branch: String = required(&args, "branch")?;
+            crate::task_workspace::task_workspace_environment_create_branch(workspace_id, branch)
+                .await
+                .map_err(RpcError::internal)
+                .and_then(to_json)
         }
         "task_workspace_managed_restore" => {
             let workspace_id: String = required(&args, "workspaceId")?;
@@ -772,14 +942,28 @@ mod tests {
     fn registry_inventory_and_lifecycle_commands_are_remotely_routed() {
         for command in [
             "task_workspace_bundle_begin",
+            "task_workspace_bundle_turn_begin",
+            "task_workspace_bundle_turn_settle",
+            "task_workspace_bundle_turn_abort",
+            "task_workspace_bundle_turn_get",
             "task_workspace_managed_list",
+            "task_workspace_environment_list",
             "task_workspace_bundle_list",
             "task_workspace_bundle_acquire",
+            "task_workspace_bundle_apply",
+            "task_workspace_bundle_handoff_retry",
+            "task_workspace_bundle_handoff_get",
+            "task_workspace_bundle_handoff_undo",
+            "task_workspace_bundle_handoff_undo_get",
             "task_workspace_reconcile",
             "task_workspace_policy_get",
             "task_workspace_policy_set",
+            "task_workspace_maintenance_run",
+            "task_workspace_maintenance_events",
             "task_workspace_managed_archive",
             "task_workspace_managed_adopt",
+            "task_workspace_environment_adopt",
+            "task_workspace_environment_create_branch",
             "task_workspace_managed_restore",
             "task_workspace_managed_delete",
         ] {

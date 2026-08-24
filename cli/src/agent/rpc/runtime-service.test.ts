@@ -8,6 +8,7 @@ import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude
 import { computeToolSchemaDigest } from "@/packages/agent/src/agent-definition"
 import { contentDigest } from "@/packages/agent/src/digest"
 import type { PluginTool } from "@/types/plugin"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { UnifiedTurnParams, UnifiedTurnResult } from "../runtime/unified-runtime"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
@@ -601,6 +602,89 @@ describe("createAgentRuntimeService", () => {
       snapshotCount: 1,
       policy: { network: "off", writableRoots: [home], maxMemoryMb: 512 },
     })
+    await service.close()
+  })
+
+  it("binds the persisted ceiling before a turn can dispatch tools", async () => {
+    const sessionRoot = path.join(home, "sessions")
+    const statePath = path.join(sessionRoot, "session-1", "rpc-state.json")
+    mkdirSync(path.dirname(statePath), { recursive: true })
+    writeFileSync(
+      statePath,
+      JSON.stringify({ sandboxPolicy: { network: "off", writableRoots: [home] } })
+    )
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      sessionDirOverride: sessionRoot,
+      mintSessionId: () => "session-1",
+      runTurn: async (params: UnifiedTurnParams): Promise<UnifiedTurnResult> => ({
+        result: {
+          schemaVersion: 1 as const,
+          type: "result" as const,
+          status: "completed" as const,
+          sessionId: params.sessionId ?? "session-1",
+          runId: "run-1",
+          turnId: "turn-1",
+          attemptId: "attempt-1",
+          text: "done",
+          backend: "builtin",
+          model: "test-model",
+          capabilities: ["session.resume"],
+          session: { persisted: true, turnCount: 0 },
+        },
+        envelopes: [],
+      }),
+    })
+    await service.handle("session/create", {}, context as never)
+    await service.handle("turn/run", { sessionId: "session-1", input: "hi" }, context as never)
+
+    // `plugin-tool-dispatch` resolves the placement synchronously by session
+    // id, so the bind must have settled before the turn started — otherwise the
+    // first tool call runs against the unpoliced host default.
+    const ref = sandboxSessionRuntime.activeRefForSession("session-1")
+    expect(ref).toBeDefined()
+    expect(() => sandboxSessionRuntime.assertWritablePath(ref!, "/etc/passwd")).toThrow(
+      /outside the configured writable roots/
+    )
+    // Computer Use is the host/local placement on this rail, not a refusal.
+    await expect(sandboxSessionRuntime.decorateComputerUseContext(ref!, {})).resolves.toEqual({})
+    await service.close()
+  })
+
+  it("reports a restore whose rebind failed instead of acknowledging it", async () => {
+    const sessionRoot = path.join(home, "sessions")
+    const service = createAgentRuntimeService({
+      config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
+      home,
+      sessionDirOverride: sessionRoot,
+      mintSessionId: () => "session-1",
+    })
+    await service.handle("session/create", {}, context as never)
+    const policyRecord = await service.handle(
+      "sandbox/policy/capture",
+      { sessionId: "session-1", commandId: "snapshot-one" },
+      context as never
+    )
+    const bindSpy = jest
+      .spyOn(sandboxSessionRuntime, "bindSession")
+      .mockRejectedValueOnce(new Error("adapter refused"))
+
+    try {
+      await expect(
+        service.handle(
+          "sandbox/policy/restore",
+          {
+            sessionId: "session-1",
+            policyRecordId: String(policyRecord.policyRecordId),
+            commandId: "restore-one",
+          },
+          context as never
+        )
+      ).rejects.toThrow(/could not be bound/)
+    } finally {
+      bindSpy.mockRestore()
+    }
     await service.close()
   })
 

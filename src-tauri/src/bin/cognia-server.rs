@@ -984,6 +984,7 @@ async fn run_serve(
     app_lib::configure_agent_session_store_path(agent_session_store_path(&data_dir));
     app_lib::task_workspace::install(data_dir.clone())
         .map_err(|error| format!("task workspace: {error}"))?;
+    app_lib::task_workspace::start_workspace_maintenance();
     // The headless host serves the same sidecar `host_rpc` protocol as the
     // desktop. Install the shared Rust supervisor before the sidecar can
     // accept its first request, so background commands and durable monitors

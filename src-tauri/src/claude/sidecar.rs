@@ -1,8 +1,10 @@
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex as ParkingMutex;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -117,10 +119,37 @@ fn apply_managed_proxy_env(
     Ok(())
 }
 
+fn handle_active_run_event(state: &SidecarState, generation: u64, value: &Value) {
+    let session_id = value.get("sessionId").and_then(Value::as_str);
+    match value.get("type").and_then(Value::as_str) {
+        Some("session_ended") => {
+            if let Some(session_id) = session_id {
+                state.finish_active_run(generation, session_id);
+            }
+        }
+        Some("command_ack") if value.get("duplicate").and_then(Value::as_bool) == Some(true) => {
+            if let (Some(session_id), Some(command_id)) =
+                (session_id, value.get("commandId").and_then(Value::as_str))
+            {
+                state.finish_duplicate_active_run(generation, session_id, command_id);
+            }
+        }
+        Some("capability_error")
+            if value.get("command").and_then(Value::as_str) == Some("send") =>
+        {
+            if let Some(session_id) = session_id {
+                state.finish_active_run(generation, session_id);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
     inner: Arc<Mutex<Inner>>,
+    active_runs: Arc<ParkingMutex<ActiveRunRegistry>>,
     /// The live child's stdin, kept behind its own lock — separate from
     /// `inner` so a slow control-message write never blocks state reads
     /// (`is_ready`). Mirrors the owned-stdin
@@ -146,6 +175,24 @@ pub struct SidecarState {
     /// a failed probe leaves this `false` so a later spawn (after the user
     /// installs/upgrades Node) re-checks.
     node_version_ok: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Debug)]
+struct ActiveRunHold {
+    token_id: u64,
+    generation: u64,
+    command_id: Option<String>,
+}
+
+#[derive(Default)]
+struct ActiveRunRegistry {
+    next_token_id: u64,
+    by_session: HashMap<String, VecDeque<ActiveRunHold>>,
+}
+
+pub(crate) struct ActiveRunToken {
+    token_id: u64,
+    session_id: String,
 }
 
 #[derive(Default)]
@@ -248,6 +295,108 @@ impl SidecarState {
         self.spawn_epoch
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             .wrapping_add(1)
+    }
+
+    pub(crate) fn begin_active_run(
+        &self,
+        session_id: &str,
+        command_id: Option<&str>,
+    ) -> ActiveRunToken {
+        let mut registry = self.active_runs.lock();
+        registry.next_token_id = registry.next_token_id.wrapping_add(1);
+        let token_id = registry.next_token_id;
+        let generation = self.current_epoch();
+        crate::power_assertion::acquire(crate::power_assertion::WakeReason::ActiveRun(
+            session_id.to_string(),
+        ));
+        registry
+            .by_session
+            .entry(session_id.to_string())
+            .or_default()
+            .push_back(ActiveRunHold {
+                token_id,
+                generation,
+                command_id: command_id.map(str::to_string),
+            });
+        ActiveRunToken {
+            token_id,
+            session_id: session_id.to_string(),
+        }
+    }
+
+    pub(crate) fn cancel_active_run(&self, token: ActiveRunToken) {
+        self.release_active_run_matching(&token.session_id, |hold| hold.token_id == token.token_id);
+    }
+
+    fn finish_active_run(&self, generation: u64, session_id: &str) {
+        self.release_active_run_matching(session_id, |hold| hold.generation == generation);
+    }
+
+    fn finish_duplicate_active_run(&self, generation: u64, session_id: &str, command_id: &str) {
+        self.release_active_run_matching_from_back(session_id, |hold| {
+            hold.generation == generation && hold.command_id.as_deref() == Some(command_id)
+        });
+    }
+
+    fn finish_generation_active_runs(&self, generation: u64) {
+        let releases = {
+            let mut registry = self.active_runs.lock();
+            let mut releases = Vec::new();
+            registry.by_session.retain(|session_id, holds| {
+                let before = holds.len();
+                holds.retain(|hold| hold.generation != generation);
+                releases.extend(std::iter::repeat_n(
+                    session_id.clone(),
+                    before - holds.len(),
+                ));
+                !holds.is_empty()
+            });
+            releases
+        };
+        for session_id in releases {
+            crate::power_assertion::release(&crate::power_assertion::WakeReason::ActiveRun(
+                session_id,
+            ));
+        }
+    }
+
+    fn release_active_run_matching(
+        &self,
+        session_id: &str,
+        predicate: impl FnMut(&ActiveRunHold) -> bool,
+    ) {
+        self.release_active_run_at(session_id, |holds| holds.iter().position(predicate));
+    }
+
+    fn release_active_run_matching_from_back(
+        &self,
+        session_id: &str,
+        predicate: impl FnMut(&ActiveRunHold) -> bool,
+    ) {
+        self.release_active_run_at(session_id, |holds| holds.iter().rposition(predicate));
+    }
+
+    fn release_active_run_at(
+        &self,
+        session_id: &str,
+        index: impl FnOnce(&VecDeque<ActiveRunHold>) -> Option<usize>,
+    ) {
+        let removed = {
+            let mut registry = self.active_runs.lock();
+            let Some(holds) = registry.by_session.get_mut(session_id) else {
+                return;
+            };
+            let removed = index(holds).and_then(|index| holds.remove(index)).is_some();
+            if holds.is_empty() {
+                registry.by_session.remove(session_id);
+            }
+            removed
+        };
+        if removed {
+            crate::power_assertion::release(&crate::power_assertion::WakeReason::ActiveRun(
+                session_id.to_string(),
+            ));
+        }
     }
 
     /// Send one JSON-line command to the running sidecar. Locks only `stdin`
@@ -585,6 +734,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
                                 if value.get("type").and_then(|t| t.as_str()) == Some("ready") {
                                     state.note_ready().await;
                                 }
+                                handle_active_run_event(&state, my_epoch, &value);
                                 // PreToolUse hook: when the sidecar emits a permission_request
                                 // we may need to short-circuit it with an automatic deny.
                                 // Spawn the hook eval as a task so the reader keeps draining
@@ -653,6 +803,7 @@ pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<()
             // state) and record the failure so the next spawn can back off a
             // crash loop. `note_exit` is the single sink for all of that.
             let unexpected = state.note_exit(Instant::now()).await;
+            state.finish_generation_active_runs(my_epoch);
             if unexpected {
                 // ADR-0102 §4 — three automatic restarts per subsystem, then
                 // the subsystem is held back and the app enters safe mode. The
@@ -888,6 +1039,45 @@ pub async fn kill_sidecar(state: SidecarState) {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn old_generation_cleanup_preserves_successor_holds() {
+        let _guard = crate::power_assertion::ASSERTION_TEST_LOCK.lock();
+        let state = SidecarState::new();
+        let reason = crate::power_assertion::WakeReason::ActiveRun("shared-session".into());
+
+        let old_generation = state.next_epoch();
+        state.begin_active_run("shared-session", Some("old-command"));
+        let new_generation = state.next_epoch();
+        state.begin_active_run("shared-session", Some("new-command"));
+
+        state.finish_generation_active_runs(old_generation);
+        assert!(crate::power_assertion::active_reasons().contains(&reason));
+
+        state.finish_generation_active_runs(new_generation);
+        assert!(!crate::power_assertion::active_reasons().contains(&reason));
+    }
+
+    #[test]
+    fn rejected_send_event_releases_its_generation_hold() {
+        let _guard = crate::power_assertion::ASSERTION_TEST_LOCK.lock();
+        let state = SidecarState::new();
+        let generation = state.next_epoch();
+        let reason = crate::power_assertion::WakeReason::ActiveRun("rejected-session".into());
+        state.begin_active_run("rejected-session", Some("rejected-command"));
+
+        handle_active_run_event(
+            &state,
+            generation,
+            &serde_json::json!({
+                "type": "capability_error",
+                "sessionId": "rejected-session",
+                "command": "send",
+            }),
+        );
+
+        assert!(!crate::power_assertion::active_reasons().contains(&reason));
+    }
 
     #[test]
     fn host_rpc_routes_session_store_before_the_jobs_dispatcher() {

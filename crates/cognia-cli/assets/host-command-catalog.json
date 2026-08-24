@@ -29924,6 +29924,47 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_bundle_apply",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_apply (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId",
+          "request"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_bundle_begin",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -30005,6 +30046,157 @@
       "outputTyped": true
     },
     {
+      "name": "task_workspace_bundle_handoff_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_bundle_handoff_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_handoff_retry",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_handoff_retry (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId",
+          "request"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_handoff_undo",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_handoff_undo (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId",
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          },
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_handoff_undo_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_bundle_handoff_undo_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
       "name": "task_workspace_bundle_list",
       "category": "tasks",
       "resource": "task-workspaces",
@@ -30020,6 +30212,283 @@
       "inputSchema": {
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_turn_abort",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_turn_abort (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_turn_begin",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "write",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_turn_begin (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleId",
+          "request"
+        ],
+        "properties": {
+          "bundleId": {
+            "type": "string",
+            "example": ""
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_turn_get",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_bundle_turn_get (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_bundle_turn_settle",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_bundle_turn_settle (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "bundleTurnId"
+        ],
+        "properties": {
+          "bundleTurnId": {
+            "type": "string",
+            "example": ""
+          },
+          "finalState": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_environment_adopt",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_environment_adopt (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "environmentId",
+          "sourceRoot",
+          "path"
+        ],
+        "properties": {
+          "environmentId": {
+            "type": "string",
+            "example": ""
+          },
+          "sourceRoot": {
+            "type": "string",
+            "example": ""
+          },
+          "path": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_environment_create_branch",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_environment_create_branch (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "workspaceId",
+          "branch"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": ""
+          },
+          "branch": {
+            "type": "string",
+            "example": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_environment_list",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_environment_list (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rootDir": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
       "outputSchemaSource": "contract",
@@ -30416,6 +30885,82 @@
           "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
         },
         "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_maintenance_events",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "read",
+      "capability": "host.observe",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "summary": "task_workspace_maintenance_events (host.observe)",
+      "description": "Loopback service-token command. Target: execution; risk: low.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "array",
+        "items": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "x-cognia-opaque-reason": "The legacy dispatch seam intentionally carries provider-, plugin-, or bridge-defined JSON. The command remains contract-covered at the JSON value boundary until its owning domain publishes a narrower stable wire type."
+        },
+        "x-cognia-opaque-reason": "The command serializes an existing domain collection; item compatibility remains owned by that domain.",
+        "x-cognia-schema-owner": "task-workspaces"
+      },
+      "outputTyped": true
+    },
+    {
+      "name": "task_workspace_maintenance_run",
+      "category": "tasks",
+      "resource": "task-workspaces",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "workspace.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "summary": "task_workspace_maintenance_run (workspace.write)",
+      "description": "Loopback service-token command. Target: execution; risk: high.",
+      "inputSchemaSource": "contract",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "additionalProperties": {},
+            "example": {}
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchemaSource": "contract",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true,
+        "x-cognia-opaque-reason": "The command serializes an existing domain record whose stable root is an object; property-level compatibility remains owned by that domain.",
         "x-cognia-schema-owner": "task-workspaces"
       },
       "outputTyped": true
@@ -34857,5 +35402,5 @@
       "outputTyped": true
     }
   ],
-  "catalogHash": "e5c70e9417a1a0a07586d00ca7fbc92b69694833c81bd695c658ec57bd0e3d15"
+  "catalogHash": "247db23576d7dd9e81b696d73eafe09d7167bd8110a3233723e5f3e4ab473674"
 }

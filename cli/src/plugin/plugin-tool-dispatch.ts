@@ -18,12 +18,15 @@ import {
   type PluginToolExecRequest,
   type PluginToolExecResponse,
 } from "@/lib/claude/plugin-tool-ipc"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 
 export interface PluginToolDispatchDeps {
   subscribe?: typeof subscribePluginToolExec
   handle?: (req: PluginToolExecRequest) => Promise<PluginToolExecResponse>
   send?: typeof sendPluginToolResponse
+  /** Override the session → sandbox placement lookup. Tests inject here. */
+  runtimeRef?: (sessionId: string) => string | undefined
 }
 
 /**
@@ -38,7 +41,24 @@ export function subscribePluginToolDispatch(
   const subscribe = deps.subscribe ?? subscribePluginToolExec
   const handle = deps.handle ?? handlePluginToolExec
   const send = deps.send ?? sendPluginToolResponse
+  const runtimeRefFor =
+    deps.runtimeRef ?? ((sessionId: string) => sandboxSessionRuntime.activeRefForSession(sessionId))
   return subscribe((req) => {
-    void handle(req as PluginToolExecRequest).then((resp) => send(resp))
+    // The CLI rail has no send envelope to carry the placement, so the frame
+    // arrives without `sandboxRuntimeRef`. The runtime service bound one for
+    // this session id from its persisted sandbox ceiling; stamp it here so
+    // headless `sandbox_*` calls clamp to that ceiling instead of falling back
+    // to an unpoliced host tier.
+    //
+    // The stamp is deliberately not scoped to the sandbox tools: the ref also
+    // carries the GUI placement, and the CLI binds `computerTarget: "local"`
+    // with Computer Use enabled — the host/local placement those tools already
+    // ran under. A ref that declared the GUI surface disabled would turn every
+    // `perform_action` on this rail into a refusal instead.
+    const request = req as PluginToolExecRequest
+    const bound = request.sandboxRuntimeRef ?? runtimeRefFor(request.sessionId)
+    void handle(bound ? { ...request, sandboxRuntimeRef: bound } : request).then((resp) =>
+      send(resp)
+    )
   })
 }

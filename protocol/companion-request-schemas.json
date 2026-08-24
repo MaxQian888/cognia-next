@@ -8423,6 +8423,25 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_bundle_apply": {
+      "type": "object",
+      "required": [
+        "bundleId",
+        "request"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_bundle_begin": {
       "type": "object",
       "required": [
@@ -8460,9 +8479,184 @@
       },
       "additionalProperties": false
     },
+    "task_workspace_bundle_handoff_get": {
+      "type": "object",
+      "required": [
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_handoff_retry": {
+      "type": "object",
+      "required": [
+        "bundleId",
+        "request"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_handoff_undo": {
+      "type": "object",
+      "required": [
+        "bundleId",
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        },
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_handoff_undo_get": {
+      "type": "object",
+      "required": [
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
     "task_workspace_bundle_list": {
       "type": "object",
       "properties": {},
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_turn_abort": {
+      "type": "object",
+      "required": [
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_turn_begin": {
+      "type": "object",
+      "required": [
+        "bundleId",
+        "request"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string",
+          "example": ""
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": true,
+          "example": {}
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_turn_get": {
+      "type": "object",
+      "required": [
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_bundle_turn_settle": {
+      "type": "object",
+      "required": [
+        "bundleTurnId"
+      ],
+      "properties": {
+        "bundleTurnId": {
+          "type": "string",
+          "example": ""
+        },
+        "finalState": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_environment_adopt": {
+      "type": "object",
+      "required": [
+        "environmentId",
+        "sourceRoot",
+        "path"
+      ],
+      "properties": {
+        "environmentId": {
+          "type": "string",
+          "example": ""
+        },
+        "sourceRoot": {
+          "type": "string",
+          "example": ""
+        },
+        "path": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_environment_create_branch": {
+      "type": "object",
+      "required": [
+        "workspaceId",
+        "branch"
+      ],
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "example": ""
+        },
+        "branch": {
+          "type": "string",
+          "example": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_environment_list": {
+      "type": "object",
+      "properties": {
+        "rootDir": {
+          "type": "string"
+        }
+      },
       "additionalProperties": false
     },
     "task_workspace_export_resource_manifest": {
@@ -8586,6 +8780,27 @@
       "properties": {
         "taskId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_maintenance_events": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "task_workspace_maintenance_run": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "object",
+          "additionalProperties": true
         }
       },
       "additionalProperties": false

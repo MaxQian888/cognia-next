@@ -124,10 +124,8 @@ pub(super) async fn dispatch(
         "claude_set_mode" => {
             let session_id: String = required_aliased(&args, "session_id", "sessionId")?;
             let mode: String = required(&args, "mode")?;
-            // `claude_set_mode_impl` is a thin wrapper that passes `None` for
-            // the correlation id, so remote callers structurally could not
-            // match the sidecar's ack to their request — the desktop command
-            // takes `command_id` for exactly that. Forward it.
+            // Forward the correlation id just like the desktop command so the
+            // caller can match the sidecar acknowledgement to this request.
             let command_id: Option<String> = optional_aliased(&args, "command_id", "commandId")?;
             claude_commands::claude_set_mode_impl_with_id(
                 &host.sidecar_state(),

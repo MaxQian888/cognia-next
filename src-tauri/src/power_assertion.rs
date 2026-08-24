@@ -111,6 +111,7 @@ pub fn release(reason: &WakeReason) {
 }
 
 /// Whether the host is currently being held awake, and by what.
+#[cfg(test)]
 pub fn active_reasons() -> Vec<WakeReason> {
     let mut reasons = STATE.lock().holders.keys().cloned().collect::<Vec<_>>();
     reasons.sort();
