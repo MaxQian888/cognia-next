@@ -5,6 +5,12 @@
 //! [`PYTHON_EVENT`], consumed by `lib/plugin/core/manager.ts`. Emission
 //! goes through the [`EventSink`] indirection so protocol code stays unit
 //! testable without fabricating an `AppHandle` (tests inject a collector).
+//!
+//! The plugin -> host RPC channel (ADR-0143) rides a second event,
+//! [`PYTHON_HOST_REQUEST_EVENT`], behind the same indirection: a `host_request`
+//! frame is projected to whoever registered a [`HostRequestSink`] (the renderer
+//! under Tauri, the CLI plugin runtime headless), which answers by calling
+//! `plugin_python_host_response`.
 
 use std::sync::Arc;
 
@@ -42,6 +48,47 @@ pub fn tauri_sink(app: tauri::AppHandle) -> EventSink {
     })
 }
 
+/// Event channel for plugin -> host RPC requests.
+pub const PYTHON_HOST_REQUEST_EVENT: &str = "plugin:python:host-request";
+
+/// One `host_request` frame: a plugin reaching back into the host's `ctx.*`
+/// API surface. The receiver must answer exactly once by invoking
+/// `plugin_python_host_response` with `request_id`, or the plugin's call fails
+/// on its own timeout.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PythonHostRequest {
+    pub plugin_id: String,
+    /// Lifecycle generation of the host that issued it — a response carrying a
+    /// stale generation is rejected, so a respawned host can never be answered
+    /// with a reply meant for its predecessor.
+    pub generation: String,
+    /// Plugin-assigned id. Its namespace is independent of the host-assigned
+    /// request ids: the two travel in opposite directions.
+    pub request_id: u64,
+    /// `<namespace>.<method>` — e.g. `agent.run`, `storage.get`.
+    pub method: String,
+    pub params: Value,
+}
+
+/// Where host requests go. Production (Tauri): [`tauri_host_request_sink`].
+/// Headless and tests supply their own.
+pub type HostRequestSink = Arc<dyn Fn(PythonHostRequest) + Send + Sync>;
+
+/// Production sink: forward to the renderer, which routes the call onto the
+/// permission-guarded `ctx.*` APIs.
+pub fn tauri_host_request_sink(app: tauri::AppHandle) -> HostRequestSink {
+    use tauri::Emitter;
+    Arc::new(move |request| {
+        if let Err(e) = app.emit(PYTHON_HOST_REQUEST_EVENT, &request) {
+            log::warn!(
+                "[python.{}] host request emit failed: {e}",
+                request.plugin_id
+            );
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,5 +121,21 @@ mod tests {
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["callId"], 7);
+    }
+
+    #[test]
+    fn host_request_serializes_camel_case() {
+        let request = PythonHostRequest {
+            plugin_id: "demo".into(),
+            generation: "gen-1".into(),
+            request_id: 3,
+            method: "agent.run".into(),
+            params: serde_json::json!({"prompt": "hi"}),
+        };
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["pluginId"], "demo");
+        assert_eq!(json["requestId"], 3);
+        assert_eq!(json["method"], "agent.run");
+        assert_eq!(json["params"]["prompt"], "hi");
     }
 }

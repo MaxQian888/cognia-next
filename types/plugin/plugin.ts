@@ -3307,6 +3307,14 @@ export interface PythonHostSettings {
   /** In-flight request cap per host (default 4). */
   maxConcurrentCalls?: number
   /**
+   * Cap on concurrent plugin → host RPC calls (ADR-0143; default 8).
+   *
+   * A throughput gate, not a recursion guard: excess frames queue rather than
+   * failing. The runaway backstop lives in `host.py` and is derived from this
+   * value so it always sits above it.
+   */
+  maxOutboundHostCalls?: number
+  /**
    * ADR-0028 Phase 3 — run the interpreter under the OS sandbox
    * (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; defaults from
    * the global sandbox toggle at load. Windows is not wrapped yet (its

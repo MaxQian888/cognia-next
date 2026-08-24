@@ -31,7 +31,7 @@ use parking_lot::RwLock;
 use serde_json::Value;
 
 use discover::Interpreter;
-use events::EventSink;
+use events::{EventSink, HostRequestSink};
 use protocol::{HostOptions, PluginHost, CALL_TIMEOUT};
 
 use crate::{PluginError, Result};
@@ -66,6 +66,8 @@ pub struct RespawnSpec {
     pub import_params: Value,
     pub env: HashMap<String, String>,
     pub max_concurrent_calls: Option<usize>,
+    /// Outbound `host_request` gate size; `None` → the protocol default.
+    pub max_outbound_host_calls: Option<usize>,
     /// Idle minutes before the sweep demotes the host to `Lazy`; 0 = never.
     pub idle_shutdown_min: u64,
     /// Per-plugin override of [`CALL_TIMEOUT`] (clamped 1s..=3600s).
@@ -112,6 +114,9 @@ pub struct PythonRuntimeState {
     /// `tauri_sink` in production, a collector in tests). Hosts spawned
     /// before initialization fall back to log-only behavior.
     pub event_sink: RwLock<Option<EventSink>>,
+    /// Plugin -> host RPC sink, set alongside `event_sink`. `None` refuses
+    /// every `ctx.*` call with a clear error rather than hanging the plugin.
+    pub host_request_sink: RwLock<Option<HostRequestSink>>,
     /// Serializes lazy materialization so concurrent first-calls spawn
     /// exactly one subprocess.
     materialize_lock: tokio::sync::Mutex<()>,
@@ -126,6 +131,7 @@ impl PythonRuntimeState {
             hosts: Arc::new(RwLock::new(HashMap::new())),
             counters: PythonCounters::default(),
             event_sink: RwLock::new(None),
+            host_request_sink: RwLock::new(None),
             materialize_lock: tokio::sync::Mutex::new(()),
             sweep_started: AtomicBool::new(false),
         }
@@ -210,6 +216,11 @@ impl PythonRuntimeState {
         self.event_sink.read().clone()
     }
 
+    /// Current plugin -> host RPC sink, if one was registered.
+    pub fn host_request_sink(&self) -> Option<HostRequestSink> {
+        self.host_request_sink.read().clone()
+    }
+
     /// Effective call timeout for a plugin (its override or the default),
     /// clamped to a sane window.
     pub fn call_timeout(&self, plugin_id: &str) -> Duration {
@@ -276,8 +287,10 @@ impl PythonRuntimeState {
             &spec.host_script,
             HostOptions {
                 sink: self.sink(),
+                host_request_sink: self.host_request_sink(),
                 generation: generation.clone(),
                 max_concurrent_calls: spec.max_concurrent_calls,
+                max_outbound_host_calls: spec.max_outbound_host_calls,
                 env: spec.env.clone(),
                 sandboxed: spec.sandboxed,
             },
@@ -498,6 +511,7 @@ mod tests {
                 import_params: json!({}),
                 env: HashMap::new(),
                 max_concurrent_calls: None,
+                max_outbound_host_calls: None,
                 idle_shutdown_min: idle_min,
                 call_timeout_ms: None,
                 sandboxed: false,

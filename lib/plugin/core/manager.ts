@@ -115,6 +115,10 @@ import {
   getPythonHostSettings,
   setPythonHostSettings,
 } from "@/lib/db/plugins"
+import {
+  routePythonHostRequest,
+  type PythonHostRequestFrame,
+} from "@/lib/plugin/python/host-request-router"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import {
   bindPythonRuntimeGeneration,
@@ -759,6 +763,12 @@ export class PluginManager {
   private runtimeProfile: PluginRuntimeProfile
   /** `plugin:python` Tauri event unlisten — set once by subscribePythonEvents. */
   private pythonEventsUnlisten: (() => void) | null = null
+
+  /**
+   * `plugin:python:host-request` unlisten — the plugin → host RPC channel
+   * (ADR-0143), set once by subscribePythonHostRequests.
+   */
+  private pythonHostRequestsUnlisten: (() => void) | null = null
 
   constructor(config: PluginManagerConfig) {
     this.config = config
@@ -1845,6 +1855,7 @@ export class PluginManager {
         pythonPath: this.config.pythonPath,
       })
       await this.subscribePythonEvents()
+      await this.subscribePythonHostRequests()
       const runtime = await this.getPythonRuntimeInfo().catch(() => null)
       if (runtime && !runtime.available) {
         // Supported configuration, not an error: the backend probed and
@@ -1894,6 +1905,78 @@ export class PluginManager {
           site: "manager.subscribePythonEvents",
           message: "Failed to subscribe to plugin:python events",
           expected: !canUseTauriInvoke(),
+        },
+        error
+      )
+    }
+  }
+
+  /**
+   * Own the single listener for the plugin → host RPC channel (ADR-0143).
+   *
+   * Mirrors `subscribePythonEvents`, including the `nodeHostSubscriber` seam
+   * so the headless runtime routes the same frames without a renderer. Every
+   * frame is answered exactly once: a Python plugin blocked on `ctx.*` has no
+   * other way out but its own timeout.
+   */
+  private async subscribePythonHostRequests(): Promise<void> {
+    if (this.pythonHostRequestsUnlisten) {
+      return
+    }
+    const handle = (frame: PythonHostRequestFrame) => {
+      void this.handlePythonHostRequest(frame)
+    }
+    try {
+      if (this.config.nodeHostSubscriber) {
+        this.pythonHostRequestsUnlisten =
+          await this.config.nodeHostSubscriber<PythonHostRequestFrame>(
+            "plugin:python:host-request",
+            handle
+          )
+        return
+      }
+      const { listen } = await import("@tauri-apps/api/event")
+      this.pythonHostRequestsUnlisten = await listen<PythonHostRequestFrame>(
+        "plugin:python:host-request",
+        (event) => handle(event.payload)
+      )
+    } catch (error) {
+      recordSilentFailure(
+        "python-runtime",
+        {
+          site: "manager.subscribePythonHostRequests",
+          message: "Failed to subscribe to plugin:python:host-request events",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
+    }
+  }
+
+  /** Route one host request and write its answer back to the plugin. */
+  private async handlePythonHostRequest(frame: PythonHostRequestFrame): Promise<void> {
+    const outcome = await routePythonHostRequest(frame, {
+      getContext: (pluginId) => this.contexts.get(pluginId) ?? null,
+    })
+    try {
+      await this.invokeNativeHost("plugin_python_host_response", {
+        pluginId: frame.pluginId,
+        generation: frame.generation,
+        requestId: frame.requestId,
+        ok: outcome.ok,
+        result: outcome.ok ? outcome.result : null,
+        error: outcome.ok ? null : outcome.error,
+      })
+    } catch (error) {
+      // The host is gone or the generation went stale — the plugin's own
+      // timeout is the backstop. Record it rather than swallowing: a burst of
+      // these means the response path itself is broken.
+      recordSilentFailure(
+        "python-runtime",
+        {
+          site: "manager.handlePythonHostRequest",
+          message: `Failed to answer host request ${frame.requestId} for ${frame.pluginId}`,
+          expected: false,
         },
         error
       )

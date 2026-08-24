@@ -260,6 +260,24 @@ impl HeadlessServices {
                 }
                 Err(error) => log::warn!("serialize headless Python plugin event: {error}"),
             }));
+        // Plugin -> host RPC (ADR-0143) rides the same bus. Without this a
+        // headless python plugin's `ctx.*` call is refused rather than routed:
+        // the Rust side has a sink only when someone registers one, and the
+        // Tauri registration lives in the command layer this host never runs.
+        let python_host_request_bus = Arc::clone(&event_bus);
+        *python_plugins.host_request_sink.write() = Some(Arc::new(move |request| {
+            match serde_json::to_value(request) {
+                Ok(payload) => {
+                    python_host_request_bus.publish(
+                        crate::plugin_api::python::events::PYTHON_HOST_REQUEST_EVENT.to_string(),
+                        payload,
+                    );
+                }
+                Err(error) => {
+                    log::warn!("serialize headless Python host request: {error}")
+                }
+            }
+        }));
         let vscode_dir = plugin_install_dir
             .parent()
             .unwrap_or(plugin_install_dir.as_path())

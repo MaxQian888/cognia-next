@@ -4,41 +4,76 @@ Embedded into the Tauri binary via include_str! and written to
 <app_data>/cognia/python/host.py at plugin_python_initialize. One host
 process serves exactly one plugin.
 
-Protocol (NDJSON over stdio, driven by src-tauri/src/plugin_api/python/):
-  request   {"id": <int>, "method": <str>, "params": <object>}
-  response  {"id": <int>, "ok": true, "result": <json>}
-          | {"id": <int>, "ok": false, "error": <str>}
-  event     {"type": "event", "event": <str>, "call_id"?: <int>, "data": <json>}
-            (un-correlated notification: "progress" | "chunk" | "chunk_end";
-             "log" and "exit" are synthesized Rust-side)
+Protocol (NDJSON over stdio, driven by crates/cognia-plugin-runtime/src/python/):
+
+  host -> plugin
+    request        {"id": <int>, "method": <str>, "params": <object>}
+    host_response  {"type": "host_response", "id": <int>, "ok": true, "result": <json>}
+                 | {"type": "host_response", "id": <int>, "ok": false, "error": <str>}
+
+  plugin -> host
+    response       {"id": <int>, "ok": true, "result": <json>}
+                 | {"id": <int>, "ok": false, "error": <str>}
+    event          {"type": "event", "event": <str>, "call_id"?: <int>, "data": <json>}
+                   (un-correlated notification: "progress" | "chunk" | "chunk_end" |
+                    "emit"; "log" and "exit" are synthesized Rust-side)
+    host_request   {"type": "host_request", "id": <int>, "method": <str>,
+                    "params": <object>}
+
+`host_request` is the plugin -> host RPC channel (ADR-0143): it lets a plugin
+reach the host's `ctx.*` API surface (agent, storage, fs, git, ui, chat, ...).
+Its `id` namespace is plugin-assigned and independent of the host-assigned
+request ids -- the two travel in opposite directions and carry distinct `type`
+tags, so they can never collide.
 
 Methods: ping, import_main, get_tools, call_tool, call, call_hook,
-push_config, get_info, shutdown.
+push_config, get_info, shutdown, eval, import, module_call, module_getattr.
 
 The `cognia` shim installed into sys.modules before importing the plugin
-exposes: tool, hook, progress, get_config, log, on_config_changed — mirroring
-the reference SDK's module-level surface (plugin-sdk/python/src/cognia).
+exposes: tool, hook, progress, get_config, log, on_config_changed,
+contribution, emit, ctx -- mirroring the reference SDK's module-level surface
+(plugin-sdk/python/src/cognia).
+
+Concurrency: the main loop is asyncio. Inbound requests are served as
+independent tasks, so a handler blocked on a `host_request` never stalls the
+loop -- which is what makes `ctx.*` usable from inside a tool at all, and what
+lets a plugin fan out concurrent host calls (RepoWiki's per-module analysis
+runs five agent turns at once). Sync plugin code runs on a worker pool with
+its contextvars copied across; async plugin code is awaited directly. stdin is
+drained by its own single-thread executor so a saturated worker pool can never
+starve the reader and deadlock the response path.
 
 Lifecycle conventions (module-level, all optional): on_startup() runs after
 import; on_config_updated(config) runs on push_config; on_shutdown() runs
-on graceful shutdown. Tools returning an iterator/generator stream each
-chunk as an event before the terminal reply.
+on graceful shutdown. Tools returning an iterator/generator (sync or async)
+stream each chunk as an event before the terminal reply.
 
 stdout is the protocol channel: plugin print() output is redirected to
 stderr, which the Rust side forwards into the app log. Stdlib only.
 """
 
+import asyncio
 import collections.abc
+import contextvars
+import functools
 import importlib
 import importlib.util
 import inspect
+import itertools
 import json
 import re
 import sys
+import threading
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 _RPC_OUT = sys.stdout
 sys.stdout = sys.stderr  # plugin print() must never corrupt the protocol
+
+#: Serializes protocol writes. Frames originate on the event loop *and* on
+#: worker threads (a sync tool calling cognia.progress), so an unguarded
+#: write can interleave two JSON lines into one unparseable frame.
+_WRITE_LOCK = threading.Lock()
 
 _TOOLS = {}  # name -> {"fn": callable, "definition": {name, description, parameters}}
 _HOOKS = []  # (event, callable)
@@ -55,8 +90,39 @@ CONTRIBUTION_DISPATCH = "__cognia_dispatch_contribution__"
 _MAIN_MODULE = None
 _CONFIG = {}  # persisted plugin config, pushed by the host app
 _CONFIG_LISTENERS = []  # cognia.on_config_changed(fn) subscribers, fired on push_config
-_CURRENT_CALL_ID = None  # request id while a handler runs (serial main loop)
+#: Request id of the inbound call this task is serving. A ContextVar rather
+#: than a global because the loop serves several requests concurrently, and
+#: `progress` / `chunk` frames must stay correlated to the right one. Copied
+#: into worker threads by `_to_worker`.
+_CURRENT_CALL_ID = contextvars.ContextVar("cognia_current_call_id", default=None)
 _SHUTDOWN = False
+
+#: Set once the asyncio loop is running; worker threads reach the loop through
+#: it to schedule host calls (`cognia.ctx.run_sync`).
+_LOOP = None
+#: Plugin-assigned ids for outbound `host_request` frames.
+_HOST_CALL_IDS = itertools.count(1)
+#: outbound id -> Future resolved by the matching `host_response` frame.
+_HOST_PENDING = {}
+#: Seconds a single `host_request` may stay unanswered. Overridable per plugin
+#: through `import_main`'s `host_call_timeout_ms`.
+_HOST_CALL_TIMEOUT = 120.0
+#: Outbound host calls currently awaiting a response.
+_INFLIGHT_HOST_CALLS = 0
+#: Runaway-reentrancy backstop. A host call may legitimately cause the host to
+#: call *back* into this plugin (ctx.agent.run resolving a tool this plugin
+#: owns), and that is supported -- the loop keeps serving while blocked. What
+#: is not supported is unbounded recursion, which grows this counter without
+#: limit. The counter also rises with honest parallelism, so the default sits
+#: well above any realistic fan-out; override via `import_main`.
+_MAX_INFLIGHT_HOST_CALLS = 16
+
+#: Dedicated single-thread reader. Sharing the worker pool would let saturated
+#: tools starve stdin, and a stalled reader can never deliver the very
+#: `host_response` those tools are blocked on.
+_STDIN_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cognia-stdin")
+#: Runs sync plugin code off the loop.
+_WORK_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="cognia-work")
 
 _TYPE_MAP = {
     str: "string",
@@ -66,6 +132,10 @@ _TYPE_MAP = {
     list: "array",
     dict: "object",
 }
+
+
+class HostCallError(RuntimeError):
+    """A `ctx.*` call the host answered with `ok: false`."""
 
 
 def _json_type_for(annotation):
@@ -144,13 +214,22 @@ def _hook(event):
     return wrapper
 
 
+def _write_frame(payload):
+    """Write one protocol frame. Safe from the loop and from worker threads."""
+    line = json.dumps(payload) + "\n"
+    with _WRITE_LOCK:
+        _RPC_OUT.write(line)
+        _RPC_OUT.flush()
+
+
 def _emit_event(event, data=None, call_id=None):
     """Write one un-correlated notification frame to the protocol channel."""
     payload = {"type": "event", "event": event, "data": data}
+    if call_id is None:
+        call_id = _CURRENT_CALL_ID.get()
     if call_id is not None:
         payload["call_id"] = call_id
-    _RPC_OUT.write(json.dumps(payload) + "\n")
-    _RPC_OUT.flush()
+    _write_frame(payload)
 
 
 def _progress(pct=None, message=None):
@@ -160,7 +239,7 @@ def _progress(pct=None, message=None):
         data["pct"] = pct
     if message is not None:
         data["message"] = message
-    _emit_event("progress", data, _CURRENT_CALL_ID)
+    _emit_event("progress", data)
 
 
 def _get_config():
@@ -236,6 +315,132 @@ def _emit(contribution_id, channel, payload=None):
     )
 
 
+# ---------------------------------------------------------------------------
+# plugin -> host RPC (`cognia.ctx.*`)
+# ---------------------------------------------------------------------------
+
+
+def _pack_params(args, kwargs):
+    """Normalize a call site onto the wire's single `params` object.
+
+    Three shapes, in precedence order: keywords become the object itself; a
+    lone positional mapping is passed through (so a caller can build the
+    object explicitly); anything else is wrapped as `{"args": [...]}`.
+    """
+    if kwargs and not args:
+        return dict(kwargs)
+    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        return dict(args[0])
+    params = {"args": list(args)} if args else {}
+    params.update(kwargs)
+    return params
+
+
+async def _host_call(method, params=None):
+    """Issue one `host_request` and await the host's answer."""
+    global _INFLIGHT_HOST_CALLS
+    loop = asyncio.get_running_loop()
+    if _INFLIGHT_HOST_CALLS >= _MAX_INFLIGHT_HOST_CALLS:
+        raise HostCallError(
+            f"host call '{method}' refused: {_INFLIGHT_HOST_CALLS} calls already in "
+            f"flight (limit {_MAX_INFLIGHT_HOST_CALLS}) — this usually means a host "
+            "call is recursing back into this plugin without terminating"
+        )
+    call_id = next(_HOST_CALL_IDS)
+    future = loop.create_future()
+    _HOST_PENDING[call_id] = future
+    _INFLIGHT_HOST_CALLS += 1
+    try:
+        _write_frame(
+            {
+                "type": "host_request",
+                "id": call_id,
+                "method": method,
+                "params": params if params is not None else {},
+            }
+        )
+        try:
+            reply = await asyncio.wait_for(future, _HOST_CALL_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise HostCallError(
+                f"host call '{method}' timed out after {_HOST_CALL_TIMEOUT}s"
+            ) from None
+    finally:
+        _INFLIGHT_HOST_CALLS -= 1
+        _HOST_PENDING.pop(call_id, None)
+    if not reply.get("ok"):
+        raise HostCallError(reply.get("error") or f"host call '{method}' failed")
+    return reply.get("result")
+
+
+class _HostNamespace:
+    """Attribute proxy for one `ctx.<namespace>`.
+
+    Deliberately untyped: the host owns the method table, and pinning it here
+    would mean a second copy to drift. The typed, documented surface lives in
+    the SDK (`plugin-sdk/python/src/cognia/ctx/`), which calls straight through
+    this proxy.
+    """
+
+    __slots__ = ("_namespace",)
+
+    def __init__(self, namespace):
+        self._namespace = namespace
+
+    def __getattr__(self, method):
+        if method.startswith("_"):
+            raise AttributeError(method)
+        namespace = self._namespace
+
+        async def call(*args, **kwargs):
+            return await _host_call(f"{namespace}.{method}", _pack_params(args, kwargs))
+
+        call.__name__ = method
+        call.__qualname__ = f"cognia.ctx.{namespace}.{method}"
+        return call
+
+    def __repr__(self):
+        return f"<cognia.ctx.{self._namespace}>"
+
+
+class _HostCtx:
+    """`cognia.ctx` — the host's `ctx.*` API surface, reached over RPC."""
+
+    def __getattr__(self, namespace):
+        if namespace.startswith("_"):
+            raise AttributeError(namespace)
+        return _HostNamespace(namespace)
+
+    async def call(self, method, params=None):
+        """Escape hatch: invoke `<namespace>.<method>` by name."""
+        return await _host_call(method, params)
+
+    def run_sync(self, awaitable, timeout=None):
+        """Block a worker thread on a `ctx.*` coroutine.
+
+        For sync tools. Refuses to run on the event loop, where blocking would
+        deadlock the very reader that has to deliver the response.
+        """
+        loop = _LOOP
+        if loop is None:
+            raise RuntimeError("cognia.ctx.run_sync() requires a running host loop")
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            raise RuntimeError(
+                "cognia.ctx.run_sync() cannot be called from the event loop — "
+                "await the coroutine instead"
+            )
+        return asyncio.run_coroutine_threadsafe(awaitable, loop).result(
+            timeout if timeout is not None else _HOST_CALL_TIMEOUT
+        )
+
+
+_CTX = _HostCtx()
+
+
 def _install_cognia_shim():
     shim = types.ModuleType("cognia")
     shim.tool = _tool
@@ -246,6 +451,8 @@ def _install_cognia_shim():
     shim.on_config_changed = _on_config_changed
     shim.contribution = _contribution
     shim.emit = _emit
+    shim.ctx = _CTX
+    shim.HostCallError = HostCallError
     sys.modules["cognia"] = shim
 
 
@@ -283,8 +490,31 @@ def _lifecycle_fn(name):
     return fn if callable(fn) else None
 
 
-def _handle_import_main(params):
-    global _MAIN_MODULE, _CONFIG
+async def _to_worker(fn, *args, **kwargs):
+    """Run sync plugin code off the loop, carrying this task's contextvars.
+
+    `run_in_executor` does not propagate context, so `_CURRENT_CALL_ID` would
+    read as None inside the thread and every `progress` frame would lose its
+    correlation.
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    call = functools.partial(fn, *args, **kwargs)
+    return await loop.run_in_executor(_WORK_POOL, lambda: ctx.run(call))
+
+
+async def _invoke(fn, *args, **kwargs):
+    """Call plugin code that may be sync or async, and resolve the result."""
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    result = await _to_worker(fn, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def _handle_import_main(params):
+    global _MAIN_MODULE, _CONFIG, _HOST_CALL_TIMEOUT, _MAX_INFLIGHT_HOST_CALLS
     plugin_path = params["plugin_path"]
     main_module = params["main_module"]
     missing = _check_dependencies(params.get("dependencies"))
@@ -295,14 +525,22 @@ def _handle_import_main(params):
             + " — install them with: pip install "
             + " ".join(missing)
         )
+    timeout_ms = params.get("host_call_timeout_ms")
+    if isinstance(timeout_ms, (int, float)) and timeout_ms > 0:
+        _HOST_CALL_TIMEOUT = float(timeout_ms) / 1000.0
+    max_inflight = params.get("max_inflight_host_calls")
+    if isinstance(max_inflight, int) and max_inflight > 0:
+        _MAX_INFLIGHT_HOST_CALLS = max_inflight
     _CONFIG = dict(params.get("config") or {})
     if plugin_path not in sys.path:
         sys.path.insert(0, plugin_path)
     _install_cognia_shim()
-    _MAIN_MODULE = importlib.import_module(_module_name_from(main_module))
+    # Import off the loop: a plugin's module body is arbitrary blocking code,
+    # and stalling the loop here would stall the stdin reader with it.
+    _MAIN_MODULE = await _to_worker(importlib.import_module, _module_name_from(main_module))
     startup = _lifecycle_fn("on_startup")
     if startup is not None:
-        startup()
+        await _invoke(startup)
     info = _info()
     info["hooks"] = [{"event": event, "name": fn.__name__} for event, fn in _HOOKS]
     info["contributions"] = [
@@ -317,7 +555,16 @@ def _info():
         "protocol_version": "__COGNIA_PROTOCOL_VERSION__",
         "contract_version": "__COGNIA_CONTRACT_VERSION__",
         "runtime_id": "python",
-        "capabilities": ["tools", "hooks", "contributions", "config", "events", "streaming"],
+        "capabilities": [
+            "tools",
+            "hooks",
+            "contributions",
+            "config",
+            "events",
+            "streaming",
+            "host-calls",
+            "async",
+        ],
         "legacy_adapter": False,
         "tool_count": len(_TOOLS),
         "hook_count": len(_HOOKS),
@@ -341,30 +588,65 @@ def _ensure_serializable(value, context):
     return value
 
 
-def _handle_call_tool(params):
+_SENTINEL = object()
+
+
+def _next_or_sentinel(iterator):
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _SENTINEL
+
+
+async def _drain(result, label, frame_for):
+    """Stream a sync or async iterator, emitting one frame per item.
+
+    Returns the collected chunks, joined when they are all strings — the same
+    collapse the non-streaming reply path performs.
+    """
+    chunks = []
+    if isinstance(result, collections.abc.AsyncIterator):
+        async for chunk in result:
+            _ensure_serializable(chunk, f"{label} stream chunk")
+            _emit_event("chunk", frame_for(chunk))
+            chunks.append(chunk)
+    else:
+        while True:
+            chunk = await _to_worker(_next_or_sentinel, result)
+            if chunk is _SENTINEL:
+                break
+            _ensure_serializable(chunk, f"{label} stream chunk")
+            _emit_event("chunk", frame_for(chunk))
+            chunks.append(chunk)
+    if chunks and all(isinstance(c, str) for c in chunks):
+        return "".join(chunks)
+    return chunks
+
+
+def _is_stream(value):
+    return isinstance(
+        value, (collections.abc.Iterator, collections.abc.AsyncIterator)
+    )
+
+
+async def _handle_call_tool(params):
     _require_loaded()
     name = params["name"]
     entry = _TOOLS.get(name)
     if entry is None:
         raise RuntimeError(f"unknown tool: {name}")
-    result = entry["fn"](**(params.get("args") or {}))
-    if isinstance(result, collections.abc.Iterator):
+    result = await _invoke(entry["fn"], **(params.get("args") or {}))
+    if _is_stream(result):
         # Streaming tool: each chunk goes out as an event frame before the
         # terminal reply (str is Iterable but not Iterator, so plain string
         # results never land here).
-        chunks = []
-        for chunk in result:
-            _ensure_serializable(chunk, f"tool '{name}' stream chunk")
-            _emit_event("chunk", chunk, _CURRENT_CALL_ID)
-            chunks.append(chunk)
-        _emit_event("chunk_end", None, _CURRENT_CALL_ID)
-        if chunks and all(isinstance(c, str) for c in chunks):
-            return "".join(chunks)
-        return chunks
+        collected = await _drain(result, f"tool '{name}'", lambda chunk: chunk)
+        _emit_event("chunk_end", None)
+        return collected
     return _ensure_serializable(result, f"tool '{name}'")
 
 
-def _dispatch_contribution(args):
+async def _dispatch_contribution(args):
     """Route `__cognia_dispatch_contribution__(id, method, args, streamId)`.
 
     Mirrors `createPythonBackedProxy` on the renderer side. When `stream_id` is
@@ -384,72 +666,66 @@ def _dispatch_contribution(args):
         raise RuntimeError(f"contribution '{contribution_id}' has no method '{method}'")
 
     label = f"contribution '{contribution_id}.{method}'"
-    result = fn(*(call_args or []))
-    if stream_id is None or not isinstance(result, collections.abc.Iterator):
+    result = await _invoke(fn, *(call_args or []))
+    if stream_id is None or not _is_stream(result):
         return _ensure_serializable(result, label)
 
-    chunks = []
-    for chunk in result:
-        _ensure_serializable(chunk, f"{label} stream chunk")
-        _emit_event("chunk", {"streamId": stream_id, "value": chunk}, _CURRENT_CALL_ID)
-        chunks.append(chunk)
-    _emit_event("chunk_end", {"streamId": stream_id}, _CURRENT_CALL_ID)
-    if chunks and all(isinstance(c, str) for c in chunks):
-        return "".join(chunks)
-    return chunks
+    collected = await _drain(
+        result, label, lambda chunk: {"streamId": stream_id, "value": chunk}
+    )
+    _emit_event("chunk_end", {"streamId": stream_id})
+    return collected
 
 
-def _handle_call(params):
+async def _handle_call(params):
     _require_loaded()
     function_name = params["function_name"]
     if function_name == CONTRIBUTION_DISPATCH:
-        return _dispatch_contribution(params.get("args"))
+        return await _dispatch_contribution(params.get("args"))
     if function_name.startswith("_"):
         raise RuntimeError(f"private function names are not callable: {function_name}")
     fn = getattr(_MAIN_MODULE, function_name, None)
     if fn is None or not callable(fn):
         raise RuntimeError(f"no module-level callable named '{function_name}'")
-    result = fn(*(params.get("args") or []))
+    result = await _invoke(fn, *(params.get("args") or []))
     return _ensure_serializable(result, f"function '{function_name}'")
 
 
-def _handle_call_hook(params):
+async def _handle_call_hook(params):
     _require_loaded()
     event = params["event"]
     name = params["name"]
     for hook_event, fn in _HOOKS:
         if hook_event == event and fn.__name__ == name:
-            result = fn(params.get("payload"))
+            result = await _invoke(fn, params.get("payload"))
             return _ensure_serializable(result, f"hook '{name}' for '{event}'")
     raise RuntimeError(f"no hook named '{name}' registered for event '{event}'")
 
 
-def _handle_push_config(params):
+async def _handle_push_config(params):
     global _CONFIG
     _CONFIG = dict(params.get("config") or {})
     updated = _lifecycle_fn("on_config_updated")
     if updated is not None:
-        updated(_CONFIG)
+        await _invoke(updated, _CONFIG)
     # Notify cognia.on_config_changed subscribers. A listener that raises must
     # not stop the others or the host push.
     for listener in list(_CONFIG_LISTENERS):
         try:
-            listener(_CONFIG)
+            await _invoke(listener, _CONFIG)
         except Exception:
             pass
     return None
 
 
-def _handle_shutdown(params):
+async def _handle_shutdown(params):
     global _SHUTDOWN
     shutdown = _lifecycle_fn("on_shutdown")
     if shutdown is not None:
-        shutdown()
+        await _invoke(shutdown)
     _SHUTDOWN = True
     return "bye"
 
-
-import importlib
 
 # Modules imported on demand via `ctx.python.import(name)`. Keyed by the
 # fully-qualified module name so `module_call` / `module_getattr` resolve the
@@ -464,18 +740,24 @@ def _eval_globals():
     return {"__builtins__": __builtins__, "modules": _IMPORTED_MODULES}
 
 
-def _handle_eval(params):
+def _eval_sync(code, locals_):
+    g = _eval_globals()
+    try:
+        return eval(compile(code, "<plugin-eval>", "eval"), g, locals_)
+    except SyntaxError:
+        # Not an expression — run as a statement block and return None.
+        exec(compile(code, "<plugin-eval>", "exec"), g, locals_)
+        return None
+
+
+async def _handle_eval(params):
     code = params.get("code")
     if not isinstance(code, str) or not code:
         raise RuntimeError("eval requires a non-empty 'code' string")
     locals_ = dict(params.get("locals") or {})
-    g = _eval_globals()
-    try:
-        result = eval(compile(code, "<plugin-eval>", "eval"), g, locals_)
-    except SyntaxError:
-        # Not an expression — run as a statement block and return None.
-        exec(compile(code, "<plugin-eval>", "exec"), g, locals_)
-        result = None
+    result = await _to_worker(_eval_sync, code, locals_)
+    if inspect.isawaitable(result):
+        result = await result
     return _ensure_serializable(result, "eval")
 
 
@@ -489,13 +771,13 @@ def _resolve_module(module_name):
     return mod
 
 
-def _handle_import(params):
-    _resolve_module(params.get("module_name"))
+async def _handle_import(params):
+    await _to_worker(_resolve_module, params.get("module_name"))
     return None
 
 
-def _handle_module_call(params):
-    mod = _resolve_module(params.get("module_name"))
+async def _handle_module_call(params):
+    mod = await _to_worker(_resolve_module, params.get("module_name"))
     function_name = params.get("function_name")
     if not isinstance(function_name, str) or function_name.startswith("_"):
         raise RuntimeError(f"not a callable module attribute: {function_name!r}")
@@ -504,12 +786,12 @@ def _handle_module_call(params):
         raise RuntimeError(
             f"no callable '{function_name}' on module '{params.get('module_name')}'"
         )
-    result = fn(*(params.get("args") or []))
+    result = await _invoke(fn, *(params.get("args") or []))
     return _ensure_serializable(result, f"module_call '{function_name}'")
 
 
-def _handle_module_getattr(params):
-    mod = _resolve_module(params.get("module_name"))
+async def _handle_module_getattr(params):
+    mod = await _to_worker(_resolve_module, params.get("module_name"))
     attr_name = params.get("attr_name")
     if not isinstance(attr_name, str) or attr_name.startswith("_"):
         raise RuntimeError(f"not a readable module attribute: {attr_name!r}")
@@ -517,15 +799,27 @@ def _handle_module_getattr(params):
     return _ensure_serializable(value, f"module_getattr '{attr_name}'")
 
 
+async def _handle_ping(params):
+    return "pong"
+
+
+async def _handle_get_tools(params):
+    return [entry["definition"] for entry in _TOOLS.values()]
+
+
+async def _handle_get_info(params):
+    return _info()
+
+
 _METHODS = {
-    "ping": lambda params: "pong",
+    "ping": _handle_ping,
     "import_main": _handle_import_main,
-    "get_tools": lambda params: [entry["definition"] for entry in _TOOLS.values()],
+    "get_tools": _handle_get_tools,
     "call_tool": _handle_call_tool,
     "call": _handle_call,
     "call_hook": _handle_call_hook,
     "push_config": _handle_push_config,
-    "get_info": lambda params: _info(),
+    "get_info": _handle_get_info,
     "shutdown": _handle_shutdown,
     "eval": _handle_eval,
     "import": _handle_import,
@@ -535,39 +829,100 @@ _METHODS = {
 
 
 def _respond(payload):
-    _RPC_OUT.write(json.dumps(payload) + "\n")
-    _RPC_OUT.flush()
+    _write_frame(payload)
+
+
+def _classify_inbound(line):
+    """Parse one stdin line into ("host_response" | "request", value).
+
+    Returns None for anything unparseable. `host_response` is matched on its
+    explicit `type` tag before the id check, mirroring `classify_frame` on the
+    Rust side.
+    """
+    try:
+        value = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") == "host_response":
+        if isinstance(value.get("id"), int):
+            return ("host_response", value)
+        return None
+    if isinstance(value.get("id"), int) and isinstance(value.get("method"), str):
+        return ("request", value)
+    return None
+
+
+def _resolve_host_response(frame):
+    future = _HOST_PENDING.get(frame["id"])
+    if future is None or future.done():
+        return  # timed out, cancelled, or a duplicate reply
+    future.set_result(frame)
+
+
+async def _serve(request):
+    """Run one inbound request to completion and write its reply."""
+    request_id = request["id"]
+    method = request.get("method")
+    handler = _METHODS.get(method)
+    if handler is None:
+        _respond({"id": request_id, "ok": False, "error": f"unknown method: {method}"})
+        return
+    token = _CURRENT_CALL_ID.set(request_id)
+    try:
+        result = await handler(request.get("params") or {})
+        _respond({"id": request_id, "ok": True, "result": result})
+    except BaseException as exc:  # never let one call kill the host
+        _respond({"id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        _CURRENT_CALL_ID.reset(token)
+
+
+async def _read_line(loop):
+    """One blocking stdin read, moved to the dedicated reader thread."""
+    return await loop.run_in_executor(_STDIN_POOL, sys.stdin.readline)
+
+
+async def _main_async():
+    global _LOOP
+    _LOOP = asyncio.get_running_loop()
+    tasks = set()
+    while True:
+        raw = await _read_line(_LOOP)
+        if raw == "":
+            break  # EOF — host closed stdin
+        line = raw.strip()
+        if not line:
+            continue
+        classified = _classify_inbound(line)
+        if classified is None:
+            print(f"host.py: dropping malformed request line: {line[:200]}", file=sys.stderr)
+            continue
+        kind, frame = classified
+        if kind == "host_response":
+            _resolve_host_response(frame)
+            continue
+        task = asyncio.ensure_future(_serve(frame))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        if frame.get("method") == "shutdown":
+            # Await this one inline so the "bye" reply is flushed before the
+            # loop stops, then stop reading. Concurrency means _SHUTDOWN can
+            # no longer be observed from here the way the serial loop did.
+            await task
+            break
+    if tasks:
+        # Let in-flight replies flush before the interpreter tears down.
+        await asyncio.wait(tasks, timeout=5)
 
 
 def main():
-    global _CURRENT_CALL_ID
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            request = json.loads(line)
-            request_id = request["id"]
-        except (ValueError, KeyError, TypeError):
-            print(f"host.py: dropping malformed request line: {line[:200]}", file=sys.stderr)
-            continue
-        method = request.get("method")
-        handler = _METHODS.get(method)
-        if handler is None:
-            _respond({"id": request_id, "ok": False, "error": f"unknown method: {method}"})
-            continue
-        _CURRENT_CALL_ID = request_id
-        try:
-            result = handler(request.get("params") or {})
-            _respond({"id": request_id, "ok": True, "result": result})
-        except BaseException as exc:  # never let one call kill the host
-            _respond(
-                {"id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            )
-        finally:
-            _CURRENT_CALL_ID = None
-        if _SHUTDOWN:
-            break  # graceful exit after the shutdown reply was flushed
+    try:
+        asyncio.run(_main_async())
+    finally:
+        _STDIN_POOL.shutdown(wait=False)
+        _WORK_POOL.shutdown(wait=False)
 
 
 if __name__ == "__main__":

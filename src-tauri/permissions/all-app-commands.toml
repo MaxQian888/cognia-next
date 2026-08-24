@@ -631,6 +631,7 @@ commands.allow = [
   "plugin_python_eval",
   "plugin_python_get_info",
   "plugin_python_get_tools",
+  "plugin_python_host_response",
   "plugin_python_import",
   "plugin_python_initialize",
   "plugin_python_install_deps",

@@ -10,12 +10,17 @@ documentation for plugin authors:
   * lifecycle            — ``on_startup`` / ``on_config_updated`` /
                            ``on_shutdown`` module conventions
   * ``cognia.get_config`` — the user's persisted configSchema values
+  * ``cognia.ctx``       — the plugin -> host RPC surface (ADR-0143): reach
+                           the same ``ctx.*`` APIs a TypeScript plugin gets,
+                           from sync *and* async tools
 
 Stdlib only; no pythonDependencies, so it loads on any Python >= 3.9.
 """
 
+import asyncio
 import time
 
+import cognia
 from cognia import get_config, hook, progress, tool
 
 
@@ -88,3 +93,43 @@ def stamp_outgoing(payload):
     if isinstance(payload, dict):
         payload.setdefault("metadata", {})["pythonDemo"] = True
     return payload
+
+
+@tool(description="Log a line through the host (ctx.logger.info) and confirm the round trip.")
+async def host_log(message: str = "hello from python") -> str:
+    """Async tool calling the host — the natural shape for `ctx.*`.
+
+    `cognia.ctx.<namespace>.<method>(...)` is a coroutine: it writes a
+    `host_request` frame and suspends until the host answers. The host loop
+    keeps serving other requests meanwhile, so a blocked tool never stalls the
+    plugin.
+    """
+    await cognia.ctx.logger.info(message)
+    return f"host logged: {message}"
+
+
+@tool(description="Same host call from a synchronous tool, via ctx.run_sync.")
+def host_log_sync(message: str = "hello from a sync tool") -> str:
+    """Sync tools run on a worker thread, so they must bridge explicitly.
+
+    `cognia.ctx.run_sync` blocks *this thread* on the coroutine — it refuses to
+    run on the event loop, where blocking would deadlock the reader that has to
+    deliver the answer.
+    """
+    cognia.ctx.run_sync(cognia.ctx.logger.info(message))
+    return f"host logged (sync): {message}"
+
+
+@tool(description="Fan out concurrent host calls to show the loop stays responsive.")
+async def host_fanout(count: int = 3) -> list:
+    """Concurrency is real: these calls overlap.
+
+    RepoWiki's per-module analysis leans on exactly this — N agent turns in
+    flight at once, bounded by the host's outbound gate rather than serialized
+    one behind another.
+    """
+    count = max(1, min(int(count), 5))
+    results = await asyncio.gather(
+        *[cognia.ctx.logger.info(f"fanout {index}") for index in range(count)]
+    )
+    return [str(item) for item in results]

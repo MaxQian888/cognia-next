@@ -1333,6 +1333,7 @@ pub fn run() {
             plugin_api::scan::plugin_scan_directory,
             plugin_api::cli_exec::plugin_cli_exec,
             plugin_api::python::commands::plugin_python_initialize,
+            plugin_api::python::commands::plugin_python_host_response,
             plugin_api::python::commands::plugin_python_runtime_info,
             plugin_api::python::commands::plugin_python_load,
             plugin_api::python::commands::plugin_python_get_tools,

@@ -15,16 +15,16 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{oneshot, Mutex, Semaphore};
+use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 
 use super::discover::Interpreter;
-use super::events::{EventSink, PythonEvent};
+use super::events::{EventSink, HostRequestSink, PythonEvent, PythonHostRequest};
 use crate::{PluginError, Result};
 
 /// Timeout for cheap control calls (ping, get_tools, get_info).
@@ -32,9 +32,19 @@ pub const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout for plugin code execution (call_tool, call, import_main —
 /// imports can be slow on cold caches).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(120);
-/// Per-host in-flight request cap. The interpreter processes requests
-/// serially, so this is back-pressure (bounding the queue), not parallelism.
+/// Per-host in-flight request cap. Inbound requests are served concurrently
+/// by the host's asyncio loop, so this bounds how much work the host app will
+/// push at one plugin at a time.
 pub const DEFAULT_MAX_CONCURRENT_CALLS: usize = 4;
+
+/// Per-host cap on `host_request` frames being routed at once (ADR-0143).
+///
+/// This is a throughput gate, not a recursion guard: excess frames queue here
+/// rather than failing. The recursion backstop lives in `host.py`
+/// (`_MAX_INFLIGHT_HOST_CALLS`, default 16) and must stay *above* this number
+/// — a plugin recursing without end keeps issuing frames, so it trips its own
+/// counter while this gate only ever shapes the rate.
+pub const DEFAULT_MAX_OUTBOUND_HOST_CALLS: usize = 8;
 
 /// Spawn-time knobs for one host. Grows with host-level settings (env,
 /// concurrency) without churning the `spawn` signature.
@@ -42,10 +52,15 @@ pub const DEFAULT_MAX_CONCURRENT_CALLS: usize = 4;
 pub struct HostOptions {
     /// Renderer notification sink; `None` keeps log-only behavior.
     pub sink: Option<EventSink>,
+    /// Where `host_request` frames go. `None` refuses every plugin -> host
+    /// call with a clear error instead of leaving the plugin to time out.
+    pub host_request_sink: Option<HostRequestSink>,
     /// Opaque lifecycle generation copied onto every renderer event.
     pub generation: String,
     /// In-flight request cap; `None` → [`DEFAULT_MAX_CONCURRENT_CALLS`].
     pub max_concurrent_calls: Option<usize>,
+    /// Outbound host-call gate; `None` → [`DEFAULT_MAX_OUTBOUND_HOST_CALLS`].
+    pub max_outbound_host_calls: Option<usize>,
     /// Extra environment variables forwarded to the host process.
     pub env: HashMap<String, String>,
     /// ADR-0028 Phase 3 — when true, the interpreter is launched under the OS
@@ -217,14 +232,39 @@ pub enum Frame {
         call_id: Option<u64>,
         data: Value,
     },
+    /// Plugin -> host RPC request — `{"type":"host_request","id":...}`.
+    HostRequest {
+        id: u64,
+        method: String,
+        params: Value,
+    },
     /// Neither a reply nor a well-formed event.
     Malformed(Value),
 }
 
-/// Classify one protocol frame. Replies win: a frame carrying a numeric
-/// `id` is always a reply, so event frames can never collide with the
-/// request-id namespace consumed by the pending map.
+/// Classify one protocol frame.
+///
+/// `host_request` is matched **first**, on its explicit `type` tag: it also
+/// carries a numeric `id`, so the "replies win" rule below would otherwise
+/// swallow it into the pending map and hang the plugin. After that, replies
+/// win — a frame carrying a numeric `id` is always a reply, so event frames
+/// can never collide with the request-id namespace.
 pub fn classify_frame(value: Value) -> Frame {
+    if value.get("type").and_then(Value::as_str) == Some("host_request") {
+        let id = value.get("id").and_then(Value::as_u64);
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return match (id, method) {
+            (Some(id), Some(method)) => Frame::HostRequest {
+                id,
+                method,
+                params: value.get("params").cloned().unwrap_or(Value::Null),
+            },
+            _ => Frame::Malformed(value),
+        };
+    }
     if value.get("id").and_then(Value::as_u64).is_some() {
         return Frame::Reply(value);
     }
@@ -253,6 +293,12 @@ pub struct PluginHost {
     pending: PendingMap,
     /// Back-pressure: bounds in-flight requests per host.
     semaphore: Semaphore,
+    /// Bounds `host_request` frames being routed at once. A permit is taken
+    /// when the frame arrives and released when the response is written, so
+    /// the gate measures real in-flight host work rather than dispatch rate.
+    outbound_gate: Arc<Semaphore>,
+    /// request_id -> its held gate permit. Dropping the entry releases it.
+    outbound_permits: Arc<parking_lot::Mutex<HashMap<u64, OwnedSemaphorePermit>>>,
     /// Epoch ms of the most recent request activity (for idle shutdown).
     pub last_activity: AtomicU64,
 }
@@ -267,8 +313,10 @@ impl PluginHost {
     ) -> Result<Arc<Self>> {
         let HostOptions {
             sink,
+            host_request_sink,
             generation,
             max_concurrent_calls,
+            max_outbound_host_calls,
             env,
             sandboxed,
         } = options;
@@ -324,6 +372,12 @@ impl PluginHost {
                     .unwrap_or(DEFAULT_MAX_CONCURRENT_CALLS)
                     .max(1),
             ),
+            outbound_gate: Arc::new(Semaphore::new(
+                max_outbound_host_calls
+                    .unwrap_or(DEFAULT_MAX_OUTBOUND_HOST_CALLS)
+                    .max(1),
+            )),
+            outbound_permits: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             last_activity: AtomicU64::new(now_epoch_ms()),
         });
 
@@ -334,6 +388,10 @@ impl PluginHost {
             let plugin_id = host.plugin_id.clone();
             let generation = generation.clone();
             let sink = sink.clone();
+            let host_request_sink = host_request_sink.clone();
+            let outbound_gate = Arc::clone(&host.outbound_gate);
+            let outbound_permits = Arc::clone(&host.outbound_permits);
+            let weak_host = Arc::downgrade(&host);
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
                 loop {
@@ -362,6 +420,21 @@ impl PluginHost {
                                                 data,
                                             });
                                         }
+                                    }
+                                    Frame::HostRequest { id, method, params } => {
+                                        route_host_request(
+                                            RouteHostRequest {
+                                                host: weak_host.clone(),
+                                                sink: host_request_sink.clone(),
+                                                gate: Arc::clone(&outbound_gate),
+                                                permits: Arc::clone(&outbound_permits),
+                                                plugin_id: plugin_id.clone(),
+                                                generation: generation.clone(),
+                                            },
+                                            id,
+                                            method,
+                                            params,
+                                        );
                                     }
                                     Frame::Malformed(value) => log::warn!(
                                         "[python.{plugin_id}] malformed protocol frame: {value}"
@@ -395,6 +468,10 @@ impl PluginHost {
                 for (_, tx) in map.drain() {
                     let _ = tx.send(Err("python host exited".into()));
                 }
+                drop(map);
+                // Nothing will ever answer these now; releasing the permits
+                // keeps the gate from staying closed on a dead host.
+                outbound_permits.lock().clear();
             });
         }
 
@@ -423,6 +500,44 @@ impl PluginHost {
         Ok(host)
     }
 
+    /// Write one NDJSON frame to the child's stdin.
+    async fn write_line(&self, line: &str) -> Result<()> {
+        let mut guard = self.inner.lock().await;
+        let stdin = guard
+            .stdin
+            .as_mut()
+            .ok_or_else(|| PluginError::PythonHost("python host is not running".into()))?;
+        let write = async {
+            stdin.write_all(line.as_bytes()).await?;
+            stdin.write_all(b"\n").await?;
+            stdin.flush().await?;
+            std::io::Result::Ok(())
+        };
+        write
+            .await
+            .map_err(|e| PluginError::PythonHost(format!("stdin write failed: {e}")))
+    }
+
+    /// Answer one plugin -> host RPC request. Releases the outbound gate
+    /// permit whether or not the write succeeds — a permit held by a frame
+    /// nobody can deliver would close the gate permanently.
+    pub async fn respond_to_host_request(
+        &self,
+        request_id: u64,
+        outcome: std::result::Result<Value, String>,
+    ) -> Result<()> {
+        self.outbound_permits.lock().remove(&request_id);
+        let frame = match outcome {
+            Ok(result) => json!({
+                "type": "host_response", "id": request_id, "ok": true, "result": result
+            }),
+            Err(error) => json!({
+                "type": "host_response", "id": request_id, "ok": false, "error": error
+            }),
+        };
+        self.write_line(&serde_json::to_string(&frame)?).await
+    }
+
     /// Send one request and await its correlated reply.
     pub async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         // Back-pressure: never closed, so acquire only fails on overflow —
@@ -443,22 +558,9 @@ impl PluginHost {
             "params": params,
         }))?;
 
-        {
-            let mut guard = self.inner.lock().await;
-            let stdin = guard.stdin.as_mut().ok_or_else(|| {
-                self.pending.lock().remove(&id);
-                PluginError::PythonHost("python host is not running".into())
-            })?;
-            let write = async {
-                stdin.write_all(line.as_bytes()).await?;
-                stdin.write_all(b"\n").await?;
-                stdin.flush().await?;
-                std::io::Result::Ok(())
-            };
-            if let Err(e) = write.await {
-                self.pending.lock().remove(&id);
-                return Err(PluginError::PythonHost(format!("stdin write failed: {e}")));
-            }
+        if let Err(e) = self.write_line(&line).await {
+            self.pending.lock().remove(&id);
+            return Err(e);
         }
 
         let outcome = match tokio::time::timeout(timeout, rx).await {
@@ -516,6 +618,73 @@ impl PluginHost {
     }
 }
 
+/// Everything one routed `host_request` needs. A struct rather than six
+/// positional args so the reader's clone site stays readable.
+struct RouteHostRequest {
+    host: Weak<PluginHost>,
+    sink: Option<HostRequestSink>,
+    gate: Arc<Semaphore>,
+    permits: Arc<parking_lot::Mutex<HashMap<u64, OwnedSemaphorePermit>>>,
+    plugin_id: String,
+    generation: String,
+}
+
+/// Answer a `host_request` we cannot route. Refusing beats silence: the
+/// plugin gets a real error now instead of stalling until its own timeout.
+async fn refuse_host_request(host: &Weak<PluginHost>, request_id: u64, message: String) {
+    if let Some(host) = host.upgrade() {
+        if let Err(e) = host.respond_to_host_request(request_id, Err(message)).await {
+            log::warn!(
+                "[python.{}] could not refuse host request {request_id}: {e}",
+                host.plugin_id
+            );
+        }
+    }
+}
+
+/// Hand one plugin -> host RPC frame to the registered sink, under the
+/// outbound gate. Spawns because acquiring the gate may block and the stdout
+/// reader must keep draining — the very responses that release these permits
+/// arrive on the host app side, but `chunk`/`progress` frames from other
+/// in-flight calls still come through this loop.
+fn route_host_request(route: RouteHostRequest, id: u64, method: String, params: Value) {
+    tokio::spawn(async move {
+        let RouteHostRequest {
+            host,
+            sink,
+            gate,
+            permits,
+            plugin_id,
+            generation,
+        } = route;
+        let Some(sink) = sink else {
+            refuse_host_request(
+                &host,
+                id,
+                format!("plugin->host RPC is unavailable in this runtime (method '{method}')"),
+            )
+            .await;
+            return;
+        };
+        let permit = match Arc::clone(&gate).acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => {
+                refuse_host_request(&host, id, "host request gate closed".into()).await;
+                return;
+            }
+        };
+        permits.lock().insert(id, permit);
+        log::debug!("[python.{plugin_id}] host request {id}: {method}");
+        sink(PythonHostRequest {
+            plugin_id,
+            generation,
+            request_id: id,
+            method,
+            params,
+        });
+    });
+}
+
 fn dispatch_reply(pending: &PendingMap, plugin_id: &str, reply: &Value) {
     let Some(id) = reply.get("id").and_then(Value::as_u64) else {
         log::warn!("[python.{plugin_id}] protocol reply without id: {reply}");
@@ -548,6 +717,40 @@ mod tests {
             .join("src")
             .join("python")
             .join("host.py")
+    }
+
+    #[test]
+    fn classify_frame_matches_host_request_before_the_reply_rule() {
+        // A host_request also carries a numeric id. If the "replies win" rule
+        // ran first it would be swallowed into the pending map and the
+        // plugin's ctx.* call would hang until its own timeout.
+        let frame = classify_frame(json!({
+            "type": "host_request", "id": 4, "method": "agent.run",
+            "params": {"prompt": "hi"},
+        }));
+        match frame {
+            Frame::HostRequest { id, method, params } => {
+                assert_eq!(id, 4);
+                assert_eq!(method, "agent.run");
+                assert_eq!(params["prompt"], "hi");
+            }
+            other => panic!("expected HostRequest, got {other:?}"),
+        }
+
+        // Ordinary replies and events are unaffected.
+        assert!(matches!(
+            classify_frame(json!({"id": 1, "ok": true, "result": "pong"})),
+            Frame::Reply(_)
+        ));
+        assert!(matches!(
+            classify_frame(json!({"type": "event", "event": "progress", "data": {}})),
+            Frame::Event { .. }
+        ));
+        // A host_request missing its method is malformed, not a reply.
+        assert!(matches!(
+            classify_frame(json!({"type": "host_request", "id": 9})),
+            Frame::Malformed(_)
+        ));
     }
 
     #[test]
@@ -1009,5 +1212,143 @@ for line in sys.stdin:
             wait_for_event(&collected, |e| e.kind == "exit").await,
             "exit event never reached the sink"
         );
+    }
+
+    /// A plugin's `ctx.*` call reaches the sink and its answer comes back.
+    #[tokio::test]
+    async fn host_requests_round_trip_through_the_sink() {
+        let Some(interp) = interpreter_or_skip("host_requests_round_trip_through_the_sink") else {
+            return;
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("main.py"),
+            "import cognia\n\
+             \n\
+             @cognia.tool\n\
+             async def ask(word: str) -> str:\n\
+             \x20   return 'got:' + str(await cognia.ctx.demo.echo(word=word))\n",
+        )
+        .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink: HostRequestSink = Arc::new(move |request| {
+            let _ = tx.send(request);
+        });
+        let host = PluginHost::spawn(
+            "t-hostcall",
+            &interp,
+            &host_script(),
+            HostOptions {
+                host_request_sink: Some(sink),
+                generation: "gen-1".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // Stands in for the renderer's host-request router.
+        {
+            let host = Arc::clone(&host);
+            tokio::spawn(async move {
+                while let Some(request) = rx.recv().await {
+                    assert_eq!(request.generation, "gen-1");
+                    assert_eq!(request.plugin_id, "t-hostcall");
+                    let echo = json!({
+                        "method": request.method,
+                        "word": request.params.get("word").cloned(),
+                    });
+                    let _ = host
+                        .respond_to_host_request(request.request_id, Ok(echo))
+                        .await;
+                }
+            });
+        }
+
+        host.request(
+            "import_main",
+            json!({
+                "plugin_path": tmp.path().to_string_lossy(),
+                "main_module": "main.py",
+                "dependencies": [],
+                "config": {},
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .unwrap();
+
+        let out = host
+            .request(
+                "call_tool",
+                json!({"name": "ask", "args": {"word": "hi"}}),
+                CALL_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        let text = out.as_str().expect("tool returns a string");
+        assert!(text.starts_with("got:"), "{text}");
+        assert!(
+            text.contains("demo.echo"),
+            "routed method must reach the sink: {text}"
+        );
+        assert!(
+            text.contains("hi"),
+            "params must survive the round trip: {text}"
+        );
+        host.kill().await;
+    }
+
+    /// With no sink the call is refused immediately — the plugin gets a real
+    /// error rather than stalling until its own timeout.
+    #[tokio::test]
+    async fn host_calls_are_refused_when_no_sink_is_registered() {
+        let Some(interp) = interpreter_or_skip("host_calls_are_refused_when_no_sink_is_registered")
+        else {
+            return;
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("main.py"),
+            "import cognia\n\
+             \n\
+             @cognia.tool\n\
+             async def ask() -> str:\n\
+             \x20   return str(await cognia.ctx.demo.echo())\n",
+        )
+        .unwrap();
+
+        let host = PluginHost::spawn("t-nosink", &interp, &host_script(), HostOptions::default())
+            .await
+            .unwrap();
+        host.request(
+            "import_main",
+            json!({
+                "plugin_path": tmp.path().to_string_lossy(),
+                "main_module": "main.py",
+                "dependencies": [],
+                "config": {},
+            }),
+            CALL_TIMEOUT,
+        )
+        .await
+        .unwrap();
+
+        let started = std::time::Instant::now();
+        let err = host
+            .request("call_tool", json!({"name": "ask"}), CALL_TIMEOUT)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unavailable in this runtime"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "refusal must be immediate, took {:?}",
+            started.elapsed()
+        );
+        // The host survived and still answers.
+        assert!(host.ping().await);
+        host.kill().await;
     }
 }

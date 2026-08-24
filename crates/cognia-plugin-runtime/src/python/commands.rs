@@ -57,6 +57,9 @@ pub struct PythonHostSettings {
     pub idle_shutdown_min: Option<u64>,
     /// In-flight request cap (default 4).
     pub max_concurrent_calls: Option<usize>,
+    /// Cap on concurrent plugin -> host RPC calls (default 8). The host.py
+    /// runaway guard is derived from this and always sits above it.
+    pub max_outbound_host_calls: Option<usize>,
     /// ADR-0028 Phase 3 — run the interpreter under the OS sandbox
     /// (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; Windows is
     /// not wrapped yet (its restricted-token runner can't host a long-lived
@@ -106,6 +109,29 @@ fn rendered_host_script() -> String {
         )
 }
 
+/// Seconds a plugin will wait for one `ctx.*` answer, in ms. Follows the
+/// plugin's call timeout so both directions share one budget.
+fn host_call_timeout_ms(settings: &PythonHostSettings) -> u64 {
+    settings
+        .call_timeout_ms
+        .unwrap_or(super::protocol::CALL_TIMEOUT.as_millis() as u64)
+        .clamp(1_000, 3_600_000)
+}
+
+/// The runaway-recursion guard handed to `host.py`.
+///
+/// Derived, never configured directly, so the invariant holds by construction:
+/// it must stay above the Rust-side outbound gate. The gate only queues, so if
+/// the guard sat at or below it a recursing plugin would deadlock against the
+/// gate instead of getting the error it needs.
+fn max_inflight_host_calls(settings: &PythonHostSettings) -> usize {
+    let gate = settings
+        .max_outbound_host_calls
+        .unwrap_or(super::protocol::DEFAULT_MAX_OUTBOUND_HOST_CALLS)
+        .max(1);
+    gate.saturating_mul(2).max(16)
+}
+
 // ============================================================================
 // Commands (thin wrappers around testable `*_inner` fns, per lifecycle.rs)
 // ============================================================================
@@ -116,6 +142,11 @@ pub async fn plugin_python_initialize(
     state: State<'_, PythonRuntimeState>,
     python_path: Option<String>,
 ) -> Result<()> {
+    // Registered here rather than threaded through the host-neutral
+    // initializer: the companion/remote path has no renderer to route `ctx.*`
+    // onto yet, and `None` there refuses those calls with a clear message
+    // instead of hanging the plugin.
+    *state.host_request_sink.write() = Some(super::events::tauri_host_request_sink(app.clone()));
     plugin_python_initialize_for_state(
         state.inner(),
         python_path,
@@ -745,6 +776,63 @@ pub async fn plugin_python_install_deps_for_state(
     install_deps_inner(state, plugins, plugin_id, dependencies).await
 }
 
+/// Answer one plugin -> host RPC request (ADR-0143).
+///
+/// The renderer (or the headless plugin runtime) calls this once per
+/// `plugin:python:host-request` event, after routing the method onto the
+/// permission-guarded `ctx.*` API. `generation` is checked so a reply meant
+/// for a host that has since been respawned is rejected rather than delivered
+/// to its replacement, where the request id would mean something else.
+#[tauri::command]
+pub async fn plugin_python_host_response(
+    state: State<'_, PythonRuntimeState>,
+    plugin_id: String,
+    generation: String,
+    request_id: u64,
+    ok: bool,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Result<()> {
+    plugin_python_host_response_for_state(
+        state.inner(),
+        &plugin_id,
+        &generation,
+        request_id,
+        ok,
+        result,
+        error,
+    )
+    .await
+}
+
+pub async fn plugin_python_host_response_for_state(
+    state: &PythonRuntimeState,
+    plugin_id: &str,
+    generation: &str,
+    request_id: u64,
+    ok: bool,
+    result: Option<Value>,
+    error: Option<String>,
+) -> Result<()> {
+    let host = state
+        .host_for_generation(plugin_id, generation)?
+        .ok_or_else(|| {
+            // A demoted host cannot be answered: the interpreter that issued
+            // the request is gone, and respawning would not restore its
+            // pending future.
+            PluginError::InvalidArgument(format!(
+                "python host for {plugin_id} is no longer running; \
+                 host request {request_id} cannot be answered"
+            ))
+        })?;
+    let outcome = if ok {
+        Ok(result.unwrap_or(Value::Null))
+    } else {
+        Err(error.unwrap_or_else(|| "host call failed".into()))
+    };
+    host.respond_to_host_request(request_id, outcome).await
+}
+
 #[tauri::command]
 pub async fn plugin_python_unload(
     state: State<'_, PythonRuntimeState>,
@@ -955,6 +1043,8 @@ async fn load_inner(
         "main_module": main_module,
         "dependencies": dependencies,
         "config": config,
+        "host_call_timeout_ms": host_call_timeout_ms(&settings),
+        "max_inflight_host_calls": max_inflight_host_calls(&settings),
     });
     let sandboxed = settings.sandboxed.unwrap_or(false);
     let spec = super::RespawnSpec {
@@ -963,6 +1053,7 @@ async fn load_inner(
         import_params: import_params.clone(),
         env: settings.env.clone(),
         max_concurrent_calls: settings.max_concurrent_calls,
+        max_outbound_host_calls: settings.max_outbound_host_calls,
         idle_shutdown_min: settings.idle_shutdown_min.unwrap_or(0),
         call_timeout_ms: settings.call_timeout_ms,
         sandboxed,
@@ -975,8 +1066,10 @@ async fn load_inner(
         &host_script,
         super::protocol::HostOptions {
             sink: state.sink(),
+            host_request_sink: state.host_request_sink(),
             generation: generation.clone(),
             max_concurrent_calls: settings.max_concurrent_calls,
+            max_outbound_host_calls: settings.max_outbound_host_calls,
             env: settings.env,
             sandboxed,
         },
@@ -2415,7 +2508,7 @@ def rewrite(payload):
         )
         .await
         .unwrap();
-        assert_eq!(info["tool_count"], 4);
+        assert_eq!(info["tool_count"], 7);
         assert_eq!(info["hooks"][0]["event"], "onMessageSend");
 
         // Config-aware tool.
@@ -2534,5 +2627,170 @@ def rewrite(payload):
         assert!(host.contains(r#""sdk_version": "0.1.0""#));
         assert!(host.contains(r#""contract_version": "1.0.0""#));
         assert!(!host.contains("__COGNIA_"));
+    }
+
+    /// The host.py runaway guard must stay strictly above the Rust outbound
+    /// gate. The gate queues rather than failing, so a guard at or below it
+    /// would turn runaway recursion into a deadlock instead of an error.
+    #[test]
+    fn python_runaway_guard_sits_above_the_outbound_gate() {
+        let cases = [None, Some(1), Some(4), Some(8), Some(32), Some(1000)];
+        for gate in cases {
+            let settings = PythonHostSettings {
+                max_outbound_host_calls: gate,
+                ..Default::default()
+            };
+            let effective_gate = gate
+                .unwrap_or(super::super::protocol::DEFAULT_MAX_OUTBOUND_HOST_CALLS)
+                .max(1);
+            let guard = max_inflight_host_calls(&settings);
+            assert!(
+                guard > effective_gate,
+                "guard {guard} must exceed gate {effective_gate}",
+            );
+        }
+    }
+
+    #[test]
+    fn host_call_timeout_follows_the_call_timeout_and_clamps() {
+        let default = PythonHostSettings::default();
+        assert_eq!(
+            host_call_timeout_ms(&default),
+            super::super::protocol::CALL_TIMEOUT.as_millis() as u64
+        );
+        let tiny = PythonHostSettings {
+            call_timeout_ms: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(host_call_timeout_ms(&tiny), 1_000);
+        let huge = PythonHostSettings {
+            call_timeout_ms: Some(u64::MAX),
+            ..Default::default()
+        };
+        assert_eq!(host_call_timeout_ms(&huge), 3_600_000);
+    }
+
+    #[tokio::test]
+    async fn host_response_for_an_unloaded_plugin_is_not_found() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = PythonRuntimeState::new(tmp.path().to_path_buf());
+        let err = plugin_python_host_response_for_state(
+            &state,
+            "ghost",
+            "gen-1",
+            1,
+            true,
+            Some(json!("x")),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, PluginError::NotFound(_)),
+            "expected NotFound, got {err:?}"
+        );
+    }
+
+    /// The first-party demo plugin's `ctx.*` tools reach the host and come
+    /// back — the end-to-end acceptance for the plugin -> host RPC channel,
+    /// exercised through the real command path rather than a bespoke harness.
+    #[tokio::test]
+    async fn first_party_demo_plugin_calls_the_host_over_ctx() {
+        let Some(interp) = super::super::discover::discover_interpreter(None) else {
+            eprintln!("skipping demo host-call test: no python interpreter found");
+            return;
+        };
+        let demo_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins")
+            .join("cognia-python-demo");
+
+        let tmp = TempDir::new().unwrap();
+        let state = std::sync::Arc::new(py_state(&tmp));
+        let plugins = plugins_state(&tmp);
+        grant_execute(&plugins, "cognia-python-demo");
+
+        // Stand in for the renderer's host-request router.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        *state.host_request_sink.write() = Some(std::sync::Arc::new(move |request| {
+            let _ = tx.send(request);
+        }));
+        apply_initialize(&state, Some(interp)).unwrap();
+        {
+            let state = std::sync::Arc::clone(&state);
+            tokio::spawn(async move {
+                while let Some(request) = rx.recv().await {
+                    let echo = json!({"logged": request.method});
+                    let _ = plugin_python_host_response_for_state(
+                        &state,
+                        &request.plugin_id,
+                        &request.generation,
+                        request.request_id,
+                        true,
+                        Some(echo),
+                        None,
+                    )
+                    .await;
+                }
+            });
+        }
+
+        load_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            demo_dir.to_string_lossy().into_owned(),
+            "main.py".into(),
+            None,
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap();
+
+        // Async tool: `await cognia.ctx.logger.info(...)`.
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            "host_log".into(),
+            json!({"message": "from async"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, json!("host logged: from async"));
+
+        // Sync tool bridging through `cognia.ctx.run_sync` on a worker thread.
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            "host_log_sync".into(),
+            json!({"message": "from sync"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, json!("host logged (sync): from sync"));
+
+        // Concurrent host calls from one tool — the property the asyncio loop
+        // exists for. A serial host would deadlock on the first one.
+        let result = call_tool_inner(
+            &state,
+            &plugins,
+            "cognia-python-demo".into(),
+            "host_fanout".into(),
+            json!({"count": 3}),
+        )
+        .await
+        .unwrap();
+        let entries = result.as_array().expect("fanout returns a list");
+        assert_eq!(entries.len(), 3);
+        for entry in entries {
+            assert!(
+                entry.as_str().unwrap().contains("logger.info"),
+                "each fanout call must have reached the host: {entry}"
+            );
+        }
     }
 }
