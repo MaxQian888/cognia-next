@@ -46,7 +46,10 @@ test("package scripts expose explicit bundled and system-node desktop profiles",
     packageJson.scripts["tauri:build:system-node"],
     "node scripts/build/run-tauri-system-node.mjs build"
   )
-  assert.equal(packageJson.scripts["tauri:dev:bundled"], "tauri dev")
+  assert.equal(
+    packageJson.scripts["tauri:dev:bundled"],
+    "node scripts/dev/tauri.mjs dev"
+  )
   assert.equal(
     packageJson.scripts["tauri:dev:system-node"],
     "node scripts/build/run-tauri-system-node.mjs dev"

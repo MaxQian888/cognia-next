@@ -43,6 +43,7 @@ async function run(subcommand, forwardedArgs) {
     "exec",
     "tauri",
     subcommand,
+    ...(subcommand === "dev" ? ["--exit-on-panic"] : []),
     "--features",
     "system-node-runtime",
     "--config",
