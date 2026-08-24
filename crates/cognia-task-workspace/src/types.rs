@@ -609,6 +609,65 @@ pub struct WorkspaceRecord {
     pub created_at: i64,
 }
 
+/// Product ownership of one row in the canonical workspace inventory.
+///
+/// This is intentionally distinct from [`WorkspaceOwnerType`]: it describes
+/// which lifecycle controller owns the directory, not which product actor
+/// requested it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceEnvironmentOwnership {
+    Main,
+    Manual,
+    Managed,
+    Imported,
+    Permanent,
+}
+
+/// Server-authoritative actions that may be offered for an environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceEnvironmentAction {
+    Open,
+    Remove,
+    Prune,
+    Adopt,
+    Pin,
+    MakePermanent,
+    Archive,
+    Restore,
+    Delete,
+    Review,
+    Handoff,
+    CreateBranchHere,
+    Publish,
+}
+
+/// Canonical inventory row joining Git's worktree porcelain with Registry
+/// ownership. Callers must use `allowed_actions` rather than reimplementing
+/// lifecycle policy in a UI or transport adapter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEnvironmentSummary {
+    pub environment_id: String,
+    pub workspace_id: Option<String>,
+    pub path: String,
+    pub source_root: String,
+    pub ownership: WorkspaceEnvironmentOwnership,
+    pub owner_type: Option<WorkspaceOwnerType>,
+    pub owner_ref: Option<String>,
+    pub state: Option<WorkspaceState>,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    pub locked: bool,
+    pub lock_reason: Option<String>,
+    pub prunable: bool,
+    pub prune_reason: Option<String>,
+    pub base: Option<WorkspaceBaseSpec>,
+    pub pinned: bool,
+    pub allowed_actions: Vec<WorkspaceEnvironmentAction>,
+}
+
 /// A worker-local mapping from a stable repository ref to a trusted Git root.
 /// Paths never leave the worker; remote callers use `binding_ref` only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -703,6 +762,98 @@ pub struct WorkspaceBundleOutcome {
     pub state: WorkspaceState,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleHandoffRootSelection {
+    pub workspace_id: String,
+    pub logical_root_id: String,
+    #[serde(default)]
+    pub selection: Vec<PatchSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleHandoffRequest {
+    pub bundle_turn_id: String,
+    #[serde(default)]
+    pub selections: Vec<BundleHandoffRootSelection>,
+    #[serde(default)]
+    pub allow_irreversible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleHandoffOutcome {
+    pub bundle_turn_id: String,
+    pub request: BundleHandoffRequest,
+    pub outcome: WorkspaceBundleOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleHandoffUndoOutcome {
+    pub bundle_turn_id: String,
+    pub bundle_id: String,
+    pub reverted: Vec<String>,
+    pub re_applied: Vec<String>,
+    pub conflicts: Vec<PatchConflict>,
+    pub state: WorkspaceState,
+}
+
+/// Request to begin one execution turn across every unique physical
+/// workspace in a Bundle. The service derives collision-free task/run ids
+/// from the supplied template and persists the resulting group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeginWorkspaceBundleTurn {
+    pub primary_logical_root_id: String,
+    pub run: BeginTaskRun,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleTurnRunLease {
+    pub workspace_id: String,
+    pub logical_root_ids: Vec<String>,
+    pub run: TaskRun,
+}
+
+/// Persisted grouping for all TaskRuns opened for one Bundle turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleTurnLease {
+    pub bundle_turn_id: String,
+    pub bundle_id: String,
+    pub primary_logical_root_id: String,
+    pub primary_alias: String,
+    pub additional_aliases: Vec<String>,
+    pub runs: Vec<WorkspaceBundleTurnRunLease>,
+    pub state: RunState,
+    pub created_at: i64,
+    pub settled_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleTurnRunOutcome {
+    pub workspace_id: String,
+    pub logical_root_ids: Vec<String>,
+    pub run_id: String,
+    pub state: RunState,
+    pub resources: Vec<ResourceChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBundleTurnOutcome {
+    pub bundle_turn_id: String,
+    pub bundle_id: String,
+    pub state: RunState,
+    pub runs: Vec<WorkspaceBundleTurnRunOutcome>,
+    pub resources: Vec<ResourceChange>,
+    pub settled_at: i64,
+}
+
 /// Retention policy inputs. All three knobs are user-adjustable in settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -710,6 +861,44 @@ pub struct WorkspaceLifecyclePolicy {
     pub active_directory_cap: u32,
     pub snapshot_retention_days: u32,
     pub blob_budget_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceMaintenanceEventKind {
+    Reconciled,
+    DirectoryReclaimed,
+    SnapshotExpired,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMaintenanceEvent {
+    pub event_id: String,
+    pub kind: WorkspaceMaintenanceEventKind,
+    pub workspace_id: Option<String>,
+    pub occurred_at: i64,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMaintenanceRequest {
+    pub now: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMaintenanceResult {
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub reconcile: crate::ReconcileOutcome,
+    pub reclaimed_workspace_ids: Vec<String>,
+    pub expired_snapshot_task_ids: Vec<String>,
+    pub removed_blob_count: u64,
+    pub reclaimed_bytes: u64,
+    pub events: Vec<WorkspaceMaintenanceEvent>,
 }
 
 impl Default for WorkspaceLifecyclePolicy {
@@ -733,6 +922,22 @@ mod tests {
         let policy: ResourceTrackingPolicy = serde_json::from_str("{}").unwrap();
         assert!(policy.auto_detect);
         assert!(policy.generated_output_roots.is_empty());
+    }
+
+    #[test]
+    fn workspace_environment_contract_uses_camel_case_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&WorkspaceEnvironmentOwnership::Permanent).unwrap(),
+            "\"permanent\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WorkspaceEnvironmentAction::CreateBranchHere).unwrap(),
+            "\"createBranchHere\""
+        );
+        assert_eq!(
+            serde_json::to_string(&WorkspaceEnvironmentAction::MakePermanent).unwrap(),
+            "\"makePermanent\""
+        );
     }
 
     #[test]

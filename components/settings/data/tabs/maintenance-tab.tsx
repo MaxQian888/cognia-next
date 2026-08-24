@@ -5,7 +5,7 @@
 //   • Clear data — wipe one or more Dexie tables (typed-DELETE confirm)
 //   • Privacy — telemetry toggle + keyring-migration preview note
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -44,6 +44,11 @@ import {
   setBehaviorTelemetryEnabled,
 } from "@/lib/telemetry/events/settings"
 import { trackEvent } from "@/lib/telemetry/events/track-event"
+import {
+  listWorkspaceMaintenanceEvents,
+  runWorkspaceMaintenance,
+} from "@/lib/task-workspace/client"
+import type { WorkspaceMaintenanceEvent } from "@/lib/task-workspace/types"
 
 const CLEAR_TARGETS: { value: ClearableTable | "all"; label: string }[] = [
   { value: "sessions", label: "Conversations + messages" },
@@ -60,10 +65,83 @@ export function MaintenanceTab() {
   return (
     <div className="space-y-6">
       <CleanupBlock />
+      <WorkspaceMaintenanceBlock />
       <RetentionBlock />
       <ClearBlock />
       <PrivacyBlock />
     </div>
+  )
+}
+
+function WorkspaceMaintenanceBlock() {
+  const t = useTranslations("settings.data.workspaceMaintenance")
+  const [events, setEvents] = useState<WorkspaceMaintenanceEvent[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    const next = await listWorkspaceMaintenanceEvents(20)
+    setEvents(next)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void listWorkspaceMaintenanceEvents(20).then(
+      (next) => {
+        if (!cancelled) setEvents(next)
+      },
+      (cause: unknown) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const run = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await runWorkspaceMaintenance()
+      await refresh()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card
+      className="space-y-3 p-4"
+      data-testid="workspace-maintenance"
+      data-last-event-detail={events[0]?.detail}
+    >
+      <div className="flex items-center gap-2">
+        <RotateCcwIcon className="size-4" />
+        <Label className="text-sm">{t("title")}</Label>
+      </div>
+      <p className="text-xs text-muted-foreground">{t("description")}</p>
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {t("error", { error })}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">
+          {events.length > 0
+            ? t("lastEvent", {
+                kind: t(`kinds.${events[0].kind}`),
+                detail: events[0].detail,
+              })
+            : t("noEvents")}
+        </span>
+        <Button variant="outline" size="sm" disabled={busy} onClick={() => void run()}>
+          {busy ? t("running") : t("runNow")}
+        </Button>
+      </div>
+    </Card>
   )
 }
 

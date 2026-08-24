@@ -1,17 +1,21 @@
 import { getSession, updateSession } from "@/lib/db/sessions"
 import {
   applyTaskWorkspace,
+  applyWorkspaceBundle,
+  getBundleHandoffOutcome,
   pinTaskWorkspace,
   pruneTaskWorkspaces,
   resolveTaskWorkspaceConflict,
   restoreTaskWorkspaceSnapshot,
+  retryWorkspaceBundleHandoff,
   undoTaskWorkspace,
+  undoWorkspaceBundleHandoff,
 } from "./client"
 import {
   createSessionExecutionContext,
   transitionManagedWorktree,
 } from "./session-execution-context"
-import type { PatchSelection } from "./types"
+import type { BundleHandoffRootSelection, PatchSelection } from "./types"
 import type { SessionExecutionContext } from "@/types/execution-context"
 
 async function requireManagedSession(sessionId: string) {
@@ -45,19 +49,65 @@ export async function handoffSessionToLocal(
   sessionId: string,
   selection: PatchSelection[] = [],
   allowIrreversible = false,
-  now = Date.now()
+  now = Date.now(),
+  bundleSelections?: BundleHandoffRootSelection[]
 ) {
   const session = await requireManagedSession(sessionId)
   const context = session.executionContext!
+  const bundleId = context.execution?.bundleId
+  const bundleTurnId = context.taskWorkspace.bundleTurnId
   const runId = context.taskWorkspace.runId
-  if (!runId) throw new Error("Managed worktree has no restorable run")
+  if (bundleId && !bundleTurnId) {
+    throw new Error("Managed workspace Bundle has no restorable turn")
+  }
+  if (!bundleId && !runId) throw new Error("Managed worktree has no restorable run")
+
+  let scopedSelections = bundleSelections
+  if (bundleId && scopedSelections === undefined) {
+    if (selection.length === 0) {
+      scopedSelections = []
+    } else {
+      const primaryRoot = context.execution?.roots.find((root) => root.role === "primary")
+      if (!primaryRoot) {
+        throw new Error("Managed workspace Bundle has no primary root")
+      }
+      scopedSelections = [
+        {
+          workspaceId: primaryRoot.workspaceId,
+          logicalRootId: primaryRoot.logicalRootId,
+          selection,
+        },
+      ]
+    }
+  }
+
   await updateSession(sessionId, {
     executionContext: transitionManagedWorktree(context, "handingOff", now),
   })
-  const outcome = await applyTaskWorkspace(runId, selection, allowIrreversible)
-  if (outcome.state === "conflict") {
+  let outcome
+  try {
+    outcome = bundleId
+      ? (
+          await applyWorkspaceBundle(bundleId, {
+            bundleTurnId: bundleTurnId!,
+            selections: scopedSelections!,
+            allowIrreversible,
+          })
+        ).outcome
+      : await applyTaskWorkspace(runId!, selection, allowIrreversible)
+  } catch (error) {
     await updateSession(sessionId, {
-      executionContext: transitionManagedWorktree(context, "conflict", Date.now()),
+      executionContext: transitionManagedWorktree(context, "failed", Date.now()),
+    })
+    throw error
+  }
+  if (outcome.state === "conflict" || outcome.conflicts.length > 0) {
+    await updateSession(sessionId, {
+      executionContext: transitionManagedWorktree(
+        context,
+        outcome.state === "conflict" ? "conflict" : "ready",
+        Date.now()
+      ),
     })
     return outcome
   }
@@ -71,6 +121,21 @@ export async function handoffSessionToLocal(
 export async function undoSessionHandoff(sessionId: string, now = Date.now()) {
   const session = await getSession(sessionId)
   const context = session?.executionContext
+  const bundleId = context?.execution?.bundleId
+  const bundleTurnId = context?.taskWorkspace.bundleTurnId
+  if (bundleId || bundleTurnId) {
+    if (!context || !bundleId || !bundleTurnId) {
+      throw new Error("Session has no complete Bundle handoff to undo")
+    }
+    const outcome = await undoWorkspaceBundleHandoff(bundleId, bundleTurnId)
+    if (outcome.state === "active" && outcome.conflicts.length === 0) {
+      const managed = { ...context, location: "managedWorktree" as const }
+      await updateSession(sessionId, {
+        executionContext: transitionManagedWorktree(managed, "ready", now),
+      })
+    }
+    return outcome
+  }
   const runId = context?.taskWorkspace.runId
   if (!context || !runId) throw new Error("Session has no handoff to undo")
   const outcome = await undoTaskWorkspace(runId)
@@ -95,13 +160,19 @@ export async function restoreSessionSnapshot(sessionId: string, runId: string, n
   await updateSession(sessionId, { executionContext: restoring })
   try {
     const run = await restoreTaskWorkspaceSnapshot(runId)
-    const ready = transitionManagedWorktree(restoring, "ready", Date.now(), {
-      worktreePath: run.executionRoot,
-      ...(run.isolationRef ? { branch: run.isolationRef } : {}),
-    })
+    const ready = transitionManagedWorktree(restoring, "ready", Date.now())
+    const execution = ready.execution
+      ? {
+          ...ready.execution,
+          roots: ready.execution.roots.map((root) =>
+            root.role === "primary" ? { ...root, aliasPath: run.executionRoot } : root
+          ),
+        }
+      : undefined
     await updateSession(sessionId, {
       executionContext: {
         ...ready,
+        ...(execution ? { execution } : {}),
         taskWorkspace: { ...ready.taskWorkspace, runId },
       },
     })
@@ -123,6 +194,27 @@ export async function resolveSessionHandoffConflict(
 ) {
   const session = await requireManagedSession(sessionId)
   const context = session.executionContext!
+  const bundleId = context.execution?.bundleId
+  const bundleTurnId = context.taskWorkspace.bundleTurnId
+  if (bundleId || bundleTurnId) {
+    if (!bundleId || !bundleTurnId) {
+      throw new Error("Managed workspace Bundle has no restorable conflict")
+    }
+    if (resolution !== "retryMerge") {
+      throw new Error("Bundle handoff supports exact retry only")
+    }
+    const previous = await getBundleHandoffOutcome(bundleTurnId)
+    if (!previous) throw new Error("Managed workspace Bundle has no persisted handoff")
+    const retried = await retryWorkspaceBundleHandoff(bundleId, previous.request)
+    await updateSession(sessionId, {
+      executionContext: transitionManagedWorktree(
+        context,
+        retried.outcome.state === "conflict" ? "conflict" : "ready",
+        now
+      ),
+    })
+    return retried.outcome
+  }
   const runId = context.taskWorkspace.runId
   if (!runId) throw new Error("Managed worktree has no conflicted run")
   const outcome = await resolveTaskWorkspaceConflict(

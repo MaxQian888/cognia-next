@@ -28,6 +28,7 @@ interface TaskWorkspaceStore {
   activate: (run: ActiveTaskRun) => void
   bindTrace: (sessionId: string, traceId: string, traceSpanId: string) => void
   reconcile: (sessionId: string, resources: ResourceChange[]) => void
+  reconcileRun: (runId: string, resources: ResourceChange[]) => void
   ingestEvent: (event: TaskWorkspaceResourceEvent) => void
   clear: () => void
 }
@@ -71,6 +72,26 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceStore>((set) => ({
         activeByRun: {
           ...state.activeByRun,
           [active.runId]: { ...active, state: "ready" },
+        },
+        resourcesByTask: { ...state.resourcesByTask, [active.taskId]: resources },
+        provisionalByRun,
+      }
+    }),
+  reconcileRun: (runId, resources) =>
+    set((state) => {
+      const active = state.activeByRun[runId]
+      if (!active) return state
+      const provisionalByRun = { ...state.provisionalByRun }
+      delete provisionalByRun[runId]
+      const activeBySession = { ...state.activeBySession }
+      if (activeBySession[active.sessionId]?.runId === runId) {
+        activeBySession[active.sessionId] = { ...active, state: "ready" }
+      }
+      return {
+        activeBySession,
+        activeByRun: {
+          ...state.activeByRun,
+          [runId]: { ...active, state: "ready" },
         },
         resourcesByTask: { ...state.resourcesByTask, [active.taskId]: resources },
         provisionalByRun,

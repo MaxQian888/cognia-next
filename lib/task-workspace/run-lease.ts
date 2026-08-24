@@ -1,142 +1,73 @@
 import {
-  beginTaskWorkspaceBundleTurn,
-  beginTaskWorkspaceTurn,
-  settleTaskWorkspaceRunWithProjection,
+  abortWorkspaceBundleTurn,
+  beginWorkspaceBundleTurn,
+  settleWorkspaceBundleTurn,
   type BeginTaskWorkspaceTurn,
 } from "./client"
-import type { ResourceChange, ResourceTrackingPolicy, TaskRun, WorkspaceBaseSpec } from "./types"
+import type { ResourceChange, TaskRun, WorkspaceBundle } from "./types"
 
 export interface TaskWorkspaceRunLease {
   run: TaskRun
   settle: (finalState?: "ready" | "failed" | "cancelled") => Promise<ResourceChange[]>
 }
 
-export async function openTaskWorkspaceBundleRunLease(
-  bundleId: string,
-  logicalRootId: string,
+export interface WorkspaceBundleTurnRun {
+  run: TaskRun
+  workspaceId: string
+  logicalRootIds: string[]
+}
+
+export interface WorkspaceBundleTurnLease extends TaskWorkspaceRunLease {
+  bundleTurnId: string
+  bundleId: string
+  runs: WorkspaceBundleTurnRun[]
+  primaryAlias: string
+  additionalAliases: string[]
+  abort: () => Promise<ResourceChange[]>
+}
+
+/**
+ * Opens one persisted turn spanning every distinct physical workspace in a
+ * Registry Bundle while keeping its logical aliases as the execution surface.
+ */
+export async function openWorkspaceBundleTurnLease(
+  bundle: Pick<WorkspaceBundle, "bundleId" | "leases">,
+  primaryLogicalRootId: string,
   input: BeginTaskWorkspaceTurn
-): Promise<TaskWorkspaceRunLease | null> {
-  const run = await beginTaskWorkspaceBundleTurn(bundleId, logicalRootId, input)
-  if (!run) return null
-  return {
-    run,
-    settle: (finalState = "ready") => settleTaskWorkspaceRunWithProjection(run.runId, finalState),
-  }
-}
-
-export async function openTaskWorkspaceRunLease(
-  input: BeginTaskWorkspaceTurn
-): Promise<TaskWorkspaceRunLease | null> {
-  const run = await beginTaskWorkspaceTurn(input)
-  if (!run) return null
-  return {
-    run,
-    settle: (finalState = "ready") => settleTaskWorkspaceRunWithProjection(run.runId, finalState),
-  }
-}
-
-export interface TaskWorkspaceRunLeaseInput {
-  enabled: boolean
-  workspaceRoot?: string
-  base?: WorkspaceBaseSpec
-  taskId?: string
-  sessionId: string
-  runId: string
-  parentRunId?: string
-  turnId?: string
-  attemptId: string
-  providerAttemptId?: string
-  executionRunId?: string
-  traceId?: string
-  traceSpanId?: string
-  surface: string
-  agentId: string
-  agentKind: string
-  trackingPolicy?: ResourceTrackingPolicy
-}
-
-export interface TaskWorkspaceRunLeaseOutcome<T> {
-  value: T
-  taskWorkspaceRunId?: string
-  executionRoot: string
-  trackingUnavailable?: boolean
-}
-
-function boundaryId(prefix: string, parts: Array<string | undefined>): string {
-  const value = parts
-    .filter(Boolean)
-    .join(":")
-    .replace(/[^a-zA-Z0-9_.:-]/g, "_")
-  return `${prefix}${value}`.slice(0, 128)
-}
-
-function failedRunState(error: unknown): "failed" | "cancelled" {
-  return error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed"
-}
-
-/** Owns the complete begin → isolated execution → settle/projection lifecycle. */
-export async function withTaskWorkspaceRun<T>(
-  input: TaskWorkspaceRunLeaseInput,
-  execute: (executionRoot: string) => Promise<T>
-): Promise<TaskWorkspaceRunLeaseOutcome<T>> {
-  const workspaceRoot = input.workspaceRoot?.trim()
-  if (!input.enabled || !workspaceRoot) {
-    return {
-      value: await execute(workspaceRoot ?? ""),
-      executionRoot: workspaceRoot ?? "",
-      ...(!workspaceRoot ? { trackingUnavailable: true } : {}),
-    }
-  }
-
-  const taskId = input.taskId ?? boundaryId("task:", [input.sessionId, input.turnId ?? input.runId])
-  const workspaceRunId = boundaryId("run:", [input.runId, input.attemptId])
-  const lease = await openTaskWorkspaceRunLease({
-    taskId,
-    sessionId: input.sessionId,
-    runId: workspaceRunId,
-    ...(input.parentRunId ? { parentRunId: input.parentRunId } : {}),
-    agentId: input.agentId,
-    agentKind: input.agentKind,
-    workspaceRoot,
-    ...(input.base ? { base: input.base } : {}),
-    executionRunId: input.executionRunId ?? input.runId,
-    ...(input.traceId ? { traceId: input.traceId } : {}),
-    ...(input.traceSpanId ? { traceSpanId: input.traceSpanId } : {}),
-    ...(input.turnId ? { turnId: input.turnId } : {}),
-    attemptId: input.attemptId,
-    ...(input.providerAttemptId ? { providerAttemptId: input.providerAttemptId } : {}),
-    surface: input.surface,
-    ...(input.trackingPolicy ? { trackingPolicy: input.trackingPolicy } : {}),
+): Promise<WorkspaceBundleTurnLease | null> {
+  const lease = await beginWorkspaceBundleTurn(bundle.bundleId, {
+    primaryLogicalRootId,
+    run: input,
   })
-  if (!lease) {
-    return {
-      value: await execute(workspaceRoot),
-      executionRoot: workspaceRoot,
-      trackingUnavailable: true,
-    }
+  if (!lease) return null
+  const primaryRun = lease.runs.find(({ logicalRootIds }) =>
+    logicalRootIds.includes(primaryLogicalRootId)
+  )?.run
+  if (!primaryRun) {
+    await abortWorkspaceBundleTurn(lease.bundleTurnId).catch(() => undefined)
+    return null
   }
 
-  let value: T
-  try {
-    value = await execute(lease.run.executionRoot)
-  } catch (error) {
-    await lease.settle(failedRunState(error)).catch(() => undefined)
-    throw error
+  let completion: Promise<ResourceChange[]> | null = null
+  const settle = (finalState: "ready" | "failed" | "cancelled" = "ready") => {
+    completion ??= settleWorkspaceBundleTurn(lease.bundleTurnId, finalState).then(
+      (outcome) => outcome.resources
+    )
+    return completion
+  }
+  const abort = () => {
+    completion ??= abortWorkspaceBundleTurn(lease.bundleTurnId).then((outcome) => outcome.resources)
+    return completion
   }
 
-  try {
-    await lease.settle("ready")
-    return {
-      value,
-      taskWorkspaceRunId: lease.run.runId,
-      executionRoot: lease.run.executionRoot,
-    }
-  } catch {
-    return {
-      value,
-      taskWorkspaceRunId: lease.run.runId,
-      executionRoot: lease.run.executionRoot,
-      trackingUnavailable: true,
-    }
+  return {
+    bundleTurnId: lease.bundleTurnId,
+    bundleId: lease.bundleId,
+    run: primaryRun,
+    runs: lease.runs,
+    primaryAlias: lease.primaryAlias,
+    additionalAliases: lease.additionalAliases,
+    settle,
+    abort,
   }
 }

@@ -160,6 +160,37 @@ impl WorkspaceStore {
                  );
                  CREATE INDEX IF NOT EXISTS idx_workspace_root_leases_workspace
                    ON workspace_root_leases(workspace_id);
+                 CREATE TABLE IF NOT EXISTS workspace_bundle_turns (
+                   bundle_turn_id TEXT PRIMARY KEY,
+                   bundle_id TEXT NOT NULL,
+                   payload TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   FOREIGN KEY(bundle_id) REFERENCES workspace_bundles(bundle_id)
+                     ON DELETE CASCADE
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_bundle_turns_bundle
+                   ON workspace_bundle_turns(bundle_id, created_at);
+                 CREATE TABLE IF NOT EXISTS workspace_bundle_handoffs (
+                   bundle_turn_id TEXT PRIMARY KEY,
+                   payload TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   FOREIGN KEY(bundle_turn_id) REFERENCES workspace_bundle_turns(bundle_turn_id)
+                     ON DELETE CASCADE
+                 );
+                 CREATE TABLE IF NOT EXISTS workspace_bundle_handoff_undos (
+                   bundle_turn_id TEXT PRIMARY KEY,
+                   payload TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   FOREIGN KEY(bundle_turn_id) REFERENCES workspace_bundle_turns(bundle_turn_id)
+                     ON DELETE CASCADE
+                 );
+                 CREATE TABLE IF NOT EXISTS workspace_maintenance_events (
+                   event_id TEXT PRIMARY KEY,
+                   occurred_at INTEGER NOT NULL,
+                   payload TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_workspace_maintenance_events_time
+                   ON workspace_maintenance_events(occurred_at DESC);
                  CREATE TABLE IF NOT EXISTS workspace_sensitive_grants (
                    workspace_id TEXT NOT NULL,
                    relative_path TEXT NOT NULL,
@@ -728,6 +759,7 @@ impl WorkspaceStore {
             "task_runs:baseline",
             "task_resources:payload",
             "task_patch_sets:payload",
+            "workspace_archives:payload",
         ] {
             let (table, column) = table_column.split_once(':').expect("static table column");
             let sql = format!("SELECT {column} FROM {table}");
@@ -938,10 +970,17 @@ impl WorkspaceStore {
         let state = serialize_enum(&bundle.state, "workspace state")?;
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO workspace_bundles (
+                "INSERT INTO workspace_bundles (
                    bundle_id, environment_kind, owner_type, owner_ref, state,
                    last_used_at, pinned, created_at
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(bundle_id) DO UPDATE SET
+                   environment_kind=excluded.environment_kind,
+                   owner_type=excluded.owner_type,
+                   owner_ref=excluded.owner_ref,
+                   state=excluded.state,
+                   last_used_at=excluded.last_used_at,
+                   pinned=excluded.pinned",
                 params![
                     bundle.bundle_id,
                     environment_kind,
@@ -1026,6 +1065,189 @@ impl WorkspaceStore {
                     .ok_or_else(|| format!("workspace bundle disappeared: {id}"))
             })
             .collect()
+    }
+
+    pub fn put_workspace_bundle_turn(
+        &self,
+        turn: &crate::WorkspaceBundleTurnLease,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(turn)
+            .map_err(|error| format!("encode workspace bundle turn: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_bundle_turns(bundle_turn_id,bundle_id,payload,created_at)
+                 VALUES(?1,?2,?3,?4)
+                 ON CONFLICT(bundle_turn_id) DO UPDATE SET payload=excluded.payload",
+                params![
+                    turn.bundle_turn_id,
+                    turn.bundle_id,
+                    payload,
+                    turn.created_at
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put workspace bundle turn {}: {error}", turn.bundle_turn_id))
+    }
+
+    pub fn get_workspace_bundle_turn(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::WorkspaceBundleTurnLease>, String> {
+        let payload = self
+            .connection
+            .query_row(
+                "SELECT payload FROM workspace_bundle_turns WHERE bundle_turn_id=?1",
+                [bundle_turn_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("get workspace bundle turn {bundle_turn_id}: {error}"))?;
+        payload
+            .map(|payload| {
+                serde_json::from_str(&payload)
+                    .map_err(|error| format!("decode workspace bundle turn: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn list_workspace_bundle_turns(
+        &self,
+    ) -> Result<Vec<crate::WorkspaceBundleTurnLease>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT payload FROM workspace_bundle_turns ORDER BY created_at")
+            .map_err(|error| format!("prepare workspace bundle turns: {error}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query workspace bundle turns: {error}"))?;
+        rows.map(|row| {
+            let payload = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&payload)
+                .map_err(|error| format!("decode workspace bundle turn: {error}"))
+        })
+        .collect()
+    }
+
+    pub fn put_bundle_handoff_outcome(
+        &self,
+        outcome: &crate::BundleHandoffOutcome,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(outcome)
+            .map_err(|error| format!("encode bundle handoff outcome: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_bundle_handoffs(bundle_turn_id,payload,created_at)
+                 VALUES(?1,?2,CAST(strftime('%s','now') AS INTEGER)*1000)
+                 ON CONFLICT(bundle_turn_id) DO UPDATE SET payload=excluded.payload",
+                params![outcome.bundle_turn_id, payload],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put bundle handoff outcome: {error}"))
+    }
+
+    pub fn get_bundle_handoff_outcome(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::BundleHandoffOutcome>, String> {
+        let payload = self
+            .connection
+            .query_row(
+                "SELECT payload FROM workspace_bundle_handoffs WHERE bundle_turn_id=?1",
+                [bundle_turn_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("get bundle handoff outcome: {error}"))?;
+        payload
+            .map(|payload| {
+                serde_json::from_str(&payload)
+                    .map_err(|error| format!("decode bundle handoff outcome: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn put_bundle_handoff_undo_outcome(
+        &self,
+        outcome: &crate::BundleHandoffUndoOutcome,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(outcome)
+            .map_err(|error| format!("encode bundle handoff undo outcome: {error}"))?;
+        self.connection
+            .execute(
+                "INSERT INTO workspace_bundle_handoff_undos(bundle_turn_id,payload,created_at)
+                 VALUES(?1,?2,CAST(strftime('%s','now') AS INTEGER)*1000)
+                 ON CONFLICT(bundle_turn_id) DO UPDATE SET payload=excluded.payload",
+                params![outcome.bundle_turn_id, payload],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("put bundle handoff undo outcome: {error}"))
+    }
+
+    pub fn get_bundle_handoff_undo_outcome(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::BundleHandoffUndoOutcome>, String> {
+        let payload = self
+            .connection
+            .query_row(
+                "SELECT payload FROM workspace_bundle_handoff_undos WHERE bundle_turn_id=?1",
+                [bundle_turn_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| format!("get bundle handoff undo outcome: {error}"))?;
+        payload
+            .map(|payload| {
+                serde_json::from_str(&payload)
+                    .map_err(|error| format!("decode bundle handoff undo outcome: {error}"))
+            })
+            .transpose()
+    }
+
+    pub fn append_workspace_maintenance_events(
+        &mut self,
+        events: &[crate::WorkspaceMaintenanceEvent],
+    ) -> Result<(), String> {
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|error| format!("begin workspace maintenance events: {error}"))?;
+        for event in events {
+            let payload = serde_json::to_string(event)
+                .map_err(|error| format!("encode workspace maintenance event: {error}"))?;
+            transaction
+                .execute(
+                    "INSERT OR REPLACE INTO workspace_maintenance_events(event_id,occurred_at,payload)
+                     VALUES(?1,?2,?3)",
+                    params![event.event_id, event.occurred_at, payload],
+                )
+                .map_err(|error| format!("append workspace maintenance event: {error}"))?;
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("commit workspace maintenance events: {error}"))
+    }
+
+    pub fn list_workspace_maintenance_events(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<crate::WorkspaceMaintenanceEvent>, String> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT payload FROM workspace_maintenance_events
+                 ORDER BY occurred_at DESC, rowid DESC LIMIT ?1",
+            )
+            .map_err(|error| format!("prepare workspace maintenance events: {error}"))?;
+        let rows = statement
+            .query_map([i64::from(limit)], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("query workspace maintenance events: {error}"))?;
+        rows.map(|row| {
+            let payload = row.map_err(|error| error.to_string())?;
+            serde_json::from_str(&payload)
+                .map_err(|error| format!("decode workspace maintenance event: {error}"))
+        })
+        .collect()
     }
 
     pub fn put_workspace_source_binding(

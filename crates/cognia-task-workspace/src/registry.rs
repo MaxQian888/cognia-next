@@ -543,6 +543,33 @@ impl WorkspaceRegistry {
         Ok(record)
     }
 
+    /// Persist branch metadata after a host has successfully attached a
+    /// detached managed worktree to a branch. Git mutation stays outside this
+    /// transport-neutral crate; Registry remains the metadata authority.
+    pub fn set_branch_metadata(
+        &self,
+        workspace_id: &str,
+        branch: String,
+        head: Option<String>,
+    ) -> Result<WorkspaceRecord, RegistryError> {
+        let store = self.store.lock();
+        let mut record = store
+            .get_workspace(workspace_id)
+            .map_err(RegistryError::Store)?
+            .ok_or_else(|| RegistryError::NotFound(workspace_id.to_string()))?;
+        if record.owner_type == WorkspaceOwnerType::Imported
+            || record.environment_kind == WorkspaceEnvironmentKind::Imported
+        {
+            return Err(RegistryError::NotImported(workspace_id.to_string()));
+        }
+        record.branch = Some(branch);
+        if let Some(head) = head {
+            record.head = Some(head);
+        }
+        store.put_workspace(&record).map_err(RegistryError::Store)?;
+        Ok(record)
+    }
+
     /// Remove a Cognia-owned workspace. Refuses if the lock reason does not
     /// match. Callers must have separately transitioned the workspace to
     /// `Removing` first — this call finalizes it to `Removed` and deletes
@@ -707,7 +734,7 @@ pub fn plan_snapshot_expiration(
     policy: WorkspaceLifecyclePolicy,
     now: i64,
 ) -> Vec<SnapshotExpirationCandidate> {
-    let retention_window_seconds = i64::from(policy.snapshot_retention_days) * 24 * 60 * 60;
+    let retention_window_millis = i64::from(policy.snapshot_retention_days) * 24 * 60 * 60 * 1_000;
     let mut candidates: Vec<SnapshotExpirationCandidate> = Vec::new();
     let mut kept_bytes: u64 = 0;
     let mut protected: HashSet<&str> = HashSet::new();
@@ -725,7 +752,7 @@ pub fn plan_snapshot_expiration(
             kept_bytes = kept_bytes.saturating_add(record.size_bytes.unwrap_or(0));
             continue;
         }
-        if now.saturating_sub(record.last_used_at) > retention_window_seconds {
+        if now.saturating_sub(record.last_used_at) > retention_window_millis {
             candidates.push(SnapshotExpirationCandidate {
                 workspace_id: record.workspace_id.clone(),
                 snapshot_task_id: task_id.clone(),
@@ -1349,15 +1376,15 @@ mod tests {
 
     #[test]
     fn snapshot_expiration_flags_aged_rows_first() {
-        let seconds_per_day: i64 = 24 * 60 * 60;
-        let now = 1_000_000 + 100 * seconds_per_day;
+        let millis_per_day: i64 = 24 * 60 * 60 * 1_000;
+        let now = 1_000_000 + 100 * millis_per_day;
         let mut fresh = record("fresh", WorkspaceState::Archived, WorkspaceOwnerType::User);
         fresh.snapshot_task_id = Some("snap-fresh".into());
-        fresh.last_used_at = now - seconds_per_day; // 1 day old
+        fresh.last_used_at = now - millis_per_day; // 1 day old
         fresh.size_bytes = Some(100);
         let mut aged = record("aged", WorkspaceState::Archived, WorkspaceOwnerType::User);
         aged.snapshot_task_id = Some("snap-aged".into());
-        aged.last_used_at = now - 45 * seconds_per_day; // 45 days old
+        aged.last_used_at = now - 45 * millis_per_day; // 45 days old
         aged.size_bytes = Some(100);
         let policy = WorkspaceLifecyclePolicy {
             snapshot_retention_days: 30,

@@ -16,27 +16,39 @@ import {
   acquireWorkspaceBundle,
   archiveManagedWorkspace,
   applyTaskWorkspace,
+  applyWorkspaceBundle,
   beginTaskWorkspaceTurn,
   beginTaskWorkspaceBundleTurn,
+  beginWorkspaceBundleTurn,
   adoptManagedWorkspace,
+  adoptWorkspaceEnvironment,
   exportTaskResourceManifest,
+  getBundleHandoffOutcome,
+  getBundleHandoffUndoOutcome,
   getTaskResourceSummary,
   listTaskResourceEvents,
   recordTaskResourceToolEvent,
   reconcileManagedWorkspaces,
+  retryWorkspaceBundleHandoff,
+  undoWorkspaceBundleHandoff,
   listTaskWorkspaces,
   listManagedWorkspaces,
+  listWorkspaceEnvironments,
   listWorkspaceBundles,
   getWorkspaceLifecyclePolicy,
   deleteManagedWorkspace,
+  createWorkspaceBranch,
   makeManagedWorkspacePermanent,
   setWorkspaceLifecyclePolicy,
+  runWorkspaceMaintenance,
+  listWorkspaceMaintenanceEvents,
   pinManagedWorkspace,
   resolveTaskWorkspaceConflict,
   runIdForTurn,
   settleTaskWorkspaceTurn,
   restoreTaskWorkspaceSnapshot,
   restoreManagedWorkspace,
+  settleWorkspaceBundleTurn,
   taskIdForMessage,
 } from "./client"
 
@@ -157,6 +169,36 @@ describe("task workspace client", () => {
     ])
   })
 
+  it("loads the canonical ownership-aware environment inventory from the host", async () => {
+    call.mockResolvedValueOnce([
+      {
+        environmentId: "manual:/repo/.worktrees/feature",
+        workspaceId: null,
+        path: "/repo/.worktrees/feature",
+        sourceRoot: "/repo",
+        ownership: "manual",
+        ownerType: null,
+        ownerRef: null,
+        state: null,
+        branch: "feature",
+        head: "abc123",
+        locked: false,
+        lockReason: null,
+        prunable: false,
+        pruneReason: null,
+        base: null,
+        pinned: false,
+        allowedActions: ["open", "remove"],
+      },
+    ])
+
+    await expect(listWorkspaceEnvironments("/repo")).resolves.toHaveLength(1)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_environment_list", {
+      rootDir: "/repo",
+    })
+  })
+
   it("acquires all writable roots through the canonical bundle command", async () => {
     const input = {
       ownerType: "session" as const,
@@ -200,6 +242,103 @@ describe("task workspace client", () => {
     })
   })
 
+  it("begins and settles a persisted multi-root bundle turn as one host transaction", async () => {
+    const input = {
+      taskId: "task-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      agentId: "built-in",
+      agentKind: "in-app",
+      workspaceRoot: "/isolated/repo",
+    }
+    call
+      .mockResolvedValueOnce({
+        bundleTurnId: "turn-1",
+        bundleId: "bundle-1",
+        primaryLogicalRootId: "primary",
+        primaryAlias: "/isolated/repo",
+        additionalAliases: ["/isolated/notes"],
+        runs: [
+          {
+            workspaceId: "ws-primary",
+            logicalRootIds: ["primary"],
+            run: {
+              taskId: "task-primary",
+              runId: "run-primary",
+              executionRoot: "/isolated/repo",
+              state: "running",
+            },
+          },
+          {
+            workspaceId: "ws-notes",
+            logicalRootIds: ["notes"],
+            run: {
+              taskId: "task-notes",
+              runId: "run-notes",
+              executionRoot: "/isolated/notes",
+              state: "running",
+            },
+          },
+        ],
+        state: "running",
+        createdAt: 1,
+        settledAt: null,
+      })
+      .mockResolvedValueOnce({
+        bundleTurnId: "turn-1",
+        bundleId: "bundle-1",
+        state: "ready",
+        runs: [
+          {
+            workspaceId: "ws-primary",
+            logicalRootIds: ["primary"],
+            runId: "run-primary",
+            state: "ready",
+            resources: [],
+          },
+          {
+            workspaceId: "ws-notes",
+            logicalRootIds: ["notes"],
+            runId: "run-notes",
+            state: "ready",
+            resources: [],
+          },
+        ],
+        resources: [],
+        settledAt: 2,
+      })
+
+    await beginWorkspaceBundleTurn("bundle-1", {
+      primaryLogicalRootId: "primary",
+      run: input,
+    })
+    await settleWorkspaceBundleTurn("turn-1", "ready")
+
+    expect(Object.keys(useTaskWorkspaceStore.getState().activeByRun).sort()).toEqual([
+      "run-notes",
+      "run-primary",
+    ])
+    expect(useTaskWorkspaceStore.getState().activeBySession["session-1"].runId).toBe("run-primary")
+    expect(useTaskWorkspaceStore.getState().activeByRun["run-notes"].state).toBe("ready")
+
+    expect(call.mock.calls).toEqual([
+      [
+        "task_workspace_bundle_turn_begin",
+        {
+          bundleId: "bundle-1",
+          request: { primaryLogicalRootId: "primary", run: input },
+        },
+      ],
+      [
+        "task_workspace_bundle_turn_settle",
+        {
+          bundleTurnId: "turn-1",
+          finalState: "ready",
+        },
+      ],
+    ])
+  })
+
   it("routes protected environment lifecycle actions through the Registry", async () => {
     call
       .mockResolvedValueOnce({ workspaceId: "ws-1", environmentKind: "permanent" })
@@ -220,6 +359,17 @@ describe("task workspace client", () => {
     ])
   })
 
+  it("creates a promotion branch through the ownership-validated host command", async () => {
+    call.mockResolvedValueOnce({ workspaceId: "ws-1", branch: "feature/review" })
+
+    await createWorkspaceBranch("ws-1", "feature/review")
+
+    expect(call).toHaveBeenCalledWith("task_workspace_environment_create_branch", {
+      workspaceId: "ws-1",
+      branch: "feature/review",
+    })
+  })
+
   it("adopts imported environments only through the explicit Registry command", async () => {
     call.mockResolvedValueOnce({ workspaceId: "ws-imported", environmentKind: "managed" })
 
@@ -230,12 +380,47 @@ describe("task workspace client", () => {
     })
   })
 
+  it("adopts a selected manual worktree only after host identity revalidation", async () => {
+    call.mockResolvedValueOnce({ workspaceId: "ws-adopted", environmentKind: "managed" })
+
+    await adoptWorkspaceEnvironment("git:manual-id", "/repo", "/repo/.worktrees/feature")
+
+    expect(call).toHaveBeenCalledWith("task_workspace_environment_adopt", {
+      environmentId: "git:manual-id",
+      sourceRoot: "/repo",
+      path: "/repo/.worktrees/feature",
+    })
+  })
+
   it("reconciles signed and imported worktrees through the host", async () => {
     call.mockResolvedValueOnce({ reclaimed: ["ws-1"], orphaned: [], imported: [] })
 
     await reconcileManagedWorkspaces()
 
     expect(call).toHaveBeenCalledWith("task_workspace_reconcile")
+  })
+
+  it("exposes host-owned maintenance execution and durable history", async () => {
+    call
+      .mockResolvedValueOnce({
+        startedAt: 1,
+        finishedAt: 2,
+        reconcile: { reclaimed: [], orphaned: [], imported: [] },
+        reclaimedWorkspaceIds: [],
+        expiredSnapshotTaskIds: [],
+        removedBlobCount: 0,
+        reclaimedBytes: 0,
+        events: [],
+      })
+      .mockResolvedValueOnce([{ eventId: "event-1", kind: "reconciled" }])
+
+    await runWorkspaceMaintenance()
+    await listWorkspaceMaintenanceEvents(100)
+
+    expect(call.mock.calls).toEqual([
+      ["task_workspace_maintenance_run", { request: { now: null } }],
+      ["task_workspace_maintenance_events", { limit: 100 }],
+    ])
   })
 
   it("restores a historical content-addressed snapshot", async () => {
@@ -264,6 +449,77 @@ describe("task workspace client", () => {
       expect.objectContaining({ runId: "run:session:1" }),
       "apply"
     )
+  })
+
+  it("applies a multi-root handoff through one persisted Bundle transaction", async () => {
+    const request = {
+      bundleTurnId: "turn-1",
+      selections: [
+        {
+          workspaceId: "ws-1",
+          logicalRootId: "primary",
+          selection: [{ path: "src/app.ts", hunkIds: ["h1"] }],
+        },
+      ],
+      allowIrreversible: false,
+    }
+    call.mockResolvedValueOnce({
+      bundleTurnId: "turn-1",
+      outcome: {
+        bundleId: "bundle-1",
+        applied: ["ws-1"],
+        rolledBack: [],
+        conflicts: [],
+        state: "active",
+      },
+    })
+
+    await applyWorkspaceBundle("bundle-1", request)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_apply", {
+      bundleId: "bundle-1",
+      request,
+    })
+  })
+
+  it("recovers the persisted outcome of a multi-root handoff", async () => {
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-1", outcome: { state: "applied" } })
+
+    await getBundleHandoffOutcome("turn-1")
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_handoff_get", {
+      bundleTurnId: "turn-1",
+    })
+  })
+
+  it("retries only the persisted conflicted Bundle handoff request", async () => {
+    const request = {
+      bundleTurnId: "turn-1",
+      selections: [],
+      allowIrreversible: false,
+    }
+    call.mockResolvedValueOnce({ bundleTurnId: "turn-1", request, outcome: { state: "applied" } })
+
+    await retryWorkspaceBundleHandoff("bundle-1", request)
+
+    expect(call).toHaveBeenCalledWith("task_workspace_bundle_handoff_retry", {
+      bundleId: "bundle-1",
+      request,
+    })
+  })
+
+  it("undoes and recovers the persisted Bundle handoff as one transaction", async () => {
+    call
+      .mockResolvedValueOnce({ bundleTurnId: "turn-1", bundleId: "bundle-1", state: "active" })
+      .mockResolvedValueOnce({ bundleTurnId: "turn-1", bundleId: "bundle-1", state: "active" })
+
+    await undoWorkspaceBundleHandoff("bundle-1", "turn-1")
+    await getBundleHandoffUndoOutcome("turn-1")
+
+    expect(call.mock.calls).toEqual([
+      ["task_workspace_bundle_handoff_undo", { bundleId: "bundle-1", bundleTurnId: "turn-1" }],
+      ["task_workspace_bundle_handoff_undo_get", { bundleTurnId: "turn-1" }],
+    ])
   })
 
   it("exposes durable resource timeline, summary, and manifest commands", async () => {

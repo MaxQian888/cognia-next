@@ -1,141 +1,169 @@
-const begin = jest.fn()
-const beginBundle = jest.fn()
-const settle = jest.fn()
+const beginBundleTurn = jest.fn()
+const settleBundleTurn = jest.fn()
+const abortBundleTurn = jest.fn()
 
 jest.mock("./client", () => ({
-  beginTaskWorkspaceBundleTurn: (...args: unknown[]) => beginBundle(...args),
-  beginTaskWorkspaceTurn: (...args: unknown[]) => begin(...args),
-  settleTaskWorkspaceRunWithProjection: (...args: unknown[]) => settle(...args),
+  beginWorkspaceBundleTurn: (...args: unknown[]) => beginBundleTurn(...args),
+  settleWorkspaceBundleTurn: (...args: unknown[]) => settleBundleTurn(...args),
+  abortWorkspaceBundleTurn: (...args: unknown[]) => abortBundleTurn(...args),
 }))
 
-import { openTaskWorkspaceBundleRunLease, withTaskWorkspaceRun } from "./run-lease"
+import { openWorkspaceBundleTurnLease } from "./run-lease"
 
-describe("withTaskWorkspaceRun", () => {
+describe("openWorkspaceBundleTurnLease", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    begin.mockResolvedValue({ runId: "workspace-run", executionRoot: "/isolated" })
-    beginBundle.mockResolvedValue({ runId: "bundle-run", executionRoot: "/bundle/repo" })
-    settle.mockResolvedValue([{ path: "src/a.ts", kind: "modified", captureClass: "source" }])
+    beginBundleTurn.mockResolvedValue(null)
+    settleBundleTurn.mockResolvedValue({ resources: [] })
+    abortBundleTurn.mockResolvedValue({ resources: [] })
   })
 
-  it("opens a run that borrows an existing Registry bundle lease", async () => {
+  it("leases every physical workspace in a bundle and preserves its logical aliases", async () => {
+    beginBundleTurn.mockResolvedValue({
+      bundleTurnId: "bundle-turn-1",
+      bundleId: "bundle-1",
+      primaryLogicalRootId: "app",
+      primaryAlias: "/aliases/app",
+      additionalAliases: ["/aliases/app-tests", "/aliases/docs"],
+      runs: [
+        {
+          workspaceId: "workspace-app",
+          logicalRootIds: ["app", "app-tests"],
+          run: { runId: "turn-1", executionRoot: "/physical/app" },
+        },
+        {
+          workspaceId: "workspace-docs",
+          logicalRootIds: ["docs"],
+          run: { runId: "turn-1:docs", executionRoot: "/physical/docs" },
+        },
+      ],
+    })
+    settleBundleTurn.mockResolvedValue({
+      resources: [
+        { runId: "turn-1", path: "src/a.ts" },
+        { runId: "turn-1:docs", path: "guide.md" },
+      ],
+    })
     const input = {
       taskId: "task-1",
       sessionId: "session-1",
-      runId: "run-1",
+      runId: "turn-1",
       agentId: "built-in",
       agentKind: "in-app",
-      workspaceRoot: "/bundle/repo",
+      workspaceRoot: "/aliases/app",
     }
 
-    const lease = await openTaskWorkspaceBundleRunLease("bundle-1", "root-1", input)
+    const lease = await openWorkspaceBundleTurnLease(
+      {
+        bundleId: "bundle-1",
+        leases: [
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-app",
+            logicalRootId: "app",
+            role: "primary",
+            aliasPath: "/aliases/app",
+          },
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-app",
+            logicalRootId: "app-tests",
+            role: "additional",
+            aliasPath: "/aliases/app-tests",
+          },
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-docs",
+            logicalRootId: "docs",
+            role: "additional",
+            aliasPath: "/aliases/docs",
+          },
+        ],
+      },
+      "app",
+      input
+    )
 
-    expect(beginBundle).toHaveBeenCalledWith("bundle-1", "root-1", input)
+    expect(beginBundleTurn).toHaveBeenCalledTimes(1)
+    expect(beginBundleTurn).toHaveBeenCalledWith("bundle-1", {
+      primaryLogicalRootId: "app",
+      run: input,
+    })
+    expect(lease).toMatchObject({
+      bundleId: "bundle-1",
+      primaryAlias: "/aliases/app",
+      additionalAliases: ["/aliases/app-tests", "/aliases/docs"],
+    })
+    expect(lease?.runs).toHaveLength(2)
+
     await lease?.settle("ready")
-    expect(settle).toHaveBeenCalledWith("bundle-run", "ready")
+    expect(settleBundleTurn).toHaveBeenCalledWith("bundle-turn-1", "ready")
   })
 
-  it("executes in the isolated root and settles with correlated identities", async () => {
-    const execute = jest.fn(async (cwd: string) => `ran:${cwd}`)
-    const outcome = await withTaskWorkspaceRun(
+  it("fails closed when the host cannot open the complete persisted bundle turn", async () => {
+    beginBundleTurn.mockResolvedValueOnce(null)
+
+    const lease = await openWorkspaceBundleTurnLease(
       {
-        enabled: true,
-        workspaceRoot: "/repo",
-        base: { kind: "gitRef", gitRef: "origin/dev" },
+        bundleId: "bundle-1",
+        leases: [
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-app",
+            logicalRootId: "app",
+            role: "primary",
+            aliasPath: "/aliases/app",
+          },
+          {
+            bundleId: "bundle-1",
+            workspaceId: "workspace-docs",
+            logicalRootId: "docs",
+            role: "additional",
+            aliasPath: "/aliases/docs",
+          },
+        ],
+      },
+      "app",
+      {
+        taskId: "task-1",
         sessionId: "session-1",
-        runId: "execution-1",
-        turnId: "turn-1",
-        attemptId: "attempt-1",
-        providerAttemptId: "provider-1",
-        executionRunId: "journal-1",
-        traceId: "trace-1",
-        traceSpanId: "span-1",
-        surface: "workflow-agent-turn",
-        agentId: "agent-1",
+        runId: "turn-1",
+        agentId: "built-in",
         agentKind: "in-app",
-      },
-      execute
+        workspaceRoot: "/aliases/app",
+      }
     )
 
-    expect(execute).toHaveBeenCalledWith("/isolated")
-    expect(settle).toHaveBeenCalledWith("workspace-run", "ready")
-    expect(begin).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionRunId: "journal-1",
-        traceId: "trace-1",
-        turnId: "turn-1",
-        attemptId: "attempt-1",
-        providerAttemptId: "provider-1",
-        surface: "workflow-agent-turn",
-      })
-    )
-    expect(outcome).toEqual(
-      expect.objectContaining({ value: "ran:/isolated", taskWorkspaceRunId: "workspace-run" })
-    )
+    expect(lease).toBeNull()
+    expect(settleBundleTurn).not.toHaveBeenCalled()
   })
 
-  it("settles failed work without replacing the original error", async () => {
-    const failure = new Error("provider failed")
-    await expect(
-      withTaskWorkspaceRun(
+  it("aborts the complete persisted bundle turn", async () => {
+    beginBundleTurn.mockResolvedValueOnce({
+      bundleTurnId: "bundle-turn-1",
+      bundleId: "bundle-1",
+      primaryLogicalRootId: "app",
+      primaryAlias: "/aliases/app",
+      additionalAliases: [],
+      runs: [
         {
-          enabled: true,
-          workspaceRoot: "/repo",
-          sessionId: "session-1",
-          runId: "execution-1",
-          attemptId: "attempt-1",
-          surface: "plugin",
-          agentId: "plugin-1",
-          agentKind: "plugin",
+          workspaceId: "workspace-app",
+          logicalRootIds: ["app"],
+          run: { runId: "turn-1", executionRoot: "/physical/app" },
         },
-        async () => {
-          throw failure
-        }
-      )
-    ).rejects.toBe(failure)
-    expect(settle).toHaveBeenCalledWith("workspace-run", "failed")
-  })
+      ],
+    })
 
-  it("settles aborted work as cancelled", async () => {
-    const cancellation = new Error("cancelled")
-    cancellation.name = "AbortError"
-    await expect(
-      withTaskWorkspaceRun(
-        {
-          enabled: true,
-          workspaceRoot: "/repo",
-          sessionId: "session-1",
-          runId: "execution-1",
-          attemptId: "attempt-1",
-          surface: "workflow",
-          agentId: "agent-1",
-          agentKind: "workflow",
-        },
-        async () => {
-          throw cancellation
-        }
-      )
-    ).rejects.toBe(cancellation)
-    expect(settle).toHaveBeenCalledWith("workspace-run", "cancelled")
-  })
+    const lease = await openWorkspaceBundleTurnLease({ bundleId: "bundle-1", leases: [] }, "app", {
+      taskId: "task-1",
+      sessionId: "session-1",
+      runId: "turn-1",
+      agentId: "built-in",
+      agentKind: "in-app",
+      workspaceRoot: "/aliases/app",
+    })
 
-  it("reports host-unavailable tracking instead of claiming an empty ledger", async () => {
-    begin.mockResolvedValue(null)
-    const outcome = await withTaskWorkspaceRun(
-      {
-        enabled: true,
-        workspaceRoot: "/repo",
-        sessionId: "session-1",
-        runId: "execution-1",
-        attemptId: "attempt-1",
-        surface: "plugin",
-        agentId: "plugin-1",
-        agentKind: "plugin",
-      },
-      async (cwd) => cwd
-    )
-    expect(outcome.value).toBe("/repo")
-    expect(outcome.trackingUnavailable).toBe(true)
-    expect(settle).not.toHaveBeenCalled()
+    await lease?.abort()
+    expect(abortBundleTurn).toHaveBeenCalledWith("bundle-turn-1")
   })
 })

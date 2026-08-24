@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const saveMock = jest.fn(async (..._a: unknown[]) => undefined)
@@ -26,14 +26,47 @@ const mockTrackEvent = jest.fn().mockResolvedValue(true)
 jest.mock("@/lib/telemetry/events/track-event", () => ({
   trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }))
+const runWorkspaceMaintenanceMock = jest.fn()
+const listWorkspaceMaintenanceEventsMock = jest.fn()
+jest.mock("@/lib/task-workspace/client", () => ({
+  runWorkspaceMaintenance: (...args: unknown[]) => runWorkspaceMaintenanceMock(...args),
+  listWorkspaceMaintenanceEvents: (...args: unknown[]) =>
+    listWorkspaceMaintenanceEventsMock(...args),
+}))
 
 import { MaintenanceTab } from "./maintenance-tab"
 
 beforeEach(() => {
   saveMock.mockClear()
   mockTrackEvent.mockClear()
+  runWorkspaceMaintenanceMock.mockReset().mockResolvedValue({ events: [] })
+  listWorkspaceMaintenanceEventsMock.mockReset().mockResolvedValue([])
   localStorage.clear()
   storeState = { settings: { storageRetention: { traceRetentionDays: 30 } }, save: saveMock }
+})
+
+describe("<MaintenanceTab /> managed workspace block", () => {
+  it("runs host-owned maintenance and refreshes durable history", async () => {
+    listWorkspaceMaintenanceEventsMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        eventId: "event-1",
+        kind: "reconciled",
+        workspaceId: null,
+        occurredAt: 1,
+        detail: "registry checked",
+      },
+    ])
+    const user = userEvent.setup()
+    render(<MaintenanceTab />)
+
+    await waitFor(() => expect(listWorkspaceMaintenanceEventsMock).toHaveBeenCalledWith(20))
+    const block = screen.getByTestId("workspace-maintenance")
+    await user.click(within(block).getByRole("button"))
+
+    await waitFor(() => expect(runWorkspaceMaintenanceMock).toHaveBeenCalledTimes(1))
+    expect(listWorkspaceMaintenanceEventsMock).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(block).toHaveAttribute("data-last-event-detail", "registry checked"))
+  })
 })
 
 describe("<MaintenanceTab /> privacy block", () => {

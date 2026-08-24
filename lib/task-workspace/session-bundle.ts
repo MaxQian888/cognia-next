@@ -59,6 +59,11 @@ export async function ensureSessionExecutionBundle(input: {
   if (missingRoot) {
     throw new Error(`workspace bundle is missing Project root: ${missingRoot.id}`)
   }
+  const projectRootIds = new Set(project.roots.map((root) => root.id))
+  const staleLease = bundle.leases.find((lease) => !projectRootIds.has(lease.logicalRootId))
+  if (staleLease) {
+    throw new Error(`workspace bundle contains stale Project root: ${staleLease.logicalRootId}`)
+  }
   const primaryLease = leasesByRoot.get(primaryRoot.id)
   if (!primaryLease) throw new Error("workspace bundle has no primary root lease")
   const rootLeases = project.roots.map((root) => {
@@ -71,8 +76,14 @@ export async function ensureSessionExecutionBundle(input: {
     }
   })
   const now = Date.now()
+  const {
+    worktreePath: _legacyWorktreePath,
+    branch: _legacyBranch,
+    baseRef: _legacyBaseRef,
+    ...canonicalContext
+  } = context
   const nextContext: SessionExecutionContext = {
-    ...context,
+    ...canonicalContext,
     execution: {
       mode: bundle.environmentKind === "permanent" ? "permanent" : "managed",
       ...(context.execution?.environmentId
@@ -82,7 +93,6 @@ export async function ensureSessionExecutionBundle(input: {
       base: resolvedBase,
       roots: rootLeases,
     },
-    worktreePath: primaryLease.aliasPath,
     lifecycle: {
       state: "active",
       createdAt: context.lifecycle?.createdAt ?? bundle.createdAt,

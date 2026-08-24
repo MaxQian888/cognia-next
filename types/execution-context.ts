@@ -64,6 +64,7 @@ export interface TaskWorkspaceBinding {
   taskId: string
   workspaceKey: string
   runId?: string
+  bundleTurnId?: string
 }
 
 export interface ManagedWorktreeLifecycle {

@@ -5,13 +5,17 @@ import { projectTaskWorkspaceRun } from "./projection"
 import type {
   AcquireWorkspaceBundle,
   ApplyOutcome,
+  BeginTaskWorkspaceTurn,
+  BeginWorkspaceBundleTurn,
+  BundleHandoffOutcome,
+  BundleHandoffUndoOutcome,
+  BundleHandoffRequest,
   DownloadHandle,
   PatchSelection,
   PatchSet,
   ResourceChange,
   ResourceEvent,
   ResourceRead,
-  ResourceTrackingPolicy,
   TaskResourceManifest,
   TaskResourceSummary,
   TaskRun,
@@ -19,34 +23,20 @@ import type {
   TaskWorkspaceResourceEvent,
   TransferChunk,
   UploadHandle,
-  WorkspaceBaseSpec,
   ManagedWorkspaceRecord,
   WorkspaceBundle,
+  WorkspaceBundleTurnLease,
+  WorkspaceBundleTurnOutcome,
   WorkspaceLifecyclePolicy,
+  WorkspaceMaintenanceEvent,
+  WorkspaceMaintenanceResult,
+  WorkspaceEnvironmentSummary,
   WorkspaceReconcileOutcome,
 } from "./types"
 
 export const TASK_WORKSPACE_RESOURCE_EVENT = "task-workspace://resources-changed"
 
-export interface BeginTaskWorkspaceTurn {
-  taskId: string
-  sessionId: string
-  runId: string
-  parentRunId?: string
-  agentId: string
-  agentKind: string
-  workspaceRoot: string
-  base?: WorkspaceBaseSpec
-  workspaceKey?: string
-  executionRunId?: string
-  traceId?: string
-  traceSpanId?: string
-  turnId?: string
-  attemptId?: string
-  providerAttemptId?: string
-  surface?: string
-  trackingPolicy?: ResourceTrackingPolicy
-}
+export type { BeginTaskWorkspaceTurn } from "./types"
 
 function safeId(prefix: string, value: string): string {
   const normalized = value.replace(/[^a-zA-Z0-9_.:-]/g, "_")
@@ -117,6 +107,100 @@ export async function beginTaskWorkspaceBundleTurn(
     if (!hostDeferred) throw error
     return null
   }
+}
+
+export async function beginWorkspaceBundleTurn(
+  bundleId: string,
+  request: BeginWorkspaceBundleTurn
+): Promise<WorkspaceBundleTurnLease | null> {
+  try {
+    const turn = await transport.call<WorkspaceBundleTurnLease>(
+      "task_workspace_bundle_turn_begin",
+      { bundleId, request }
+    )
+    const primaryIndex = turn.runs.findIndex((lease) =>
+      lease.logicalRootIds.includes(turn.primaryLogicalRootId)
+    )
+    const ordered = [...turn.runs]
+    if (primaryIndex >= 0) {
+      const [primary] = ordered.splice(primaryIndex, 1)
+      ordered.push(primary)
+    }
+    for (const lease of ordered) {
+      const run = lease.run
+      useTaskWorkspaceStore.getState().activate({
+        taskId: run.taskId,
+        runId: run.runId,
+        sessionId: request.run.sessionId,
+        workspaceRoot: request.run.workspaceRoot,
+        executionRoot: run.executionRoot,
+        state: run.state,
+        ...(request.run.executionRunId ? { executionRunId: request.run.executionRunId } : {}),
+        ...(request.run.traceId ? { traceId: request.run.traceId } : {}),
+        ...(request.run.traceSpanId ? { traceSpanId: request.run.traceSpanId } : {}),
+        ...(request.run.surface ? { surface: request.run.surface } : {}),
+      })
+    }
+    return turn
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const hostDeferred = /remote.control|not authorized|unknown.command|forbidden/i.test(message)
+    if (!hostDeferred) throw error
+    return null
+  }
+}
+
+async function reconcileWorkspaceBundleTurnOutcome(
+  outcome: WorkspaceBundleTurnOutcome
+): Promise<WorkspaceBundleTurnOutcome> {
+  for (const settled of outcome.runs) {
+    const active = useTaskWorkspaceStore.getState().activeByRun[settled.runId]
+    if (active?.executionRunId || active?.traceSpanId) {
+      await getTaskResourceSummary(settled.runId)
+        .then((summary) =>
+          projectTaskWorkspaceRun({
+            ...(active.executionRunId ? { executionRunId: active.executionRunId } : {}),
+            taskWorkspaceRunId: settled.runId,
+            ...(active.traceSpanId ? { traceSpanId: active.traceSpanId } : {}),
+            ...(active.traceId ? { traceId: active.traceId } : {}),
+            sessionId: active.sessionId,
+            ...(active.surface ? { surface: active.surface } : {}),
+            resources: settled.resources,
+            summary,
+          })
+        )
+        .catch(() => undefined)
+    }
+    useTaskWorkspaceStore.getState().reconcileRun(settled.runId, settled.resources)
+  }
+  return outcome
+}
+
+export async function settleWorkspaceBundleTurn(
+  bundleTurnId: string,
+  finalState: "ready" | "failed" | "cancelled" = "ready"
+): Promise<WorkspaceBundleTurnOutcome> {
+  const outcome = await transport.call<WorkspaceBundleTurnOutcome>(
+    "task_workspace_bundle_turn_settle",
+    { bundleTurnId, finalState }
+  )
+  return reconcileWorkspaceBundleTurnOutcome(outcome)
+}
+
+export async function abortWorkspaceBundleTurn(
+  bundleTurnId: string
+): Promise<WorkspaceBundleTurnOutcome> {
+  const outcome = await transport.call<WorkspaceBundleTurnOutcome>(
+    "task_workspace_bundle_turn_abort",
+    { bundleTurnId }
+  )
+  return reconcileWorkspaceBundleTurnOutcome(outcome)
+}
+
+export function getWorkspaceBundleTurn(
+  bundleTurnId: string
+): Promise<WorkspaceBundleTurnLease | null> {
+  return transport.call("task_workspace_bundle_turn_get", { bundleTurnId })
 }
 
 export async function settleTaskWorkspaceTurn(
@@ -211,6 +295,12 @@ export function listManagedWorkspaces(): Promise<ManagedWorkspaceRecord[]> {
   return transport.call("task_workspace_managed_list")
 }
 
+export function listWorkspaceEnvironments(
+  rootDir?: string
+): Promise<WorkspaceEnvironmentSummary[]> {
+  return transport.call("task_workspace_environment_list", { rootDir })
+}
+
 export function getWorkspaceBundle(bundleId: string): Promise<WorkspaceBundle | null> {
   return transport.call("task_workspace_bundle_get", { bundleId })
 }
@@ -227,6 +317,39 @@ export function acquireWorkspaceBundle(input: AcquireWorkspaceBundle): Promise<W
   return transport.call("task_workspace_bundle_acquire", { input })
 }
 
+export function applyWorkspaceBundle(
+  bundleId: string,
+  request: BundleHandoffRequest
+): Promise<BundleHandoffOutcome> {
+  return transport.call("task_workspace_bundle_apply", { bundleId, request })
+}
+
+export function retryWorkspaceBundleHandoff(
+  bundleId: string,
+  request: BundleHandoffRequest
+): Promise<BundleHandoffOutcome> {
+  return transport.call("task_workspace_bundle_handoff_retry", { bundleId, request })
+}
+
+export function getBundleHandoffOutcome(
+  bundleTurnId: string
+): Promise<BundleHandoffOutcome | null> {
+  return transport.call("task_workspace_bundle_handoff_get", { bundleTurnId })
+}
+
+export function undoWorkspaceBundleHandoff(
+  bundleId: string,
+  bundleTurnId: string
+): Promise<BundleHandoffUndoOutcome> {
+  return transport.call("task_workspace_bundle_handoff_undo", { bundleId, bundleTurnId })
+}
+
+export function getBundleHandoffUndoOutcome(
+  bundleTurnId: string
+): Promise<BundleHandoffUndoOutcome | null> {
+  return transport.call("task_workspace_bundle_handoff_undo_get", { bundleTurnId })
+}
+
 export function getWorkspaceLifecyclePolicy(): Promise<WorkspaceLifecyclePolicy> {
   return transport.call("task_workspace_policy_get")
 }
@@ -235,6 +358,14 @@ export function setWorkspaceLifecyclePolicy(
   policy: WorkspaceLifecyclePolicy
 ): Promise<WorkspaceLifecyclePolicy> {
   return transport.call("task_workspace_policy_set", { policy })
+}
+
+export function runWorkspaceMaintenance(): Promise<WorkspaceMaintenanceResult> {
+  return transport.call("task_workspace_maintenance_run", { request: { now: null } })
+}
+
+export function listWorkspaceMaintenanceEvents(limit = 100): Promise<WorkspaceMaintenanceEvent[]> {
+  return transport.call("task_workspace_maintenance_events", { limit })
 }
 
 export function pinManagedWorkspace(
@@ -250,8 +381,27 @@ export function makeManagedWorkspacePermanent(
   return transport.call("task_workspace_managed_permanent", { workspaceId })
 }
 
+export function createWorkspaceBranch(
+  workspaceId: string,
+  branch: string
+): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_environment_create_branch", { workspaceId, branch })
+}
+
 export function adoptManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {
   return transport.call("task_workspace_managed_adopt", { workspaceId })
+}
+
+export function adoptWorkspaceEnvironment(
+  environmentId: string,
+  sourceRoot: string,
+  path: string
+): Promise<ManagedWorkspaceRecord> {
+  return transport.call("task_workspace_environment_adopt", {
+    environmentId,
+    sourceRoot,
+    path,
+  })
 }
 
 export function archiveManagedWorkspace(workspaceId: string): Promise<ManagedWorkspaceRecord> {

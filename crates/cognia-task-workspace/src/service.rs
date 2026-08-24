@@ -85,6 +85,146 @@ struct BorrowedExecution {
     base: WorkspaceBaseSpec,
 }
 
+struct ServiceBundleApplier<'a> {
+    service: &'a TaskWorkspaceService,
+    selections: HashMap<String, Vec<crate::PatchSelection>>,
+    allow_irreversible: bool,
+}
+
+struct LogicalBundleSelection {
+    path_prefix: String,
+    selection: Vec<crate::PatchSelection>,
+}
+
+impl ServiceBundleApplier<'_> {
+    fn target(&self, step: &crate::ApplyStep) -> Result<PathBuf, Vec<crate::PatchConflict>> {
+        self.service
+            .registry
+            .get(&step.workspace_id)
+            .map_err(|error| bundle_operation_conflict(step, error.to_string()))?
+            .map(|record| PathBuf::from(record.source_root))
+            .ok_or_else(|| bundle_operation_conflict(step, "managed workspace is missing"))
+    }
+}
+
+impl crate::BundleApplier for ServiceBundleApplier<'_> {
+    fn precheck(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+        let target = self.target(step)?;
+        let scratch = self
+            .service
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.service.execution_dir)
+            .join("scratch");
+        let mut store = self.service.store.lock();
+        let patch = store
+            .get_patch_set(&step.patch.run_id)
+            .map_err(|error| bundle_operation_conflict(step, error))?
+            .ok_or_else(|| bundle_operation_conflict(step, "patch set is missing"))?;
+        let selection = self
+            .selections
+            .get(&step.workspace_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let conflicts =
+            ledger::precheck(&target, &scratch, &mut store, &patch, selection, now_ms())
+                .map_err(|error| bundle_operation_conflict(step, error))?;
+        conflicts.is_empty().then_some(()).ok_or(conflicts)
+    }
+
+    fn apply(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+        let target = self.target(step)?;
+        let scratch = self
+            .service
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.service.execution_dir)
+            .join("scratch");
+        let now = now_ms();
+        let mut store = self.service.store.lock();
+        let mut patch = store
+            .get_patch_set(&step.patch.run_id)
+            .map_err(|error| bundle_operation_conflict(step, error))?
+            .ok_or_else(|| bundle_operation_conflict(step, "patch set is missing"))?;
+        let mut task = store
+            .get_task(&patch.task_id)
+            .map_err(|error| bundle_operation_conflict(step, error))?
+            .ok_or_else(|| bundle_operation_conflict(step, "task workspace is missing"))?;
+        let revision = task.revision.saturating_add(1);
+        let selection = self
+            .selections
+            .get(&step.workspace_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let outcome = ledger::apply(
+            &target,
+            &scratch,
+            &mut store,
+            &mut patch,
+            selection,
+            ledger::ApplyOptions {
+                revision,
+                now,
+                allow_irreversible: self.allow_irreversible,
+            },
+        )
+        .map_err(|error| bundle_operation_conflict(step, error))?;
+        if outcome.state == crate::PatchState::Applied {
+            task.revision = revision;
+            task.state = TaskWorkspaceState::Applied;
+        } else {
+            task.state = TaskWorkspaceState::Conflict;
+        }
+        store
+            .put_patch_set(&patch)
+            .and_then(|_| store.put_task(&task))
+            .map_err(|error| bundle_operation_conflict(step, error))?;
+        if outcome.state == crate::PatchState::Applied {
+            Ok(())
+        } else {
+            Err(outcome.conflicts)
+        }
+    }
+
+    fn compensate(&self, step: &crate::ApplyStep) -> Result<(), Vec<crate::PatchConflict>> {
+        let target = self.target(step)?;
+        let scratch = self
+            .service
+            .execution_dir
+            .parent()
+            .unwrap_or(&self.service.execution_dir)
+            .join("scratch");
+        let now = now_ms();
+        let mut store = self.service.store.lock();
+        let mut patch = store
+            .get_patch_set(&step.patch.run_id)
+            .map_err(|error| bundle_operation_conflict(step, error))?
+            .ok_or_else(|| bundle_operation_conflict(step, "patch set is missing"))?;
+        let mut task = store
+            .get_task(&patch.task_id)
+            .map_err(|error| bundle_operation_conflict(step, error))?
+            .ok_or_else(|| bundle_operation_conflict(step, "task workspace is missing"))?;
+        let revision = task.revision.saturating_add(1);
+        let outcome = ledger::undo(&target, &scratch, &mut store, &mut patch, revision, now)
+            .map_err(|error| bundle_operation_conflict(step, error))?;
+        if outcome.state == crate::PatchState::Reverted {
+            task.revision = revision;
+            task.state = TaskWorkspaceState::Ready;
+        } else {
+            task.state = TaskWorkspaceState::Conflict;
+        }
+        store
+            .put_patch_set(&patch)
+            .and_then(|_| store.put_task(&task))
+            .map_err(|error| bundle_operation_conflict(step, error))?;
+        if outcome.state == crate::PatchState::Reverted {
+            Ok(())
+        } else {
+            Err(outcome.conflicts)
+        }
+    }
+}
+
 impl TaskWorkspaceService {
     pub fn open(config: ServiceConfig) -> Result<Self, String> {
         let service_dir = config.data_dir.join("task-workspaces");
@@ -111,6 +251,7 @@ impl TaskWorkspaceService {
             lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
         };
         service.recover_incomplete_runs()?;
+        service.recover_workspace_bundle_turns()?;
         service.reconcile_known_worktrees()?;
         Ok(service)
     }
@@ -248,6 +389,270 @@ impl TaskWorkspaceService {
                 base: record.base,
             }),
         )
+    }
+
+    /// Start one persisted turn across every unique physical workspace in a
+    /// Registry Bundle. Logical roots sharing a workspace share one TaskRun,
+    /// so watchers cover the physical root exactly once.
+    pub fn begin_workspace_bundle_turn(
+        &self,
+        bundle_id: &str,
+        request: crate::BeginWorkspaceBundleTurn,
+    ) -> Result<crate::WorkspaceBundleTurnLease, String> {
+        validate_id("taskId", &request.run.task_id)?;
+        validate_id("runId", &request.run.run_id)?;
+        let bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {bundle_id}"))?;
+        if bundle.state != WorkspaceState::Active {
+            return Err(format!("workspace bundle is not active: {bundle_id}"));
+        }
+        if bundle.environment_kind == crate::WorkspaceEnvironmentKind::Imported {
+            return Err("imported environments must be adopted before execution".into());
+        }
+        if bundle.owner_type == WorkspaceOwnerType::Session
+            && bundle.owner_ref.as_deref() != Some(request.run.session_id.as_str())
+        {
+            return Err("workspace bundle is owned by another session".into());
+        }
+        let primary_lease = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == request.primary_logical_root_id)
+            .ok_or_else(|| {
+                format!(
+                    "workspace bundle has no logical root: {}",
+                    request.primary_logical_root_id
+                )
+            })?;
+        if primary_lease.role != crate::WorkspaceRootRole::Primary {
+            return Err(format!(
+                "workspace bundle logical root is not primary: {}",
+                request.primary_logical_root_id
+            ));
+        }
+        let bundle_turn_id = request
+            .run
+            .turn_id
+            .clone()
+            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        validate_id("bundleTurnId", &bundle_turn_id)?;
+        if let Some(existing) = self
+            .store
+            .lock()
+            .get_workspace_bundle_turn(&bundle_turn_id)?
+        {
+            let matches_runs = existing.runs.iter().all(|lease| {
+                let suffix = &storage_key(&lease.workspace_id)[..12];
+                lease.run.task_id == scoped_run_id(&request.run.task_id, suffix)
+                    && lease.run.run_id == scoped_run_id(&request.run.run_id, suffix)
+            });
+            if existing.bundle_id == bundle_id
+                && existing.primary_logical_root_id == request.primary_logical_root_id
+                && matches_runs
+            {
+                return Ok(existing);
+            }
+            return Err(format!(
+                "bundleTurnId is already owned by another workspace bundle: {bundle_turn_id}"
+            ));
+        }
+
+        let mut workspace_ids = Vec::new();
+        for lease in &bundle.leases {
+            if !workspace_ids.contains(&lease.workspace_id) {
+                workspace_ids.push(lease.workspace_id.clone());
+            }
+        }
+        let prepared = workspace_ids
+            .into_iter()
+            .map(|workspace_id| {
+                let record = self
+                    .registry
+                    .get(&workspace_id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("managed workspace is missing: {workspace_id}"))?;
+                if record.state != WorkspaceState::Active {
+                    return Err(format!("managed workspace is not active: {workspace_id}"));
+                }
+                let execution_root = PathBuf::from(&record.execution_root)
+                    .canonicalize()
+                    .map_err(|error| format!("canonicalize managed execution root: {error}"))?;
+                let logical_root_ids = bundle
+                    .leases
+                    .iter()
+                    .filter(|lease| lease.workspace_id == workspace_id)
+                    .map(|lease| lease.logical_root_id.clone())
+                    .collect::<Vec<_>>();
+                Ok((workspace_id, record, execution_root, logical_root_ids))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let mut opened_runs: Vec<crate::WorkspaceBundleTurnRunLease> =
+            Vec::with_capacity(prepared.len());
+        for (workspace_id, record, execution_root, logical_root_ids) in prepared {
+            let mut input = request.run.clone();
+            let suffix = &storage_key(&workspace_id)[..12];
+            input.task_id = scoped_run_id(&request.run.task_id, suffix);
+            input.run_id = scoped_run_id(&request.run.run_id, suffix);
+            input.turn_id = Some(bundle_turn_id.clone());
+            input.workspace_root = execution_root.to_string_lossy().into_owned();
+            input.base = record.base.clone();
+            let run = self.begin_run_internal(
+                input,
+                Some(BorrowedExecution {
+                    root: execution_root,
+                    isolation_kind: record.isolation_kind,
+                    isolation_ref: record.branch,
+                    base: record.base,
+                }),
+            );
+            let run = match run {
+                Ok(run) => run,
+                Err(error) => {
+                    for opened in &opened_runs {
+                        let _ = self.settle_failed_run(&opened.run.run_id);
+                    }
+                    return Err(error);
+                }
+            };
+            opened_runs.push(crate::WorkspaceBundleTurnRunLease {
+                workspace_id,
+                logical_root_ids,
+                run,
+            });
+        }
+        let now = now_ms();
+        let turn = crate::WorkspaceBundleTurnLease {
+            bundle_turn_id,
+            bundle_id: bundle_id.to_string(),
+            primary_logical_root_id: request.primary_logical_root_id,
+            primary_alias: primary_lease.alias_path.clone(),
+            additional_aliases: bundle
+                .leases
+                .iter()
+                .filter(|lease| lease.role == crate::WorkspaceRootRole::Additional)
+                .map(|lease| lease.alias_path.clone())
+                .collect(),
+            runs: opened_runs,
+            state: RunState::Running,
+            created_at: now,
+            settled_at: None,
+        };
+        if let Err(error) = self.store.lock().put_workspace_bundle_turn(&turn) {
+            for opened in &turn.runs {
+                let _ = self.settle_failed_run(&opened.run.run_id);
+            }
+            return Err(error);
+        }
+        Ok(turn)
+    }
+
+    pub fn get_workspace_bundle_turn(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::WorkspaceBundleTurnLease>, String> {
+        self.store.lock().get_workspace_bundle_turn(bundle_turn_id)
+    }
+
+    pub fn settle_workspace_bundle_turn(
+        &self,
+        bundle_turn_id: &str,
+        final_state: RunState,
+    ) -> Result<crate::WorkspaceBundleTurnOutcome, String> {
+        if !matches!(
+            final_state,
+            RunState::Ready | RunState::Failed | RunState::Cancelled
+        ) {
+            return Err(format!(
+                "invalid terminal bundle turn state: {final_state:?}"
+            ));
+        }
+        let mut turn = self
+            .store
+            .lock()
+            .get_workspace_bundle_turn(bundle_turn_id)?
+            .ok_or_else(|| format!("workspace bundle turn not found: {bundle_turn_id}"))?;
+        let mut outcomes = Vec::with_capacity(turn.runs.len());
+        let mut all_resources = Vec::new();
+        for lease in &mut turn.runs {
+            let resources = match final_state {
+                RunState::Ready => self.settle_run_single(&lease.run.run_id)?,
+                RunState::Failed => {
+                    let resources = self.settle_run_single(&lease.run.run_id)?;
+                    self.set_run_terminal_state(&lease.run.run_id, RunState::Failed)?;
+                    resources
+                }
+                RunState::Cancelled => {
+                    let resources = self.settle_run_single(&lease.run.run_id)?;
+                    self.set_run_terminal_state(&lease.run.run_id, RunState::Cancelled)?;
+                    resources
+                }
+                RunState::Running | RunState::Settling => unreachable!(),
+            };
+            let (run, _): (TaskRun, WorkspaceSnapshot) = self
+                .store
+                .lock()
+                .get_run(&lease.run.run_id)?
+                .ok_or_else(|| format!("unknown task run: {}", lease.run.run_id))?;
+            lease.run = run;
+            all_resources.extend(resources.iter().cloned());
+            outcomes.push(crate::WorkspaceBundleTurnRunOutcome {
+                workspace_id: lease.workspace_id.clone(),
+                logical_root_ids: lease.logical_root_ids.clone(),
+                run_id: lease.run.run_id.clone(),
+                state: lease.run.state,
+                resources,
+            });
+        }
+        let settled_at = now_ms();
+        turn.state = final_state;
+        turn.settled_at = Some(settled_at);
+        self.store.lock().put_workspace_bundle_turn(&turn)?;
+        Ok(crate::WorkspaceBundleTurnOutcome {
+            bundle_turn_id: turn.bundle_turn_id,
+            bundle_id: turn.bundle_id,
+            state: final_state,
+            runs: outcomes,
+            resources: all_resources,
+            settled_at,
+        })
+    }
+
+    pub fn abort_workspace_bundle_turn(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<crate::WorkspaceBundleTurnOutcome, String> {
+        self.settle_workspace_bundle_turn(bundle_turn_id, RunState::Cancelled)
+    }
+
+    /// Synchronize persisted Bundle turns with TaskRuns recovered at startup.
+    pub fn recover_workspace_bundle_turns(
+        &self,
+    ) -> Result<Vec<crate::WorkspaceBundleTurnLease>, String> {
+        let turns = self.store.lock().list_workspace_bundle_turns()?;
+        let mut recovered = Vec::with_capacity(turns.len());
+        for mut turn in turns {
+            let mut states = Vec::with_capacity(turn.runs.len());
+            for lease in &mut turn.runs {
+                if let Some((run, _)) = self
+                    .store
+                    .lock()
+                    .get_run::<WorkspaceSnapshot>(&lease.run.run_id)?
+                {
+                    lease.run = run;
+                }
+                states.push(lease.run.state);
+            }
+            turn.state = aggregate_bundle_turn_state(&states);
+            if !matches!(turn.state, RunState::Running | RunState::Settling) {
+                turn.settled_at.get_or_insert_with(now_ms);
+            }
+            self.store.lock().put_workspace_bundle_turn(&turn)?;
+            recovered.push(turn);
+        }
+        Ok(recovered)
     }
 
     fn reject_registry_owned_source(&self, source_root: &Path) -> Result<(), String> {
@@ -583,8 +988,208 @@ impl TaskWorkspaceService {
             .map_err(|error| error.to_string())
     }
 
+    /// Record the successful result of the host's existing
+    /// `cognia_git::worktree::create_branch_here` operation.
+    pub fn record_workspace_branch(
+        &self,
+        workspace_id: &str,
+        branch: &str,
+        head: Option<&str>,
+    ) -> Result<WorkspaceRecord, String> {
+        if branch.trim().is_empty()
+            || branch.chars().any(char::is_control)
+            || head
+                .is_some_and(|value| value.trim().is_empty() || value.chars().any(char::is_control))
+        {
+            return Err("workspace branch metadata is invalid".into());
+        }
+        self.validate_workspace_branch_target(workspace_id)?;
+        self.registry
+            .set_branch_metadata(workspace_id, branch.to_string(), head.map(str::to_string))
+            .map_err(|error| error.to_string())
+    }
+
+    /// Validate branch creation and return the Registry-owned worktree path
+    /// that the host may pass to `cognia_git::worktree::create_branch_here`.
+    pub fn workspace_branch_target(&self, workspace_id: &str) -> Result<String, String> {
+        self.validate_workspace_branch_target(workspace_id)
+            .map(|record| record.execution_root)
+    }
+
+    fn validate_workspace_branch_target(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceRecord, String> {
+        let record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.state != WorkspaceState::Active {
+            return Err("branch metadata can only be recorded for an active environment".into());
+        }
+        if record.isolation_kind != IsolationKind::GitWorktree {
+            return Err("branch metadata is only valid for a Git worktree".into());
+        }
+        if !matches!(
+            record.environment_kind,
+            crate::WorkspaceEnvironmentKind::Managed | crate::WorkspaceEnvironmentKind::Permanent
+        ) {
+            return Err("imported environments must be adopted before creating a branch".into());
+        }
+        Ok(record)
+    }
+
     pub fn list_managed_workspaces(&self) -> Result<Vec<WorkspaceRecord>, String> {
         self.registry.list().map_err(|error| error.to_string())
+    }
+
+    /// Return one canonical inventory for both ordinary Git worktrees and
+    /// Registry-owned environments. This query is read-only: discovering a
+    /// manual worktree does not transfer ownership to the Registry.
+    pub fn list_workspace_environments(
+        &self,
+        root_dir: Option<&Path>,
+    ) -> Result<Vec<crate::WorkspaceEnvironmentSummary>, String> {
+        let records = self.registry.list().map_err(|error| error.to_string())?;
+        let requested_source = root_dir
+            .map(|path| {
+                git2::Repository::discover(path)
+                    .map_err(|error| format!("discover workspace repository: {error}"))?
+                    .workdir()
+                    .map(Path::to_path_buf)
+                    .ok_or_else(|| {
+                        "bare repositories do not have workspace environments".to_string()
+                    })?
+                    .canonicalize()
+                    .map_err(|error| format!("canonicalize workspace repository: {error}"))
+            })
+            .transpose()?;
+        let requested_key = requested_source.as_deref().map(normalized_path_key);
+        let mut source_roots = std::collections::BTreeSet::new();
+        if let Some(source) = requested_source.as_ref() {
+            source_roots.insert(source.to_string_lossy().into_owned());
+        } else {
+            source_roots.extend(
+                records
+                    .iter()
+                    .filter(|record| record.isolation_kind == IsolationKind::GitWorktree)
+                    .map(|record| record.source_root.clone()),
+            );
+            source_roots.extend(
+                self.store
+                    .lock()
+                    .list_workspace_source_bindings()?
+                    .into_iter()
+                    .map(|binding| binding.source_root),
+            );
+        }
+
+        let records_by_path = records
+            .iter()
+            .map(|record| {
+                (
+                    normalized_path_key(Path::new(&record.execution_root)),
+                    record,
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let mut seen_paths = std::collections::HashSet::new();
+        let mut summaries = Vec::new();
+        for source_root in source_roots {
+            let source = PathBuf::from(&source_root);
+            let inventory = read_git_worktree_inventory(&source)?;
+            let canonical_source = inventory
+                .first()
+                .map(|row| row.path.clone())
+                .unwrap_or(source);
+            let source_key = normalized_path_key(&canonical_source);
+            for row in inventory {
+                let path_key = normalized_path_key(&row.path);
+                if !seen_paths.insert(path_key.clone()) {
+                    continue;
+                }
+                let record = records_by_path.get(&path_key).copied();
+                let ownership = if path_key == source_key {
+                    crate::WorkspaceEnvironmentOwnership::Main
+                } else {
+                    record.map_or(crate::WorkspaceEnvironmentOwnership::Manual, |record| {
+                        environment_ownership(record)
+                    })
+                };
+                summaries.push(environment_summary_from_git(
+                    &canonical_source,
+                    row,
+                    record,
+                    ownership,
+                ));
+            }
+        }
+        for record in records {
+            if requested_key.as_ref().is_some_and(|requested| {
+                normalized_path_key(Path::new(&record.source_root)) != *requested
+            }) {
+                continue;
+            }
+            let path_key = normalized_path_key(Path::new(&record.execution_root));
+            if seen_paths.insert(path_key) {
+                summaries.push(environment_summary_from_record(&record));
+            }
+        }
+        summaries.sort_by(|left, right| {
+            environment_ownership_rank(left.ownership)
+                .cmp(&environment_ownership_rank(right.ownership))
+                .then_with(|| left.path.cmp(&right.path))
+        });
+        Ok(summaries)
+    }
+
+    /// Explicitly transfer one manual Git worktree into Registry ownership.
+    /// The caller must echo the inventory identity and path; the service
+    /// re-reads Git porcelain immediately before inserting only that row.
+    pub fn adopt_workspace_environment(
+        &self,
+        environment_id: &str,
+        source_root: &Path,
+        path: &Path,
+    ) -> Result<WorkspaceRecord, String> {
+        let source_root = source_root
+            .canonicalize()
+            .map_err(|error| format!("canonicalize worktree source: {error}"))?;
+        let target_key = normalized_path_key(path);
+        let row = read_git_worktree_inventory(&source_root)?
+            .into_iter()
+            .find(|row| normalized_path_key(&row.path) == target_key)
+            .ok_or_else(|| format!("manual workspace is no longer present: {}", path.display()))?;
+        if normalized_path_key(&row.path) == normalized_path_key(&source_root) {
+            return Err("the main worktree cannot be adopted".into());
+        }
+        let expected_environment_id = format!("git:{}", storage_key(&target_key));
+        if environment_id != expected_environment_id {
+            return Err("workspace environment identity changed; refresh the inventory".into());
+        }
+        if self
+            .registry
+            .list()
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|record| normalized_path_key(Path::new(&record.execution_root)) == target_key)
+        {
+            return Err("workspace environment is already Registry-owned".into());
+        }
+        let imported = self
+            .registry
+            .insert_imported(
+                crate::ImportedWorkspaceHint {
+                    source_root: source_root.to_string_lossy().into_owned(),
+                    execution_root: row.path.to_string_lossy().into_owned(),
+                    git_common_dir: git_common_dir(&source_root),
+                    branch: row.branch,
+                },
+                now_ms(),
+            )
+            .map_err(|error| error.to_string())?;
+        self.adopt_imported_workspace(&imported.workspace_id)
     }
 
     pub fn reconcile_known_worktrees(&self) -> Result<crate::ReconcileOutcome, String> {
@@ -740,6 +1345,495 @@ impl TaskWorkspaceService {
 
     pub fn list_workspace_bundles(&self) -> Result<Vec<crate::WorkspaceBundle>, String> {
         self.store.lock().list_workspace_bundles()
+    }
+
+    /// Atomically apply the settled patches from one Bundle turn back to all
+    /// source roots. The existing ledger performs preflight/apply/undo; the
+    /// Bundle executor only coordinates ordering and compensation.
+    pub fn apply_workspace_bundle(
+        &self,
+        bundle_id: &str,
+        request: crate::BundleHandoffRequest,
+    ) -> Result<crate::BundleHandoffOutcome, String> {
+        let mut bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {bundle_id}"))?;
+        let turn = self
+            .store
+            .lock()
+            .get_workspace_bundle_turn(&request.bundle_turn_id)?
+            .ok_or_else(|| {
+                format!(
+                    "workspace bundle turn not found: {}",
+                    request.bundle_turn_id
+                )
+            })?;
+        if turn.bundle_id != bundle_id {
+            return Err("workspace bundle turn belongs to another bundle".into());
+        }
+        if turn.state != RunState::Ready {
+            return Err(format!(
+                "workspace bundle turn is not ready: {:?}",
+                turn.state
+            ));
+        }
+
+        let mut selection_specs: HashMap<String, Vec<LogicalBundleSelection>> = HashMap::new();
+        for selected in &request.selections {
+            let lease = bundle
+                .leases
+                .iter()
+                .find(|lease| {
+                    lease.workspace_id == selected.workspace_id
+                        && lease.logical_root_id == selected.logical_root_id
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "bundle selection does not match a logical root: {}/{}",
+                        selected.workspace_id, selected.logical_root_id
+                    )
+                })?;
+            let record = self
+                .registry
+                .get(&lease.workspace_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("managed workspace is missing: {}", lease.workspace_id))?;
+            let prefix = Path::new(&lease.alias_path)
+                .strip_prefix(Path::new(&record.execution_root))
+                .map_err(|_| "bundle logical root escapes its physical workspace".to_string())?
+                .to_string_lossy()
+                .into_owned();
+            let translated = selected
+                .selection
+                .iter()
+                .map(|selection| {
+                    Ok(crate::PatchSelection {
+                        path: join_logical_selection_path(&prefix, &selection.path)?,
+                        hunk_ids: selection.hunk_ids.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            selection_specs
+                .entry(lease.workspace_id.clone())
+                .or_default()
+                .push(LogicalBundleSelection {
+                    path_prefix: prefix,
+                    selection: translated,
+                });
+        }
+
+        let selecting_subset = !request.selections.is_empty();
+        let mut selections = HashMap::new();
+        let mut patches = HashMap::new();
+        let mut groups = Vec::with_capacity(turn.runs.len());
+        for run_lease in &turn.runs {
+            let record = self
+                .registry
+                .get(&run_lease.workspace_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| {
+                    format!("managed workspace is missing: {}", run_lease.workspace_id)
+                })?;
+            let patch = self
+                .store
+                .lock()
+                .get_patch_set(&run_lease.run.run_id)?
+                .ok_or_else(|| format!("patch set is missing: {}", run_lease.run.run_id))?;
+            if selecting_subset {
+                if let Some(specs) = selection_specs.get(&run_lease.workspace_id) {
+                    let mut combined = Vec::new();
+                    for spec in specs {
+                        if spec.selection.is_empty() {
+                            combined.extend(
+                                patch
+                                    .files
+                                    .iter()
+                                    .filter(|file| {
+                                        path_has_logical_prefix(&file.path, &spec.path_prefix)
+                                    })
+                                    .map(|file| crate::PatchSelection {
+                                        path: file.path.clone(),
+                                        hunk_ids: Vec::new(),
+                                    }),
+                            );
+                        } else {
+                            combined.extend(spec.selection.iter().cloned());
+                        }
+                    }
+                    merge_patch_selections(&mut combined)?;
+                    if combined.is_empty() {
+                        continue;
+                    }
+                    selections.insert(run_lease.workspace_id.clone(), combined);
+                } else {
+                    continue;
+                }
+            }
+            patches.insert(run_lease.workspace_id.clone(), patch);
+            groups.push(crate::PhysicalLeaseGroup {
+                bundle_id: bundle_id.to_string(),
+                group_key: record
+                    .git_common_dir
+                    .clone()
+                    .unwrap_or_else(|| format!("shadow:{}", record.workspace_id)),
+                alias_path: record.source_root.clone(),
+                isolation: record.isolation_kind,
+                git_common_dir: record.git_common_dir,
+                logical_root_ids: run_lease.logical_root_ids.clone(),
+                workspace_id: Some(run_lease.workspace_id.clone()),
+            });
+        }
+        let plan = crate::plan_bundle_apply(&bundle, &groups, patches)
+            .map_err(|error| error.to_string())?;
+        let applier = ServiceBundleApplier {
+            service: self,
+            selections,
+            allow_irreversible: request.allow_irreversible,
+        };
+        let outcome = crate::execute_bundle_apply(&plan, &applier);
+        bundle.state = outcome.state;
+        self.store.lock().put_workspace_bundle(&bundle)?;
+        if outcome.state == WorkspaceState::Conflict {
+            let now = now_ms();
+            for run in &turn.runs {
+                if let Ok(Some(record)) = self.registry.get(&run.workspace_id) {
+                    if record.state == WorkspaceState::Active {
+                        let _ = self.registry.transition(
+                            &record.workspace_id,
+                            record.owner_type,
+                            record.owner_ref.as_deref(),
+                            WorkspaceState::Conflict,
+                            now,
+                        );
+                    }
+                }
+            }
+        }
+        let handoff = crate::BundleHandoffOutcome {
+            bundle_turn_id: request.bundle_turn_id.clone(),
+            request,
+            outcome,
+        };
+        self.store.lock().put_bundle_handoff_outcome(&handoff)?;
+        Ok(handoff)
+    }
+
+    pub fn get_bundle_handoff_outcome(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::BundleHandoffOutcome>, String> {
+        self.store.lock().get_bundle_handoff_outcome(bundle_turn_id)
+    }
+
+    /// Retry a persisted conflicted handoff after the user has repaired the
+    /// source roots. Successfully compensated patches are reset to Ready;
+    /// every root then passes through the same atomic precheck again.
+    pub fn retry_workspace_bundle_handoff(
+        &self,
+        bundle_id: &str,
+        request: crate::BundleHandoffRequest,
+    ) -> Result<crate::BundleHandoffOutcome, String> {
+        let previous = self
+            .store
+            .lock()
+            .get_bundle_handoff_outcome(&request.bundle_turn_id)?
+            .ok_or_else(|| {
+                format!(
+                    "workspace bundle handoff not found: {}",
+                    request.bundle_turn_id
+                )
+            })?;
+        if previous.outcome.bundle_id != bundle_id
+            || previous.outcome.state != WorkspaceState::Conflict
+            || previous.request != request
+        {
+            return Err(
+                "only the persisted request for a conflicted bundle handoff can be retried".into(),
+            );
+        }
+        let turn = self
+            .store
+            .lock()
+            .get_workspace_bundle_turn(&request.bundle_turn_id)?
+            .ok_or_else(|| {
+                format!(
+                    "workspace bundle turn not found: {}",
+                    request.bundle_turn_id
+                )
+            })?;
+        {
+            let store = self.store.lock();
+            for run in &turn.runs {
+                let mut patch = store
+                    .get_patch_set(&run.run.run_id)?
+                    .ok_or_else(|| format!("patch set is missing: {}", run.run.run_id))?;
+                match patch.state {
+                    crate::PatchState::Reverted => {
+                        patch.state = crate::PatchState::Ready;
+                        patch.applied_revision = None;
+                        patch.applied_files.clear();
+                        patch.applied_selection.clear();
+                        patch.applied_selection_known = false;
+                        patch.reversible = true;
+                        store.put_patch_set(&patch)?;
+                    }
+                    crate::PatchState::Ready | crate::PatchState::Conflict => {}
+                    crate::PatchState::Applied => {
+                        return Err(format!(
+                            "bundle retry cannot reset an applied patch: {}",
+                            patch.patch_id
+                        ));
+                    }
+                }
+            }
+        }
+        let now = now_ms();
+        for run in &turn.runs {
+            if let Some(record) = self
+                .registry
+                .get(&run.workspace_id)
+                .map_err(|error| error.to_string())?
+            {
+                if record.state == WorkspaceState::Conflict {
+                    self.registry
+                        .transition(
+                            &record.workspace_id,
+                            record.owner_type,
+                            record.owner_ref.as_deref(),
+                            WorkspaceState::Active,
+                            now,
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        let mut bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {bundle_id}"))?;
+        bundle.state = WorkspaceState::Active;
+        self.store.lock().put_workspace_bundle(&bundle)?;
+        self.apply_workspace_bundle(bundle_id, request)
+    }
+
+    /// Undo a successfully applied Bundle handoff as one persisted operation.
+    /// Roots are reverted in reverse apply order. If an undo fails after an
+    /// earlier root was reverted, those roots are re-applied in original
+    /// order so the Bundle returns to its pre-undo state whenever possible.
+    pub fn undo_workspace_bundle_handoff(
+        &self,
+        bundle_id: &str,
+        bundle_turn_id: &str,
+    ) -> Result<crate::BundleHandoffUndoOutcome, String> {
+        let handoff = self
+            .store
+            .lock()
+            .get_bundle_handoff_outcome(bundle_turn_id)?
+            .ok_or_else(|| format!("workspace bundle handoff not found: {bundle_turn_id}"))?;
+        if handoff.outcome.bundle_id != bundle_id
+            || handoff.outcome.state != WorkspaceState::Active
+            || !handoff.outcome.conflicts.is_empty()
+        {
+            return Err("only a successfully applied bundle handoff can be undone".into());
+        }
+        if let Some(previous) = self
+            .store
+            .lock()
+            .get_bundle_handoff_undo_outcome(bundle_turn_id)?
+        {
+            if previous.bundle_id != bundle_id {
+                return Err("bundle handoff undo belongs to another bundle".into());
+            }
+            if previous.state == WorkspaceState::Conflict || previous.conflicts.is_empty() {
+                return Ok(previous);
+            }
+        }
+
+        let bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {bundle_id}"))?;
+        if bundle.state != WorkspaceState::Active {
+            return Err(format!("workspace bundle is not active: {bundle_id}"));
+        }
+        let turn = self
+            .store
+            .lock()
+            .get_workspace_bundle_turn(bundle_turn_id)?
+            .ok_or_else(|| format!("workspace bundle turn not found: {bundle_turn_id}"))?;
+        if turn.bundle_id != bundle_id {
+            return Err("workspace bundle turn belongs to another bundle".into());
+        }
+
+        let retrying_compensated_failure = self
+            .store
+            .lock()
+            .get_bundle_handoff_undo_outcome(bundle_turn_id)?
+            .is_some_and(|outcome| !outcome.conflicts.is_empty());
+        let mut selections = HashMap::new();
+        let mut steps = Vec::with_capacity(handoff.outcome.applied.len());
+        for (step_index, workspace_id) in handoff.outcome.applied.iter().enumerate() {
+            let run = turn
+                .runs
+                .iter()
+                .find(|run| run.workspace_id == *workspace_id)
+                .ok_or_else(|| {
+                    format!("bundle turn has no run for applied workspace: {workspace_id}")
+                })?;
+            let record = self
+                .registry
+                .get(workspace_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("managed workspace is missing: {workspace_id}"))?;
+            let patch = self
+                .store
+                .lock()
+                .get_patch_set(&run.run.run_id)?
+                .ok_or_else(|| format!("patch set is missing: {}", run.run.run_id))?;
+            let valid_state = patch.state == crate::PatchState::Applied
+                || (retrying_compensated_failure && patch.state == crate::PatchState::Conflict);
+            if !valid_state {
+                return Err(format!(
+                    "bundle handoff patch cannot be undone from state {:?}: {}",
+                    patch.state, patch.patch_id
+                ));
+            }
+            if !patch.reversible {
+                return Err(format!(
+                    "bundle handoff patch was applied irreversibly: {}",
+                    patch.patch_id
+                ));
+            }
+            if !patch.applied_selection_known {
+                return Err(format!(
+                    "bundle handoff patch has no persisted apply selection: {}",
+                    patch.patch_id
+                ));
+            }
+            if self.store.lock().get_task(&patch.task_id)?.is_none() {
+                return Err(format!("task workspace is missing: {}", patch.task_id));
+            }
+            selections.insert(workspace_id.clone(), patch.applied_selection.clone());
+            steps.push(crate::ApplyStep {
+                step_index,
+                workspace_id: workspace_id.clone(),
+                alias_path: record.source_root,
+                patch,
+            });
+        }
+
+        let applier = ServiceBundleApplier {
+            service: self,
+            selections,
+            allow_irreversible: handoff.request.allow_irreversible,
+        };
+        let mut reverted_steps = Vec::new();
+        let mut conflicts = Vec::new();
+        for step in steps.iter().rev() {
+            match crate::BundleApplier::compensate(&applier, step) {
+                Ok(()) => reverted_steps.push(step.clone()),
+                Err(mut undo_conflicts) => {
+                    conflicts.append(&mut undo_conflicts);
+                    break;
+                }
+            }
+        }
+
+        let mut re_applied = Vec::new();
+        if !conflicts.is_empty() {
+            for step in reverted_steps.iter().rev() {
+                self.reset_reverted_bundle_patch(&step.patch.run_id)?;
+                match crate::BundleApplier::apply(&applier, step) {
+                    Ok(()) => re_applied.push(step.workspace_id.clone()),
+                    Err(mut apply_conflicts) => conflicts.append(&mut apply_conflicts),
+                }
+            }
+        }
+        let re_applied_set = re_applied.iter().collect::<std::collections::HashSet<_>>();
+        let reverted = reverted_steps
+            .iter()
+            .filter(|step| !re_applied_set.contains(&step.workspace_id))
+            .map(|step| step.workspace_id.clone())
+            .collect::<Vec<_>>();
+        let state = if conflicts.is_empty() || reverted.is_empty() {
+            WorkspaceState::Active
+        } else {
+            WorkspaceState::Conflict
+        };
+        let outcome = crate::BundleHandoffUndoOutcome {
+            bundle_turn_id: bundle_turn_id.to_string(),
+            bundle_id: bundle_id.to_string(),
+            reverted,
+            re_applied,
+            conflicts,
+            state,
+        };
+        self.store
+            .lock()
+            .put_bundle_handoff_undo_outcome(&outcome)?;
+        self.persist_bundle_operation_state(&turn, state)?;
+        Ok(outcome)
+    }
+
+    pub fn get_bundle_handoff_undo_outcome(
+        &self,
+        bundle_turn_id: &str,
+    ) -> Result<Option<crate::BundleHandoffUndoOutcome>, String> {
+        self.store
+            .lock()
+            .get_bundle_handoff_undo_outcome(bundle_turn_id)
+    }
+
+    fn reset_reverted_bundle_patch(&self, run_id: &str) -> Result<(), String> {
+        let store = self.store.lock();
+        let mut patch = store
+            .get_patch_set(run_id)?
+            .ok_or_else(|| format!("patch set is missing: {run_id}"))?;
+        if patch.state != crate::PatchState::Reverted {
+            return Err(format!(
+                "bundle undo compensation expected a reverted patch: {}",
+                patch.patch_id
+            ));
+        }
+        patch.state = crate::PatchState::Ready;
+        patch.applied_revision = None;
+        patch.applied_files.clear();
+        store.put_patch_set(&patch)
+    }
+
+    fn persist_bundle_operation_state(
+        &self,
+        turn: &crate::WorkspaceBundleTurnLease,
+        state: WorkspaceState,
+    ) -> Result<(), String> {
+        let mut bundle = self
+            .store
+            .lock()
+            .get_workspace_bundle(&turn.bundle_id)?
+            .ok_or_else(|| format!("workspace bundle not found: {}", turn.bundle_id))?;
+        bundle.state = state;
+        self.store.lock().put_workspace_bundle(&bundle)?;
+        if state == WorkspaceState::Conflict {
+            let now = now_ms();
+            for run in &turn.runs {
+                if let Ok(Some(record)) = self.registry.get(&run.workspace_id) {
+                    if record.state == WorkspaceState::Active {
+                        let _ = self.registry.transition(
+                            &record.workspace_id,
+                            record.owner_type,
+                            record.owner_ref.as_deref(),
+                            WorkspaceState::Conflict,
+                            now,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Provision every writable root as one transactionally acquired bundle.
@@ -938,6 +2032,140 @@ impl TaskWorkspaceService {
         Ok(policy)
     }
 
+    /// Execute one host-side Registry maintenance pass. Candidate planning is
+    /// delegated to the existing retention planners; this method only applies
+    /// their safe lifecycle operations and records durable history.
+    pub fn run_workspace_maintenance(
+        &self,
+        request: crate::WorkspaceMaintenanceRequest,
+    ) -> Result<crate::WorkspaceMaintenanceResult, String> {
+        let started_at = request.now.unwrap_or_else(now_ms);
+        let reconcile = self.reconcile_known_worktrees()?;
+        let mut events = vec![crate::WorkspaceMaintenanceEvent {
+            event_id: Uuid::now_v7().to_string(),
+            kind: crate::WorkspaceMaintenanceEventKind::Reconciled,
+            workspace_id: None,
+            occurred_at: started_at,
+            detail: format!(
+                "reclaimed={}, orphaned={}, imported={}",
+                reconcile.reclaimed.len(),
+                reconcile.orphaned.len(),
+                reconcile.imported.len()
+            ),
+        }];
+        let policy = self.registry.policy();
+        let records = self.registry.list().map_err(|error| error.to_string())?;
+        let protected_workspace_ids = self.workspace_ids_with_unsettled_or_unapplied_tasks()?;
+        let directory_candidates = crate::plan_directory_reclaim(&records, policy)
+            .into_iter()
+            .filter(|candidate| !protected_workspace_ids.contains(&candidate.workspace_id));
+        let mut reclaimed_workspace_ids = Vec::new();
+        for candidate in directory_candidates {
+            match self.archive_managed_workspace(&candidate.workspace_id) {
+                Ok(_) => {
+                    reclaimed_workspace_ids.push(candidate.workspace_id.clone());
+                    events.push(crate::WorkspaceMaintenanceEvent {
+                        event_id: Uuid::now_v7().to_string(),
+                        kind: crate::WorkspaceMaintenanceEventKind::DirectoryReclaimed,
+                        workspace_id: Some(candidate.workspace_id),
+                        occurred_at: started_at,
+                        detail: format!("{:?}", candidate.reason),
+                    });
+                }
+                Err(error) => events.push(crate::WorkspaceMaintenanceEvent {
+                    event_id: Uuid::now_v7().to_string(),
+                    kind: crate::WorkspaceMaintenanceEventKind::Failed,
+                    workspace_id: Some(candidate.workspace_id),
+                    occurred_at: started_at,
+                    detail: error,
+                }),
+            }
+        }
+
+        let records = self.registry.list().map_err(|error| error.to_string())?;
+        let snapshot_candidates = crate::plan_snapshot_expiration(&records, policy, started_at)
+            .into_iter()
+            .filter(|candidate| !protected_workspace_ids.contains(&candidate.workspace_id));
+        let mut expired_snapshot_task_ids = Vec::new();
+        for candidate in snapshot_candidates {
+            match self.delete_managed_workspace(&candidate.workspace_id) {
+                Ok(()) => {
+                    expired_snapshot_task_ids.push(candidate.snapshot_task_id.clone());
+                    events.push(crate::WorkspaceMaintenanceEvent {
+                        event_id: Uuid::now_v7().to_string(),
+                        kind: crate::WorkspaceMaintenanceEventKind::SnapshotExpired,
+                        workspace_id: Some(candidate.workspace_id),
+                        occurred_at: started_at,
+                        detail: format!("{:?}", candidate.reason),
+                    });
+                }
+                Err(error) => events.push(crate::WorkspaceMaintenanceEvent {
+                    event_id: Uuid::now_v7().to_string(),
+                    kind: crate::WorkspaceMaintenanceEventKind::Failed,
+                    workspace_id: Some(candidate.workspace_id),
+                    occurred_at: started_at,
+                    detail: error,
+                }),
+            }
+        }
+        let (removed_blob_count, reclaimed_bytes) =
+            match self.store.lock().prune_unreferenced_blobs() {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    events.push(crate::WorkspaceMaintenanceEvent {
+                        event_id: Uuid::now_v7().to_string(),
+                        kind: crate::WorkspaceMaintenanceEventKind::Failed,
+                        workspace_id: None,
+                        occurred_at: started_at,
+                        detail: error,
+                    });
+                    (0, 0)
+                }
+            };
+        self.store
+            .lock()
+            .append_workspace_maintenance_events(&events)?;
+        Ok(crate::WorkspaceMaintenanceResult {
+            started_at,
+            finished_at: now_ms().max(started_at),
+            reconcile,
+            reclaimed_workspace_ids,
+            expired_snapshot_task_ids,
+            removed_blob_count,
+            reclaimed_bytes,
+            events,
+        })
+    }
+
+    pub fn list_workspace_maintenance_events(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<crate::WorkspaceMaintenanceEvent>, String> {
+        if limit == 0 || limit > 1_000 {
+            return Err("workspace maintenance event limit must be between 1 and 1000".into());
+        }
+        self.store.lock().list_workspace_maintenance_events(limit)
+    }
+
+    fn workspace_ids_with_unsettled_or_unapplied_tasks(
+        &self,
+    ) -> Result<std::collections::HashSet<String>, String> {
+        let store = self.store.lock();
+        let mut protected = std::collections::HashSet::new();
+        for task in store.list_tasks()? {
+            if store.task_is_prunable(&task.task_id)? {
+                continue;
+            }
+            protected.extend(
+                store
+                    .list_runs(&task.task_id)?
+                    .into_iter()
+                    .filter_map(|run| run.workspace_id),
+            );
+        }
+        Ok(protected)
+    }
+
     fn enforce_managed_workspace_capacity(&self, requested: u32) -> Result<(), String> {
         let policy = self.registry.policy();
         let active_managed = self
@@ -979,6 +2207,19 @@ impl TaskWorkspaceService {
         workspace_id: &str,
         pinned: bool,
     ) -> Result<WorkspaceRecord, String> {
+        let record = self
+            .registry
+            .get(workspace_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
+        if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed
+            || !matches!(
+                record.state,
+                WorkspaceState::Active | WorkspaceState::Archived | WorkspaceState::Restorable
+            )
+        {
+            return Err("only active or restorable managed environments can be pinned".into());
+        }
         self.registry
             .set_pinned(workspace_id, pinned)
             .map_err(|error| error.to_string())
@@ -992,6 +2233,9 @@ impl TaskWorkspaceService {
             .ok_or_else(|| format!("workspace {workspace_id} not found"))?;
         if record.state != WorkspaceState::Active {
             return Err("only an active environment can be made permanent".into());
+        }
+        if record.environment_kind != crate::WorkspaceEnvironmentKind::Managed {
+            return Err("only a managed environment can be made permanent".into());
         }
         self.registry
             .set_environment_kind(workspace_id, crate::WorkspaceEnvironmentKind::Permanent)
@@ -1389,6 +2633,18 @@ impl TaskWorkspaceService {
     }
 
     pub fn settle_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
+        if let Some(turn) = self.workspace_bundle_turn_for_run(run_id)? {
+            if matches!(turn.state, RunState::Running | RunState::Settling) {
+                return self
+                    .settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Ready)
+                    .map(|outcome| outcome.resources);
+            }
+            return self.bundle_turn_resources(&turn);
+        }
+        self.settle_run_single(run_id)
+    }
+
+    fn settle_run_single(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
         // Stop drains queued notifications and joins the watcher before the
         // authoritative snapshot, preventing provisional events after settle.
         let _ = self.watchers.stop(run_id);
@@ -1478,14 +2734,48 @@ impl TaskWorkspaceService {
     }
 
     pub fn settle_failed_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
-        let resources = self.settle_run(run_id)?;
+        if let Some(turn) = self.workspace_bundle_turn_for_run(run_id)? {
+            return self
+                .settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Failed)
+                .map(|outcome| outcome.resources);
+        }
+        let resources = self.settle_run_single(run_id)?;
         self.set_run_terminal_state(run_id, RunState::Failed)?;
         Ok(resources)
     }
 
     pub fn settle_cancelled_run(&self, run_id: &str) -> Result<Vec<ResourceChange>, String> {
-        let resources = self.settle_run(run_id)?;
+        if let Some(turn) = self.workspace_bundle_turn_for_run(run_id)? {
+            return self
+                .settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Cancelled)
+                .map(|outcome| outcome.resources);
+        }
+        let resources = self.settle_run_single(run_id)?;
         self.set_run_terminal_state(run_id, RunState::Cancelled)?;
+        Ok(resources)
+    }
+
+    fn workspace_bundle_turn_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<crate::WorkspaceBundleTurnLease>, String> {
+        Ok(self
+            .store
+            .lock()
+            .list_workspace_bundle_turns()?
+            .into_iter()
+            .find(|turn| turn.runs.iter().any(|lease| lease.run.run_id == run_id)))
+    }
+
+    fn bundle_turn_resources(
+        &self,
+        turn: &crate::WorkspaceBundleTurnLease,
+    ) -> Result<Vec<ResourceChange>, String> {
+        let store = self.store.lock();
+        let mut resources = Vec::new();
+        for lease in &turn.runs {
+            resources.extend(store.list_run_resources(&lease.run.run_id)?);
+        }
         Ok(resources)
     }
 
@@ -2837,7 +4127,10 @@ fn managed_git_lock_reason(
 struct GitWorktreeInventoryRow {
     path: PathBuf,
     branch: Option<String>,
+    head: Option<String>,
     lock_reason: Option<String>,
+    prunable: bool,
+    prune_reason: Option<String>,
 }
 
 fn read_git_worktree_inventory(source_root: &Path) -> Result<Vec<GitWorktreeInventoryRow>, String> {
@@ -2858,29 +4151,59 @@ fn read_git_worktree_inventory(source_root: &Path) -> Result<Vec<GitWorktreeInve
     let mut rows = Vec::new();
     let mut path: Option<PathBuf> = None;
     let mut branch: Option<String> = None;
+    let mut head: Option<String> = None;
     let mut lock_reason: Option<String> = None;
+    let mut prunable = false;
+    let mut prune_reason: Option<String> = None;
     let flush = |rows: &mut Vec<GitWorktreeInventoryRow>,
                  path: &mut Option<PathBuf>,
                  branch: &mut Option<String>,
-                 lock_reason: &mut Option<String>| {
+                 head: &mut Option<String>,
+                 lock_reason: &mut Option<String>,
+                 prunable: &mut bool,
+                 prune_reason: &mut Option<String>| {
         if let Some(path) = path.take() {
             rows.push(GitWorktreeInventoryRow {
                 path,
                 branch: branch.take(),
+                head: head.take(),
                 lock_reason: lock_reason.take(),
+                prunable: *prunable,
+                prune_reason: prune_reason.take(),
             });
         } else {
             *branch = None;
+            *head = None;
             *lock_reason = None;
+            *prune_reason = None;
         }
+        *prunable = false;
     };
     for raw in porcelain.split(if porcelain.contains('\0') { '\0' } else { '\n' }) {
         let line = raw.trim_end();
         if line.is_empty() {
-            flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+            flush(
+                &mut rows,
+                &mut path,
+                &mut branch,
+                &mut head,
+                &mut lock_reason,
+                &mut prunable,
+                &mut prune_reason,
+            );
         } else if let Some(value) = line.strip_prefix("worktree ") {
-            flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+            flush(
+                &mut rows,
+                &mut path,
+                &mut branch,
+                &mut head,
+                &mut lock_reason,
+                &mut prunable,
+                &mut prune_reason,
+            );
             path = Some(PathBuf::from(value));
+        } else if let Some(value) = line.strip_prefix("HEAD ") {
+            head = Some(value.to_string());
         } else if let Some(value) = line.strip_prefix("branch ") {
             branch = Some(
                 value
@@ -2890,10 +4213,176 @@ fn read_git_worktree_inventory(source_root: &Path) -> Result<Vec<GitWorktreeInve
             );
         } else if let Some(value) = line.strip_prefix("locked ") {
             lock_reason = Some(value.to_string());
+        } else if line == "locked" {
+            lock_reason = Some(String::new());
+        } else if let Some(value) = line.strip_prefix("prunable ") {
+            prunable = true;
+            prune_reason = Some(value.to_string());
+        } else if line == "prunable" {
+            prunable = true;
         }
     }
-    flush(&mut rows, &mut path, &mut branch, &mut lock_reason);
+    flush(
+        &mut rows,
+        &mut path,
+        &mut branch,
+        &mut head,
+        &mut lock_reason,
+        &mut prunable,
+        &mut prune_reason,
+    );
     Ok(rows)
+}
+
+fn environment_ownership(record: &WorkspaceRecord) -> crate::WorkspaceEnvironmentOwnership {
+    match record.environment_kind {
+        crate::WorkspaceEnvironmentKind::Managed => crate::WorkspaceEnvironmentOwnership::Managed,
+        crate::WorkspaceEnvironmentKind::Imported => crate::WorkspaceEnvironmentOwnership::Imported,
+        crate::WorkspaceEnvironmentKind::Permanent => {
+            crate::WorkspaceEnvironmentOwnership::Permanent
+        }
+    }
+}
+
+fn environment_ownership_rank(ownership: crate::WorkspaceEnvironmentOwnership) -> u8 {
+    match ownership {
+        crate::WorkspaceEnvironmentOwnership::Main => 0,
+        crate::WorkspaceEnvironmentOwnership::Managed => 1,
+        crate::WorkspaceEnvironmentOwnership::Permanent => 2,
+        crate::WorkspaceEnvironmentOwnership::Imported => 3,
+        crate::WorkspaceEnvironmentOwnership::Manual => 4,
+    }
+}
+
+fn environment_actions(
+    ownership: crate::WorkspaceEnvironmentOwnership,
+    state: Option<WorkspaceState>,
+    pinned: bool,
+    git_worktree: bool,
+) -> Vec<crate::WorkspaceEnvironmentAction> {
+    use crate::WorkspaceEnvironmentAction as Action;
+    use crate::WorkspaceEnvironmentOwnership as Ownership;
+    match ownership {
+        Ownership::Main => vec![Action::Open],
+        Ownership::Manual => vec![Action::Open, Action::Remove, Action::Adopt],
+        Ownership::Imported => vec![Action::Open, Action::Adopt],
+        Ownership::Permanent => match state {
+            Some(WorkspaceState::Active) => {
+                let mut actions = vec![Action::Open];
+                if git_worktree {
+                    actions.push(Action::CreateBranchHere);
+                }
+                actions
+            }
+            Some(WorkspaceState::Conflict) => vec![Action::Open],
+            _ => Vec::new(),
+        },
+        Ownership::Managed => match state {
+            Some(WorkspaceState::Archived | WorkspaceState::Restorable) => {
+                vec![Action::Restore, Action::Delete, Action::Pin]
+            }
+            Some(WorkspaceState::Conflict) => vec![Action::Open],
+            Some(WorkspaceState::Removing | WorkspaceState::Removed) => Vec::new(),
+            Some(WorkspaceState::Active) => {
+                let mut actions = vec![Action::Open];
+                if git_worktree {
+                    actions.push(Action::CreateBranchHere);
+                }
+                actions.push(Action::Pin);
+                actions.push(Action::MakePermanent);
+                if !pinned {
+                    actions.push(Action::Archive);
+                }
+                actions
+            }
+            _ => Vec::new(),
+        },
+    }
+}
+
+fn environment_summary_from_git(
+    source_root: &Path,
+    row: GitWorktreeInventoryRow,
+    record: Option<&WorkspaceRecord>,
+    ownership: crate::WorkspaceEnvironmentOwnership,
+) -> crate::WorkspaceEnvironmentSummary {
+    let path = row.path.to_string_lossy().into_owned();
+    let workspace_id = record.map(|record| record.workspace_id.clone());
+    let pinned = record.is_some_and(|record| record.pinned);
+    let state = record.map(|record| record.state);
+    let allowed_actions = match ownership {
+        crate::WorkspaceEnvironmentOwnership::Manual if row.prunable => {
+            vec![crate::WorkspaceEnvironmentAction::Prune]
+        }
+        crate::WorkspaceEnvironmentOwnership::Manual if row.lock_reason.is_some() => {
+            vec![crate::WorkspaceEnvironmentAction::Open]
+        }
+        crate::WorkspaceEnvironmentOwnership::Imported
+            if row.lock_reason.as_deref().is_some_and(|reason| {
+                record.is_none_or(|record| {
+                    reason != crate::registry::compose_lock_reason(&record.workspace_id)
+                })
+            }) =>
+        {
+            vec![crate::WorkspaceEnvironmentAction::Open]
+        }
+        _ => environment_actions(ownership, state, pinned, true),
+    };
+    crate::WorkspaceEnvironmentSummary {
+        environment_id: workspace_id
+            .clone()
+            .unwrap_or_else(|| format!("git:{}", storage_key(&normalized_path_key(&row.path)))),
+        workspace_id,
+        path,
+        source_root: source_root.to_string_lossy().into_owned(),
+        ownership,
+        owner_type: record.map(|record| record.owner_type),
+        owner_ref: record.and_then(|record| record.owner_ref.clone()),
+        state,
+        branch: row
+            .branch
+            .or_else(|| record.and_then(|record| record.branch.clone())),
+        head: row
+            .head
+            .or_else(|| record.and_then(|record| record.head.clone())),
+        locked: row.lock_reason.is_some(),
+        lock_reason: row.lock_reason,
+        prunable: row.prunable,
+        prune_reason: row.prune_reason,
+        base: record.map(|record| record.base.clone()),
+        pinned,
+        allowed_actions,
+    }
+}
+
+fn environment_summary_from_record(record: &WorkspaceRecord) -> crate::WorkspaceEnvironmentSummary {
+    let ownership = environment_ownership(record);
+    crate::WorkspaceEnvironmentSummary {
+        environment_id: record.workspace_id.clone(),
+        workspace_id: Some(record.workspace_id.clone()),
+        path: record.execution_root.clone(),
+        source_root: record.source_root.clone(),
+        ownership,
+        owner_type: Some(record.owner_type),
+        owner_ref: record.owner_ref.clone(),
+        state: Some(record.state),
+        branch: record.branch.clone(),
+        head: record.head.clone(),
+        locked: record.locked_by.is_some(),
+        lock_reason: record.locked_by.clone(),
+        prunable: record.environment_kind == crate::WorkspaceEnvironmentKind::Managed
+            && record.state.is_prunable()
+            && !record.pinned,
+        prune_reason: None,
+        base: Some(record.base.clone()),
+        pinned: record.pinned,
+        allowed_actions: environment_actions(
+            ownership,
+            Some(record.state),
+            record.pinned,
+            record.isolation_kind == IsolationKind::GitWorktree,
+        ),
+    }
 }
 
 fn normalized_path_key(path: &Path) -> String {
@@ -3325,6 +4814,98 @@ fn validate_id(label: &str, value: &str) -> Result<(), String> {
 fn storage_key(value: &str) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(value.as_bytes()))[..24].to_string()
+}
+
+fn scoped_run_id(base: &str, suffix: &str) -> String {
+    const MAX_ID_BYTES: usize = 128;
+    let separator_bytes = 1;
+    let keep = MAX_ID_BYTES.saturating_sub(separator_bytes + suffix.len());
+    let prefix = &base.as_bytes()[..base.len().min(keep)];
+    let prefix = std::str::from_utf8(prefix).unwrap_or(base);
+    format!("{prefix}:{suffix}")
+}
+
+fn aggregate_bundle_turn_state(states: &[RunState]) -> RunState {
+    if states
+        .iter()
+        .any(|state| matches!(state, RunState::Running | RunState::Settling))
+    {
+        RunState::Running
+    } else if states.contains(&RunState::Failed) {
+        RunState::Failed
+    } else if states.contains(&RunState::Cancelled) {
+        RunState::Cancelled
+    } else {
+        RunState::Ready
+    }
+}
+
+fn bundle_operation_conflict(
+    step: &crate::ApplyStep,
+    reason: impl Into<String>,
+) -> Vec<crate::PatchConflict> {
+    vec![crate::PatchConflict {
+        path: step.alias_path.clone(),
+        reason: reason.into(),
+    }]
+}
+
+fn join_logical_selection_path(prefix: &str, path: &str) -> Result<String, String> {
+    if path.is_empty() {
+        return Err("bundle patch selection path cannot be empty".into());
+    }
+    let mut relative = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::Normal(value) => relative.push(value),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(format!(
+                    "bundle patch selection escapes its logical root: {path}"
+                ));
+            }
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        return Err("bundle patch selection path cannot be empty".into());
+    }
+    Ok(Path::new(prefix)
+        .join(relative)
+        .to_string_lossy()
+        .into_owned())
+}
+
+fn path_has_logical_prefix(path: &str, prefix: &str) -> bool {
+    prefix.is_empty() || Path::new(path).starts_with(prefix)
+}
+
+fn merge_patch_selections(selections: &mut Vec<crate::PatchSelection>) -> Result<(), String> {
+    let mut merged: std::collections::BTreeMap<String, Option<std::collections::BTreeSet<String>>> =
+        std::collections::BTreeMap::new();
+    for selection in selections.drain(..) {
+        if selection.path.is_empty() {
+            return Err("bundle patch selection path cannot be empty".into());
+        }
+        let entry = merged
+            .entry(selection.path)
+            .or_insert_with(|| Some(std::collections::BTreeSet::new()));
+        if selection.hunk_ids.is_empty() {
+            *entry = None;
+        } else if let Some(hunks) = entry {
+            hunks.extend(selection.hunk_ids);
+        }
+    }
+    selections.extend(merged.into_iter().map(|(path, hunks)| {
+        crate::PatchSelection {
+            path,
+            hunk_ids: hunks
+                .map(|hunks| hunks.into_iter().collect())
+                .unwrap_or_default(),
+        }
+    }));
+    Ok(())
 }
 
 fn load_or_create_manifest_key(service_dir: &Path) -> Result<Vec<u8>, String> {
@@ -4843,7 +6424,50 @@ mod tests {
             .delete_managed_workspace(workspace_id)
             .unwrap_err()
             .contains("protected"));
+        assert!(service
+            .set_managed_workspace_pinned(workspace_id, true)
+            .unwrap_err()
+            .contains("managed environments"));
+        assert!(service
+            .make_workspace_permanent(workspace_id)
+            .unwrap_err()
+            .contains("managed environment"));
         assert!(Path::new(&bundle.leases[0].alias_path).exists());
+    }
+
+    #[test]
+    fn managed_lifecycle_mutations_revalidate_registry_ownership() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-lifecycle-mutation".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let workspace_id = &bundle.leases[0].workspace_id;
+
+        let pinned = service
+            .set_managed_workspace_pinned(workspace_id, true)
+            .unwrap();
+        assert!(pinned.pinned);
+        let permanent = service.make_workspace_permanent(workspace_id).unwrap();
+        assert_eq!(
+            permanent.environment_kind,
+            crate::WorkspaceEnvironmentKind::Permanent
+        );
+        assert!(service
+            .set_managed_workspace_pinned(workspace_id, false)
+            .unwrap_err()
+            .contains("managed environments"));
     }
 
     #[test]
@@ -5024,6 +6648,577 @@ mod tests {
 
         let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         assert_eq!(reopened.workspace_lifecycle_policy(), policy);
+    }
+
+    #[test]
+    fn unified_environment_inventory_classifies_main_manual_and_managed_rows() {
+        let data = TempDir::new().unwrap();
+        let repository_parent = TempDir::new().unwrap();
+        let repository = repository_parent.path().join("main");
+        let manual = repository_parent.path().join("manual");
+        fs::create_dir_all(&repository).unwrap();
+        git2::Repository::init(&repository).unwrap();
+        seed_git_repository(&repository);
+        let add = Command::new("git")
+            .args(["-C"])
+            .arg(&repository)
+            .args(["worktree", "add", "--detach"])
+            .arg(&manual)
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let environments = service
+            .list_workspace_environments(Some(&repository))
+            .unwrap();
+
+        assert_eq!(environments.len(), 2);
+        let main = environments
+            .iter()
+            .find(|environment| environment.ownership == crate::WorkspaceEnvironmentOwnership::Main)
+            .unwrap();
+        assert_eq!(
+            Path::new(&main.path).canonicalize().unwrap(),
+            repository.canonicalize().unwrap()
+        );
+        assert_eq!(
+            main.allowed_actions,
+            vec![crate::WorkspaceEnvironmentAction::Open]
+        );
+        assert_eq!(main.owner_type, None);
+        assert_eq!(main.owner_ref, None);
+        let manual = environments
+            .iter()
+            .find(|environment| {
+                Path::new(&environment.path).canonicalize().ok() == manual.canonicalize().ok()
+            })
+            .unwrap();
+        assert_eq!(
+            manual.ownership,
+            crate::WorkspaceEnvironmentOwnership::Manual
+        );
+        assert!(manual
+            .allowed_actions
+            .contains(&crate::WorkspaceEnvironmentAction::Adopt));
+        assert!(manual
+            .allowed_actions
+            .contains(&crate::WorkspaceEnvironmentAction::Remove));
+        assert!(manual.workspace_id.is_none());
+        assert_eq!(manual.owner_type, None);
+        assert_eq!(manual.owner_ref, None);
+
+        let adopted = service
+            .adopt_workspace_environment(
+                &manual.environment_id,
+                &repository,
+                Path::new(&manual.path),
+            )
+            .unwrap();
+        assert_eq!(
+            adopted.environment_kind,
+            crate::WorkspaceEnvironmentKind::Managed
+        );
+        assert_eq!(
+            Path::new(&adopted.execution_root).canonicalize().unwrap(),
+            Path::new(&manual.path).canonicalize().unwrap()
+        );
+        let adopted_summary = service
+            .list_workspace_environments(Some(&repository))
+            .unwrap()
+            .into_iter()
+            .find(|environment| environment.workspace_id.as_deref() == Some(&adopted.workspace_id))
+            .unwrap();
+        assert_eq!(adopted_summary.owner_type, Some(WorkspaceOwnerType::User));
+        assert_eq!(adopted_summary.owner_ref, None);
+    }
+
+    #[test]
+    fn environment_actions_only_advertise_executable_lifecycle_and_git_operations() {
+        use crate::WorkspaceEnvironmentAction as Action;
+        use crate::WorkspaceEnvironmentOwnership as Ownership;
+
+        let active_git = environment_actions(
+            Ownership::Managed,
+            Some(WorkspaceState::Active),
+            false,
+            true,
+        );
+        assert!(active_git.contains(&Action::Archive));
+        assert!(active_git.contains(&Action::CreateBranchHere));
+        assert!(!active_git.contains(&Action::Review));
+        assert!(!active_git.contains(&Action::Handoff));
+        assert!(!active_git.contains(&Action::Publish));
+        assert!(!active_git.contains(&Action::Delete));
+
+        let active_shadow = environment_actions(
+            Ownership::Managed,
+            Some(WorkspaceState::Active),
+            false,
+            false,
+        );
+        assert!(!active_shadow.contains(&Action::CreateBranchHere));
+        assert!(!active_shadow.contains(&Action::Publish));
+        assert!(!active_shadow.contains(&Action::Delete));
+
+        let archived = environment_actions(
+            Ownership::Managed,
+            Some(WorkspaceState::Archived),
+            false,
+            true,
+        );
+        assert!(archived.contains(&Action::Restore));
+        assert!(archived.contains(&Action::Delete));
+
+        let manual = environment_actions(Ownership::Manual, None, false, true);
+        assert!(manual.contains(&Action::Remove));
+        assert!(manual.contains(&Action::Adopt));
+        assert!(!manual.contains(&Action::Prune));
+    }
+
+    #[test]
+    fn bundle_turn_tracks_each_unique_physical_workspace_and_recovers_after_restart() {
+        let data = TempDir::new().unwrap();
+        let primary = TempDir::new().unwrap();
+        let additional = TempDir::new().unwrap();
+        fs::write(primary.path().join("primary.txt"), "before\n").unwrap();
+        fs::write(additional.path().join("additional.txt"), "before\n").unwrap();
+
+        let turn_id;
+        {
+            let service =
+                TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+            let bundle = service
+                .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                    owner_type: WorkspaceOwnerType::Session,
+                    owner_ref: Some("session-1".into()),
+                    environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                    base: WorkspaceBaseSpec::WorkingState,
+                    roots: vec![
+                        crate::WorkspaceBundleRootInput {
+                            logical_root_id: "primary".into(),
+                            role: crate::WorkspaceRootRole::Primary,
+                            source_root: primary.path().to_string_lossy().into_owned(),
+                        },
+                        crate::WorkspaceBundleRootInput {
+                            logical_root_id: "additional".into(),
+                            role: crate::WorkspaceRootRole::Additional,
+                            source_root: additional.path().to_string_lossy().into_owned(),
+                        },
+                    ],
+                })
+                .unwrap();
+            let request = crate::BeginWorkspaceBundleTurn {
+                primary_logical_root_id: "primary".into(),
+                run: BeginTaskRun {
+                    turn_id: Some("bundle-turn-1".into()),
+                    ..input(&primary, "task-turn", "run-turn")
+                },
+            };
+            let turn = service
+                .begin_workspace_bundle_turn(&bundle.bundle_id, request)
+                .unwrap();
+            assert_eq!(turn.runs.len(), 2);
+            assert_eq!(turn.state, RunState::Running);
+            assert_eq!(turn.primary_alias, bundle.leases[0].alias_path);
+            assert_eq!(
+                turn.additional_aliases,
+                vec![bundle.leases[1].alias_path.clone()]
+            );
+            for run in &turn.runs {
+                assert_eq!(run.logical_root_ids.len(), 1);
+                assert_eq!(
+                    run.run.turn_id.as_deref(),
+                    Some(turn.bundle_turn_id.as_str())
+                );
+            }
+            turn_id = turn.bundle_turn_id;
+        }
+
+        let reopened = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let recovered = reopened
+            .get_workspace_bundle_turn(&turn_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.runs.len(), 2);
+        assert_eq!(recovered.state, RunState::Failed);
+        assert!(recovered.settled_at.is_some());
+    }
+
+    #[test]
+    fn settling_a_bundle_turn_run_cascades_to_every_physical_workspace() {
+        let data = TempDir::new().unwrap();
+        let primary = TempDir::new().unwrap();
+        let additional = TempDir::new().unwrap();
+        fs::write(primary.path().join("primary.txt"), "before\n").unwrap();
+        fs::write(additional.path().join("additional.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "primary".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: primary.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "additional".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: additional.path().to_string_lossy().into_owned(),
+                    },
+                ],
+            })
+            .unwrap();
+        let turn = service
+            .begin_workspace_bundle_turn(
+                &bundle.bundle_id,
+                crate::BeginWorkspaceBundleTurn {
+                    primary_logical_root_id: "primary".into(),
+                    run: input(&primary, "task-cascade", "run-cascade"),
+                },
+            )
+            .unwrap();
+        for run in &turn.runs {
+            let name = if run
+                .logical_root_ids
+                .iter()
+                .any(|logical| logical == "primary")
+            {
+                "primary.txt"
+            } else {
+                "additional.txt"
+            };
+            fs::write(Path::new(&run.run.execution_root).join(name), "after\n").unwrap();
+        }
+        let primary_run_id = turn
+            .runs
+            .iter()
+            .find(|run| {
+                run.logical_root_ids
+                    .iter()
+                    .any(|logical| logical == "primary")
+            })
+            .unwrap()
+            .run
+            .run_id
+            .clone();
+
+        let resources = service.settle_run(&primary_run_id).unwrap();
+
+        assert_eq!(resources.len(), 2);
+        let settled = service
+            .get_workspace_bundle_turn(&turn.bundle_turn_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(settled.state, RunState::Ready);
+        assert!(settled
+            .runs
+            .iter()
+            .all(|run| run.run.state == RunState::Ready));
+    }
+
+    #[test]
+    fn bundle_turn_deduplicates_logical_roots_in_one_git_worktree() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let package = repository.path().join("package");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(package.join("package.txt"), "package\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "repository".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: repository.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "package".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: package.to_string_lossy().into_owned(),
+                    },
+                ],
+            })
+            .unwrap();
+
+        let turn = service
+            .begin_workspace_bundle_turn(
+                &bundle.bundle_id,
+                crate::BeginWorkspaceBundleTurn {
+                    primary_logical_root_id: "repository".into(),
+                    run: input(&repository, "task-shared-root", "run-shared-root"),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(turn.runs.len(), 1);
+        assert_eq!(
+            turn.runs[0].logical_root_ids,
+            vec!["repository".to_string(), "package".to_string()]
+        );
+    }
+
+    #[test]
+    fn bundle_handoff_applies_every_physical_root_as_one_service_operation() {
+        let data = TempDir::new().unwrap();
+        let primary = TempDir::new().unwrap();
+        let additional = TempDir::new().unwrap();
+        fs::write(primary.path().join("primary.txt"), "before\n").unwrap();
+        fs::write(additional.path().join("additional.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "primary".into(),
+                        role: crate::WorkspaceRootRole::Primary,
+                        source_root: primary.path().to_string_lossy().into_owned(),
+                    },
+                    crate::WorkspaceBundleRootInput {
+                        logical_root_id: "additional".into(),
+                        role: crate::WorkspaceRootRole::Additional,
+                        source_root: additional.path().to_string_lossy().into_owned(),
+                    },
+                ],
+            })
+            .unwrap();
+        let turn = service
+            .begin_workspace_bundle_turn(
+                &bundle.bundle_id,
+                crate::BeginWorkspaceBundleTurn {
+                    primary_logical_root_id: "primary".into(),
+                    run: input(&primary, "task-handoff", "run-handoff"),
+                },
+            )
+            .unwrap();
+        let additional_workspace_id = bundle
+            .leases
+            .iter()
+            .find(|lease| lease.logical_root_id == "additional")
+            .unwrap()
+            .workspace_id
+            .clone();
+        for run in &turn.runs {
+            let name = if run.logical_root_ids.contains(&"primary".to_string()) {
+                "primary.txt"
+            } else {
+                "additional.txt"
+            };
+            fs::write(Path::new(&run.run.execution_root).join(name), "after\n").unwrap();
+        }
+        service
+            .settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Ready)
+            .unwrap();
+        fs::write(primary.path().join("primary.txt"), "user change\n").unwrap();
+
+        let request = crate::BundleHandoffRequest {
+            bundle_turn_id: turn.bundle_turn_id.clone(),
+            selections: Vec::new(),
+            allow_irreversible: false,
+        };
+        let conflicted = service
+            .apply_workspace_bundle(&bundle.bundle_id, request.clone())
+            .unwrap();
+        assert_eq!(conflicted.outcome.state, WorkspaceState::Conflict);
+        assert_eq!(
+            fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
+            "before\n"
+        );
+        fs::write(primary.path().join("primary.txt"), "before\n").unwrap();
+
+        let handoff = service
+            .retry_workspace_bundle_handoff(&bundle.bundle_id, request)
+            .unwrap();
+
+        assert_eq!(handoff.outcome.state, WorkspaceState::Active);
+        assert_eq!(handoff.outcome.applied.len(), 2);
+        assert_eq!(
+            fs::read_to_string(primary.path().join("primary.txt")).unwrap(),
+            "after\n"
+        );
+        assert_eq!(
+            fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
+            "after\n"
+        );
+
+        fs::write(primary.path().join("primary.txt"), "user change\n").unwrap();
+        let compensated = service
+            .undo_workspace_bundle_handoff(&bundle.bundle_id, &turn.bundle_turn_id)
+            .unwrap();
+        assert_eq!(compensated.state, WorkspaceState::Active);
+        assert_eq!(compensated.reverted, Vec::<String>::new());
+        assert_eq!(compensated.re_applied, vec![additional_workspace_id]);
+        assert!(!compensated.conflicts.is_empty());
+        assert_eq!(
+            fs::read_to_string(primary.path().join("primary.txt")).unwrap(),
+            "user change\n"
+        );
+        assert_eq!(
+            fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
+            "after\n"
+        );
+
+        fs::write(primary.path().join("primary.txt"), "after\n").unwrap();
+        let undone = service
+            .undo_workspace_bundle_handoff(&bundle.bundle_id, &turn.bundle_turn_id)
+            .unwrap();
+        assert_eq!(undone.state, WorkspaceState::Active);
+        assert_eq!(undone.reverted.len(), 2);
+        assert!(undone.re_applied.is_empty());
+        assert!(undone.conflicts.is_empty());
+        assert_eq!(
+            fs::read_to_string(primary.path().join("primary.txt")).unwrap(),
+            "before\n"
+        );
+        assert_eq!(
+            fs::read_to_string(additional.path().join("additional.txt")).unwrap(),
+            "before\n"
+        );
+        assert_eq!(
+            service
+                .get_bundle_handoff_undo_outcome(&turn.bundle_turn_id)
+                .unwrap(),
+            Some(undone)
+        );
+    }
+
+    #[test]
+    fn maintenance_expires_aged_archives_and_persists_history() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "notes\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .set_workspace_lifecycle_policy(crate::WorkspaceLifecyclePolicy {
+                active_directory_cap: 15,
+                snapshot_retention_days: 1,
+                blob_budget_bytes: 1 << 30,
+            })
+            .unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::WorkingState,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: shadow.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+        let workspace_id = bundle.leases[0].workspace_id.clone();
+        service.archive_managed_workspace(&workspace_id).unwrap();
+
+        let result = service
+            .run_workspace_maintenance(crate::WorkspaceMaintenanceRequest {
+                now: Some(now_ms() + 2 * 24 * 60 * 60 * 1_000),
+            })
+            .unwrap();
+
+        assert_eq!(
+            result.expired_snapshot_task_ids,
+            vec![format!("workspace:{workspace_id}")]
+        );
+        assert!(service
+            .get_managed_workspace(&workspace_id)
+            .unwrap()
+            .is_none());
+        let history = service.list_workspace_maintenance_events(10).unwrap();
+        assert!(history.iter().any(|event| {
+            event.kind == crate::WorkspaceMaintenanceEventKind::SnapshotExpired
+                && event.workspace_id.as_deref() == Some(workspace_id.as_str())
+        }));
+    }
+
+    #[test]
+    fn maintenance_preserves_archives_with_unapplied_task_patches() {
+        let data = TempDir::new().unwrap();
+        let shadow = TempDir::new().unwrap();
+        fs::write(shadow.path().join("notes.txt"), "before\n").unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        service
+            .set_workspace_lifecycle_policy(crate::WorkspaceLifecyclePolicy {
+                active_directory_cap: 15,
+                snapshot_retention_days: 1,
+                blob_budget_bytes: 1 << 30,
+            })
+            .unwrap();
+        let run = service
+            .begin_run(input(&shadow, "task-protected", "run-protected"))
+            .unwrap();
+        fs::write(Path::new(&run.execution_root).join("notes.txt"), "after\n").unwrap();
+        service.settle_run(&run.run_id).unwrap();
+        let workspace_id = run.workspace_id.unwrap();
+        service.archive_managed_workspace(&workspace_id).unwrap();
+
+        let result = service
+            .run_workspace_maintenance(crate::WorkspaceMaintenanceRequest {
+                now: Some(now_ms() + 2 * 24 * 60 * 60 * 1_000),
+            })
+            .unwrap();
+
+        assert!(result.expired_snapshot_task_ids.is_empty());
+        assert!(service
+            .get_managed_workspace(&workspace_id)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn records_host_created_branch_on_an_active_managed_git_environment() {
+        let data = TempDir::new().unwrap();
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+        let bundle = service
+            .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                owner_type: WorkspaceOwnerType::Session,
+                owner_ref: Some("session-1".into()),
+                environment_kind: crate::WorkspaceEnvironmentKind::Managed,
+                base: WorkspaceBaseSpec::LocalHead,
+                roots: vec![crate::WorkspaceBundleRootInput {
+                    logical_root_id: "primary".into(),
+                    role: crate::WorkspaceRootRole::Primary,
+                    source_root: repository.path().to_string_lossy().into_owned(),
+                }],
+            })
+            .unwrap();
+
+        let recorded = service
+            .record_workspace_branch(
+                &bundle.leases[0].workspace_id,
+                "feature/managed",
+                Some("0123456789abcdef"),
+            )
+            .unwrap();
+
+        assert_eq!(
+            service
+                .workspace_branch_target(&bundle.leases[0].workspace_id)
+                .unwrap(),
+            bundle.leases[0].alias_path
+        );
+        assert_eq!(recorded.branch.as_deref(), Some("feature/managed"));
+        assert_eq!(recorded.head.as_deref(), Some("0123456789abcdef"));
     }
 
     #[test]

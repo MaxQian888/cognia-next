@@ -97,36 +97,14 @@ pub fn apply(
     if patch.state != PatchState::Ready && patch.state != PatchState::Conflict {
         return Err(format!("patch set is not ready: {:?}", patch.state));
     }
-    let selected_paths = selected_paths(selection)?;
-    let files = patch
-        .files
-        .iter()
-        .filter(|file| {
-            selected_paths
-                .as_ref()
-                .is_none_or(|paths| paths.contains(&file.path))
-        })
-        .collect::<Vec<_>>();
-    if files.is_empty() && !patch.files.is_empty() {
-        return Err("patch selection did not match any resource".into());
-    }
-
-    let mut plans = Vec::new();
-    let mut conflicts = Vec::new();
-    let mut context = PreflightContext {
+    let (plans, conflicts) = plan_apply(
         workspace_root,
         scratch_root,
         store,
-        now: options.now,
-    };
-    for file in files {
-        let hunk_ids = selection
-            .iter()
-            .find(|item| item.path == file.path)
-            .map(|item| item.hunk_ids.as_slice())
-            .unwrap_or_default();
-        preflight_patch_file(&mut context, file, hunk_ids, &mut plans, &mut conflicts)?;
-    }
+        patch,
+        selection,
+        options.now,
+    )?;
     if !conflicts.is_empty() {
         patch.state = PatchState::Conflict;
         return Ok(ApplyOutcome {
@@ -136,12 +114,7 @@ pub fn apply(
         });
     }
 
-    patch.reversible = persist_plan_blobs(
-        context.store,
-        &plans,
-        options.now,
-        options.allow_irreversible,
-    )?;
+    patch.reversible = persist_plan_blobs(store, &plans, options.now, options.allow_irreversible)?;
     commit_plans(workspace_root, &plans)?;
     patch.applied_files = plans
         .iter()
@@ -169,6 +142,65 @@ pub fn apply(
         revision: options.revision,
         conflicts: Vec::new(),
     })
+}
+
+/// Run the exact apply preflight without mutating either the patch or the
+/// target directory. Bundle orchestration uses this to precheck every root
+/// before the first write.
+pub(crate) fn precheck(
+    workspace_root: &Path,
+    scratch_root: &Path,
+    store: &mut WorkspaceStore,
+    patch: &PatchSet,
+    selection: &[PatchSelection],
+    now: i64,
+) -> Result<Vec<PatchConflict>, String> {
+    if patch.state != PatchState::Ready && patch.state != PatchState::Conflict {
+        return Err(format!("patch set is not ready: {:?}", patch.state));
+    }
+    plan_apply(workspace_root, scratch_root, store, patch, selection, now)
+        .map(|(_, conflicts)| conflicts)
+}
+
+fn plan_apply(
+    workspace_root: &Path,
+    scratch_root: &Path,
+    store: &mut WorkspaceStore,
+    patch: &PatchSet,
+    selection: &[PatchSelection],
+    now: i64,
+) -> Result<(Vec<PlannedWrite>, Vec<PatchConflict>), String> {
+    let selected_paths = selected_paths(selection)?;
+    let files = patch
+        .files
+        .iter()
+        .filter(|file| {
+            selected_paths
+                .as_ref()
+                .is_none_or(|paths| paths.contains(&file.path))
+        })
+        .collect::<Vec<_>>();
+    if files.is_empty() && !patch.files.is_empty() {
+        return Err("patch selection did not match any resource".into());
+    }
+
+    let mut plans = Vec::new();
+    let mut conflicts = Vec::new();
+    let mut context = PreflightContext {
+        workspace_root,
+        scratch_root,
+        store,
+        now,
+    };
+    for file in files {
+        let hunk_ids = selection
+            .iter()
+            .find(|item| item.path == file.path)
+            .map(|item| item.hunk_ids.as_slice())
+            .unwrap_or_default();
+        preflight_patch_file(&mut context, file, hunk_ids, &mut plans, &mut conflicts)?;
+    }
+    Ok((plans, conflicts))
 }
 
 pub fn undo(

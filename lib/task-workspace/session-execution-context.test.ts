@@ -1,5 +1,6 @@
 import {
   bindExecutionRun,
+  bindExecutionBundleTurn,
   canBypassEnvironmentSetup,
   createSessionExecutionContext,
   transitionManagedWorktree,
@@ -27,7 +28,6 @@ describe("session execution context", () => {
           roots: [{ logicalRootId: "primary", role: "primary", aliasPath: "/repo" }],
         },
         workspaceBinding: { kind: "project", projectId: "project-1" },
-        baseRef: "main",
         taskWorkspace: {
           taskId: "task-workspace:session-1",
           workspaceKey: "session-1",
@@ -42,6 +42,21 @@ describe("session execution context", () => {
       taskId: "task-workspace:session-1",
       workspaceKey: "session-1",
       runId: "run-2",
+    })
+  })
+
+  it("persists the grouped Bundle turn identity independently from its primary run", () => {
+    const context = bindExecutionBundleTurn(
+      createSessionExecutionContext(input),
+      "bundle-turn-1",
+      "run-primary"
+    )
+
+    expect(context.taskWorkspace).toEqual({
+      taskId: "task-workspace:session-1",
+      workspaceKey: "session-1",
+      runId: "run-primary",
+      bundleTurnId: "bundle-turn-1",
     })
   })
 
@@ -83,13 +98,12 @@ describe("session execution context", () => {
 
   it("tracks worktree lifecycle without changing durable workspace identity", () => {
     const context = createSessionExecutionContext(input)
-    const ready = transitionManagedWorktree(context, "ready", 20, {
-      worktreePath: "/managed/session-1",
-      branch: "codex/session-1",
-    })
+    const ready = transitionManagedWorktree(context, "ready", 20)
     expect(ready.lifecycle?.state).toBe("ready")
     expect(ready.lifecycle?.updatedAt).toBe(20)
     expect(ready.taskWorkspace).toBe(context.taskWorkspace)
+    expect(ready.worktreePath).toBeUndefined()
+    expect(ready.branch).toBeUndefined()
   })
 
   it("rejects managed transitions for a local context", () => {

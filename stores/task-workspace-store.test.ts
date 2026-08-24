@@ -100,4 +100,56 @@ describe("task workspace store", () => {
     }
     expect(Object.keys(useTaskWorkspaceStore.getState().activeByRun)).toEqual(["run-1", "run-2"])
   })
+
+  it("reconciles a grouped member by run without replacing the primary session run", () => {
+    const state = useTaskWorkspaceStore.getState()
+    for (const runId of ["run-additional", "run-primary"]) {
+      state.activate({
+        taskId: `task-${runId}`,
+        runId,
+        sessionId: "session-1",
+        workspaceRoot: "/repo",
+        executionRoot: `/isolated/${runId}`,
+        state: "running",
+      })
+    }
+    state.ingestEvent({
+      taskId: "task-run-additional",
+      runId: "run-additional",
+      revision: 1,
+      changes: [{ path: "docs.md", kind: "modified" }],
+      overflow: false,
+      resyncRequired: false,
+    })
+
+    useTaskWorkspaceStore.getState().reconcileRun("run-additional", [])
+
+    expect(useTaskWorkspaceStore.getState().activeByRun["run-additional"].state).toBe("ready")
+    expect(useTaskWorkspaceStore.getState().activeBySession["session-1"].runId).toBe("run-primary")
+    expect(useTaskWorkspaceStore.getState().provisionalByRun["run-additional"]).toBeUndefined()
+  })
+
+  it("ignores reconciliation for a run that is no longer active", () => {
+    const before = useTaskWorkspaceStore.getState()
+
+    before.reconcileRun("missing-run", [])
+
+    expect(useTaskWorkspaceStore.getState()).toBe(before)
+  })
+
+  it("reconciles the session projection when the grouped run is primary", () => {
+    const state = useTaskWorkspaceStore.getState()
+    state.activate({
+      taskId: "task-primary",
+      runId: "run-primary",
+      sessionId: "session-primary",
+      workspaceRoot: "/repo",
+      executionRoot: "/isolated/primary",
+      state: "running",
+    })
+
+    useTaskWorkspaceStore.getState().reconcileRun("run-primary", [])
+
+    expect(useTaskWorkspaceStore.getState().activeBySession["session-primary"].state).toBe("ready")
+  })
 })

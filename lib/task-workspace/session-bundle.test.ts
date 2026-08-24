@@ -67,7 +67,12 @@ describe("ensureSessionExecutionBundle", () => {
   it("acquires every Project root and replaces live paths with lease aliases", async () => {
     const binding = await ensureSessionExecutionBundle({
       sessionId: "session-1",
-      context,
+      context: {
+        ...context,
+        worktreePath: "/legacy/worktree",
+        branch: "legacy-branch",
+        baseRef: "legacy-base",
+      },
       project,
     })
 
@@ -90,6 +95,9 @@ describe("ensureSessionExecutionBundle", () => {
         { logicalRootId: "docs", aliasPath: "/isolated/docs" },
       ],
     })
+    expect(binding.context).not.toHaveProperty("worktreePath")
+    expect(binding.context).not.toHaveProperty("branch")
+    expect(binding.context).not.toHaveProperty("baseRef")
   })
 
   it("reuses a persisted active bundle without provisioning again", async () => {
@@ -114,5 +122,29 @@ describe("ensureSessionExecutionBundle", () => {
         project,
       })
     ).rejects.toThrow("missing Project root: docs")
+  })
+
+  it("fails closed when a persisted bundle contains a stale extra Project root", async () => {
+    getWorkspaceBundle.mockResolvedValue({
+      ...bundle,
+      leases: [
+        ...bundle.leases,
+        {
+          bundleId: "bundle-1",
+          workspaceId: "workspace-old",
+          logicalRootId: "removed-root",
+          role: "additional",
+          aliasPath: "/isolated/removed",
+        },
+      ],
+    })
+
+    await expect(
+      ensureSessionExecutionBundle({
+        sessionId: "session-1",
+        context: { ...context, execution: { ...context.execution!, bundleId: "bundle-1" } },
+        project,
+      })
+    ).rejects.toThrow("contains stale Project root: removed-root")
   })
 })

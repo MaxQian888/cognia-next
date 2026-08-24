@@ -11,6 +11,26 @@ export interface ResourceTrackingPolicy {
   autoDetect: boolean
 }
 
+export interface BeginTaskWorkspaceTurn {
+  taskId: string
+  sessionId: string
+  runId: string
+  parentRunId?: string
+  agentId: string
+  agentKind: string
+  workspaceRoot: string
+  base?: WorkspaceBaseSpec
+  workspaceKey?: string
+  executionRunId?: string
+  traceId?: string
+  traceSpanId?: string
+  turnId?: string
+  attemptId?: string
+  providerAttemptId?: string
+  surface?: string
+  trackingPolicy?: ResourceTrackingPolicy
+}
+
 export type WorkspaceBaseSpec =
   | { kind: "workingState" }
   | { kind: "localHead" }
@@ -83,10 +103,149 @@ export interface WorkspaceBundle {
   createdAt: number
 }
 
+export interface WorkspaceBundleOutcome {
+  bundleId: string
+  applied: string[]
+  rolledBack: string[]
+  conflicts: Array<{ path: string; reason: string }>
+  state: ManagedWorkspaceState
+}
+
+export interface BundleHandoffRootSelection {
+  workspaceId: string
+  logicalRootId: string
+  selection: PatchSelection[]
+}
+
+export interface BundleHandoffRequest {
+  bundleTurnId: string
+  selections: BundleHandoffRootSelection[]
+  allowIrreversible: boolean
+}
+
+export interface BundleHandoffOutcome {
+  bundleTurnId: string
+  request: BundleHandoffRequest
+  outcome: WorkspaceBundleOutcome
+}
+
+export interface BundleHandoffUndoOutcome {
+  bundleTurnId: string
+  bundleId: string
+  reverted: string[]
+  reApplied: string[]
+  conflicts: PatchConflict[]
+  state: ManagedWorkspaceState
+}
+
+export interface BeginWorkspaceBundleTurn {
+  primaryLogicalRootId: string
+  run: BeginTaskWorkspaceTurn
+}
+
+export interface WorkspaceBundleTurnRunLease {
+  workspaceId: string
+  logicalRootIds: string[]
+  run: TaskRun
+}
+
+export interface WorkspaceBundleTurnLease {
+  bundleTurnId: string
+  bundleId: string
+  primaryLogicalRootId: string
+  primaryAlias: string
+  additionalAliases: string[]
+  runs: WorkspaceBundleTurnRunLease[]
+  state: TaskRunState
+  createdAt: number
+  settledAt: number | null
+}
+
+export interface WorkspaceBundleTurnRunOutcome {
+  workspaceId: string
+  logicalRootIds: string[]
+  runId: string
+  state: TaskRunState
+  resources: ResourceChange[]
+}
+
+export interface WorkspaceBundleTurnOutcome {
+  bundleTurnId: string
+  bundleId: string
+  state: TaskRunState
+  runs: WorkspaceBundleTurnRunOutcome[]
+  resources: ResourceChange[]
+  settledAt: number
+}
+
 export interface WorkspaceLifecyclePolicy {
   activeDirectoryCap: number
   snapshotRetentionDays: number
   blobBudgetBytes: number
+}
+
+export interface WorkspaceMaintenanceRequest {
+  now: number | null
+}
+
+export type WorkspaceMaintenanceEventKind =
+  "reconciled" | "directoryReclaimed" | "snapshotExpired" | "failed"
+
+export interface WorkspaceMaintenanceEvent {
+  eventId: string
+  kind: WorkspaceMaintenanceEventKind
+  workspaceId: string | null
+  occurredAt: number
+  detail: string
+}
+
+export interface WorkspaceMaintenanceResult {
+  startedAt: number
+  finishedAt: number
+  reconcile: WorkspaceReconcileOutcome
+  reclaimedWorkspaceIds: string[]
+  expiredSnapshotTaskIds: string[]
+  removedBlobCount: number
+  reclaimedBytes: number
+  events: WorkspaceMaintenanceEvent[]
+}
+
+export type WorkspaceEnvironmentOwnership = "main" | "manual" | "managed" | "imported" | "permanent"
+
+export type WorkspaceEnvironmentAction =
+  | "open"
+  | "remove"
+  | "prune"
+  | "adopt"
+  | "pin"
+  | "makePermanent"
+  | "archive"
+  | "restore"
+  | "delete"
+  | "review"
+  | "handoff"
+  | "createBranchHere"
+  | "publish"
+
+/** Canonical host-owned projection of Git worktrees and Registry environments. */
+export interface WorkspaceEnvironmentSummary {
+  environmentId: string
+  workspaceId: string | null
+  path: string
+  sourceRoot: string
+  ownership: WorkspaceEnvironmentOwnership
+  ownerType: WorkspaceOwnerType | null
+  ownerRef: string | null
+  state: ManagedWorkspaceState | null
+  branch: string | null
+  head: string | null
+  locked: boolean
+  lockReason: string | null
+  prunable: boolean
+  pruneReason: string | null
+  base: WorkspaceBaseSpec | null
+  pinned: boolean
+  allowedActions: WorkspaceEnvironmentAction[]
 }
 
 export interface WorkspaceReconcileOutcome {

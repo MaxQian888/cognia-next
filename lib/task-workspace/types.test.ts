@@ -3,6 +3,7 @@ import type {
   ResourceEvent,
   ResourceTrackingPolicy,
   TaskResourceManifest,
+  WorkspaceEnvironmentSummary,
 } from "./types"
 
 describe("task workspace resource tracking contract", () => {
@@ -70,5 +71,33 @@ describe("task workspace resource tracking contract", () => {
     expect(manifest.resources[0]).toEqual(
       expect.objectContaining({ hash: null, contentCaptured: false })
     )
+  })
+})
+
+describe("workspace environment inventory contract", () => {
+  it("keeps ownership and allowed actions explicit at the transport boundary", () => {
+    const environment = {
+      environmentId: "managed:ws-1",
+      workspaceId: "ws-1",
+      path: "/managed/ws-1",
+      sourceRoot: "/repo",
+      ownership: "managed",
+      ownerType: "session",
+      ownerRef: "session-1",
+      state: "active",
+      branch: null,
+      head: "abc123",
+      locked: true,
+      lockReason: "cognia:managed:ws-1",
+      prunable: false,
+      pruneReason: null,
+      base: { kind: "remoteDefault" },
+      pinned: false,
+      allowedActions: ["open", "createBranchHere"],
+    } satisfies WorkspaceEnvironmentSummary
+
+    expect(environment.ownership).toBe("managed")
+    expect(environment.ownerType).toBe("session")
+    expect(environment.allowedActions).toContain("createBranchHere")
   })
 })

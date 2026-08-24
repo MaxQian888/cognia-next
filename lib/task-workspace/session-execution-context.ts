@@ -83,10 +83,6 @@ export function createSessionExecutionContext(
       taskId: `task-workspace:${input.sessionId}`,
       workspaceKey: managedWorkspaceId ?? input.sessionId,
     },
-    baseRef:
-      location === "managedWorktree" && input.isGitRepository
-        ? (input.baseRef ?? "HEAD")
-        : undefined,
     lifecycle:
       location === "managedWorktree"
         ? {
@@ -110,18 +106,31 @@ export function bindExecutionRun(
   }
 }
 
+export function bindExecutionBundleTurn(
+  context: SessionExecutionContext,
+  bundleTurnId: string,
+  primaryRunId?: string
+): SessionExecutionContext {
+  return {
+    ...context,
+    taskWorkspace: {
+      ...context.taskWorkspace,
+      ...(primaryRunId ? { runId: primaryRunId } : {}),
+      bundleTurnId,
+    },
+  }
+}
+
 export function transitionManagedWorktree(
   context: SessionExecutionContext,
   state: ManagedWorktreeLifecycleState,
-  now: number,
-  patch: Partial<Pick<SessionExecutionContext, "worktreePath" | "branch">> = {}
+  now: number
 ): SessionExecutionContext {
   if (context.location !== "managedWorktree" || !context.lifecycle) {
     throw new Error("Managed worktree transition requires a managed-worktree context")
   }
   return {
     ...context,
-    ...patch,
     lifecycle: { ...context.lifecycle, state, updatedAt: now },
   }
 }

@@ -1,25 +1,33 @@
 //! Shared task-workspace command surface for desktop and headless runtimes.
 
 use cognia_task_workspace::{
-    AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, ConflictResolution, DownloadHandle,
-    PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome, ResourceChange, ResourceEvent,
-    ResourceEventKind, ResourceRead, ResourceTrackingPolicy, RunState, ServiceConfig,
-    TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace, TaskWorkspaceEventSink,
-    TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk, UploadHandle, WorkspaceBundle,
-    WorkspaceLifecyclePolicy, WorkspaceRecord, WorktreeLifecycleEvent, WorktreeLifecycleKind,
-    WorktreeLifecycleSink,
+    AcquireWorkspaceBundle, ApplyOutcome, BeginTaskRun, BeginWorkspaceBundleTurn,
+    BundleHandoffOutcome, BundleHandoffRequest, BundleHandoffUndoOutcome, ConflictResolution,
+    DownloadHandle, PatchSelection, PatchSet, PruneOutcome, ReconcileOutcome, ResourceChange,
+    ResourceEvent, ResourceEventKind, ResourceRead, ResourceTrackingPolicy, RunState,
+    ServiceConfig, TaskResourceManifest, TaskResourceSummary, TaskRun, TaskWorkspace,
+    TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceService, TransferChunk,
+    UploadHandle, WorkspaceBundle, WorkspaceBundleTurnLease, WorkspaceBundleTurnOutcome,
+    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
+    WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult, WorkspaceRecord,
+    WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
-    path::PathBuf,
-    sync::{Arc, OnceLock},
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, OnceLock,
+    },
 };
 use tauri::Emitter;
 
 pub const RESOURCE_EVENT: &str = "task-workspace://resources-changed";
 
 static SERVICE: OnceLock<RwLock<Option<Arc<TaskWorkspaceService>>>> = OnceLock::new();
+static MAINTENANCE_STARTED: AtomicBool = AtomicBool::new(false);
+const MAINTENANCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 fn slot() -> &'static RwLock<Option<Arc<TaskWorkspaceService>>> {
     SERVICE.get_or_init(|| RwLock::new(None))
@@ -45,6 +53,42 @@ pub fn install(data_dir: PathBuf) -> Result<Arc<TaskWorkspaceService>, String> {
     service.set_worktree_lifecycle_sink(Some(Arc::new(HookWorktreeLifecycleSink)));
     *slot().write() = Some(Arc::clone(&service));
     Ok(service)
+}
+
+/// Start host-owned maintenance once per process. The first pass runs at
+/// startup; later passes run every 24 hours without depending on a renderer.
+pub fn start_workspace_maintenance() {
+    if MAINTENANCE_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        MAINTENANCE_STARTED.store(false, Ordering::Release);
+        log::error!("task workspace maintenance requires an async runtime");
+        return;
+    };
+    handle.spawn(async {
+        loop {
+            let result = run_workspace_maintenance_once().await;
+            match result {
+                Ok(outcome) => log::info!(
+                    "task workspace maintenance completed: reclaimed={}, snapshots={}, blobs={}",
+                    outcome.reclaimed_workspace_ids.len(),
+                    outcome.expired_snapshot_task_ids.len(),
+                    outcome.removed_blob_count
+                ),
+                Err(error) => log::warn!("task workspace maintenance failed: {error}"),
+            }
+            tokio::time::sleep(MAINTENANCE_INTERVAL).await;
+        }
+    });
+}
+
+async fn run_workspace_maintenance_once() -> Result<WorkspaceMaintenanceResult, String> {
+    tokio::task::spawn_blocking(|| {
+        service()?.run_workspace_maintenance(WorkspaceMaintenanceRequest { now: None })
+    })
+    .await
+    .map_err(|error| format!("task workspace maintenance panicked: {error}"))?
 }
 
 /// Runs the `WorktreeCreate` / `WorktreeRemove` lifecycle hooks for a
@@ -186,6 +230,17 @@ pub fn begin_hosted_bundle_turn(
     )
 }
 
+pub fn begin_hosted_workspace_bundle_turn(
+    bundle_id: String,
+    request: BeginWorkspaceBundleTurn,
+    sink: Arc<dyn TaskWorkspaceEventSink>,
+) -> Result<WorkspaceBundleTurnLease, String> {
+    let service = service()?;
+    begin_workspace_bundle_turn_and_watch(&service, &bundle_id, request, move |service, run| {
+        service.watch_run(&run.run_id, Arc::clone(&sink))
+    })
+}
+
 #[tauri::command]
 pub fn task_workspace_status() -> TaskWorkspaceStatus {
     TaskWorkspaceStatus {
@@ -232,6 +287,46 @@ pub async fn task_workspace_bundle_begin(
 }
 
 #[tauri::command]
+pub async fn task_workspace_bundle_turn_begin(
+    bundle_id: String,
+    request: BeginWorkspaceBundleTurn,
+    app: tauri::AppHandle,
+) -> Result<WorkspaceBundleTurnLease, String> {
+    blocking(move |service| {
+        begin_workspace_bundle_turn_and_watch(service, &bundle_id, request, move |service, run| {
+            service.watch_run(&run.run_id, Arc::new(TauriResourceEventSink(app.clone())))
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_turn_settle(
+    bundle_turn_id: String,
+    final_state: Option<RunState>,
+) -> Result<WorkspaceBundleTurnOutcome, String> {
+    blocking(move |service| {
+        service
+            .settle_workspace_bundle_turn(&bundle_turn_id, final_state.unwrap_or(RunState::Ready))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_turn_abort(
+    bundle_turn_id: String,
+) -> Result<WorkspaceBundleTurnOutcome, String> {
+    blocking(move |service| service.abort_workspace_bundle_turn(&bundle_turn_id)).await
+}
+
+#[tauri::command]
+pub fn task_workspace_bundle_turn_get(
+    bundle_turn_id: String,
+) -> Result<Option<WorkspaceBundleTurnLease>, String> {
+    service()?.get_workspace_bundle_turn(&bundle_turn_id)
+}
+
+#[tauri::command]
 pub async fn task_workspace_settle(
     run_id: String,
     final_state: Option<RunState>,
@@ -268,6 +363,14 @@ pub fn task_workspace_managed_list() -> Result<Vec<WorkspaceRecord>, String> {
 }
 
 #[tauri::command]
+pub async fn task_workspace_environment_list(
+    root_dir: Option<String>,
+) -> Result<Vec<WorkspaceEnvironmentSummary>, String> {
+    blocking(move |service| service.list_workspace_environments(root_dir.as_deref().map(Path::new)))
+        .await
+}
+
+#[tauri::command]
 pub fn task_workspace_bundle_get(bundle_id: String) -> Result<Option<WorkspaceBundle>, String> {
     service()?.get_workspace_bundle(&bundle_id)
 }
@@ -282,6 +385,45 @@ pub async fn task_workspace_bundle_acquire(
     input: AcquireWorkspaceBundle,
 ) -> Result<WorkspaceBundle, String> {
     blocking(move |service| service.acquire_workspace_bundle(input)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_apply(
+    bundle_id: String,
+    request: BundleHandoffRequest,
+) -> Result<BundleHandoffOutcome, String> {
+    blocking(move |service| service.apply_workspace_bundle(&bundle_id, request)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_handoff_retry(
+    bundle_id: String,
+    request: BundleHandoffRequest,
+) -> Result<BundleHandoffOutcome, String> {
+    blocking(move |service| service.retry_workspace_bundle_handoff(&bundle_id, request)).await
+}
+
+#[tauri::command]
+pub fn task_workspace_bundle_handoff_get(
+    bundle_turn_id: String,
+) -> Result<Option<BundleHandoffOutcome>, String> {
+    service()?.get_bundle_handoff_outcome(&bundle_turn_id)
+}
+
+#[tauri::command]
+pub async fn task_workspace_bundle_handoff_undo(
+    bundle_id: String,
+    bundle_turn_id: String,
+) -> Result<BundleHandoffUndoOutcome, String> {
+    blocking(move |service| service.undo_workspace_bundle_handoff(&bundle_id, &bundle_turn_id))
+        .await
+}
+
+#[tauri::command]
+pub fn task_workspace_bundle_handoff_undo_get(
+    bundle_turn_id: String,
+) -> Result<Option<BundleHandoffUndoOutcome>, String> {
+    service()?.get_bundle_handoff_undo_outcome(&bundle_turn_id)
 }
 
 #[tauri::command]
@@ -302,6 +444,24 @@ pub fn task_workspace_policy_set(
 }
 
 #[tauri::command]
+pub async fn task_workspace_maintenance_run(
+    request: Option<WorkspaceMaintenanceRequest>,
+) -> Result<WorkspaceMaintenanceResult, String> {
+    blocking(move |service| {
+        service
+            .run_workspace_maintenance(request.unwrap_or(WorkspaceMaintenanceRequest { now: None }))
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn task_workspace_maintenance_events(
+    limit: Option<u32>,
+) -> Result<Vec<WorkspaceMaintenanceEvent>, String> {
+    service()?.list_workspace_maintenance_events(limit.unwrap_or(100))
+}
+
+#[tauri::command]
 pub fn task_workspace_managed_pin(
     workspace_id: String,
     pinned: bool,
@@ -317,6 +477,72 @@ pub fn task_workspace_managed_permanent(workspace_id: String) -> Result<Workspac
 #[tauri::command]
 pub async fn task_workspace_managed_adopt(workspace_id: String) -> Result<WorkspaceRecord, String> {
     blocking(move |service| service.adopt_imported_workspace(&workspace_id)).await
+}
+
+#[tauri::command]
+pub async fn task_workspace_environment_adopt(
+    environment_id: String,
+    source_root: String,
+    path: String,
+) -> Result<WorkspaceRecord, String> {
+    blocking(move |service| {
+        service.adopt_workspace_environment(
+            &environment_id,
+            Path::new(&source_root),
+            Path::new(&path),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn task_workspace_environment_create_branch(
+    workspace_id: String,
+    branch: String,
+) -> Result<WorkspaceRecord, String> {
+    let execution_root = service()?.workspace_branch_target(&workspace_id)?;
+    let old_head = cognia_git::exec::capture(Path::new(&execution_root), ["rev-parse", "HEAD"])
+        .await
+        .map_err(|error| error.to_string())?;
+    cognia_git::worktree::create_branch_here(&execution_root, &branch)
+        .await
+        .map_err(|error| error.to_string())?;
+    let result = async {
+        let head = cognia_git::exec::capture(Path::new(&execution_root), ["rev-parse", "HEAD"])
+            .await
+            .map_err(|error| error.to_string())?;
+        service()?.record_workspace_branch(&workspace_id, &branch, Some(head.trim()))
+    }
+    .await;
+    match result {
+        Ok(record) => Ok(record),
+        Err(error) => {
+            let rollback =
+                rollback_workspace_branch(&execution_root, &branch, old_head.trim()).await;
+            match rollback {
+                Ok(()) => Err(error),
+                Err(rollback_error) => Err(format!(
+                    "{error}; branch rollback also failed: {rollback_error}"
+                )),
+            }
+        }
+    }
+}
+
+async fn rollback_workspace_branch(
+    execution_root: &str,
+    branch: &str,
+    old_head: &str,
+) -> Result<(), String> {
+    cognia_git::exec::run(
+        Path::new(execution_root),
+        ["checkout", "--detach", old_head],
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    cognia_git::branch::delete(execution_root, branch, true)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -624,6 +850,28 @@ where
     watch_started_run(service, run, watch)
 }
 
+fn begin_workspace_bundle_turn_and_watch<F>(
+    service: &TaskWorkspaceService,
+    bundle_id: &str,
+    request: BeginWorkspaceBundleTurn,
+    mut watch: F,
+) -> Result<WorkspaceBundleTurnLease, String>
+where
+    F: FnMut(&TaskWorkspaceService, &TaskRun) -> Result<(), String>,
+{
+    let turn = service.begin_workspace_bundle_turn(bundle_id, request)?;
+    for lease in &turn.runs {
+        if matches!(lease.run.state, RunState::Running | RunState::Settling) {
+            if let Err(error) = watch(service, &lease.run) {
+                let _ =
+                    service.settle_workspace_bundle_turn(&turn.bundle_turn_id, RunState::Failed);
+                return Err(error);
+            }
+        }
+    }
+    Ok(turn)
+}
+
 fn watch_started_run<F>(
     service: &TaskWorkspaceService,
     run: TaskRun,
@@ -747,6 +995,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn maintenance_pass_runs_immediately_against_the_installed_registry() {
+        let _guard = test_guard();
+        let data = TempDir::new().unwrap();
+        install(data.path().to_path_buf()).unwrap();
+
+        let result = run_workspace_maintenance_once().await.unwrap();
+
+        assert!(result.reclaimed_workspace_ids.is_empty());
+        assert!(result.expired_snapshot_task_ids.is_empty());
+        assert_eq!(result.removed_blob_count, 0);
+    }
+
+    #[tokio::test]
     async fn generic_worktree_remove_fails_closed_for_external_inventory() {
         let _guard = test_guard();
         let data = TempDir::new().unwrap();
@@ -786,6 +1047,41 @@ mod tests {
             records[0].environment_kind,
             cognia_task_workspace::WorkspaceEnvironmentKind::Imported
         );
+    }
+
+    #[tokio::test]
+    async fn branch_rollback_restores_detached_head_and_removes_created_branch() {
+        let repository = TempDir::new().unwrap();
+        run_git(repository.path(), &["init"]);
+        run_git(repository.path(), &["config", "user.name", "Cognia Test"]);
+        run_git(
+            repository.path(),
+            &["config", "user.email", "cognia@example.com"],
+        );
+        std::fs::write(repository.path().join("README.md"), "seed\n").unwrap();
+        run_git(repository.path(), &["add", "README.md"]);
+        run_git(repository.path(), &["commit", "-m", "seed"]);
+        let old_head = cognia_git::exec::capture(repository.path(), ["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let root = repository.path().to_string_lossy().into_owned();
+        cognia_git::worktree::create_branch_here(&root, "feature/rollback")
+            .await
+            .unwrap();
+
+        rollback_workspace_branch(&root, "feature/rollback", old_head.trim())
+            .await
+            .unwrap();
+
+        let current = cognia_git::exec::capture(repository.path(), ["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        assert_eq!(current.trim(), old_head.trim());
+        let branch =
+            cognia_git::exec::capture(repository.path(), ["branch", "--list", "feature/rollback"])
+                .await
+                .unwrap();
+        assert!(branch.trim().is_empty());
     }
 
     fn turn_envelope(workspace: &TempDir, run_id: &str) -> TaskWorkspaceTurnEnvelope {
