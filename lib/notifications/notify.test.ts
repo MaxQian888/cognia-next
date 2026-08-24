@@ -232,7 +232,7 @@ describe("source workspace label", () => {
     const resolveSessionWorkspace = jest.fn(async () => "w-from-session")
     const deps = baseDeps({ resolveSessionWorkspace })
     await notify(
-      { source: "chat", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
+      { source: "session", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
       deps
     )
     expect(resolveSessionWorkspace).toHaveBeenCalledWith("s1")
@@ -255,7 +255,7 @@ describe("source workspace label", () => {
       },
     })
     const id = await notify(
-      { source: "chat", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
+      { source: "session", level: "info", title: "x", sourceRef: { kind: "session", id: "s1" } },
       deps
     )
     expect(id).toBe("fixed-id")
