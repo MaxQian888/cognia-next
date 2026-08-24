@@ -1,31 +1,63 @@
 /**
  * Wiring test (ADR-0020 remote-target): the chat-path chain that turns a
  * session/character `computerUseTarget` into the `sandboxConnectionId` the Rust
- * `cua_route` layer reads. Exercises the pure resolver + the per-session stash
- * the computer-use plugin executor reads back, end-to-end.
+ * `cua_route` layer reads. Exercises the pure resolver and the immutable runtime
+ * reference the computer-use plugin receives, end-to-end.
  */
 import { resolveComputerUseTarget } from "@/lib/automation/sandbox-target"
-import {
-  setActiveComputerUseTarget,
-  getActiveComputerUseTarget,
-  clearActiveComputerUseTarget,
-} from "@/lib/claude/computer-use-target-state"
+import { defaultSandboxCapabilities } from "@/lib/sandbox/connection-capabilities"
+import { SandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import type { SandboxConnectionRow } from "@/types/sandbox"
 
-test("session remote target flows through resolve + stash to the executor read", () => {
-  const sessionId = "sess-remote"
+const connection: SandboxConnectionRow = {
+  id: "conn-9",
+  name: "Remote desktop",
+  provider: "docker",
+  driver: "computer-server",
+  config: {
+    provider: "docker",
+    image: "example/cua:latest",
+    host: "127.0.0.1",
+    port: 49152,
+  },
+  state: "running",
+  capabilities: defaultSandboxCapabilities("docker", "computer-server"),
+  lastHealthStatus: "ok",
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+test("session remote target flows through resolve + runtime ref to the executor context", async () => {
   // resolveSendOptions resolves (session → character → local) at send time…
   const resolved = resolveComputerUseTarget({ connectionId: "conn-9" }, undefined)
-  setActiveComputerUseTarget(sessionId, resolved)
-  // …and buildChatCallContext reads it back to stamp sandboxConnectionId.
-  const fromExecutor = getActiveComputerUseTarget(sessionId)
-  expect(fromExecutor).toEqual({ kind: "remote", connectionId: "conn-9" })
-})
+  const runtime = new SandboxSessionRuntime({
+    getConnection: jest.fn(async () => connection),
+    getMicrovmAdapter: jest.fn(() => null),
+    executeOsSandbox: jest.fn(),
+    makeRef: jest.fn(() => "sandbox-runtime:remote"),
+  })
+  const ref = await runtime.bindSession({
+    sessionId: "sess-remote",
+    binding: {
+      shellTier: "os",
+      computerTarget: resolved.kind === "remote" ? "bound" : "local",
+      ...(resolved.kind === "remote" ? { connectionId: resolved.connectionId } : {}),
+    },
+    policy: null,
+    confine: { writable: ["/workspace"], network: "off" },
+    sandboxEnabled: true,
+    computerUseEnabled: true,
+    workspaceRoot: "/workspace",
+  })
 
-test("disabling computer use clears the stash so the host is used again", () => {
-  const sessionId = "sess-cleared"
-  setActiveComputerUseTarget(sessionId, { kind: "remote", connectionId: "conn-1" })
-  clearActiveComputerUseTarget(sessionId)
-  expect(getActiveComputerUseTarget(sessionId)).toEqual({ kind: "local" })
+  // …and the plugin decorates the call from that ref, with no focused-session lookup.
+  await expect(
+    runtime.decorateComputerUseContext(ref, { surface: "computerUse" })
+  ).resolves.toEqual({
+    surface: "computerUse",
+    sandboxConnectionId: "conn-9",
+    sandboxConfine: { writable: ["/workspace"], network: "off" },
+  })
 })
 
 test("session local override wins over a remote character default", () => {

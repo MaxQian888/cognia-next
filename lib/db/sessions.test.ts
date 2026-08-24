@@ -63,12 +63,18 @@ jest.mock("@/lib/chat/search/indexer", () => ({
   markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
 }))
 
+const releaseSandboxSessionMock = jest.fn(async (_id: string) => undefined)
+jest.mock("@/lib/sandbox/session-runtime", () => ({
+  sandboxSessionRuntime: { releaseSession: (id: string) => releaseSandboxSessionMock(id) },
+}))
+
 const dbFixture = createDbTestFixture()
 
 beforeAll(dbFixture.initialize)
 beforeEach(async () => {
   await dbFixture.restore()
   markSessionRemovedMock.mockClear()
+  releaseSandboxSessionMock.mockReset().mockResolvedValue(undefined)
   await getDb().promptPresets.clear()
   // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
   // hook budget under fake-indexeddb on the first test.
@@ -605,6 +611,31 @@ describe("deletion tombstones (companion sync v61)", () => {
       .sort()
     expect(ids).toEqual([a.id, b.id].sort())
     expect(markSessionRemovedMock.mock.calls.map(([id]) => id).sort()).toEqual([a.id, b.id].sort())
+    expect(releaseSandboxSessionMock.mock.calls.map(([id]) => id).sort()).toEqual(
+      [a.id, b.id].sort()
+    )
+  })
+
+  it("retries a transient sandbox provider release failure", async () => {
+    const session = await createSession({ title: "Release failure" })
+    releaseSandboxSessionMock.mockRejectedValueOnce(new Error("provider close failed"))
+
+    await expect(bulkDeleteSessions([session.id])).resolves.toBeUndefined()
+
+    expect(await getSession(session.id)).toBeUndefined()
+    expect(markSessionRemovedMock).toHaveBeenCalledWith(session.id)
+    expect(releaseSandboxSessionMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("finishes local cleanup while surfacing a persistent provider release failure", async () => {
+    const session = await createSession({ title: "Persistent release failure" })
+    releaseSandboxSessionMock.mockRejectedValue(new Error("provider close failed"))
+
+    await expect(bulkDeleteSessions([session.id])).rejects.toThrow(/could not release/)
+
+    expect(await getSession(session.id)).toBeUndefined()
+    expect(markSessionRemovedMock).toHaveBeenCalledWith(session.id)
+    expect(releaseSandboxSessionMock).toHaveBeenCalledTimes(2)
   })
 })
 

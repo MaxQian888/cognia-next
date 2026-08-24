@@ -55,6 +55,7 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
     // without wiring a `pendingApprovals` channel.
     sendOptions: {
       permissionMode: "bypassPermissions",
+      sandboxRuntimeRef: "sandbox-runtime:ai-sdk",
       pluginTools: [
         {
           name: "my_plugin_tool",
@@ -78,6 +79,7 @@ test("buildAiSdkTools wires plugin tools that round-trip through the renderer", 
   assert.ok(event, "plugin_tool_exec emitted")
   assert.equal(event.name, "my_plugin_tool")
   assert.deepEqual(event.args, { q: "hi" })
+  assert.equal(event.sandboxRuntimeRef, "sandbox-runtime:ai-sdk")
   assert.equal(pendingPluginToolCalls.size, 1)
 
   // Resolve the round-trip the way claude-host's plugin_tool_response would.

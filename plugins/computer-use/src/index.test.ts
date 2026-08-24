@@ -31,18 +31,30 @@ jest.mock("@/lib/claude/computer-use-active-settings", () => ({
   getActiveComputerUseSettings: jest.fn(() => null),
 }))
 
+jest.mock("@/lib/sandbox/session-runtime", () => ({
+  sandboxSessionRuntime: {
+    decorateComputerUseContext: jest.fn(async (_ref: string, context: object) => ({
+      ...context,
+      sandboxConnectionId: "connection-1",
+      sandboxConfine: { writable: ["/workspace"], network: "off" },
+    })),
+  },
+}))
+
 import definition from "./index"
 import { desktop } from "@/lib/automation/client"
 import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { ActionRequest } from "@/lib/automation/types"
 import type { PluginTool } from "@/types/plugin/plugin"
 
 const mockedDesktop = desktop as jest.Mocked<typeof desktop>
 const mockedGetState = (useChatStore as unknown as { getState: jest.Mock }).getState
 const mockedGetSettings = getActiveComputerUseSettings as jest.Mock
+const mockedDecorate = sandboxSessionRuntime.decorateComputerUseContext as jest.Mock
 
 interface MockAgentContext {
   pluginId: string
@@ -155,6 +167,7 @@ describe("computer-use plugin activate()", () => {
       config: {},
       sessionId: "chat-session",
       messageId: "message-1",
+      sandboxRuntimeRef: "sandbox-runtime:one",
     }
     await (await getTool("list_apps")).execute({}, toolContext)
     await (
@@ -173,6 +186,8 @@ describe("computer-use plugin activate()", () => {
       pluginId: "cognia-computer-use",
       sessionKey: "chat-session",
       turnKey: "message-1",
+      sandboxConnectionId: "connection-1",
+      sandboxConfine: { writable: ["/workspace"], network: "off" },
     }
     expect(mockedDesktop.listApps).toHaveBeenCalledWith(callContext)
     expect(mockedDesktop.getAppState).toHaveBeenCalledWith(
@@ -184,6 +199,10 @@ describe("computer-use plugin activate()", () => {
     expect(mockedDesktop.queryElements).toHaveBeenCalledWith(state, elementLocator, 40, callContext)
     expect(mockedDesktop.expandElement).toHaveBeenCalledWith(handle, "next", 25, callContext)
     expect(mockedDesktop.performAction).toHaveBeenCalledWith(request, callContext)
+    expect(mockedDecorate).toHaveBeenCalledWith(
+      "sandbox-runtime:one",
+      expect.objectContaining({ sessionKey: "chat-session", turnKey: "message-1" })
+    )
   })
 
   it("binds consent policy to the originating session, not current focus", async () => {
@@ -194,7 +213,11 @@ describe("computer-use plugin activate()", () => {
       await getTool("get_app_state")
     ).execute(
       { sessionId: "automation-session", locator },
-      { config: {}, sessionId: "origin-session" }
+      {
+        config: {},
+        sessionId: "origin-session",
+        sandboxRuntimeRef: "sandbox-runtime:consent",
+      }
     )
 
     expect(mockedGetSettings).toHaveBeenCalledWith("origin-session")
@@ -208,8 +231,21 @@ describe("computer-use plugin activate()", () => {
         pluginId: "cognia-computer-use",
         sessionKey: "origin-session",
         forceTier: "perCall",
+        sandboxConnectionId: "connection-1",
+        sandboxConfine: { writable: ["/workspace"], network: "off" },
       }
     )
+  })
+
+  it("refuses a call without a runtime binding before touching local automation", async () => {
+    const tool = await getTool("list_apps")
+
+    await expect(tool.execute({}, { config: {}, sessionId: "origin-session" })).rejects.toThrow(
+      /runtime binding is missing/i
+    )
+
+    expect(mockedDesktop.listApps).not.toHaveBeenCalled()
+    expect(mockedDecorate).not.toHaveBeenCalled()
   })
 })
 

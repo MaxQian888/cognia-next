@@ -552,3 +552,19 @@ Adding a skill recorder — a session that installs a global input hook and outl
 **Emergency stop was three different features.** `automation_kill_switch` (commands.rs), the global shortcut (`shortcuts/registry.rs`) and the tray item (`tray/mod.rs`) each did a different subset of the work: the first never emitted the event, the second skipped persistence and virtual-display release, the third skipped grant clearing. They now share `automation::kill_switch::engage`, which does engage → persist → clear session grants → release virtual displays → `recorder.interrupt_blocking(KillSwitch)` → emit one `automation:kill-switch`. The event *name* is unchanged so existing TS listeners keep working; its payload goes from `null` to a `KillSwitchEvent`. `interrupt_blocking` takes no `AppHandle` (it uses the stored `EventSink`), which is what lets `engage` stay generic over `R: Runtime` without infecting `ActiveSession`.
 
 Two supporting additions: a non-prompting `platform/shared/input_monitoring.rs` (`IOHIDCheckAccess`, same 5s cache as `screen_capture.rs`) so preflight can report input-monitoring state without the only signal being `HookGuard::install` failing; and `InputEvent::KeyDown` gaining a layout-decoded `text` field (macOS `CGEventKeyboardGetUnicodeString`, Windows `ToUnicodeEx`), because `keys_to_hint` produced uppercase ASCII only.
+
+## Addendum — remote desktop capability correction (2026-08-24)
+
+The Docker/computer-server connection is now treated as a **remote GUI**
+provider only. It does not attest container-local shell or file access, so
+`workspaceRead` and `workspaceExec` default to `false` and are narrowed to
+`false` when older rows are read. Existing remote GUI calls still carry the
+connection id, but now receive it from the immutable `SandboxRuntimeRef`
+together with the resolved confinement ceiling.
+
+The legacy `cua-desktop` shell tier remains in serialized types for backwards
+compatibility, is disabled with a reason in the existing tier selector, and is
+rejected during send preflight. It can never fall through to host automation or
+`sandbox_exec`. Docker start/stop/health/delete now dispatch through the
+existing `SandboxProviderAdapter` and `runSandboxOperation`; unsupported
+provider rows persist a typed error instead of remaining in `starting`.

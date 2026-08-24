@@ -173,3 +173,22 @@ SDK的`--resume`忽略`CLAUDE_CONFIG_DIR`（只在默认`~/.claude/projects/`下
 4. Anthropic `--resume`忽略`CLAUDE_CONFIG_DIR`（#16103）——跟踪上游修复;一旦确定，Dexie重放路径可以退役用于每个账户会话。
 5. V2 无头服务器多租户每会话隔离（ADR-0014后续）——当无头 API稳定后，对特征/环境注入层进行端口。
 6. T2 / T3 / T4 / T5遥测——五级发货后，在诊断审计日志中测量层级组合，以判断T4（e2b）选择加入率是否值得其捆绑成本。
+
+## 附录——不可变沙盒运行时绑定（2026-08-24）
+
+沙盒放置现在由窄模块 `SandboxSessionRuntime` 解析。`resolveSendOptions` 在发送前
+绑定会话，并通过现有插件工具 envelope 透传不透明的 `SandboxRuntimeRef`。引用会
+冻结单个 generation 的 tier、target、policy、confinement 与启用 surface，但不
+保存凭证或健康状态。设置变化会创建新 generation；已经执行中的调用继续沿用原路由。
+
+sandboxed-tools 插件采用穷尽路由：`os` 使用既有 `sandbox_exec`，`microvm` 使用
+已注册 E2B adapter，`cua-desktop` 直接拒绝。runtime ref、adapter、实时连接、
+能力或 running 状态任一缺失，都会在任何宿主机执行前失败。
+
+E2B 现在与现有 workspace backend 共用一个实例池。microVM runtime 只能绑定到
+存活的 E2B workspace handle，不会另行 clone 或同步第二份目录。同一 runtime ref
+的连续调用复用同一 VM；同一会话的配置 generation 会共同保留该 workspace，直到
+所有 owner 释放，而不同 workspace handle 保持隔离。会话释放与插件停用只关闭一次；
+关闭失败会继续被跟踪并向上抛出，以便重试。network mode 属于实例创建事实；当前基于
+Git 的 handle 创建时必须联网，因此在 adapter 能证明落实前，offline 请求、allowlist
+与 CPU/内存上限都会被拒绝。

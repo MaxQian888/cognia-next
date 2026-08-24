@@ -211,6 +211,7 @@
       },
       "tier": {
         "cuaDesktop": "Bound sandbox desktop",
+        "cuaDesktopUnavailable": "Unavailable: this desktop currently proves remote GUI isolation only; sandbox shell and file operations are disabled.",
         "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
         "inherit": "Inherit app default",
         "label": "Sandbox tier",

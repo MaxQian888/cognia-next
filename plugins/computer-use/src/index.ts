@@ -23,6 +23,7 @@ import type {
   Locator,
 } from "@/lib/automation/types"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import type { CallContext } from "@/lib/automation/client"
 import manifestJson from "../plugin.json"
 
@@ -34,7 +35,11 @@ import manifestJson from "../plugin.json"
 // `RequireConsent` so the floating overlay fires. The PluginTool execution
 // context supplies the originating session; the focused-session lookup is a
 // defensive fallback for non-chat callers that omit it.
-function buildChatCallContext(originSessionId?: string, originMessageId?: string): CallContext {
+async function buildChatCallContext(
+  originSessionId?: string,
+  originMessageId?: string,
+  sandboxRuntimeRef?: string
+): Promise<CallContext> {
   // The invocation context is authoritative in split/concurrent chat. Focus
   // can move while a background session's tool call is still executing.
   const sessionId = originSessionId ?? resolveActiveSessionId()
@@ -53,7 +58,12 @@ function buildChatCallContext(originSessionId?: string, originMessageId?: string
   if (originMessageId) {
     ctx.turnKey = originMessageId
   }
-  return ctx
+  if (!sandboxRuntimeRef) {
+    throw new Error(
+      "Computer Use runtime binding is missing; refusing to guess a local automation target."
+    )
+  }
+  return sandboxSessionRuntime.decorateComputerUseContext(sandboxRuntimeRef, ctx)
 }
 
 /**
@@ -198,7 +208,11 @@ function buildPluginTools(): PluginTool[] {
           input.sessionId,
           input.locator,
           input.options,
-          buildChatCallContext(context.sessionId, context.messageId)
+          await buildChatCallContext(
+            context.sessionId,
+            context.messageId,
+            context.sandboxRuntimeRef
+          )
         )
       },
     },
@@ -213,7 +227,13 @@ function buildPluginTools(): PluginTool[] {
         parametersSchema: LIST_APPS_SCHEMA as unknown as Record<string, unknown>,
       },
       execute: async (_args, context) => {
-        return desktop.listApps(buildChatCallContext(context.sessionId, context.messageId))
+        return desktop.listApps(
+          await buildChatCallContext(
+            context.sessionId,
+            context.messageId,
+            context.sandboxRuntimeRef
+          )
+        )
       },
     },
     {
@@ -242,7 +262,11 @@ function buildPluginTools(): PluginTool[] {
           },
           input.locator,
           input.limit,
-          buildChatCallContext(context.sessionId, context.messageId)
+          await buildChatCallContext(
+            context.sessionId,
+            context.messageId,
+            context.sandboxRuntimeRef
+          )
         )
       },
     },
@@ -266,7 +290,11 @@ function buildPluginTools(): PluginTool[] {
           input.handle,
           input.continuationToken,
           input.limit,
-          buildChatCallContext(context.sessionId, context.messageId)
+          await buildChatCallContext(
+            context.sessionId,
+            context.messageId,
+            context.sandboxRuntimeRef
+          )
         )
       },
     },
@@ -284,7 +312,11 @@ function buildPluginTools(): PluginTool[] {
         const input = args as unknown as { request: ActionRequest }
         return desktop.performAction(
           input.request,
-          buildChatCallContext(context.sessionId, context.messageId)
+          await buildChatCallContext(
+            context.sessionId,
+            context.messageId,
+            context.sandboxRuntimeRef
+          )
         )
       },
     },

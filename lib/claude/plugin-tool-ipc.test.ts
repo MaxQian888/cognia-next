@@ -309,17 +309,25 @@ describe("handlePluginToolExec", () => {
     expect(response.result).toBeUndefined()
   })
 
-  it("threads the sessionId into the execution context", async () => {
+  it("threads the session and sandbox runtime into the execution context", async () => {
     const execute = jest.fn().mockResolvedValue("ok")
     __setPluginToolResolverForTesting({
       getTool: () => ({ pluginId: "p", execute }),
     })
 
-    await handlePluginToolExec(makeRequest({ sessionId: "alt-session" }))
+    await handlePluginToolExec(
+      makeRequest({
+        sessionId: "alt-session",
+        sandboxRuntimeRef: "sandbox-runtime:one",
+      })
+    )
 
     expect(execute).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ sessionId: "alt-session" })
+      expect.objectContaining({
+        sessionId: "alt-session",
+        sandboxRuntimeRef: "sandbox-runtime:one",
+      })
     )
   })
 

@@ -121,17 +121,15 @@ export interface CallContext {
    * Empty / absent = local. Deserialized into
    * `automation::commands::CallContext.sandbox_connection_id`; the Rust
    * `cua_route` layer dispatches to the `CuaRemoteClient` keyed by this id.
-   * Populated by the computer-use plugin's `execute()` callback from the
-   * per-session resolved `computerUseTarget` (see
-   * `lib/claude/computer-use-target-state.ts`).
+   * Populated by the computer-use plugin from the immutable
+   * `SandboxRuntimeRef` resolved before the prompt is sent.
    */
   sandboxConnectionId?: string
   /**
    * ADR-0028 — when set, the native `bash` / `text_editor` Computer Use tools
    * run OS-sandboxed / path-confined instead of unconfined. Deserialized into
-   * `CallContext.sandbox_confine`. Populated by the computer-use plugin's
-   * `execute()` callback when the session has the sandbox enabled (see
-   * `lib/claude/sandbox-confine-state.ts`).
+   * `CallContext.sandbox_confine`. Populated by the computer-use plugin from
+   * the immutable `SandboxRuntimeRef` resolved before the prompt is sent.
    */
   sandboxConfine?: {
     writable?: string[]

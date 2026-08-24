@@ -25,17 +25,8 @@
  */
 
 import type { PluginContext, PluginDefinition, PluginTool, PluginToolContext } from "@/types/plugin"
-import { transport } from "@/lib/tauri"
-import {
-  getActiveSandboxTier,
-  getMicrovmExec,
-  type MicrovmExecPayload,
-} from "@/lib/sandbox/microvm-bridge"
-import {
-  clampPolicyRequest,
-  getActiveSandboxPolicy,
-  isPathUnderRoot,
-} from "@/lib/sandbox/policy-bridge"
+import type { MicrovmExecPayload } from "@/lib/sandbox/microvm-bridge"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
@@ -232,55 +223,29 @@ async function dispatchSandbox(
   payload: MicrovmExecPayload,
   ctx: PluginToolContext
 ): Promise<SandboxResultShape> {
-  const tier = getActiveSandboxTier(ctx.sessionId)
-  if (tier === "microvm") {
-    const impl = getMicrovmExec()
-    if (!impl) {
-      throw new Error(
-        "sandbox tier resolved to 'microvm' but no microVM exec is registered. " +
-          "Enable the cognia-e2b-sandbox plugin or set the character / app tier to 'os'."
-      )
-    }
-    return impl(payload)
+  if (!ctx.sandboxRuntimeRef) {
+    throw new Error(
+      "sandbox runtime binding is missing from this tool call; refusing to guess a host target"
+    )
   }
-  // OS sandbox path: the Rust `SandboxCommand.stdin` is `Option<Vec<u8>>`,
-  // which serde deserializes from a JSON byte array — not a string. Convert
-  // the UTF-8 stdin string to bytes here (the e2b microvm path above keeps
-  // the string form, since its adapter pipes it through bash `<<<`).
-  const osPayload = {
-    ...payload,
-    command: {
-      ...payload.command,
-      stdin:
-        payload.command.stdin == null
-          ? null
-          : Array.from(new TextEncoder().encode(payload.command.stdin)),
-    },
-  }
-  return transport.call<SandboxResultShape>(
-    "sandbox_exec",
-    osPayload as unknown as Record<string, unknown>
-  )
+  return sandboxSessionRuntime.executeSandbox(ctx.sandboxRuntimeRef, payload)
 }
 
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
   const cwd = args.cwd
   assertPathUnderCeiling(cwd, ctx, "working directory")
-  const policy = getActiveSandboxPolicy(ctx.sessionId)
+  const runtimeRef = requireRuntimeRef(ctx)
   const explicitWritable = args.writable && args.writable.length > 0 ? args.writable : null
   const narrowedExplicitWritable = explicitWritable
-    ? clampPolicyRequest(
-        {
-          writable: explicitWritable,
-          readable: [],
-          targetFiles: [],
-          maxCpuSeconds: 0,
-          maxMemoryMb: 0,
-          network: "off",
-          networkHosts: [],
-        },
-        policy
-      ).writable
+    ? sandboxSessionRuntime.clampRequest(runtimeRef, {
+        writable: explicitWritable,
+        readable: [],
+        targetFiles: [],
+        maxCpuSeconds: 0,
+        maxMemoryMb: 0,
+        network: "off",
+        networkHosts: [],
+      }).writable
     : []
   const writable = explicitWritable
     ? Array.from(new Set([cwd, ...narrowedExplicitWritable]))
@@ -288,18 +253,15 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
   // Clamp the model-supplied resource caps + network down to the per-session
   // ceiling (character override beats the app default). The model cannot widen
   // past the configured policy because this is the only path to `sandbox_exec`.
-  const request = clampPolicyRequest(
-    {
-      writable,
-      readable: args.readable ?? [],
-      targetFiles: [],
-      maxCpuSeconds: args.maxCpuSeconds ?? 0,
-      maxMemoryMb: args.maxMemoryMb ?? 0,
-      network: args.network ?? "off",
-      networkHosts: args.networkHosts ?? [],
-    },
-    policy
-  )
+  const request = sandboxSessionRuntime.clampRequest(runtimeRef, {
+    writable,
+    readable: args.readable ?? [],
+    targetFiles: [],
+    maxCpuSeconds: args.maxCpuSeconds ?? 0,
+    maxMemoryMb: args.maxMemoryMb ?? 0,
+    network: args.network ?? "off",
+    networkHosts: args.networkHosts ?? [],
+  })
   return dispatchSandbox(
     {
       tool: TOOL_SANDBOX_BASH,
@@ -323,13 +285,16 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
  * (the always-on Rust floor still rejects system / app-data targets).
  */
 function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "path"): void {
-  const roots = getActiveSandboxPolicy(ctx.sessionId)?.writableRoots ?? []
-  if (roots.length > 0 && !roots.some((r) => isPathUnderRoot(path, r))) {
+  sandboxSessionRuntime.assertWritablePath(requireRuntimeRef(ctx), path, label)
+}
+
+function requireRuntimeRef(ctx: PluginToolContext): string {
+  if (!ctx.sandboxRuntimeRef) {
     throw new Error(
-      `sandbox: ${label} '${path}' is outside the configured writable roots — widen ` +
-        "Settings → Sandbox writable roots or choose a path inside them."
+      "sandbox runtime binding is missing from this tool call; refusing to guess a host target"
     )
   }
+  return ctx.sandboxRuntimeRef
 }
 
 function parentDir(p: string): string {
@@ -354,6 +319,15 @@ async function sandboxReadFile(
   ctx: PluginToolContext,
   env?: Record<string, string>
 ): Promise<string> {
+  const request = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
+    writable: [],
+    readable: Array.from(new Set([...readable, path])),
+    targetFiles: [],
+    maxCpuSeconds: 0,
+    maxMemoryMb: 0,
+    network: "off" as const,
+    networkHosts: [],
+  })
   const res = await dispatchSandbox(
     {
       tool,
@@ -364,15 +338,7 @@ async function sandboxReadFile(
         stdin: null,
         timeout: timeoutSeconds,
       },
-      request: {
-        writable: [],
-        readable,
-        targetFiles: [path],
-        maxCpuSeconds: 0,
-        maxMemoryMb: 0,
-        network: "off",
-        networkHosts: [],
-      },
+      request,
     },
     ctx
   )
@@ -397,6 +363,15 @@ async function sandboxWriteFile(
   ctx: PluginToolContext,
   env?: Record<string, string>
 ): Promise<SandboxResultShape> {
+  const request = sandboxSessionRuntime.clampRequest(requireRuntimeRef(ctx), {
+    writable: [],
+    readable,
+    targetFiles: [path],
+    maxCpuSeconds: 0,
+    maxMemoryMb: 0,
+    network: "off" as const,
+    networkHosts: [],
+  })
   const res = await dispatchSandbox(
     {
       tool,
@@ -409,15 +384,7 @@ async function sandboxWriteFile(
         stdin: content,
         timeout: timeoutSeconds,
       },
-      request: {
-        writable: [],
-        readable,
-        targetFiles: [path],
-        maxCpuSeconds: 0,
-        maxMemoryMb: 0,
-        network: "off",
-        networkHosts: [],
-      },
+      request,
     },
     ctx
   )

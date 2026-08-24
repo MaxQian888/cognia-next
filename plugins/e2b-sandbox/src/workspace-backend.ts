@@ -19,6 +19,7 @@
  */
 
 import type { E2BBackend, WorkspaceHandle } from "@/lib/github/workspace"
+import { E2BSandboxPool } from "./sandbox-pool"
 
 /** Narrow shape of `@e2b/sdk` we depend on. Real SDK exports `Sandbox`. */
 export interface E2BSandboxFacade {
@@ -38,6 +39,8 @@ export interface E2BSandboxConnection {
   apiKey?: string
   /** SDK option name. AgentENV's `E2B_API_URL` is normalized into this. */
   domain?: string
+  /** E2B instance-creation network gate. */
+  allowInternetAccess?: boolean
 }
 
 /** Factory the backend uses to obtain a fresh sandbox. */
@@ -54,6 +57,8 @@ export interface E2BWorkspaceBackendOptions {
   connection?: () => E2BSandboxConnection
   /** Override the sandbox factory — tests inject a mock here. */
   sandboxFactory?: E2BSandboxFactory
+  /** Shared identity pool used by the owner-scoped exec adapter. */
+  pool?: E2BSandboxPool
   /** Override `Date.now` for deterministic test output. */
   now?: () => number
 }
@@ -65,12 +70,11 @@ export interface E2BWorkspaceBackendOptions {
  */
 export class E2BWorkspaceBackend implements E2BBackend {
   private opts: Required<Pick<E2BWorkspaceBackendOptions, "now">> & E2BWorkspaceBackendOptions
-  private sandboxes = new Map<string, E2BSandboxFacade>()
-  /** handle.path → sandbox.id so `commitAndPush` / `remove` find the right vm. */
-  private pathToSandboxId = new Map<string, string>()
+  private readonly pool: E2BSandboxPool
 
   constructor(opts: E2BWorkspaceBackendOptions = {}) {
     this.opts = { now: opts.now ?? Date.now, ...opts }
+    this.pool = opts.pool ?? new E2BSandboxPool()
   }
 
   async clone(opts: {
@@ -79,7 +83,12 @@ export class E2BWorkspaceBackend implements E2BBackend {
     token: string
   }): Promise<WorkspaceHandle> {
     const factory = this.opts.sandboxFactory ?? defaultSandboxFactory
-    const sandbox = await factory(resolveSandboxConnection(this.opts))
+    const sandbox = await factory({
+      ...resolveSandboxConnection(this.opts),
+      // Git clone needs network access. The pool records this immutable
+      // creation fact so an execution request for network=off is refused.
+      allowInternetAccess: true,
+    })
     try {
       // The sandbox starts with a writable working directory; we clone into
       // /tmp/cognia/<repo>/<stamp> so multiple clones in one sandbox lifetime
@@ -92,8 +101,7 @@ export class E2BWorkspaceBackend implements E2BBackend {
       await execChecked(sandbox, {
         cmd: `git clone --branch ${shellEscape(opts.branch)} --depth 20 ${shellEscape(remote)} ${shellEscape(cwd)}`,
       })
-      this.sandboxes.set(sandbox.id, sandbox)
-      this.pathToSandboxId.set(cwd, sandbox.id)
+      this.pool.addWorkspace(cwd, sandbox, "on")
       return {
         backend: "e2b",
         path: cwd,
@@ -102,8 +110,14 @@ export class E2BWorkspaceBackend implements E2BBackend {
         createdAt: this.opts.now(),
       }
     } catch (err) {
-      // Best-effort cleanup so we don't leak a sandbox when clone fails.
-      await sandbox.close().catch(() => undefined)
+      try {
+        await sandbox.close()
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [err, cleanupError],
+          "E2B workspace provisioning failed and the sandbox could not be closed."
+        )
+      }
       throw err
     }
   }
@@ -127,32 +141,16 @@ export class E2BWorkspaceBackend implements E2BBackend {
   }
 
   async remove(handle: WorkspaceHandle): Promise<boolean> {
-    const sandboxId = this.pathToSandboxId.get(handle.path)
-    if (!sandboxId) return false
-    const sandbox = this.sandboxes.get(sandboxId)
-    if (!sandbox) return false
-    try {
-      await sandbox.close()
-    } catch {
-      /* swallow — we still drop the handle */
-    }
-    this.sandboxes.delete(sandbox.id)
-    this.pathToSandboxId.delete(handle.path)
-    return true
+    return this.pool.removeWorkspace(handle.path)
   }
 
   /** Test utility — number of live sandboxes the backend is tracking. */
   liveSandboxCount(): number {
-    return this.sandboxes.size
+    return this.pool.liveSandboxCount()
   }
 
   private sandboxForHandle(handle: WorkspaceHandle): E2BSandboxFacade {
-    const sandboxId = this.pathToSandboxId.get(handle.path)
-    const sandbox = sandboxId ? this.sandboxes.get(sandboxId) : undefined
-    if (!sandbox) {
-      throw new Error("E2B backend: no live sandbox for handle " + handle.path)
-    }
-    return sandbox
+    return this.pool.forWorkspace(handle.path).sandbox
   }
 }
 

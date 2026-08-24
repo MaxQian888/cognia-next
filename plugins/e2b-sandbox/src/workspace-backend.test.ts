@@ -49,6 +49,7 @@ describe("E2BWorkspaceBackend", () => {
     expect(sandboxFactory).toHaveBeenCalledWith({
       apiKey: "key-1",
       domain: "http://127.0.0.1:8000",
+      allowInternetAccess: true,
     })
   })
 
@@ -94,6 +95,17 @@ describe("E2BWorkspaceBackend", () => {
     ).rejects.toThrow(/permission denied/)
     expect(sandbox.close).toHaveBeenCalled()
     expect(backend.liveSandboxCount()).toBe(0)
+  })
+
+  it("surfaces cleanup failure when a failed clone cannot close the sandbox", async () => {
+    const sandbox = makeSandbox("sb-leaked")
+    sandbox.exec.mockResolvedValueOnce({ stdout: "", stderr: "clone failed", exitCode: 1 })
+    sandbox.close.mockRejectedValueOnce(new Error("close failed"))
+    const backend = new E2BWorkspaceBackend({ sandboxFactory: async () => sandbox })
+
+    await expect(
+      backend.clone({ repoFullName: "o/r", branch: "main", token: "t" })
+    ).rejects.toThrow(/could not be closed/)
   })
 
   it("commitAndPush runs git add+commit+push inside the sandbox and returns the SHA", async () => {

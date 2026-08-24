@@ -210,10 +210,7 @@ import { isTauri } from "@/lib/tauri"
 import { isNativeMobile } from "@/lib/platform/detect"
 import { buildAgentModeSessionUpdate } from "@/lib/agent/mode-session-update"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
-import {
-  __resetSandboxConfineStateForTesting,
-  getActiveSandboxConfine,
-} from "@/lib/claude/sandbox-confine-state"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMapResolved, listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import {
@@ -335,7 +332,6 @@ const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string
 
 beforeEach(() => {
   jest.clearAllMocks()
-  __resetSandboxConfineStateForTesting()
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
@@ -4106,6 +4102,7 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
     mGetCharacter.mockResolvedValue(
       makeChar({
         id: "c1",
+        enableComputerUse: true,
         sandboxEnabled: true,
         sandboxPolicy: {
           writableRoots: ["/workspace"],
@@ -4116,16 +4113,53 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
       })
     )
 
-    await resolveSendOptions({
+    const opts = await resolveSendOptions({
       session: makeSession({ id: "s1", characterId: "c1" }),
     })
 
-    expect(getActiveSandboxConfine("s1")).toEqual({
-      writable: ["/workspace"],
-      readable: ["/vendor/include"],
-      network: "allowlist",
-      networkHosts: ["api.github.com"],
+    expect(opts.sandboxRuntimeRef).toBeDefined()
+    await expect(
+      sandboxSessionRuntime.decorateComputerUseContext(opts.sandboxRuntimeRef!, {})
+    ).resolves.toMatchObject({
+      sandboxConfine: {
+        writable: ["/workspace"],
+        readable: ["/vendor/include"],
+        network: "allowlist",
+        networkHosts: ["api.github.com"],
+      },
     })
+  })
+
+  it("binds confinement for a remote GUI even when sandboxed shell tools are disabled", async () => {
+    const bindSpy = jest
+      .spyOn(sandboxSessionRuntime, "bindSession")
+      .mockResolvedValueOnce("sandbox-runtime:remote-only")
+    mGetCharacter.mockResolvedValue(
+      makeChar({
+        id: "c1",
+        enableComputerUse: true,
+        sandboxEnabled: false,
+        computerUseTarget: { connectionId: "connection-1" },
+        sandboxPolicy: { writableRoots: ["/workspace"], network: "off" },
+      })
+    )
+
+    try {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1", characterId: "c1" }),
+      })
+
+      expect(opts.sandboxRuntimeRef).toBe("sandbox-runtime:remote-only")
+      expect(bindSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sandboxEnabled: false,
+          computerUseEnabled: true,
+          confine: expect.objectContaining({ writable: ["/workspace"], network: "off" }),
+        })
+      )
+    } finally {
+      bindSpy.mockRestore()
+    }
   })
 })
 

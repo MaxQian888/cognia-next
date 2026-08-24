@@ -19,10 +19,11 @@ import type { PluginContext } from "@/types/plugin"
 import { defineMcpServerPreset, definePlugin } from "@cognia/plugin-sdk"
 import type { PluginManifest } from "@cognia/plugin-sdk/manifest"
 import manifestJson from "../plugin.json"
-import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
+import { setMicrovmExec, type MicrovmExecAdapter } from "@/lib/sandbox/microvm-bridge"
 import { E2BWorkspaceBackend } from "./workspace-backend"
 import type { E2BSandboxConnection } from "./workspace-backend"
 import { buildMicrovmExec } from "./microvm-exec"
+import { E2BSandboxPool } from "./sandbox-pool"
 
 const E2B_PRESET = defineMcpServerPreset({
   id: "e2b-sandbox",
@@ -63,6 +64,7 @@ const E2B_PRESET = defineMcpServerPreset({
 let workspaceRegistrationDispose: (() => void) | undefined
 let configChangeDispose: (() => void) | undefined
 let sandboxConnection: E2BSandboxConnection = {}
+let microvmAdapter: MicrovmExecAdapter | undefined
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
@@ -159,7 +161,11 @@ const definition = definePlugin({
         "[e2b-sandbox] host context has no `workspace` API — cannot register the e2b workspace backend"
       )
     }
-    const backend = new E2BWorkspaceBackend({ connection: () => sandboxConnection })
+    const sandboxPool = new E2BSandboxPool()
+    const backend = new E2BWorkspaceBackend({
+      connection: () => sandboxConnection,
+      pool: sandboxPool,
+    })
     const handle = ctx.workspace.registerBackend({
       id: "e2b",
       label: "E2B Firecracker",
@@ -174,7 +180,8 @@ const definition = definePlugin({
     // an ephemeral Firecracker microVM instead of the OS sandbox. When
     // `@e2b/sdk` isn't installed the factory throws a clean install hint
     // at first call — strict-mode compliant (no silent fallback).
-    setMicrovmExec(buildMicrovmExec({ connection: () => sandboxConnection }))
+    microvmAdapter = buildMicrovmExec({ pool: sandboxPool })
+    setMicrovmExec(microvmAdapter)
 
     // The slash command is declared in plugin.json so the manager owns
     // namespacing, command-palette registration, idle refresh, and teardown.
@@ -198,7 +205,10 @@ const definition = definePlugin({
       workspaceRegistrationDispose()
       workspaceRegistrationDispose = undefined
     }
+    const adapter = microvmAdapter
+    microvmAdapter = undefined
     setMicrovmExec(null)
+    await adapter?.dispose?.()
   },
 })
 

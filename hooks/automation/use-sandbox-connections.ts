@@ -10,7 +10,10 @@ import {
   getSandboxConnection,
   type SandboxConnectionRow,
 } from "@/lib/db/sandbox-connections"
-import { sandboxClient } from "@/lib/automation/sandbox-client"
+import {
+  runSandboxConnectionOperation,
+  serializeSandboxConnectionOperation,
+} from "@/lib/sandbox/connection-lifecycle"
 
 const DEFAULT_IMAGE = "ghcr.io/trycua/cua-xfce:latest"
 
@@ -56,83 +59,111 @@ export function useSandboxConnections() {
   }, [])
 
   const remove = useCallback(async (id: string): Promise<void> => {
-    // Best-effort stop before dropping the row so we don't orphan a container.
-    try {
-      await sandboxClient.stop(id)
-    } catch {
-      // ignore — container may not be running
-    }
-    await deleteSandboxConnection(id)
+    await serializeSandboxConnectionOperation(id, async () => {
+      const row = await getSandboxConnection(id)
+      if (!row) return
+      try {
+        await runSandboxConnectionOperation(row, "delete")
+        await deleteSandboxConnection(id)
+      } catch (error) {
+        await persistLifecycleError(row, error)
+        throw error
+      }
+    })
   }, [])
 
   const start = useCallback(async (id: string): Promise<void> => {
-    const row = await getSandboxConnection(id)
-    if (!row) return
-    await putSandboxConnection({
-      ...row,
-      state: "starting",
-      lastHealthStatus: "starting",
-      updatedAt: Date.now(),
+    await serializeSandboxConnectionOperation(id, async () => {
+      const row = await getSandboxConnection(id)
+      if (!row) return
+      await putSandboxConnection({
+        ...row,
+        state: "starting",
+        lastHealthStatus: "starting",
+        updatedAt: Date.now(),
+      })
+      try {
+        const result = await runSandboxConnectionOperation(row, "start")
+        if (row.config.provider !== "docker" || result.port === undefined) {
+          throw new Error("Docker sandbox start completed without a mapped port.")
+        }
+        await putSandboxConnection({
+          ...row,
+          config: { ...row.config, port: result.port },
+          state: "running",
+          lastHealthStatus: "ok",
+          lastHealthError: undefined,
+          lastHealthCheckAt: Date.now(),
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        await persistLifecycleError(row, error)
+        throw error
+      }
     })
-    try {
-      // Docker-only lifecycle: the shared adapter layer lands with the
-      // provider adapters; until then a non-Docker row has no image to start.
-      if (row.config.provider !== "docker") return
-      const port = await sandboxClient.start(id, row.config.image)
-      await putSandboxConnection({
-        ...row,
-        config: { ...row.config, port },
-        state: "running",
-        lastHealthStatus: "ok",
-        lastHealthError: undefined,
-        lastHealthCheckAt: Date.now(),
-        updatedAt: Date.now(),
-      })
-    } catch (err) {
-      await putSandboxConnection({
-        ...row,
-        state: "error",
-        lastHealthStatus: "error",
-        lastHealthError: err instanceof Error ? err.message : String(err),
-        lastHealthCheckAt: Date.now(),
-        updatedAt: Date.now(),
-      })
-      throw err
-    }
   }, [])
 
   const stop = useCallback(async (id: string): Promise<void> => {
-    const row = await getSandboxConnection(id)
-    await sandboxClient.stop(id)
-    if (row) {
-      await putSandboxConnection({
-        ...row,
-        state: "stopped",
-        lastHealthStatus: "unknown",
-        // Clear both the mapped port and the container id: the container is
-        // gone, and a stale id would make the next start() adopt a ghost.
-        config:
-          row.config.provider === "docker"
-            ? { provider: "docker", image: row.config.image, host: row.config.host, port: 0 }
-            : row.config,
-        updatedAt: Date.now(),
-      })
-    }
+    await serializeSandboxConnectionOperation(id, async () => {
+      const row = await getSandboxConnection(id)
+      if (!row) return
+      try {
+        await runSandboxConnectionOperation(row, "stop")
+        await putSandboxConnection({
+          ...row,
+          state: "stopped",
+          lastHealthStatus: "unknown",
+          // Clear both the mapped port and the container id: the container is
+          // gone, and a stale id would make the next start() adopt a ghost.
+          config:
+            row.config.provider === "docker"
+              ? { provider: "docker", image: row.config.image, host: row.config.host, port: 0 }
+              : row.config,
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        await persistLifecycleError(row, error)
+        throw error
+      }
+    })
   }, [])
 
   const refreshHealth = useCallback(async (id: string): Promise<void> => {
-    const row = await getSandboxConnection(id)
-    if (!row) return
-    const ok = await sandboxClient.health(id).catch(() => false)
-    await putSandboxConnection({
-      ...row,
-      lastHealthStatus: ok ? "ok" : "unreachable",
-      // A failed probe is not proof the machine is stopped, so `state` is left
-      // alone; only an explicit stop/start transition moves it.
-      lastHealthCheckAt: Date.now(),
-      updatedAt: Date.now(),
+    await serializeSandboxConnectionOperation(id, async () => {
+      const row = await getSandboxConnection(id)
+      if (!row) return
+      try {
+        const { health } = await runSandboxConnectionOperation(row, "health")
+        await putSandboxConnection({
+          ...row,
+          lastHealthStatus: health ? "ok" : "unreachable",
+          lastHealthError: undefined,
+          // A failed probe is not proof the machine is stopped, so `state` is left
+          // alone; only an explicit stop/start transition moves it.
+          lastHealthCheckAt: Date.now(),
+          updatedAt: Date.now(),
+        })
+      } catch (error) {
+        await persistLifecycleError(row, error, false)
+        throw error
+      }
     })
   }, [])
 
   return { connections: connections ?? [], create, update, remove, start, stop, refreshHealth }
+}
+
+async function persistLifecycleError(
+  row: SandboxConnectionRow,
+  error: unknown,
+  markStateError = true
+): Promise<void> {
+  await putSandboxConnection({
+    ...row,
+    ...(markStateError ? { state: "error" as const } : {}),
+    lastHealthStatus: "error",
+    lastHealthError: error instanceof Error ? error.message : String(error),
+    lastHealthCheckAt: Date.now(),
+    updatedAt: Date.now(),
+  })
 }

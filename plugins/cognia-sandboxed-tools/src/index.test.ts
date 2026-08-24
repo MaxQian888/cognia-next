@@ -6,15 +6,12 @@ import type { Transport } from "@/lib/tauri/transport-types"
 import { setTransport } from "@/lib/tauri"
 import {
   __resetMicrovmBridgeForTesting,
-  setActiveSandboxTier,
   setMicrovmExec,
   type MicrovmExecPayload,
   type MicrovmResult,
 } from "@/lib/sandbox/microvm-bridge"
-import {
-  __resetSandboxPolicyBridgeForTesting,
-  setActiveSandboxPolicy,
-} from "@/lib/sandbox/policy-bridge"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
+import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 import definition, { SANDBOXED_TOOL_NAMES } from "./index"
 import type { PluginTool, PluginToolContext } from "@/types/plugin"
@@ -55,12 +52,28 @@ async function collectTools(): Promise<Map<string, PluginTool>> {
   return tools
 }
 
-const CTX: PluginToolContext = { sessionId: "s1" } as unknown as PluginToolContext
+let CTX: PluginToolContext
 
-beforeEach(() => {
+async function bindRuntime(options?: {
+  tier?: "os" | "microvm"
+  policy?: SandboxResourcePolicy | null
+}): Promise<void> {
+  const ref = await sandboxSessionRuntime.bindSession({
+    sessionId: "s1",
+    binding: { shellTier: options?.tier ?? "os", computerTarget: "local" },
+    policy: options?.policy ?? null,
+    confine: null,
+    sandboxEnabled: true,
+    computerUseEnabled: false,
+    workspaceRoot: "/w",
+  })
+  CTX = { sessionId: "s1", sandboxRuntimeRef: ref, config: {} }
+}
+
+beforeEach(async () => {
+  await sandboxSessionRuntime.releaseSession("s1")
   __resetMicrovmBridgeForTesting()
-  __resetSandboxPolicyBridgeForTesting()
-  setActiveSandboxTier("s1", "os")
+  await bindRuntime()
 })
 
 describe("cognia-sandboxed-tools registration", () => {
@@ -105,7 +118,7 @@ describe("sandbox_write", () => {
 describe("writable-root ceiling enforcement", () => {
   it("rejects a write whose path is outside the configured roots before any exec", async () => {
     const { calls } = installTransport()
-    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    await bindRuntime({ policy: { writableRoots: ["/home/me/proj"] } })
     const tools = await collectTools()
     await expect(
       tools.get("sandbox_write")!.execute({ path: "/etc/passwd", content: "x" }, CTX)
@@ -115,26 +128,42 @@ describe("writable-root ceiling enforcement", () => {
 
   it("allows a write whose path is inside a configured root", async () => {
     const { calls } = installTransport()
-    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    await bindRuntime({ policy: { writableRoots: ["/home/me/proj"] } })
     const tools = await collectTools()
     await tools.get("sandbox_write")!.execute({ path: "/home/me/proj/out.txt", content: "ok" }, CTX)
     expect(calls).toHaveLength(1)
   })
 
+  it("applies resource ceilings to file operations before dispatch", async () => {
+    const { calls } = installTransport()
+    await bindRuntime({ policy: { maxCpuSeconds: 5, maxMemoryMb: 128 } })
+    const tools = await collectTools()
+
+    await tools.get("sandbox_write")!.execute({ path: "/repo/out.txt", content: "ok" }, CTX)
+
+    expect((calls[0].args as { request: object }).request).toMatchObject({
+      maxCpuSeconds: 5,
+      maxMemoryMb: 128,
+    })
+  })
+
   it("does not gate a read-only text_editor view", async () => {
     const { calls } = installTransport([{ ...OK, stdout: "file body" }])
-    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    await bindRuntime({ policy: { writableRoots: ["/home/me/proj"] } })
     const tools = await collectTools()
     const res = await tools
       .get("sandbox_text_editor")!
       .execute({ command: "view", path: "/etc/hosts" }, CTX)
     expect((res as { stdout: string }).stdout).toBe("file body")
     expect(calls).toHaveLength(1)
+    expect((calls[0].args as { request: { readable: string[] } }).request.readable).toContain(
+      "/etc/hosts"
+    )
   })
 
   it("rejects sandbox_bash when cwd is outside the configured writable roots", async () => {
     const { calls } = installTransport()
-    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    await bindRuntime({ policy: { writableRoots: ["/home/me/proj"] } })
     const tools = await collectTools()
 
     await expect(
@@ -147,7 +176,7 @@ describe("writable-root ceiling enforcement", () => {
 
   it("rejects sandbox_bash when explicit writable roots are all outside the ceiling", async () => {
     const { calls } = installTransport()
-    setActiveSandboxPolicy("s1", { writableRoots: ["/home/me/proj"] })
+    await bindRuntime({ policy: { writableRoots: ["/home/me/proj"] } })
     const tools = await collectTools()
 
     await expect(
@@ -230,12 +259,14 @@ describe("sandbox_text_editor", () => {
 describe("sandbox_bash tier routing", () => {
   it("routes to the registered microvm impl when the session tier is microvm", async () => {
     installTransport()
-    setActiveSandboxTier("s1", "microvm")
     const seen: MicrovmExecPayload[] = []
-    setMicrovmExec(async (p) => {
-      seen.push(p)
-      return { ...OK, stdout: "vm" }
+    setMicrovmExec({
+      execute: async (_ownerRef, p) => {
+        seen.push(p)
+        return { ...OK, stdout: "vm" }
+      },
     })
+    await bindRuntime({ tier: "microvm" })
     const tools = await collectTools()
     const res = (await tools
       .get("sandbox_bash")!
@@ -246,11 +277,9 @@ describe("sandbox_bash tier routing", () => {
 
   it("throws strict-mode when microvm tier has no registered impl", async () => {
     installTransport()
-    setActiveSandboxTier("s1", "microvm")
-    const tools = await collectTools()
-    await expect(
-      tools.get("sandbox_bash")!.execute({ command: "echo hi", cwd: "/w" }, CTX)
-    ).rejects.toThrow(/microVM exec is registered/i)
+    await expect(bindRuntime({ tier: "microvm" })).rejects.toThrow(
+      /no E2B execution adapter is registered/i
+    )
   })
 })
 

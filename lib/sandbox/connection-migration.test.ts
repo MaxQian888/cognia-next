@@ -129,10 +129,25 @@ describe("migrateSandboxConnectionRow", () => {
     expect(migrated.lastHealthStatus).toBe("unknown")
   })
 
-  it("is idempotent — re-running returns the migrated row untouched", () => {
+  it("is idempotent — re-running returns a normalized migrated row untouched", () => {
     const once = migrateSandboxConnectionRow(legacyRow())
     const twice = migrateSandboxConnectionRow(once)
     expect(twice).toBe(once)
+  })
+
+  it("narrows stored computer-server workspace capabilities on every read", () => {
+    const migrated = migrateSandboxConnectionRow(legacyRow())
+    const overclaimed: SandboxConnectionRow = {
+      ...migrated,
+      capabilities: { ...migrated.capabilities, workspaceRead: true, workspaceExec: true },
+    }
+
+    const normalized = migrateSandboxConnectionRow(overclaimed)
+
+    expect(normalized.capabilities.workspaceRead).toBe(false)
+    expect(normalized.capabilities.workspaceExec).toBe(false)
+    expect(normalized).not.toBe(overclaimed)
+    expect(migrateSandboxConnectionRow(normalized)).toBe(normalized)
   })
 
   it("does not clobber a config the user edited after migration", () => {
@@ -235,6 +250,17 @@ describe("migrateSandboxConnectionRows", () => {
   it("reports zero changes for an already-migrated table", () => {
     const rows = [legacyRow({ id: "a" }), legacyRow({ id: "b" })].map(migrateSandboxConnectionRow)
     expect(migrateSandboxConnectionRows(rows).changed).toBe(0)
+  })
+
+  it("counts an already-migrated row whose stored capabilities are narrowed", () => {
+    const row = migrateSandboxConnectionRow(legacyRow())
+    const overclaimed = {
+      ...row,
+      capabilities: { ...row.capabilities, workspaceExec: true },
+    }
+    const result = migrateSandboxConnectionRows([overclaimed])
+    expect(result.changed).toBe(1)
+    expect(result.rows[0].capabilities.workspaceExec).toBe(false)
   })
 
   it("handles an empty table", () => {

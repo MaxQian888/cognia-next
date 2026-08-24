@@ -1664,6 +1664,9 @@ export interface PluginToolContext {
   /** Current message ID */
   messageId?: string
 
+  /** Immutable sandbox placement binding for the originating send. */
+  sandboxRuntimeRef?: string
+
   /** Plugin configuration */
   config: Record<string, unknown>
 

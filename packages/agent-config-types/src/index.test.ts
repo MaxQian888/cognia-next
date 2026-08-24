@@ -3,7 +3,7 @@
 // shape so the file isn't excluded from the coverage corpus.
 
 import { DEFAULT_BACKUP_AUTO_SCHEDULE, isPluginToolExecEvent } from "./index"
-import type { ClaudeEvent, SendContentBlock } from "./index"
+import type { ClaudeEvent, SendContentBlock, SendOptions } from "./index"
 
 describe("SendContentBlock", () => {
   it("accepts text, image, and document base64 blocks", () => {
@@ -31,10 +31,21 @@ describe("PluginToolExecEvent", () => {
       toolUseId: "t1",
       name: "mcp__cognia-plugin-tools__sandbox_bash",
       args: { command: "echo hi" },
+      sandboxRuntimeRef: "sandbox-runtime:type-test",
     }
     expect(isPluginToolExecEvent(evt)).toBe(true)
+    if (isPluginToolExecEvent(evt)) {
+      expect(evt.sandboxRuntimeRef).toBe("sandbox-runtime:type-test")
+    }
     const other: ClaudeEvent = { type: "ready" } as ClaudeEvent
     expect(isPluginToolExecEvent(other)).toBe(false)
+  })
+})
+
+describe("SendOptions", () => {
+  it("carries the immutable sandbox runtime reference on the host envelope", () => {
+    const options: SendOptions = { sandboxRuntimeRef: "sandbox-runtime:send" }
+    expect(options.sandboxRuntimeRef).toBe("sandbox-runtime:send")
   })
 })
 

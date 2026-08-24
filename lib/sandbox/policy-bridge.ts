@@ -1,14 +1,9 @@
 /**
- * ADR-0028 — per-session sandbox resource/network **ceiling** bridge.
+ * ADR-0028 — pure sandbox resource/network ceiling helpers.
  *
- * `lib/claude/build-options.ts:resolveSendOptions` resolves the effective
- * `SandboxResourcePolicy` (character override beats the app default) and
- * stamps it here keyed by session id, right before the send goes out — the
- * same pattern `microvm-bridge` uses for the tier. The
- * `cognia-sandboxed-tools` plugin reads it inside its `execute()` and clamps
- * the model-supplied per-call request DOWN to the ceiling before forwarding
- * to the Rust `sandbox_exec` dispatcher. Because the model can only reach the
- * sandbox through that plugin, the clamp cannot be bypassed.
+ * Runtime placement state, including the resolved policy, lives in the
+ * immutable `SandboxRuntimeRef`. This module only owns monotonic clamping and
+ * path-boundary helpers shared by that runtime and external-agent paths.
  */
 
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
@@ -66,39 +61,6 @@ function narrowRequiredWriteScope(
     )
   }
   return narrowed
-}
-
-/** Active resolved policy per session id. */
-const activePolicy = new Map<string, SandboxResourcePolicy>()
-
-/**
- * Stamp the resolved sandbox policy for the next send on `sessionId`. Pass
- * `null` to clear (e.g. when the sandbox is disabled for this session) so a
- * stale ceiling can't leak into a later, un-policied call.
- */
-export function setActiveSandboxPolicy(
-  sessionId: string | null | undefined,
-  policy: SandboxResourcePolicy | null
-): void {
-  if (!sessionId) return
-  if (policy) {
-    activePolicy.set(sessionId, policy)
-  } else {
-    activePolicy.delete(sessionId)
-  }
-}
-
-/** Read the active policy for `sessionId`, or `null` when none is set. */
-export function getActiveSandboxPolicy(
-  sessionId: string | null | undefined
-): SandboxResourcePolicy | null {
-  if (!sessionId) return null
-  return activePolicy.get(sessionId) ?? null
-}
-
-/** Clear the active policy when a session ends. */
-export function clearActiveSandboxPolicy(sessionId: string): void {
-  activePolicy.delete(sessionId)
 }
 
 /** Clamp a single numeric cap to its ceiling. `0` from the model means
@@ -219,9 +181,4 @@ export function clampSandboxPolicy(
       ? { readableRoots: child.readableRoots ?? parent.readableRoots }
       : {}),
   }
-}
-
-/** Test-only — wipe the per-session registry. */
-export function __resetSandboxPolicyBridgeForTesting(): void {
-  activePolicy.clear()
 }

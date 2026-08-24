@@ -78,6 +78,8 @@ export interface InvokePluginToolOptions {
   sessionId?: string
   /** Message id surfaced to the tool. */
   messageId?: string
+  /** Immutable sandbox placement binding surfaced to the tool. */
+  sandboxRuntimeRef?: string
   /**
    * Attempt `onTool:<name>` lazy activation when the plugin is not
    * enabled. Defaults to `true` (mirrors the chat agent's behavior).
@@ -310,6 +312,7 @@ export async function invokePluginTool(
   const context: PluginToolContext = {
     sessionId: options.sessionId,
     messageId: options.messageId,
+    sandboxRuntimeRef: options.sandboxRuntimeRef,
     config: plugin.config ?? {},
     signal: options.signal,
   }

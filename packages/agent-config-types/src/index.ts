@@ -281,6 +281,11 @@ export interface SendOptions {
    */
   turnId?: string
   /**
+   * Host-only immutable sandbox placement binding for this send. The sidecar
+   * echoes it on plugin tool requests; model providers never receive it.
+   */
+  sandboxRuntimeRef?: string
+  /**
    * Which agent this turn belongs to, for lifecycle-hook scoping. Like
    * {@link turnId} these are sidecar-protocol envelope fields, not SDK options:
    * they ride through Rust's `SendOptions.extra` flatten and the sidecar merges
@@ -1193,6 +1198,7 @@ export interface PluginToolExecEvent {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  sandboxRuntimeRef?: string
 }
 
 export function isPluginToolExecEvent(evt: ClaudeEvent): evt is PluginToolExecEvent {

@@ -19,10 +19,8 @@ import { deterministicRulesetSort } from "@/lib/claude/permissions/ruleset-edit"
 import { resolveLspServers } from "@/lib/lsp/resolve-config"
 import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
-import { setActiveSandboxTier } from "@/lib/sandbox/microvm-bridge"
-import { resolveSandboxSessionBinding, validateSandboxSessionBinding } from "@/lib/sandbox/binding"
-import { setActiveSandboxPolicy } from "@/lib/sandbox/policy-bridge"
-import { setActiveSandboxConfine } from "@/lib/claude/sandbox-confine-state"
+import { resolveSandboxSessionBinding } from "@/lib/sandbox/binding"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 import {
   deriveExternalSessionPermission,
   type ExternalSessionPermissionSpec,
@@ -2834,25 +2832,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       computerUseGateTier,
     })
     Object.assign(opts, applied.opts)
-    // ADR-0020 remote-target — resolve the GUI execution target (session →
-    // character → local) and stash it per-session so the computer-use plugin's
-    // execute() callback can stamp `CallContext.sandboxConnectionId`. Cleared
-    // when Computer Use is disabled so a stale remote target can't linger.
-    const [
-      { resolveComputerUseTarget },
-      { setActiveComputerUseTarget, clearActiveComputerUseTarget },
-    ] = await Promise.all([
-      import("@/lib/automation/sandbox-target"),
-      import("@/lib/claude/computer-use-target-state"),
-    ])
-    if (character?.enableComputerUse) {
-      setActiveComputerUseTarget(
-        session?.id,
-        resolveComputerUseTarget(session?.computerUseTarget, character?.computerUseTarget)
-      )
-    } else {
-      clearActiveComputerUseTarget(session?.id)
-    }
   } catch {
     // Non-fatal — the registry import shouldn't ever fail in production,
     // but a hot-reload during dev can briefly leave it unresolved. Better
@@ -2877,6 +2856,42 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     character?.sandboxEnabled ??
     appSettings?.sandboxDefaultEnabled ??
     false
+  const sandboxBinding = resolveSandboxSessionBinding({
+    session: {
+      sandboxTier: session?.sandboxTier,
+      computerUseTarget: session?.computerUseTarget,
+    },
+    character: {
+      sandboxTier: character?.sandboxTier,
+      computerUseTarget: character?.computerUseTarget,
+    },
+    appSettings: { sandboxTier: appSettings?.sandboxTier },
+  })
+  const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null
+  const computerUseNeedsConfine =
+    computerUseAllowedForChat && sandboxBinding.computerTarget === "bound"
+  if (session?.id && (sandboxEnabled || computerUseAllowedForChat)) {
+    opts.sandboxRuntimeRef = await sandboxSessionRuntime.bindSession({
+      sessionId: session.id,
+      binding: sandboxBinding,
+      policy: sandboxEnabled ? resolvedSandboxPolicy : null,
+      confine:
+        sandboxEnabled || computerUseNeedsConfine
+          ? {
+              writable: resolvedSandboxPolicy?.writableRoots ?? [],
+              readable: resolvedSandboxPolicy?.readableRoots ?? [],
+              network: resolvedSandboxPolicy?.network ?? "off",
+              networkHosts: resolvedSandboxPolicy?.networkAllowlist ?? [],
+            }
+          : null,
+      sandboxEnabled,
+      computerUseEnabled: computerUseAllowedForChat,
+      workspaceRoot: opts.cwd,
+    })
+  } else if (session?.id) {
+    await sandboxSessionRuntime.releaseSession(session.id)
+    delete opts.sandboxRuntimeRef
+  }
   if (sandboxEnabled) {
     const disallowed = new Set(opts.disallowedTools ?? [])
     // SDK builtins AND the sidecar coreFiles mutators — either would bypass
@@ -2910,50 +2925,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
         (t) => t.name !== "text_editor" && t.name !== "str_replace_based_edit_tool"
       )
     }
-    // ADR-0028 / T4 — sandboxTier precedence: character override beats
-    // the app default. Stamped onto the microvm-bridge so the
-    // `cognia-sandboxed-tools` plugin can route this session's exec
-    // calls to e2b when the user opts into microVM isolation.
-    // Epic 5 — the tier and the Computer Use target are resolved together into
-    // one binding, so a `cua-desktop` tier cannot end up driving a remote GUI
-    // while Bash still runs on the host. An unusable binding (the tier needs a
-    // connection and none is selected) is reported, never silently downgraded:
-    // the user asked for isolation and must not lose it quietly.
-    const sandboxBinding = resolveSandboxSessionBinding({
-      session: {
-        sandboxTier: session?.sandboxTier,
-        computerUseTarget: session?.computerUseTarget,
-      },
-      character: {
-        sandboxTier: character?.sandboxTier,
-        computerUseTarget: character?.computerUseTarget,
-      },
-      appSettings: { sandboxTier: appSettings?.sandboxTier },
-    })
-    const bindingCheck = validateSandboxSessionBinding(sandboxBinding)
-    if (!bindingCheck.ok) {
-      loggers.app.warn("unusable sandbox binding", {
-        sessionId: session?.id,
-        violation: bindingCheck.violation,
-        shellTier: sandboxBinding.shellTier,
-        computerTarget: sandboxBinding.computerTarget,
-      })
-    }
-    setActiveSandboxTier(session?.id, sandboxBinding.shellTier)
-    // ADR-0028 — resolve the resource/network ceiling (character beats app)
-    // and stamp it so `cognia-sandboxed-tools` can clamp each call to it.
-    const resolvedSandboxPolicy = character?.sandboxPolicy ?? appSettings?.sandboxPolicy ?? null
-    setActiveSandboxPolicy(session?.id, resolvedSandboxPolicy)
-    // ADR-0028 — confine native Computer Use bash / text_editor through the
-    // OS sandbox with the same resolved resource + network ceiling as the
-    // sandbox_* tools. Empty writable roots intentionally keep the Rust-side
-    // home-dir default; configured roots become the hard ceiling.
-    setActiveSandboxConfine(session?.id, {
-      writable: resolvedSandboxPolicy?.writableRoots ?? [],
-      readable: resolvedSandboxPolicy?.readableRoots ?? [],
-      network: resolvedSandboxPolicy?.network ?? "off",
-      networkHosts: resolvedSandboxPolicy?.networkAllowlist ?? [],
-    })
     const sandboxHint =
       "Filesystem-mutating and shell tools are sandboxed in this session. Use " +
       "`sandbox_bash` / `sandbox_edit` / `sandbox_write` / `sandbox_text_editor` " +
@@ -2962,12 +2933,6 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       "Edit / Write are not available in this session."
     const existing = opts.appendSystemPrompt?.trim() ?? ""
     opts.appendSystemPrompt = existing ? `${existing}\n\n${sandboxHint}` : sandboxHint
-  } else {
-    // Sandbox disabled — make sure stale tier / policy / confine state from a
-    // previous send on the same session id doesn't leak into the next call.
-    setActiveSandboxTier(session?.id, "os")
-    setActiveSandboxPolicy(session?.id, null)
-    setActiveSandboxConfine(session?.id, null)
   }
 
   // --- Workspace confinement (ADR-0028 "lite") ------------------------------

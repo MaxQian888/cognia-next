@@ -98,6 +98,7 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
       if (pendingEntry) pendingEntry.resolve({ result: `got: ${msg.args.text}` })
     },
     sessionId: "sess-1",
+    sandboxRuntimeRef: "sandbox-runtime:one",
     pendingPluginToolCalls: pending,
   })
 
@@ -111,6 +112,7 @@ test("synthesized tool emits plugin_tool_exec and resolves with the response res
   assert.equal(emitted.length, 1)
   assert.equal(emitted[0].type, "plugin_tool_exec")
   assert.equal(emitted[0].sessionId, "sess-1")
+  assert.equal(emitted[0].sandboxRuntimeRef, "sandbox-runtime:one")
   assert.equal(emitted[0].name, "echo")
   assert.deepEqual(emitted[0].args, { text: "hi" })
   assert.equal(typeof emitted[0].toolUseId, "string")

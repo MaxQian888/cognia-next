@@ -112,7 +112,13 @@ describe("buildStandaloneTools", () => {
       result: { hits: 3 },
     })
 
-    const result = buildStandaloneTools({ pluginTools: [entry("web_search")] }, "s1")
+    const result = buildStandaloneTools(
+      {
+        pluginTools: [entry("web_search")],
+        sandboxRuntimeRef: "sandbox-runtime:standalone",
+      },
+      "s1"
+    )
     await expect(runTool(result!.tools.web_search, { q: "cognia" }, "call-9")).resolves.toEqual({
       hits: 3,
     })
@@ -123,6 +129,7 @@ describe("buildStandaloneTools", () => {
       toolUseId: "call-9",
       name: "web_search",
       args: { q: "cognia" },
+      sandboxRuntimeRef: "sandbox-runtime:standalone",
     })
   })
 

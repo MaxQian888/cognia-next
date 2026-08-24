@@ -209,6 +209,19 @@ function renderEditor(
 }
 
 describe("CharacterEditor — v2 fields", () => {
+  it("keeps a legacy cua-desktop tier visible but disabled with an explanation", async () => {
+    renderEditor(baseInitial({ sandboxTier: "cua-desktop" }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(screen.getByText("tier.cuaDesktopUnavailable")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("character-sandbox-tier"))
+    expect(screen.getByRole("option", { name: "tier.cuaDesktop" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    )
+  })
+
   it("hydrates persona, voice, avatar image, and platform fields from initial and saves them", async () => {
     const { onSave } = renderEditor(
       baseInitial({

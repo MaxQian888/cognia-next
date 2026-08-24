@@ -2508,18 +2508,15 @@ export function CharacterEditor({
               <SelectItem value="inherit">{tSandbox("tier.inherit")}</SelectItem>
               <SelectItem value="os">{tSandbox("tier.os")}</SelectItem>
               <SelectItem value="microvm">{tSandbox("tier.microvm")}</SelectItem>
-              {/* Offered only when this character already targets a sandbox
-                  connection for Computer Use: the tier means "run shell, file
-                  AND GUI work in that desktop", so without a bound connection
-                  it has nothing to bind to. `lib/sandbox/binding` refuses such
-                  a binding rather than downgrading it, so the option must not
-                  be reachable in a state that can only produce a refusal. */}
-              {s.computerUseTarget !== "local" && (
-                <SelectItem value="cua-desktop">{tSandbox("tier.cuaDesktop")}</SelectItem>
-              )}
+              <SelectItem value="cua-desktop" disabled>
+                {tSandbox("tier.cuaDesktop")}
+              </SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">{tSandbox("tier.description")}</p>
+          {s.sandboxTier === "cua-desktop" && (
+            <p className="text-[10px] text-destructive">{tSandbox("tier.cuaDesktopUnavailable")}</p>
+          )}
         </div>
         <div className="space-y-1">
           <Label className="text-xs">{tAccount("label")}</Label>

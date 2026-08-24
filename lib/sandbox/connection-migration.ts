@@ -79,7 +79,7 @@ export function inferLegacyLifecycleState(
 export function migrateSandboxConnectionRow(
   row: LegacySandboxConnectionRow | SandboxConnectionRow
 ): SandboxConnectionRow {
-  if (isMigratedSandboxConnection(row)) return row
+  if (isMigratedSandboxConnection(row)) return normalizeStoredCapabilities(row)
 
   const legacy = row as LegacySandboxConnectionRow
   const provider: SandboxConnectionProvider = "docker"
@@ -120,6 +120,23 @@ export function migrateSandboxConnectionRow(
 }
 
 /**
+ * Existing rows may persist capabilities from an older optimistic matrix.
+ * Reads may only narrow those claims; they never widen an adapter handshake.
+ */
+function normalizeStoredCapabilities(row: SandboxConnectionRow): SandboxConnectionRow {
+  if (row.driver !== "computer-server") return row
+  if (!row.capabilities.workspaceRead && !row.capabilities.workspaceExec) return row
+  return {
+    ...row,
+    capabilities: Object.freeze({
+      ...row.capabilities,
+      workspaceRead: false,
+      workspaceExec: false,
+    }),
+  }
+}
+
+/**
  * Refresh the deprecated mirrors from `config` so a downgrade keeps working
  * after a new-code write. Docker-only: a cloud or Lume row has no meaningful
  * legacy projection, and inventing one would make the old build try to
@@ -150,9 +167,9 @@ export function migrateSandboxConnectionRows(
 ): { rows: SandboxConnectionRow[]; changed: number } {
   let changed = 0
   const migrated = rows.map((row) => {
-    if (isMigratedSandboxConnection(row)) return row
-    changed++
-    return migrateSandboxConnectionRow(row)
+    const next = migrateSandboxConnectionRow(row)
+    if (next !== row) changed++
+    return next
   })
   return { rows: migrated, changed }
 }

@@ -121,6 +121,7 @@ export function buildPluginToolsServer({
   tools,
   emit,
   sessionId,
+  sandboxRuntimeRef,
   pendingPluginToolCalls,
   alwaysLoad,
   alwaysLoadToolNames,
@@ -154,6 +155,7 @@ export function buildPluginToolsServer({
           toolUseId,
           name: t.name,
           args,
+          ...(sandboxRuntimeRef ? { sandboxRuntimeRef } : {}),
           ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
         })
         const response = await pending

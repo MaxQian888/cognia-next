@@ -7,7 +7,7 @@ jest.mock("./workspace-backend", () => ({
   E2BWorkspaceBackend: jest.fn(() => fakeBackend),
 }))
 
-const fakeExec = { kind: "microvm-exec" }
+const fakeExec = { kind: "microvm-exec", dispose: jest.fn(async () => undefined) }
 jest.mock("./microvm-exec", () => ({ buildMicrovmExec: jest.fn(() => fakeExec) }))
 
 import { setMicrovmExec } from "@/lib/sandbox/microvm-bridge"
@@ -58,6 +58,7 @@ beforeEach(() => {
   setMicrovmExecMock.mockReset()
   E2BWorkspaceBackendMock.mockClear()
   buildMicrovmExecMock.mockClear()
+  fakeExec.dispose.mockClear()
 })
 
 describe("e2b-sandbox (built-in)", () => {
@@ -124,6 +125,7 @@ describe("e2b-sandbox (built-in)", () => {
     expect(setMicrovmExecMock).toHaveBeenCalledWith(fakeExec)
     await e2bSandbox.deactivate?.(ctx)
     expect(setMicrovmExecMock).toHaveBeenLastCalledWith(null)
+    expect(fakeExec.dispose).toHaveBeenCalledTimes(1)
   })
 
   it("deactivate unsubscribes from plugin config changes", async () => {

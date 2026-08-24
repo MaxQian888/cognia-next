@@ -1,4 +1,14 @@
-import type { PluginManifest, PluginManifestDexieBlock } from "./plugin"
+import type { PluginManifest, PluginManifestDexieBlock, PluginToolContext } from "./plugin"
+
+describe("PluginToolContext", () => {
+  it("carries the originating immutable sandbox runtime reference", () => {
+    const context: PluginToolContext = {
+      config: {},
+      sandboxRuntimeRef: "sandbox-runtime:plugin",
+    }
+    expect(context.sandboxRuntimeRef).toBe("sandbox-runtime:plugin")
+  })
+})
 
 describe("PluginManifest.dexie", () => {
   it("accepts a valid dexie block", () => {

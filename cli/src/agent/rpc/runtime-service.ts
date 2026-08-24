@@ -23,11 +23,6 @@ import {
 import { catalogModelIds } from "@/lib/ai/model-options"
 import { validateMcpDefinition } from "@/lib/mcp/server-definition"
 import {
-  clearActiveSandboxPolicy,
-  getActiveSandboxPolicy,
-  setActiveSandboxPolicy,
-} from "@/lib/sandbox/policy-bridge"
-import {
   compactSession,
   onClaudeMessage,
   restoreSession,
@@ -457,9 +452,6 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       durableState,
       ...(persisted.agentBinding ? { agentBinding: persisted.agentBinding } : {}),
       ...(agentDefinition ? { agentDefinition } : {}),
-    }
-    if (persisted.sandboxPolicy) {
-      setActiveSandboxPolicy(sessionId, persisted.sandboxPolicy as SandboxResourcePolicy)
     }
     sessions.set(sessionId, session)
     return session
@@ -1323,9 +1315,7 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
       case "sandbox/status": {
         const session = materialize(requireString(params, "sessionId"))
         const persisted = session.durableState.read(session.id)
-        const policy =
-          getActiveSandboxPolicy(session.id) ??
-          (persisted.sandboxPolicy as SandboxResourcePolicy | null)
+        const policy = persisted.sandboxPolicy as SandboxResourcePolicy | null
         return result({
           enabled: policy !== null,
           policy,
@@ -1339,13 +1329,13 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
           await runCommand(session, method, params, async (commandId) => {
             const policyRecordId = `sandbox-policy-${randomUUID()}`
             const createdAt = new Date(now()).toISOString()
-            const active = getActiveSandboxPolicy(session.id)
+            const active = session.durableState.read(session.id)
+              .sandboxPolicy as SandboxResourcePolicy | null
             session.durableState.update(session.id, (state) => {
-              state.sandboxPolicy = active ? { ...active } : state.sandboxPolicy
               state.sandboxSnapshots[policyRecordId] = {
                 snapshotId: policyRecordId,
                 createdAt,
-                policy: active ? { ...active } : state.sandboxPolicy,
+                policy: active ? { ...active } : null,
               }
             })
             return { policyRecordId, createdAt, commandId }
@@ -1364,7 +1354,6 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
             session.durableState.update(session.id, (state) => {
               state.sandboxPolicy = record.policy ? { ...record.policy } : null
             })
-            setActiveSandboxPolicy(session.id, record.policy as SandboxResourcePolicy | null)
             session.lease.current?.invalidateOptions?.()
             return { ...receipt(commandId), policyRecordId }
           })
@@ -1909,7 +1898,6 @@ export function createAgentRuntimeService(options: AgentRuntimeServiceOptions): 
     cancelPendingElicitations(session, "session closed")
     await session.activeRun?.catch(() => undefined)
     await session.lease.close()
-    clearActiveSandboxPolicy(session.id)
     session.status = "closed"
     sessions.delete(session.id)
   }

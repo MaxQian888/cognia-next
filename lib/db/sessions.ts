@@ -11,6 +11,7 @@ import { getSettings } from "./settings"
 import { thinkingLevelPatch } from "@/lib/ai/thinking-level"
 import { markSessionRemoved } from "@/lib/chat/search/indexer"
 import { publishTranscriptRevision } from "@/lib/chat/transcript/revision-events"
+import { sandboxSessionRuntime } from "@/lib/sandbox/session-runtime"
 
 function newId() {
   return "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -644,6 +645,19 @@ async function cleanupScheduledLoopTasks(taskIds: readonly string[]): Promise<vo
   }
 }
 
+async function releaseSandboxSessionWithRetry(sessionId: string): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await sandboxSessionRuntime.releaseSession(sessionId)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
+}
+
 /**
  * Bulk variant of `deleteSession` for the channel-list batch toolbar.
  * Expands parent-owned attached descendants, then removes their session,
@@ -742,10 +756,22 @@ export async function bulkDeleteSessions(ids: readonly string[]): Promise<void> 
     }
   )
   await cleanupScheduledLoopTasks(scheduledTaskIds)
+  const sandboxReleaseErrors: unknown[] = []
   for (const id of deletedIds) {
+    try {
+      await releaseSandboxSessionWithRetry(id)
+    } catch (error) {
+      sandboxReleaseErrors.push(error)
+    }
     invalidatePersistSnapshot(id)
     markSessionRemoved(id)
     await purgeSessionStoreBuckets(id)
+  }
+  if (sandboxReleaseErrors.length > 0) {
+    throw new AggregateError(
+      sandboxReleaseErrors,
+      "One or more sandbox runtimes could not release their provider resources."
+    )
   }
 }
 

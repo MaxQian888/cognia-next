@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -8,11 +8,6 @@ import type { PluginToolExecRequest, PluginToolExecResponse } from "@/lib/claude
 import { computeToolSchemaDigest } from "@/packages/agent/src/agent-definition"
 import { contentDigest } from "@/packages/agent/src/digest"
 import type { PluginTool } from "@/types/plugin"
-import {
-  __resetSandboxPolicyBridgeForTesting,
-  getActiveSandboxPolicy,
-  setActiveSandboxPolicy,
-} from "@/lib/sandbox/policy-bridge"
 import type { UnifiedTurnParams, UnifiedTurnResult } from "../runtime/unified-runtime"
 
 import { DEFAULT_RESOLVED_CONFIG } from "../../config/schema"
@@ -80,7 +75,6 @@ describe("createAgentRuntimeService", () => {
   })
 
   afterEach(() => {
-    __resetSandboxPolicyBridgeForTesting()
     rmSync(home, { recursive: true, force: true })
   })
 
@@ -560,23 +554,36 @@ describe("createAgentRuntimeService", () => {
   })
 
   it("snapshots and restores the effective sandbox policy", async () => {
+    const sessionRoot = path.join(home, "sessions")
+    const statePath = path.join(sessionRoot, "session-1", "rpc-state.json")
+    mkdirSync(path.dirname(statePath), { recursive: true })
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        sandboxPolicy: {
+          network: "off",
+          writableRoots: [home],
+          maxMemoryMb: 512,
+        },
+      })
+    )
     const service = createAgentRuntimeService({
       config: { ...DEFAULT_RESOLVED_CONFIG, cwd: home, model: "test-model" },
       home,
+      sessionDirOverride: sessionRoot,
       mintSessionId: () => "session-1",
     })
     await service.handle("session/create", {}, context as never)
-    setActiveSandboxPolicy("session-1", {
-      network: "off",
-      writableRoots: [home],
-      maxMemoryMb: 512,
-    })
     const policyRecord = await service.handle(
       "sandbox/policy/capture",
       { sessionId: "session-1", commandId: "snapshot-one" },
       context as never
     )
-    setActiveSandboxPolicy("session-1", { network: "on" })
+    const changedState = JSON.parse(readFileSync(statePath, "utf8")) as {
+      sandboxPolicy: Record<string, unknown> | null
+    }
+    changedState.sandboxPolicy = { network: "on" }
+    writeFileSync(statePath, JSON.stringify(changedState))
 
     await service.handle(
       "sandbox/policy/restore",
@@ -587,14 +594,13 @@ describe("createAgentRuntimeService", () => {
       },
       context as never
     )
-    expect(getActiveSandboxPolicy("session-1")).toEqual({
-      network: "off",
-      writableRoots: [home],
-      maxMemoryMb: 512,
-    })
     expect(
       await service.handle("sandbox/status", { sessionId: "session-1" }, context as never)
-    ).toMatchObject({ enabled: true, snapshotCount: 1 })
+    ).toMatchObject({
+      enabled: true,
+      snapshotCount: 1,
+      policy: { network: "off", writableRoots: [home], maxMemoryMb: 512 },
+    })
     await service.close()
   })
 

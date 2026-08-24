@@ -714,7 +714,15 @@ function builtinDefToAiSdkTool(def, gate, timeoutMs, reviewToolOutput) {
  */
 function pluginToolToAiSdkTool(
   manifest,
-  { emit, sessionId, pendingPluginToolCalls, gate, reviewToolOutput, remoteExecutionContext }
+  {
+    emit,
+    sessionId,
+    pendingPluginToolCalls,
+    gate,
+    reviewToolOutput,
+    remoteExecutionContext,
+    sandboxRuntimeRef,
+  }
 ) {
   const namespaced = `mcp__${PLUGIN_TOOLS_SERVER_NAME}__${manifest.name}`
   return tool({
@@ -742,6 +750,7 @@ function pluginToolToAiSdkTool(
         toolUseId,
         name: manifest.name,
         args: effective,
+        ...(sandboxRuntimeRef ? { sandboxRuntimeRef } : {}),
         ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
       })
       const response = await pending
@@ -923,6 +932,7 @@ export function buildAiSdkTools({
           gate,
           reviewToolOutput,
           remoteExecutionContext: sendOptions.remoteExecutionContext,
+          sandboxRuntimeRef: sendOptions.sandboxRuntimeRef,
         }),
         { serverName: PLUGIN_TOOLS_SERVER_NAME }
       )

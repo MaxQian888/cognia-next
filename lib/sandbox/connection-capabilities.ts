@@ -95,14 +95,14 @@ const PROVIDER_CAPABILITIES: Record<SandboxConnectionProvider, SandboxCapabiliti
  * Operations a driver cannot carry, whatever the provider supports. Absent
  * from this map means "carries everything the provider offers".
  *
- * `computer-server` speaks GUI and exec but has no file-read channel of its
- * own — workspace reads go through the exec channel, so it is exposed as
- * `workspaceRead: false` and callers use `workspaceExec`.
+ * `computer-server` currently has a proven remote-GUI channel only. Its
+ * workspace shell/files claims stay disabled until a real provider adapter
+ * can prove those operations execute inside the selected container.
  */
 const DRIVER_RESTRICTIONS: Partial<
   Record<SandboxConnectionDriver, Partial<Record<SandboxLifecycleOperation, boolean>>>
 > = {
-  "computer-server": { workspaceRead: false },
+  "computer-server": { workspaceRead: false, workspaceExec: false },
 }
 
 /**

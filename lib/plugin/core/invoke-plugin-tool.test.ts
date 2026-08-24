@@ -214,7 +214,7 @@ describe("invokePluginTool", () => {
     expect(deps.toolUseRefreshes).toEqual([])
   })
 
-  it("threads sessionId, messageId, and the AbortSignal into the tool context", async () => {
+  it("threads session, message, sandbox runtime, and AbortSignal into the tool context", async () => {
     const execute = jest.fn().mockResolvedValue("ok")
     __setInvokePluginToolDepsForTesting(makeDeps({ tools: [makeTool({ execute })] }))
     const controller = new AbortController()
@@ -223,7 +223,12 @@ describe("invokePluginTool", () => {
       "plug-a",
       "demo_tool",
       {},
-      { signal: controller.signal, sessionId: "sess-1", messageId: "msg-1" }
+      {
+        signal: controller.signal,
+        sessionId: "sess-1",
+        messageId: "msg-1",
+        sandboxRuntimeRef: "sandbox-runtime:one",
+      }
     )
 
     expect(execute).toHaveBeenCalledWith(
@@ -231,6 +236,7 @@ describe("invokePluginTool", () => {
       expect.objectContaining({
         sessionId: "sess-1",
         messageId: "msg-1",
+        sandboxRuntimeRef: "sandbox-runtime:one",
         signal: expect.any(AbortSignal),
       })
     )

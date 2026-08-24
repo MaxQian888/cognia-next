@@ -1,137 +1,171 @@
-/**
- * ADR-0028 / T4 — e2b microVM exec adapter.
- *
- * Registered with `lib/sandbox/microvm-bridge.ts:setMicrovmExec` on plugin
- * activate. The `cognia-sandboxed-tools` plugin calls into it when the
- * active session resolves to the `"microvm"` tier; otherwise calls stay
- * on the OS sandbox tier via the `sandbox_exec` Tauri command.
- *
- * Each call provisions a fresh sandbox, runs the requested argv (joined
- * via `bash -c` so quoting semantics match the OS backend), closes the
- * sandbox, and returns a `MicrovmResult` shaped like the OS sandbox's
- * `SandboxResult`.
- *
- * Why a separate file:
- *   - Keeps `@e2b/sdk` an optional dynamic-import so platforms / users
- *     without the SDK installed still get a clean install-hint error
- *     instead of a build failure.
- *   - Lets tests inject a `sandboxFactory` without touching the live
- *     dynamic-import path.
- */
+/** Owner-scoped E2B microVM adapter for `SandboxSessionRuntime`. */
 
-import type { MicrovmExec, MicrovmExecPayload, MicrovmResult } from "@/lib/sandbox/microvm-bridge"
-
-import type { E2BSandboxConnection, E2BSandboxFacade, E2BSandboxFactory } from "./workspace-backend"
-import { resolveSandboxConnection } from "./workspace-backend"
+import type {
+  MicrovmExecAdapter,
+  MicrovmExecPayload,
+  MicrovmResult,
+} from "@/lib/sandbox/microvm-bridge"
+import { MicrovmAdapterError } from "@/lib/sandbox/microvm-bridge"
+import { E2BSandboxPool, type E2BSandboxLease } from "./sandbox-pool"
 
 export interface MicrovmExecOptions {
-  /** API key forwarded to the sandbox factory. */
-  apiKey?: string
-  /** E2B-compatible API URL. AgentENV documents this as E2B_API_URL. */
-  apiUrl?: string
-  /** Native @e2b/sdk domain override. Takes precedence over apiUrl. */
-  domain?: string
-  /** Dynamic config resolver used by the plugin settings lifecycle. */
-  connection?: () => E2BSandboxConnection
-  /** Factory override — tests inject a mock here. */
-  sandboxFactory?: E2BSandboxFactory
+  pool: E2BSandboxPool
   /** Override `Date.now()` for deterministic timing in tests. */
   now?: () => number
 }
 
 /**
- * Build a microvm exec function bound to the given options. The returned
- * function matches `MicrovmExec` so it can be passed to
- * `setMicrovmExec`.
+ * Execution never provisions a second environment. `preflight` claims an
+ * existing E2B workspace handle and every call for that runtime ref reuses it.
  */
-export function buildMicrovmExec(opts: MicrovmExecOptions = {}): MicrovmExec {
-  const factory = opts.sandboxFactory ?? defaultMicrovmSandboxFactory
+export function buildMicrovmExec(opts: MicrovmExecOptions): MicrovmExecAdapter {
   const now = opts.now ?? Date.now
+  return {
+    async preflight(ownerRef, workspaceRoot, ownerGroup) {
+      if (!workspaceRoot) {
+        throw new MicrovmAdapterError(
+          "workspace-unavailable",
+          "E2B microVM execution requires an existing remote workspace handle."
+        )
+      }
+      try {
+        opts.pool.claim(ownerRef, workspaceRoot, ownerGroup ?? ownerRef)
+      } catch (error) {
+        throw new MicrovmAdapterError(
+          "workspace-unavailable",
+          error instanceof Error ? error.message : String(error),
+          { cause: error }
+        )
+      }
+    },
 
-  return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
-    const started = now()
-    const sandbox = await factory(resolveSandboxConnection(opts))
-    try {
-      const cmd = buildBashCommand(payload)
-      const result = await sandbox.exec({
-        cmd,
-        cwd: payload.command.cwd,
-        timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
-      })
-      return {
-        exit_code: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        duration: Math.max(0, now() - started),
-        timed_out: false,
+    async execute(ownerRef, payload): Promise<MicrovmResult> {
+      const lease = leaseForOwner(opts.pool, ownerRef)
+      assertSupportedPolicy(payload, lease.workspacePath, lease.network)
+      const started = now()
+      try {
+        const result = await lease.sandbox.exec({
+          cmd: buildBashCommand(payload),
+          cwd: payload.command.cwd,
+          timeoutMs: payload.command.timeout > 0 ? payload.command.timeout * 1000 : undefined,
+        })
+        return {
+          exit_code: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          duration: Math.max(0, now() - started),
+          timed_out: false,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return {
+          exit_code: -1,
+          stdout: "",
+          stderr: message,
+          duration: Math.max(0, now() - started),
+          timed_out: /timed?[ _-]?out/i.test(message),
+        }
       }
-    } catch (err) {
-      // Surface the cause through stderr so the model sees the actual
-      // reason. Matches the OS backend's error reporting shape.
-      const message = err instanceof Error ? err.message : String(err)
-      return {
-        exit_code: -1,
-        stdout: "",
-        stderr: message,
-        duration: Math.max(0, now() - started),
-        timed_out: /timed?[ _-]?out/i.test(message),
-      }
-    } finally {
-      await sandbox.close().catch(() => undefined)
+    },
+
+    release(ownerRef) {
+      return opts.pool.releaseOwner(ownerRef)
+    },
+
+    dispose() {
+      return opts.pool.dispose()
+    },
+  }
+}
+
+function leaseForOwner(pool: E2BSandboxPool, ownerRef: string): E2BSandboxLease {
+  try {
+    return pool.forOwner(ownerRef)
+  } catch (error) {
+    throw new MicrovmAdapterError(
+      "runtime-unbound",
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    )
+  }
+}
+
+function assertSupportedPolicy(
+  payload: MicrovmExecPayload,
+  workspaceRoot: string,
+  provisionedNetwork: "off" | "on"
+): void {
+  const request = payload.request
+  if (request.network === "allowlist") {
+    throw new MicrovmAdapterError(
+      "policy-not-attested",
+      "E2B microVM network allowlists are not attested by this adapter."
+    )
+  }
+  if (request.network !== provisionedNetwork) {
+    throw new MicrovmAdapterError(
+      "policy-not-attested",
+      `E2B workspace was provisioned with network=${provisionedNetwork}; requested network=${request.network} cannot be applied after creation.`
+    )
+  }
+  if (request.maxCpuSeconds > 0 || request.maxMemoryMb > 0) {
+    throw new MicrovmAdapterError(
+      "policy-not-attested",
+      "E2B microVM CPU and memory limits are not attested by this adapter."
+    )
+  }
+  if (!isInsideWorkspace(payload.command.cwd, workspaceRoot)) {
+    throw new MicrovmAdapterError(
+      "workspace-boundary",
+      `E2B command cwd is outside the bound remote workspace: ${payload.command.cwd}`
+    )
+  }
+  for (const path of request.targetFiles) {
+    if (!isInsideWorkspace(path, workspaceRoot)) {
+      throw new MicrovmAdapterError(
+        "workspace-boundary",
+        `E2B target file is outside the bound remote workspace: ${path}`
+      )
     }
   }
 }
 
-/**
- * Translate a `MicrovmExecPayload` to a single `bash -c` string. The OS
- * sandbox path runs `argv[0] argv[1] …`; e2b's `exec` takes a single
- * command string, so we join with `bash -c` and let bash parse argv. Env
- * vars are exported inline.
- */
+function isInsideWorkspace(path: string, root: string): boolean {
+  const normalizedPath = normalizeAbsolutePosixPath(path)
+  const normalizedRoot = normalizeAbsolutePosixPath(root)
+  if (!normalizedPath || !normalizedRoot) return false
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)
+}
+
+function normalizeAbsolutePosixPath(value: string): string | null {
+  if (!value.startsWith("/")) return null
+  const segments: string[] = []
+  for (const segment of value.split("/")) {
+    if (!segment || segment === ".") continue
+    if (segment === "..") {
+      if (segments.length === 0) return null
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  return `/${segments.join("/")}`
+}
+
 function buildBashCommand(payload: MicrovmExecPayload): string {
   const envExports = Object.entries(payload.command.env)
-    .map(([k, v]) => `export ${escapeShellName(k)}=${escapeShellArg(v)};`)
+    .map(([key, value]) => `export ${escapeShellName(key)}=${escapeShellArg(value)};`)
     .join(" ")
   const argv = payload.command.argv.map(escapeShellArg).join(" ")
-  // Stdin (if any) is piped through `<<<` so the runner can read it.
-  const stdinPipe = payload.command.stdin ? ` <<< ${escapeShellArg(payload.command.stdin)}` : ""
-  return `${envExports} ${argv}${stdinPipe}`.trim()
+  const command = `${envExports} ${argv}`.trim()
+  if (payload.command.stdin == null) return command
+  return `printf %s ${escapeShellArg(payload.command.stdin)} | { ${command}; }`
 }
 
 function escapeShellArg(value: string): string {
-  // Single-quote and escape inner single quotes — safe under bash.
   return `'${value.replace(/'/g, `'"'"'`)}'`
 }
 
 function escapeShellName(name: string): string {
-  // Env var names: `[A-Za-z_][A-Za-z0-9_]*`. Anything else gets dropped by
-  // bash; we strip invalid characters so a sneaky env entry can't break
-  // out of the assignment.
   return name.replace(/[^A-Za-z0-9_]/g, "")
-}
-
-/**
- * Dynamic-import-based default factory. Mirrors `workspace-backend.ts`'s
- * approach: surfaces a single-line install hint when `@e2b/sdk` isn't
- * present, so users opting into the microvm tier without the SDK get a
- * clean strict-mode failure rather than a build break.
- */
-async function defaultMicrovmSandboxFactory(opts: E2BSandboxConnection): Promise<E2BSandboxFacade> {
-  let mod: { Sandbox?: unknown } | undefined
-  try {
-    mod = (await (Function("s", "return import(s)") as (s: string) => Promise<unknown>)(
-      "@e2b/sdk"
-    )) as { Sandbox?: unknown }
-  } catch {
-    throw new Error(
-      "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w`, then configure " +
-        "E2B Sandbox in Settings → Plugins."
-    )
-  }
-  const SandboxCtor = mod?.Sandbox as
-    { create?: (opts: unknown) => Promise<E2BSandboxFacade> } | undefined
-  if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
-    throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
-  }
-  return SandboxCtor.create(opts)
 }

@@ -299,3 +299,17 @@ macOS 上的 `read_tree` / `find` 现在可以通过高层`accessibility` crate�
 **紧急停止包含三个不同的功能。** `automation_kill_switch`（命令.rs）、全局快捷方式（`shortcuts/registry.rs`）和托盘项（`tray/mod.rs`）各自承担不同的子集工作：前者从未发出事件，后者跳过持久性和虚拟显示释放，第三者跳过了授权清除。它们现在共享`automation::kill_switch::engage`，会激活→持久化→清除会话授权→释放虚拟显示→ `recorder.interrupt_blocking(KillSwitch)` →发出一个`automation:kill-switch`。事件*名称*未变，现有TS监听者继续工作;它的载荷从`null`变成`KillSwitchEvent`。`interrupt_blocking`不接受`AppHandle`（它使用存储的`EventSink`），这让`engage`能保持通用而不会感染`ActiveSession` `R: Runtime`。
 
 两个支持性新增：一个非提示`platform/shared/input_monitoring.rs`（`IOHIDCheckAccess`，与`screen_capture.rs`相同的5s缓存），使得印前检查可以报告输入监控状态，而唯一信号不会`HookGuard::install`失效;以及`InputEvent::KeyDown`获得一个布局解码的`text`字段（macOS `CGEventKeyboardGetUnicodeString`，Windows `ToUnicodeEx`），因为`keys_to_hint`只输出大写ASCII。
+
+## 附录——远程桌面能力修正（2026-08-24）
+
+Docker/computer-server 连接现在只被视为**远程 GUI** 提供方。它不能证明
+shell 或文件操作发生在容器内，因此 `workspaceRead` 与 `workspaceExec`
+默认均为 `false`；读取旧连接行时也会将这两项收窄为 `false`。远程 GUI
+调用仍携带 connection id，但现在由不可变的 `SandboxRuntimeRef` 连同已解析
+的 confinement ceiling 一起提供。
+
+为兼容存量数据，`cua-desktop` shell tier 仍保留在序列化类型中，但现有层级
+选择器会禁用它并显示原因，发送预检也会直接拒绝。它不会回退到宿主机自动化
+或 `sandbox_exec`。Docker 的 start/stop/health/delete 现统一经过既有
+`SandboxProviderAdapter` 与 `runSandboxOperation`；未实现的 provider 会持久化
+类型化错误，不再停留在 `starting`。

@@ -184,3 +184,27 @@ Manual acceptance (per-release): see implementation plan at `~/.claude/plans/pla
 4. Anthropic `--resume` ignoring `CLAUDE_CONFIG_DIR` (#16103) — track upstream fix; once landed, the Dexie replay path can be retired for per-account sessions.
 5. V2 headless server multi-tenant per-session isolation (ADR-0014 follow-up) — port the trait / env-injection layer once the headless API is stable.
 6. T2 / T3 / T4 / T5 telemetry — once the five tiers ship, measure tier-mix in the Diagnostics audit log to see whether T4 (e2b) opt-in rate justifies its bundle cost.
+
+## Addendum — immutable sandbox runtime binding (2026-08-24)
+
+Sandbox placement is now resolved by the narrow `SandboxSessionRuntime` module.
+`resolveSendOptions` binds the session before dispatch and sends an opaque
+`SandboxRuntimeRef` through the existing plugin-tool envelope. The reference
+freezes tier, target, policy, confinement, and enabled surfaces for one
+generation; it never stores credentials or health. A settings change creates a
+new generation, while already-running calls keep their original route.
+
+The sandboxed-tools plugin has an exhaustive route: `os` uses the existing
+`sandbox_exec`, `microvm` uses the registered E2B adapter, and `cua-desktop`
+rejects. Missing refs, adapters, live connections, capabilities, or running
+state fail before any host execution.
+
+E2B now shares one pool with the existing workspace backend. A microVM runtime
+may bind only to a live E2B workspace handle; it never clones or synchronizes a
+second directory. Repeated calls for one runtime reference reuse the same VM,
+configuration generations for one session retain the same workspace until all
+owners release, and different workspace handles stay isolated. Session release
+and plugin deactivation close each VM once; close failures remain tracked and
+are surfaced for retry. Network mode is an instance-creation fact; the current
+Git-backed handle is created online, so offline requests, allowlists, and
+CPU/memory ceilings are rejected until the adapter can prove enforcement.

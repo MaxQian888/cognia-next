@@ -51,8 +51,12 @@
  *   closes/uninstalls both in the same command teardown. It cannot be created
  *   from this import-only roster because its dependency is the live bridge.
  *
- * ## Deliberately NOT registered (desktop/mobile-UI-only provider effects)
+ * ## Deliberately NOT registered (lifecycle owned elsewhere or UI-only)
  *
+ * - `sandbox-session-runtime` — owns only immutable in-memory placement refs;
+ *   the canonical plugin runtime owns E2B process lifetime and disposes the
+ *   shared sandbox pool on plugin deactivation, so there is no independent
+ *   bootstrap or teardown effect to register here.
  * - `companion-boot` — the CLIENT side of the companion protocol (pairing,
  *   sync-down into a phone); a brain is the server side.
  * - `companion-outbound-runner` — drains phone-originated writes from the

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { enforceAnthropicToolSurface } from "./anthropic.mjs"
+import { anthropicPluginToolBridgeOptions, enforceAnthropicToolSurface } from "./anthropic.mjs"
 
 test("disabled tool surface removes every SDK tool entry point", () => {
   const options = enforceAnthropicToolSurface(
@@ -26,4 +26,18 @@ test("disabled tool surface removes every SDK tool entry point", () => {
 test("default tool surface preserves SDK options", () => {
   const original = { tools: ["Read"], mcpServers: { safe: {} } }
   assert.equal(enforceAnthropicToolSurface(original, {}), original)
+})
+
+test("plugin tool bridge preserves the immutable sandbox runtime reference", () => {
+  const options = anthropicPluginToolBridgeOptions({
+    tools: [],
+    emit: () => {},
+    sessionId: "s1",
+    sandboxRuntimeRef: "sandbox-runtime:anthropic",
+    pendingPluginToolCalls: new Map(),
+    alwaysLoad: true,
+    alwaysLoadToolNames: new Set(),
+  })
+
+  assert.equal(options.sandboxRuntimeRef, "sandbox-runtime:anthropic")
 })

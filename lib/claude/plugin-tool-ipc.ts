@@ -96,6 +96,7 @@ export interface PluginToolExecRequest {
   toolUseId: string
   name: string
   args: Record<string, unknown>
+  sandboxRuntimeRef?: string
   /** Cooperative cancellation for direct renderer callers such as live voice. */
   abortSignal?: AbortSignal
   remoteExecutionContext?: RemoteExecutionContext
@@ -608,6 +609,7 @@ export async function handlePluginToolExec(
       if (tool) {
         const context: PluginToolContext = {
           sessionId: request.sessionId,
+          sandboxRuntimeRef: request.sandboxRuntimeRef,
           config: resolverOverride.getPluginConfig?.(tool.pluginId) ?? {},
           signal: request.abortSignal,
         }
@@ -627,6 +629,7 @@ export async function handlePluginToolExec(
         const { result } = await invokePluginTool(resolved.pluginId, request.name, request.args, {
           signal: request.abortSignal,
           sessionId: request.sessionId,
+          sandboxRuntimeRef: request.sandboxRuntimeRef,
           reason: `chat:plugin_tool_exec:${request.name}`,
         })
         return { ...baseResponse, result: assertSafePluginToolResult(result) }

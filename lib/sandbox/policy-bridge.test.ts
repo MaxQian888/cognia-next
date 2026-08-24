@@ -1,12 +1,9 @@
 import type { SandboxResourcePolicy } from "@cognia/agent-config-types"
 
 import {
-  __resetSandboxPolicyBridgeForTesting,
   clampPolicyRequest,
   clampSandboxPolicy,
-  getActiveSandboxPolicy,
   isPathUnderRoot,
-  setActiveSandboxPolicy,
   type ClampableRequest,
 } from "./policy-bridge"
 
@@ -19,27 +16,6 @@ function req(overrides: Partial<ClampableRequest> = {}): ClampableRequest {
     ...overrides,
   }
 }
-
-beforeEach(() => {
-  __resetSandboxPolicyBridgeForTesting()
-})
-
-describe("active policy registry", () => {
-  it("stores and reads a policy per session", () => {
-    const policy: SandboxResourcePolicy = { maxCpuSeconds: 60 }
-    setActiveSandboxPolicy("s1", policy)
-    expect(getActiveSandboxPolicy("s1")).toEqual(policy)
-    expect(getActiveSandboxPolicy("s2")).toBeNull()
-  })
-
-  it("clears when passed null and ignores empty session id", () => {
-    setActiveSandboxPolicy("s1", { maxMemoryMb: 256 })
-    setActiveSandboxPolicy("s1", null)
-    expect(getActiveSandboxPolicy("s1")).toBeNull()
-    setActiveSandboxPolicy(null, { maxMemoryMb: 1 })
-    expect(getActiveSandboxPolicy(null)).toBeNull()
-  })
-})
 
 describe("clampPolicyRequest — caps", () => {
   it("returns the request unchanged when no policy is set", () => {

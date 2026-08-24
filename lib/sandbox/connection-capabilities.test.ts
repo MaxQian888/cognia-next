@@ -53,8 +53,10 @@ describe("defaultSandboxCapabilities", () => {
     expect(defaultSandboxCapabilities("lume", "cua-driver").workspaceRead).toBe(true)
   })
 
-  it("keeps workspaceExec on computer-server — reads route through exec there", () => {
-    expect(defaultSandboxCapabilities("lume", "computer-server").workspaceExec).toBe(true)
+  it("keeps computer-server workspace shell and files disabled until a real adapter exists", () => {
+    const caps = defaultSandboxCapabilities("lume", "computer-server")
+    expect(caps.workspaceRead).toBe(false)
+    expect(caps.workspaceExec).toBe(false)
   })
 
   it("a driver can only remove capabilities, never add them", () => {

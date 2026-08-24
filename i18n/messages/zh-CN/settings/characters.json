@@ -211,6 +211,7 @@
       },
       "tier": {
         "cuaDesktop": "绑定的沙箱桌面",
+        "cuaDesktopUnavailable": "暂不可用：该桌面目前只能证明远程 GUI 隔离，沙箱 shell 与文件操作已禁用。",
         "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
         "inherit": "继承应用默认",
         "label": "沙盒层级",

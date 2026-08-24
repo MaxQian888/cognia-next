@@ -157,6 +157,33 @@ export function drainPendingRoundTrips(
 }
 
 /**
+ * Keep the host-only sandbox binding on the plugin-tool bridge envelope.
+ * Exported as a pure wiring seam so dispatch tests can prove the field is not
+ * dropped before the renderer receives `plugin_tool_exec`.
+ */
+export function anthropicPluginToolBridgeOptions({
+  tools,
+  emit,
+  sessionId,
+  sandboxRuntimeRef,
+  pendingPluginToolCalls,
+  alwaysLoad,
+  alwaysLoadToolNames,
+  remoteExecutionContext,
+}) {
+  return {
+    tools,
+    emit,
+    sessionId,
+    sandboxRuntimeRef,
+    pendingPluginToolCalls,
+    alwaysLoad,
+    alwaysLoadToolNames,
+    remoteExecutionContext,
+  }
+}
+
+/**
  * @param {{
  *   sessionId: string,
  *   firstPrompt: any,
@@ -317,15 +344,18 @@ export function dispatchAnthropic({ sessionId, firstPrompt, sendOptions, emit, l
   // resolve the in-flight tool call.
   let mergedMcpServers = withA2UI
   if (Array.isArray(sendOptions.pluginTools) && sendOptions.pluginTools.length > 0) {
-    const pluginToolsServer = buildPluginToolsServer({
-      tools: sendOptions.pluginTools,
-      emit,
-      sessionId,
-      pendingPluginToolCalls,
-      alwaysLoad: serverAlwaysLoad(PLUGIN_TOOLS_SERVER_NAME),
-      alwaysLoadToolNames,
-      remoteExecutionContext: sendOptions.remoteExecutionContext,
-    })
+    const pluginToolsServer = buildPluginToolsServer(
+      anthropicPluginToolBridgeOptions({
+        tools: sendOptions.pluginTools,
+        emit,
+        sessionId,
+        sandboxRuntimeRef: sendOptions.sandboxRuntimeRef,
+        pendingPluginToolCalls,
+        alwaysLoad: serverAlwaysLoad(PLUGIN_TOOLS_SERVER_NAME),
+        alwaysLoadToolNames,
+        remoteExecutionContext: sendOptions.remoteExecutionContext,
+      })
+    )
     if (pluginToolsServer) {
       mergedMcpServers = Object.prototype.hasOwnProperty.call(withA2UI, PLUGIN_TOOLS_SERVER_NAME)
         ? (() => {

@@ -68,7 +68,7 @@ export interface StandaloneToolsResult {
  * byte-identical to what shipped before.
  */
 export function buildStandaloneTools(
-  sendOptions: Pick<SendOptions, "pluginTools" | "toolSurface">,
+  sendOptions: Pick<SendOptions, "pluginTools" | "sandboxRuntimeRef" | "toolSurface">,
   sessionId: string
 ): StandaloneToolsResult | undefined {
   if (sendOptions.toolSurface === "none") return undefined
@@ -99,6 +99,9 @@ export function buildStandaloneTools(
           toolUseId: options.toolCallId,
           name: entry.name,
           args: (args ?? {}) as Record<string, unknown>,
+          ...(sendOptions.sandboxRuntimeRef
+            ? { sandboxRuntimeRef: sendOptions.sandboxRuntimeRef }
+            : {}),
         })
         // `handlePluginToolExec` never throws — it reports failure on `error`.
         // Rethrowing turns it into an AI SDK `tool-error` part, which the event
