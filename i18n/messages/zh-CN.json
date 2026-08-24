@@ -433,6 +433,9 @@
     "templateName": "模板名称",
     "templatesTab": "模板",
     "thumbnail": "缩略图",
+    "treeCollapse": "收起",
+    "treeEmpty": "暂无内容",
+    "treeExpand": "展开",
     "tryCreating": "试试创建一个新应用",
     "tryDifferentSearch": "尝试不同的搜索词或调整筛选条件",
     "uncategorized": "未分类",
@@ -3406,6 +3409,7 @@
       "selectionChipExternalTruncatedLabel": "{app} · {title} · 已截断",
       "selectionChipFileLabel": "{path} · 整个文件",
       "selectionChipLabel": "{title} · 第 {start}-{end} 行",
+      "selectionChipPluginLabel": "{source}：{title}",
       "selectionChipWebLabel": "{title} · 网页",
       "selectionChipWholeLabel": "{title} · 整份产物",
       "selectionCommentPlaceholder": "这里希望怎么改？",
@@ -4805,6 +4809,9 @@
       "submitHint": "⌘/Ctrl + Enter 提交",
       "textPlaceholder": "输入你的回答…",
       "title": "智能体有个问题"
+    },
+    "backgroundRuns": {
+      "count": "{count, plural, other {后台还有 # 个会话在运行}}"
     },
     "branch": {
       "ariaLineage": "跳到「{title}」中创建这条分支的那条消息",
@@ -6752,6 +6759,7 @@
     }
   },
   "contextWorkbench": {
+    "a2uiPanelPending": "此面板正在等待插件生成内容。",
     "actions": {
       "close": "关闭",
       "closeSplit": "关闭分屏",
@@ -8146,6 +8154,7 @@
       "perf": "性能",
       "perfCpu": "CPU",
       "perfMem": "内存",
+      "runningCount": "{count, plural, other {# 个会话进行中}}",
       "streaming": "流式响应中",
       "syncLast": "已同步 {time}",
       "syncNever": "未同步",
@@ -10136,6 +10145,7 @@
       "done": "完成",
       "error": "错误",
       "queued": "排队中",
+      "queuedOnSlot": "等待目录空出",
       "running": "运行中",
       "waiting": "等待中"
     },
@@ -11039,6 +11049,8 @@
       "system": "系统",
       "user": "你"
     },
+    "scopeWiden": "搜索全部",
+    "scopeWidenHint": "结果仅限本工作区。点击改为搜索所有工作区。",
     "scopes": {
       "all": "全部",
       "chats": "会话",
@@ -37916,11 +37928,13 @@
     "show": "显示 Cognia",
     "status": {
       "automationRunning": "自动化运行中",
+      "awaitingApproval": "等待批准",
       "goalPaused": "目标已暂停",
       "goalRunning": "目标运行中",
       "idle": "空闲",
       "petNeedsAttention": "宠物需要照顾",
       "placeholder": "状态",
+      "runningCount": "{count, plural, other {# 个会话进行中}}",
       "streaming": "回复中…"
     },
     "toggleWindow": "显示 / 隐藏窗口",
@@ -43937,6 +43951,42 @@
     }
   },
   "workspace": {
+    "adopt": {
+      "adopt": "收编",
+      "description": "这些目录已经在被使用 —— 来自工作树、终端标签页 —— 但还没有工作区拥有它们。收编只是把目录挂载为工作区，磁盘上的内容不会被移动。",
+      "dismissLabel": "在本设备上不再提示 {name}",
+      "empty": "正在使用的目录都已归属于某个工作区。",
+      "origin": {
+        "environment": "环境",
+        "session": "会话",
+        "terminal": "终端",
+        "worktree": "仓库"
+      },
+      "scanning": "正在查找目录……",
+      "title": "正在使用的目录"
+    },
+    "capabilities": {
+      "description": "技能与 MCP 服务器在本机统一定义，这里只记录本工作区的取舍：保持「继承」的条目会跟随全局设置，包括之后的改动。",
+      "effectiveOff": "在此不加载",
+      "effectiveOn": "在此加载",
+      "globallyOff": "全局已禁用",
+      "globallyOn": "全局已启用",
+      "mcpServers": "MCP 服务器",
+      "noMcpServers": "尚未配置任何 MCP 服务器。可在「设置 → MCP」中添加。",
+      "noSkills": "尚未定义任何技能。可在「设置 → 技能」中添加。",
+      "overrideCount": "{count, plural, =0 {没有覆盖} other {# 项覆盖}}",
+      "pluginsAreGlobal": "插件保持全机范围：它的启用标记记录的是「当前实际在运行什么」，而不是一项偏好，因此工作区无法对它另持一份意见。请在「设置 → 插件」中管理。",
+      "skills": "技能",
+      "state": {
+        "inherit": "继承",
+        "off": "禁用",
+        "on": "启用"
+      },
+      "stateLabel": "{name} 在本工作区的可用性",
+      "tab": "能力",
+      "title": "本工作区启用的能力",
+      "unavailable": "不可用 — 请先在「设置 → MCP」中信任它"
+    },
     "create": {
       "browse": "浏览…",
       "cancel": "取消",
@@ -44117,8 +44167,18 @@
       "trustedBadge": "已信任",
       "untrustedBadge": "未信任"
     },
+    "panelRoot": {
+      "following": "跟随当前会话",
+      "none": "无目录",
+      "pinLabel": "将此面板固定到当前目录",
+      "pinned": "已固定",
+      "unpinLabel": "恢复跟随会话",
+      "workspace": "工作区根目录",
+      "worktree": "工作树"
+    },
     "switcher": {
       "active": "当前工作区：{name}",
+      "adoptEntry": "正在使用的目录",
       "allHeading": "全部",
       "clearSearch": "清除搜索",
       "empty": "暂无工作区",
