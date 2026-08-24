@@ -44,7 +44,8 @@
     "error": "Error",
     "queued": "Queued",
     "running": "Running",
-    "waiting": "Waiting"
+    "waiting": "Waiting",
+    "queuedOnSlot": "Waiting for the folder"
   },
   "title": "Execution Monitor",
   "watchLeg": "Watch {label}"

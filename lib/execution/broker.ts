@@ -89,6 +89,8 @@ interface ManagedLease {
   controller: AbortController
   externalSignal?: AbortSignal
   externalAbortHandler?: () => void
+  /** The execution slot this lease holds while running, if any. */
+  heldSlot?: string
   /** Resolve/reject for a still-queued acquire. Cleared once admitted. */
   resolve?: (lease: ExecutionLease) => void
   reject?: (err: unknown) => void
@@ -145,6 +147,28 @@ export class ExecutionBroker {
    * with an {@link ExecutionAbortError} if the caller's `signal` is already
    * aborted, or if the lease is cancelled while still queued.
    */
+  /**
+   * Which lease currently holds each execution slot, and who is waiting.
+   *
+   * Separate from the resource pool because they answer different questions:
+   * the pool caps HOW MUCH runs at once, the slot decides whether two legs may
+   * touch the SAME working tree. A leg can be admitted by one and blocked by
+   * the other, and the slot is claimed only at admission so a slot-holding leg
+   * can never sit idle waiting for a permit.
+   */
+  private slotHolders = new Map<string, string>()
+  private slotQueues = new Map<string, ManagedLease[]>()
+
+  /** The lease holding `slotKey`, or null. */
+  slotHolder(slotKey: string): string | null {
+    return this.slotHolders.get(slotKey) ?? null
+  }
+
+  /** How many legs are waiting for `slotKey`. */
+  slotQueueLength(slotKey: string): number {
+    return this.slotQueues.get(slotKey)?.length ?? 0
+  }
+
   acquire(request: ExecutionLeaseRequest): Promise<ExecutionLease> {
     const resource = request.resource ?? DEFAULT_RESOURCE
     const pool = this.poolFor(resource)
@@ -189,6 +213,19 @@ export class ExecutionBroker {
       return Promise.resolve(managed.lease)
     }
 
+    // Slot before pool: a leg blocked on the tree it wants is not competing
+    // for a permit, and letting it queue on the pool instead would let a
+    // second leg into the same directory the moment a permit freed.
+    const slotKey = request.slotKey
+    if (slotKey && this.slotHolders.has(slotKey)) {
+      this.markDirty()
+      return new Promise<ExecutionLease>((resolve, reject) => {
+        managed.resolve = resolve
+        managed.reject = reject
+        this.queueForSlot(slotKey, managed)
+      })
+    }
+
     if (pool.inUse + weight <= pool.limit) {
       this.admit(managed, pool, /* consumePermit */ true)
       return Promise.resolve(managed.lease)
@@ -203,9 +240,48 @@ export class ExecutionBroker {
     })
   }
 
+  private queueForSlot(slotKey: string, managed: ManagedLease): void {
+    const queue = this.slotQueues.get(slotKey)
+    if (queue) queue.push(managed)
+    else this.slotQueues.set(slotKey, [managed])
+  }
+
+  /**
+   * Hand `slotKey` to the next waiter, if any.
+   *
+   * The waiter re-enters the ordinary admission path, so it can still end up
+   * on the pool queue — which is right: freeing a directory does not create a
+   * permit.
+   */
+  private drainSlot(slotKey: string): void {
+    const queue = this.slotQueues.get(slotKey)
+    if (!queue) return
+    while (queue.length > 0) {
+      const head = queue.shift()!
+      if (queue.length === 0) this.slotQueues.delete(slotKey)
+      if (head.cancelled || head.released) continue
+      const pool = this.poolFor(head.resource)
+      if (pool.inUse + head.weight <= pool.limit) {
+        this.admit(head, pool, /* consumePermit */ true)
+      } else {
+        pool.queue.push(head)
+        this.markDirty()
+      }
+      return
+    }
+    this.slotQueues.delete(slotKey)
+  }
+
   private admit(managed: ManagedLease, pool: ResourcePool, consumePermit: boolean): void {
     managed.state = "running"
     if (consumePermit) pool.inUse += managed.weight
+    // Claimed here, not at acquire: a leg that is only pool-queued must not
+    // hold a directory nobody is working in.
+    const slotKey = managed.request.slotKey
+    if (slotKey && !managed.exempt && !this.slotHolders.has(slotKey)) {
+      this.slotHolders.set(slotKey, managed.id)
+      managed.heldSlot = slotKey
+    }
     const resolve = managed.resolve
     managed.resolve = undefined
     managed.reject = undefined
@@ -253,6 +329,13 @@ export class ExecutionBroker {
       // waiter list so the queue can't resurrect it.
       const idx = pool.queue.indexOf(managed)
       if (idx >= 0) pool.queue.splice(idx, 1)
+      this.dropFromSlotQueue(managed)
+    }
+
+    const heldSlot = managed.heldSlot
+    if (heldSlot && this.slotHolders.get(heldSlot) === managed.id) {
+      this.slotHolders.delete(heldSlot)
+      managed.heldSlot = undefined
     }
 
     this.active.delete(managed.id)
@@ -262,6 +345,19 @@ export class ExecutionBroker {
 
     // A freed permit may let queued waiters in.
     if (managed.state === "running" && !managed.exempt) this.drain(pool)
+    // A freed directory may let the next leg into it — after the pool drain,
+    // so a waiter that has been queued longer keeps its place.
+    if (heldSlot) this.drainSlot(heldSlot)
+  }
+
+  private dropFromSlotQueue(managed: ManagedLease): void {
+    const slotKey = managed.request.slotKey
+    if (!slotKey) return
+    const queue = this.slotQueues.get(slotKey)
+    if (!queue) return
+    const idx = queue.indexOf(managed)
+    if (idx >= 0) queue.splice(idx, 1)
+    if (queue.length === 0) this.slotQueues.delete(slotKey)
   }
 
   private drain(pool: ResourcePool): void {
@@ -299,10 +395,12 @@ export class ExecutionBroker {
     }
 
     if (managed.state === "queued") {
-      // Never admitted — no release() will ever come, so finalize here.
+      // Never admitted — no release() will ever come, so finalize here. It may
+      // have been waiting on a permit OR on a directory; drop it from both.
       const pool = this.poolFor(managed.resource)
       const idx = pool.queue.indexOf(managed)
       if (idx >= 0) pool.queue.splice(idx, 1)
+      this.dropFromSlotQueue(managed)
       const reject = managed.reject
       managed.resolve = undefined
       managed.reject = undefined
@@ -450,6 +548,8 @@ export class ExecutionBroker {
       ...(m.request.runId ? { runId: m.request.runId } : {}),
       ...(m.request.taskId ? { taskId: m.request.taskId } : {}),
       ...(m.request.projectId ? { projectId: m.request.projectId } : {}),
+      ...(m.request.slotKey ? { slotKey: m.request.slotKey } : {}),
+      ...(m.heldSlot ? { holdsSlot: true } : {}),
       weight: m.weight,
       exempt: m.exempt,
       state: m.state,

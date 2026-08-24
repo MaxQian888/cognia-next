@@ -433,3 +433,132 @@ describe("ExecutionBroker — singleton", () => {
     expect(getExecutionBroker()).toBe(custom)
   })
 })
+
+describe("ExecutionBroker — execution slots", () => {
+  it("serializes two legs that want the same working tree", async () => {
+    // The pool cap answers "how much at once"; it never answered "may these
+    // two run in the SAME directory". Both fit under the cap and then
+    // interleaved edits in one tree.
+    const broker = makeBroker(4)
+    const first = await broker.acquire(req({ slotKey: "/repos/app" }))
+    expect(broker.slotHolder("/repos/app")).toBe(first.id)
+
+    let admitted = false
+    const pending = broker.acquire(req({ slotKey: "/repos/app" })).then((lease) => {
+      admitted = true
+      return lease
+    })
+    await Promise.resolve()
+    expect(admitted).toBe(false)
+    expect(broker.slotQueueLength("/repos/app")).toBe(1)
+
+    first.release()
+    const second = await pending
+    expect(broker.slotHolder("/repos/app")).toBe(second.id)
+  })
+
+  it("runs legs in different trees at the same time", async () => {
+    const broker = makeBroker(4)
+    const a = await broker.acquire(req({ slotKey: "/repos/a" }))
+    const b = await broker.acquire(req({ slotKey: "/repos/b" }))
+    expect(a.id).not.toBe(b.id)
+    expect(broker.slotHolder("/repos/a")).toBe(a.id)
+    expect(broker.slotHolder("/repos/b")).toBe(b.id)
+  })
+
+  it("leaves a leg with no slot entirely unaffected", async () => {
+    const broker = makeBroker(4)
+    await broker.acquire(req({ slotKey: "/repos/app" }))
+    const free = await broker.acquire(req())
+    expect(free.id).toBeTruthy()
+  })
+
+  it("does not make a continuation queue behind itself", async () => {
+    // An exempt leg IS the work already holding the tree; blocking it on its
+    // own slot would deadlock the conversation it belongs to.
+    const broker = makeBroker(4)
+    await broker.acquire(req({ slotKey: "/repos/app", sessionId: "s1" }))
+    const continuation = await broker.acquire(req({ slotKey: "/repos/app", sessionId: "s1" }))
+    expect(continuation.exempt).toBe(true)
+    expect(continuation.id).toBeTruthy()
+  })
+
+  it("does not hold a directory while only waiting for a permit", async () => {
+    // Claiming the slot at acquire time would leave a tree locked by a leg
+    // that has not started and cannot start.
+    const broker = makeBroker(1)
+    const holder = await broker.acquire(req())
+    const queued = broker.acquire(req({ slotKey: "/repos/app" }))
+    await Promise.resolve()
+    expect(broker.slotHolder("/repos/app")).toBeNull()
+
+    holder.release()
+    const lease = await queued
+    expect(broker.slotHolder("/repos/app")).toBe(lease.id)
+  })
+
+  it("sends a freed tree's next waiter through the ordinary permit check", async () => {
+    // Freeing a directory does not create a permit.
+    const broker = makeBroker(1)
+    const first = await broker.acquire(req({ slotKey: "/repos/app" }))
+    const second = broker.acquire(req({ slotKey: "/repos/app" }))
+    const other = broker.acquire(req())
+
+    first.release()
+    // The pool drain runs before the slot drain, so the longer-queued
+    // permit waiter keeps its place and the slot waiter waits for a permit.
+    const otherLease = await other
+    await Promise.resolve()
+    expect(broker.slotHolder("/repos/app")).toBeNull()
+
+    otherLease.release()
+    const secondLease = await second
+    expect(broker.slotHolder("/repos/app")).toBe(secondLease.id)
+  })
+
+  it("drops a cancelled waiter from the tree's queue", async () => {
+    const broker = makeBroker(4)
+    const first = await broker.acquire(req({ slotKey: "/repos/app" }))
+    const controller = new AbortController()
+    const cancelled = broker
+      .acquire(req({ slotKey: "/repos/app", signal: controller.signal }))
+      .catch((err) => err)
+    await Promise.resolve()
+    expect(broker.slotQueueLength("/repos/app")).toBe(1)
+
+    controller.abort()
+    await expect(cancelled).resolves.toBeInstanceOf(ExecutionAbortError)
+    expect(broker.slotQueueLength("/repos/app")).toBe(0)
+
+    first.release()
+    // The queue is empty, so nothing inherits the tree.
+    expect(broker.slotHolder("/repos/app")).toBeNull()
+  })
+
+  it("skips a cancelled waiter and hands the tree to the next live one", async () => {
+    const broker = makeBroker(4)
+    const first = await broker.acquire(req({ slotKey: "/repos/app" }))
+    const controller = new AbortController()
+    const dead = broker
+      .acquire(req({ slotKey: "/repos/app", signal: controller.signal }))
+      .catch((err) => err)
+    const live = broker.acquire(req({ slotKey: "/repos/app" }))
+    await Promise.resolve()
+    controller.abort()
+    await dead
+
+    first.release()
+    const lease = await live
+    expect(broker.slotHolder("/repos/app")).toBe(lease.id)
+  })
+
+  it("frees the tree when its holder is cancelled rather than released", async () => {
+    const broker = makeBroker(4)
+    const first = await broker.acquire(req({ slotKey: "/repos/app" }))
+    const next = broker.acquire(req({ slotKey: "/repos/app" }))
+    broker.cancel(first.id)
+    first.release()
+    const lease = await next
+    expect(broker.slotHolder("/repos/app")).toBe(lease.id)
+  })
+})

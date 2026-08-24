@@ -62,6 +62,15 @@ export interface AcquireChatLeaseParams {
   projectId?: string
   /** Display label for the execution panel — pass the session title. */
   label: string
+  /**
+   * The working tree this turn will mutate. Two turns naming the same slot are
+   * serialized by the broker; turns in different trees run in parallel.
+   *
+   * Omitted for a turn that touches nothing shared. Callers get it from
+   * `slotKeyForExecutionContext`, so a conversation in a managed worktree
+   * serializes against that worktree and not against its source repository.
+   */
+  slotKey?: string
   /** Leg kind for the execution panel; foreground chat turns default to
    *  "chat", team turns pass "team". */
   kind?: Extract<ExecutionLegKind, "chat" | "team">
@@ -91,6 +100,7 @@ export async function acquireChatLease(
     label: params.label,
     sessionId: params.sessionId,
     ...(params.projectId ? { projectId: params.projectId } : {}),
+    ...(params.slotKey ? { slotKey: params.slotKey } : {}),
   })
   // A broker-side cancel aborts the lease signal — bridge it to an interrupt so
   // the live turn actually stops. (A normal release never fires `abort`.)

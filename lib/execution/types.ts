@@ -56,6 +56,23 @@ export interface ExecutionLeaseRequest {
   /** Workspace (Project) id this leg belongs to — drives per-project cancel. */
   projectId?: string
   /**
+   * The EXECUTION SLOT this leg mutates — a working tree, a sandbox, a remote
+   * runtime. At most one leg holds a given slot at a time.
+   *
+   * The pool cap answers "how much work at once"; it does not answer "may
+   * these two run in the SAME directory". Two conversations bound to one
+   * checkout, or two scheduled tasks in one worktree, both fitted comfortably
+   * under a 16-permit cap and then interleaved edits, builds and git
+   * operations in the same tree. Serializing per slot is what makes "parallel
+   * across slots" safe to offer at all.
+   *
+   * Omitted for a leg that mutates nothing shared (a read-only query, a
+   * cloud-only turn). Legs exempted from the cap — a continuation of a session
+   * that is already running — do not take the slot either: they ARE the work
+   * already holding it.
+   */
+  slotKey?: string
+  /**
    * Admission weight (defaults to 1). A heavier leg occupies more of the
    * pool's limit; used so a fan-out parent can reserve headroom.
    */
@@ -89,6 +106,15 @@ export interface ExecutionLegSnapshot {
   runId?: string
   taskId?: string
   projectId?: string
+  /**
+   * The execution slot this leg wants. Present on the snapshot so a surface
+   * can say WHY a leg is queued — waiting for a permit and waiting for a
+   * directory look identical otherwise, and "queued" with no reason reads as
+   * "hung".
+   */
+  slotKey?: string
+  /** True while this leg is the one holding {@link slotKey}. */
+  holdsSlot?: boolean
   weight: number
   exempt: boolean
   state: ExecutionLegState

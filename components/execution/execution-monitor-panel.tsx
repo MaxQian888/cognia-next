@@ -132,7 +132,14 @@ export function ExecutionMonitorPanel({ projectId, className }: ExecutionMonitor
       key={row.rowId}
       row={row}
       kindLabel={kindLabel(row.kind)}
-      statusLabel={t(STATUS_KEYS[row.status])}
+      statusLabel={
+        // Say WHY it is queued. "Queued" alone reads as "hung", and only one
+        // of the two reasons is something the user can act on: freeing a tree
+        // means finishing or cancelling whatever is in it.
+        row.status === "queued" && row.slotKey && !row.holdsSlot
+          ? t("status.queuedOnSlot")
+          : t(STATUS_KEYS[row.status])
+      }
       elapsed={prefs.showElapsed ? formatElapsed(t, row.startedAt, now) : null}
       watchAria={t("watchLeg", { label: row.label })}
       cancelAria={t("cancelLeg", { label: row.label })}

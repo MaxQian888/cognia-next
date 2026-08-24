@@ -90,6 +90,7 @@ import {
 } from "./steer-runtime"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import { slotKeyForExecutionContext } from "@/lib/execution/slot-key"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -496,6 +497,10 @@ export function useTeamChat() {
           projectId: session.projectId,
           label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
           kind: "team",
+          // One slot for the whole fan-out, like the one lease: the members run
+          // sequentially in the SAME tree, so a second team turn there has to
+          // wait for this one rather than interleave with its members.
+          slotKey: slotKeyForExecutionContext(session.executionContext),
           onCancel: () => {
             interruptedRef.current.add(sessionId)
             void interruptTeamTurn(sessionId, resolvers.current)

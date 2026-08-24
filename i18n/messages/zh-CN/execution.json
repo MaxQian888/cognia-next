@@ -44,7 +44,8 @@
     "error": "错误",
     "queued": "排队中",
     "running": "运行中",
-    "waiting": "等待中"
+    "waiting": "等待中",
+    "queuedOnSlot": "等待目录空出"
   },
   "title": "执行监视器",
   "watchLeg": "查看 {label}"

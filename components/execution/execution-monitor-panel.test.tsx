@@ -297,3 +297,39 @@ describe("ExecutionMonitorPanel", () => {
     }
   })
 })
+
+describe("queued reason", () => {
+  it("says a leg is waiting for the folder, not merely queued", () => {
+    // "Queued" alone reads as "hung", and only one of the two reasons is
+    // something the user can act on.
+    monitorState = {
+      rows: [row({ status: "queued", slotKey: "dir:/repos/app", label: "Second turn" })],
+      runningCount: 1,
+      isLoading: false,
+    }
+    render(<ExecutionMonitorPanel />)
+    expect(screen.getByText("Waiting for the folder")).toBeInTheDocument()
+  })
+
+  it("keeps the plain label for a leg waiting on a permit", () => {
+    monitorState = {
+      rows: [row({ status: "queued", label: "Second turn" })],
+      runningCount: 1,
+      isLoading: false,
+    }
+    render(<ExecutionMonitorPanel />)
+    expect(screen.getByText("Queued")).toBeInTheDocument()
+  })
+
+  it("keeps the plain label for the leg that HOLDS the folder", () => {
+    monitorState = {
+      rows: [
+        row({ status: "queued", slotKey: "dir:/repos/app", holdsSlot: true, label: "Holder" }),
+      ],
+      runningCount: 1,
+      isLoading: false,
+    }
+    render(<ExecutionMonitorPanel />)
+    expect(screen.getByText("Queued")).toBeInTheDocument()
+  })
+})

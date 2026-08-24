@@ -144,6 +144,7 @@ import type {
 } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import { slotKeyForExecutionContext } from "@/lib/execution/slot-key"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
@@ -962,6 +963,16 @@ export function useClaudeChat() {
           sessionId,
           projectId: session?.projectId,
           label: session?.title || `#${sessionId.slice(0, 8)}`,
+          // The working tree this turn will mutate. Two turns naming the same
+          // tree are serialized; turns in different worktrees stay parallel.
+          // The cap alone let two conversations bound to one checkout
+          // interleave edits, builds and git operations in it.
+          //
+          // The session's PERSISTED binding, because the lease is taken before
+          // this turn resolves its own. On the first turn of a managed
+          // conversation that means the source repository, which is right:
+          // cutting the worktree is itself work in the source repository.
+          slotKey: slotKeyForExecutionContext(session?.executionContext),
         })
       } catch (leaseErr) {
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
