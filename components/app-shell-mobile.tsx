@@ -51,6 +51,7 @@ import { GuildRail } from "@/components/shell/guild-rail"
 import { TeamMembersPanel } from "@/components/context-workbench/panels/team-members-panel"
 import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
+import { BackgroundRunsChip } from "@/components/chat/background-runs-chip"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
@@ -430,6 +431,16 @@ export function AppShellMobile() {
         />
 
         <MobileWorkspaceChip className="ml-2 shrink-0" />
+
+        {/* A phone shows one conversation, so turns started and navigated away
+            from had no representation at all here. Tapping goes to one. */}
+        <BackgroundRunsChip
+          className="ml-2"
+          onSelect={(id) => {
+            setNavOpen(false)
+            void select(id)
+          }}
+        />
 
         {/* Missing-credential warning stays visible (blocking issue): a tap
             opens the session sheet whose Account section resolves it. Never

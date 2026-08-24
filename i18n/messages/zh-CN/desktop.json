@@ -638,7 +638,8 @@
     "terminalRunning": "终端面板 — 有会话正在运行",
     "terminalToggle": "切换终端面板",
     "usage": "用量与额度",
-    "usageOpen": "打开用量与额度"
+    "usageOpen": "打开用量与额度",
+    "runningCount": "{count, plural, other {# 个会话进行中}}"
   },
   "titleBar": {
     "alwaysOnTop": "置顶窗口",

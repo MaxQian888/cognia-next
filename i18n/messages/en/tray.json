@@ -52,7 +52,9 @@
     "idle": "Idle",
     "petNeedsAttention": "Pet needs attention",
     "placeholder": "Status",
-    "streaming": "Responding…"
+    "streaming": "Responding…",
+    "awaitingApproval": "Waiting for approval",
+    "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}"
   },
   "toggleWindow": "Show / hide window",
   "trayPanelToggle": "Quick panel",

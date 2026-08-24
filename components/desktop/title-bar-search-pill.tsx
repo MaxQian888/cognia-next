@@ -20,9 +20,12 @@
  * to re-render whenever the active chat changed.
  */
 
+import { useMemo } from "react"
+import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
 
 import { useActiveSessionLabel } from "@/hooks/chat/use-active-session-label"
+import { aggregateRunState } from "@/lib/chat/aggregate-run-state"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 
@@ -41,10 +44,23 @@ export function TitleBarSearchPill({
   onClick: () => void
   className?: string
 }) {
-  const status = useChatStore((s) => s.status)
+  // The other strings arrive as props so the bar can keep this leaf render
+  // stable; this one is local because only the leaf knows the count.
+  const t = useTranslations("desktop.statusBar")
+  const sessions = useChatStore((s) => s.sessions)
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const run = useMemo(
+    () => aggregateRunState({ sessions, activeSessionId }),
+    [sessions, activeSessionId]
+  )
   const { label: doc } = useActiveSessionLabel()
   const title = doc ? `${appName}${separator}${doc}` : appName
-  const isStreaming = status === "streaming"
+  // The dot belongs to the conversation this pill NAMES, so it stays focused.
+  // What was missing is the other half: with the named conversation idle and
+  // two more streaming, the pill was the shell's most prominent "nothing is
+  // happening" claim. The count says otherwise without stealing the dot.
+  const isStreaming = run.focused === "streaming"
+  const backgroundHint = t("runningCount", { count: run.active })
 
   return (
     <button
@@ -71,7 +87,20 @@ export function TitleBarSearchPill({
       <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
         {title}
       </span>
-      <span aria-hidden className="ml-auto hidden text-[10px] opacity-60 sm:inline">
+      {run.activeElsewhere ? (
+        <span
+          data-testid="title-bar-background-count"
+          title={backgroundHint}
+          aria-label={backgroundHint}
+          className="ml-auto shrink-0 rounded-sm bg-primary/15 px-1 text-[10px] font-medium tabular-nums text-primary"
+        >
+          {run.active}
+        </span>
+      ) : null}
+      <span
+        aria-hidden
+        className={cn("hidden text-[10px] opacity-60 sm:inline", !run.activeElsewhere && "ml-auto")}
+      >
         {kbdHint}
       </span>
     </button>

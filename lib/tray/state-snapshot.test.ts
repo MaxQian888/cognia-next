@@ -2,7 +2,17 @@
 import { renderHook, act } from "@testing-library/react"
 
 // ── Controllable mock state ──────────────────────────────────────────────
-let chatState = { status: "idle" as string, activeSessionId: null as string | null }
+type ChatStatus = "idle" | "streaming" | "awaiting_approval" | "error"
+// The tray reads the whole session map now, not the focused-slice projection:
+// with two background turns streaming it used to report the app as idle.
+let chatState = {
+  sessions: {} as Record<string, { status: ChatStatus }>,
+  activeSessionId: null as string | null,
+}
+const focusedOnly = (status: ChatStatus, id = "s1") => ({
+  sessions: { [id]: { status } },
+  activeSessionId: id,
+})
 let liveGoal: { status?: string; safeObjective?: string } | null = null
 // `useLiveQuery` is mocked once for both call sites in `useTrayStateSnapshot`
 // (the goal query and the pet-profile query); they're told apart by `deps`
@@ -54,7 +64,7 @@ import { createDefaultProfile } from "@/lib/pet/defaults"
 const useTrayUsageMock = useTrayUsage as jest.Mock
 
 beforeEach(() => {
-  chatState = { status: "idle", activeSessionId: null }
+  chatState = { sessions: {}, activeSessionId: null }
   liveGoal = null
   livePetProfile = undefined
   autostartValue = false
@@ -66,11 +76,37 @@ beforeEach(() => {
   __resetTrayStoreForTesting()
 })
 
+describe("useTrayStateSnapshot — concurrency", () => {
+  it("does not report the app idle because the focused conversation is", () => {
+    chatState = {
+      sessions: { s1: { status: "idle" }, s2: { status: "streaming" } },
+      activeSessionId: "s1",
+    }
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.chat.streaming).toBe(true)
+    expect(result.current.chat.activeCount).toBe(1)
+  })
+
+  it("flags a background approval the tray would otherwise hide", () => {
+    chatState = {
+      sessions: { s1: { status: "idle" }, s2: { status: "awaiting_approval" } },
+      activeSessionId: "s1",
+    }
+    const { result } = renderHook(() => useTrayStateSnapshot())
+    expect(result.current.chat.awaitingApproval).toBe(true)
+  })
+})
+
 describe("useTrayStateSnapshot", () => {
   it("reports an idle baseline", () => {
     const { result } = renderHook(() => useTrayStateSnapshot())
     expect(result.current.goal).toEqual({ active: false, paused: false, title: undefined })
-    expect(result.current.chat).toEqual({ streaming: false, hasActiveSession: false })
+    expect(result.current.chat).toEqual({
+      streaming: false,
+      hasActiveSession: false,
+      awaitingApproval: false,
+      activeCount: 0,
+    })
     expect(result.current.app.version).toEqual(expect.any(String))
     expect(result.current.usage).toBeNull()
   })
@@ -88,10 +124,15 @@ describe("useTrayStateSnapshot", () => {
 
   it("maps an active goal's redacted objective into the snapshot", () => {
     liveGoal = { status: "active", safeObjective: "ship the tray" }
-    chatState = { status: "streaming", activeSessionId: "s1" }
+    chatState = focusedOnly("streaming")
     const { result } = renderHook(() => useTrayStateSnapshot())
     expect(result.current.goal).toEqual({ active: true, paused: false, title: "ship the tray" })
-    expect(result.current.chat).toEqual({ streaming: true, hasActiveSession: true })
+    expect(result.current.chat).toEqual({
+      streaming: true,
+      hasActiveSession: true,
+      awaitingApproval: false,
+      activeCount: 1,
+    })
   })
 
   it("flags a paused goal", () => {
@@ -191,10 +232,15 @@ describe("useTrayStateSnapshot", () => {
       await Promise.resolve()
     })
     const first = result.current
-    chatState = { status: "streaming", activeSessionId: "s1" }
+    chatState = focusedOnly("streaming")
     rerender()
     expect(result.current).not.toBe(first)
-    expect(result.current.chat).toEqual({ streaming: true, hasActiveSession: true })
+    expect(result.current.chat).toEqual({
+      streaming: true,
+      hasActiveSession: true,
+      awaitingApproval: false,
+      activeCount: 1,
+    })
   })
 
   it("marks automation running when an automation event arrives, then clears the kill switch", async () => {

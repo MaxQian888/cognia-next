@@ -1901,5 +1901,8 @@
     "title": "Trust this workspace?",
     "trust": "Trust workspace",
     "workspaceLabel": "Workspace"
+  },
+  "backgroundRuns": {
+    "count": "{count, plural, one {# conversation running in the background} other {# conversations running in the background}}"
   }
 }

@@ -12,6 +12,12 @@
 import { NEUTRAL_MOOD_CEILING, UNWELL_NEED_THRESHOLD } from "@/lib/pet/care/condition"
 import type { TrayMenuItem, TrayStateSnapshot } from "./types"
 
+/**
+ * Translator for the one status row that needs a number. Widened beyond the
+ * builder's `(key) => string` because a count cannot be baked into a key.
+ */
+export type StatusRowTranslator = (key: string, values?: Record<string, unknown>) => string
+
 /** Max characters of the goal objective shown in the detail row. */
 export const GOAL_TITLE_MAX = 48
 
@@ -39,6 +45,9 @@ export function deriveStatusKey(snapshot: TrayStateSnapshot): string {
   if (snapshot.automation.running) return "tray.status.automationRunning"
   if (snapshot.goal.active) return "tray.status.goalRunning"
   if (snapshot.goal.paused) return "tray.status.goalPaused"
+  // Above streaming: a run blocked on a decision the user has not been shown
+  // is the worst thing for an OS-level surface to hide.
+  if (snapshot.chat.awaitingApproval) return "tray.status.awaitingApproval"
   if (snapshot.chat.streaming) return "tray.status.streaming"
   if (
     snapshot.pet?.enabled &&
@@ -61,7 +70,10 @@ export function truncateTitle(title: string, max: number = GOAL_TITLE_MAX): stri
  * primary status row; appends a second row with the (redacted, truncated)
  * goal objective when a goal is open and carries a title.
  */
-export function buildStatusSection(snapshot: TrayStateSnapshot): TrayMenuItem[] {
+export function buildStatusSection(
+  snapshot: TrayStateSnapshot,
+  t?: StatusRowTranslator
+): TrayMenuItem[] {
   const rows: TrayMenuItem[] = [
     {
       kind: "action",
@@ -71,6 +83,24 @@ export function buildStatusSection(snapshot: TrayStateSnapshot): TrayMenuItem[] 
       payload: { kind: "native", action: "noop" },
     },
   ]
+
+  // "Responding…" is true of one conversation and of five. Concurrency is
+  // invisible without the number, and the number is the reason the user would
+  // open the app rather than assume one turn is nearly done. Only when there
+  // is more than one: for a single run the primary row already says it.
+  const activeCount = snapshot.chat.activeCount ?? 0
+  if (activeCount > 1) {
+    rows.push({
+      kind: "action",
+      id: "tray.status.running",
+      // Already-translated, because the count needs interpolation. The
+      // builder's resilient translator passes an unknown key through
+      // unchanged, so a literal survives `t(label)` intact.
+      label: t ? t("tray.status.runningCount", { count: activeCount }) : `tray.status.runningCount`,
+      disabled: true,
+      payload: { kind: "native", action: "noop" },
+    })
+  }
 
   const hasGoal = snapshot.goal.active || snapshot.goal.paused
   const title = snapshot.goal.title?.trim()

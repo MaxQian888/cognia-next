@@ -638,7 +638,8 @@
     "terminalRunning": "Terminal panel — a session is running",
     "terminalToggle": "Toggle terminal panel",
     "usage": "Usage & limits",
-    "usageOpen": "Open usage & limits"
+    "usageOpen": "Open usage & limits",
+    "runningCount": "{count, plural, one {# conversation running} other {# conversations running}}"
   },
   "titleBar": {
     "alwaysOnTop": "Always on top",

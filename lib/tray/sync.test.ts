@@ -86,7 +86,12 @@ describe("defaultSnapshot", () => {
     const snap = defaultSnapshot()
     expect(snap.goal).toEqual({ active: false, paused: false })
     expect(snap.automation).toEqual({ running: false, armed: true })
-    expect(snap.chat).toEqual({ streaming: false, hasActiveSession: false })
+    expect(snap.chat).toEqual({
+      streaming: false,
+      hasActiveSession: false,
+      awaitingApproval: false,
+      activeCount: 0,
+    })
     expect(snap.platform.os).toBeDefined()
   })
 })

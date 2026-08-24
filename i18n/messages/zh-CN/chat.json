@@ -1901,5 +1901,8 @@
     "title": "信任此工作区？",
     "trust": "信任工作区",
     "workspaceLabel": "工作区"
+  },
+  "backgroundRuns": {
+    "count": "{count, plural, other {后台还有 # 个会话在运行}}"
   }
 }

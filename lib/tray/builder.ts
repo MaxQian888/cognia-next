@@ -21,7 +21,11 @@ import type { TrayActionPayload, TrayDisplayPrefs, TrayMenuItem, TrayStateSnapsh
 
 /** Minimal translator signature — compatible with what `useTranslations()`
  * returns from next-intl. Tests can pass a synthetic identity function. */
-export type TrayTranslator = (key: string) => string
+/**
+ * `values` is forwarded for the one status row that carries a count; every
+ * other label is a bare key or an already-literal string.
+ */
+export type TrayTranslator = (key: string, values?: Record<string, unknown>) => string
 
 interface BuilderInput {
   items: TrayMenuItem[]
@@ -63,7 +67,7 @@ export function buildTrayPayload({ items, t, snapshot, display }: BuilderInput):
     // it is spliced here rather than returned as a single node by `transform`.
     if (item.kind === "action" && item.id === STATUS_PLACEHOLDER_ID) {
       if (!isHidden(item)) {
-        for (const row of buildStatusSection(snapshot)) {
+        for (const row of buildStatusSection(snapshot, t)) {
           const built = transform(row, t, snapshot, display)
           if (built) out.push(built)
         }

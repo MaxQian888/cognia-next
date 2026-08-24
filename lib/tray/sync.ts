@@ -47,7 +47,7 @@ export const BADGE_STATUS_COLORS: Record<TrayUsageMeterSummary["status"], string
  * tests can pass a minimal stand-in without recreating all of next-intl.
  */
 export interface NextIntlTranslator {
-  (key: string): string
+  (key: string, values?: Record<string, unknown>): string
   has(key: string): boolean
 }
 
@@ -64,7 +64,7 @@ export interface NextIntlTranslator {
  * `useSyncTrayToRust` in production.
  */
 export function makeResilientTrayTranslator(t: NextIntlTranslator): TrayTranslator {
-  return (key: string) => (t.has(key) ? t(key) : key)
+  return (key: string, values?: Record<string, unknown>) => (t.has(key) ? t(key, values) : key)
 }
 
 /**
@@ -109,7 +109,7 @@ export function defaultSnapshot(): TrayStateSnapshot {
   return {
     goal: { active: false, paused: false },
     automation: { running: false, armed: true },
-    chat: { streaming: false, hasActiveSession: false },
+    chat: { streaming: false, hasActiveSession: false, awaitingApproval: false, activeCount: 0 },
     platform: { os: os as TrayStateSnapshot["platform"]["os"] },
     app: { autostart: false, version: APP_VERSION },
   }

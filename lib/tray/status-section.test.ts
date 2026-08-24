@@ -18,6 +18,42 @@ function snap(overrides: Partial<TrayStateSnapshot> = {}): TrayStateSnapshot {
   }
 }
 
+describe("concurrency honesty", () => {
+  it("puts a blocked approval above a running turn", () => {
+    // An OS-level surface hiding "someone needs to decide something" is the
+    // worst version of this projection lying.
+    const key = deriveStatusKey(
+      snap({ chat: { streaming: true, hasActiveSession: true, awaitingApproval: true } })
+    )
+    expect(key).toBe("tray.status.awaitingApproval")
+  })
+
+  it("adds a count row once more than one conversation is running", () => {
+    const rows = buildStatusSection(
+      snap({ chat: { streaming: true, hasActiveSession: true, activeCount: 3 } }),
+      (key, values) => `${key}:${JSON.stringify(values)}`
+    )
+    const running = rows.find((row) => row.id === "tray.status.running")
+    expect(running?.kind).toBe("action")
+    expect(running && "label" in running ? running.label : undefined).toBe(
+      'tray.status.runningCount:{"count":3}'
+    )
+  })
+
+  it("omits the count row for a single run, which the primary row already says", () => {
+    const rows = buildStatusSection(
+      snap({ chat: { streaming: true, hasActiveSession: true, activeCount: 1 } }),
+      (key) => key
+    )
+    expect(rows.find((row) => row.id === "tray.status.running")).toBeUndefined()
+  })
+
+  it("omits the count row for a snapshot that predates the field", () => {
+    const rows = buildStatusSection(snap({ chat: { streaming: true, hasActiveSession: true } }))
+    expect(rows.find((row) => row.id === "tray.status.running")).toBeUndefined()
+  })
+})
+
 describe("deriveStatusKey", () => {
   it("returns idle when nothing is happening", () => {
     expect(deriveStatusKey(snap())).toBe("tray.status.idle")

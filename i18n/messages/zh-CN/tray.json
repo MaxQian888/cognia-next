@@ -52,7 +52,9 @@
     "idle": "空闲",
     "petNeedsAttention": "宠物需要照顾",
     "placeholder": "状态",
-    "streaming": "回复中…"
+    "streaming": "回复中…",
+    "awaitingApproval": "等待批准",
+    "runningCount": "{count, plural, other {# 个会话进行中}}"
   },
   "toggleWindow": "显示 / 隐藏窗口",
   "trayPanelToggle": "快捷面板",

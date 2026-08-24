@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useChatStore } from "@/stores/chat"
+import { aggregateRunState } from "@/lib/chat/aggregate-run-state"
 import { useSettingsStore } from "@/stores/settings"
 import { getOpenGoalForSession } from "@/lib/db/goals"
 import { getDb } from "@/lib/db/schema"
@@ -65,8 +66,15 @@ interface AutomationState {
 }
 
 export function useTrayStateSnapshot(): TrayStateSnapshot {
-  const status = useChatStore((s) => s.status)
+  // Deliberately NOT `s.status`: that is the focused slice projected onto the
+  // store top level, so the tray called the app idle whenever the conversation
+  // on screen was idle and two others were streaming.
+  const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const run = useMemo(
+    () => aggregateRunState({ sessions, activeSessionId }),
+    [sessions, activeSessionId]
+  )
 
   // Live goal subscription via Dexie's `useLiveQuery` — fires on every
   // pause / resume / stop / preempt the goal runtime writes to IndexedDB.
@@ -189,14 +197,16 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
       goal,
       automation,
       chat: {
-        streaming: status === "streaming",
+        streaming: run.streaming > 0,
         hasActiveSession: !!activeSessionId,
+        awaitingApproval: run.awaitingApproval > 0,
+        activeCount: run.active,
       },
       platform: { os: detectOs() },
       app: { autostart, version: APP_VERSION },
       pet,
       usage,
     }),
-    [goal, automation, status, activeSessionId, autostart, pet, usage]
+    [goal, automation, run, activeSessionId, autostart, pet, usage]
   )
 }

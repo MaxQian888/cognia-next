@@ -110,7 +110,20 @@ export interface TrayStateSnapshot {
     title?: string
   }
   automation: { running: boolean; armed: boolean }
-  chat: { streaming: boolean; hasActiveSession: boolean }
+  chat: {
+    /**
+     * ANY open conversation is streaming — not just the focused one. The tray
+     * speaks for the whole app, so the focused-slice projection
+     * (`useChatStore().status`) was a lie here whenever work ran in the
+     * background. See `lib/chat/aggregate-run-state.ts`.
+     */
+    streaming: boolean
+    hasActiveSession: boolean
+    /** Any conversation is blocked on a decision the user has not been shown. */
+    awaitingApproval?: boolean
+    /** Conversations in a non-idle state. Drives the "N running" row. */
+    activeCount?: number
+  }
   platform: { os: "windows" | "macos" | "linux" | "unknown" }
   /** App-level facts surfaced in the status / About sections. */
   app: {
