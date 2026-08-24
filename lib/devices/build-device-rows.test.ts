@@ -255,6 +255,51 @@ describe("admin state precedence", () => {
   })
 })
 
+describe("remote host liveness", () => {
+  /**
+   * The store only reports `ready` after authentication and both capability
+   * probes succeed, so the transport is demonstrably open. Judging that
+   * against `lastConnectedAt` would report a freshly-activated host as offline
+   * while it is answering calls.
+   */
+  it("treats a ready host as present even before it records a connection time", () => {
+    const rows = buildDeviceRows(
+      input({
+        remoteHosts: [host({ connectionState: "ready", lastConnectedAt: undefined })],
+      })
+    )
+    const row = find(rows, "host:h1")
+    expect(row.liveness.source).toBe("socket")
+    expect(row.reachability).toBe("online")
+  })
+
+  it("ages a host that is not ready against its last evidence", () => {
+    const rows = buildDeviceRows(
+      input({
+        // Well past the recently-active window, but still a positive instant:
+        // NOW is small in these fixtures, so a day's offset would go negative
+        // and read as "never seen" instead of "stale".
+        remoteHosts: [host({ connectionState: "degraded", lastConnectedAt: NOW - 600_000 })],
+      })
+    )
+    const row = find(rows, "host:h1")
+    expect(row.liveness.source).toBe("manifest")
+    expect(row.reachability).toBe("offline")
+  })
+
+  it("reports a host that was never reached as unknown, not offline", () => {
+    const rows = buildDeviceRows(
+      input({
+        remoteHosts: [host({ connectionState: "disconnected", lastConnectedAt: undefined })],
+      })
+    )
+    expect(find(rows, "host:h1")).toMatchObject({
+      reachability: "unknown",
+      adminState: "unknown",
+    })
+  })
+})
+
 describe("row composition", () => {
   it("marks the local machine as self and always online", () => {
     const rows = buildDeviceRows(input())

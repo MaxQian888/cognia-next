@@ -187,11 +187,20 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
 
 function buildRemoteHostRow(host: RemoteHostInput, input: BuildDeviceRowsInput): DeviceRow {
   const lastSeenAt = host.lastConnectedAt ?? host.featureManifestAt ?? host.capabilitiesAt ?? 0
-  const liveness: PlacementLiveness = {
-    online: host.connectionState === "ready",
-    lastSeenAt,
-    source: "manifest",
-  }
+  /**
+   * `ready` is socket-grade evidence, not a timestamp to be aged out.
+   *
+   * The remote-host store only reports `ready` after authentication AND both
+   * capability probes succeed, so the transport is demonstrably open right
+   * now — which is exactly what `LivenessSource: "socket"` means. Treating it
+   * as a `manifest` timestamp instead would judge a freshly-activated host
+   * against `lastConnectedAt`, and a host that is connected but has not yet
+   * recorded one would be reported offline while it is answering calls.
+   */
+  const liveness: PlacementLiveness =
+    host.connectionState === "ready"
+      ? { online: true, lastSeenAt: lastSeenAt > 0 ? lastSeenAt : input.now, source: "socket" }
+      : { online: false, lastSeenAt, source: "manifest" }
   const adminState: DeviceAdminState =
     host.connectionState === "revoked" ? "revoked" : lastSeenAt > 0 ? "active" : "unknown"
 

@@ -139,12 +139,20 @@ export function buildHostFeatureCells(
     if (!descriptor) {
       return { id: feature, group, state: "absent" as const, source: "host-manifest" as const }
     }
+    // `operations` is required by the type but arrives over the wire from a
+    // host we do not control, and a manifest that names a feature without
+    // listing its operations must degrade to "no detail" rather than taking
+    // the whole matrix down with it.
+    const operations = Array.isArray(descriptor.operations) ? descriptor.operations : []
     return {
       id: feature,
       group,
       state: "reported" as const,
       source: "host-manifest" as const,
-      detail: `v${descriptor.version} · ${descriptor.operations.join(", ")}`,
+      detail:
+        operations.length > 0
+          ? `v${descriptor.version} · ${operations.join(", ")}`
+          : `v${descriptor.version}`,
     }
   })
 }

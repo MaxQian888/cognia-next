@@ -8,6 +8,7 @@ import {
   requireSandboxTier,
 } from "./placement-directory"
 import type { DeviceRow, DeviceShellTierRow } from "./types"
+import type { PlacementReason } from "@/lib/placement/types"
 import type { PlacementLiveness } from "@/lib/placement/liveness"
 import type { HostFeatureManifest } from "@/lib/platform/host-feature-manifest"
 
@@ -191,5 +192,43 @@ describe("buildDeviceOptions", () => {
       buildDeviceOptions([local], [requireSandboxTier("microvm")], NOW)[0]!.verdict
     ).toMatchObject({ ready: false, reason: "sandbox_mismatch" })
     expect(buildDeviceOptions([local], [requireSandboxTier("os")], NOW)[0]!.eligible).toBe(true)
+  })
+})
+
+/**
+ * `lint:i18n` cannot see `` t(`placementReason.${reason}`) ``, so the
+ * catalogue is pinned here instead. `PlacementReason` is persisted on
+ * `AgentTeamChildRun.placementReason` and therefore append-only: a new member
+ * that reaches a picker without a label would render its raw enum value.
+ */
+describe("placement reason labels", () => {
+  const REASONS: readonly PlacementReason[] = [
+    "offline",
+    "deployment_mismatch",
+    "capability_mismatch",
+    "sandbox_mismatch",
+    "workspace_missing",
+    "credential_missing",
+    "capacity_exhausted",
+    "not_permitted",
+  ]
+
+  it.each(["en", "zh-CN"])("has a label for every reason in %s", (locale) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const messages = require(`../../i18n/messages/${locale}/devices.json`) as {
+      placementReason: Record<string, string>
+    }
+    for (const reason of REASONS) {
+      expect(typeof messages.placementReason[reason]).toBe("string")
+      expect(messages.placementReason[reason]!.length).toBeGreaterThan(0)
+    }
+  })
+
+  it("covers the whole union, so a new member fails here first", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const messages = require("../../i18n/messages/en/devices.json") as {
+      placementReason: Record<string, string>
+    }
+    expect(Object.keys(messages.placementReason).sort()).toEqual([...REASONS].sort())
   })
 })

@@ -241,5 +241,15 @@
     "hostsTitle": "远程主机",
     "hostsBody": "{count, plural, =0 {尚未配置任何主机。} other {已配置 # 台主机。}}连接、重命名与移除在设备控制台中管理。",
     "open": "打开设备控制台"
+  },
+  "placementReason": {
+    "offline": "离线",
+    "deployment_mismatch": "部署版本不一致",
+    "capability_mismatch": "缺少所需能力",
+    "sandbox_mismatch": "沙盒档位不可用",
+    "workspace_missing": "工作区不可用",
+    "credential_missing": "凭据不可用",
+    "capacity_exhausted": "已达并发上限",
+    "not_permitted": "不被允许"
   }
 }

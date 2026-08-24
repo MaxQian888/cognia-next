@@ -34,13 +34,24 @@ import { WorkflowCredentialsList } from "./settings/workflow-credentials-list"
 import { WorkflowPublishSection } from "./settings/workflow-publish-section"
 import { PluginCapabilitiesSection } from "./settings/plugin-capabilities-section"
 import { FanoutSubscriptionsPanel } from "@/components/workflow/library/fanout-subscriptions-panel"
-import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
 import { getDb } from "@/lib/db/schema"
+import { requireHostFeature } from "@/lib/devices/placement-directory"
+import type { DeviceKind } from "@/lib/devices/types"
+import { useDeviceOptions } from "@/hooks/devices/use-device-options"
 
 function num(value: string, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
 }
+
+/**
+ * A published workflow runs whole on its target, so the only candidates are
+ * machines advertising the host-side execution contract. Frozen at module
+ * scope: a fresh array each render would rebuild the option list on every
+ * keystroke elsewhere in this sidebar.
+ */
+const RUN_ON_REQUIREMENTS = Object.freeze([requireHostFeature("workflow.execution")])
+const RUN_ON_KINDS: readonly DeviceKind[] = Object.freeze(["remote-host"])
 
 export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   const t = useTranslations("workflowEditor.settings")
@@ -72,19 +83,20 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
 
   const retry = settings.retryDefaults
   const onFailure = settings.onFailure ?? { runCatchNodes: true, notify: false }
-  const remoteHosts = useRemoteHostStore(
-    useShallow((state) =>
-      state.hosts.filter((host) => {
-        const manifest = host.featureManifest
-        return (
-          manifest?.schemaVersion === 2 &&
-          Boolean(manifest.features["workflow.execution"]) &&
-          host.connectionState !== "revoked" &&
-          host.connectionState !== "versionMismatch"
-        )
-      })
-    )
-  )
+  /**
+   * Every reachable host, each with a verdict — not just the compatible ones.
+   *
+   * This used to filter the Select down to hosts whose manifest carried
+   * `workflow.execution` and silently drop the rest, so an offline host, an
+   * unprobed one, and a machine that simply cannot run workflows were equally
+   * invisible. An ineligible candidate now renders disabled with its typed
+   * `PlacementReason`, which is the interface half of ADR-0136's visible
+   * degradation.
+   */
+  // `PlacementReason` is a closed, append-only union; its labels live with the
+  // device console because that is where the vocabulary is owned.
+  const tPlacement = useTranslations("devices.placementReason")
+  const hostOptions = useDeviceOptions({ requirements: RUN_ON_REQUIREMENTS, kinds: RUN_ON_KINDS })
   const runOn = settings.runOn ?? { mode: "colocate" as const }
   const runOnValue = runOn.mode === "pinned" ? `pinned:${runOn.ref}` : runOn.mode
   const handoffSummary = useLiveQuery(
@@ -132,15 +144,21 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                     <SelectItem value="colocate">{t("runOn.colocate")}</SelectItem>
                     <SelectItem value="auto">{t("runOn.auto")}</SelectItem>
                   </SelectGroup>
-                  {remoteHosts.length > 0 ? (
+                  {hostOptions.length > 0 ? (
                     <SelectGroup>
                       <SelectLabel>{t("runOn.pinnedGroup")}</SelectLabel>
-                      {remoteHosts.map((host) => (
+                      {hostOptions.map((option) => (
                         <SelectItem
-                          key={host.id}
-                          value={`pinned:${host.featureManifest!.hostIdentity.id}`}
+                          key={option.row.ref}
+                          value={`pinned:${option.row.ref}`}
+                          disabled={!option.eligible}
                         >
-                          {host.label}
+                          {option.row.label}
+                          {option.verdict.ready ? null : (
+                            <span className="ml-2 text-[10px] text-muted-foreground">
+                              {tPlacement(option.verdict.reason)}
+                            </span>
+                          )}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -149,7 +167,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
               </Select>
               {!published ? (
                 <p className="text-[11px] text-muted-foreground">{t("runOn.publishRequired")}</p>
-              ) : remoteHosts.length === 0 ? (
+              ) : hostOptions.every((option) => !option.eligible) ? (
                 <p className="text-[11px] text-muted-foreground">{t("runOn.noCompatibleHosts")}</p>
               ) : null}
               {handoffSummary.active > 0 ? (

@@ -129,6 +129,23 @@ describe("buildHostFeatureCells", () => {
     })
   })
 
+  /**
+   * The manifest arrives over the wire from a host we do not control. A
+   * feature named without its operations must degrade to "no detail", not take
+   * the whole matrix down.
+   */
+  it("survives a feature descriptor with no operations list", () => {
+    const cells = buildHostFeatureCells(
+      manifest({
+        "workflow.execution": { version: 2 } as never,
+      })
+    )
+    expect(cells.find((cell) => cell.id === "workflow.execution")).toMatchObject({
+      state: "reported",
+      detail: "v2",
+    })
+  })
+
   it("splits proxy features away from execution features", () => {
     const cells = buildHostFeatureCells(manifest({}))
     const proxy = cells.find((cell) => cell.id === "browser.remote")

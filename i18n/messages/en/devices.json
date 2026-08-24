@@ -241,5 +241,15 @@
     "hostsTitle": "Remote hosts",
     "hostsBody": "{count, plural, =0 {No hosts are configured.} =1 {One host is configured.} other {# hosts are configured.}} Connecting, renaming and removing are managed in the device console.",
     "open": "Open device console"
+  },
+  "placementReason": {
+    "offline": "Offline",
+    "deployment_mismatch": "Different deployment",
+    "capability_mismatch": "Missing a required capability",
+    "sandbox_mismatch": "Sandbox tier unavailable",
+    "workspace_missing": "Workspace not available",
+    "credential_missing": "Credential not available",
+    "capacity_exhausted": "At capacity",
+    "not_permitted": "Not permitted"
   }
 }

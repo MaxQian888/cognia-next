@@ -8396,6 +8396,16 @@
       "role": "角色",
       "serverVersion": "服务端版本"
     },
+    "placementReason": {
+      "capability_mismatch": "缺少所需能力",
+      "capacity_exhausted": "已达并发上限",
+      "credential_missing": "凭据不可用",
+      "deployment_mismatch": "部署版本不一致",
+      "not_permitted": "不被允许",
+      "offline": "离线",
+      "sandbox_mismatch": "沙盒档位不可用",
+      "workspace_missing": "工作区不可用"
+    },
     "reachability": {
       "offline": "离线",
       "online": "在线",

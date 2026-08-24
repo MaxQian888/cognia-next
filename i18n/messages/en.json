@@ -8396,6 +8396,16 @@
       "role": "Role",
       "serverVersion": "Server version"
     },
+    "placementReason": {
+      "capability_mismatch": "Missing a required capability",
+      "capacity_exhausted": "At capacity",
+      "credential_missing": "Credential not available",
+      "deployment_mismatch": "Different deployment",
+      "not_permitted": "Not permitted",
+      "offline": "Offline",
+      "sandbox_mismatch": "Sandbox tier unavailable",
+      "workspace_missing": "Workspace not available"
+    },
     "reachability": {
       "offline": "Offline",
       "online": "Online",
