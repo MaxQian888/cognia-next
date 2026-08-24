@@ -14,6 +14,7 @@ import {
 } from "@/lib/claude/agents/chat-mention-targets"
 import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-mention-targets"
 import { useProjectStore } from "@/stores/project/project-store"
+import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
 import { allRootPaths } from "@/lib/workspace/roots"
 import { resolveWorkspaceTrustForSend } from "@/lib/workspace/trust-gate"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
@@ -57,6 +58,21 @@ export async function buildSendOptions(
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
 
+  // The workspace THIS TURN runs in. Resolved from the session's own
+  // `projectId` first and only then from the UI-active workspace — the two
+  // diverge whenever the conversation list spans workspaces, a background pane
+  // keeps streaming after the user switches, or the turn has no UI focus at all
+  // (connector / scheduler legs). Resolving against the active workspace in
+  // those cases sends the turn against another project's roots. Everything
+  // downstream — cwd, allRootPaths, workspace trust, additionalDirectories,
+  // project RAG — reads this one value.
+  const projectState = useProjectStore.getState()
+  const turnProject = resolveSessionWorkspace(
+    session,
+    projectState.projects,
+    projectState.activeProjectId
+  )
+
   // `@agent` single-turn routing: resolve the first @-mentioned subagent in the
   // message to its dispatcher id. `resolveSendOptions` only honours it when the
   // id is actually registered in this turn's agent map (membership guard), so a
@@ -67,30 +83,18 @@ export async function buildSendOptions(
   // is cached (3s) and returns `[]` off-Tauri, so this stays cheap.
   let targetAgentId: string | undefined
   if (userMessage) {
-    const ps = useProjectStore.getState()
-    const activeProjectForAgents = ps.activeProjectId
-      ? (ps.projects.find((p) => p.id === ps.activeProjectId) ?? null)
-      : null
     const markdownTargets = await discoverMarkdownAgentTargets({
       cwd: session?.workingDir ?? undefined,
-      roots: activeProjectForAgents ? allRootPaths(activeProjectForAgents) : [],
+      roots: turnProject ? allRootPaths(turnProject) : [],
     })
     const mentionTargets = [...buildChatMentionTargets(), ...markdownTargets]
     targetAgentId = resolveTargetAgentId(userMessage, mentionTargets) ?? undefined
   }
 
-  // Active workspace (project). Its `rootDir` joins the cwd resolution chain
-  // and its `additionalDirs` are unioned into `additionalDirectories` for this
-  // turn. `null` when no workspace is active (resolver falls back as before).
-  const projectState = useProjectStore.getState()
-  const activeProject = projectState.activeProjectId
-    ? (projectState.projects.find((p) => p.id === projectState.activeProjectId) ?? null)
-    : null
-
   // Workspace Trust gate: an untrusted active workspace runs in Restricted Mode
   // (disk/host tools denied by `resolveSendOptions`). Authoritative at send time
   // — independent of the React banner state. Web + disabled setting bypass.
-  const workspaceTrust = await resolveWorkspaceTrustForSend(activeProject, {
+  const workspaceTrust = await resolveWorkspaceTrustForSend(turnProject, {
     enabled: appSettings?.workspaceTrust?.enabled !== false,
     onWeb: !isTauri(),
   })
@@ -208,7 +212,7 @@ export async function buildSendOptions(
     checkpointInstructions
   )
   const memoryBranch = useGitStore.getState().status?.branch ?? undefined
-  const primaryRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
+  const primaryRoot = turnProject ? primaryRootOf(turnProject)?.path : undefined
   const referencedMemoryPath =
     primaryRoot && referencedPaths
       ? referencedPaths
@@ -224,7 +228,7 @@ export async function buildSendOptions(
     postCompaction,
     session,
     appSettings,
-    activeProject,
+    activeProject: turnProject,
     workspaceRestricted: workspaceTrust.restricted,
     trustedWorkspaceRoots: workspaceTrust.trustedRoots,
     referencedPaths,

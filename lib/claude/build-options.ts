@@ -374,8 +374,12 @@ export interface BuildOptionsContext {
    * The active workspace (project). Its `rootDir` feeds the cwd resolution
    * chain (between the session override and the character default) and its
    * `additionalDirs` are unioned into `additionalDirectories` alongside any
-   * @-referenced paths. Direct chat passes the `useProjectStore` active
-   * project; team/connector/diagnostics paths pass `null` to opt out.
+   * @-referenced paths.
+   *
+   * This is the workspace THIS TURN runs in, which is the session's own
+   * workspace — NOT necessarily the one active in the UI. Direct chat resolves
+   * it via `resolveSessionWorkspace` (`lib/workspace/session-workspace.ts`);
+   * team/connector/diagnostics paths pass `null` to opt out.
    */
   activeProject?: Project | null
   /**
