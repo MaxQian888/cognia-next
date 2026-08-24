@@ -977,6 +977,19 @@
       "summary": {
         "defaults": "Using defaults",
         "overrides": "{count, plural, one {# override} other {# overrides}}"
+      },
+      "workspaceMove": {
+        "failed": "Could not move the conversation: {error}",
+        "hint": "The conversation is re-bound to the new workspace. Anything it left in the old worktree stays on disk.",
+        "label": "Workspace",
+        "moved": "Conversation moved",
+        "placeholder": "Choose a workspace",
+        "refused": {
+          "same-workspace": "The conversation is already in that workspace.",
+          "session-locked": "This conversation was handed off to another host and is read-only here.",
+          "session-running": "Stop the running turn before moving the conversation.",
+          "unknown-workspace": "That workspace no longer exists."
+        }
       }
     },
     "showArtifacts": "Show artifacts panel",

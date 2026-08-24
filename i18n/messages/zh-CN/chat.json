@@ -977,6 +977,19 @@
       "summary": {
         "defaults": "使用默认值",
         "overrides": "{count} 项覆盖"
+      },
+      "workspaceMove": {
+        "failed": "迁移会话失败：{error}",
+        "hint": "会话会重新绑定到新工作区。它在旧工作树里留下的内容仍保留在磁盘上。",
+        "label": "工作区",
+        "moved": "会话已迁移",
+        "placeholder": "选择工作区",
+        "refused": {
+          "same-workspace": "会话已经在该工作区了。",
+          "session-locked": "该会话已移交给另一台主机，在此为只读。",
+          "session-running": "请先停止正在进行的回合再迁移会话。",
+          "unknown-workspace": "该工作区已不存在。"
+        }
       }
     },
     "showArtifacts": "展开产物面板",

@@ -104,6 +104,7 @@ import { selectVisibleMessages } from "@/stores/chat/chat-store"
 import { useChatStore } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
+import { SessionWorkspaceMove } from "./session-workspace-move"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { useSettingsStore } from "@/stores/settings"
 import { resolveEffectiveCwd } from "@/lib/workspace/effective-cwd"
@@ -939,6 +940,11 @@ export function SessionSettingsSheet({
               open={sectionOpen.execution}
               onOpenChange={setSection("execution")}
             >
+              {/* Attribution is correctable: a conversation started in the
+                  wrong workspace — or in Default before one existed — would
+                  otherwise be stuck there, invisible to the workspace it
+                  belongs to. */}
+              <SessionWorkspaceMove session={session} />
               <SessionExecutionWorkspace
                 session={session}
                 projectId={activeProject?.id}
