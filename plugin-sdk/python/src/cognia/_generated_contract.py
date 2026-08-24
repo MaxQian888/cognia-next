@@ -254,6 +254,7 @@ CAPABILITY_FIELDS = {
     "python": [
         "pythonMain",
         "pythonDependencies",
+        "pythonVenv",
     ],
     "scheduler": [
         "scheduledTasks",

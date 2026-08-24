@@ -1347,6 +1347,7 @@ pub fn run() {
             plugin_api::python::commands::plugin_python_call_hook,
             plugin_api::python::commands::plugin_python_push_config,
             plugin_api::python::commands::plugin_python_install_deps,
+            plugin_api::python::commands::plugin_python_install_uv,
             plugin_api::python::commands::plugin_python_is_initialized,
             plugin_api::python::commands::plugin_python_get_info,
             plugin_api::python::commands::plugin_python_unload,

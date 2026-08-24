@@ -60,6 +60,12 @@ pub struct PythonHostSettings {
     /// Cap on concurrent plugin -> host RPC calls (default 8). The host.py
     /// runaway guard is derived from this and always sits above it.
     pub max_outbound_host_calls: Option<usize>,
+    /// Which tool creates environments and installs packages. `auto` prefers
+    /// `uv` and falls back to `pip`.
+    pub installer: super::venv::InstallerPreference,
+    /// User override of the manifest's `pythonVenv`. `shared` | `isolated`.
+    /// The user's choice wins: they are the one paying for the disk.
+    pub venv_scope: Option<String>,
     /// ADR-0028 Phase 3 — run the interpreter under the OS sandbox
     /// (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; Windows is
     /// not wrapped yet (its restricted-token runner can't host a long-lived
@@ -74,11 +80,31 @@ pub struct PythonHostSettings {
 pub struct PythonRuntimeInfo {
     pub available: bool,
     pub version: Option<String>,
+    /// `uv --version` output when it is on PATH. `None` means the guided
+    /// install is worth offering.
+    pub uv_version: Option<String>,
     pub plugin_count: usize,
     pub lazy_hosts: usize,
     pub total_calls: u64,
     pub total_execution_time_ms: u64,
     pub failed_calls: u64,
+}
+
+/// Outcome of `plugin_python_install_deps`.
+///
+/// Returned rather than discarded because a downgrade is something the user
+/// needs told: "this plugin has its own 400 MB environment" is confusing
+/// without the reason, and the reason is only known here.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PythonInstallOutcome {
+    pub venv_dir: String,
+    /// `shared` | `isolated`.
+    pub scope: String,
+    /// `uv` | `pip` | `custom`.
+    pub installer: String,
+    /// Present when a shared install was asked for and could not be given.
+    pub downgraded_reason: Option<String>,
 }
 
 /// Wire-exact match for `PythonPluginInfo` (manager.ts:236-240).
@@ -762,9 +788,18 @@ pub async fn plugin_python_install_deps(
     plugins: State<'_, PluginRuntimeState>,
     plugin_id: String,
     dependencies: Vec<String>,
-) -> Result<()> {
-    plugin_python_install_deps_for_state(state.inner(), plugins.inner(), &plugin_id, &dependencies)
-        .await
+    venv_scope: Option<String>,
+    host_settings: Option<PythonHostSettings>,
+) -> Result<PythonInstallOutcome> {
+    plugin_python_install_deps_for_state(
+        state.inner(),
+        plugins.inner(),
+        &plugin_id,
+        &dependencies,
+        venv_scope.as_deref(),
+        host_settings.unwrap_or_default(),
+    )
+    .await
 }
 
 pub async fn plugin_python_install_deps_for_state(
@@ -772,8 +807,18 @@ pub async fn plugin_python_install_deps_for_state(
     plugins: &PluginRuntimeState,
     plugin_id: &str,
     dependencies: &[String],
-) -> Result<()> {
-    install_deps_inner(state, plugins, plugin_id, dependencies).await
+    manifest_scope: Option<&str>,
+    settings: PythonHostSettings,
+) -> Result<PythonInstallOutcome> {
+    install_deps_inner(
+        state,
+        plugins,
+        plugin_id,
+        dependencies,
+        manifest_scope,
+        settings,
+    )
+    .await
 }
 
 /// Answer one plugin -> host RPC request (ADR-0143).
@@ -831,6 +876,22 @@ pub async fn plugin_python_host_response_for_state(
         Err(error.unwrap_or_else(|| "host call failed".into()))
     };
     host.respond_to_host_request(request_id, outcome).await
+}
+
+/// Install `uv` with the probed interpreter's own pip.
+///
+/// Deliberately not the vendor's shell installer: piping a remote script into
+/// a shell is a different trust decision from installing a package, and this
+/// host already installs packages from PyPI for every plugin that declares
+/// `pythonDependencies`. Same boundary, no new one.
+#[tauri::command]
+pub async fn plugin_python_install_uv(state: State<'_, PythonRuntimeState>) -> Result<String> {
+    plugin_python_install_uv_for_state(state.inner()).await
+}
+
+pub async fn plugin_python_install_uv_for_state(state: &PythonRuntimeState) -> Result<String> {
+    let base = require_interpreter(state)?;
+    super::venv::install_uv(&base, &state.sink()).await
 }
 
 #[tauri::command]
@@ -899,6 +960,10 @@ fn runtime_info_inner(state: &PythonRuntimeState) -> PythonRuntimeInfo {
     PythonRuntimeInfo {
         available: interpreter.is_some(),
         version: interpreter.as_ref().map(|i| i.version.clone()),
+        // Probed per call rather than cached: the user may install uv from
+        // the settings panel and expect the panel to notice.
+        uv_version: super::venv::discover_uv(None)
+            .and_then(|program| super::venv::uv_version_of(&program)),
         plugin_count: state.hosts.read().len(),
         lazy_hosts: state.lazy_count(),
         total_calls: state.counters.total_calls.load(Ordering::Relaxed),
@@ -1346,14 +1411,36 @@ async fn install_deps_inner(
     plugins: &PluginRuntimeState,
     plugin_id: &str,
     dependencies: &[String],
-) -> Result<()> {
+    manifest_scope: Option<&str>,
+    settings: PythonHostSettings,
+) -> Result<PythonInstallOutcome> {
     // Same gate order as load: permission first, availability second.
     check_execute_grant(plugins, plugin_id)?;
     let base = require_interpreter(state)?;
     let sink = state.sink();
-    let venv_dir = super::venv::ensure_venv(&base, &state.python_dir, plugin_id, &sink).await?;
-    let venv_python = super::venv::venv_python(&venv_dir);
-    super::venv::install_deps(&venv_python, dependencies, plugin_id, &sink).await
+    let installer = super::venv::resolve_installer(&settings.installer)?;
+    // The user's setting beats the manifest: the plugin author knows whether
+    // its dependencies are unusual, but the user owns the disk.
+    let scope = super::venv::VenvScope::parse(settings.venv_scope.as_deref().or(manifest_scope));
+    let outcome = super::venv::provision_dependencies(
+        &base,
+        &state.python_dir,
+        plugin_id,
+        dependencies,
+        scope,
+        &installer,
+        &sink,
+    )
+    .await?;
+    if let Some(reason) = &outcome.downgraded_reason {
+        log::info!("[python.{plugin_id}] using an isolated environment: {reason}");
+    }
+    Ok(PythonInstallOutcome {
+        venv_dir: outcome.venv_dir.to_string_lossy().into_owned(),
+        scope: outcome.scope.as_str().to_string(),
+        installer: outcome.installer,
+        downgraded_reason: outcome.downgraded_reason,
+    })
 }
 
 async fn unload_inner(state: &PythonRuntimeState, plugin_id: &str) -> Result<()> {
@@ -1811,15 +1898,29 @@ mod tests {
         let state = py_state(&tmp);
         let plugins = plugins_state(&tmp);
         // No grant AND no interpreter: permission gate wins.
-        let err = install_deps_inner(&state, &plugins, "demo", &["requests".into()])
-            .await
-            .unwrap_err();
+        let err = install_deps_inner(
+            &state,
+            &plugins,
+            "demo",
+            &["requests".into()],
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PermissionDenied { .. }));
         // Granted but uninitialized: availability error.
         grant_execute(&plugins, "demo");
-        let err = install_deps_inner(&state, &plugins, "demo", &["requests".into()])
-            .await
-            .unwrap_err();
+        let err = install_deps_inner(
+            &state,
+            &plugins,
+            "demo",
+            &["requests".into()],
+            None,
+            PythonHostSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, PluginError::PythonUnavailable(_)));
     }
 
@@ -2593,6 +2694,7 @@ def rewrite(payload):
         let info = PythonRuntimeInfo {
             available: true,
             version: Some("3.12.0".into()),
+            uv_version: Some("uv 0.5.0".into()),
             plugin_count: 1,
             lazy_hosts: 0,
             total_calls: 2,
@@ -2602,6 +2704,7 @@ def rewrite(payload):
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["plugin_count"], 1);
         assert_eq!(json["total_execution_time_ms"], 3);
+        assert_eq!(json["uv_version"], "uv 0.5.0");
 
         let info = PythonPluginInfo {
             plugin_id: "demo".into(),

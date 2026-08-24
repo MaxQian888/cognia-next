@@ -12,7 +12,9 @@ describe("plugin interface catalog", () => {
   beforeEach(() => clearPluginApiAuditEvents())
 
   it("indexes the canonical ctx method surface", () => {
-    expect(listPluginApiMethodContracts()).toHaveLength(646)
+    // A canary, not a fact worth memorising: any catalog edit lands here so
+    // the method surface cannot grow or shrink without someone noticing.
+    expect(listPluginApiMethodContracts()).toHaveLength(651)
     expect(getPluginApiMethodContract("session.listSessions")).toMatchObject({
       name: "listSessions",
       namespace: { authorPath: "ctx.session" },

@@ -4835,6 +4835,10 @@ describe("PluginManager", () => {
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_install_deps", {
         pluginId: "py-plugin",
         dependencies: ["requests>=2"],
+        // The manifest's environment choice and the user's host settings both
+        // ride along: the backend decides shared-vs-isolated and needs both.
+        venvScope: null,
+        hostSettings: null,
       })
       await manager.callPythonHook("py-plugin", "onMessageSend", "rewrite", null)
       expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {

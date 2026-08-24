@@ -657,6 +657,19 @@ export interface PluginManifest {
   /** Python package dependencies */
   pythonDependencies?: string[]
 
+  /**
+   * Which environment this plugin's `pythonDependencies` install into.
+   *
+   * `"shared"` (the default) puts them in one environment several plugins
+   * draw on — cheaper on disk and much faster to provision. The host only
+   * shares when the whole contributor set still resolves together, so a
+   * plugin whose requirements conflict is given its own environment anyway.
+   *
+   * `"isolated"` opts out up front, for a plugin that knows its dependencies
+   * are unusual. The user's setting overrides whatever is declared here.
+   */
+  pythonVenv?: "shared" | "isolated"
+
   // Configuration
   /** JSON Schema for plugin configuration */
   configSchema?: PluginConfigSchema
@@ -3314,6 +3327,13 @@ export interface PythonHostSettings {
    * value so it always sits above it.
    */
   maxOutboundHostCalls?: number
+  /** Which tool creates environments and installs packages. */
+  installer?: PythonInstallerPreference
+  /**
+   * Override the manifest's `pythonVenv`. The user's choice wins — they own
+   * the disk the environment sits on.
+   */
+  venvScope?: "shared" | "isolated"
   /**
    * ADR-0028 Phase 3 — run the interpreter under the OS sandbox
    * (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; defaults from
@@ -3321,6 +3341,41 @@ export interface PythonHostSettings {
    * restricted-token runner can't host a long-lived stdio JSON-RPC process).
    */
   sandboxed?: boolean
+}
+
+/**
+ * Which tool provisions a Python plugin's environment.
+ *
+ * `auto` prefers `uv` when it is on PATH and falls back to `pip`. A `custom`
+ * installer is driven by argv templates and never gets the shared
+ * environment: sharing is only safe behind a dependency resolution the host
+ * can perform without installing, and it cannot express that in an arbitrary
+ * CLI.
+ */
+export interface PythonInstallerPreference {
+  kind?: "auto" | "uv" | "pip" | "custom"
+  /** Explicit executable for `uv` / `custom`; skips the PATH probe. */
+  path?: string
+  /** `custom` only: argv to create an environment. `{python}` / `{venv}`. */
+  createArgs?: string[]
+  /**
+   * `custom` only: argv to install. `{venvPython}` / `{venv}` substitute, and
+   * `{specs}` expands to one argument per requirement.
+   */
+  installArgs?: string[]
+}
+
+/** Result of `plugin_python_install_deps`. */
+export interface PythonInstallOutcome {
+  venvDir: string
+  scope: "shared" | "isolated"
+  installer: "uv" | "pip" | "custom"
+  /**
+   * Why a requested shared install became an isolated one. Surfaced rather
+   * than swallowed: an unexpectedly large per-plugin environment is confusing
+   * without the reason.
+   */
+  downgradedReason?: string | null
 }
 
 /** One `@hook` declared by a python plugin, from `import_main`'s reply. */

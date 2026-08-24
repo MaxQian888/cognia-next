@@ -31,6 +31,7 @@ import type {
   PluginVerificationStage,
   PythonHookDeclaration,
   PythonHostSettings,
+  PythonInstallOutcome,
   PythonLoadResult,
   PluginChildLifecycleAPI,
   PluginOptionalServiceListener,
@@ -445,6 +446,12 @@ interface InstallTransactionState {
 export interface PythonRuntimeInfo {
   available: boolean
   version: string | null
+  /**
+   * `uv --version` when it is on PATH. `null` means the faster installer is
+   * absent and the guided install (`plugin_python_install_uv`) is worth
+   * offering; the runtime still works on pip.
+   */
+  uv_version: string | null
   plugin_count: number
   /** Loaded plugins currently demoted to a dormant lazy slot. */
   lazy_hosts: number
@@ -6148,12 +6155,34 @@ export class PluginManager {
   }
 
   /**
-   * Create the plugin's venv (if missing) and pip-install its declared
+   * Create the plugin's environment (if missing) and install its declared
    * dependencies, streaming progress into the log buffer. Callers MUST
    * obtain explicit user consent first (network + disk side effects).
+   *
+   * The environment may be shared with other plugins — the host only shares
+   * when the whole contributor set still resolves together, and reports a
+   * downgrade in the result rather than silently giving the plugin its own.
    */
-  async installPythonDeps(pluginId: string, dependencies: string[]): Promise<void> {
-    await this.invokeNativeHost("plugin_python_install_deps", { pluginId, dependencies })
+  async installPythonDeps(
+    pluginId: string,
+    dependencies: string[]
+  ): Promise<PythonInstallOutcome | null> {
+    // Both of these are hints the backend can do without; neither is allowed
+    // to turn a missing store or Dexie row into a failed install.
+    const manifestScope = (() => {
+      try {
+        return usePluginStore.getState()?.plugins?.[pluginId]?.manifest?.pythonVenv ?? null
+      } catch {
+        return null
+      }
+    })()
+    const hostSettings = await getPythonHostSettings(pluginId).catch(() => undefined)
+    return this.invokeNativeHost<PythonInstallOutcome | null>("plugin_python_install_deps", {
+      pluginId,
+      dependencies,
+      venvScope: manifestScope,
+      hostSettings: hostSettings ?? null,
+    })
   }
 
   /** Host-level python settings (persisted on the Dexie plugins row). */

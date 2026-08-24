@@ -251,7 +251,7 @@
     {
       "id": "python",
       "support": "supported",
-      "manifestFields": ["pythonMain", "pythonDependencies"],
+      "manifestFields": ["pythonMain", "pythonDependencies", "pythonVenv"],
       "introducedIn": "0.1.0",
       "minimumHostVersion": "0.1.0"
     },

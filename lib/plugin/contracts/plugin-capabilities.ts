@@ -385,8 +385,8 @@ export const PLUGIN_CAPABILITY_CONTRACTS: readonly PluginCapabilityContract[] = 
   {
     id: "python",
     support: "supported",
-    manifestFields: ["pythonMain", "pythonDependencies"],
-    runtimeBinding: "PyO3/Tauri python runtime",
+    manifestFields: ["pythonMain", "pythonDependencies", "pythonVenv"],
+    runtimeBinding: "Tauri python runtime (subprocess host, NDJSON over stdio)",
     hostBindings: [
       "crates/cognia-plugin-runtime/src/python/commands.rs",
       "lib/plugin/core/manager.ts",

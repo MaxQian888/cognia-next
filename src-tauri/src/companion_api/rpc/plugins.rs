@@ -747,15 +747,21 @@ pub(super) async fn dispatch(
                 .ok_or_else(|| RpcError::headless_host_required(name))?;
             let plugin_id: String = required_aliased(&args, "plugin_id", "pluginId")?;
             let dependencies: Vec<String> = required(&args, "dependencies")?;
-            crate::plugin_api::python::commands::plugin_python_install_deps_for_state(
-                services.python_plugins.as_ref(),
-                services.plugin_runtime.as_ref(),
-                &plugin_id,
-                &dependencies,
+            let venv_scope: Option<String> = optional_aliased(&args, "venv_scope", "venvScope")?;
+            let host_settings: Option<crate::plugin_api::python::commands::PythonHostSettings> =
+                optional_aliased(&args, "host_settings", "hostSettings")?;
+            to_json(
+                crate::plugin_api::python::commands::plugin_python_install_deps_for_state(
+                    services.python_plugins.as_ref(),
+                    services.plugin_runtime.as_ref(),
+                    &plugin_id,
+                    &dependencies,
+                    venv_scope.as_deref(),
+                    host_settings.unwrap_or_default(),
+                )
+                .await
+                .map_err(plugin_rpc_error)?,
             )
-            .await
-            .map(|_| Value::Null)
-            .map_err(plugin_rpc_error)
         }
         "plugin_python_unload" => {
             let services = host
