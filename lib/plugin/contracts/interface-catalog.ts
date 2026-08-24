@@ -6,6 +6,29 @@ import {
 import type { PluginPermission } from "@/types/plugin"
 
 export type PluginApiRuntime = "frontend" | "hybrid" | "python" | "wasm" | "vscode"
+
+/**
+ * Classify a plugin's manifest type as the runtime the API catalog reasons in.
+ *
+ * These are two vocabularies for the same thing and they agree everywhere but
+ * one spelling, so the mapping lives here — beside the union — rather than at
+ * the call site, where a new plugin type could be added without anyone
+ * noticing the catalog still classifies it as `frontend`.
+ */
+export function pluginApiRuntimeForType(type: string | undefined): PluginApiRuntime {
+  switch (type) {
+    case "python":
+      return "python"
+    case "hybrid":
+      return "hybrid"
+    case "wasm":
+      return "wasm"
+    case "vscode-extension":
+      return "vscode"
+    default:
+      return "frontend"
+  }
+}
 export type PluginApiPlatform = "desktop" | "web" | "mobile" | "headless"
 
 export interface EffectivePluginApiMethodContract extends PluginApiMethodContract {
@@ -28,6 +51,13 @@ export type PluginApiPolicyDecision =
 export interface PluginApiAuditEvent {
   pluginId: string
   methodId: string
+  /**
+   * Runtime the call came from. Load-bearing rather than decorative: it is one
+   * of the axes `evaluatePluginApiCall` gates on, so an audit record without it
+   * cannot explain its own `denied` verdict — and consumers cannot tell an
+   * in-renderer call apart from one that crossed a process boundary.
+   */
+  runtime: PluginApiRuntime
   outcome: "allowed" | "denied" | "error"
   durationMs: number
   dataClassification: PluginApiNamespaceContract["dataClassification"] | "unknown"

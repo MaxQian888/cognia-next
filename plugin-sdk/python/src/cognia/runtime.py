@@ -37,6 +37,14 @@ from .types import (
 # chunk_end frames, mirroring the host's event channel.
 EventSink = Callable[[str, Any, Optional[int]], None]
 
+# Answers a ``cognia.ctx.*`` call. May be sync or async; the return value is
+# whatever the host's ``ctx.<namespace>.<method>`` produced.
+HostCallHandler = Callable[[str, Dict[str, Any]], Any]
+
+
+class HostCallError(RuntimeError):
+    """A ``cognia.ctx.*`` call the host refused, or that had no host at all."""
+
 
 class Runtime:
     """A registry + dispatch engine matching the host protocol."""
@@ -48,6 +56,7 @@ class Runtime:
         self._config_listeners: List[Callable[[Dict[str, Any]], None]] = []
         self._current_call_id: Optional[int] = None
         self._event_sink: Optional[EventSink] = None
+        self._host_call_handler: Optional[HostCallHandler] = None
         # External-agent presets contributed via the cognia_next helper; the
         # host normally collects these from the manifest, but recording them
         # here keeps the typed helper introspectable in tests.
@@ -226,6 +235,35 @@ class Runtime:
             {"contributionId": contribution_id, "channel": channel, "payload": payload},
         )
 
+    # -- host calls ---------------------------------------------------------
+
+    def set_host_call_handler(self, handler: Optional["HostCallHandler"]) -> None:
+        """Attach the thing that answers ``cognia.ctx.*`` calls.
+
+        In production the embedded host owns this end and this package is not
+        even imported — the shim replaces ``cognia`` in ``sys.modules``. Here
+        it exists so a plugin that calls the host can be unit-tested offline:
+        register a handler and assert on the calls it receives.
+        """
+        self._host_call_handler = handler
+
+    async def host_call(self, method: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """Route one ``<namespace>.<method>`` call to the attached handler.
+
+        Raises rather than returning a sentinel when nothing is attached: a
+        plugin silently receiving ``None`` from ``ctx.storage.get`` would look
+        like a cache miss, which is the kind of bug that survives a test suite.
+        """
+        if self._host_call_handler is None:
+            raise HostCallError(
+                f"no host attached: cannot serve '{method}'. In a unit test, call "
+                "runtime.set_host_call_handler(...) to stub the host."
+            )
+        result = self._host_call_handler(method, dict(params or {}))
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
     def progress(self, pct: Optional[float] = None, message: Optional[str] = None) -> None:
         """``cognia.progress(...)`` — report progress for the in-flight call."""
         data: Dict[str, Any] = {}
@@ -313,6 +351,7 @@ class Runtime:
         self._external_agent_adapters.clear()
         self._current_call_id = None
         self._event_sink = None
+        self._host_call_handler = None
 
 
 # -- active-runtime singleton ----------------------------------------------

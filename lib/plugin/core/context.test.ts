@@ -41,7 +41,9 @@ import { __resetMcpServerPresetsForTesting } from "@/lib/plugin/registries/mcp-s
 import { __resetNativeAnthropicToolsForTesting } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { PluginDisposableScope } from "./disposable-scope"
 import { PluginRegistry } from "./registry"
-import { subscribePluginApiAudit } from "../contracts/interface-catalog"
+import { subscribePluginApiAudit, pluginApiRuntimeForType } from "../contracts/interface-catalog"
+import { PLUGIN_API_NAMESPACE_CONTRACTS } from "@cognia/plugin-sdk/contracts"
+import { routePythonHostRequest } from "@/lib/plugin/python/host-request-router"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
@@ -1963,5 +1965,89 @@ describe("agent imperative API", () => {
       ).rejects.toThrow(/allowedDomains/)
       expect(fetchMock).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe("python host-call parity (ADR-0143)", () => {
+  /**
+   * The catalog claims a set of `ctx.*` namespaces is reachable from a Python
+   * plugin. Nothing in the Python process can verify that: it only sends
+   * `<namespace>.<method>` strings over a pipe. So the claim is checked here,
+   * against a real context — otherwise the contract could say `ctx.git` is
+   * python-callable long after the namespace was renamed, and the only symptom
+   * would be a plugin author's call failing at runtime.
+   *
+   * This is the same failure ADR-0087 recorded for `pythonExecution`: an SDK
+   * that advertised capabilities the runtime could not execute.
+   */
+  const pythonNamespaces = PLUGIN_API_NAMESPACE_CONTRACTS.filter((namespace) =>
+    namespace.runtimes.includes("python")
+  )
+
+  it("opens at least the namespaces the reverse RPC channel was built for", () => {
+    expect(pythonNamespaces.map((namespace) => namespace.id).sort()).toEqual(
+      ["agent", "fs", "git", "logger", "secrets", "storage", "ui"].sort()
+    )
+  })
+
+  it.each(pythonNamespaces.map((namespace) => [namespace.id, namespace] as const))(
+    "ctx.%s exists on a real context with every method the contract lists",
+    (id, namespace) => {
+      const context = createFullPluginContext(createMockPlugin(), mockManager)
+      expect((context as unknown as Record<string, unknown>)[id]).toBeDefined()
+
+      // `./logger` is stubbed at the top of this file with a four-method
+      // console shim, so a context built here would report the real logger's
+      // `child` / `withContext` / `trace` / `fatal` as missing and this test
+      // would be measuring the mock, not the implementation. Resolve that one
+      // namespace from the module itself; the other six are the real thing.
+      const surface =
+        id === "logger"
+          ? jest
+              .requireActual<typeof import("./logger")>("./logger")
+              .createPluginSystemLogger("parity-probe")
+          : (context as unknown as Record<string, unknown>)[id]
+
+      // Method names are dotted for nested surfaces (`sessions.create`,
+      // `guardrails.register`), which is how the contract models them.
+      const resolve = (root: unknown, path: string): unknown =>
+        path.split(".").reduce<unknown>((holder, segment) => {
+          if (holder === null || typeof holder !== "object") return undefined
+          return (holder as Record<string, unknown>)[segment]
+        }, root)
+
+      const missing = namespace.methods
+        .map((method) => method.name)
+        .filter((name) => typeof resolve(surface, name) !== "function")
+      expect(missing).toEqual([])
+    }
+  )
+
+  it("routes a contract method through the router onto the real context", async () => {
+    const context = createFullPluginContext(createMockPlugin(), mockManager)
+    const outcome = await routePythonHostRequest(
+      {
+        pluginId: "test-plugin",
+        generation: "gen-1",
+        requestId: 1,
+        method: "logger.info",
+        params: { args: ["hello"] },
+      },
+      { getContext: () => context }
+    )
+    // The value is unimportant; that the dotted path resolved to something
+    // callable on the governed context is the whole point.
+    expect(outcome.ok).toBe(true)
+  })
+
+  it("classifies a python plugin as the python runtime, not frontend", () => {
+    // Without this the catalog's per-runtime gate can never fire for python:
+    // every call would be evaluated as if it came from the renderer.
+    expect(pluginApiRuntimeForType("python")).toBe("python")
+    expect(pluginApiRuntimeForType("hybrid")).toBe("hybrid")
+    expect(pluginApiRuntimeForType("wasm")).toBe("wasm")
+    expect(pluginApiRuntimeForType("vscode-extension")).toBe("vscode")
+    expect(pluginApiRuntimeForType("frontend")).toBe("frontend")
+    expect(pluginApiRuntimeForType(undefined)).toBe("frontend")
   })
 })

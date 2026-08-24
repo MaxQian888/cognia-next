@@ -53,9 +53,10 @@ export function withGovernedPluginContext<T extends object>(
         return (...args: unknown[]) => {
           const startedAt = globalThis.performance?.now() ?? Date.now()
           const methodId = memberPath.slice("ctx.".length)
+          const runtime = options.runtime ?? "frontend"
           const decision = evaluatePluginApiCall({
             methodId,
-            runtime: options.runtime ?? "frontend",
+            runtime,
             platform: options.platform ?? "desktop",
             hasPermission: options.hasPermission,
           })
@@ -64,6 +65,7 @@ export function withGovernedPluginContext<T extends object>(
             recordPluginApiAudit({
               pluginId: options.pluginId,
               methodId,
+              runtime,
               outcome,
               durationMs: Math.max(0, finishedAt - startedAt),
               dataClassification: decision.descriptor?.namespace.dataClassification ?? "unknown",

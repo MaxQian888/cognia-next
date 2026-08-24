@@ -212,6 +212,7 @@ import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugi
 import { PluginDisposableScope, withPluginDisposableScope } from "./disposable-scope"
 import { PLUGIN_RESOURCE_EFFECTS } from "./resource-effects"
 import { withGovernedPluginContext } from "../contracts/governed-context"
+import { pluginApiRuntimeForType } from "../contracts/interface-catalog"
 
 /** @deprecated `PluginContext` is now the complete activated context. */
 export type FullPluginContext = PluginContext
@@ -425,6 +426,12 @@ export function createFullPluginContext(
   } satisfies PublicFullPluginContext
   const governedContext = withGovernedPluginContext(fullContext, {
     pluginId,
+    // Classify by manifest type rather than defaulting to "frontend": a python
+    // plugin's calls were being audited as a runtime it does not run in, which
+    // meant the catalog's per-runtime gate could never fire for it. Enforcement
+    // is still per-namespace `shadow`, so this changes what is recorded, not
+    // what is allowed.
+    runtime: pluginApiRuntimeForType(plugin.manifest.type),
     hasPermission: (permission) => permissionsAPI.hasPermission(permission),
   })
   scope.track(() => revokePluginFileHandles(pluginId), "ctx.files.handles")

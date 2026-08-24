@@ -41,6 +41,7 @@ from .capability_contract import (
     validate_capabilities,
 )
 from .context import Context, PluginContext, create_context
+from .ctx import Ctx, HostNamespace, PYTHON_HOST_NAMESPACES, ctx
 from .decorators import hook, tool
 from .external_agent import (
     ACP,
@@ -156,6 +157,10 @@ from .types import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "ctx",
+    "Ctx",
+    "HostNamespace",
+    "PYTHON_HOST_NAMESPACES",
     "__version__",
     # decorators / runtime entrypoints
     "tool",

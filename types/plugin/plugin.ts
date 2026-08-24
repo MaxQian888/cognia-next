@@ -128,7 +128,7 @@ type CanonicalExtensionPoint = string
  */
 export type PluginType =
   | "frontend" // JavaScript/TypeScript plugin running in renderer
-  | "python" // Python plugin running via PyO3
+  | "python" // Python plugin running in a subprocess host (NDJSON over stdio)
   | "hybrid" // Combination of frontend and Python components
   | "wasm" // WASM Component Model plugin (wasmtime host, Tauri-only — ADR 0013)
   | "vscode-extension" // VS Code extension running in Node sidecar (Tauri-only — see ~/.claude/plans/vscode-snug-squid.md)

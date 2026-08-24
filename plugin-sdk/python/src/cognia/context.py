@@ -15,9 +15,12 @@ read config / report progress through this proxy.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 from .runtime import Runtime, get_active_runtime
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .ctx import Ctx
 from .types import HookFn, ToolFn
 
 
@@ -41,6 +44,18 @@ class Context:
         """Register a listener fired whenever the host pushes new config —
         the Python mirror of the TS `ctx.configuration.onChange`."""
         return self.runtime.on_config_changed(fn)
+
+    @property
+    def ctx(self) -> "Ctx":
+        """The host's ``ctx.*`` API surface (ADR-0143), bound to this runtime.
+
+        ``cognia.ctx`` resolves the *active* runtime; this one is pinned to the
+        runtime this context wraps, which is what a test swapping runtimes per
+        case actually wants.
+        """
+        from .ctx import Ctx
+
+        return Ctx(self.runtime)
 
     def progress(self, pct: Optional[float] = None, message: Optional[str] = None) -> None:
         """Report progress for the in-flight call."""

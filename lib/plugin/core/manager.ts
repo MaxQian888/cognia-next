@@ -2,7 +2,7 @@
  * Plugin Manager - Core plugin lifecycle management
  *
  * Handles plugin discovery, loading, enabling, disabling, and unloading.
- * Coordinates with Tauri backend for Python plugin support via PyO3.
+ * Coordinates with Tauri backend for Python plugin support in a subprocess host (NDJSON over stdio).
  */
 
 import { invoke } from "@tauri-apps/api/core"
@@ -119,6 +119,7 @@ import {
   routePythonHostRequest,
   type PythonHostRequestFrame,
 } from "@/lib/plugin/python/host-request-router"
+import { startPluginApiSpanBridge } from "@/lib/plugin/observability/plugin-api-spans"
 import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import {
   bindPythonRuntimeGeneration,
@@ -1803,6 +1804,11 @@ export class PluginManager {
     } catch (error) {
       loggers.manager.warn("[manager] permission migration failed:", error)
     }
+
+    // Forward out-of-process plugin API calls onto the trace surface. Not
+    // python-specific — wasm and the vscode sidecar cross the same boundary —
+    // so it starts with the manager rather than inside the python branch.
+    startPluginApiSpanBridge()
 
     // Initialize Python runtime if enabled
     if (this.config.enablePython) {

@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Python plugins get a real `ctx.*` surface, and out-of-process plugin API calls now show up in Traces. Seven namespaces — `agent`, `storage`, `secrets`, `fs`, `git`, `ui`, `logger` — are declared python-callable in the plugin API catalog, which had listed every namespace as renderer-only since it was written. `cognia.ctx.<namespace>.<method>(...)` in the Python SDK is driven by that catalog rather than a hand-written copy, so an unknown namespace or method fails immediately with the list of what exists instead of after a round trip, and the surface cannot drift from the contract. A new test proves the catalog's claim against a real plugin context: every method it advertises resolves to a callable. Plugin contexts are also now classified by their actual runtime instead of always being audited as "frontend", which is what makes the catalog's per-runtime gate meaningful for anything but a renderer plugin. Finally, the plugin API audit stream — which had measured every `ctx.*` call since it was introduced and had no consumer — now lands calls that crossed a process boundary, plus every denial and error, on the `/logs` Traces surface.

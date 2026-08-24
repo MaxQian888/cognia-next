@@ -12,7 +12,7 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | Namespace | Methods | Declared permissions | Runtimes | Data class |
 | --- | ---: | --- | --- | --- |
 | `ctx.a2ui` | 7 | None | frontend, hybrid | internal |
-| `ctx.agent` | 27 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid | sensitive |
+| `ctx.agent` | 27 | `agent:control`, `twin:read`, `agent:shared-memory:read`, `agent:dispatch`, `agent:dispatch-external` | frontend, hybrid, python | sensitive |
 | `ctx.ai` | 7 | None | frontend, hybrid | sensitive |
 | `ctx.artifact` | 10 | `artifact:write`, `artifact:read` | frontend, hybrid | internal |
 | `ctx.auth` | 5 | `auth:provide`, `auth:consume` | frontend, hybrid | secret |
@@ -33,14 +33,14 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.events` | 17 | None | frontend, hybrid | internal |
 | `ctx.export` | 8 | `export:session`, `export:project` | frontend, hybrid | internal |
 | `ctx.extensions` | 3 | `extension:ui` | frontend, hybrid | internal |
-| `ctx.fs` | 18 | `filesystem:write`, `filesystem:read` | frontend, hybrid | sensitive |
-| `ctx.git` | 33 | `git:read`, `git:write` | frontend, hybrid | internal |
+| `ctx.fs` | 18 | `filesystem:write`, `filesystem:read` | frontend, hybrid, python | sensitive |
+| `ctx.git` | 33 | `git:read`, `git:write` | frontend, hybrid, python | internal |
 | `ctx.goals` | 17 | `goal:write`, `goal:read` | frontend, hybrid | internal |
 | `ctx.i18n` | 10 | None | frontend, hybrid | internal |
 | `ctx.import` | 5 | None | frontend, hybrid | internal |
 | `ctx.integrations` | 16 | `integrations:execute`, `integrations:manage`, `integrations:read`, `integrations:events` | frontend, hybrid | sensitive |
 | `ctx.lifecycle` | 1 | None | frontend, hybrid | internal |
-| `ctx.logger` | 8 | None | frontend, hybrid | internal |
+| `ctx.logger` | 8 | None | frontend, hybrid, python | internal |
 | `ctx.logs` | 14 | `logs:read`, `trace:read` | frontend, hybrid | sensitive |
 | `ctx.media` | 47 | `media:video:read`, `media:video:write`, `media:video:export`, `ai:chat` | frontend, hybrid | sensitive |
 | `ctx.memory` | 7 | `memory:read`, `memory:write` | frontend, hybrid | sensitive |
@@ -56,14 +56,14 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.python` | 3 | None | frontend, hybrid | internal |
 | `ctx.quickActions` | 2 | None | frontend, hybrid | internal |
 | `ctx.scheduler` | 16 | None | frontend, hybrid | internal |
-| `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid | secret |
+| `ctx.secrets` | 6 | `secrets:write`, `secrets:read` | frontend, hybrid, python | secret |
 | `ctx.services` | 3 | None | frontend, hybrid | internal |
 | `ctx.session` | 15 | `session:write`, `session:delete`, `session:read` | frontend, hybrid | sensitive |
 | `ctx.settings` | 3 | None | frontend, hybrid | internal |
 | `ctx.share` | 6 | `share:create`, `share:read` | frontend, hybrid | internal |
 | `ctx.shell` | 4 | `shell:execute`, `process:spawn` | frontend, hybrid | internal |
 | `ctx.shortcuts` | 4 | None | frontend, hybrid | internal |
-| `ctx.storage` | 12 | None | frontend, hybrid | internal |
+| `ctx.storage` | 12 | None | frontend, hybrid, python | internal |
 | `ctx.subscription` | 7 | `subscription:read` | frontend, hybrid | sensitive |
 | `ctx.team` | 21 | `team:write`, `team:read` | frontend, hybrid | sensitive |
 | `ctx.templates` | 11 | `templates:contribute`, `templates:read`, `templates:library:write`, `templates:instantiate` | frontend, hybrid | internal |
@@ -71,7 +71,7 @@ Contract `1.0.0`; protocol `2.0.0`. The public author surface is `ctx.*`. Runtim
 | `ctx.theme` | 16 | `theme:write`, `theme:read` | frontend, hybrid | internal |
 | `ctx.toolResult` | 1 | `extension:ui` | frontend, hybrid | internal |
 | `ctx.tray` | 2 | None | frontend, hybrid | internal |
-| `ctx.ui` | 5 | None | frontend, hybrid | internal |
+| `ctx.ui` | 5 | None | frontend, hybrid, python | internal |
 | `ctx.uri` | 1 | None | frontend, hybrid | internal |
 | `ctx.vector` | 13 | `vector:write`, `vector:read` | frontend, hybrid | internal |
 | `ctx.webview` | 1 | None | frontend, hybrid | internal |
