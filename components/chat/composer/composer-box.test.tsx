@@ -262,3 +262,46 @@ describe("non-classic skins drive geometry from variables", () => {
     expect(classSet(box()).has("rounded-[1.75rem]")).toBe(false)
   })
 })
+
+// Every resolved token must reach the DOM. `sendSizePx`, `sendShape` and `mono`
+// were each computed, clamped and floored for touch — and then ignored by the
+// box, which kept hardcoding `size-9 rounded-full` and the interface font.
+// Nothing caught it until the rendered box was looked at.
+describe("ComposerBox — resolved tokens actually reach the DOM", () => {
+  it("sizes and shapes the send button from the skin", () => {
+    const skin = resolveComposerSkin({ skin: "dense" }, { isMobile: false })
+    render(<ComposerBox {...props({ skin })} />)
+    const send = screen.getByLabelText("ariaSend")
+    expect(send.className).toContain("size-[var(--composer-send-size)]")
+    expect(send.className).toContain("rounded-[var(--composer-inner-radius)]")
+    expect(send.className).not.toContain("size-9")
+  })
+
+  it("keeps classic's literal send button", () => {
+    render(<ComposerBox {...props()} />)
+    const send = screen.getByLabelText("ariaSend")
+    expect(send.className).toContain("size-9")
+    expect(send.className).toContain("rounded-full")
+    expect(send.className).not.toContain("var(--composer-send-size)")
+  })
+
+  it("puts the textarea in the code font when the skin asks", () => {
+    const skin = resolveComposerSkin({ skin: "dense" }, { isMobile: false })
+    render(<ComposerBox {...props({ skin })} />)
+    expect(screen.getByLabelText("ariaMessage").className).toContain("font-mono")
+  })
+
+  it("never puts classic in the code font", () => {
+    render(<ComposerBox {...props()} />)
+    expect(screen.getByLabelText("ariaMessage").className).not.toContain("font-mono")
+  })
+
+  it("honours a mono override on a skin that does not default to it", () => {
+    const skin = resolveComposerSkin(
+      { skin: "airy", skinOverrides: { mono: true } },
+      { isMobile: false }
+    )
+    render(<ComposerBox {...props({ skin })} />)
+    expect(screen.getByLabelText("ariaMessage").className).toContain("font-mono")
+  })
+})

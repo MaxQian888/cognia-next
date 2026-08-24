@@ -291,6 +291,8 @@ export function ComposerBox({
             "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
             compactLayout && "min-h-14 py-1.5",
             !compactLayout && textInput.value.length === 0 && "h-9 overflow-hidden",
+            // A skin may ask for the code font; classic never does.
+            skin.mono && "font-mono",
             TEXTAREA_TYPOGRAPHY
           )}
           disabled={disabled}
@@ -363,7 +365,13 @@ export function ComposerBox({
                         : t("ariaSend")
                 }
                 className={cn(
-                  "size-9 rounded-full transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
+                  "transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
+                  // Classic keeps its literals; every other skin sizes and
+                  // shapes the button from its own resolved tokens (already
+                  // floored to the touch minimum on mobile by the resolver).
+                  skin.isClassic
+                    ? "size-9 rounded-full"
+                    : "size-[var(--composer-send-size)] rounded-[var(--composer-inner-radius)]",
                   // Mobile: 44px minimum tap target (primary send/stop action).
                   isMobile && "touch-target"
                 )}
