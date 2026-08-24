@@ -201,7 +201,11 @@ describe("startNewSession", () => {
     })
   })
 
-  it("skips workspace linking when no workspace is active", async () => {
+  it("attributes a chat started with no active workspace to Default", async () => {
+    // `createSession` resolves the owning workspace through
+    // `resolveScopeProjectId`, which never returns null — it adopts (or
+    // creates) Default. Leaving the reverse link unwritten made the row's
+    // workspace and the workspace's session list disagree from the first turn.
     const addSessionToProject = jest.fn()
     jest.spyOn(useProjectStore, "getState").mockReturnValue({
       ...useProjectStore.getState(),
@@ -209,8 +213,9 @@ describe("startNewSession", () => {
       addSessionToProject,
     } as ReturnType<typeof useProjectStore.getState>)
 
-    await startNewSession()
+    const session = await startNewSession()
 
-    expect(addSessionToProject).not.toHaveBeenCalled()
+    expect(session.projectId).toBe("project-default")
+    expect(addSessionToProject).toHaveBeenCalledWith("project-default", session.id)
   })
 })

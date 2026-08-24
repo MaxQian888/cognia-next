@@ -51,21 +51,43 @@ export interface NewSessionInput extends SessionSeed {
  */
 export async function startNewSession(partial?: NewSessionInput): Promise<ChatSession> {
   const { executionLocation, executionBase, ...sessionSeed } = partial ?? {}
-  let session = await createSession(sessionSeed)
 
-  // Auto-link to the active workspace so it groups under that project
-  // (persisted via `project.sessionIds`). No-op when no workspace is active.
-  const { activeProjectId, addSessionToProject, projects, updateProject } =
-    useProjectStore.getState()
-  if (activeProjectId) addSessionToProject(activeProjectId, session.id)
+  // Name the owning workspace explicitly instead of letting `createSession`
+  // resolve it. `resolveScopeProjectId` reads the PERSISTED
+  // `AppSettings.activeProjectId`, which lags the store by one async write, so
+  // a conversation started right after switching workspaces could be stamped
+  // with the one the user just left. The store is the truth at the moment the
+  // user clicked "new chat".
+  const store = useProjectStore.getState()
+  const seededProjectId = store.activeProjectId ?? undefined
+  let session = await createSession(
+    seededProjectId ? { ...sessionSeed, projectId: seededProjectId } : sessionSeed
+  )
 
-  // Every conversation has one durable workspace identity. Active-project
-  // chats bind to that Project; projectless Quick Chats receive a managed,
-  // portable identity and materialize a device-local root when desktop APIs
-  // are available. Web/mobile receivers keep the explicit missing state.
+  // Never null: with no active workspace `createSession` adopts (or creates)
+  // Default, so the row is always attributed. Everything below binds to THAT
+  // workspace rather than to the UI-active pointer.
+  const ownerProjectId = session.projectId ?? seededProjectId ?? null
+  if (ownerProjectId) store.addSessionToProject(ownerProjectId, session.id)
+
+  // The store can be a step behind Dexie here — `resolveScopeProjectId` may
+  // have just created Default in the database. Load once so the workspace the
+  // row names is actually visible before the execution context is derived from
+  // it; `load()` is a no-op once hydrated.
+  if (ownerProjectId && !store.projects.some((p) => p.id === ownerProjectId)) {
+    await store.load().catch(() => undefined)
+  }
+  const { projects, updateProject } = useProjectStore.getState()
+
+  // Every conversation has one durable workspace identity. A workspace with a
+  // root binds to that Project; a rootless one (the Default workspace before
+  // the user has opened or created anything) has no directory to bind to, so it
+  // receives a managed, portable identity and materializes a device-local root
+  // where desktop APIs exist. Web/mobile receivers keep the explicit missing
+  // state rather than guessing a directory.
   if (!partial?.executionContext) {
-    const project = activeProjectId
-      ? projects.find((candidate) => candidate.id === activeProjectId)
+    const project = ownerProjectId
+      ? projects.find((candidate) => candidate.id === ownerProjectId)
       : undefined
     const root = project ? primaryRootOf(project) : undefined
     const executionContext =
@@ -94,14 +116,16 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
         // rebind/import before execution, rather than guessing a directory.
       }
     }
-  } else if (activeProjectId) {
-    updateProject(activeProjectId, {
+  } else if (ownerProjectId) {
+    // The remembered default belongs to the workspace this conversation runs
+    // in, not to whichever one the UI happens to be showing.
+    updateProject(ownerProjectId, {
       defaultExecutionLocation: partial.executionContext.location,
     })
   }
 
-  if (activeProjectId && executionLocation) {
-    updateProject(activeProjectId, { defaultExecutionLocation: executionLocation })
+  if (ownerProjectId && executionLocation) {
+    updateProject(ownerProjectId, { defaultExecutionLocation: executionLocation })
   }
 
   useChatStore.getState().setActiveSession(session.id)

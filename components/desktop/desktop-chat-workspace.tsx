@@ -62,6 +62,7 @@ import {
   resolveConversationSearchOptions,
 } from "@/lib/chat/conversation-search-scope"
 import { useProjectStore } from "@/stores/project/project-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
 import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
 import { loggers } from "@cognia/logging"
 import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
@@ -147,6 +148,7 @@ export function DesktopChatWorkspace() {
   const activeProject = useProjectStore((s) =>
     s.projects.find((project) => project.id === s.activeProjectId)
   )
+  const activeProjectRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
 
@@ -726,9 +728,14 @@ export function DesktopChatWorkspace() {
                     onUseSample={handleUseSample}
                     onOpenSettings={openSettings}
                     newChatExecutionControls={
-                      activeProject ? (
+                      // Only offered when the workspace HAS a directory. A
+                      // rootless workspace (Default, before anything is opened
+                      // or created) has nothing for "Local" to mean — the
+                      // session falls back to a managed workspace regardless,
+                      // so presenting the choice would be presenting a lie.
+                      activeProjectRoot ? (
                         <NewChatExecutionPicker
-                          rootDir={activeProject.rootDir}
+                          rootDir={activeProjectRoot}
                           value={newChatExecution}
                           onChange={setNewChatExecution}
                         />
