@@ -18,12 +18,18 @@
  * action; on a plain desktop it still states the fact — that is the recorded
  * decision — but as one quiet line instead of a full-width card, because that
  * case is permanent and actionless and was eating a whole row of the pane.
+ *
+ * Which schedule the page *reads* and which host is allowed to *fire* it are
+ * two different questions. `SchedulerAuthorityControl` answers the second and
+ * sits on the same row: it is the same mental model ("whose schedule is this?")
+ * and splitting it into its own card would separate a choice from its context.
  */
 
 import { useTranslations } from "next-intl"
 import { CloudIcon, MonitorSmartphoneIcon, PauseCircleIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { SchedulerAuthorityControl } from "./scheduler-authority-control"
 import { useSchedulerHostTarget } from "@/hooks/scheduler/use-scheduler-host-target"
 import { useHostProfile } from "@/hooks/use-host-profile"
 import { useRemoteHostStore } from "@/stores/remote-host/remote-host-store"
@@ -55,7 +61,7 @@ export function SchedulerHostBar({ className }: SchedulerHostBarProps) {
   return (
     <div
       className={[
-        "flex flex-wrap items-center gap-2 text-xs",
+        "flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs",
         isActionable
           ? "rounded-md border bg-muted/30 px-3 py-2"
           : "px-4 py-1.5 text-muted-foreground",
@@ -100,6 +106,7 @@ export function SchedulerHostBar({ className }: SchedulerHostBarProps) {
           {target === "paired" ? t("switchToLocal") : t("switchToPaired", { host: pairedLabel })}
         </Button>
       )}
+      <SchedulerAuthorityControl className={pairedAvailable ? "basis-full" : "ml-auto"} />
     </div>
   )
 }

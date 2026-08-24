@@ -1,9 +1,13 @@
 /** @jest-environment jsdom */
 import {
   DEFAULT_AUTHORITY_CONFIG,
+  getExecutionAuthorityConfigServerSnapshot,
+  getExecutionAuthorityConfigSnapshot,
   readExecutionAuthorityConfig,
   resolveExecutionAuthority,
+  subscribeExecutionAuthorityConfig,
   writeExecutionAuthorityConfig,
+  __resetExecutionAuthorityConfigForTests,
   type ExecutionAuthorityConfig,
 } from "./authority"
 import type { PlacementLiveness } from "./liveness"
@@ -87,5 +91,58 @@ describe("execution authority config storage", () => {
     })
     expect(() => writeExecutionAuthorityConfig(configured)).not.toThrow()
     setItem.mockRestore()
+  })
+
+  describe("react seam", () => {
+    beforeEach(() => {
+      globalThis.localStorage?.clear()
+      __resetExecutionAuthorityConfigForTests()
+    })
+
+    it("keeps the snapshot referentially stable so useSyncExternalStore settles", () => {
+      const first = getExecutionAuthorityConfigSnapshot()
+      expect(getExecutionAuthorityConfigSnapshot()).toBe(first)
+      expect(first).toEqual(DEFAULT_AUTHORITY_CONFIG)
+    })
+
+    it("notifies subscribers and re-snapshots after a write", () => {
+      const listener = jest.fn()
+      const unsubscribe = subscribeExecutionAuthorityConfig(listener)
+      const before = getExecutionAuthorityConfigSnapshot()
+
+      const next = { hostId: "host-a", degradeAfterMs: 60_000 }
+      writeExecutionAuthorityConfig(next)
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(getExecutionAuthorityConfigSnapshot()).toEqual(next)
+      expect(getExecutionAuthorityConfigSnapshot()).not.toBe(before)
+
+      unsubscribe()
+      writeExecutionAuthorityConfig(DEFAULT_AUTHORITY_CONFIG)
+      expect(listener).toHaveBeenCalledTimes(1)
+    })
+
+    it("re-reads storage when another tab rewrites the key", () => {
+      const listener = jest.fn()
+      subscribeExecutionAuthorityConfig(listener)
+      getExecutionAuthorityConfigSnapshot()
+
+      globalThis.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-b", degradeAfterMs: 900_000 })
+      )
+      window.dispatchEvent(new StorageEvent("storage", { key: "cognia-execution-authority-v1" }))
+
+      expect(listener).toHaveBeenCalled()
+      expect(getExecutionAuthorityConfigSnapshot()).toEqual({
+        hostId: "host-b",
+        degradeAfterMs: 900_000,
+      })
+    })
+
+    it("prerenders the default, because storage is unreadable during a static export", () => {
+      writeExecutionAuthorityConfig({ hostId: "host-a", degradeAfterMs: 60_000 })
+      expect(getExecutionAuthorityConfigServerSnapshot()).toEqual(DEFAULT_AUTHORITY_CONFIG)
+    })
   })
 })

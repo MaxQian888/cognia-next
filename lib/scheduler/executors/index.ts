@@ -43,11 +43,12 @@ import type {
   TaskExecution,
   TaskExecutorResult,
 } from "@/types/scheduler"
+import { openWorkspaceBundleTurnLease } from "@/lib/task-workspace/run-lease"
 import {
-  openTaskWorkspaceBundleRunLease,
-  openTaskWorkspaceRunLease,
-} from "@/lib/task-workspace/run-lease"
-import { getWorkspaceBundle, type BeginTaskWorkspaceTurn } from "@/lib/task-workspace/client"
+  acquireWorkspaceBundle,
+  getWorkspaceBundle,
+  type BeginTaskWorkspaceTurn,
+} from "@/lib/task-workspace/client"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
@@ -111,6 +112,43 @@ export type { AgentTaskPayload, SkillTaskPayload, ExternalAgentTaskPayload }
 // =============================================================================
 
 type ChatExecutionResult = TaskExecutorResult
+
+async function openScheduledWritableBundle(
+  task: ScheduledTask,
+  execution: TaskExecution,
+  sourceRoot: string,
+  agentKind: string
+) {
+  const primaryLogicalRootId = "primary"
+  const bundle = await acquireWorkspaceBundle({
+    ownerType: "scheduled",
+    ownerRef: task.id,
+    environmentKind: "managed",
+    base: { kind: "remoteDefault" },
+    roots: [
+      {
+        logicalRootId: primaryLogicalRootId,
+        role: "primary",
+        sourceRoot,
+      },
+    ],
+  })
+  const lease = await openWorkspaceBundleTurnLease(bundle, primaryLogicalRootId, {
+    taskId: `scheduled:${task.id}`,
+    sessionId: task.id,
+    runId: `scheduled:${execution.id}:${agentKind}`,
+    executionRunId: execution.id,
+    turnId: execution.id,
+    attemptId: "a1",
+    surface: "scheduler",
+    agentId: "scheduler",
+    agentKind,
+    workspaceRoot: sourceRoot,
+    base: { kind: "remoteDefault" },
+  })
+  if (!lease) throw new Error("Scheduled Registry Bundle Turn is unavailable")
+  return lease
+}
 
 // =============================================================================
 // Legacy payload field migration
@@ -459,9 +497,6 @@ async function runChatPrompt(
     return { success: false, error: "Scheduled workspace canonical bundle is unavailable" }
   }
   const canonicalPrimary = canonicalBundle?.leases.find((lease) => lease.role === "primary")
-  const canonicalAdditionalAliases = canonicalBundle?.leases
-    .filter((lease) => lease.role === "additional")
-    .map((lease) => lease.aliasPath)
   const requestedRootIds = new Set(
     canonicalExecution?.roots.map((root) => root.logicalRootId) ?? []
   )
@@ -505,12 +540,17 @@ async function runChatPrompt(
     : null
   const taskLease = taskLeaseInput
     ? canonicalManaged
-      ? await openTaskWorkspaceBundleRunLease(
-          canonicalBundle!.bundleId,
+      ? await openWorkspaceBundleTurnLease(
+          canonicalBundle!,
           canonicalPrimary!.logicalRootId,
           taskLeaseInput
         )
-      : await openTaskWorkspaceRunLease(taskLeaseInput)
+      : await openScheduledWritableBundle(
+          task,
+          execution,
+          boundWorkspaceRoot!,
+          "scheduled-chat"
+        ).catch(() => null)
     : null
   if (executionContext && !taskLease) {
     return { success: false, error: "Scheduled workspace isolation is unavailable" }
@@ -518,8 +558,8 @@ async function runChatPrompt(
   if (taskLease) {
     finalOptions = {
       ...finalOptions,
-      cwd: taskLease.run.executionRoot,
-      ...(canonicalManaged ? { additionalDirectories: canonicalAdditionalAliases ?? [] } : {}),
+      cwd: taskLease.primaryAlias,
+      additionalDirectories: taskLease.additionalAliases,
       taskWorkspace: {
         taskId: executionContext!.taskWorkspace.taskId,
         runId: taskLease.run.runId,
@@ -750,24 +790,34 @@ async function executeScriptTask(
     return { success: false, error: "Script execution aborted before start" }
   }
 
-  const result = await executeScript(
-    {
-      type: "execute_script",
-      language: payload.language,
-      code: payload.code,
-      working_dir: payload.working_dir,
-      args: payload.args,
-      env: payload.env,
-      timeout_secs: payload.timeout_secs ?? Math.floor((task.config.timeout || 300_000) / 1000),
-      memory_mb: payload.memory_mb,
-      use_sandbox: payload.use_sandbox,
-    },
-    { signal, taskId: task.id }
-  )
-
+  const workspaceLease = payload.working_dir
+    ? await openScheduledWritableBundle(task, execution, payload.working_dir, "scheduled-script")
+    : null
+  let result: Awaited<ReturnType<typeof executeScript>>
+  try {
+    result = await executeScript(
+      {
+        type: "execute_script",
+        language: payload.language,
+        code: payload.code,
+        working_dir: workspaceLease?.primaryAlias,
+        args: payload.args,
+        env: payload.env,
+        timeout_secs: payload.timeout_secs ?? Math.floor((task.config.timeout || 300_000) / 1000),
+        memory_mb: payload.memory_mb,
+        use_sandbox: payload.use_sandbox,
+      },
+      { signal, taskId: task.id }
+    )
+  } catch (error) {
+    await workspaceLease?.settle(signal.aborted ? "cancelled" : "failed").catch(() => undefined)
+    throw error
+  }
   if (signal?.aborted) {
+    await workspaceLease?.settle("cancelled")
     return { success: false, error: "Script execution was cancelled" }
   }
+  await workspaceLease?.settle(result.success ? "ready" : "failed")
 
   log.info("Scheduler script task complete", {
     taskId: task.id,
@@ -808,6 +858,7 @@ async function executeExternalAgentTask(
   }
 
   const timeout = payload.timeoutMs ?? task.config.timeout ?? 300_000
+  let workspaceLease: Awaited<ReturnType<typeof openScheduledWritableBundle>> | null = null
 
   log.info("Scheduler external-agent task → executeOnExternalAgent", {
     taskId: task.id,
@@ -816,19 +867,25 @@ async function executeExternalAgentTask(
   })
 
   try {
+    workspaceLease = payload.cwd
+      ? await openScheduledWritableBundle(task, execution, payload.cwd, "scheduled-external-agent")
+      : null
     const result = await executeOnExternalAgent(payload.prompt, {
       agentId: payload.agentId,
       permissionMode: payload.permissionMode,
-      workingDirectory: payload.cwd,
+      workingDirectory: workspaceLease?.primaryAlias,
       timeout,
     })
 
     if (!result) {
+      await workspaceLease?.settle("failed")
       return {
         success: false,
         error: `No matching external agent for id: ${payload.agentId}`,
       }
     }
+
+    await workspaceLease?.settle(result.success ? "ready" : "failed")
 
     return {
       success: result.success,
@@ -842,6 +899,7 @@ async function executeExternalAgentTask(
       error: result.error,
     }
   } catch (err) {
+    await workspaceLease?.settle(signal.aborted ? "cancelled" : "failed").catch(() => undefined)
     return { success: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

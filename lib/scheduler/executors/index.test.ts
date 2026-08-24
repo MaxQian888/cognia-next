@@ -60,28 +60,14 @@ jest.mock("@/lib/db/agent-tasks", () => ({
 }))
 
 const settleTaskWorkspaceMock = jest.fn(async () => [])
-const openTaskWorkspaceBundleRunLeaseMock = jest.fn()
-const openTaskWorkspaceRunLeaseMock = jest.fn(
-  async (
-    _input: unknown
-  ): Promise<{
-    run: { runId: string; executionRoot: string }
-    settle: typeof settleTaskWorkspaceMock
-  } | null> => ({
-    run: {
-      runId: "task-run-1",
-      executionRoot: "/managed/session-1",
-    },
-    settle: settleTaskWorkspaceMock,
-  })
-)
+const openWorkspaceBundleTurnLeaseMock = jest.fn()
 jest.mock("@/lib/task-workspace/run-lease", () => ({
-  openTaskWorkspaceBundleRunLease: (...args: unknown[]) =>
-    openTaskWorkspaceBundleRunLeaseMock(...args),
-  openTaskWorkspaceRunLease: (input: unknown) => openTaskWorkspaceRunLeaseMock(input),
+  openWorkspaceBundleTurnLease: (...args: unknown[]) => openWorkspaceBundleTurnLeaseMock(...args),
 }))
 const getWorkspaceBundleMock = jest.fn()
+const acquireWorkspaceBundleMock = jest.fn()
 jest.mock("@/lib/task-workspace/client", () => ({
+  acquireWorkspaceBundle: (input: unknown) => acquireWorkspaceBundleMock(input),
   getWorkspaceBundle: (bundleId: string) => getWorkspaceBundleMock(bundleId),
 }))
 
@@ -262,13 +248,22 @@ beforeEach(() => {
       },
     ],
   })
-  openTaskWorkspaceBundleRunLeaseMock.mockReset().mockResolvedValue({
-    run: { runId: "task-run-bundle-1", executionRoot: "/bundle/primary" },
-    settle: settleTaskWorkspaceMock,
+  acquireWorkspaceBundleMock.mockReset().mockResolvedValue({
+    bundleId: "scheduled-bundle-1",
+    leases: [
+      {
+        bundleId: "scheduled-bundle-1",
+        workspaceId: "scheduled-workspace-1",
+        logicalRootId: "primary",
+        role: "primary",
+        aliasPath: "/scheduled/isolated",
+      },
+    ],
   })
-  openTaskWorkspaceRunLeaseMock.mockClear()
-  openTaskWorkspaceRunLeaseMock.mockResolvedValue({
-    run: { runId: "task-run-1", executionRoot: "/managed/session-1" },
+  openWorkspaceBundleTurnLeaseMock.mockReset().mockResolvedValue({
+    run: { runId: "task-run-bundle-1", executionRoot: "/bundle/primary" },
+    primaryAlias: "/bundle/primary",
+    additionalAliases: ["/bundle/docs"],
     settle: settleTaskWorkspaceMock,
   })
   settleTaskWorkspaceMock.mockClear()
@@ -634,24 +629,25 @@ describe("executeChatTask", () => {
     )
 
     expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({ executionContext }))
-    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+    expect(acquireWorkspaceBundleMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        taskId: "task-workspace:session-1",
-        workspaceKey: "session-1",
-        workspaceRoot: "/repo",
+        ownerType: "scheduled",
+        ownerRef: "task-1",
+        base: { kind: "remoteDefault" },
+        roots: [expect.objectContaining({ sourceRoot: "/repo" })],
       })
     )
     expect(sendPromptMock).toHaveBeenCalledWith(
       "session-created",
       "hi",
-      expect.objectContaining({ cwd: "/managed/session-1" })
+      expect.objectContaining({ cwd: "/bundle/primary" })
     )
     expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("ready")
     expect(result.success).toBe(true)
   })
 
   it("fails closed when a scheduled managed worktree cannot be acquired", async () => {
-    openTaskWorkspaceRunLeaseMock.mockResolvedValueOnce(null)
+    acquireWorkspaceBundleMock.mockRejectedValueOnce(new Error("registry unavailable"))
     const result = await executeChatTask(
       makeTask({
         payload: {
@@ -712,8 +708,8 @@ describe("executeChatTask", () => {
       makeSignal()
     )
 
-    expect(openTaskWorkspaceBundleRunLeaseMock).toHaveBeenCalledWith(
-      "bundle-1",
+    expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleId: "bundle-1" }),
       "root-primary",
       expect.objectContaining({
         taskId: "task-workspace:session-1",
@@ -722,7 +718,6 @@ describe("executeChatTask", () => {
     )
     expect(getWorkspaceBundleMock).toHaveBeenCalledWith("bundle-1")
     expect(createSessionMock).not.toHaveBeenCalled()
-    expect(openTaskWorkspaceRunLeaseMock).not.toHaveBeenCalled()
     expect(sendPromptMock).toHaveBeenCalledWith(
       "session-1",
       "hi",
@@ -769,15 +764,15 @@ describe("executeChatTask", () => {
 
     expect(executeProjectEnvironmentMock).toHaveBeenCalledWith({
       environment,
-      executionRoot: "/managed/session-1",
+      executionRoot: "/bundle/primary",
       scope: "local",
       surface: "scheduled",
     })
-    expect(openTaskWorkspaceRunLeaseMock).toHaveBeenCalledWith(
+    expect(acquireWorkspaceBundleMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceRoot: "/repo",
-        base: { kind: "workingState" },
-        surface: "scheduler",
+        ownerType: "scheduled",
+        base: { kind: "remoteDefault" },
+        roots: [expect.objectContaining({ sourceRoot: "/repo" })],
       })
     )
     expect(sendPromptMock).toHaveBeenCalled()
@@ -1117,11 +1112,40 @@ describe("executeExternalAgentTask", () => {
       expect.objectContaining({
         agentId: "a",
         permissionMode: "acceptEdits",
-        workingDirectory: "/tmp",
+        workingDirectory: "/bundle/primary",
         timeout: 1000,
       })
     )
+    expect(acquireWorkspaceBundleMock).toHaveBeenCalledWith({
+      ownerType: "scheduled",
+      ownerRef: "task-1",
+      environmentKind: "managed",
+      base: { kind: "remoteDefault" },
+      roots: [{ logicalRootId: "primary", role: "primary", sourceRoot: "/tmp" }],
+    })
+    expect(openWorkspaceBundleTurnLeaseMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bundleId: "scheduled-bundle-1" }),
+      "primary",
+      expect.objectContaining({
+        runId: "scheduled:exec-1:scheduled-external-agent",
+        surface: "scheduler",
+        base: { kind: "remoteDefault" },
+      })
+    )
+    expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("ready")
     expect(r.success).toBe(true)
+  })
+  it("fails closed when the requested cwd cannot acquire a Registry Bundle", async () => {
+    acquireWorkspaceBundleMock.mockRejectedValueOnce(new Error("registry unavailable"))
+
+    const r = await executeExternalAgentTask(
+      makeTask({ payload: { prompt: "hi", agentId: "a", cwd: "/tmp" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r).toMatchObject({ success: false, error: "registry unavailable" })
+    expect(executeOnExternalAgentMock).not.toHaveBeenCalled()
   })
   it("falls back to task.config.timeout when payload.timeoutMs absent", async () => {
     executeOnExternalAgentMock.mockResolvedValueOnce({
@@ -1189,6 +1213,30 @@ describe("executeScriptTask", () => {
     )
     expect(r.success).toBe(true)
     expect(r.output).toMatchObject({ stdout: "ok" })
+  })
+  it("routes an explicit working directory through an isolated Registry Bundle", async () => {
+    executeScriptMock.mockResolvedValueOnce({ success: true })
+
+    const r = await executeScriptTask(
+      makeTask({ payload: { language: "bash", code: "pwd", working_dir: "/tmp" } }),
+      makeExecution(),
+      makeSignal()
+    )
+
+    expect(r.success).toBe(true)
+    expect(executeScriptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ working_dir: "/bundle/primary" }),
+      expect.anything()
+    )
+    expect(acquireWorkspaceBundleMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerType: "scheduled",
+        ownerRef: "task-1",
+        environmentKind: "managed",
+        base: { kind: "remoteDefault" },
+      })
+    )
+    expect(settleTaskWorkspaceMock).toHaveBeenCalledWith("ready")
   })
   it("reflects errors from executeScript", async () => {
     executeScriptMock.mockResolvedValueOnce({

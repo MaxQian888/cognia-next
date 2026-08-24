@@ -6,6 +6,11 @@
  * stat band, status/trigger/date/text filters, bulk + single-run deletion,
  * "clear history", JSON/CSV export of the filtered set, in-list re-run, and
  * client-side "load more" windowing.
+ *
+ * A workflow whose `runOn` sends triggers to another Host has no local
+ * `workflowRuns` rows at all, so `WorkflowHandoffPanel` sits above the history
+ * (and above the empty state — that is the case where it matters most) to say
+ * where the work actually went.
  */
 
 import { useMemo, useState } from "react"
@@ -28,6 +33,7 @@ import { getDb } from "@/lib/db/schema"
 import { deleteAllRunsForWorkflow, deleteWorkflowRun, deleteWorkflowRuns } from "@/lib/db/workflows"
 import { retryWorkflowRun } from "@/lib/workflow/runtime/execution-authority"
 import type { RunStatus, WorkflowRunRow } from "@/types/workflow/visual"
+import { WorkflowHandoffPanel } from "./handoff-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -255,6 +261,8 @@ export function RunList({ workflowId }: { workflowId: string }) {
           </Button>
         ) : null}
       </header>
+
+      <WorkflowHandoffPanel workflowId={workflowId} />
 
       {runs && runs.length > 0 ? (
         <>

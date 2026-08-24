@@ -11,6 +11,7 @@ import {
   HostDispatchDeliveryError,
   type HostDispatchDeliveryOutcome,
 } from "./host-dispatch-delivery"
+import { recordHostDispatchFailure, type HostDispatchFailure } from "./dispatch-failure-audit"
 import type { HostDispatchJobRow } from "@/types/placement/host-dispatch"
 
 export interface HostDispatchRunnerOptions {
@@ -20,6 +21,11 @@ export interface HostDispatchRunnerOptions {
   now?: () => number
   leaseOwner?: string
   deliver?: (job: HostDispatchJobRow) => Promise<HostDispatchDeliveryOutcome>
+  /**
+   * Surface a terminal dispatch. Injected only so tests can assert on it —
+   * the default is the real notification-center + run-event audit.
+   */
+  auditFailure?: (job: HostDispatchJobRow, failure: HostDispatchFailure) => Promise<void>
 }
 
 export interface HostDispatchRunner {
@@ -33,6 +39,16 @@ export function createHostDispatchRunner(options: HostDispatchRunnerOptions): Ho
   const now = options.now ?? Date.now
   const leaseOwner = options.leaseOwner ?? crypto.randomUUID()
   const deliver = options.deliver ?? deliverHostDispatch
+  const auditFailure = options.auditFailure ?? recordHostDispatchFailure
+  // A terminal outcome has to reach a human, but the audit is never on the
+  // critical path: a failed notification must not strand the drain loop.
+  const audit = async (job: HostDispatchJobRow, failure: HostDispatchFailure): Promise<void> => {
+    try {
+      await auditFailure(job, failure)
+    } catch {
+      // Best-effort by contract (see dispatch-failure-audit).
+    }
+  }
   let active: Promise<void> | null = null
   let stopped = false
 
@@ -52,7 +68,14 @@ export function createHostDispatchRunner(options: HostDispatchRunnerOptions): Ho
         )
         if (!job) break
         if (now() >= job.expiresAt) {
-          await terminateHostDispatch(job.id, "host dispatch deadline expired", "timeout", now())
+          const at = now()
+          await terminateHostDispatch(job.id, "host dispatch deadline expired", "timeout", at)
+          await audit(job, {
+            kind: "failed",
+            code: "timeout",
+            error: "host dispatch deadline expired",
+            at,
+          })
           continue
         }
         try {
@@ -63,14 +86,23 @@ export function createHostDispatchRunner(options: HostDispatchRunnerOptions): Ho
             await completeHostDispatch(job.id, now())
           }
         } catch (error) {
+          const at = now()
           if (error instanceof HostDispatchDeliveryError && !error.retryable) {
-            await terminateHostDispatch(job.id, error.message, error.code, now())
+            await terminateHostDispatch(job.id, error.message, error.code, at)
+            await audit(job, { kind: "failed", code: error.code, error: error.message, at })
           } else {
-            await failHostDispatch(
-              job.id,
-              error instanceof Error ? error.message : String(error),
-              now()
-            )
+            const message = error instanceof Error ? error.message : String(error)
+            const status = await failHostDispatch(job.id, message, at)
+            // Only the attempt that exhausts the budget is terminal; the
+            // retries before it are noise a human must not be paged for.
+            if (status === "deadletter") {
+              const code =
+                error instanceof HostDispatchDeliveryError ? error.code : "delivery_failed"
+              await audit(
+                { ...job, attempts: job.attempts + 1 },
+                { kind: "deadletter", code, error: message, at }
+              )
+            }
           }
         }
       }

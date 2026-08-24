@@ -578,6 +578,26 @@ class TaskSchedulerImpl {
   }
 
   /**
+   * Re-evaluate the configured execution authority and arm or stand down.
+   *
+   * `scheduleTask` consults the authority when it arms, so a *new* task always
+   * lands on the right host. Tasks armed before the operator handed authority
+   * elsewhere were already in the driver, and nothing disarmed them — the host
+   * that just stood down would still fire the next occurrence. The Scheduled
+   * Tasks host surface calls this the moment it writes the config; the fire-time
+   * gate in `handleTaskDue` is the backstop for a driver we cannot disarm.
+   */
+  async reconcileTimingAuthority(): Promise<void> {
+    this.authorityAnnouncedFor = null
+    if (!this.driver || !this.driverReady) return
+    if (this.isTimingAuthority()) {
+      await this.scheduleAllActiveTasks()
+      return
+    }
+    this.unscheduleAllTasks()
+  }
+
+  /**
    * Handle a task becoming due (fired by the timing driver). Resolves the
    * latest task row and runs it through the same execution path as before.
    * `firedAtMs` is the originally-armed slot so interval cadence stays stable.
@@ -592,6 +612,14 @@ class TaskSchedulerImpl {
     const task = await schedulerDb.getTask(taskId)
     if (version !== this.lifecycleVersion) return
     if (!task || task.status !== "active") return
+    // A slot armed before the operator handed timing to another host must not
+    // fire here. The occurrence is not consumed and `nextRunAt` is not advanced:
+    // the authority owns this occurrence, and rewriting the schedule from a host
+    // that stood down would desynchronise the two.
+    if (!this.isTimingAuthority()) {
+      log.debug(`Skipping ${task.name}: another host holds the execution authority`)
+      return
+    }
     const now = new Date()
     // Lifecycle bounds are checked before consuming the persisted slot so an
     // expired task records its terminal state without advancing the schedule.
@@ -684,6 +712,11 @@ class TaskSchedulerImpl {
    * Check and run any missed tasks
    */
   private async checkMissedTasks(): Promise<void> {
+    // The catch-up sweep both *runs* overdue slots and rewrites `nextRunAt`, so
+    // a host that stood down must not enter it: it would consume occurrences the
+    // authority owns and move the schedule out from under it. The authority runs
+    // the same sweep.
+    if (!this.isTimingAuthority()) return
     const now = new Date()
     const tasks = await schedulerDb.getOverdueActiveTasks(now)
 

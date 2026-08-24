@@ -14,6 +14,7 @@ import {
   markHostDispatchInflight,
   markHostDispatchAwaitingResult,
   pruneTerminalHostDispatch,
+  recordHostDispatchRemoteRun,
   recoverStrandedHostDispatch,
   storeHostDispatchResultChunk,
   consumeHostDispatchResult,
@@ -414,5 +415,34 @@ describe("hostDispatchQueue", () => {
       "storage unavailable"
     )
     add.mockRestore()
+  })
+
+  it("records the target's run id once and ignores a repeated write", async () => {
+    const row = await enqueueHostDispatch({
+      accountId: "acct",
+      domain: "schedule-handoff",
+      targetRef: "host-b",
+      kind: "workflow.trigger",
+      payload: {},
+      idempotencyKey: "remote-run-pointer",
+      now: 1_000,
+    })
+
+    await recordHostDispatchRemoteRun(row.id, "remote-run-1", 2_000)
+    await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
+      remoteRunId: "remote-run-1",
+      updatedAt: 2_000,
+    })
+
+    // A redelivery replays the same pointer; it must not churn `updatedAt` and
+    // make an idle row look freshly touched.
+    await recordHostDispatchRemoteRun(row.id, "remote-run-1", 3_000)
+    await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
+      updatedAt: 2_000,
+    })
+  })
+
+  it("ignores a run pointer for a row that no longer exists", async () => {
+    await expect(recordHostDispatchRemoteRun("gone", "run-x", 1_000)).resolves.toBeUndefined()
   })
 })

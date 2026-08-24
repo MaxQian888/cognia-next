@@ -109,4 +109,44 @@ describe("createScheduleHandoffDelivery", () => {
     unregister()
     await expect(deliverHostDispatch(job())).rejects.toMatchObject({ code: "unsupported" })
   })
+
+  it("records the run the target minted so the source can point at it", async () => {
+    const recordRemoteRun = jest.fn().mockResolvedValue(undefined)
+    const delivery = createScheduleHandoffDelivery({
+      recordRemoteRun,
+      openTarget: async () => ({
+        transport: { call: jest.fn().mockResolvedValue({ runId: "remote-run-1" }) },
+        close: jest.fn(),
+      }),
+    })
+
+    await expect(delivery(job())).resolves.toBe("succeeded")
+    expect(recordRemoteRun).toHaveBeenCalledWith("dispatch-1", "remote-run-1")
+  })
+
+  it("still succeeds when the target answers without a run id", async () => {
+    const recordRemoteRun = jest.fn()
+    const delivery = createScheduleHandoffDelivery({
+      recordRemoteRun,
+      openTarget: async () => ({
+        transport: { call: jest.fn().mockResolvedValue(undefined) },
+        close: jest.fn(),
+      }),
+    })
+
+    await expect(delivery(job())).resolves.toBe("succeeded")
+    expect(recordRemoteRun).not.toHaveBeenCalled()
+  })
+
+  it("does not fail a delivered handoff when the pointer write throws", async () => {
+    const delivery = createScheduleHandoffDelivery({
+      recordRemoteRun: jest.fn().mockRejectedValue(new Error("dexie closed")),
+      openTarget: async () => ({
+        transport: { call: jest.fn().mockResolvedValue({ runId: "remote-run-1" }) },
+        close: jest.fn(),
+      }),
+    })
+
+    await expect(delivery(job())).resolves.toBe("succeeded")
+  })
 })

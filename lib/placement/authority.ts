@@ -115,10 +115,64 @@ export function readExecutionAuthorityConfig(): ExecutionAuthorityConfig {
 }
 
 export function writeExecutionAuthorityConfig(config: ExecutionAuthorityConfig): void {
+  snapshot = config
   try {
     globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(config))
   } catch {
     // Storage unavailable (private mode, quota). The in-memory decision for
     // this session still stands; nothing here may throw into the scheduler.
   }
+  for (const listener of listeners) listener()
+}
+
+// ---------------------------------------------------------------------------
+// React seam
+// ---------------------------------------------------------------------------
+//
+// `readExecutionAuthorityConfig` parses on every call, which is what the
+// scheduler wants (another tab may have rewritten the key between ticks) and
+// exactly what `useSyncExternalStore` cannot have: a fresh object every read is
+// an infinite render loop. The cache below is therefore confined to the UI
+// seam and leaves the scheduler's per-tick semantics untouched.
+
+let snapshot: ExecutionAuthorityConfig | null = null
+const listeners = new Set<() => void>()
+let storageBound = false
+
+function invalidate(): void {
+  snapshot = null
+  for (const listener of listeners) listener()
+}
+
+/** Subscribe to config changes from this tab and from any other one. */
+export function subscribeExecutionAuthorityConfig(listener: () => void): () => void {
+  listeners.add(listener)
+  if (!storageBound && typeof window !== "undefined") {
+    storageBound = true
+    // Another tab writing the same key must not leave this one showing — or
+    // acting on — a stale authority.
+    window.addEventListener("storage", (event) => {
+      if (event.key === null || event.key === STORAGE_KEY) invalidate()
+    })
+  }
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** Referentially stable snapshot for `useSyncExternalStore`. */
+export function getExecutionAuthorityConfigSnapshot(): ExecutionAuthorityConfig {
+  snapshot ??= readExecutionAuthorityConfig()
+  return snapshot
+}
+
+/** Server/prerender snapshot — storage is not readable during a static export. */
+export function getExecutionAuthorityConfigServerSnapshot(): ExecutionAuthorityConfig {
+  return DEFAULT_AUTHORITY_CONFIG
+}
+
+/** Test-only reset of the module-level snapshot and listener set. */
+export function __resetExecutionAuthorityConfigForTests(): void {
+  snapshot = null
+  listeners.clear()
 }

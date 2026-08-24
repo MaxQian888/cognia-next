@@ -1,3 +1,4 @@
+import { recordHostDispatchRemoteRun } from "@/lib/db/host-dispatch-queue"
 import { openRemoteHostTarget } from "@/lib/remote-host/target-transport"
 import {
   HostDispatchDeliveryError,
@@ -18,6 +19,8 @@ export interface ScheduleHandoffDeliveryDeps {
     transport: Pick<Transport, "call">
     close: () => void
   }>
+  /** Persist the run the target minted. Injected only so tests avoid Dexie. */
+  recordRemoteRun?: (dispatchId: string, remoteRunId: string) => Promise<void>
 }
 
 function isHandoffPayload(value: unknown): value is WorkflowScheduleHandoffPayload {
@@ -43,6 +46,7 @@ export function createScheduleHandoffDelivery(
   deps: ScheduleHandoffDeliveryDeps = {}
 ): HostDispatchDelivery {
   const openTarget = deps.openTarget ?? openRemoteHostTarget
+  const recordRemoteRun = deps.recordRemoteRun ?? recordHostDispatchRemoteRun
   return async (job) => {
     if (
       job.domain !== "schedule-handoff" ||
@@ -59,7 +63,7 @@ export function createScheduleHandoffDelivery(
     let target: Awaited<ReturnType<typeof openTarget>> | undefined
     try {
       target = await openTarget(job.targetRef)
-      await target.transport.call(
+      const accepted = await target.transport.call<{ runId?: unknown }>(
         "workflow_handoff_create",
         {
           deploymentId: job.payload.deploymentId,
@@ -69,6 +73,16 @@ export function createScheduleHandoffDelivery(
         },
         { idempotencyKey: job.idempotencyKey }
       )
+      // The source keeps a pointer, never a mirror of the remote journal: one
+      // run has one event log, and it lives on the Host that is executing it.
+      const remoteRunId = typeof accepted?.runId === "string" ? accepted.runId : undefined
+      if (remoteRunId) {
+        try {
+          await recordRemoteRun(job.id, remoteRunId)
+        } catch {
+          // A lost pointer costs the Runs surface a link, not the run itself.
+        }
+      }
       return "succeeded"
     } catch (error) {
       throw new HostDispatchDeliveryError(

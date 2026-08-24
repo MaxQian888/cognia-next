@@ -1471,6 +1471,153 @@ describe("TaskScheduler", () => {
       window.localStorage.removeItem("cognia-execution-authority-v1")
     })
 
+    it("does not fire a slot armed before timing was handed to another host", async () => {
+      // `scheduleTask` gates on the authority when it arms, but a task armed
+      // *before* the handover was already inside the driver and nothing
+      // disarmed it — the host that stood down still fired the next occurrence.
+      const executor = jest.fn().mockResolvedValue({ success: true })
+      registerTaskExecutor("test", executor)
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      const slot = Date.now()
+      const task: ScheduledTask = {
+        id: "handover-task",
+        name: "Handover Task",
+        type: "test",
+        trigger: { type: "interval", intervalMs: 60_000 },
+        config: {
+          maxRetries: 0,
+          retryDelay: 1_000,
+          timeout: 30_000,
+          allowConcurrent: true,
+          overlapPolicy: "allow",
+          runMissedOnStartup: false,
+        },
+        notification: { onStart: false, onComplete: false, onError: false },
+        status: "active",
+        nextRunAt: new Date(slot),
+        runCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        createdAt: new Date(slot - 60_000),
+        updatedAt: new Date(),
+      }
+      mockSchedulerDb.getTask.mockResolvedValue(task)
+      mockSchedulerDb.claimTaskSlot.mockResolvedValue(task)
+
+      const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+      useRemoteHostStore.setState({
+        activeHostId: null,
+        hosts: [
+          {
+            id: "host-authority",
+            label: "build box",
+            config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+            credentialRef: "ref",
+            addedAt: 1,
+            connectionState: "ready",
+            lastConnectedAt: Date.now(),
+          },
+        ] as never,
+      })
+      window.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+      )
+
+      driver.fire(task.id, slot)
+      await jest.advanceTimersByTimeAsync(10)
+
+      expect(executor).not.toHaveBeenCalled()
+      // The occurrence belongs to the authority: this host must not consume the
+      // slot or advance `nextRunAt`, or the two schedules desynchronise.
+      expect(mockSchedulerDb.claimTaskSlot).not.toHaveBeenCalled()
+
+      sched.stop()
+      window.localStorage.removeItem("cognia-execution-authority-v1")
+      useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    })
+
+    it("does not run the missed-task catch-up while another host holds timing", async () => {
+      // The sweep both executes overdue slots and rewrites `nextRunAt`; running
+      // it on a host that stood down moves the schedule under the authority.
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+      useRemoteHostStore.setState({
+        activeHostId: null,
+        hosts: [
+          {
+            id: "host-authority",
+            label: "build box",
+            config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+            credentialRef: "ref",
+            addedAt: 1,
+            connectionState: "ready",
+            lastConnectedAt: Date.now(),
+          },
+        ] as never,
+      })
+      window.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+      )
+
+      mockSchedulerDb.getOverdueActiveTasks.mockClear()
+      await jest.advanceTimersByTimeAsync(61_000)
+      expect(mockSchedulerDb.getOverdueActiveTasks).not.toHaveBeenCalled()
+
+      window.localStorage.removeItem("cognia-execution-authority-v1")
+      await jest.advanceTimersByTimeAsync(61_000)
+      expect(mockSchedulerDb.getOverdueActiveTasks).toHaveBeenCalled()
+
+      sched.stop()
+      useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    })
+
+    it("disarms and re-arms when the operator changes the execution authority", async () => {
+      const driver = makeMockDriver()
+      const sched = createTaskScheduler(driver)
+      await sched.initialize()
+
+      const { useRemoteHostStore } = await import("@/stores/remote-host/remote-host-store")
+      useRemoteHostStore.setState({
+        activeHostId: null,
+        hosts: [
+          {
+            id: "host-authority",
+            label: "build box",
+            config: { baseUrl: "https://h", deviceJwt: "j", deviceId: "d", serverVersion: "1" },
+            credentialRef: "ref",
+            addedAt: 1,
+            connectionState: "ready",
+            lastConnectedAt: Date.now(),
+          },
+        ] as never,
+      })
+      window.localStorage.setItem(
+        "cognia-execution-authority-v1",
+        JSON.stringify({ hostId: "host-authority", degradeAfterMs: 300_000 })
+      )
+
+      jest.mocked(driver.arm).mockClear()
+      jest.mocked(driver.disarm).mockClear()
+      await sched.reconcileTimingAuthority()
+      expect(driver.arm).not.toHaveBeenCalled()
+
+      window.localStorage.removeItem("cognia-execution-authority-v1")
+      jest.mocked(driver.arm).mockClear()
+      await sched.reconcileTimingAuthority()
+      expect(mockSchedulerDb.getTasksByStatus).toHaveBeenCalledWith("active")
+
+      sched.stop()
+      useRemoteHostStore.setState({ activeHostId: null, hosts: [] })
+    })
+
     it("keeps event-triggered tasks off the timing driver without warning", async () => {
       const driver = makeMockDriver()
       const sched = createTaskScheduler(driver)

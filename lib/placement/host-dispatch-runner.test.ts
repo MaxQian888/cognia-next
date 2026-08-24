@@ -60,15 +60,24 @@ describe("createHostDispatchRunner", () => {
       idempotencyKey: "terminal",
       now: NOW,
     })
+    const auditFailure = jest.fn().mockResolvedValue(undefined)
     const runner = createHostDispatchRunner({
       accountId: "acct",
       now: () => NOW,
+      auditFailure,
       deliver: async (job) => {
         if (job.id === retry.id) throw new HostDispatchDeliveryError("offline", true, "offline")
         throw new HostDispatchDeliveryError("unsupported", false, "unsupported")
       },
     })
     await runner.kick()
+    // The retryable failure still has attempts left, so nobody is paged for it;
+    // only the non-retryable refusal is terminal and audited.
+    expect(auditFailure).toHaveBeenCalledTimes(1)
+    expect(auditFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ id: terminal.id }),
+      expect.objectContaining({ kind: "failed", code: "unsupported" })
+    )
     await expect(getDb().hostDispatchQueue.get(retry.id)).resolves.toMatchObject({
       status: "pending",
       attempts: 1,
@@ -91,11 +100,21 @@ describe("createHostDispatchRunner", () => {
       expiresAt: NOW + 1,
     })
     const deliver = jest.fn().mockResolvedValue("succeeded")
-    const runner = createHostDispatchRunner({ accountId: "acct", now: () => NOW + 1, deliver })
+    const auditFailure = jest.fn().mockResolvedValue(undefined)
+    const runner = createHostDispatchRunner({
+      accountId: "acct",
+      now: () => NOW + 1,
+      deliver,
+      auditFailure,
+    })
 
     await runner.kick()
 
     expect(deliver).not.toHaveBeenCalled()
+    expect(auditFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row.id }),
+      expect.objectContaining({ kind: "failed", code: "timeout" })
+    )
     await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
       status: "failed",
       terminalCode: "timeout",
@@ -156,6 +175,81 @@ describe("createHostDispatchRunner", () => {
     await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
       status: "pending",
       lastError: "offline",
+    })
+  })
+
+  it("audits only the attempt that exhausts the retry budget", async () => {
+    const row = await enqueueHostDispatch({
+      accountId: "acct",
+      domain: "schedule-handoff",
+      targetRef: "host-b",
+      kind: "workflow.trigger",
+      payload: {},
+      idempotencyKey: "exhaust",
+      maxAttempts: 2,
+      label: "wf-1",
+      now: NOW,
+    })
+    const auditFailure = jest.fn().mockResolvedValue(undefined)
+    const runner = createHostDispatchRunner({
+      accountId: "acct",
+      now: () => NOW,
+      auditFailure,
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new HostDispatchDeliveryError("handoff_failed", true, "offline")),
+    })
+
+    // First attempt: retryable, still inside the budget — nothing audited.
+    await runner.kick()
+    expect(auditFailure).not.toHaveBeenCalled()
+
+    // The row is now backing off; make it due again so the second attempt runs.
+    await getDb().hostDispatchQueue.update(row.id, { nextAttemptAt: NOW })
+    await runner.kick()
+
+    await expect(getDb().hostDispatchQueue.get(row.id)).resolves.toMatchObject({
+      status: "deadletter",
+      attempts: 2,
+    })
+    expect(auditFailure).toHaveBeenCalledTimes(1)
+    expect(auditFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row.id, attempts: 2, label: "wf-1" }),
+      expect.objectContaining({ kind: "deadletter", code: "handoff_failed", error: "offline" })
+    )
+  })
+
+  it("keeps draining when the audit itself throws", async () => {
+    await enqueueHostDispatch({
+      accountId: "acct",
+      domain: "mobile-step",
+      targetRef: "phone",
+      kind: "camera",
+      payload: {},
+      idempotencyKey: "audit-throws",
+      now: NOW,
+    })
+    const second = await enqueueHostDispatch({
+      accountId: "acct",
+      domain: "mobile-step",
+      targetRef: "phone",
+      kind: "camera",
+      payload: {},
+      idempotencyKey: "audit-throws-2",
+      now: NOW + 1,
+    })
+    const runner = createHostDispatchRunner({
+      accountId: "acct",
+      now: () => NOW + 2,
+      auditFailure: jest.fn().mockRejectedValue(new Error("center down")),
+      deliver: jest
+        .fn()
+        .mockRejectedValue(new HostDispatchDeliveryError("unsupported", false, "no")),
+    })
+
+    await expect(runner.kick()).resolves.toBeUndefined()
+    await expect(getDb().hostDispatchQueue.get(second.id)).resolves.toMatchObject({
+      status: "failed",
     })
   })
 })

@@ -394,6 +394,27 @@ export async function storeHostDispatchResultChunk(
   })
 }
 
+/**
+ * Record the id the target minted for this dispatch.
+ *
+ * Written before the row settles so a Host that dies between the target's
+ * acknowledgement and its own completion still knows a remote run exists — the
+ * alternative is a source that offers to cancel work the target already
+ * admitted.
+ */
+export async function recordHostDispatchRemoteRun(
+  id: string,
+  remoteRunId: string,
+  now = Date.now()
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.hostDispatchQueue, async () => {
+    const row = await db.hostDispatchQueue.get(id)
+    if (!row || row.remoteRunId === remoteRunId) return
+    await db.hostDispatchQueue.update(id, { remoteRunId, updatedAt: now })
+  })
+}
+
 /** Read a complete result; retain it until the owning workflow journal settles. */
 export async function consumeHostDispatchResult(id: string): Promise<string | undefined> {
   return (await getDb().hostDispatchQueue.get(id))?.resultJson

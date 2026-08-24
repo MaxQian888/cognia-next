@@ -44,6 +44,8 @@ describe("SchedulerHostBar", () => {
     expect(screen.getByTestId("scheduler-host-bar")).toHaveTextContent(/this device/i)
     expect(screen.getByTestId("scheduler-host-bar-no-paired")).toBeInTheDocument()
     expect(screen.queryByTestId("scheduler-host-bar-switch")).not.toBeInTheDocument()
+    // Nobody to hand execution authority to on a single-machine install.
+    expect(screen.queryByTestId("scheduler-authority-control")).not.toBeInTheDocument()
   })
 
   it("on a desktop driving a remote host: names the host, marks local as suspended, and switches", () => {
@@ -54,6 +56,8 @@ describe("SchedulerHostBar", () => {
     remoteState.activeHostId = "h1"
     const { rerender } = render(<SchedulerHostBar />)
     expect(screen.getByTestId("scheduler-host-bar")).toHaveTextContent(/Office box/)
+    // The execution-authority control lives on this bar, not in its own card.
+    expect(screen.getByTestId("scheduler-authority-control")).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("scheduler-host-bar-switch"))
     expect(hostTarget.setTarget).toHaveBeenCalledWith("local")
     hostTarget.target = "local"

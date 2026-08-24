@@ -89,6 +89,17 @@ export interface HostDispatchJobRow {
   stepId?: string
   /** Free-form label for the queue UI. */
   label?: string
+  /**
+   * What the target minted for this dispatch — for a `schedule-handoff`, the
+   * remote `runId`.
+   *
+   * The source Host deliberately does not mirror the remote run's events (that
+   * would be a second execution journal for one run). It records the pointer so
+   * the Runs surface can name where the work went and offer to open it there.
+   * Its presence is also the admission watermark: once the target has minted a
+   * run, cancelling at the source would leave that run orphaned.
+   */
+  remoteRunId?: string
   /** Persisted chunk assembly survives a Host process restart. */
   resultTotal?: number
   resultChunks?: Record<string, string>
