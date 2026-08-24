@@ -1,5 +1,5 @@
 {
-  "title": "架构决策记录",
+  "title": "\u67b6\u6784\u51b3\u7b56\u8bb0\u5f55",
   "pages": [
     "index",
     "0001-backup-schema-v3",
@@ -139,6 +139,7 @@
     "0139-visual-output-routing",
     "0140-squad-as-an-executor",
     "0141-onboarding-two-paths",
-    "0142-agent-sdk-two-layer-product"
+    "0142-agent-sdk-two-layer-product",
+    "0143-device-console"
   ]
 }
