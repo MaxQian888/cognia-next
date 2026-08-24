@@ -251,3 +251,40 @@ export function shortenFingerprint(value: string | undefined): string | null {
   if (trimmed.length <= 24) return trimmed
   return `${trimmed.slice(0, 12)}…${trimmed.slice(-8)}`
 }
+
+/**
+ * One labelled fact in a detail pane.
+ *
+ * A definition list rather than a two-column grid of divs: these really are
+ * term/description pairs, and a screen reader reading "Paired · 3 days ago" as
+ * a pair is the difference between a fact and two loose strings.
+ */
+export function DeviceFactRow({
+  label,
+  children,
+  mono,
+}: {
+  label: string
+  children: React.ReactNode
+  mono?: boolean
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1">
+      <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("min-w-0 truncate text-right text-xs", mono && "font-mono text-[11px]")}>
+        {children}
+      </dd>
+    </div>
+  )
+}
+
+/** Wraps a group of {@link DeviceFactRow}s in the `<dl>` they belong to. */
+export function DeviceFactList({
+  children,
+  className,
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return <dl className={cn("divide-y divide-border/50", className)}>{children}</dl>
+}

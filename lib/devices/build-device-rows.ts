@@ -58,6 +58,29 @@ export function workerRef(worker: WorkerInput): string {
 }
 
 /**
+ * The key this device is addressed by in `hostDispatchQueue`.
+ *
+ * Not the console `ref`. `HostDispatchJobRow.targetRef` is documented as being
+ * "in the target's own vocabulary" — a raw `deviceId` for a paired device, a
+ * `hostRef` for a worker, a remote-host id for a handoff — and the console
+ * namespaces its refs so a phone and a Host cannot collide. Querying with the
+ * namespaced ref would silently return nothing, which reads as "no work has
+ * ever been sent here".
+ */
+export function dispatchTargetRef(row: DeviceRow): string | undefined {
+  switch (row.kind) {
+    case "paired-device":
+      return row.deviceId
+    case "remote-host":
+      return row.hostId
+    case "worker":
+      return row.ref
+    default:
+      return undefined
+  }
+}
+
+/**
  * Reachability from liveness plus, when we have it, the event plane.
  *
  * A ready event stream is proof of presence now; a timestamp is only evidence
@@ -132,6 +155,7 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     label: row.label,
     isSelf: false,
     deviceId: row.deviceId,
+    pubkey: row.pubkey,
     platform: baselinePlatformFor(row.platform),
     reportedPlatform: row.platform,
     appVersion: row.appVersion,

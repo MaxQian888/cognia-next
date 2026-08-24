@@ -424,6 +424,26 @@ export async function listHostDispatchForRun(runId: string): Promise<HostDispatc
   return getDb().hostDispatchQueue.where("runId").equals(runId).toArray()
 }
 
+/**
+ * Every dispatch row addressed to one target, newest first.
+ *
+ * Reads the `targetRef` index rather than scanning, and returns terminal rows
+ * too: the device console's question is "what has been sent here and how did it
+ * go", and hiding the failures would answer only the half that never needed
+ * explaining.
+ *
+ * `targetRef` is in the target's OWN vocabulary — a `hostRef` for a worker, a
+ * `deviceId` for a paired device, a remote-host id for a handoff — so callers
+ * holding a namespaced console ref must translate first.
+ */
+export async function listHostDispatchForTarget(
+  targetRef: string,
+  limit = 50
+): Promise<HostDispatchJobRow[]> {
+  const rows = await getDb().hostDispatchQueue.where("targetRef").equals(targetRef).toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)
+}
+
 export async function listDeadLetteredHostDispatch(
   accountId: string
 ): Promise<HostDispatchJobRow[]> {

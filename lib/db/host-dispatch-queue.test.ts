@@ -11,6 +11,7 @@ import {
   hostDispatchBackoffMs,
   listDeadLetteredHostDispatch,
   listHostDispatchForRun,
+  listHostDispatchForTarget,
   markHostDispatchInflight,
   markHostDispatchAwaitingResult,
   pruneTerminalHostDispatch,
@@ -394,6 +395,30 @@ describe("hostDispatchQueue", () => {
 
     const forRun = await listHostDispatchForRun("run_1")
     expect(forRun.map((row) => row.idempotencyKey).sort()).toEqual(["a", "b"])
+  })
+
+  it("lists everything ever sent to one target, newest first", async () => {
+    await enqueueHostDispatch(input({ idempotencyKey: "a", now: NOW }))
+    await enqueueHostDispatch(input({ idempotencyKey: "b", stepId: "step_2", now: NOW + 1_000 }))
+    await enqueueHostDispatch(input({ idempotencyKey: "c", targetRef: "device:b" }))
+
+    const rows = await listHostDispatchForTarget("device:a")
+    expect(rows.map((row) => row.idempotencyKey)).toEqual(["b", "a"])
+  })
+
+  it("keeps terminal rows, because a failure is what the reader came for", async () => {
+    const job = await enqueueHostDispatch(input())
+    await markHostDispatchInflight(job.id)
+    await failHostDispatch(job.id, "device denied the prompt", NOW, { maxAttempts: 1 })
+
+    const rows = await listHostDispatchForTarget("device:a")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ lastError: "device denied the prompt" })
+  })
+
+  it("answers nothing for a target that was never addressed", async () => {
+    await enqueueHostDispatch(input())
+    await expect(listHostDispatchForTarget("device:never")).resolves.toEqual([])
   })
 
   it("tolerates a concurrent enqueue winning the race for one key", async () => {

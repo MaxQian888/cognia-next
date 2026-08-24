@@ -38,9 +38,187 @@
     "filterAll": "全部类型",
     "emptyTitle": "暂无设备",
     "emptyBody": "配对一台手机或添加远程主机后会显示在这里。",
-    "emptyFiltered": "没有设备符合当前的搜索或筛选条件。"
+    "emptyFiltered": "没有设备符合当前的搜索或筛选条件。",
+    "label": "设备列表"
   },
   "row": {
     "needsAttention": "需要关注"
+  },
+  "connectionState": {
+    "disconnected": "未连接",
+    "connecting": "连接中",
+    "ready": "就绪",
+    "degraded": "降级",
+    "revoked": "已吊销",
+    "versionMismatch": "版本不匹配"
+  },
+  "eventPlane": {
+    "disconnected": "未连接",
+    "connecting": "连接中",
+    "replaying": "回放中",
+    "ready": "就绪",
+    "degraded": "降级"
+  },
+  "attention": {
+    "foreground": "前台",
+    "background": "后台",
+    "unknown": "未知"
+  },
+  "eventStreamState": {
+    "connecting": "连接中",
+    "replaying": "回放中",
+    "ready": "就绪"
+  },
+  "overview": {
+    "identity": "身份",
+    "kind": "类型",
+    "platform": "平台",
+    "appVersion": "应用版本",
+    "serverVersion": "服务端版本",
+    "role": "角色",
+    "adminState": "状态",
+    "ref": "标识",
+    "presence": "在场",
+    "reachability": "可达性",
+    "lastSeen": "最近可见",
+    "isThisDevice": "本机",
+    "paired": "配对于",
+    "added": "添加于",
+    "lastConnected": "最近连接",
+    "connectionState": "连接状态",
+    "eventPlane": "事件通道",
+    "eventPlaneState": "流健康度",
+    "attention": "前后台",
+    "noStreams": "当前没有打开的事件流。",
+    "connection": "连接",
+    "baseUrl": "地址",
+    "fingerprint": "指纹",
+    "copyFingerprint": "复制完整指纹",
+    "fingerprintCopied": "指纹已复制",
+    "conflictTitle": "主机与本地记录不一致",
+    "conflictBody": "上方显示的是主机的判定，也是实际生效的那一个。本地镜像已过期——通常是通过 CLI 或 Owner API 改动的。",
+    "connectionErrorTitle": "上次连接失败"
+  },
+  "capabilities": {
+    "group": {
+      "platform": "平台能力",
+      "host-execution": "主机执行特性",
+      "host-proxy": "主机代理特性"
+    },
+    "reportedCount": "已上报 {reported}/{total}",
+    "reportedAt": "上报于{when}",
+    "neverReportedTitle": "该设备从未上报过能力",
+    "neverReportedBody": "下面的内容都未经确认。标为「预期具备」的来自平台基线，其余的是真的未知。设备会在下次连接时上报。",
+    "noVocabularyTitle": "该设备没有可展示的能力词表",
+    "noVocabulary": {
+      "local": "本机能力由本地探测得出，不经上报。",
+      "paired-device": "该设备未上报过，且平台未知，没有可推断的基线。",
+      "remote-host": "尚未与该主机完成能力交换。连接后即可读取其清单。",
+      "worker": "Worker 登记的是 SecurityStore 能力 id，与平台能力属于不同词表。请查看「运行时」页。"
+    }
+  },
+  "title": "设备",
+  "description": "此账户可触达的每一台机器：它能做什么，以及在这里被允许做什么。",
+  "summary": "{total} 台中 {online} 台在线",
+  "hostUnreachableTitle": "当前显示的是本地记录",
+  "hostUnreachableBody": "无法向主机查询，因此生命周期状态与每项授权背后的具体能力来自本地镜像。在别处被挂起的设备在这里可能仍显示为正常。",
+  "actions": {
+    "pair": "配对设备",
+    "addHost": "添加主机",
+    "refresh": "刷新"
+  },
+  "detail": {
+    "noSelectionTitle": "未选择设备",
+    "noSelectionBody": "从左侧选择一台设备，查看它能做什么。",
+    "tab": {
+      "overview": "概览",
+      "capabilities": "能力",
+      "access": "权限",
+      "runtime": "运行时",
+      "activity": "活动"
+    }
+  },
+  "access": {
+    "partialHint": "该设备只持有此项授权所包含能力中的一部分。关闭再打开可将其恢复一致。",
+    "reason": {
+      "mirrorOnly": "来自本地镜像——无法向主机查询。",
+      "deviceRevoked": "已吊销的设备不持有任何能力，无论本地记录还写着什么。",
+      "lockedUseUnavailable": "此授权在当前构建中没有强制执行点，因此无法发放。"
+    },
+    "lifecycle": "生命周期",
+    "lifecycleHint": "暂停会阻断该设备，直到你恢复它。吊销不可逆——设备必须重新配对。",
+    "pause": "暂停",
+    "resume": "恢复",
+    "revoke": "吊销",
+    "revokedTitle": "该设备已被吊销",
+    "revokedBody": "它不持有任何能力，且必须重新配对才能连接。",
+    "notApplicableTitle": "没有可管理的授权",
+    "notApplicable": {
+      "local": "本机不会给自己授权。",
+      "remote-host": "远程主机自行决定本客户端可做什么；授权在主机侧管理，不在这里。",
+      "worker": "Worker 的能力来自它的登记。若要撤销，请到「设置 → 机队」吊销它。",
+      "paired-device": "没有可管理的授权。"
+    }
+  },
+  "runtime": {
+    "shellTiers": "Shell 档位",
+    "tierAvailable": "可用",
+    "tierUnavailable": "不可用",
+    "tierReason": {
+      "osBackendUnavailable": "本机未安装操作系统沙盒后端。",
+      "microvmAdapterMissing": "未注册 microVM 适配器。请启用 E2B 沙盒插件；没有它时 microVM 请求会被直接拒绝，而不会回退到宿主执行。",
+      "cuaDesktopRetired": "已撤回。绑定桌面只能证明远程 GUI 隔离，shell 与文件操作并未被沙盒化。仍带有该档位的历史会话会在绑定时被拒绝。"
+    },
+    "sandbox": "沙盒连接",
+    "sandboxUnsupportedTitle": "这里没有沙盒连接",
+    "workspaces": "工作区环境",
+    "workspacesInactiveTitle": "当前不是路由目标",
+    "workspacesUnsupportedTitle": "这里没有工作区",
+    "reason": {
+      "sandboxIsClientLocal": "沙盒连接只属于运行本窗口的机器，永远不会路由到其他设备。",
+      "sandboxNotHosted": "这类设备不承载沙盒。",
+      "workspaceNotHosted": "这类设备不承载工作区环境。",
+      "workerNoRoutingPlane": "Worker 接收派发的工作，但不在设备路由平面上，因此无法从这里读取它的工作区。",
+      "routedToRemoteHost": "本窗口当前把执行路由到了远程主机，此时的工作区列表描述的是那台主机，而不是本机。",
+      "activateToInspect": "激活这台主机，把执行路由过去后即可读取它的工作区。"
+    },
+    "activateHost": "激活此主机",
+    "routeLocally": "路由回本机",
+    "isRoutingTarget": "本窗口的执行当前路由到这里。",
+    "timingAuthority": "定时调度权威",
+    "timingAuthorityHint": "设置后，只有这台机器会武装定时任务。保持关闭则每台主机各自武装；重复触发会被确定性幂等键吸收。",
+    "timingAuthorityAria": "将 {label} 设为定时调度权威"
+  },
+  "activity": {
+    "dispatch": "派发队列",
+    "dispatchNotAddressable": "派发队列不会寻址到该设备。",
+    "dispatchEmptyTitle": "没有派发记录",
+    "dispatchEmptyBody": "尚未有工作排队发往该设备。",
+    "attempts": "第 {attempts} 次尝试，共 {max} 次",
+    "status": {
+      "pending": "等待中",
+      "inflight": "投递中",
+      "awaiting-result": "等待结果",
+      "succeeded": "已成功",
+      "failed": "已失败",
+      "cancelled": "已取消",
+      "deadletter": "已进死信"
+    },
+    "domain": {
+      "mobile-step": "设备上的工作流步骤",
+      "remote-step": "Worker 上的工作流步骤",
+      "schedule-handoff": "调度交接"
+    },
+    "placement": "放置",
+    "providesNothing": "该设备没有可供放置决策匹配的内容，因此永远不会被自动选中。",
+    "placementHint": "需求按维度匹配。在调用方所要求的维度上什么都不提供的设备，会被报告为能力不匹配，而不是被悄悄略过。",
+    "dimension": {
+      "platform": "平台",
+      "agent": "Agent",
+      "sandbox": "沙盒",
+      "workspace": "工作区",
+      "credential": "凭据",
+      "host-feature": "主机特性"
+    }
   }
 }

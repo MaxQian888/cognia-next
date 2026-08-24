@@ -38,9 +38,187 @@
     "filterAll": "All kinds",
     "emptyTitle": "No devices",
     "emptyBody": "Pair a phone or add a remote host to see it here.",
-    "emptyFiltered": "No device matches the current search or filter."
+    "emptyFiltered": "No device matches the current search or filter.",
+    "label": "Device list"
   },
   "row": {
     "needsAttention": "Needs attention"
+  },
+  "connectionState": {
+    "disconnected": "Disconnected",
+    "connecting": "Connecting",
+    "ready": "Ready",
+    "degraded": "Degraded",
+    "revoked": "Revoked",
+    "versionMismatch": "Version mismatch"
+  },
+  "eventPlane": {
+    "disconnected": "Disconnected",
+    "connecting": "Connecting",
+    "replaying": "Replaying",
+    "ready": "Ready",
+    "degraded": "Degraded"
+  },
+  "attention": {
+    "foreground": "In the foreground",
+    "background": "In the background",
+    "unknown": "Unknown"
+  },
+  "eventStreamState": {
+    "connecting": "Connecting",
+    "replaying": "Replaying",
+    "ready": "Ready"
+  },
+  "overview": {
+    "identity": "Identity",
+    "kind": "Kind",
+    "platform": "Platform",
+    "appVersion": "App version",
+    "serverVersion": "Server version",
+    "role": "Role",
+    "adminState": "State",
+    "ref": "Reference",
+    "presence": "Presence",
+    "reachability": "Reachability",
+    "lastSeen": "Last seen",
+    "isThisDevice": "This device",
+    "paired": "Paired",
+    "added": "Added",
+    "lastConnected": "Last connected",
+    "connectionState": "Connection",
+    "eventPlane": "Event plane",
+    "eventPlaneState": "Stream health",
+    "attention": "Attention",
+    "noStreams": "No event stream is open right now.",
+    "connection": "Connection",
+    "baseUrl": "Address",
+    "fingerprint": "Fingerprint",
+    "copyFingerprint": "Copy full fingerprint",
+    "fingerprintCopied": "Fingerprint copied",
+    "conflictTitle": "This host and the local record disagree",
+    "conflictBody": "The host's answer is shown above and is the one enforced. The local mirror is stale — it was most likely changed from the CLI or the Owner API.",
+    "connectionErrorTitle": "Last connection attempt failed"
+  },
+  "capabilities": {
+    "group": {
+      "platform": "Platform capabilities",
+      "host-execution": "Host execution features",
+      "host-proxy": "Host proxy features"
+    },
+    "reportedCount": "{reported}/{total} reported",
+    "reportedAt": "Reported {when}",
+    "neverReportedTitle": "This device has never reported its capabilities",
+    "neverReportedBody": "Nothing below is confirmed. Entries marked Expected come from the platform baseline; the rest are simply unknown. The device reports on its next connection.",
+    "noVocabularyTitle": "No capability vocabulary for this device",
+    "noVocabulary": {
+      "local": "This machine's capabilities are probed locally rather than reported.",
+      "paired-device": "This device has not reported, and its platform is unknown, so there is no baseline to infer from.",
+      "remote-host": "This host has not completed a capability exchange yet. Connect to it to read its manifest.",
+      "worker": "A worker is enrolled with SecurityStore capability ids, which are a different vocabulary from platform capabilities. See the Runtime tab."
+    }
+  },
+  "title": "Devices",
+  "description": "Every machine this account can reach, what it can do, and what it is allowed to do here.",
+  "summary": "{online} of {total} online",
+  "hostUnreachableTitle": "Showing the local record",
+  "hostUnreachableBody": "This host could not be asked, so lifecycle state and the exact capabilities behind each grant come from the local mirror. A device suspended elsewhere may still read as active.",
+  "actions": {
+    "pair": "Pair a device",
+    "addHost": "Add a host",
+    "refresh": "Refresh"
+  },
+  "detail": {
+    "noSelectionTitle": "No device selected",
+    "noSelectionBody": "Pick a device from the list to see what it can do.",
+    "tab": {
+      "overview": "Overview",
+      "capabilities": "Capabilities",
+      "access": "Access",
+      "runtime": "Runtime",
+      "activity": "Activity"
+    }
+  },
+  "access": {
+    "partialHint": "This device holds only some of the capabilities this grant confers. Toggle it off and on to bring it back in line.",
+    "reason": {
+      "mirrorOnly": "From the local mirror — this host could not be asked.",
+      "deviceRevoked": "Revoked devices hold nothing, whatever the local record still says.",
+      "lockedUseUnavailable": "This grant has no enforcement point on this build, so it cannot be handed out."
+    },
+    "lifecycle": "Lifecycle",
+    "lifecycleHint": "Pausing blocks this device until you resume it. Revoking is permanent — the device has to pair again.",
+    "pause": "Pause",
+    "resume": "Resume",
+    "revoke": "Revoke",
+    "revokedTitle": "This device is revoked",
+    "revokedBody": "It holds no capabilities and cannot reconnect without pairing again.",
+    "notApplicableTitle": "No grants to manage",
+    "notApplicable": {
+      "local": "This machine does not grant itself access.",
+      "remote-host": "A remote host decides what this client may do; grants are administered on the host, not here.",
+      "worker": "A worker's capabilities come from its enrollment. Revoke it from Settings → Fleet to withdraw them.",
+      "paired-device": "No grants to manage."
+    }
+  },
+  "runtime": {
+    "shellTiers": "Shell tiers",
+    "tierAvailable": "Available",
+    "tierUnavailable": "Unavailable",
+    "tierReason": {
+      "osBackendUnavailable": "The OS sandbox backend is not installed on this machine.",
+      "microvmAdapterMissing": "No microVM adapter is registered. Activate the E2B sandbox plugin; without it a microVM request is refused outright rather than falling back to the host.",
+      "cuaDesktopRetired": "Withdrawn. A bound desktop proves remote GUI isolation only, so shell and file work would not be sandboxed. Existing sessions that still carry this tier are refused at bind time."
+    },
+    "sandbox": "Sandbox connections",
+    "sandboxUnsupportedTitle": "No sandbox connections here",
+    "workspaces": "Workspace environments",
+    "workspacesInactiveTitle": "Not the current routing target",
+    "workspacesUnsupportedTitle": "No workspaces here",
+    "reason": {
+      "sandboxIsClientLocal": "Sandbox connections are local to the machine running this window and are never routed to another device.",
+      "sandboxNotHosted": "This kind of device does not host sandboxes.",
+      "workspaceNotHosted": "This kind of device does not host workspace environments.",
+      "workerNoRoutingPlane": "A worker receives dispatched work but is not on the device routing plane, so its workspaces cannot be read from here.",
+      "routedToRemoteHost": "This window currently routes execution to a remote host, so a workspace list would describe that host rather than this machine.",
+      "activateToInspect": "Activate this host to route execution to it and read its workspaces."
+    },
+    "activateHost": "Activate this host",
+    "routeLocally": "Route locally",
+    "isRoutingTarget": "Execution from this window currently routes here.",
+    "timingAuthority": "Scheduled timing authority",
+    "timingAuthorityHint": "When set, only this machine arms scheduled work. Leave it off and every host arms its own; duplicates are absorbed by the deterministic idempotency key.",
+    "timingAuthorityAria": "Make {label} the scheduled timing authority"
+  },
+  "activity": {
+    "dispatch": "Dispatch queue",
+    "dispatchNotAddressable": "This device is not addressed by the dispatch queue.",
+    "dispatchEmptyTitle": "Nothing dispatched",
+    "dispatchEmptyBody": "No work has been queued to this device.",
+    "attempts": "attempt {attempts} of {max}",
+    "status": {
+      "pending": "Pending",
+      "inflight": "In flight",
+      "awaiting-result": "Awaiting result",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "deadletter": "Dead-lettered"
+    },
+    "domain": {
+      "mobile-step": "Workflow step on a device",
+      "remote-step": "Workflow step on a worker",
+      "schedule-handoff": "Scheduled handoff"
+    },
+    "placement": "Placement",
+    "providesNothing": "This device offers nothing a placement decision can match, so it will never be selected automatically.",
+    "placementHint": "Requirements are matched per dimension. A device that offers nothing in the dimension a caller asks for is reported as a capability mismatch rather than omitted.",
+    "dimension": {
+      "platform": "Platform",
+      "agent": "Agent",
+      "sandbox": "Sandbox",
+      "workspace": "Workspace",
+      "credential": "Credential",
+      "host-feature": "Host feature"
+    }
   }
 }

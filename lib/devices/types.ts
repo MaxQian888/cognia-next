@@ -178,6 +178,12 @@ export interface DeviceRow {
 
   /** Paired devices and workers. */
   deviceId?: string
+  /**
+   * The device's public key, carried only because provisioning a terminal host
+   * descriptor needs it. Never rendered — it is not a secret, but it is also
+   * not a fact a human reads.
+   */
+  pubkey?: string
   /** Remote hosts — the local store id, not the remote device id. */
   hostId?: string
 

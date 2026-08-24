@@ -1,6 +1,7 @@
 import {
   buildDeviceRows,
   deriveReachability,
+  dispatchTargetRef,
   pairedDeviceRef,
   remoteHostRef,
   summarizeDeviceRows,
@@ -131,6 +132,28 @@ describe("refs", () => {
 
   it("addresses a worker by hostRef, the way remote-worker-runtime pins it", () => {
     expect(workerRef(worker())).toBe("worker-ref-1")
+  })
+})
+
+describe("dispatchTargetRef", () => {
+  /**
+   * `HostDispatchJobRow.targetRef` is documented as being in the target's own
+   * vocabulary — a raw `deviceId`, a `hostRef`, a remote-host id — while the
+   * console namespaces its refs. Querying the queue with the namespaced ref
+   * returns nothing, which reads as "no work has ever been sent here".
+   */
+  it("uses each kind's own addressing, not the console ref", () => {
+    const rows = buildDeviceRows(
+      input({ pairedDevices: [phone()], remoteHosts: [host()], workers: [worker()] })
+    )
+    expect(dispatchTargetRef(find(rows, "device:d1"))).toBe("d1")
+    expect(dispatchTargetRef(find(rows, "host:h1"))).toBe("h1")
+    expect(dispatchTargetRef(find(rows, "worker-ref-1"))).toBe("worker-ref-1")
+  })
+
+  it("has no answer for this machine, which the queue never addresses", () => {
+    const rows = buildDeviceRows(input())
+    expect(dispatchTargetRef(find(rows, "local"))).toBeUndefined()
   })
 })
 
