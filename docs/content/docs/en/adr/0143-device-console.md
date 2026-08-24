@@ -136,9 +136,11 @@ invented.
 - Settings keeps pairing, adding a host and LAN discovery — configuration —
   and links into the console for the fleet. A second list in Settings would be
   a second surface to hold in step, and it is the one that would fall behind.
-- `/me/devices` opens the console. `FeaturePageShell` already collapses to one
-  column with sheet triggers below `md`, so both shells are served from one
-  tree instead of a mobile-only wrapper.
+- The mobile Me entry now points at `/devices`, and `app/me/devices` is gone.
+  `FeaturePageShell` already collapses to one column with sheet triggers below
+  `md`, so both shells are served from one tree instead of a mobile-only
+  wrapper. The old path is not redirected: it was an in-app route with no deep
+  link or external entry point, so nothing outside the app ever addressed it.
 - Every write the paired-devices card made survives in `useDeviceGrantActions`
   with its asymmetry intact: enabling is behind the biometric guard, disabling
   applies immediately, because a user who cannot pass the biometric must still

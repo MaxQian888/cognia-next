@@ -20,10 +20,15 @@ import { useRouter, useSearchParams } from "next/navigation"
 
 import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { FeaturePageShell } from "@/components/feature-shell/feature-page-shell"
+import Link from "next/link"
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import { useDeviceConsoleStore } from "@/stores/devices/device-console-store"
 import { useDeviceGrantActions } from "@/hooks/devices/use-device-grant-actions"
 import { useDeviceRows } from "@/hooks/devices/use-device-rows"
+import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 
 import { DeviceDetail } from "./device-detail"
 import { DeviceListPane } from "./device-list-pane"
@@ -45,6 +50,16 @@ export function DeviceConsole() {
   const setKindFilter = useDeviceConsoleStore((state) => state.setKindFilter)
 
   const selected = rows.find((row) => row.ref === selectedRef) ?? null
+
+  /**
+   * Standalone: no host of our own and none paired.
+   *
+   * The same trichotomy `useFleetSnapshot` picks its source by. This is the
+   * surface contract's `standalone: "explain"` state — the console keeps
+   * working for this machine, and says which half is missing rather than
+   * rendering a one-row "fleet".
+   */
+  const standalone = !isTauri() && !isCapacitor() && !hasWebCompanionTarget()
 
   // A `?device=<ref>` deep link wins over whatever was last selected — it is
   // what ⌘K and the Settings entry points hand us, and landing on the previous
@@ -122,6 +137,17 @@ export function DeviceConsole() {
       centerClassName="min-h-0"
     >
       <div className="flex h-full min-h-0 flex-col">
+        {standalone ? (
+          <Alert className="m-3 mb-0" data-testid="devices-requires-host">
+            <AlertTitle>{t("standaloneTitle")}</AlertTitle>
+            <AlertDescription className="space-y-2">
+              <span className="block">{t("standaloneBody")}</span>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/pair">{t("standalonePair")}</Link>
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {hostUnreachable ? (
           /**
            * Stated rather than swallowed: without the host, lifecycle state and

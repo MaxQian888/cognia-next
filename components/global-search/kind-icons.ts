@@ -21,6 +21,7 @@ import {
   PlugIcon,
   PuzzleIcon,
   ServerCogIcon,
+  SmartphoneIcon,
   SettingsIcon,
   SparklesIcon,
   UserRoundIcon,
@@ -52,6 +53,7 @@ export const KIND_ICONS: Readonly<Record<GlobalSearchKind, LucideIcon>> = {
   "inbox-contact": ContactIcon,
   "workbench-panel": PanelRightIcon,
   "pi-package": PackageIcon,
+  device: SmartphoneIcon,
   issue: CircleDotIcon,
 }
 

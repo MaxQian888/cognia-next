@@ -61,6 +61,7 @@
   "kinds": {
     "action": "Commands",
     "character": "Characters",
+    "device": "Devices",
     "inbox-contact": "Contacts",
     "inbox-conversation": "Inbox conversations",
     "issue": "Issues",

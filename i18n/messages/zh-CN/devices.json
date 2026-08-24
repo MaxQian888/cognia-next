@@ -251,5 +251,8 @@
     "credential_missing": "凭据不可用",
     "capacity_exhausted": "已达并发上限",
     "not_permitted": "不被允许"
-  }
+  },
+  "standaloneTitle": "只有本机",
+  "standaloneBody": "尚未配对任何设备，本应用也没有运行自己的宿主，因此没有机队可显示，也无处查询授权与生命周期状态。下面显示的是本机。",
+  "standalonePair": "与主机配对"
 }

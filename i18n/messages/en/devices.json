@@ -251,5 +251,8 @@
     "credential_missing": "Credential not available",
     "capacity_exhausted": "At capacity",
     "not_permitted": "Not permitted"
-  }
+  },
+  "standaloneTitle": "Only this device",
+  "standaloneBody": "Nothing is paired and this app is not running its own host, so there is no fleet to show and no host to ask about grants or lifecycle state. What is below describes this machine.",
+  "standalonePair": "Pair with a host"
 }

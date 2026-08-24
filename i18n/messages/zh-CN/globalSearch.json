@@ -61,6 +61,7 @@
   "kinds": {
     "action": "命令",
     "character": "角色",
+    "device": "设备",
     "inbox-contact": "联系人",
     "inbox-conversation": "收件箱会话",
     "issue": "议题",

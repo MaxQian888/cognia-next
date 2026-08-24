@@ -26,6 +26,27 @@ jest.mock("@/hooks/devices/use-device-grant-actions", () => ({
 }))
 
 let searchParams = new URLSearchParams()
+/**
+ * `var`, not `let`: `jest.mock` factories are hoisted above this file's body,
+ * and `components/ui/tooltip` pulls in `lib/tauri`, which calls `isTauri()` at
+ * module-init time. A `let` would still be in its temporal dead zone at that
+ * point and reading it throws; `var` is hoisted as `undefined`, so the `??`
+ * defaults below apply until `beforeEach` sets a real value.
+ */
+// eslint-disable-next-line no-var -- hoisting is the point; see above.
+var platform: { tauri: boolean; capacitor: boolean; webCompanion: boolean } | undefined
+// Spread the real module: `detect` also exports `isNativeMobile`,
+// `detectPlatform` and friends that the imported tree calls at load time, and
+// replacing the whole module wholesale removes them.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: () => platform?.tauri ?? true,
+  isCapacitor: () => platform?.capacitor ?? false,
+}))
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => platform?.webCompanion ?? false,
+}))
+
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
   useSearchParams: () => searchParams,
@@ -80,6 +101,7 @@ beforeEach(() => {
   useDeviceConsoleStore.setState(initial, true)
   rows = [LOCAL, row()]
   searchParams = new URLSearchParams()
+  platform = { tauri: true, capacitor: false, webCompanion: false }
   hostUnreachable = false
   jest.clearAllMocks()
 })
@@ -153,6 +175,45 @@ describe("DeviceConsole", () => {
   it("stays quiet when the host answered", () => {
     renderConsole()
     expect(screen.queryByTestId("device-host-unreachable")).not.toBeInTheDocument()
+  })
+
+  /**
+   * `standalone: "explain"` in `lib/runtime/surface-contract.ts` is a convention
+   * each surface implements for itself — `resolveSurfaceAvailability` has no
+   * generic branch for it, so an unimplemented "explain" is a silent lie.
+   * See `standaloneDevicesRequiresHost`.
+   */
+  it("says which half is missing when nothing is paired and there is no host", () => {
+    platform = { tauri: false, capacitor: false, webCompanion: false }
+    rows = [LOCAL]
+    renderConsole()
+    expect(screen.getByTestId("devices-requires-host")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Pair with a host/ })).toHaveAttribute("href", "/pair")
+  })
+
+  it("keeps showing this machine rather than swapping the console out", () => {
+    platform = { tauri: false, capacitor: false, webCompanion: false }
+    rows = [LOCAL]
+    renderConsole()
+    expect(screen.getByTestId("detail")).toHaveTextContent("local")
+    expect(screen.getByTestId("device-list-pane")).toBeInTheDocument()
+  })
+
+  it("stays quiet on a desktop host", () => {
+    renderConsole()
+    expect(screen.queryByTestId("devices-requires-host")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet on a phone paired to a host", () => {
+    platform = { tauri: false, capacitor: true, webCompanion: false }
+    renderConsole()
+    expect(screen.queryByTestId("devices-requires-host")).not.toBeInTheDocument()
+  })
+
+  it("stays quiet in a browser pointed at a companion", () => {
+    platform = { tauri: false, capacitor: false, webCompanion: true }
+    renderConsole()
+    expect(screen.queryByTestId("devices-requires-host")).not.toBeInTheDocument()
   })
 
   it("renders the rail and the header", () => {

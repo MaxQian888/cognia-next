@@ -343,6 +343,26 @@ export const standaloneInboxRequiresHost = {
   remedy: "/pair",
 } as const
 
+/**
+ * `/devices` in standalone: the console still has one honest row — this
+ * machine — but no fleet and no host to ask.
+ *
+ * `standalone: "explain"` is a convention each surface implements for itself;
+ * `resolveSurfaceAvailability` has no generic branch for it. Unlike
+ * {@link standaloneInboxRequiresHost}, this one does NOT swap the shell out:
+ * the local device's capabilities and sandbox tiers are real and worth
+ * reading. What it explains is the half that is missing — paired devices,
+ * remote hosts, and every host-authoritative fact (lifecycle state, the exact
+ * capabilities behind a grant) that `companion_list_devices` would supply.
+ *
+ * Rendered by `components/devices/device-console.tsx` and pinned by its test.
+ */
+export const standaloneDevicesRequiresHost = {
+  surfaceId: "devices",
+  reason: "no-paired-host",
+  remedy: "/pair",
+} as const
+
 export const INTERNAL_ROUTE_EXEMPTIONS = [
   "/deep-link",
   "/e2e/plugin-ui-surfaces",

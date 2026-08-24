@@ -89,6 +89,7 @@ const IN_ALIASES: Readonly<Record<string, GlobalSearchScope | GlobalSearchKind>>
   pi: "pi-package",
   "pi-packages": "pi-package",
   issues: "issue",
+  devices: "device",
   issue: "issue",
 }
 

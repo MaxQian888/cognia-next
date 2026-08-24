@@ -20,10 +20,11 @@
 //! built, the native edge is not. Until it lands:
 //!
 //! * **the type** says so — this doc block;
-//! * **the UI** says so — the Locked Use switch in
-//!   `components/settings/companion/paired-devices-card.tsx` renders disabled
-//!   with an "unavailable in this build" note, so it cannot imply that
-//!   toggling it grants anything;
+//! * **the UI** says so — the Locked Use switch in the device console's
+//!   Access tab (`components/devices/tabs/access-tab.tsx`, fed by
+//!   `LOCKED_USE_AVAILABLE` in `lib/devices/grant-capabilities.ts`) renders
+//!   disabled with an "unavailable in this build" note, so it cannot imply
+//!   that toggling it grants anything;
 //! * **a test** says so — [`tests::nothing_reads_this_list_in_production`]
 //!   below fails the moment a reader appears, which is the signal to enable
 //!   the UI switch and delete this section.
@@ -109,10 +110,12 @@ mod tests {
     /// together rather than only the one being worked on.
     ///
     /// If the new reference is the real reader (the Locked Use native edge
-    /// landing), the change is: add its file below, drop the `unavailable`
-    /// treatment from the Locked Use switch in
-    /// `components/settings/companion/paired-devices-card.tsx` and its test,
-    /// and delete the dormancy section from this module's docs.
+    /// landing), the change is: add its file below, flip
+    /// `LOCKED_USE_AVAILABLE` in `lib/devices/grant-capabilities.ts` (which
+    /// drops the `unavailable` treatment from the Access tab's switch) along
+    /// with the dormancy assertions in `grant-capabilities.test.ts` and
+    /// `access-tab.test.tsx`, and delete the dormancy section from this
+    /// module's docs.
     #[test]
     fn the_set_of_files_touching_this_list_is_writers_only() {
         const OWN_FILE: &str = "locked_use_allow_list.rs";

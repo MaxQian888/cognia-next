@@ -129,7 +129,15 @@ export function buildDeviceOptions(
   })
 }
 
-/** Requirement helpers, so consumers never hand-write a dimension string. */
+/**
+ * Requirement helpers, so consumers never hand-write a dimension string.
+ *
+ * Only {@link requireHostFeature} has a production caller today (the workflow
+ * run-on picker). The other two are deliberate: a helper set that covers one
+ * dimension out of the three a caller might plausibly ask for invites the next
+ * consumer to hand-write `{ dimension: "sandbox", value }` and get the string
+ * wrong. They are exercised by this module's test, not dead-but-unreferenced.
+ */
 export const requirePlatform = (value: string): PlacementRequirement => ({
   dimension: "platform",
   value,
