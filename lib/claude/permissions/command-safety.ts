@@ -19,7 +19,7 @@
  * I/O, safe to run on every keystroke / tool call.
  */
 
-import { splitCommandSegments } from "./command-parse"
+import { splitCommandSegments, type CommandRedirect } from "./command-parse"
 
 export type CommandVerdict = "allow" | "ask" | "deny"
 
@@ -559,15 +559,52 @@ function classifySegmentInner(head: string, args: string[], depth: number): Segm
 }
 
 /**
+ * Redirect targets that write nowhere a later command could read back.
+ * `nul` is the Windows spelling.
+ */
+const DISCARD_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "nul"])
+
+/**
+ * The verdict floor a segment's redirects impose, or `null` when they impose
+ * none.
+ *
+ * `allow` in this classifier means "auto-approve, it is read-only or safe".
+ * A write redirect makes the segment not read-only no matter how safe its
+ * head is, and the head-name table cannot see it: before this,
+ * `curl https://x > /usr/local/bin/y` classified as "read-only network
+ * fetch" and was auto-approved, as was `echo evil >> ~/.zshrc`.
+ *
+ * Deliberately a floor of `ask`, not `deny`: writing a file is ordinary work,
+ * so the user decides. What it must never do again is decide for them.
+ */
+function classifyRedirects(
+  redirects: CommandRedirect[]
+): { verdict: CommandVerdict; reason: string } | null {
+  for (const redirect of redirects) {
+    if (!redirect.writes || redirect.duplicatesDescriptor) continue
+    const target = redirect.target
+    if (target === undefined) continue
+    if (DISCARD_TARGETS.has(target.toLowerCase())) continue
+    return { verdict: "ask", reason: `redirects output into ${target} (${redirect.op})` }
+  }
+  return null
+}
+
+/**
  * Classify a (possibly compound) command line into an allow/ask/deny verdict.
  * The worst verdict across all segments — including those inside command
  * substitutions and subshells — wins.
  */
 export function classifyCommand(command: string): CommandClassification {
   const parsed = splitCommandSegments(command)
-  const segments: SegmentClassification[] = parsed.map((s) =>
-    classifySegmentInner(s.head, s.args, 0)
-  )
+  const segments: SegmentClassification[] = parsed.map((s) => {
+    const base = classifySegmentInner(s.head, s.args, 0)
+    const floor = classifyRedirects(s.redirects)
+    if (floor && RANK[floor.verdict] > RANK[base.verdict]) {
+      return { head: base.head, verdict: floor.verdict, reason: floor.reason }
+    }
+    return base
+  })
 
   const catastrophic = matchCatastrophic(command)
 

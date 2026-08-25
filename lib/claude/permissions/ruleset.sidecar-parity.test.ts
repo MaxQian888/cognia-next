@@ -52,6 +52,13 @@ const MUST_DENY = [
   "echo `git push`",
   "(git push)",
   "echo $(echo $(git push))",
+  // Respellings. The shell runs `git push`; the segment text does not say so.
+  "gi\\t push",
+  '"git" push',
+  "gi''t push",
+  "$'\\x67\\x69\\x74' push",
+  "git    push",
+  "echo $(gi\\t push)",
 ]
 
 describe("renderer ↔ sidecar permission parity", () => {

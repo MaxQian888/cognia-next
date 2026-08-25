@@ -19,7 +19,7 @@
  * (the patterns we need are file/tool globs, not full extglob).
  */
 
-import { splitCommandSegments } from "./command-parse"
+import { canonicalizeCommand, splitCommandSegments } from "./command-parse"
 
 export type PermissionVerdict = "allow" | "ask" | "deny"
 
@@ -249,6 +249,17 @@ export function resolveBashPermission(
     if (r.layer === 0 && seg.head !== seg.raw) {
       const byHead = resolvePermissionDetailed("Bash", seg.head, rulesets, opts)
       if (byHead.layer > 0) r = byHead
+    }
+    // Deny probe against the canonical spelling, so `r\m -rf /` cannot walk
+    // past a `Bash(rm *)` deny that `rm -rf /` would hit. DENY ONLY, and
+    // deliberately so: canonicalisation mangles an unquoted Windows path, so
+    // it may only ever add a refusal, never satisfy an allow.
+    if (r.verdict !== "deny") {
+      const canonical = canonicalizeCommand(seg.raw)
+      if (canonical && canonical !== seg.raw) {
+        const byCanonical = resolvePermissionDetailed("Bash", canonical, rulesets, opts)
+        if (byCanonical.layer > 0 && byCanonical.verdict === "deny") r = byCanonical
+      }
     }
     if (r.layer > 0) explicit = true
     if (VERDICT_RANK[r.verdict] > VERDICT_RANK[worst]) worst = r.verdict

@@ -277,6 +277,136 @@ function extractSubstitutions(text) {
   return { inner, stripped }
 }
 
+/**
+ * Byte-for-byte mirror of `readAnsiCQuote` in
+ * `lib/claude/permissions/command-parse.ts`.
+ */
+function readAnsiCQuote(segment, start) {
+  let out = ""
+  let i = start + 2
+  while (i < segment.length && segment[i] !== "'") {
+    if (segment[i] !== "\\") {
+      out += segment[i]
+      i++
+      continue
+    }
+    const esc = segment[i + 1]
+    i += 2
+    switch (esc) {
+      case "n":
+        out += "\n"
+        break
+      case "t":
+        out += "\t"
+        break
+      case "r":
+        out += "\r"
+        break
+      case "a":
+        out += "\x07"
+        break
+      case "b":
+        out += "\b"
+        break
+      case "f":
+        out += "\f"
+        break
+      case "v":
+        out += "\v"
+        break
+      case "e":
+        out += "\x1b"
+        break
+      case "\\":
+        out += "\\"
+        break
+      case "'":
+        out += "'"
+        break
+      case '"':
+        out += '"'
+        break
+      case "x": {
+        const hex = /^[0-9a-fA-F]{1,2}/.exec(segment.slice(i))?.[0]
+        if (hex) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += hex.length
+        } else out += "x"
+        break
+      }
+      case "u": {
+        const hex = /^[0-9a-fA-F]{1,4}/.exec(segment.slice(i))?.[0]
+        if (hex) {
+          out += String.fromCharCode(parseInt(hex, 16))
+          i += hex.length
+        } else out += "u"
+        break
+      }
+      default: {
+        if (esc !== undefined && esc >= "0" && esc <= "7") {
+          const oct = /^[0-7]{0,2}/.exec(segment.slice(i))?.[0] ?? ""
+          out += String.fromCharCode(parseInt(esc + oct, 8))
+          i += oct.length
+        } else if (esc !== undefined) {
+          out += esc
+        }
+      }
+    }
+  }
+  return { text: out, next: i + 1 }
+}
+
+/**
+ * Mirror of `canonicalizeCommand` in `lib/claude/permissions/command-parse.ts`
+ * — the single spelling the shell would actually run. Used ONLY as a deny
+ * probe: it may add a refusal a respelt command dodged, never satisfy an
+ * allow. `ruleset.sidecar-parity.test.ts` pins the two implementations
+ * together.
+ */
+export function canonicalizeCommand(command) {
+  const text = command ?? ""
+  let out = ""
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inSingle) {
+      if (c === "'") inSingle = false
+      else out += c
+      continue
+    }
+    if (inDouble) {
+      if (c === "\\" && text[i + 1] !== undefined && '$`"\\'.includes(text[i + 1])) {
+        out += text[i + 1]
+        i++
+      } else if (c === '"') inDouble = false
+      else out += c
+      continue
+    }
+    if (c === "$" && text[i + 1] === "'") {
+      const { text: decoded, next } = readAnsiCQuote(text, i)
+      out += decoded
+      i = next - 1
+      continue
+    }
+    if (c === "'") {
+      inSingle = true
+      continue
+    }
+    if (c === '"') {
+      inDouble = true
+      continue
+    }
+    if (c === "\\" && text[i + 1] !== undefined) {
+      out += text[i + 1]
+      i++
+      continue
+    }
+    out += c
+  }
+  return out.replace(/\s+/g, " ").trim()
+}
+
 const MAX_SPLIT_DEPTH = 20
 
 function collectSegments(command, out, depth) {
@@ -370,6 +500,19 @@ export function resolveForToolCall(ruleset, toolName, input) {
       if (own !== null && (v === null || VERDICT_RANK[own] > VERDICT_RANK[v])) v = own
     }
     if (v === "deny") return "deny"
+    // Deny probe against the canonical spelling — see `canonicalizeCommand`.
+    // Kept out of the `allAllow` bookkeeping on purpose: a canonical form that
+    // matches nothing must not downgrade an otherwise explicit allow.
+    const canonical = canonicalizeCommand(t)
+    if (canonical && canonical !== t) {
+      if (resolveToolVerdict(ruleset, "Bash", canonical) === "deny") return "deny"
+      if (
+        CORE_BASH_NAMES.has(toolName) &&
+        resolveToolVerdict(ruleset, toolName, canonical) === "deny"
+      ) {
+        return "deny"
+      }
+    }
     if (v === null || v === "ask") {
       allAllow = false
       if (VERDICT_RANK[worst] < VERDICT_RANK["ask"]) worst = "ask"

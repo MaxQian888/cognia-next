@@ -1,4 +1,4 @@
-import { splitCommandSegments, normalizeHead } from "./command-parse"
+import { canonicalizeCommand, normalizeHead, splitCommandSegments } from "./command-parse"
 
 describe("normalizeHead", () => {
   it("lowercases, strips path and .exe", () => {
@@ -105,5 +105,102 @@ describe("splitCommandSegments", () => {
     const segs = splitCommandSegments("echo hi > out.txt")
     expect(segs).toHaveLength(1)
     expect(segs[0].head).toBe("echo")
+  })
+})
+
+describe("redirects", () => {
+  it("pulls a write redirect out of args and marks it", () => {
+    const [seg] = splitCommandSegments("curl https://x > /usr/local/bin/y")
+    expect(seg.head).toBe("curl")
+    expect(seg.args).toEqual(["https://x"])
+    expect(seg.redirects).toEqual([
+      { op: ">", target: "/usr/local/bin/y", duplicatesDescriptor: false, writes: true },
+    ])
+  })
+
+  it("keeps an appending redirect distinct from a truncating one", () => {
+    const [seg] = splitCommandSegments("echo evil >> ~/.zshrc")
+    expect(seg.redirects[0]).toMatchObject({ op: ">>", target: "~/.zshrc", writes: true })
+  })
+
+  it("reads a descriptor prefix as the descriptor, not as an argument", () => {
+    const [seg] = splitCommandSegments("cmd 2> err.log")
+    expect(seg.args).toEqual([])
+    expect(seg.redirects[0]).toMatchObject({ op: ">", fd: "2", target: "err.log" })
+  })
+
+  it("does not split `2>&1` into a phantom command named 1", () => {
+    const segs = splitCommandSegments("echo hi 2>&1")
+    expect(segs.map((s) => s.head)).toEqual(["echo"])
+    expect(segs[0].redirects[0]).toMatchObject({
+      op: ">&",
+      fd: "2",
+      target: "1",
+      duplicatesDescriptor: true,
+      writes: false,
+    })
+  })
+
+  it("treats `&>` as a redirect rather than a background operator", () => {
+    const segs = splitCommandSegments("build &> /dev/null")
+    expect(segs.map((s) => s.head)).toEqual(["build"])
+    expect(segs[0].redirects[0]).toMatchObject({ op: "&>", target: "/dev/null", writes: true })
+  })
+
+  it("still treats a lone `&` as a statement separator", () => {
+    expect(splitCommandSegments("sleep 1 & echo done").map((s) => s.head)).toEqual([
+      "sleep",
+      "echo",
+    ])
+  })
+
+  it("marks input redirects as non-writing", () => {
+    const [seg] = splitCommandSegments("sort < in.txt")
+    expect(seg.redirects[0]).toMatchObject({ op: "<", target: "in.txt", writes: false })
+  })
+})
+
+describe("head spellings the shell accepts", () => {
+  it("resolves a backslash escape to the real executable", () => {
+    expect(splitCommandSegments("r\\m -rf /tmp/x")[0].head).toBe("rm")
+    expect(splitCommandSegments("\\rm -rf /tmp/x")[0].head).toBe("rm")
+  })
+
+  it("decodes an ANSI-C quoted head", () => {
+    expect(splitCommandSegments("$'\\x72\\x6d' -rf /tmp/x")[0].head).toBe("rm")
+  })
+
+  it("still treats a backslash as a separator inside a Windows path", () => {
+    expect(normalizeHead("C:\\Windows\\System32\\cmd.exe")).toBe("cmd")
+    expect(normalizeHead("/usr/bin/rm")).toBe("rm")
+  })
+
+  it("treats a backslash as an escape when the token is not path-shaped", () => {
+    expect(normalizeHead("r\\m")).toBe("rm")
+  })
+})
+
+describe("canonicalizeCommand", () => {
+  it("collapses every respelling of one command onto the same text", () => {
+    const canonical = "rm -rf /tmp/x"
+    for (const spelling of [
+      "rm -rf /tmp/x",
+      "rm   -rf    /tmp/x",
+      "r''m -rf /tmp/x",
+      '"rm" -rf /tmp/x',
+      "r\\m -rf /tmp/x",
+      "$'\\x72\\x6d' -rf /tmp/x",
+    ]) {
+      expect(canonicalizeCommand(spelling)).toBe(canonical)
+    }
+  })
+
+  it("mangles an unquoted Windows path — why it is a deny probe only", () => {
+    expect(canonicalizeCommand("type C:\\a\\b")).toBe("type C:ab")
+  })
+
+  it("is empty for blank input", () => {
+    expect(canonicalizeCommand("")).toBe("")
+    expect(canonicalizeCommand("   ")).toBe("")
   })
 })
