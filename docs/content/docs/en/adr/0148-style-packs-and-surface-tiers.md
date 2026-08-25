@@ -182,10 +182,25 @@ matches nothing passes just as green as one that finds nothing.
 
 ## Known gaps
 
-- `settings-sync:gen` cannot regenerate the Rust mirror: the OpenAPI file has
-  been missing its generated markers since before this work, and `cursor`,
-  `componentStyles`, `monacoLink` and `usageDisplayMode` are already absent from
-  it for the same reason. `stylePack` joins them until that is unblocked.
-- `wallpapers` is in `MOBILE_WRITABLE_SETTING_KEYS`, so a phone mirrors an array
-  of device-local `blobKey` / `relPath` references to a desktop that cannot
-  resolve either. Pre-existing, unrelated to this change, worth its own fix.
+- `settings-sync:gen` still cannot run end to end: `docs/api/mobile-companion-api.openapi.yaml`
+  is now written by the companion-api generator, which rewrote the file without
+  the `# BEGIN/END GENERATED settings-sync` markers this generator edits between,
+  so it throws before writing anything. The **Rust** mirror is no longer stale —
+  the wallpaper fix below regenerated it through the generator's own
+  `renderRust()`, which also carried `stylePack` and `costBudget` across — but the
+  published OpenAPI enum still omits `cursor`, `componentStyles`, `monacoLink`,
+  `usageDisplayMode` and `stylePack` until the markers are restored.
+- ~~`wallpapers` is in `MOBILE_WRITABLE_SETTING_KEYS`~~ — **fixed.** It is
+  `device-local` now. Two of the five `WallpaperSource` shapes are references
+  into one machine's storage (`disk` = a path under that Tauri host's appData,
+  `indexeddb` = a key in that browser's blob store), and `saveImage()` picks
+  between them by `isTauri()` — so a desktop only ever wrote `disk` and a phone
+  only ever wrote `indexeddb`, and mirroring the array handed each side exactly
+  the kind it could not resolve. Because the projection
+  (`lib/sync/desktop-sync-source.ts`) and the up-mirror
+  (`lib/settings/mirror-to-host.ts`) both derive from the one classification
+  table, the single reclassification closes both directions. Rows mirrored before
+  the fix are left in place rather than swept: the gallery now names the device
+  that holds the image, refuses to activate the tile (activating one is what made
+  `BackgroundApplier` switch the whole background off) and keeps delete
+  available.

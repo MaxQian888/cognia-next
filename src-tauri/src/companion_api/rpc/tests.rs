@@ -3716,7 +3716,6 @@ fn mobile_allowlist_includes_appearance_keys() {
         "colorTheme",
         "customThemes",
         "activeCustomThemeId",
-        "wallpapers",
         "customCss",
         "customCssEnabled",
         "importedVscodeThemes",
@@ -3731,6 +3730,11 @@ fn mobile_allowlist_includes_appearance_keys() {
         // Theme system enhancement — accent override + plugin theme pointer.
         "accentColor",
         "activePluginThemeId",
+        // `wallpapers` is deliberately NOT here: the mobile appearance route
+        // renders the wallpaper tab, but every image it can save is an
+        // `indexeddb` blobKey that only this handset can resolve. It is
+        // device-local now, and `nothing_that_must_not_travel_upward_is_allowlisted`
+        // in `settings_sync_generated.rs` pins that it stays off the allowlist.
     ] {
         assert!(
             APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&key),

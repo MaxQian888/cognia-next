@@ -8,6 +8,11 @@
 // Deliberately excluded: `wallpapers` (device-local binary blobs that can't be
 // resolved on another device) and `background` (points at a wallpaper id that
 // won't exist elsewhere). Everything else is portable.
+//
+// The settings-sync table disagreed with that judgement for a long time and
+// classified `wallpapers` as `shared`, so a paired phone and desktop mirrored
+// libraries neither could open. It is `device-local` there too now, and
+// `packages/agent-config-types/src/settings-sync.test.ts` pins the agreement.
 
 import type { AppSettings } from "@cognia/agent-config-types"
 

@@ -86,5 +86,5 @@ description: "外观系统有全部的形状旋钮，却没有任何东西把它
 
 ## 已知缺口
 
-- `settings-sync:gen` 无法重新生成 Rust 镜像：OpenAPI 文件在本次工作之前就已丢失生成标记，`cursor`、`componentStyles`、`monacoLink` 与 `usageDisplayMode` 也因同一原因早已缺席。`stylePack` 在该问题解开之前与它们同列。
-- `wallpapers` 位于 `MOBILE_WRITABLE_SETTING_KEYS` 中，因此手机会把一份包含设备本地 `blobKey`/`relPath` 引用的壁纸数组镜像到根本无法解析它们的桌面端。这是既有缺陷，与本次改动无关，值得单独修复。
+- `settings-sync:gen` 仍无法完整跑通：`docs/api/mobile-companion-api.openapi.yaml` 现在由 companion-api 生成器负责，它重写该文件时没有保留本生成器所依赖的 `# BEGIN/END GENERATED settings-sync` 标记，因此它在写入任何内容之前就抛错。**Rust** 镜像已不再陈旧——下面的壁纸修复通过生成器自身的 `renderRust()` 重新生成了它，顺带把 `stylePack` 与 `costBudget` 一并带上——但在标记恢复之前，发布出去的 OpenAPI 枚举仍然缺少 `cursor`、`componentStyles`、`monacoLink`、`usageDisplayMode` 与 `stylePack`。
+- ~~`wallpapers` 位于 `MOBILE_WRITABLE_SETTING_KEYS` 中~~ —— **已修复**，现已改为 `device-local`。`WallpaperSource` 五种形态中有两种是指向某一台机器存储的引用（`disk` 是该 Tauri 宿主 appData 下的路径，`indexeddb` 是该浏览器 blob 库中的键），而 `saveImage()` 按 `isTauri()` 在两者之间二选一——于是桌面端只会写 `disk`、手机只会写 `indexeddb`，镜像这个数组等于把对方唯一解析不了的那种形态递给对方。由于下行投影（`lib/sync/desktop-sync-source.ts`）与上行镜像（`lib/settings/mirror-to-host.ts`）都派生自同一张分类表，仅此一处重新分类即可同时封住两个方向。修复前已被镜像过去的行不做清扫：图库现在会说明图片存放在哪台设备、拒绝激活该磁贴（激活正是导致 `BackgroundApplier` 把整个背景关掉的原因），并保留删除入口。

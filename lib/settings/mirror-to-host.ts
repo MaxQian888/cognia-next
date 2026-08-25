@@ -12,10 +12,17 @@
  * called it. Every mobile route that instead **embeds a desktop settings
  * section** — `/me/appearance` renders the desktop `<AppearanceSection />` — went
  * straight to `useSettingsStore`, which only ever wrote locally. So the phone's
- * theme, custom themes, wallpapers, accent colour, custom CSS and imported
- * VSCode themes never reached the desktop, no matter how long you waited. The
- * server-side allowlist had thirteen keys added specifically to stop those tabs
- * from 400-ing, and not one of them was ever exercised.
+ * theme, custom themes, accent colour, custom CSS and imported VSCode themes
+ * never reached the desktop, no matter how long you waited. The server-side
+ * allowlist had thirteen keys added specifically to stop those tabs from
+ * 400-ing, and not one of them was ever exercised.
+ *
+ * `wallpapers` was in that list too and is no longer: it is an array of
+ * references into one machine's storage (a `disk` path under that Tauri host's
+ * appData, or an `indexeddb` key in that webview's blob store), and off Tauri
+ * `saveImage()` can only produce the latter. Mirroring it filled the desktop's
+ * gallery with rows it could not open. It is `device-local` now, so it is
+ * dropped here like any other non-writable key.
  *
  * Hanging the mirror off the single persistence funnel (`saveSettings`) instead
  * of off each page fixes every embedded section at once, and means the next

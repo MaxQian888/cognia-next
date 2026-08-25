@@ -131,6 +131,29 @@ describe("derived key lists", () => {
     }
   })
 
+  it("keeps the wallpaper library on the device that holds its bytes", () => {
+    // `wallpapers` is an array of *references into one machine's storage*, not
+    // of values: `disk` is a path under that Tauri host's own appData and
+    // `indexeddb` is a key in that browser's blob store. `saveImage()` picks
+    // between them by `isTauri()`, so a desktop only ever writes `disk` and a
+    // phone only ever writes `indexeddb` — mirroring the array handed each side
+    // exactly the kind it cannot resolve. Both galleries filled with unopenable
+    // rows, and activating one made the background applier switch the wallpaper
+    // off entirely.
+    //
+    // `background` was already withheld for the same reason (its `activeId`
+    // names a row that need not exist on the other device), and
+    // `lib/appearance/appearance-config-io.ts` excludes both keys from an
+    // exported look. This is the third place that agreement is now pinned.
+    const mirrored = new Set<string>(CROSS_PLATFORM_SETTING_KEYS)
+    const writable = new Set<string>(MOBILE_WRITABLE_SETTING_KEYS)
+    expect(SETTINGS_SYNC.wallpapers.category).toBe("device-local")
+    expect(mirrored.has("wallpapers")).toBe(false)
+    expect(writable.has("wallpapers")).toBe(false)
+    expect(SETTINGS_SYNC.background.category).toBe("desktop-only")
+    expect(mirrored.has("background")).toBe(false)
+  })
+
   it("lets the fields a /me page edits travel in both directions", () => {
     // A field a mobile page writes is part of the mobile contract by
     // definition, which is exactly what `desktop-only` denies. `evalSettings`

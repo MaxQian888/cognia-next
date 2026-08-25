@@ -882,6 +882,13 @@
     },
     "title": "Wallpaper",
     "tooLarge": "File is too large (max 32 MB).",
+    "unavailable": {
+      "aria": "{name} — unavailable on this device",
+      "badge": "Unavailable",
+      "missing": "This wallpaper's image is no longer in this device's storage.",
+      "savedOnAnotherDevice": "This wallpaper's image lives in another device's local storage, so it can't be opened here. Delete the entry to tidy up the gallery.",
+      "savedOnDesktop": "This wallpaper's image lives in the desktop app's files. Open it there, or delete the entry to tidy up the gallery."
+    },
     "uploadHint": "Drop an image here or browse",
     "uploading": "Uploading…"
   },

@@ -10,6 +10,12 @@ jest.mock("@/lib/appearance/wallpaper-storage", () => ({
   resolveSourceToCss: jest.fn(),
   disposeUrl: jest.fn(),
 }))
+// The tile decides "can this device open it?" from the runtime marker, so the
+// suite drives that marker rather than the real Tauri detection.
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const storage = require("@/lib/appearance/wallpaper-storage") as {
@@ -33,7 +39,34 @@ const baseWp = (overrides: Partial<Wallpaper> = {}): Wallpaper => ({
 beforeEach(() => {
   jest.clearAllMocks()
   storage.resolveSourceToCss.mockResolvedValue("linear-gradient(0deg, red, blue)")
+  tauri.isTauri.mockReturnValue(false)
 })
+
+const diskWp = (): Wallpaper =>
+  baseWp({
+    kind: "image",
+    source: {
+      kind: "image",
+      storage: "disk",
+      relPath: "shot.png",
+      mime: "image/png",
+      width: 4,
+      height: 3,
+    },
+  })
+
+const idbWp = (): Wallpaper =>
+  baseWp({
+    kind: "image",
+    source: {
+      kind: "image",
+      storage: "indexeddb",
+      blobKey: "blob-1",
+      mime: "image/png",
+      width: 4,
+      height: 3,
+    },
+  })
 
 describe("WallpaperCard", () => {
   it("renders the wallpaper name and triggers onActivate", async () => {
@@ -86,7 +119,7 @@ describe("WallpaperCard", () => {
     expect(onActivate).not.toHaveBeenCalled()
   })
 
-  it("renders the error sentinel when resolveSourceToCss rejects", async () => {
+  it("marks the tile unavailable when resolveSourceToCss rejects", async () => {
     storage.resolveSourceToCss.mockRejectedValue(new Error("nope"))
     await act(async () => {
       render(<WallpaperCard wallpaper={baseWp()} active={false} onActivate={() => {}} />)
@@ -94,8 +127,76 @@ describe("WallpaperCard", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    // Sentinel "!" is the only text inside the error overlay.
-    expect(screen.getByText("!")).toBeInTheDocument()
+    expect(screen.getByTestId("wallpaper-card-unavailable")).toBeInTheDocument()
+    // The bytes were meant to be here and are not — that is a different
+    // sentence from "they live on another device".
+    expect(screen.getByRole("button", { name: "aria" })).toHaveAttribute("title", "missing")
+  })
+
+  describe("wallpapers that belong to another device", () => {
+    // These rows exist because `wallpapers` used to be classified `shared`, so
+    // a paired phone and desktop mirrored libraries neither could open. The
+    // classification is fixed; the rows already mirrored are not.
+    it("refuses to activate a desktop disk wallpaper seen off the desktop", async () => {
+      const onActivate = jest.fn()
+      await act(async () => {
+        render(<WallpaperCard wallpaper={diskWp()} active={false} onActivate={onActivate} />)
+      })
+      const button = screen.getByRole("button", { name: "aria" })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute("title", "savedOnDesktop")
+      fireEvent.click(button)
+      // Activating is what used to make BackgroundApplier switch the whole
+      // background off, so the click must not reach the handler at all.
+      expect(onActivate).not.toHaveBeenCalled()
+    })
+
+    it("refuses to activate a phone blob wallpaper seen on the desktop", async () => {
+      tauri.isTauri.mockReturnValue(true)
+      await act(async () => {
+        render(<WallpaperCard wallpaper={idbWp()} active={false} onActivate={() => {}} />)
+      })
+      expect(screen.getByRole("button", { name: "aria" })).toHaveAttribute(
+        "title",
+        "savedOnAnotherDevice"
+      )
+    })
+
+    it("never asks the storage layer for bytes it knows are elsewhere", async () => {
+      await act(async () => {
+        render(<WallpaperCard wallpaper={diskWp()} active={false} onActivate={() => {}} />)
+      })
+      // The old code let the resolve throw and caught it. On a phone that meant
+      // a Tauri `invoke` per foreign tile on every gallery render.
+      expect(storage.resolveSourceToCss).not.toHaveBeenCalled()
+    })
+
+    it("keeps delete reachable so the user can tidy the gallery", async () => {
+      const onDelete = jest.fn()
+      await act(async () => {
+        render(
+          <WallpaperCard
+            wallpaper={diskWp()}
+            active={false}
+            onActivate={() => {}}
+            onDelete={onDelete}
+          />
+        )
+      })
+      fireEvent.click(screen.getByTestId("wallpaper-delete-button"))
+      expect(onDelete).toHaveBeenCalledTimes(1)
+    })
+
+    it("opens the same wallpaper normally on the device that saved it", async () => {
+      tauri.isTauri.mockReturnValue(true)
+      const onActivate = jest.fn()
+      await act(async () => {
+        render(<WallpaperCard wallpaper={diskWp()} active={false} onActivate={onActivate} />)
+      })
+      expect(screen.queryByTestId("wallpaper-card-unavailable")).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: "Sunset" }))
+      expect(onActivate).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe("fit preview", () => {

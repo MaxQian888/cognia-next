@@ -53,6 +53,17 @@
 //!   An OS-issued input-device identifier. The desktop's microphone id addresses nothing on the
 //!   phone.
 //!
+//! `wallpapers` — device-local (never crosses the wire).
+//!   Two of the five WallpaperSource shapes are references into one machine's storage, not
+//!   values: `disk` is a path under that host's own appData, and `indexeddb` is a key in that
+//!   browser's blob store. `saveImage()` picks between them by `isTauri()`, so a desktop only
+//!   ever writes `disk` and a phone only ever writes `indexeddb` — every image wallpaper is
+//!   device-bound, and the two platforms produce kinds the other cannot resolve at all.
+//!   Mirroring the array put unopenable rows in both galleries; activating one threw and turned
+//!   the whole background off. `background` is already withheld for the same reason (its
+//!   `activeId` names a row that need not exist elsewhere), and `appearance-config-io.ts`
+//!   excludes both keys from an exported look on exactly this reasoning.
+//!
 //! `webrtcEnabled` — device-local (never crosses the wire).
 //!   Whether to attempt the WebRTC tier is a per-device transport choice — a desktop on wired
 //!   ethernet and a phone on cellular want different answers. The endpoints it dials are
@@ -82,6 +93,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "conversationSidebar",
     "conversationTimeline",
     "conversationTitle",
+    "costBudget",
     "customCss",
     "customCssEnabled",
     "customThemes",
@@ -121,6 +133,7 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "sidebarLayout",
     "streamPartialMessages",
     "sttLanguage",
+    "stylePack",
     "surfaceSkillsEnabled",
     "systemVoice",
     "telemetryEnabled",
@@ -132,7 +145,6 @@ pub const APP_SETTINGS_MOBILE_ALLOWED_KEYS: &[&str] = &[
     "ttsRate",
     "ttsVolume",
     "typographyExt",
-    "wallpapers",
     "xiaomiVoice",
 ];
 
@@ -177,6 +189,12 @@ mod tests {
             "workflowEditorPerformanceTier",
             "selectedMicId",
             "apiKey",
+            // An array of references into one machine's storage: a `disk`
+            // relPath under that host's appData, or an `indexeddb` blobKey in
+            // that browser's blob store. It used to be writable, so a phone's
+            // uploads landed on the desktop as rows it could not open, and
+            // activating one turned the whole background off.
+            "wallpapers",
         ] {
             assert!(
                 !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&forbidden),

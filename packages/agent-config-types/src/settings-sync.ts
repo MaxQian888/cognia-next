@@ -325,7 +325,11 @@ export const SETTINGS_SYNC = {
   routingFallbackEnabled: { category: "desktop-only" },
   routingPresets: { category: "desktop-only" },
   background: { category: "desktop-only" },
-  wallpapers: { category: "shared" },
+  wallpapers: {
+    category: "device-local",
+    rationale:
+      "Two of the five WallpaperSource shapes are references into one machine's storage, not values: `disk` is a path under that host's own appData, and `indexeddb` is a key in that browser's blob store. `saveImage()` picks between them by `isTauri()`, so a desktop only ever writes `disk` and a phone only ever writes `indexeddb` — every image wallpaper is device-bound, and the two platforms produce kinds the other cannot resolve at all. Mirroring the array put unopenable rows in both galleries; activating one threw and turned the whole background off. `background` is already withheld for the same reason (its `activeId` names a row that need not exist elsewhere), and `appearance-config-io.ts` excludes both keys from an exported look on exactly this reasoning.",
+  },
   customCss: { category: "shared" },
   customCssEnabled: { category: "shared" },
   importedVscodeThemes: { category: "shared" },

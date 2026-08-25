@@ -72,7 +72,6 @@ describe("mirrorSettingsPatchToHost", () => {
     // They were allowlisted server-side but nothing ever sent them.
     const patch = {
       colorTheme: "nord",
-      wallpapers: [{ id: "w1" }],
       accentColor: "#ff0000",
       customCss: ".x{}",
       customCssEnabled: true,
@@ -115,6 +114,38 @@ describe("mirrorSettingsPatchToHost", () => {
       mirrored()
     )
     expect(keys).toEqual([])
+  })
+
+  it("keeps the wallpaper library on the handset that holds its bytes", async () => {
+    // `/me/appearance` embeds the desktop wallpaper tab, so a phone can and
+    // does upload wallpapers — but off Tauri `saveImage()` can only write an
+    // `indexeddb` blobKey, which addresses this webview's blob store and
+    // nothing else. Mirroring the array up put rows in the desktop's gallery
+    // that it could not open, and activating one switched the background off.
+    const keys = await mirrorSettingsPatchToHost(
+      {
+        wallpapers: [
+          {
+            id: "w1",
+            name: "Sunset",
+            kind: "image",
+            builtin: false,
+            createdAt: 1,
+            source: {
+              kind: "image",
+              storage: "indexeddb",
+              blobKey: "w1",
+              mime: "image/png",
+              width: 4,
+              height: 3,
+            },
+          },
+        ],
+      } as never,
+      mirrored()
+    )
+    expect(keys).toEqual([])
+    expect(enqueueJob).not.toHaveBeenCalled()
   })
 
   it("does not mirror transport config, which flows the other way", async () => {

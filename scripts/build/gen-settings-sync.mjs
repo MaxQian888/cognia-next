@@ -174,6 +174,12 @@ mod tests {
             "workflowEditorPerformanceTier",
             "selectedMicId",
             "apiKey",
+            // An array of references into one machine's storage: a \`disk\`
+            // relPath under that host's appData, or an \`indexeddb\` blobKey in
+            // that browser's blob store. It used to be writable, so a phone's
+            // uploads landed on the desktop as rows it could not open, and
+            // activating one turned the whole background off.
+            "wallpapers",
         ] {
             assert!(
                 !APP_SETTINGS_MOBILE_ALLOWED_KEYS.contains(&forbidden),
