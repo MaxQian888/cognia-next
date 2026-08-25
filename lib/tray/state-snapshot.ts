@@ -75,6 +75,20 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     () => aggregateRunState({ sessions, activeSessionId }),
     [sessions, activeSessionId]
   )
+  // Reduced to primitives BEFORE the snapshot memo, and the memo depends on
+  // these rather than on `run`.
+  //
+  // `sessions` gets a new identity on every coalesced stream frame (~16ms), so
+  // `run` did too, so the snapshot did too — and `useSyncTrayToRust` debounces
+  // its push by 150ms, clearing and re-arming the timer on each snapshot
+  // change. The timer therefore never fired while anything was streaming: the
+  // tray menu froze for the whole turn, and the "N conversations running" row
+  // this very snapshot feeds was the one thing that could never appear. Three
+  // primitives change only when the tray's answer changes, so the debounce
+  // settles.
+  const chatStreaming = run.streaming > 0
+  const chatAwaitingApproval = run.awaitingApproval > 0
+  const chatActiveCount = run.active
 
   // Live goal subscription via Dexie's `useLiveQuery` — fires on every
   // pause / resume / stop / preempt the goal runtime writes to IndexedDB.
@@ -197,16 +211,26 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
       goal,
       automation,
       chat: {
-        streaming: run.streaming > 0,
+        streaming: chatStreaming,
         hasActiveSession: !!activeSessionId,
-        awaitingApproval: run.awaitingApproval > 0,
-        activeCount: run.active,
+        awaitingApproval: chatAwaitingApproval,
+        activeCount: chatActiveCount,
       },
       platform: { os: detectOs() },
       app: { autostart, version: APP_VERSION },
       pet,
       usage,
     }),
-    [goal, automation, run, activeSessionId, autostart, pet, usage]
+    [
+      goal,
+      automation,
+      chatStreaming,
+      chatAwaitingApproval,
+      chatActiveCount,
+      activeSessionId,
+      autostart,
+      pet,
+      usage,
+    ]
   )
 }

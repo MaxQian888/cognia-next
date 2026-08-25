@@ -32,18 +32,42 @@ export interface AggregateRunState {
   streaming: number
   awaitingApproval: number
   error: number
-  /** Sessions in any non-idle state — what a "N running" badge counts. */
+  /**
+   * Sessions with work actually IN FLIGHT — what a "N running" badge counts.
+   *
+   * Deliberately excludes `error`. A turn that has already failed is not work
+   * in flight, and every surface that renders this number renders it with
+   * running chrome (a spinning loader, "N conversations running"). Counting a
+   * failure there produces a spinner that never stops for a conversation that
+   * stopped long ago — the same dishonest readout this module exists to remove.
+   * A background failure is still visible: it reaches `status` through
+   * {@link PRECEDENCE}, which ranks it above idle.
+   */
   active: number
   /** The focused conversation's own state, or `"idle"` when there is none. */
   focused: AggregateChatStatus
   /**
-   * True when something is happening somewhere OTHER than the focused
-   * conversation. The signal that justifies a "N in the background" affordance.
+   * True when work is in flight somewhere OTHER than the focused conversation.
+   * The signal that justifies a "N in the background" affordance.
+   *
+   * Same exclusion as {@link active}, and for the same reason: the affordance
+   * offers to take you to something that is happening.
    */
   activeElsewhere: boolean
 }
 
 const PRECEDENCE: AggregateChatStatus[] = ["awaiting_approval", "streaming", "error", "idle"]
+
+/**
+ * Whether a status means work is happening RIGHT NOW.
+ *
+ * The one predicate behind `active`, `activeElsewhere` and
+ * {@link backgroundActiveSessionIds}, so the count, the affordance and the list
+ * it opens can never disagree about what they are counting.
+ */
+function isInFlight(status: AggregateChatStatus): boolean {
+  return status === "streaming" || status === "awaiting_approval"
+}
 
 export interface AggregateRunStateInput {
   sessions: Record<string, { status?: AggregateChatStatus } | undefined>
@@ -62,7 +86,8 @@ export function aggregateRunState(input: AggregateRunStateInput): AggregateRunSt
     if (status === "streaming") streaming += 1
     else if (status === "awaiting_approval") awaitingApproval += 1
     else if (status === "error") error += 1
-    if (id !== input.activeSessionId) activeElsewhere = true
+    // `error` is deliberately not "elsewhere activity" — see `activeElsewhere`.
+    if (id !== input.activeSessionId && isInFlight(status)) activeElsewhere = true
   }
 
   const counts: Record<AggregateChatStatus, number> = {
@@ -78,7 +103,7 @@ export function aggregateRunState(input: AggregateRunStateInput): AggregateRunSt
     streaming,
     awaitingApproval,
     error,
-    active: streaming + awaitingApproval + error,
+    active: streaming + awaitingApproval,
     focused: input.activeSessionId
       ? (input.sessions?.[input.activeSessionId]?.status ?? "idle")
       : "idle",
@@ -86,10 +111,15 @@ export function aggregateRunState(input: AggregateRunStateInput): AggregateRunSt
   }
 }
 
-/** Sessions in a non-idle state, excluding the focused one. Ordered by key. */
+/**
+ * Sessions with work in flight, excluding the focused one. Ordered by key.
+ *
+ * Exactly the sessions `activeElsewhere` is true about, so a caller that has
+ * this list does not need to ask twice — its length IS the answer.
+ */
 export function backgroundActiveSessionIds(input: AggregateRunStateInput): string[] {
   return Object.entries(input.sessions ?? {})
-    .filter(([id, slice]) => id !== input.activeSessionId && (slice?.status ?? "idle") !== "idle")
+    .filter(([id, slice]) => id !== input.activeSessionId && isInFlight(slice?.status ?? "idle"))
     .map(([id]) => id)
     .sort()
 }

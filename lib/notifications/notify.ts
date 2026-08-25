@@ -82,18 +82,6 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
   }
   const action = decideCoalesce(existing, { now, backoff: input.coalesceBackoff })
 
-  // Which workspace this came from. The caller knows best; failing that, a
-  // session-scoped notification inherits its conversation's workspace. Never
-  // fatal — an unlabelled notification is far better than a lost one.
-  let projectId = input.projectId
-  if (!projectId && input.sourceRef?.kind === "session" && deps.resolveSessionWorkspace) {
-    try {
-      projectId = (await deps.resolveSessionWorkspace(input.sourceRef.id)) ?? undefined
-    } catch {
-      projectId = undefined
-    }
-  }
-
   // 2. Build/merge the record (deliveredVia filled after fan-out).
   let record: NotificationRecord
   if (action === "bump" && existing) {
@@ -112,6 +100,23 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
     )
     record = { ...existing, ...patch }
   } else {
+    // Which workspace this came from. The caller knows best; failing that, a
+    // session-scoped notification inherits its conversation's workspace. Never
+    // fatal — an unlabelled notification is far better than a lost one.
+    //
+    // Inside this branch, not above it: a bump keeps `existing.projectId`, so
+    // resolving before the split paid a Dexie round-trip per coalesced
+    // notification for a value that was then thrown away — and every await
+    // between `findByDedupeKey` and the write widens the window in which two
+    // concurrent calls both see no existing row and each insert one.
+    let projectId = input.projectId
+    if (!projectId && input.sourceRef?.kind === "session" && deps.resolveSessionWorkspace) {
+      try {
+        projectId = (await deps.resolveSessionWorkspace(input.sourceRef.id)) ?? undefined
+      } catch {
+        projectId = undefined
+      }
+    }
     const id = (deps.newId ?? nanoid)()
     record = {
       id,

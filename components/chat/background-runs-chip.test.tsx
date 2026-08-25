@@ -95,8 +95,21 @@ it("names the count for assistive tech, not just the digit", () => {
   expect(screen.getByTestId("background-runs-chip")).toHaveAccessibleName('count:{"count":1}')
 })
 
-it("counts a background failure, which is easiest of all to miss", () => {
+it("does not present a background failure as a running conversation", () => {
+  // The chip is a spinner over "N conversations running in the background". A
+  // turn that has already failed is not running, and the spinner never stopped
+  // — it kept turning for a conversation that ended until the user visited it.
+  // The failure still reaches the user through the status bar's word and the
+  // notification centre.
   chatRef.sessions = { a: { status: "idle" }, b: { status: "error" } }
+  chatRef.activeSessionId = "a"
+  render(<BackgroundRunsChip onSelect={onSelect} />)
+
+  expect(screen.queryByTestId("background-runs-chip")).not.toBeInTheDocument()
+})
+
+it("still counts a background approval, which is easiest of all to miss", () => {
+  chatRef.sessions = { a: { status: "idle" }, b: { status: "awaiting_approval" } }
   chatRef.activeSessionId = "a"
   render(<BackgroundRunsChip onSelect={onSelect} />)
 

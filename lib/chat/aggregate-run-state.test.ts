@@ -49,21 +49,36 @@ describe("aggregateRunState", () => {
     expect(out.error).toBe(1)
   })
 
-  it("keeps an off-screen failure visible", () => {
+  it("keeps an off-screen failure visible through the status word", () => {
     const out = aggregateRunState({
       sessions: sessions({ a: "idle", b: "error" }),
       activeSessionId: "a",
     })
     expect(out.status).toBe("error")
-    expect(out.activeElsewhere).toBe(true)
+    expect(out.error).toBe(1)
   })
 
-  it("counts every non-idle session as active", () => {
+  it("does not call a background failure activity elsewhere", () => {
+    // `activeElsewhere` drives a spinning "N running in the background" chip
+    // that offers to take you to something happening. A turn that already
+    // failed is not happening, and the spinner never stopped.
+    const out = aggregateRunState({
+      sessions: sessions({ a: "idle", b: "error" }),
+      activeSessionId: "a",
+    })
+    expect(out.activeElsewhere).toBe(false)
+    expect(out.active).toBe(0)
+  })
+
+  it("counts only work in flight as active", () => {
     const out = aggregateRunState({
       sessions: sessions({ a: "streaming", b: "awaiting_approval", c: "error", d: "idle" }),
       activeSessionId: "a",
     })
-    expect(out.active).toBe(3)
+    // Streaming + awaiting approval. The errored session is reported through
+    // `error` and `status`, not through the "N running" count.
+    expect(out.active).toBe(2)
+    expect(out.error).toBe(1)
   })
 
   it("does not report activity elsewhere when only the focused session is busy", () => {
@@ -120,10 +135,21 @@ describe("backgroundActiveSessionIds", () => {
   it("is ordered so the list does not reshuffle between renders", () => {
     expect(
       backgroundActiveSessionIds({
-        sessions: sessions({ z: "streaming", a: "error", m: "awaiting_approval" }),
+        sessions: sessions({ z: "streaming", a: "streaming", m: "awaiting_approval" }),
         activeSessionId: null,
       })
     ).toEqual(["a", "m", "z"])
+  })
+
+  it("leaves out a session that already failed", () => {
+    // Same predicate as `activeElsewhere`, so the chip's count and the list it
+    // opens can never disagree.
+    expect(
+      backgroundActiveSessionIds({
+        sessions: sessions({ a: "error", b: "streaming" }),
+        activeSessionId: null,
+      })
+    ).toEqual(["b"])
   })
 
   it("is empty when only the focused session is busy", () => {

@@ -20,7 +20,7 @@ import { useTranslations } from "next-intl"
 import { LoaderCircleIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { aggregateRunState, backgroundActiveSessionIds } from "@/lib/chat/aggregate-run-state"
+import { backgroundActiveSessionIds } from "@/lib/chat/aggregate-run-state"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 
@@ -38,12 +38,15 @@ export function BackgroundRunsChip({ onSelect, className }: BackgroundRunsChipPr
   const sessions = useChatStore((s) => s.sessions)
   const activeSessionId = useChatStore((s) => s.activeSessionId)
 
-  const { run, backgroundIds } = useMemo(() => {
-    const input = { sessions, activeSessionId }
-    return { run: aggregateRunState(input), backgroundIds: backgroundActiveSessionIds(input) }
-  }, [sessions, activeSessionId])
+  // One scan, not two: `aggregateRunState().activeElsewhere` is by construction
+  // `backgroundIds.length > 0` — same predicate, same input — and this
+  // component re-renders once per animation frame for the whole of any stream.
+  const backgroundIds = useMemo(
+    () => backgroundActiveSessionIds({ sessions, activeSessionId }),
+    [sessions, activeSessionId]
+  )
 
-  if (!run.activeElsewhere || backgroundIds.length === 0) return null
+  if (backgroundIds.length === 0) return null
 
   const first = backgroundIds[0]!
   const label = t("count", { count: backgroundIds.length })
