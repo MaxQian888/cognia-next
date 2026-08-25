@@ -329,7 +329,23 @@ also the layer this ADR actually invents — neither existing file has a `User`.
 3. **§7's shared crate found its real justification here.** Batch 2 showed the
    two existing services shared no code. The third service is what made a shared
    JWKS verifier correct, and `cognia_tenant_auth::oidc` now owns it.
-| **4** | `devices.user_id` bookkeeping, then reroute the grant decision | `security_store.rs`, `device_grants.rs`, `lib/devices/grant-capabilities.ts` — two releases, never one |
+| **4a** | ✅ `devices.user_id` bookkeeping | `security_store.rs` (column, migration, enrolment inherits the bound person, sign-in adopts the unclaimed), `lib/devices/`, the console's "Belongs to" row. **No decision path reads it**, pinned by two tests. |
+| **4b** | ⏳ Reroute the grant decision | `has_capability`, `device_grants.rs`, `lib/devices/grant-capabilities.ts`. Deliberately a **separate release** — see below. |
+
+**Why 4a and 4b are numbered apart.** §5 says "two releases, never one", and
+the roadmap row hid that inside a single line. The risk is concrete:
+`capability_grants` is read per request by `rpc.rs`, `ws_terminal.rs` and
+`remote_execution.rs`, and every device that existed before the upgrade has a
+NULL `user_id`. A release that both introduced the column and started routing
+decisions through it would evaluate the new rule against a fleet that has not
+been attributed yet — a lockout, not a migration. 4a exists so the column has a
+release to fill in before anything depends on it.
+
+`host_bindings.tenant_id` keeps its `UNIQUE` constraint through 4a. Relaxing it
+is listed under §9, but nothing needs it yet, and it is what makes "which person
+does this tenant belong to" a single-row lookup — which is exactly how an
+enrolling device learns its owner. It should be relaxed when two profiles
+genuinely share one Org's tenant, and not before.
 | **5** | `ExternalIdentity` absorbs IM principals; Guest lands | `lib/connectors/principal/*` — `bootstrap.ts` stops falling back to `accountId` |
 | **6** | `share-server` gains tenancy and identity; `ops-controller` gains RLS | `services/share-server/{src,worker}`, `crates/cognia-ops-controller/migrations/` |
 | **7** | Workspace, Plans and Runs on the collaboration plane | follows Batch 3 |

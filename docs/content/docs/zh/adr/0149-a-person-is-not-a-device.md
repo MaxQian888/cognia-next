@@ -286,7 +286,18 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
    "这个 token 属于哪个 org" 去开一条绕过行级安全的特权通道。
 3. **§7 的共享 crate 在这里才找到真正的理由。** Batch 2 证明既有两个服务没有共享代码；
    是第三个服务让共享 JWKS 验签变得正确，`cognia_tenant_auth::oidc` 现在拥有它。
-| **4** | `devices.user_id` 记账，然后改道 grant 判定 | `security_store.rs`、`device_grants.rs`、`lib/devices/grant-capabilities.ts`——两次发布，绝不合并 |
+| **4a** | ✅ `devices.user_id` 记账 | `security_store.rs`（列、迁移、入册继承已绑定的人、登录认领无主设备）、`lib/devices/`、控制台的"归属"行。**没有任何判定路径读它**，由两个测试钉住。 |
+| **4b** | ⏳ grant 判定改道 | `has_capability`、`device_grants.rs`、`lib/devices/grant-capabilities.ts`。刻意留作**独立 release**——见下。 |
+
+**为什么把 4a 与 4b 分开编号。** §5 写的是"两个 release，绝不合一"，而路线图那一行
+把这件事藏进了一句话里。风险是具体的：`capability_grants` 被 `rpc.rs`、`ws_terminal.rs`
+与 `remote_execution.rs` 每请求读取，而升级前就存在的每一台设备的 `user_id` 都是 NULL。
+一个既引入该列又开始据其判定的 release，会拿新规则去评估一支尚未完成归属的设备群——
+那是锁死，不是迁移。4a 存在的意义，就是让这一列先有一个 release 去填。
+
+`host_bindings.tenant_id` 在 4a 期间保留 `UNIQUE`。放宽它列在 §9，但目前没有任何东西
+需要它；而正是这个约束让"这个租户属于哪个人"成为单行查询——入册中的设备就是这样得知
+自己归属谁的。它应该在两个 profile 真正共享同一个 Org 租户时再放宽，不是更早。
 | **5** | `ExternalIdentity` 收编 IM principal；Guest 落地 | `lib/connectors/principal/*`——`bootstrap.ts` 不再退化到 `accountId` |
 | **6** | `share-server` 补租户与身份；`ops-controller` 补 RLS | `services/share-server/{src,worker}`、`crates/cognia-ops-controller/migrations/` |
 | **7** | Workspace、Plans 与 Runs 上协作面 | 承接 Batch 3 |
