@@ -34,6 +34,7 @@
     "github": "GitHub",
     "agent-team": "Agent 团队",
     "agent-task": "Agent 任务",
+    "collab": "共享",
     "readOnly": "只读 —— 由 {source} 管理",
     "degraded": "{count, plural, other {# 个数据源加载失败}}"
   },

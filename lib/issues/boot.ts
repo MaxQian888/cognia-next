@@ -1,8 +1,8 @@
 /**
  * Host-neutral boot for the issue tracker (ADR-0132).
  *
- * Registers the four issue sources (local, the GitHub mirror, and the two
- * agent engines), installs the run bridge and the lifecycle → Notification
+ * Registers the five issue sources (local, the GitHub mirror, the two agent
+ * engines, and the ADR-0149 collaboration mirror), installs the run bridge and the lifecycle → Notification
  * Center watcher, seeds the starter label catalogue, and reconciles the GitHub
  * refresh schedule.
  *
@@ -26,6 +26,7 @@ import { syncGithubIssueSchedule } from "@/lib/issues/github-sync-schedule"
 import { installIssueNotifications, type IssueNotifyTranslate } from "@/lib/issues/notify"
 import { installIssueRunBridge } from "@/lib/issues/run/install"
 import { registerAgentTaskIssueSource } from "@/lib/issues/sources/agent-task-source"
+import { registerCollabIssueSource } from "@/lib/issues/sources/collab-source"
 import { registerAgentTeamIssueSource } from "@/lib/issues/sources/agent-team-source"
 import { registerGithubIssueSource } from "@/lib/issues/sources/github-source"
 import { registerLocalIssueSource } from "@/lib/issues/sources/local-source"
@@ -55,6 +56,10 @@ export async function bootIssueTracker(options: BootIssueTrackerOptions = {}): P
   // (read-only), and the run bridge lets an issue be dispatched to them.
   registerAgentTaskIssueSource()
   registerAgentTeamIssueSource()
+  // ADR-0149 §6: the collaboration plane's mirror. Registering it costs nothing
+  // on a profile nobody has signed in on — the mirror is empty until a pull
+  // runs, and the board simply shows the local rows.
+  registerCollabIssueSource()
   const disposeRunBridge = installIssueRunBridge({
     onError: (error) => log.warn("issue-tracker: run bridge error", { error: String(error) }),
   })

@@ -12825,6 +12825,7 @@
     },
     "source": {
       "agent-task": "Agent Task",
+      "collab": "Shared",
       "agent-team": "Agent Team",
       "degraded": "{count, plural, one {# source failed to load} other {# sources failed to load}}",
       "github": "GitHub",

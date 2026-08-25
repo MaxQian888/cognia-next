@@ -12,6 +12,9 @@
  *   2. github     — Dexie `githubIssueMirror` (read-only cache, slice ②)
  *   3. agent-team — `AgentTeamTask` from the agent-team store (slice ③)
  *   4. agent-task — Dexie `agentTasks` (slice ③)
+ *   5. collab     — Dexie `collabIssues`, the ADR-0149 collaboration plane's
+ *                   mirror. Read-only here for the same reason as GitHub: the
+ *                   server owns those rows.
  *
  * This mirrors `types/scheduler/unified.ts` + `lib/scheduler/sources/registry.ts`,
  * which already solved "six backends, one board" for the scheduler page. Copy
@@ -25,7 +28,7 @@
 import type { IssueActor, IssuePriority, IssueStatus, IssueStatusCategory } from "@/types/issues"
 
 /** Single exhaustive runtime/type authority for every federated source. */
-export const ISSUE_SOURCE_KINDS = ["local", "github", "agent-team", "agent-task"] as const
+export const ISSUE_SOURCE_KINDS = ["local", "github", "agent-team", "agent-task", "collab"] as const
 
 export type IssueSourceKind = (typeof ISSUE_SOURCE_KINDS)[number]
 

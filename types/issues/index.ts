@@ -83,9 +83,18 @@ export function priorityRank(priority: IssuePriority): number {
 }
 
 /**
- * Who a thing belongs to. `id` is optional because the local app is
- * single-user — the human actor carries no id, exactly as
- * `ConversationOverrideRow.assignee` does.
+ * Who a thing belongs to.
+ *
+ * `id` is optional, and ADR-0132 justified that with "the local app is
+ * single-user". **ADR-0149 §10 supersedes that reason.** The shape survives —
+ * a board on a machine nobody has signed in on genuinely has no `usr_` to
+ * write, and ADR-0149 decision 4 keeps the local product working offline — but
+ * the justification is now narrower: `id` is absent because a local-only actor
+ * predates any account, not because there can only ever be one person.
+ *
+ * The moment an issue crosses onto the collaboration plane the id is required,
+ * because there "the human" names nobody. That narrowing lives in
+ * `types/issues/collab.ts`, which refuses rather than inventing an id.
  *
  *   human → the local user (or, on a GitHub mirror row, the GitHub login)
  *   agent → a `Character` id (`lib/db/characters.ts`). This is what

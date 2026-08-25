@@ -34,6 +34,7 @@
     "github": "GitHub",
     "agent-team": "Agent Team",
     "agent-task": "Agent Task",
+    "collab": "Shared",
     "readOnly": "Read-only — managed by {source}",
     "degraded": "{count, plural, one {# source failed to load} other {# sources failed to load}}"
   },

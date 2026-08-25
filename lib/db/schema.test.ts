@@ -587,6 +587,25 @@ describe("getDb", () => {
     )
   })
 
+  it("v195 opens the collaboration issue mirror with the indexes the board reads by", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(195)
+    expect(db.collabIssues.schema.primKey.name).toBe("id")
+    // The board reads by workspace, and a partial refresh replaces by
+    // `[orgId+workspaceId]` — both are full scans without an index.
+    expect(db.collabIssues.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "orgId",
+        "workspaceId",
+        "issueProjectId",
+        "[orgId+workspaceId]",
+        "updatedAt",
+      ])
+    )
+  })
+
   it("v170 opens the issue tracker tables with the indexes its queries need", async () => {
     const db = getDb()
     await db.open()

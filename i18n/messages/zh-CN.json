@@ -12825,6 +12825,7 @@
     },
     "source": {
       "agent-task": "Agent 任务",
+      "collab": "共享",
       "agent-team": "Agent 团队",
       "degraded": "{count, plural, other {# 个数据源加载失败}}",
       "github": "GitHub",
