@@ -2,6 +2,7 @@ import { pinnedFetch, type PinnedFetchInit } from "./pinned-fetch"
 import type { CompanionConfig } from "./companion-storage"
 import { generatePersistableSigningIdentity, type RoomDescriptor } from "@/lib/signaling/crypto"
 import { APP_VERSION } from "@/lib/app-version"
+import { requireJwtPayload } from "@/lib/security/jwt-payload"
 
 export interface CompanionAuthConfig {
   deploymentMode: "single-user" | "multi-tenant"
@@ -401,7 +402,7 @@ async function refreshAccessToken(
   if (typeof body.accessToken !== "string" || typeof body.expiresIn !== "number") {
     throw new Error("access token response is malformed")
   }
-  const claims = decodeJwtPayload(body.accessToken)
+  const claims = requireJwtPayload(body.accessToken, "access token is malformed")
   if (typeof claims.jti !== "string") throw new Error("access token is missing jti")
   const state = {
     accessToken: body.accessToken,
@@ -522,14 +523,6 @@ function base64UrlBytes(bytes: Uint8Array): string {
   let binary = ""
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "")
-}
-
-function decodeJwtPayload(jwt: string): Record<string, unknown> {
-  const payload = jwt.split(".")[1]
-  if (!payload) throw new Error("access token is malformed")
-  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/")
-  const padding = (4 - (normalized.length % 4)) % 4
-  return JSON.parse(atob(normalized + "=".repeat(padding))) as Record<string, unknown>
 }
 
 function bytesToHex(bytes: Uint8Array): string {

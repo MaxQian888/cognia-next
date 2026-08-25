@@ -8,23 +8,18 @@
  * holds anything else — no app secret, no bot token, no device JWT.
  */
 
+import { decodeJwtPayload } from "@/lib/security/jwt-payload"
+
 export const LARK_WEB_SESSION_STORAGE_KEY = "cognia-lark-web-session-v1"
 
 const FRAGMENT_PARAM = "lark_session"
 
-/** Unverified base64url payload decode — claim EXTRACTION only, never trust. */
-export function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split(".")
-  if (parts.length !== 3) return null
-  try {
-    const normalized = parts[1].replaceAll("-", "+").replaceAll("_", "/")
-    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4)
-    const decoded = JSON.parse(atob(padded)) as unknown
-    return decoded && typeof decoded === "object" ? (decoded as Record<string, unknown>) : null
-  } catch {
-    return null
-  }
-}
+/**
+ * Unverified base64url payload decode — claim EXTRACTION only, never trust.
+ * Re-exported so this module keeps its name at every call site while there is
+ * exactly one implementation, in `lib/security/jwt-payload.ts`.
+ */
+export { decodeJwtPayload }
 
 /**
  * Capture a session token from `location.hash`, persist it, and strip the
