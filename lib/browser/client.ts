@@ -1,6 +1,7 @@
 /**
- * Renderer-facing client for the in-app browser Tauri command surface
- * (`src-tauri/src/browser/commands.rs`). Thin pass-throughs via the shared
+ * Renderer-facing client for the in-app browser Tauri command surface —
+ * `src-tauri/src/browser/embedded.rs` (the 31 `browser_embed_*` commands),
+ * `cdp.rs` and `cookie_import/mod.rs`. Thin pass-throughs via the shared
  * `transport` so web/mobile shells reject cleanly rather than throwing.
  */
 import type { Screenshot } from "@/lib/automation/types"
@@ -321,5 +322,3 @@ export const browserClient = {
       ownerToken: requiredEmbedOwnerToken(),
     }),
 }
-
-export type BrowserClient = typeof browserClient

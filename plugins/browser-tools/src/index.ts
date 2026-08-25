@@ -23,12 +23,21 @@ import {
 } from "@/lib/db/browser-annotations"
 import { defineContextProvider } from "@cognia/plugin-sdk"
 
-// Last known preview URL — a fallback for when the live URL is unreadable
-// (preview not open yet / document mid-swap).
-let lastUrl = "http://localhost:3000/"
+/**
+ * Last known preview URL — a fallback for when the live URL is unreadable
+ * (preview not open yet / document mid-swap).
+ *
+ * Module-global on purpose: there is exactly one embedded webview, shared by
+ * every chat session, so a per-session cache would describe a page that does
+ * not exist. It starts as `null` rather than a localhost literal, because the
+ * seed decides a trust tier: pre-seeding `http://localhost:3000/` claimed the
+ * *trusted* tier for a preview that had never navigated anywhere. An unknown
+ * page resolves to `public` / untrusted instead, which is the safe direction.
+ */
+let lastUrl: string | null = null
 
 function engineFor() {
-  return routeEngine(lastUrl)
+  return routeEngine(lastUrl ?? "")
 }
 
 const ANNOTATION_INTENTS = ["fix", "change", "question", "approve"] as const
@@ -81,7 +90,7 @@ async function currentRoute() {
   } catch {
     // Preview not open / mid-navigation: fall back to the last known URL.
   }
-  return routeEngine(lastUrl)
+  return routeEngine(lastUrl ?? "")
 }
 
 async function withSnapshot(result: Record<string, unknown>, initialDelayMs?: number) {

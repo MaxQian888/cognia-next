@@ -409,10 +409,11 @@ const browserBuiltins: BrowserBuiltinRegistryEntry[] = [
   {
     // ADR-0055 — agent browser loop over the embedded preview webview
     // (browser_navigate / browser_snapshot / browser_click|type|fill_form|
-    // select|hover / browser_read_console|network / browser_get_page). It is
-    // `browser: blocked` (drives the Tauri browser_embed_* commands), but must
-    // still be DISCOVERED here like computer-use / skill-recorder, or the whole
-    // agent browser surface stays dormant; the compatibility policy gates it at
+    // select|hover / browser_read_console|network / browser_get_page). Its
+    // manifest declares all three runtime profiles supported (ADR-0085 gave the
+    // web/mobile shells a remote Chromium backend), but it must still be
+    // DISCOVERED here like computer-use / skill-recorder, or the whole agent
+    // browser surface stays dormant; the compatibility policy gates it at
     // enable time, not discovery.
     manifest: builtinManifest(browserToolsManifest, browserToolsModule),
     path: "builtin://cognia-browser-tools",

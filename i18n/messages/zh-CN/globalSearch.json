@@ -12,6 +12,8 @@
     "manageTeams": "管理团队",
     "newChat": "新建会话",
     "newChatHint": "开始一段持久化的对话",
+    "openBrowser": "打开浏览器",
+    "openBrowserHint": "预览页面并对其批注",
     "openFolder": "打开文件夹为工作区…",
     "openSettings": "打开设置",
     "switchToDark": "切换到深色主题",
@@ -119,6 +121,8 @@
     "system": "系统",
     "user": "你"
   },
+  "scopeWiden": "搜索全部",
+  "scopeWidenHint": "结果仅限本工作区。点击改为搜索所有工作区。",
   "scopes": {
     "all": "全部",
     "chats": "会话",
@@ -156,7 +160,5 @@
     "updateFailed": "检查更新失败：{message}",
     "updatesDesktopOnly": "仅桌面端支持检查更新。"
   },
-  "untitledConversation": "未命名会话",
-  "scopeWiden": "搜索全部",
-  "scopeWidenHint": "结果仅限本工作区。点击改为搜索所有工作区。"
+  "untitledConversation": "未命名会话"
 }

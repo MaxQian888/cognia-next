@@ -17,6 +17,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
     <div role="menu">{children}</div>
   ),
+  DropdownMenuSeparator: () => <hr />,
   DropdownMenuItem: ({
     children,
     onSelect,
@@ -28,6 +29,9 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
       {children}
     </button>
   ),
+}))
+jest.mock("@/lib/files/file-bridge", () => ({
+  saveFileAs: jest.fn().mockResolvedValue(true),
 }))
 jest.mock("@/lib/db/browser-recordings", () => ({
   saveRecording: jest.fn(),
@@ -56,6 +60,7 @@ import {
   saveRecording,
 } from "@/lib/db/browser-recordings"
 import { toast } from "sonner"
+import { saveFileAs } from "@/lib/files/file-bridge"
 import { BrowserRecorderPanel } from "./browser-recorder-panel"
 
 const useRecorder = useFlowRecorder as jest.Mock
@@ -315,6 +320,35 @@ describe("review", () => {
     await user.clear(screen.getByLabelText("record.name"))
     await user.click(screen.getByRole("button", { name: "record.save" }))
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: BASE }))
+  })
+
+  // `isReplayable` exists precisely to reject a flow of nothing but assertions,
+  // but nothing ever asked it — Replay was enabled for one.
+  it("refuses to replay a flow with no actions in it", async () => {
+    const user = userEvent.setup()
+    await finish(user, { steps: [{ act: "wait_for", at: 0, text: "Welcome" }] })
+    expect(screen.getByRole("button", { name: "record.replay" })).toBeDisabled()
+  })
+
+  it("saves an export to disk with a per-format filename", async () => {
+    const user = userEvent.setup()
+    await finish(user)
+    await user.click(screen.getByRole("menuitem", { name: "record.downloadPlaywright" }))
+    await waitFor(() =>
+      expect(saveFileAs).toHaveBeenCalledWith(
+        expect.objectContaining({ defaultName: "login.spec.ts" })
+      )
+    )
+    expect(toast.success).toHaveBeenCalledWith("record.downloaded")
+  })
+
+  it("stays quiet when the save dialog is cancelled", async () => {
+    ;(saveFileAs as jest.Mock).mockResolvedValueOnce(false)
+    const user = userEvent.setup()
+    await finish(user)
+    await user.click(screen.getByRole("menuitem", { name: "record.downloadJson" }))
+    await waitFor(() => expect(saveFileAs).toHaveBeenCalled())
+    expect(toast.success).not.toHaveBeenCalledWith("record.downloaded")
   })
 
   it("replays and reports success", async () => {

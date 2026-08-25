@@ -32,14 +32,20 @@ import {
   saveRecording,
   type BrowserRecordingRow,
 } from "@/lib/db/browser-recordings"
-import { exportFlow, type ExportFormat } from "@/lib/browser/recording/exporters"
-import type { RecordedFlow, RecordedStep } from "@/lib/browser/recording/protocol"
+import { exportFilename, exportFlow, type ExportFormat } from "@/lib/browser/recording/exporters"
+import {
+  isReplayable,
+  type RecordedFlow,
+  type RecordedStep,
+} from "@/lib/browser/recording/protocol"
+import { saveFileAs } from "@/lib/files/file-bridge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -245,9 +251,11 @@ function FlowReview({
     }
   }, [flow, recorder, secrets, t])
 
+  const named = useCallback(() => ({ ...flow, name: name.trim() || flow.name }), [flow, name])
+
   const doExport = useCallback(
     async (format: ExportFormat) => {
-      const artifact = exportFlow({ ...flow, name: name.trim() || flow.name }, format)
+      const artifact = exportFlow(named(), format)
       if (format === "agent" && onSendToChat) {
         onSendToChat(artifact)
         return
@@ -255,7 +263,24 @@ function FlowReview({
       await navigator.clipboard.writeText(artifact)
       toast.success(t("record.exported"))
     },
-    [flow, name, onSendToChat, t]
+    [named, onSendToChat, t]
+  )
+
+  /**
+   * Write the artifact to disk. The menu's Download icon promised this and only
+   * ever delivered a clipboard copy, which is also why `exportFilename` — with
+   * its per-format `.spec.ts` / `.json` / `.md` suffixes — had no caller.
+   */
+  const doDownload = useCallback(
+    async (format: ExportFormat) => {
+      const flowToSave = named()
+      const saved = await saveFileAs({
+        defaultName: exportFilename(flowToSave, format),
+        content: exportFlow(flowToSave, format),
+      })
+      if (saved) toast.success(t("record.downloaded"))
+    },
+    [named, t]
   )
 
   const needed = recorder.secretsFor(flow)
@@ -292,11 +317,15 @@ function FlowReview({
           <Save aria-hidden />
           {t("record.save")}
         </Button>
+        {/* A flow of nothing but assertions has no action to perform, which is
+            exactly what `isReplayable` was written to reject — it just was
+            never asked. */}
         <Button
           size="sm"
           variant="ghost"
           onClick={() => void replay()}
-          disabled={recorder.replaying}
+          disabled={recorder.replaying || !isReplayable(flow)}
+          title={isReplayable(flow) ? undefined : t("record.replayNothing")}
         >
           <Play aria-hidden />
           {recorder.replaying ? t("record.replaying") : t("record.replay")}
@@ -325,6 +354,13 @@ function FlowReview({
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void doExport("agent")}>
               {t("record.exportAgent")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void doDownload("playwright")}>
+              {t("record.downloadPlaywright")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void doDownload("json")}>
+              {t("record.downloadJson")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

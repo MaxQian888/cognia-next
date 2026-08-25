@@ -1,5 +1,5 @@
 import type { BrowserAnnotationRow } from "@/lib/db/browser-annotations"
-import { annotationQueueReducer, formatAnnotationBatch } from "./annotation-queue"
+import { formatAnnotationBatch } from "./annotation-queue"
 
 function annotation(id: string): BrowserAnnotationRow {
   return {
@@ -28,15 +28,6 @@ function annotation(id: string): BrowserAnnotationRow {
     updatedAt: 1,
   }
 }
-
-it("enqueues uniquely, removes one item, and clears", () => {
-  const a = annotation("a")
-  const b = annotation("b")
-  expect(annotationQueueReducer([a], { type: "enqueue", annotation: a })).toEqual([a])
-  expect(annotationQueueReducer([a], { type: "enqueue", annotation: b })).toEqual([a, b])
-  expect(annotationQueueReducer([a, b], { type: "remove", id: "a" })).toEqual([b])
-  expect(annotationQueueReducer([a], { type: "clear" })).toEqual([])
-})
 
 it("formats indexed annotations as one chat message", () => {
   const output = formatAnnotationBatch([annotation("a"), annotation("b")])

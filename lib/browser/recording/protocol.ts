@@ -13,18 +13,6 @@
  * Replay re-resolves `selector` → `ref` against a fresh snapshot at each step.
  */
 
-/** Discriminator for {@link RecordedStep}. */
-export type RecordedStepAct =
-  | "navigate"
-  | "click"
-  | "double_click"
-  | "hover"
-  | "scroll"
-  | "fill"
-  | "select"
-  | "press_key"
-  | "wait_for"
-
 /**
  * How to find an element again at replay time. Captured at record time from the
  * live DOM; `role`/`name` are recorded opportunistically because they are what

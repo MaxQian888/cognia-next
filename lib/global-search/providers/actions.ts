@@ -9,6 +9,7 @@ import {
   CheckIcon,
   DownloadIcon,
   FolderOpenIcon,
+  GlobeIcon,
   KeyRoundIcon,
   MoonIcon,
   PanelLeftIcon,
@@ -38,6 +39,7 @@ export type BuiltinCommandId =
   | "toggle-sidebar"
   | "open-folder"
   | "open-recorder"
+  | "open-browser"
   | "check-updates"
   | "open-settings"
   | "manage-api-key"
@@ -117,6 +119,16 @@ export function actionCandidates(ctx: GlobalSearchContext): ActionCandidate[] {
           },
         ]
       : []),
+    // The embedded browser had no entry anywhere outside the pane itself: no
+    // slash command, no palette row, no workflow node.
+    {
+      id: "open-browser",
+      title: t("globalSearch.actions.openBrowser"),
+      subtitle: t("globalSearch.actions.openBrowserHint"),
+      keywords: ["browser", "preview", "web", "localhost", "浏览器", "预览"],
+      icon: { lucide: GlobeIcon },
+      extra: ctx.isTauri ? undefined : { disabledReason: t("globalSearch.actions.desktopOnly") },
+    },
     {
       id: "open-settings",
       title: t("globalSearch.actions.openSettings"),

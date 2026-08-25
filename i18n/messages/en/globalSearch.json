@@ -12,6 +12,8 @@
     "manageTeams": "Manage teams",
     "newChat": "New chat",
     "newChatHint": "starts a persisted conversation",
+    "openBrowser": "Open the browser",
+    "openBrowserHint": "Preview a page and comment on it",
     "openFolder": "Open folder as workspace…",
     "openSettings": "Open settings",
     "switchToDark": "Switch to dark theme",
@@ -119,6 +121,8 @@
     "system": "System",
     "user": "You"
   },
+  "scopeWiden": "search all",
+  "scopeWidenHint": "Results are limited to this workspace. Search every workspace instead.",
   "scopes": {
     "all": "All",
     "chats": "Chats",
@@ -156,7 +160,5 @@
     "updateFailed": "Update check failed: {message}",
     "updatesDesktopOnly": "Updates are only available in the desktop build."
   },
-  "untitledConversation": "Untitled conversation",
-  "scopeWiden": "search all",
-  "scopeWidenHint": "Results are limited to this workspace. Search every workspace instead."
+  "untitledConversation": "Untitled conversation"
 }

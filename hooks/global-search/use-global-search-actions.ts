@@ -169,6 +169,9 @@ export function useGlobalSearchActions({
         case "open-recorder":
           openRecorder("palette")
           return
+        case "open-browser":
+          router.push("/browser")
+          return
         case "check-updates": {
           if (!isTauri()) {
             toast.info(t("toasts.updatesDesktopOnly"))

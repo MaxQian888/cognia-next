@@ -311,6 +311,12 @@ describe("useGlobalSearchActions", () => {
     expect(checkForUpdate).not.toHaveBeenCalled()
   })
 
+  it("opens the browser preview route", async () => {
+    const { result } = setup()
+    await act(() => result.current.runCommand("open-browser"))
+    expect(push).toHaveBeenCalledWith("/browser")
+  })
+
   it("delegates new-chat to the host when it owns it", async () => {
     const onNewChat = jest.fn()
     const { result, create } = setup({ onNewChat })
