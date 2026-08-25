@@ -187,6 +187,69 @@ pub fn current() -> Result<HostTenantContext, HostIdentityError> {
     }
 }
 
+/// Which person a profile belongs to, if anyone has signed in on it.
+///
+/// A named struct rather than a tuple: a tuple crosses the Tauri boundary as a
+/// positional JSON array, which is unreadable at the call site and silently
+/// re-orders when a field is added.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPerson {
+    pub local_account_namespace: String,
+    pub user_id: Option<String>,
+    pub org_id: Option<String>,
+}
+
+/// Record the person a profile belongs to after a completed sign-in (ADR-0149).
+///
+/// Deliberately NOT part of [`bind_local_account`]. That path is reached by a
+/// verified password unlock and proves a profile; this one asserts a person the
+/// renderer resolved from a Logto token. Keeping them apart means signing in
+/// never looks like it re-proved the profile, and a renderer-supplied user id
+/// never travels on the same path as the verifier pin.
+pub fn bind_person(
+    local_account_namespace: &str,
+    user_id: &str,
+    org_id: Option<&str>,
+) -> Result<(), HostIdentityError> {
+    if local_account_namespace.trim().is_empty() || user_id.trim().is_empty() {
+        return Err(HostIdentityError::Unbound);
+    }
+    let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
+    store
+        .bind_host_person(local_account_namespace, user_id, org_id, unix_time_secs())
+        .map_err(|error| match error {
+            super::security_store::SecurityStoreError::HostBindingMismatch => {
+                HostIdentityError::BindingMismatch
+            }
+            other => HostIdentityError::Store(other.to_string()),
+        })
+}
+
+/// Forget the person on a profile (sign-out). The profile binding survives —
+/// signing out is not un-owning a tenant, exactly as locking is not.
+pub fn unbind_person(local_account_namespace: &str) -> Result<(), HostIdentityError> {
+    let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
+    store
+        .clear_host_person(local_account_namespace, unix_time_secs())
+        .map_err(|error| HostIdentityError::Store(error.to_string()))
+}
+
+/// Read the person recorded for a profile. `user_id` is `None` for a profile
+/// that has only ever been unlocked locally, which stays a supported state.
+pub fn person(local_account_namespace: &str) -> Result<HostPerson, HostIdentityError> {
+    let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
+    let binding = store
+        .host_binding(local_account_namespace)
+        .map_err(|error| HostIdentityError::Store(error.to_string()))?
+        .ok_or(HostIdentityError::Unbound)?;
+    Ok(HostPerson {
+        local_account_namespace: binding.local_account_namespace,
+        user_id: binding.user_id,
+        org_id: binding.org_id,
+    })
+}
+
 /// The tenant to serve, for callers that cannot fail.
 ///
 /// Used on paths that historically substituted the `local_acct_a` literal and
@@ -265,6 +328,107 @@ mod tests {
         // A tenant is still resolved, so a host whose account is locked keeps
         // authenticating the devices that were paired before it.
         assert!(!context.remote_tenant_id.is_empty());
+    }
+
+    #[test]
+    fn a_profile_with_nobody_signed_in_reports_no_person() {
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.local_account_namespace, "acct_deadbeef");
+        assert_eq!(found.user_id, None, "unlocking a profile asserts no person");
+        assert_eq!(found.org_id, None);
+    }
+
+    #[test]
+    fn signing_in_records_the_person_without_touching_the_tenant() {
+        let _scope = store_scope();
+        install();
+        let before = bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
+
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.user_id.as_deref(), Some("usr_ada"));
+        assert_eq!(found.org_id.as_deref(), Some("org_acme"));
+        // The tenant every paired device is filed under must not move.
+        assert_eq!(current().unwrap().remote_tenant_id, before.remote_tenant_id);
+    }
+
+    #[test]
+    fn a_person_may_have_no_organisation() {
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.user_id.as_deref(), Some("usr_ada"));
+        assert_eq!(found.org_id, None);
+    }
+
+    #[test]
+    fn signing_out_forgets_the_person_and_keeps_the_profile_binding() {
+        let _scope = store_scope();
+        install();
+        let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
+
+        unbind_person("acct_deadbeef").unwrap();
+
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.user_id, None);
+        assert_eq!(found.org_id, None);
+        // Signing out is not un-owning a tenant.
+        assert_eq!(current().unwrap().remote_tenant_id, bound.remote_tenant_id);
+    }
+
+    #[test]
+    fn a_person_cannot_be_attached_to_a_profile_this_host_never_saw() {
+        let _scope = store_scope();
+        install();
+
+        let error = bind_person("acct_never_unlocked", "usr_ada", None).unwrap_err();
+        assert!(matches!(error, HostIdentityError::BindingMismatch));
+        assert!(matches!(
+            person("acct_never_unlocked").unwrap_err(),
+            HostIdentityError::Unbound
+        ));
+    }
+
+    #[test]
+    fn an_empty_namespace_or_user_is_refused_rather_than_written() {
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        assert!(matches!(
+            bind_person("", "usr_ada", None).unwrap_err(),
+            HostIdentityError::Unbound
+        ));
+        assert!(matches!(
+            bind_person("acct_deadbeef", "   ", None).unwrap_err(),
+            HostIdentityError::Unbound
+        ));
+        assert_eq!(person("acct_deadbeef").unwrap().user_id, None);
+    }
+
+    #[test]
+    fn re_signing_in_as_someone_else_overwrites_rather_than_duplicating() {
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        // The renderer owns the refusal (a profile bound to another person is
+        // a `UserBindingError` there); the host records whatever survived it.
+        bind_person("acct_deadbeef", "usr_ada", Some("org_acme")).unwrap();
+        bind_person("acct_deadbeef", "usr_bob", None).unwrap();
+
+        let found = person("acct_deadbeef").unwrap();
+        assert_eq!(found.user_id.as_deref(), Some("usr_bob"));
+        assert_eq!(found.org_id, None, "the new sign-in's org replaces the old");
     }
 
     #[test]

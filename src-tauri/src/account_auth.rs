@@ -110,6 +110,60 @@ pub fn account_rebind_verifier(
     .map_err(|error| error.to_string())
 }
 
+/// Record which person this profile belongs to, after a completed sign-in.
+///
+/// ADR-0149 §9. Deliberately a separate command from the unlock path: an unlock
+/// proves a profile, a sign-in asserts a person, and the renderer supplies the
+/// user id — so it must never travel on the verifier-pin path.
+///
+/// A host with no security database (no companion server has ever run here) is
+/// a normal desktop state, so it is reported as success with nothing recorded,
+/// exactly as `bind_host_to_account` treats it.
+#[tauri::command]
+pub fn account_bind_person(
+    account_id: String,
+    user_id: String,
+    org_id: Option<String>,
+) -> Result<(), String> {
+    use crate::companion_api::host_identity::{bind_person, HostIdentityError};
+
+    match bind_person(&account_id, &user_id, org_id.as_deref()) {
+        Ok(()) => Ok(()),
+        Err(HostIdentityError::StoreUnavailable) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Forget the person on this profile (sign-out). The profile binding and every
+/// device paired to it survive.
+#[tauri::command]
+pub fn account_unbind_person(account_id: String) -> Result<(), String> {
+    use crate::companion_api::host_identity::{unbind_person, HostIdentityError};
+
+    match unbind_person(&account_id) {
+        Ok(()) => Ok(()),
+        Err(HostIdentityError::StoreUnavailable) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Read the person recorded for this profile, so the renderer can detect a
+/// disagreement between its own binding and the host's.
+#[tauri::command]
+pub fn account_person(
+    account_id: String,
+) -> Result<Option<crate::companion_api::host_identity::HostPerson>, String> {
+    use crate::companion_api::host_identity::{person, HostIdentityError};
+
+    match person(&account_id) {
+        Ok(found) => Ok(Some(found)),
+        // No security database, or a profile this host has never seen unlocked:
+        // both mean "nothing recorded", which is an answer, not a failure.
+        Err(HostIdentityError::StoreUnavailable) | Err(HostIdentityError::Unbound) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 fn bind_host_to_account(
     account_id: &str,
     verifier: &AccountPasswordVerifier,

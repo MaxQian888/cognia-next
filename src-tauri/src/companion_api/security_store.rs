@@ -73,6 +73,13 @@ pub struct HostBinding {
     pub tenant_id: String,
     pub verifier_digest: Option<String>,
     pub pair_host_id: Option<String>,
+    /// ADR-0149: the `usr_…` this profile belongs to, once somebody has signed
+    /// in. `None` on a profile that has only ever been unlocked locally, which
+    /// stays a supported state forever — a person is a fact laid on top of a
+    /// profile, never a precondition for opening one.
+    pub user_id: Option<String>,
+    /// The `org_…` that sign-in was scoped to, when the token carried one.
+    pub org_id: Option<String>,
 }
 
 impl HostBinding {
@@ -82,6 +89,8 @@ impl HostBinding {
             tenant_id: row.get(1)?,
             verifier_digest: row.get(2)?,
             pair_host_id: row.get(3)?,
+            user_id: row.get(4)?,
+            org_id: row.get(5)?,
         })
     }
 }
@@ -1276,7 +1285,8 @@ impl SecurityStore {
         self.conn
             .lock()
             .query_row(
-                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id
+                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id,
+                        user_id, org_id
                  FROM host_bindings WHERE local_account_namespace = ?1",
                 [local_account_namespace],
                 HostBinding::from_row,
@@ -1313,7 +1323,8 @@ impl SecurityStore {
 
         let existing: Option<HostBinding> = tx
             .query_row(
-                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id
+                "SELECT local_account_namespace, tenant_id, verifier_digest, pair_host_id,
+                        user_id, org_id
                  FROM host_bindings WHERE local_account_namespace = ?1",
                 [local_account_namespace],
                 HostBinding::from_row,
@@ -1346,15 +1357,16 @@ impl SecurityStore {
         }
 
         // Adopt the unclaimed legacy bucket, tenant and all.
-        let unclaimed: Option<String> = tx
+        let unclaimed: Option<(String, Option<String>, Option<String>)> = tx
             .query_row(
-                "SELECT tenant_id FROM host_bindings WHERE local_account_namespace = ?1",
+                "SELECT tenant_id, user_id, org_id
+                 FROM host_bindings WHERE local_account_namespace = ?1",
                 [LOCAL_NAMESPACE_UNBOUND],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
 
-        let binding = if let Some(tenant_id) = unclaimed {
+        let binding = if let Some((tenant_id, user_id, org_id)) = unclaimed {
             tx.execute(
                 "UPDATE host_bindings
                  SET local_account_namespace = ?1, verifier_digest = ?2, updated_at = ?3
@@ -1371,6 +1383,8 @@ impl SecurityStore {
                 tenant_id,
                 verifier_digest: verifier_digest.map(str::to_string),
                 pair_host_id: None,
+                user_id,
+                org_id,
             }
         } else {
             let tenant_id = mint_tenant_id();
@@ -1385,6 +1399,9 @@ impl SecurityStore {
                 tenant_id,
                 verifier_digest: verifier_digest.map(str::to_string),
                 pair_host_id: None,
+                // A brand-new row: nobody has signed into this profile yet.
+                user_id: None,
+                org_id: None,
             }
         };
         tx.commit()?;
@@ -1408,6 +1425,51 @@ impl SecurityStore {
         if changed == 0 {
             return Err(SecurityStoreError::HostBindingMismatch);
         }
+        Ok(())
+    }
+
+    /// Record which person a bound profile belongs to — ADR-0149 §9.
+    ///
+    /// Separate from [`Self::bind_host_account`] on purpose. That one is
+    /// reached by a verified password unlock and proves a PROFILE; this one is
+    /// reached by a completed sign-in and asserts a PERSON. Collapsing them
+    /// would make signing in look like it re-proved the profile, and would put
+    /// a renderer-supplied user id on the same path as the verifier pin.
+    ///
+    /// Refuses a namespace that has no binding: a person cannot be attached to
+    /// a profile this host has never seen unlocked.
+    pub fn bind_host_person(
+        &self,
+        local_account_namespace: &str,
+        user_id: &str,
+        org_id: Option<&str>,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let changed = self.conn.lock().execute(
+            "UPDATE host_bindings SET user_id = ?1, org_id = ?2, updated_at = ?3
+             WHERE local_account_namespace = ?4",
+            params![user_id, org_id, now, local_account_namespace],
+        )?;
+        if changed == 0 {
+            return Err(SecurityStoreError::HostBindingMismatch);
+        }
+        Ok(())
+    }
+
+    /// Forget the person on a profile (sign-out), keeping the profile binding.
+    ///
+    /// Signing out is not un-owning a tenant: the devices paired to this
+    /// profile stay paired, exactly as locking the account leaves them paired.
+    pub fn clear_host_person(
+        &self,
+        local_account_namespace: &str,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        self.conn.lock().execute(
+            "UPDATE host_bindings SET user_id = NULL, org_id = NULL, updated_at = ?1
+             WHERE local_account_namespace = ?2",
+            params![now, local_account_namespace],
+        )?;
         Ok(())
     }
 
@@ -1984,6 +2046,7 @@ const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 /// Files every pre-existing tenant under a `host_bindings` row so the first
 /// account unlock has something to adopt.
 const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
+const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
@@ -2044,6 +2107,7 @@ fn apply_schema_migrations(
 ) -> Result<(), SecurityStoreError> {
     migrate_device_status_suspended(conn, now, backup_target)?;
     migrate_host_binding_legacy(conn, now)?;
+    migrate_host_binding_person(conn, now)?;
     Ok(())
 }
 
@@ -2086,6 +2150,43 @@ fn migrate_host_binding_legacy(conn: &mut Connection, now: i64) -> Result<(), Se
         }
     }
     mark_migration(&tx, MIGRATION_HOST_BINDING_LEGACY, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Widen `host_bindings` to the ADR-0149 triple `(localProfile, user, org)`.
+///
+/// Both columns are added nullable and nothing is backfilled: an existing
+/// binding was made by a password unlock, which proves a profile and says
+/// nothing about who was holding it. Guessing a person here would attribute
+/// somebody's paired devices to a name nobody asserted.
+///
+/// `tenant_id` keeps its UNIQUE constraint. ADR-0149 §9 notes it must eventually
+/// be relaxed, but only once two profiles genuinely need to share one Org's
+/// tenant — which needs the device→user resolution of Batch 4. Loosening a
+/// uniqueness constraint on this table before anything requires it would widen
+/// the blast radius of a renderer that lies about its account id, for no gain.
+fn migrate_host_binding_person(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_HOST_BINDING_PERSON)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for column in ["user_id", "org_id"] {
+        let present: bool = {
+            let mut statement = tx.prepare("PRAGMA table_info('host_bindings')")?;
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            names.iter().any(|name| name == column)
+        };
+        if !present {
+            tx.execute(
+                &format!("ALTER TABLE host_bindings ADD COLUMN {column} TEXT"),
+                [],
+            )?;
+        }
+    }
+    mark_migration(&tx, MIGRATION_HOST_BINDING_PERSON, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -2236,6 +2337,11 @@ CREATE TABLE IF NOT EXISTS host_bindings (
     tenant_id               TEXT NOT NULL UNIQUE,
     verifier_digest         TEXT,
     pair_host_id            TEXT,
+    -- ADR-0149: the person and organisation half of the binding triple.
+    -- Nullable forever: a LocalProfile that nobody has signed into is a
+    -- supported state, not an unfinished one.
+    user_id                 TEXT,
+    org_id                  TEXT,
     bound_at                INTEGER NOT NULL,
     updated_at              INTEGER NOT NULL
 );
@@ -2622,6 +2728,104 @@ CREATE TABLE devices (
         let store = SecurityStore::in_memory().unwrap();
         let conn = store.conn.lock();
         assert!(migration_applied(&conn, MIGRATION_DEVICE_STATUS_SUSPENDED).unwrap());
+    }
+
+    #[test]
+    fn the_person_migration_adds_both_columns_to_a_pre_adr_0149_database() {
+        // The real upgrade path: a database created before ADR-0149 has a
+        // host_bindings table without the person half. A fresh DDL run would
+        // not fix it, because CREATE TABLE IF NOT EXISTS is a no-op there.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE host_bindings (
+                 local_account_namespace TEXT PRIMARY KEY NOT NULL,
+                 tenant_id               TEXT NOT NULL UNIQUE,
+                 verifier_digest         TEXT,
+                 pair_host_id            TEXT,
+                 bound_at                INTEGER NOT NULL,
+                 updated_at              INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS security_migrations (
+                 key TEXT PRIMARY KEY,
+                 applied_at INTEGER NOT NULL
+             );
+             INSERT INTO host_bindings
+                 (local_account_namespace, tenant_id, bound_at, updated_at)
+             VALUES ('acct_old', 'tnt_old', 1, 1);",
+        )
+        .unwrap();
+
+        migrate_host_binding_person(&mut conn, 200).unwrap();
+
+        let columns: Vec<String> = {
+            let mut statement = conn.prepare("PRAGMA table_info('host_bindings')").unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert!(columns.iter().any(|name| name == "user_id"));
+        assert!(columns.iter().any(|name| name == "org_id"));
+
+        // Nothing is backfilled: an unlock proves a profile and says nothing
+        // about who was holding it.
+        let user: Option<String> = conn
+            .query_row(
+                "SELECT user_id FROM host_bindings WHERE local_account_namespace = 'acct_old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(user, None);
+
+        // Running it twice must not fail on a duplicate column.
+        migrate_host_binding_person(&mut conn, 201).unwrap();
+        assert!(migration_applied(&conn, MIGRATION_HOST_BINDING_PERSON).unwrap());
+    }
+
+    #[test]
+    fn a_fresh_database_already_carries_the_person_columns() {
+        let store = SecurityStore::in_memory().unwrap();
+        let conn = store.conn.lock();
+        assert!(migration_applied(&conn, MIGRATION_HOST_BINDING_PERSON).unwrap());
+        let columns: Vec<String> = {
+            let mut statement = conn.prepare("PRAGMA table_info('host_bindings')").unwrap();
+            statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        for expected in ["user_id", "org_id"] {
+            assert!(columns.iter().any(|name| name == expected), "{expected}");
+        }
+    }
+
+    #[test]
+    fn a_person_cannot_be_recorded_against_an_unknown_profile() {
+        let store = SecurityStore::in_memory().unwrap();
+        let error = store
+            .bind_host_person("acct_never_bound", "usr_ada", None, 100)
+            .unwrap_err();
+        assert!(matches!(error, SecurityStoreError::HostBindingMismatch));
+    }
+
+    #[test]
+    fn the_tenant_uniqueness_constraint_is_still_in_force() {
+        // ADR-0149 §9 defers relaxing this until Batch 4 gives devices a user
+        // to resolve through. If it is ever dropped, that must be a deliberate
+        // edit with its own reasoning, not a side effect of widening the row.
+        let store = SecurityStore::in_memory().unwrap();
+        let conn = store.conn.lock();
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'host_bindings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(sql.contains("UNIQUE"), "tenant_id must stay unique for now");
     }
 
     #[test]
