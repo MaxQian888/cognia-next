@@ -4009,9 +4009,7 @@ fn copy_included(source: &Path, target: &Path) -> Result<(), String> {
         return Ok(());
     }
     if metadata.is_file() {
-        fs::copy(source, target)
-            .map(|_| ())
-            .map_err(|error| format!("copy {}: {error}", source.display()))
+        copy_file_cow(source, target)
     } else if metadata.is_dir() {
         fs::create_dir_all(target)
             .map_err(|error| format!("create {}: {error}", target.display()))?;
@@ -4025,6 +4023,93 @@ fn copy_included(source: &Path, target: &Path) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Copy one file into the worktree, preferring a copy-on-write clone.
+///
+/// `include` names the gitignored files a build wants. Most are a `.env` and
+/// cost nothing either way, but the field also carries fixture corpora,
+/// downloaded model weights and seeded databases — and a worktree is created
+/// per task, so a byte-for-byte copy of those is paid every time. On APFS and
+/// on btrfs/XFS a clone is a metadata operation: the extents are shared until
+/// one side writes them, so the worktree costs only what it actually changes.
+///
+/// Every failure falls back to a real copy, and deliberately without reporting
+/// a reason. The reasons are ordinary — the source and the worktree are on
+/// different filesystems, the filesystem has no reflinks, the kernel does not
+/// implement the ioctl, the target already exists — and none of them mean the
+/// include should be skipped. Only the fallback's own failure is an error,
+/// which is exactly the error this function had before.
+fn copy_file_cow(source: &Path, target: &Path) -> Result<(), String> {
+    if clone_file(source, target).is_ok() {
+        return Ok(());
+    }
+    fs::copy(source, target)
+        .map(|_| ())
+        .map_err(|error| format!("copy {}: {error}", source.display()))
+}
+
+/// `copyfile(3)` with `COPYFILE_CLONE`.
+///
+/// Not `clonefile(2)`: its man page strongly discourages calling it on a
+/// directory, and `copy_included` walks directories itself so it only ever
+/// reaches here with a regular file. `COPYFILE_CLONE` implies `COPYFILE_EXCL`,
+/// so an existing target is removed first — the caller's contract has always
+/// been "overwrite", and leaving the old file in place would ship stale
+/// content into the worktree.
+#[cfg(target_os = "macos")]
+fn clone_file(source: &Path, target: &Path) -> Result<(), ()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from = CString::new(source.as_os_str().as_bytes()).map_err(|_| ())?;
+    let to = CString::new(target.as_os_str().as_bytes()).map_err(|_| ())?;
+    if fs::symlink_metadata(target).is_ok() {
+        fs::remove_file(target).map_err(|_| ())?;
+    }
+    // SAFETY: both paths are NUL-terminated and outlive the call; the state
+    // argument is optional and null means "no callbacks, no progress".
+    let status = unsafe {
+        libc::copyfile(
+            from.as_ptr(),
+            to.as_ptr(),
+            std::ptr::null_mut(),
+            libc::COPYFILE_CLONE,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+/// The `FICLONE` ioctl — btrfs, XFS with reflink=1, and bcachefs.
+///
+/// The destination must be a freshly truncated file, which `File::create`
+/// guarantees, and both must live on the same filesystem. Anything else
+/// returns `EXDEV`/`EOPNOTSUPP` and the caller copies instead.
+#[cfg(target_os = "linux")]
+fn clone_file(source: &Path, target: &Path) -> Result<(), ()> {
+    use std::os::unix::io::AsRawFd;
+
+    let from = fs::File::open(source).map_err(|_| ())?;
+    let to = fs::File::create(target).map_err(|_| ())?;
+    // SAFETY: both descriptors are owned and open for the duration of the call.
+    let status = unsafe { libc::ioctl(to.as_raw_fd(), libc::FICLONE, from.as_raw_fd()) };
+    if status == 0 {
+        Ok(())
+    } else {
+        // `File::create` already truncated the target, so the copy fallback
+        // rewrites it in full rather than appending to a half-cloned file.
+        Err(())
+    }
+}
+
+/// Every other target: no reflink API worth reaching for, so always copy.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clone_file(_source: &Path, _target: &Path) -> Result<(), ()> {
+    Err(())
 }
 
 fn create_execution(
@@ -5598,6 +5683,59 @@ mod tests {
     }
 
     #[test]
+    fn included_files_arrive_byte_for_byte_whether_or_not_the_clone_took() {
+        // The copy-on-write path and the fallback must be indistinguishable to
+        // the worktree: a reflink that quietly produced a truncated or empty
+        // file would look like a build that mysteriously stopped finding its
+        // fixtures.
+        let source_dir = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        let source = source_dir.path().join("fixture.bin");
+        let target = target_dir.path().join("fixture.bin");
+        let payload: Vec<u8> = (0..64 * 1024).map(|index| (index % 251) as u8).collect();
+        fs::write(&source, &payload).unwrap();
+
+        copy_file_cow(&source, &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), payload);
+    }
+
+    #[test]
+    fn an_included_file_overwrites_a_stale_copy_from_a_previous_acquisition() {
+        // `COPYFILE_CLONE` implies `COPYFILE_EXCL`, so this is the case that
+        // would silently keep the old content if the existing target were not
+        // removed first — and the worktree would run against a `.env` from a
+        // branch nobody is on any more.
+        let source_dir = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        let source = source_dir.path().join(".env");
+        let target = target_dir.path().join(".env");
+        fs::write(&source, "TOKEN=new\n").unwrap();
+        fs::write(&target, "TOKEN=stale-and-longer\n").unwrap();
+
+        copy_file_cow(&source, &target).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "TOKEN=new\n");
+    }
+
+    #[test]
+    fn a_clone_across_filesystems_still_produces_the_file() {
+        // The clone fails for ordinary reasons — a different filesystem, no
+        // reflink support, an unimplemented ioctl — and every one of them must
+        // degrade to a copy rather than to a missing include. Forced here by
+        // pointing at a target directory that does not exist yet, which no
+        // clone syscall will create.
+        let source_dir = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        let source = source_dir.path().join("data.json");
+        fs::write(&source, "{}").unwrap();
+        let nested = target_dir.path().join("missing");
+        assert!(copy_file_cow(&source, &nested.join("data.json")).is_err());
+
+        fs::create_dir_all(&nested).unwrap();
+        copy_file_cow(&source, &nested.join("data.json")).unwrap();
+        assert_eq!(fs::read_to_string(nested.join("data.json")).unwrap(), "{}");
+    }
+
+    #[test]
     fn pull_request_base_refreshes_and_verifies_the_provider_sha() {
         let repository = TempDir::new().unwrap();
         let remote = TempDir::new().unwrap();
@@ -6174,7 +6312,6 @@ mod tests {
         );
     }
 
-    #[test]
     /// A `remoteDefault` acquisition used to hit the network every time. The
     /// second call inside the window must not run `git` at all — proven here by
     /// breaking `origin` in between: without the throttle the second call would

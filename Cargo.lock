@@ -2774,6 +2774,7 @@ dependencies = [
  "git2",
  "hex",
  "ignore",
+ "libc",
  "notify",
  "parking_lot",
  "rusqlite",
