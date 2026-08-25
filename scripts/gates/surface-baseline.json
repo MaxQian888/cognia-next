@@ -279,7 +279,6 @@
   "components/settings/appearance/components/saved-themes-rail.tsx": 2,
   "components/settings/appearance/components/token-group.tsx": 1,
   "components/settings/appearance/components/wallpaper-theme-generator.tsx": 1,
-  "components/settings/appearance/panels/style-panel.tsx": 2,
   "components/settings/artifacts-section.tsx": 1,
   "components/settings/automation/automation-section.tsx": 2,
   "components/settings/automation/inspector-tab.tsx": 4,

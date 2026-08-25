@@ -12,6 +12,7 @@ import { StepHeading } from "../step-shell"
 import { WorkspaceSetup } from "../workspace-setup"
 import { cn } from "@/lib/utils"
 import { starterCardsWithFallback, type StarterCard } from "@/lib/onboarding/starter-cards"
+import { StylePackPicker } from "@/components/surface/style-pack-picker"
 import type { OnboardingCapability } from "@/lib/onboarding/scan"
 
 /** Column count per available-card count. Tailwind needs literal class names. */
@@ -82,6 +83,7 @@ export function FirstRunStep({
   const [running, setRunning] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
 
+  const tStyle = useTranslations("settings.appearance.stylePack")
   const cards = starterCardsWithFallback({ shell, capabilities })
   // Only a settled `false` blocks. `null` is "this shell cannot answer".
   const blocked = modelAccess === false
@@ -175,6 +177,16 @@ export function FirstRunStep({
           {t("firstRun.failed")}
         </p>
       )}
+
+      {/* ADR-0148 — the style pack, offered only on the custom path (this step
+          is custom-only). Express keeps the default rather than adding a
+          question to the path whose whole promise is fewer of them. Compact
+          because the choice is legible from the previews alone; the full
+          descriptions live in Settings → Appearance → Style. */}
+      <section className="flex flex-col gap-2" data-testid="onboarding-style-pack">
+        <span className="text-sm font-medium">{tStyle("sectionLabel")}</span>
+        <StylePackPicker compact />
+      </section>
 
       {/* Only when it has something to say — an empty row still painted its
           top border, leaving a hairline under the grid with nothing beneath. */}
