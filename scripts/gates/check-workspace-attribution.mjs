@@ -74,9 +74,23 @@ const PROJECTION_FIELDS = [
   "errorMessage",
   "errorDiagnostic",
   "pendingApprovals",
+  "messagesLoading",
+  "messagesLoadError",
+  "messagesReloadNonce",
+  "activeBranchByGroup",
+  // The composer-draft half. These moved into the slice at the same time as
+  // the rest and were missed here, so a per-pane control could read the focused
+  // projection and the gate said OK — which is exactly how the composer ended
+  // up writing to its own conversation and reading the one beside it.
+  // Keep in step with `ProjectedField` in stores/chat/chat-store.ts.
   "permissionMode",
   "referencedPaths",
+  "referencedWorkflowElements",
+  "referencedDocs",
   "contextSelections",
+  "pendingCommandOverrides",
+  "webSearchOnForNextSend",
+  "ephemeralSkillIds",
   "bookmarkedIds",
 ]
 
@@ -89,8 +103,25 @@ const PROJECTION_RE = new RegExp(
  * Legacy cwd derivations. `rootDir` is the deprecated mirror of the primary
  * root (`primaryRootOf`), and every remaining read of it on an execution path
  * is a place the execution context is being bypassed.
+ *
+ * The receiver is matched by SHAPE — any identifier ending in `project` or
+ * `workspace`, plus the bare `p` — rather than as the fixed list of three names
+ * it used to be (`project|workspace|p`). `activeProject.rootDir`, the spelling
+ * the terminal dock and the git indicator actually use, sailed straight through
+ * the gate meant to catch it. Deliberately not `\w*`: the git store has a
+ * `rootDir` of its own that is the bound repository, not a workspace mirror,
+ * and folding those in would bury the real offenders under thirty false ones.
+ *
+ * `resolveSessionProjectRoot` is the same defect one level up. It answers "the
+ * workspace's primary root", which is a legitimate DISPLAY question and a wrong
+ * EXECUTION one; five surfaces were on it and `edit-review-bridge` failed
+ * silently, comparing an agent's absolute path against the workspace root so
+ * every worktree edit failed the containment check and "open in review" did
+ * nothing at all. The execution answer is `resolveSessionExecutionRoot` /
+ * `sessionExecutionRootPath` (`lib/workspace/session-root.ts`).
  */
-const CWD_RE = /\b(?:project|workspace|p)\??\.(rootDir|additionalDirs)\b/g
+const CWD_RE =
+  /\b(?:\w*[Pp]roject|\w*[Ww]orkspace|p)\??\.(?:rootDir|additionalDirs)\b|\bresolveSessionProjectRoot\s*\(/g
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {

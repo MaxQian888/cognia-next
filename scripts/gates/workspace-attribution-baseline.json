@@ -7,11 +7,11 @@
     "projection": 3,
     "cwd": 0
   },
-  "components/chat/composer.tsx": {
-    "projection": 2,
-    "cwd": 0
+  "components/artifacts/workspace-mode/workspace-reveal-opener.tsx": {
+    "projection": 0,
+    "cwd": 1
   },
-  "components/chat/composer/artifact-selection-chips.tsx": {
+  "components/chat/composer.tsx": {
     "projection": 1,
     "cwd": 0
   },
@@ -43,14 +43,6 @@
     "projection": 1,
     "cwd": 0
   },
-  "components/chat/plan-mode-banner.tsx": {
-    "projection": 1,
-    "cwd": 0
-  },
-  "components/chat/reference-chips.tsx": {
-    "projection": 1,
-    "cwd": 0
-  },
   "components/desktop/desktop-chat-workspace.tsx": {
     "projection": 1,
     "cwd": 0
@@ -63,12 +55,16 @@
     "projection": 2,
     "cwd": 0
   },
+  "components/workflow/editor/right-sidebar/chat-tab.tsx": {
+    "projection": 1,
+    "cwd": 0
+  },
   "hooks/chat/use-follow-up-suggestions.ts": {
     "projection": 1,
     "cwd": 0
   },
   "hooks/chat/use-message-permalink.ts": {
-    "projection": 1,
+    "projection": 2,
     "cwd": 0
   },
   "hooks/chat/use-sdk-context-usage.ts": {
@@ -76,6 +72,10 @@
     "cwd": 0
   },
   "hooks/chat/use-sdk-session-capabilities.ts": {
+    "projection": 1,
+    "cwd": 0
+  },
+  "hooks/chat/use-sessions.ts": {
     "projection": 1,
     "cwd": 0
   },

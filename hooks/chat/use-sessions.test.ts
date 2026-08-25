@@ -125,8 +125,13 @@ const companionTransportMock = (
 const mockProjectState = {
   activeProjectId: null as string | null,
   loaded: false,
-  projects: [],
+  projects: [] as Array<{ id: string }>,
   addSessionToProject: jest.fn(),
+  // `startSession` hydrates the store once when the workspace the new row names
+  // is not visible yet (`resolveScopeProjectId` may have only just created
+  // Default in Dexie). A no-op here — the mock's `projects` is the fixture.
+  load: jest.fn(async () => undefined),
+  updateProject: jest.fn(async () => undefined),
 }
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: Object.assign(

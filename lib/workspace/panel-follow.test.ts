@@ -2,7 +2,6 @@ import {
   FOLLOWING_PANELS,
   PINNABLE_PANELS,
   isPinnablePanel,
-  pinDiverges,
   reconcileSelectedRoot,
   resolvePanelRoot,
 } from "./panel-follow"
@@ -126,27 +125,6 @@ describe("panel classification", () => {
   })
 })
 
-describe("pinDiverges", () => {
-  it("is false for a pin that matches what would be followed anyway", () => {
-    // Such a pin makes the header claim a divergence that does not exist.
-    expect(pinDiverges("/repos/app", "/repos/app")).toBe(false)
-  })
-
-  it("is true for a pin that points somewhere else", () => {
-    expect(pinDiverges("/repos/other", "/repos/app")).toBe(true)
-  })
-
-  it("is false for no pin at all", () => {
-    expect(pinDiverges(null, "/repos/app")).toBe(false)
-    expect(pinDiverges(undefined, "/repos/app")).toBe(false)
-    expect(pinDiverges("  ", "/repos/app")).toBe(false)
-  })
-
-  it("counts a pin as divergent when nothing would be followed", () => {
-    expect(pinDiverges("/repos/other", null)).toBe(true)
-  })
-})
-
 describe("reconcileSelectedRoot — the editor's selection IS its pin", () => {
   const MAIN = "/repos/app"
   const TREE = "/repos/.worktrees/feature"
@@ -229,5 +207,47 @@ describe("reconcileSelectedRoot — the editor's selection IS its pin", () => {
         available: ["  ", MAIN],
       })
     ).toEqual({ selected: MAIN, pinned: false })
+  })
+})
+
+describe("a pin still says whether it is a worktree", () => {
+  it("flags a pin onto the conversation's own managed worktree", () => {
+    // The pinned branch used to hardcode `managed: false`, so a pinned worktree
+    // rendered with the plain folder icon — the "looks like an ordinary
+    // checkout" mistake the flag exists to prevent.
+    const out = resolvePanelRoot({
+      panel: "sourceControl",
+      executionContext: managed,
+      activeProject: project,
+      pinnedRoot: "/repos/app/.cognia/wt/1",
+    })
+    expect(out).toEqual({
+      root: "/repos/app/.cognia/wt/1",
+      source: "pinned",
+      managed: true,
+    })
+  })
+
+  it("does not claim an unrelated pinned directory is a worktree", () => {
+    // The resolver knows nothing about a directory the conversation is not in,
+    // so it must not guess.
+    const out = resolvePanelRoot({
+      panel: "sourceControl",
+      executionContext: managed,
+      activeProject: project,
+      pinnedRoot: "/tmp/scratch",
+    })
+    expect(out).toEqual({ root: "/tmp/scratch", source: "pinned", managed: false })
+  })
+
+  it("still ignores a pin on a panel that must follow", () => {
+    const out = resolvePanelRoot({
+      panel: "terminal",
+      executionContext: managed,
+      activeProject: project,
+      pinnedRoot: "/tmp/scratch",
+    })
+    expect(out.source).toBe("execution")
+    expect(out.managed).toBe(true)
   })
 })

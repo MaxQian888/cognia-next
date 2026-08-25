@@ -136,9 +136,13 @@ export function useGitBranchIndicator({
     behind: branchInfo.behind,
     busy,
     target,
-    // Pin to what is on screen now / go back to following. A pin equal to the
-    // followed root would claim a divergence that does not exist, so pinning
-    // stores the resolved root and unpinning clears it outright.
-    togglePin: () => setPinnedRoot(pinnedRoot ? null : (target.root ?? null)),
+    // Pin the repository actually on screen, unpin outright.
+    //
+    // `rootDir` rather than `target.root`: an ad-hoc rebind through
+    // `RootSwitcher` is a case a pin exists for, and `rootDir` is the only
+    // value that reflects one. Pinning is deliberately recorded even when it
+    // equals the root being followed — that is the "freeze here" case, and it
+    // does something the moment the conversation moves.
+    togglePin: () => setPinnedRoot(pinnedRoot ? null : (rootDir ?? target.root)),
   }
 }

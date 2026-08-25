@@ -110,21 +110,17 @@ export function resolvePanelRoot(input: ResolvePanelRootInput): PanelRootTarget 
   return followed
 }
 
-/**
- * Whether a pin is still meaningful.
- *
- * A pin equal to what the panel would follow anyway is noise — it makes the
- * header claim a divergence that does not exist, and the user cannot tell
- * whether clearing it will move anything. Callers drop such a pin on write.
+/*
+ * `pinDiverges` used to live here: "a pin equal to what the panel would follow
+ * anyway is noise — callers drop such a pin on write". It was removed because
+ * nothing ever called it and the contract it stated is not the one the product
+ * wants. Pinning the root you are already following is the FREEZE case: it does
+ * nothing this instant and everything the moment the conversation moves, which
+ * is exactly why someone presses it. The editor's richer version of the same
+ * question — "was this selection following, or deliberately pinned at a
+ * coincidentally equal path" — is answered by `reconcileSelectedRoot` below,
+ * which distinguishes them with `previousFollowed` instead of by equality.
  */
-export function pinDiverges(
-  pinnedRoot: string | null | undefined,
-  followed: string | null
-): boolean {
-  const pinned = pinnedRoot?.trim()
-  if (!pinned) return false
-  return pinned !== (followed ?? "")
-}
 
 /**
  * Reconcile a panel whose PIN IS ITS ROOT SELECTION.
