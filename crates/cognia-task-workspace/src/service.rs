@@ -834,6 +834,7 @@ impl TaskWorkspaceService {
                 // The single-root task path carries no repository declaration:
                 // it is reached by callers that never read one.
                 None,
+                &tracking_policy,
             );
             let (created_kind, isolation_ref) = match created {
                 Ok(created) => created,
@@ -1943,6 +1944,7 @@ impl TaskWorkspaceService {
                     &blobs,
                     record.locked_by.as_deref(),
                     input.provisioning.as_ref(),
+                    &crate::ResourceTrackingPolicy::default(),
                 ) {
                     self.discard_managed_workspace(&record, now);
                     return Err(error);
@@ -2454,15 +2456,15 @@ impl TaskWorkspaceService {
             .lock()
             .get_workspace_archive(workspace_id)?
             .ok_or_else(|| format!("workspace {workspace_id} has no restorable archive"))?;
-        let mut blobs = HashMap::new();
-        {
+        let blobs = {
             let mut store = self.store.lock();
-            for entry in snapshot.entries.values() {
-                if !blobs.contains_key(&entry.hash) {
-                    blobs.insert(entry.hash.clone(), store.get_blob(&entry.hash, now)?);
-                }
-            }
-        }
+            hydrate_snapshot_blobs(
+                &mut store,
+                &snapshot,
+                Path::new(&record.source_root),
+                now,
+            )?
+        };
         if let Err(error) = create_execution(
             Path::new(&record.source_root),
             execution_root,
@@ -2474,6 +2476,7 @@ impl TaskWorkspaceService {
             // captured with. Re-provisioning here would apply a declaration the
             // record was not created under.
             None,
+            &crate::ResourceTrackingPolicy::default(),
         ) {
             return Err(error);
         }
@@ -2693,6 +2696,7 @@ impl TaskWorkspaceService {
             .ok_or_else(|| format!("missing task: {}", run.task_id))?;
         task.revision = task.revision.saturating_add(1);
         let origin_hints = self.origin_hints.lock();
+        let execution_root_path = PathBuf::from(&run.execution_root);
         let mut context = ReconcileContext {
             store: &mut store,
             revision: task.revision,
@@ -2700,6 +2704,7 @@ impl TaskWorkspaceService {
             agent_id: &run.agent_id,
             origin_hints: &origin_hints,
             now,
+            git_root: Some(execution_root_path.as_path()),
         };
         let mut changes = reconcile(&baseline, &current, &mut context)?;
         changes.extend(reconcile_generated(
@@ -3127,10 +3132,12 @@ impl TaskWorkspaceService {
                     }
                 }
             }
-            let mut blobs = HashMap::new();
-            for entry in snapshot.entries.values() {
-                blobs.insert(entry.hash.clone(), store.get_blob(&entry.hash, now_ms())?);
-            }
+            let blobs = hydrate_snapshot_blobs(
+                &mut store,
+                &snapshot,
+                Path::new(&run.execution_root),
+                now_ms(),
+            )?;
             (run, snapshot, blobs)
         };
         let execution_root = PathBuf::from(&run.execution_root);
@@ -3988,6 +3995,7 @@ fn create_execution(
     blobs: &HashMap<String, Vec<u8>>,
     lock_reason: Option<&str>,
     provisioning: Option<&WorkspaceProvisioning>,
+    policy: &crate::ResourceTrackingPolicy,
 ) -> Result<(IsolationKind, Option<String>), String> {
     let _perf = cognia_instrument::guard("workspace.create_execution");
     if is_git_root(workspace_root) {
@@ -4021,8 +4029,23 @@ fn create_execution(
             ));
         }
         if *base == WorkspaceBaseSpec::WorkingState {
-            let result = clear_worktree_contents(execution_root)
-                .and_then(|_| materialize(execution_root, baseline, blobs));
+            // A Git-backed baseline is the checkout Git has just written plus a
+            // small overlay, so the tree only needs the difference applied.
+            // Emptying it first and rewriting every file from a blob — what a
+            // blob-backed baseline still requires below — would throw away the
+            // checkout that was just paid for and read the whole tree back out
+            // of Git to reproduce it.
+            let result = match crate::snapshot::apply_git_overlay(
+                execution_root,
+                baseline,
+                blobs,
+                policy,
+            ) {
+                Ok(true) => Ok(()),
+                Ok(false) => clear_worktree_contents(execution_root)
+                    .and_then(|_| materialize(execution_root, baseline, blobs)),
+                Err(error) => Err(error),
+            };
             if let Err(error) = result {
                 unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
                 cleanup_git_worktree(workspace_root, execution_root, "");
@@ -4040,6 +4063,8 @@ fn create_execution(
                 return Err(error);
             }
         }
+        // The baseline now depends on this commit staying reachable.
+        crate::snapshot::pin_snapshot_base(workspace_root, execution_root, baseline);
         return Ok((IsolationKind::GitWorktree, None));
     }
     if *base != WorkspaceBaseSpec::WorkingState {
@@ -4178,6 +4203,7 @@ fn clear_worktree_contents(execution_root: &Path) -> Result<(), String> {
 }
 
 fn cleanup_git_worktree(workspace_root: &Path, execution_root: &Path, branch: &str) {
+    crate::snapshot::unpin_snapshot_base(workspace_root, execution_root);
     let _ = Command::new("git")
         .args(["-C"])
         .arg(workspace_root)
@@ -4219,6 +4245,10 @@ fn remove_managed_execution(record: &WorkspaceRecord) -> Result<(), String> {
             )
         }),
         IsolationKind::GitWorktree => {
+            crate::snapshot::unpin_snapshot_base(
+                Path::new(&record.source_root),
+                execution_root,
+            );
             let expected = record
                 .locked_by
                 .as_deref()
@@ -4770,6 +4800,11 @@ struct ReconcileContext<'a> {
     agent_id: &'a str,
     origin_hints: &'a HashMap<(String, String), ContributionOrigin>,
     now: i64,
+    /// Repository to read Git-resident blobs from, when either side of the
+    /// comparison was captured against a commit. A linked worktree shares its
+    /// object database with the repository it was cut from, so one root
+    /// resolves content for both the baseline and the current snapshot.
+    git_root: Option<&'a Path>,
 }
 
 fn reconcile(
@@ -4836,7 +4871,7 @@ fn reconcile(
         ));
     }
     for (path, entry) in created {
-        let bytes = context.store.get_blob(&entry.hash, context.now)?;
+        let bytes = resolve_blob(context, &entry.hash)?;
         let stats = (!entry.binary).then(|| (line_count(&bytes), 0));
         changes.push(change_from_entries(
             path,
@@ -4849,7 +4884,7 @@ fn reconcile(
         ));
     }
     for (path, entry) in deleted {
-        let bytes = context.store.get_blob(&entry.hash, context.now)?;
+        let bytes = resolve_blob(context, &entry.hash)?;
         let stats = (!entry.binary).then(|| (0, line_count(&bytes)));
         changes.push(change_from_entries(
             path,
@@ -4869,8 +4904,8 @@ fn reconcile(
             continue;
         }
         let stats = if !old.binary && !new.binary {
-            let old_bytes = context.store.get_blob(&old.hash, context.now)?;
-            let new_bytes = context.store.get_blob(&new.hash, context.now)?;
+            let old_bytes = resolve_blob(context, &old.hash)?;
+            let new_bytes = resolve_blob(context, &new.hash)?;
             line_stats(&old_bytes, &new_bytes)
         } else {
             None
@@ -4942,6 +4977,62 @@ fn change_from_entries(
         capture_class: ResourceCaptureClass::Source,
         content_captured: true,
     }
+}
+
+/// Bytes for `hash`, from the blob store or else from Git.
+///
+/// A Git-backed snapshot stores no blob for content Git already has, so a miss
+/// here is expected rather than exceptional. Only a genuine absence falls
+/// through to Git — an unreadable or corrupt blob keeps its original error, so
+/// a storage fault is never silently reported as a missing object.
+fn resolve_blob(context: &mut ReconcileContext<'_>, hash: &str) -> Result<Vec<u8>, String> {
+    match context.store.get_blob(hash, context.now) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) if error.starts_with("missing blob") => {
+            let Some(root) = context.git_root else {
+                return Err(error);
+            };
+            crate::snapshot::git_read_blobs(root, std::slice::from_ref(&hash.to_string()))?
+                .remove(hash)
+                .ok_or(error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Bytes for every entry of `snapshot`, taking what the blob store has and
+/// asking `git_root` for the rest in a single batch.
+fn hydrate_snapshot_blobs(
+    store: &mut WorkspaceStore,
+    snapshot: &crate::snapshot::WorkspaceSnapshot,
+    git_root: &Path,
+    now: i64,
+) -> Result<HashMap<String, Vec<u8>>, String> {
+    let mut blobs: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut missing: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for entry in snapshot.entries.values() {
+        if !seen.insert(entry.hash.as_str()) {
+            continue;
+        }
+        match store.get_blob(&entry.hash, now) {
+            Ok(bytes) => {
+                blobs.insert(entry.hash.clone(), bytes);
+            }
+            Err(error) if error.starts_with("missing blob") => missing.push(entry.hash.clone()),
+            Err(error) => return Err(error),
+        }
+    }
+    if !missing.is_empty() {
+        let mut from_git = crate::snapshot::git_read_blobs(git_root, &missing)?;
+        for hash in missing {
+            let bytes = from_git
+                .remove(&hash)
+                .ok_or_else(|| format!("missing blob {hash}"))?;
+            blobs.insert(hash, bytes);
+        }
+    }
+    Ok(blobs)
 }
 
 fn line_count(bytes: &[u8]) -> u32 {
