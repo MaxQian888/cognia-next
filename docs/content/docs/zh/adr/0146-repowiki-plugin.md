@@ -1,0 +1,111 @@
+---
+title: "0146 — 用 RepoWiki 作为 Python 运行时的验收负载"
+description: "整体 vendor 一个既有的 MIT wiki 生成器，只换三层——模型调用、存储、文件枚举——让这次移植验证的是插件运行时，而不是重新验证一遍算法。"
+---
+
+# ADR 0146 — 用 RepoWiki 作为 Python 运行时的验收负载
+
+**状态：** 已接受
+**日期：** 2026-08-25
+**相关：** [ADR-0145](./0145-python-plugin-runtime-alignment)、[ADR-0026](./0026-marketplace-integrations)、[ADR-0060](./0060-web-reader)
+
+## 背景
+
+[ADR-0145](./0145-python-plugin-runtime-alignment) 建了一条反向 RPC 通道，
+对 Python 开放了 11 个 `ctx.*` 命名空间，并新增两种声明式面板类。
+这一切的成色，取决于第一个真正压在上面的插件——而一个只打印一行日志的 demo tool
+什么都压不出来。
+
+[RepoWiki](https://github.com/he-yufeng/RepoWiki)（MIT）是一份真实负载：
+它遍历仓库、构建依赖图、在并发信号量下对每个模块跑一轮 LLM、渲染 Mermaid、
+分块并建立 BM25 + TF-IDF 检索索引、把一切缓存进 SQLite、导出三种格式。
+它同时压到 agent API、workspace API、文件系统、存储、面板、模式和 tool 面——
+而且它自带 164 个测试，描述了它到底该做什么。
+
+## 决策
+
+### 整体 vendor，只换三层
+
+`plugins/repowiki/repowiki/` 就是上游的源码。算法原封不动：
+scanner 的过滤层（35 个跳过目录、minified 启发式、二进制嗅探、大小上限、符号链接跳过）、
+import 图、analyzer 的各轮 pass 与提示词、分块器、检索打分、导出器。
+
+变的是三层，且全部藏在一个模块（`repowiki/host.py`）之后，
+所以「这次移植改了什么」只有一个答案：
+
+| 层 | 上游 | 这里 | 为什么 |
+| --- | --- | --- | --- |
+| **模型** | `litellm.acompletion` + 用户的 provider key | `ctx.agent.run` | 宿主拥有 provider 路由、PII 门、成本核算与 trace span。一个能读到 `ANTHROPIC_API_KEY` 的插件，就是一个能把它外泄的插件。 |
+| **存储** | `~/.repowiki` 下两个 SQLite 文件 | 插件自己的数据目录，来自 `ctx.fs.getDataDir()` | 插件没有理由动用户的家目录，而卸载时应该能把它写的东西收回去。 |
+| **IO** | `os.walk` 与四个 `git` 子进程 | `ctx.workspace.acquire` / `walk` / `changedSince` | **枚举正是包容性所在之处。** |
+
+### 枚举走宿主，读取留本地
+
+宿主决定*哪些*路径——来自 `ignore` crate 的 `.gitignore` 语义、
+对凭据文件的直接拒绝、以及克隆护栏（仅 https、主机白名单、浅克隆、限时、限大小），
+这些护栏对每个插件都生效，而不是只对碰巧记得写它们的那一个生效。
+
+读*内容*留在 Python。宿主已经对路径下了判断；
+把一千个文件一次一个 RPC 地再取一遍，买到的是延迟，不是安全。
+即便宿主已经先拒绝了敏感文件，scanner 仍保留自己的敏感文件名检查：
+**只存在于边界一侧的防御，在另一侧被绕过的那一刻就不存在了**，
+而且 `scan_directory` 也可以由调用方直接传路径列表来触达。
+
+### 有意不移植的部分
+
+- **Click CLI 与 FastAPI 服务器**，连同它的 Vite 前端。Cognia 就是界面；
+  第二个界面必然漂移——上游那两份同样的 scan 管线，就已经在「RAG 索引到底持不持久化」
+  这件事上漂开了。`test_smoke.py` 断言这些模块**保持缺席**，
+  这样后来的改动没法悄悄把 Click 和 FastAPI 拖回依赖集里。
+- **`export/site.py`**（docsify 站点）：每一个资源都来自 CDN，
+  所以那是一个只在联网时才成立的目录。
+- analyzer 缓存里的 **`projects` 表**，以及 **`WikiData.file_index`**：都只写不读。
+- **模型别名表。** 上游把 `opus` 映射到 `anthropic/claude-opus-4-5`，
+  是因为 litellm 需要完整字符串。插件把 id 交给 `ctx.agent.run`，
+  由宿主对着用户**实际拥有**的模型解析。在这里再放一张表，
+  只能变陈旧，并且会指名用户可能根本没有的 provider——正是 ADR-0087 记录过的漂移。
+
+### HTML 导出现在才真的是自包含的
+
+上游那份从 jsDelivr 拉 Mermaid，并把除一页之外的所有页面藏在 `onclick` 后面，
+所以离线打开的导出只显示一页、没有任何图。这里没有脚本、也没有任何外部请求：
+所有页面堆叠进一个文档、用锚点导航（Ctrl-F 能搜到整份 wiki，而且可打印），
+Mermaid 块把源保留在 `<pre data-mermaid>` 里——它读起来就是它所描述的那张图，
+同时也是宿主侧渲染器将来就地升级的钩子。渲染成 SVG 需要浏览器，
+而这个文件是由一个 Python 进程写出来的。
+
+### 两个面板，同一个 activity
+
+一个 `kind: "a2ui"` 阅读器（目录用 `Tree`、正文用 `Markdown`、
+引用回路由给插件，让它去项目编辑器里定位到那一行），
+以及一个 `kind: "chat"` 侧边对话，接地在几 KB 上——概览、页面列表、阅读顺序的头部，
+外加一句「其余的调 `repowiki_search`」。把每一页都贴进去，
+在一个中等仓库上就会花光上下文预算，而且效果仍然不如一次检索。
+
+`modes` 条目为主对话声明了「RepoWiki 模式」：`permissionMode: "plan"`，
+因为这个模式是来回答关于某个仓库的问题的，而**一个会去修改它的回答不算回答**。
+
+### 被换层废掉的测试要改写，绝不删除
+
+那些驱动 `litellm`、`git` 子进程、CLI 与服务器模型的套件，都被改写到移植后的面上，
+因为它们钉住的属性在移植中全部存活，变的只是传输：
+
+- project-id 的确定性（analyzer 缓存、RAG 快照与面板都挂在这把键上——
+  每次扫描随机一个 id，会让快照每次都成为孤儿，并让增量路径变成死代码）；
+- 「空的变更集意味着重新分析一切，而不是什么都没变」——
+  把这条读反了，就会发布一个静默地永不更新的 wiki；
+- 阅读顺序背后的 PageRank 排名。
+
+## 结果
+
+**213 个测试**，上游是 164。多出来的是改写，加上三个换层与它们汇合处那条管线的新套件
+——上游在那一层没有任何测试，因为同样的八步存在两份。
+
+**wiki 不能以 wiki 的形式挺过一次重启。** `_SCANS` 在进程内。
+**持久的是昂贵的那一半**：analyzer 缓存意味着重扫不产生任何模型调用，
+RAG 快照以毫秒级重新加载。把页面投影进 Dexie 需要对 Python 开放 `ctx.dexie`，
+而 `ctx.dexie` 返回的是活句柄——见 ADR-0145。
+
+**依赖集偏重**（pydantic、networkx、aiosqlite），所以 manifest 请求
+`pythonVenv: "isolated"`。把这份求解放进共享桶，会约束其他每一个 Python 插件，
+而那正是 ADR-0145 定下的规则：**新插件永远不能弄坏已装好的插件。**

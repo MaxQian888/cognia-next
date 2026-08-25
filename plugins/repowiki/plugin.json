@@ -4,8 +4,48 @@
   "version": "0.1.0",
   "description": "Generate a browsable wiki for any repository — dependency graph, per-module analysis, Mermaid diagrams, and cited search.",
   "type": "python",
-  "capabilities": ["tools"],
+  "capabilities": ["tools", "context-panel", "modes"],
   "pythonMain": "main.py",
+  "contextPanels": [
+    {
+      "id": "reader",
+      "kind": "a2ui",
+      "label": "RepoWiki",
+      "labelKey": "panel.reader",
+      "icon": "BookOpen",
+      "surface": "cognia-repowiki:{resourceKey}",
+      "activateTool": "repowiki_build_panel",
+      "selectionLabel": "wiki page",
+      "resourceKinds": ["project-file", "session"],
+      "activity": "workspace",
+      "order": 10
+    },
+    {
+      "id": "ask",
+      "kind": "chat",
+      "label": "Ask the wiki",
+      "labelKey": "panel.ask",
+      "icon": "MessageCircleQuestionMark",
+      "contextTool": "repowiki_panel_context",
+      "resourceKinds": ["project-file", "session"],
+      "activity": "workspace",
+      "order": 20
+    }
+  ],
+  "modes": [
+    {
+      "id": "repowiki",
+      "type": "custom",
+      "name": "RepoWiki",
+      "labelKey": "mode.repowiki",
+      "icon": "BookOpen",
+      "description": "Answer from the repository's generated wiki, with citations.",
+      "systemPrompt": "You are answering questions about a repository that has a generated wiki.\nAlways ground an answer in the wiki or the code: call repowiki_search first, then repowiki_get_page for a page the search points at. Cite file paths and line numbers from the search results rather than recalling them. If the wiki has no answer, say so and name what you searched for — do not fill the gap from memory. Call repowiki_map when the question is 'where do I start'.",
+      "tools": ["repowiki_search", "repowiki_get_page", "repowiki_map", "repowiki_list"],
+      "outputFormat": "markdown",
+      "permissionMode": "plan"
+    }
+  ],
   "pythonVenv": "isolated",
   "pythonDependencies": ["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0"],
   "author": "cognia-next",
@@ -15,12 +55,30 @@
     "cognia": ">=0.1.0",
     "python": ">=3.10"
   },
+  "i18n": {
+    "locales": {
+      "en": {
+        "panel.reader": "RepoWiki",
+        "panel.ask": "Ask the wiki",
+        "mode.repowiki": "RepoWiki"
+      },
+      "zh-CN": {
+        "panel.reader": "仓库百科",
+        "panel.ask": "向百科提问",
+        "mode.repowiki": "仓库百科"
+      }
+    }
+  },
   "permissions": [
     "python:execute",
     "agent:control",
     "filesystem:read",
     "filesystem:write",
-    "git:read"
+    "git:read",
+    "extension:ui",
+    "project:read",
+    "session:read",
+    "editor:write"
   ],
   "configSchema": {
     "type": "object",

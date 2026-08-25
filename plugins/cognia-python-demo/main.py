@@ -10,7 +10,7 @@ documentation for plugin authors:
   * lifecycle            — ``on_startup`` / ``on_config_updated`` /
                            ``on_shutdown`` module conventions
   * ``cognia.get_config`` — the user's persisted configSchema values
-  * ``cognia.ctx``       — the plugin -> host RPC surface (ADR-0143): reach
+  * ``cognia.ctx``       — the plugin -> host RPC surface (ADR-0145): reach
                            the same ``ctx.*`` APIs a TypeScript plugin gets,
                            from sync *and* async tools
 
@@ -226,7 +226,7 @@ def demo_panel_action(payload):
     """Clicks in the panel arrive here — the return trip, with no JS either.
 
     A2UI actions are dispatched to every plugin's ``onA2UIAction`` hook, which
-    the Python runtime has always supported; the panel class added in ADR-0143
+    the Python runtime has always supported; the panel class added in ADR-0145
     is what finally gives a Python plugin a surface to receive them from.
     """
     if isinstance(payload, dict) and payload.get("action") == "open-section":

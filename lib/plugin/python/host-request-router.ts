@@ -1,6 +1,6 @@
 /**
  * Routes `host_request` frames from a Python plugin onto the host's `ctx.*`
- * API surface (ADR-0143).
+ * API surface (ADR-0145).
  *
  * A Python plugin has no direct access to anything: its process speaks NDJSON
  * over stdio and nothing else. `cognia.ctx.agent.run(...)` therefore writes a

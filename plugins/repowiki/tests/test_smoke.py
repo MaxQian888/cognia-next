@@ -14,6 +14,8 @@ PORTED = [
     "repowiki",
     "repowiki.config",
     "repowiki.host",
+    "repowiki.panel",
+    "repowiki.pipeline",
     "repowiki.project",
     "repowiki.core.analyzer",
     "repowiki.core.cache",

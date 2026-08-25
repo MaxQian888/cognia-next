@@ -20,7 +20,7 @@ Protocol (NDJSON over stdio, driven by crates/cognia-plugin-runtime/src/python/)
     host_request   {"type": "host_request", "id": <int>, "method": <str>,
                     "params": <object>}
 
-`host_request` is the plugin -> host RPC channel (ADR-0143): it lets a plugin
+`host_request` is the plugin -> host RPC channel (ADR-0145): it lets a plugin
 reach the host's `ctx.*` API surface (agent, storage, fs, git, ui, chat, ...).
 Its `id` namespace is plugin-assigned and independent of the host-assigned
 request ids -- the two travel in opposite directions and carry distinct `type`

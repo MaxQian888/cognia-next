@@ -1481,7 +1481,7 @@ mod tests {
 
     #[test]
     fn declarative_context_panels_are_allowed_on_a_python_plugin() {
-        // ADR-0143. Before the contract made `contextPanels` conditional, a
+        // ADR-0145. Before the contract made `contextPanels` conditional, a
         // python plugin declaring one was rejected outright, whatever the panel
         // actually rendered — which is why `kind: "a2ui"` had to exist.
         let manifest = python_manifest_with_panels(serde_json::json!([

@@ -2,6 +2,7 @@
 
 import React from "react"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { ContextResource } from "@/types/context-workbench"
 import type {
   PluginA2UIContextPanelDef,
@@ -29,6 +30,24 @@ jest.mock("@/components/context-workbench/resource-workbench-chat-panel", () => 
     chatPanelProps = props
     return <div data-testid="chat-panel" />
   },
+}))
+
+const appended: Array<{ text?: string; sessionId?: string }> = []
+jest.mock("@/components/chat/composer", () => ({
+  dispatchComposerAppend: (detail: { text?: string; sessionId?: string }) => {
+    appended.push(detail)
+  },
+}))
+
+let selectionText: string | null = null
+jest.mock("@/components/chat/message-selection-toolbar", () => ({
+  useTranscriptSelection: () =>
+    selectionText === null ? null : { text: selectionText, x: 400, y: 200 },
+}))
+
+const staged: unknown[] = []
+jest.mock("@/stores/chat", () => ({
+  useChatStore: { getState: () => ({ addContextSelection: (ref: unknown) => staged.push(ref) }) },
 }))
 
 const existingSurfaces = new Set<string>()
@@ -81,6 +100,9 @@ beforeEach(() => {
   invokePluginTool.mockReset()
   existingSurfaces.clear()
   chatPanelProps = {}
+  appended.length = 0
+  staged.length = 0
+  selectionText = null
 })
 
 describe("resolvePanelSurfaceId", () => {
@@ -174,5 +196,74 @@ describe("chat panel renderer", () => {
     // Undefined, not a closure returning "": the chat panel branches on
     // presence to decide whether to prepend a context block at all.
     expect(chatPanelProps.getResourceContext).toBeUndefined()
+  })
+})
+
+describe("panel selection", () => {
+  const sessionResource: ContextResource = {
+    kind: "session",
+    sessionId: "s-1",
+    capabilities: [],
+  }
+
+  function renderReader(over: Partial<PluginA2UIContextPanelDef> = {}) {
+    existingSurfaces.add("wiki:session:s-1")
+    const Panel = createA2UIContextPanelRenderer("wiki-plugin", {
+      ...a2uiDef,
+      resourceKinds: ["session"],
+      ...over,
+    })
+    return render(<Panel workbenchInstanceId="wb" resource={sessionResource} active />)
+  }
+
+  it("offers nothing until there is a selection", () => {
+    renderReader()
+    expect(screen.queryByRole("button", { name: /Add to chat/i })).not.toBeInTheDocument()
+  })
+
+  it("stages a plugin-attributed selection into the main conversation", async () => {
+    const user = userEvent.setup()
+    selectionText = "the reverse RPC channel"
+    renderReader({ selectionLabel: "wiki page" })
+
+    await user.click(screen.getByRole("button", { name: /Add to chat/i }))
+
+    // Attribution is the host's to stamp: a plugin cannot claim another
+    // plugin's name, and the chip has to say where the excerpt came from.
+    expect(staged).toEqual([
+      {
+        kind: "plugin",
+        pluginId: "wiki-plugin",
+        sourceLabel: "wiki page",
+        title: "session:s-1",
+        snapshot: "the reverse RPC channel",
+        comment: "",
+      },
+    ])
+  })
+
+  it("falls back to the panel's own label when it names no selection label", async () => {
+    const user = userEvent.setup()
+    selectionText = "some prose"
+    renderReader()
+    await user.click(screen.getByRole("button", { name: /Add to chat/i }))
+    expect((staged[0] as { sourceLabel: string }).sourceLabel).toBe("Wiki")
+  })
+
+  it("quotes the selection into the resource's own side chat, un-sent", async () => {
+    const user = userEvent.setup()
+    selectionText = "first line\nsecond line"
+    renderReader()
+
+    await user.click(screen.getByRole("button", { name: /Ask here/i }))
+
+    // Quoted, and left in the composer: the selection is the subject, not yet
+    // the question. Addressed to the resource's workbench session so it lands
+    // in the side chat rather than in whatever conversation happens to be
+    // focused.
+    expect(appended).toEqual([
+      { text: "> first line\n> second line\n\n", sessionId: "resource-workbench:session:s-1" },
+    ])
+    expect(staged).toEqual([])
   })
 })

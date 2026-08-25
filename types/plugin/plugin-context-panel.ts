@@ -116,6 +116,13 @@ export interface PluginA2UIContextPanelDef extends PluginContextPanelDefBase, No
    * what a Python plugin cannot receive.
    */
   activateTool?: string
+  /**
+   * What the panel calls the things it shows ("wiki page", "search result").
+   * Used as the `sourceLabel` on a selection staged out of the panel, which is
+   * English prompt scaffolding — it heads the excerpt in the outgoing message.
+   * Falls back to the panel's own `label`.
+   */
+  selectionLabel?: string
 }
 
 /**

@@ -2473,7 +2473,7 @@ export interface PluginA2UIAPI {
    * A surface is created `ready: false` and every consumer — the panel host,
    * the message renderer, the artifact preview — shows a spinner until this
    * flips. Without it a plugin could build a complete component tree and still
-   * only ever render a spinner, which is what `ctx.a2ui` did before ADR-0143:
+   * only ever render a spinner, which is what `ctx.a2ui` did before ADR-0145:
    * the protocol has always carried a `surfaceReady` message, but the plugin
    * API exposed no way to send one.
    */
@@ -3339,7 +3339,7 @@ export interface PythonHostSettings {
   /** In-flight request cap per host (default 4). */
   maxConcurrentCalls?: number
   /**
-   * Cap on concurrent plugin → host RPC calls (ADR-0143; default 8).
+   * Cap on concurrent plugin → host RPC calls (ADR-0145; default 8).
    *
    * A throughput gate, not a recursion guard: excess frames queue rather than
    * failing. The runaway backstop lives in `host.py` and is derived from this

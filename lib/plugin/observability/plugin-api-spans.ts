@@ -5,7 +5,7 @@
  * data classification — since the governed context was introduced, and nothing
  * consumed it. That was tolerable while every plugin ran in the renderer and a
  * `ctx.storage.get` was an ordinary function call. It stopped being tolerable
- * with ADR-0143: a Python plugin's call is an IPC round trip to another
+ * with ADR-0145: a Python plugin's call is an IPC round trip to another
  * process, and "what did the plugin ask for, how long did it take, did it
  * fail" had no answer anywhere in the product.
  *

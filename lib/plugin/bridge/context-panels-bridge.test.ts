@@ -260,7 +260,7 @@ it("rejects an unsafe entry even when runtime registration bypasses manifest val
   expect(importer).not.toHaveBeenCalled()
 })
 
-// -- declarative kinds (ADR-0143) -------------------------------------------
+// -- declarative kinds (ADR-0145) -------------------------------------------
 
 const pythonManifest = {
   id: "wiki-plugin",

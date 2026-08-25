@@ -3,7 +3,7 @@
 A Python plugin's process speaks NDJSON over stdio and has no other reach.
 ``cognia.ctx.agent.run(...)`` therefore writes a ``host_request`` frame; the
 host resolves it against the same permission-guarded ``ctx.*`` object a
-TypeScript plugin gets, and answers. See ADR-0143.
+TypeScript plugin gets, and answers. See ADR-0145.
 
 **The method table is not written here.** It is read from
 :data:`API_NAMESPACE_CONTRACTS`, the generated mirror of

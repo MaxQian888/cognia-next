@@ -37,7 +37,7 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// push at one plugin at a time.
 pub const DEFAULT_MAX_CONCURRENT_CALLS: usize = 4;
 
-/// Per-host cap on `host_request` frames being routed at once (ADR-0143).
+/// Per-host cap on `host_request` frames being routed at once (ADR-0145).
 ///
 /// This is a throughput gate, not a recursion guard: excess frames queue here
 /// rather than failing. The recursion backstop lives in `host.py`

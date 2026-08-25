@@ -6,7 +6,7 @@
 //! goes through the [`EventSink`] indirection so protocol code stays unit
 //! testable without fabricating an `AppHandle` (tests inject a collector).
 //!
-//! The plugin -> host RPC channel (ADR-0143) rides a second event,
+//! The plugin -> host RPC channel (ADR-0145) rides a second event,
 //! [`PYTHON_HOST_REQUEST_EVENT`], behind the same indirection: a `host_request`
 //! frame is projected to whoever registered a [`HostRequestSink`] (the renderer
 //! under Tauri, the CLI plugin runtime headless), which answers by calling

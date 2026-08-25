@@ -6,7 +6,7 @@
  * Every other panel class hands the host something only JavaScript can produce
  * — a React component (`entry` + `export`) or an HTML document (`webview`).
  * Neither survives the NDJSON wire a Python plugin speaks, which is why
- * `contextPanels` was flatly rejected for `type: "python"` until ADR-0143.
+ * `contextPanels` was flatly rejected for `type: "python"` until ADR-0145.
  *
  * These two are data instead:
  *
@@ -22,14 +22,22 @@
  * the plugin is TypeScript, Python or hybrid.
  */
 
-import { useCallback, useMemo, type ComponentType } from "react"
+import { useCallback, useMemo, useRef, type ComponentType } from "react"
 import { useTranslations } from "next-intl"
 import { A2UISurface } from "@/components/a2ui/a2ui-surface"
 import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
+import { Button } from "@/components/ui/button"
+import { useTranscriptSelection } from "@/components/chat/message-selection-toolbar"
+import {
+  resourceWorkbenchSessionId,
+  surfaceBindingForContextResource,
+} from "@/lib/context-workbench/resource-session"
 import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
 import { loggers } from "@/lib/plugin/core/logger"
 import { useA2UIStore } from "@/stores/a2ui"
+import { useChatStore } from "@/stores/chat"
+import type { PluginSelectionRef } from "@/types/artifact/artifact"
 import {
   getContextResourceKey,
   type ContextPanelRenderProps,
@@ -63,6 +71,77 @@ export function readToolText(result: unknown): string {
   return ""
 }
 
+/**
+ * Two ways out of a plugin panel for the text the user just highlighted.
+ *
+ * A reader that cannot hand a paragraph to a conversation is a dead end, and
+ * before this the only text a user could stage was a chat message or a file —
+ * a plugin's own surface had no route at all. Both destinations are real
+ * conversations: the main one gets a staged context chip (so the excerpt is
+ * folded into the next prompt with its source), and the resource's side chat
+ * gets the quote appended to its composer, un-sent, because the selection is
+ * the subject and not yet the question.
+ */
+function PanelSelectionToolbar({
+  containerRef,
+  pluginId,
+  sourceLabel,
+  resource,
+}: {
+  containerRef: React.RefObject<HTMLElement | null>
+  pluginId: string
+  sourceLabel: string
+  resource: ContextResource
+}) {
+  const t = useTranslations("contextWorkbench")
+  const anchor = useTranscriptSelection(containerRef)
+
+  const stageInMainChat = useCallback(() => {
+    if (!anchor) return
+    const ref: PluginSelectionRef = {
+      kind: "plugin",
+      pluginId,
+      sourceLabel,
+      title: getContextResourceKey(resource),
+      snapshot: anchor.text,
+      comment: "",
+    }
+    useChatStore.getState().addContextSelection(ref)
+    window.getSelection()?.removeAllRanges()
+  }, [anchor, pluginId, resource, sourceLabel])
+
+  const askHere = useCallback(async () => {
+    if (!anchor) return
+    const binding = surfaceBindingForContextResource(resource)
+    if (!binding) return
+    const { dispatchComposerAppend } = await import("@/components/chat/composer")
+    dispatchComposerAppend({
+      text: `${anchor.text
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n\n`,
+      sessionId: resourceWorkbenchSessionId(binding),
+    })
+    window.getSelection()?.removeAllRanges()
+  }, [anchor, resource])
+
+  if (!anchor) return null
+
+  return (
+    <div
+      className="pointer-events-auto fixed z-50 flex items-center gap-1 rounded-md border bg-popover p-1 shadow-md"
+      style={{ left: Math.max(8, anchor.x - 160), top: anchor.y + 8 }}
+    >
+      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={stageInMainChat}>
+        {t("selectionToChat")}
+      </Button>
+      <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => void askHere()}>
+        {t("selectionToAside")}
+      </Button>
+    </div>
+  )
+}
+
 interface A2UIPanelProps extends ContextPanelRenderProps {
   pluginId: string
   panelId: string
@@ -71,6 +150,7 @@ interface A2UIPanelProps extends ContextPanelRenderProps {
 
 function A2UIContextPanel({ pluginId, panelId, def, resource }: A2UIPanelProps) {
   const t = useTranslations("contextWorkbench")
+  const bodyRef = useRef<HTMLDivElement | null>(null)
   const surfaceId = useMemo(
     () => resolvePanelSurfaceId(def.surface, resource),
     [def.surface, resource]
@@ -87,10 +167,20 @@ function A2UIContextPanel({ pluginId, panelId, def, resource }: A2UIPanelProps) 
       formFactor="panel"
       container={false}
     >
-      {exists ? (
-        <A2UISurface surfaceId={surfaceId} />
-      ) : (
-        <p className="p-4 text-sm text-muted-foreground">{t("a2uiPanelPending")}</p>
+      <div ref={bodyRef} className="h-full">
+        {exists ? (
+          <A2UISurface surfaceId={surfaceId} />
+        ) : (
+          <p className="p-4 text-sm text-muted-foreground">{t("a2uiPanelPending")}</p>
+        )}
+      </div>
+      {exists && (
+        <PanelSelectionToolbar
+          containerRef={bodyRef}
+          pluginId={pluginId}
+          sourceLabel={def.selectionLabel ?? def.label}
+          resource={resource}
+        />
       )}
     </PluginSurface>
   )

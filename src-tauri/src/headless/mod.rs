@@ -260,7 +260,7 @@ impl HeadlessServices {
                 }
                 Err(error) => log::warn!("serialize headless Python plugin event: {error}"),
             }));
-        // Plugin -> host RPC (ADR-0143) rides the same bus. Without this a
+        // Plugin -> host RPC (ADR-0145) rides the same bus. Without this a
         // headless python plugin's `ctx.*` call is refused rather than routed:
         // the Rust side has a sink only when someone registers one, and the
         // Tauri registration lives in the command layer this host never runs.

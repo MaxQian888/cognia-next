@@ -774,7 +774,7 @@ export class PluginManager {
 
   /**
    * `plugin:python:host-request` unlisten — the plugin → host RPC channel
-   * (ADR-0143), set once by subscribePythonHostRequests.
+   * (ADR-0145), set once by subscribePythonHostRequests.
    */
   private pythonHostRequestsUnlisten: (() => void) | null = null
 
@@ -1925,7 +1925,7 @@ export class PluginManager {
   }
 
   /**
-   * Own the single listener for the plugin → host RPC channel (ADR-0143).
+   * Own the single listener for the plugin → host RPC channel (ADR-0145).
    *
    * Mirrors `subscribePythonEvents`, including the `nodeHostSubscriber` seam
    * so the headless runtime routes the same frames without a renderer. Every

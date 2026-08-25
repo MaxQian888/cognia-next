@@ -39,7 +39,7 @@ describe("cognia-repowiki manifest", () => {
 
   it("asks for an isolated environment, because its dependency set is heavy", () => {
     // pydantic + networkx + aiosqlite in the shared bucket would constrain
-    // every other Python plugin's solve. ADR-0143's rule is that a new plugin
+    // every other Python plugin's solve. ADR-0145's rule is that a new plugin
     // never makes an installed one worse.
     expect(manifest.pythonVenv).toBe("isolated")
     expect(manifest.pythonDependencies).toEqual(

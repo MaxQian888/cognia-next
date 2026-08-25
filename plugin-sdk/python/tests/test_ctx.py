@@ -1,4 +1,4 @@
-"""``cognia.ctx`` — the plugin -> host RPC surface (ADR-0143).
+"""``cognia.ctx`` — the plugin -> host RPC surface (ADR-0145).
 
 The point of these tests is that the surface is *the contract*, not a copy of
 it: a namespace exists here exactly when its catalog entry lists ``python``.

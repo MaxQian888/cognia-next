@@ -141,6 +141,8 @@
     "0141-onboarding-two-paths",
     "0142-agent-sdk-two-layer-product",
     "0143-device-console",
-    "0144-workspace-as-the-unit-of-work"
+    "0144-workspace-as-the-unit-of-work",
+    "0145-python-plugin-runtime-alignment",
+    "0146-repowiki-plugin"
   ]
 }

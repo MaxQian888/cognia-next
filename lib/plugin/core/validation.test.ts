@@ -619,7 +619,7 @@ describe("Plugin Validation", () => {
     })
 
     it("accepts a python plugin's declarative context panels with no JS entry", () => {
-      // Before ADR-0143 this was a hard error: `contextPanels` was
+      // Before ADR-0145 this was a hard error: `contextPanels` was
       // `execution: "javascript"`, so declaring one on a python plugin failed
       // validation whatever the panel actually rendered.
       const manifest = createValidManifest() as unknown as Record<string, unknown>

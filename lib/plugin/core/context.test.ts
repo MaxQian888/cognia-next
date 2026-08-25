@@ -1993,7 +1993,7 @@ describe("agent imperative API", () => {
   })
 })
 
-describe("python host-call parity (ADR-0143)", () => {
+describe("python host-call parity (ADR-0145)", () => {
   /**
    * The catalog claims a set of `ctx.*` namespaces is reachable from a Python
    * plugin. Nothing in the Python process can verify that: it only sends

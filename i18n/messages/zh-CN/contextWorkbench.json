@@ -271,6 +271,8 @@
       "title": "工作集"
     }
   },
+  "selectionToAside": "在此提问",
+  "selectionToChat": "加入对话",
   "sessionSidechat": "侧聊",
   "sessionSources": {
     "description": "集中查看本会话使用的文件、网页、检索上下文和工具。",

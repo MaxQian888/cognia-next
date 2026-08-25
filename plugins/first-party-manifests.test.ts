@@ -153,6 +153,9 @@ const EXPECTED_WARNINGS: Record<string, readonly string[]> = {
   // separate `entry` module, and a `builtin://` plugin has no fetchable
   // install path to import one from.
   "prompt-templates": ["field_missing:context-panel"],
+  // Tools are registered by decorator in main.py, not declared in the
+  // manifest, so the field is legitimately empty for a python plugin.
+  repowiki: ["field_missing:tools"],
   "ripgrep-tools": [],
   // `commands` is DECLARED now (manifest.commands[] + hooks.onCommand), so the
   // `field_missing:commands` entry is gone. `tools` stays imperative —

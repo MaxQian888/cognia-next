@@ -73,12 +73,17 @@ describe("createChatAPI", () => {
   })
 })
 
-// -- composer write surface (ADR-0143) --------------------------------------
+// -- composer write surface (ADR-0145) --------------------------------------
 
 describe("chat write surface", () => {
   beforeEach(() => {
     __resetChatApiForTesting()
-    useChatStore.setState({ contextSelections: [], activeSessionId: "s-active" })
+    // Through the store's own action, not `setState`: `contextSelections` is a
+    // projection of the active session's slice (per-conversation composer
+    // state), so overwriting the projected field leaves the slice populated and
+    // the next add re-projects it.
+    useChatStore.setState({ activeSessionId: "s-active" })
+    useChatStore.getState().clearContextSelections()
     useComposerIntentStore.setState({ pendingBySession: {} })
     appended.length = 0
   })

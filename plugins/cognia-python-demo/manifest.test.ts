@@ -3,7 +3,7 @@
  * validator the installer runs.
  *
  * This is the consumer that keeps the declarative `kind: "a2ui"` panel class
- * from being a capability nobody uses: before ADR-0143 a `type: "python"`
+ * from being a capability nobody uses: before ADR-0145 a `type: "python"`
  * plugin declaring `contextPanels` failed validation outright, so this file
  * failing would mean the panel class regressed to "manifest line only".
  */

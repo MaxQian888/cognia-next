@@ -47,7 +47,7 @@ class Context:
 
     @property
     def ctx(self) -> "Ctx":
-        """The host's ``ctx.*`` API surface (ADR-0143), bound to this runtime.
+        """The host's ``ctx.*`` API surface (ADR-0145), bound to this runtime.
 
         ``cognia.ctx`` resolves the *active* runtime; this one is pinned to the
         runtime this context wraps, which is what a test swapping runtimes per

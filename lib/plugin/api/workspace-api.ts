@@ -16,7 +16,7 @@
  * `clearWorkspaceBackendsForPlugin(pluginId)`.
  *
  * The API also has a *consumer* half (`acquire` / `walk` / `read` /
- * `changedSince`), added with ADR-0143. Registration alone left the contract
+ * `changedSince`), added with ADR-0145. Registration alone left the contract
  * half-built: a plugin could contribute a backend and read back one it had
  * registered itself, and nothing anywhere let it obtain a checkout to work in.
  * See `lib/plugin/workspace/acquire.ts` for the containment rules.

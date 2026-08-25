@@ -2,7 +2,7 @@
 
 Upstream shelled out to ``git clone`` itself, into ``~/.repowiki/repos``, with
 its own timeout, size cap and host allow-list. All four of those guard rails
-moved into the host (ADR-0143's ``git_clone_guarded``), where they apply to
+moved into the host (ADR-0145's ``git_clone_guarded``), where they apply to
 every plugin rather than to whichever one remembered to write them — so what
 remains here is the *parsing*, which is pure, well-tested, and still ours.
 

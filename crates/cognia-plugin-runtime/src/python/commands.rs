@@ -821,7 +821,7 @@ pub async fn plugin_python_install_deps_for_state(
     .await
 }
 
-/// Answer one plugin -> host RPC request (ADR-0143).
+/// Answer one plugin -> host RPC request (ADR-0145).
 ///
 /// The renderer (or the headless plugin runtime) calls this once per
 /// `plugin:python:host-request` event, after routing the method onto the
@@ -2609,8 +2609,17 @@ def rewrite(payload):
         )
         .await
         .unwrap();
-        assert_eq!(info["tool_count"], 7);
-        assert_eq!(info["hooks"][0]["event"], "onMessageSend");
+        assert_eq!(info["tool_count"], 8);
+        // Two hooks now: the chat-interception one, and the A2UI action handler
+        // the declarative panel's clicks come back through.
+        let hook_events: Vec<&str> = info["hooks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hook| hook["event"].as_str().unwrap())
+            .collect();
+        assert!(hook_events.contains(&"onMessageSend"), "{hook_events:?}");
+        assert!(hook_events.contains(&"onA2UIAction"), "{hook_events:?}");
 
         // Config-aware tool.
         let result = call_tool_inner(

@@ -16,7 +16,7 @@ trade; the durable copies are the analyzer cache and the RAG snapshot on disk.
 from __future__ import annotations
 
 import cognia
-from cognia import get_config, progress, tool
+from cognia import get_config, hook, progress, tool
 
 from repowiki.config import Config
 from repowiki.core.rag import format_context
@@ -24,6 +24,13 @@ from repowiki.export.html import export_html
 from repowiki.export.json_export import export_json
 from repowiki.export.markdown import export_markdown
 from repowiki.host import configure_paths, release_workspace
+from repowiki.panel import (
+    ACTION_OPEN_CITATION,
+    ACTION_OPEN_PAGE,
+    ACTION_RESCAN,
+    ACTION_SELECT_PROJECT,
+    build_panel,
+)
 from repowiki.pipeline import ScanResult, build_index, reading_order, scan
 from repowiki.project import project_id_for
 
@@ -260,3 +267,180 @@ def repowiki_list() -> dict:
 )
 def repowiki_project_id(source: str) -> dict:
     return {"source": source, "projectId": project_id_for(source)}
+
+
+# ---------------------------------------------------------------------------
+# Panel
+# ---------------------------------------------------------------------------
+#
+# The reader is a declarative `kind: "a2ui"` context panel: the manifest names
+# a surface and a build tool, the host calls the tool when the panel is first
+# shown, and this pushes a component tree. There is no JavaScript anywhere in
+# the path, which is the whole reason that panel class exists.
+#
+# Which wiki a panel shows is per-surface state, because two panels can be open
+# on two different resources at once and a single "current page" would make one
+# of them follow the other.
+
+_PANEL_STATE: dict[str, dict] = {}
+
+
+def _panel_state(surface_id: str) -> dict:
+    return _PANEL_STATE.setdefault(surface_id, {"projectId": "", "pageId": "index"})
+
+
+def _project_for_resource(resource: dict | None) -> str:
+    """Pick the wiki a freshly-opened panel should show.
+
+    A scan of the resource's own root wins; otherwise the only scan there is,
+    if there is exactly one. With several and no match the panel opens empty
+    rather than guessing — showing the wrong repository's architecture page is
+    worse than showing none.
+    """
+    root = ((resource or {}).get("projectRoot") or (resource or {}).get("rootPath") or "").strip()
+    if root:
+        for pid, result in _SCANS.items():
+            if result.handle.root == root:
+                return pid
+    return next(iter(_SCANS)) if len(_SCANS) == 1 else ""
+
+
+async def _push_panel(surfaceId: str, *, create: bool = False) -> dict:
+    """Render the current panel state onto its surface."""
+    state = _panel_state(surfaceId)
+    result = _SCANS.get(state["projectId"])
+    pages = (
+        [
+            {"id": p.id, "title": p.title, "parentId": p.parent_id, "content": p.content}
+            for p in result.wiki.pages
+        ]
+        if result
+        else []
+    )
+    active = next((p for p in pages if p["id"] == state["pageId"]), pages[0] if pages else None)
+    if active:
+        state["pageId"] = active["id"]
+
+    components = build_panel(
+        project_name=result.wiki.project_name if result else "RepoWiki",
+        pages=pages,
+        active_page=active,
+        project_root=result.handle.root if result else "",
+        warnings=list(result.warnings) if result else [],
+        projects=[
+            {"projectId": pid, "projectName": scan_result.wiki.project_name}
+            for pid, scan_result in sorted(_SCANS.items())
+        ],
+    )
+
+    if create:
+        await cognia.ctx.a2ui.createSurface(surfaceId, "panel", {"title": "RepoWiki"})
+    await cognia.ctx.a2ui.updateComponents(surfaceId, components)
+    # Surfaces are created `ready: false`; without this the panel spins forever.
+    await cognia.ctx.a2ui.setReady(surfaceId)
+    return {"surfaceId": surfaceId, "projectId": state["projectId"], "pageId": state["pageId"]}
+
+
+@tool(
+    name="repowiki_build_panel",
+    description=(
+        "Build the reader panel's surface. Invoked by the host when the panel "
+        "is first shown for a resource."
+    ),
+    parameters={
+        "surfaceId": {"type": "string", "required": True},
+        "resource": {"type": "object", "required": False},
+    },
+)
+async def repowiki_build_panel(surfaceId: str, resource: dict | None = None) -> dict:
+    state = _panel_state(surfaceId)
+    if not state["projectId"]:
+        state["projectId"] = _project_for_resource(resource)
+    return await _push_panel(surfaceId, create=True)
+
+
+@tool(
+    name="repowiki_panel_context",
+    description=(
+        "Text the panel's side conversation is grounded in. Invoked by the "
+        "host at send time."
+    ),
+    parameters={"resource": {"type": "object", "required": False}},
+)
+def repowiki_panel_context(resource: dict | None = None) -> dict:
+    """A few KB, not the whole wiki.
+
+    Decision from the design pass: the overview, the page list, and the top of
+    the reading order — enough for the model to know what exists and what to
+    ask for — plus the reminder that `repowiki_search` is how it gets the rest.
+    Pasting every page would blow the context budget on a medium repository and
+    still be worse than a search.
+    """
+    project_id = _project_for_resource(resource)
+    result = _SCANS.get(project_id)
+    if result is None:
+        return {"text": "No wiki has been generated for this repository yet."}
+
+    overview = result.wiki.get_page("index")
+    lines = [
+        f"# {result.wiki.project_name}",
+        "",
+        (overview.content if overview else "").strip(),
+        "",
+        "## Pages",
+        *(f"- `{page.id}` — {page.title}" for page in result.wiki.pages),
+        "",
+        "## Entry points (dependency PageRank)",
+        *(
+            f"- {entry['path']} ({entry['language']}, {entry['lines']} lines)"
+            for entry in reading_order(result, top=10)
+        ),
+        "",
+        "Call `repowiki_search` for anything else; it returns cited excerpts. "
+        "Call `repowiki_get_page` with a page id above to read a full page.",
+    ]
+    return {"text": "\n".join(lines), "projectId": project_id}
+
+
+@hook("onA2UIAction")
+async def repowiki_panel_action(payload):
+    """Clicks in the panel come back here — the return trip, still no JS.
+
+    `onA2UIAction` is a broadcast: every plugin's hook sees every surface's
+    actions, which is why the action names are namespaced and why a surface
+    this plugin does not own is ignored rather than answered.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    action = payload.get("action") or ""
+    surface_id = payload.get("surfaceId") or ""
+    if not action.startswith("repowiki:") or not surface_id.startswith("cognia-repowiki:"):
+        return payload
+
+    data = payload.get("data") or {}
+    state = _panel_state(surface_id)
+
+    if action == ACTION_OPEN_PAGE:
+        state["pageId"] = str(data.get("nodeId") or state["pageId"])
+        await _push_panel(surface_id)
+    elif action == ACTION_SELECT_PROJECT:
+        state["projectId"] = str(data.get("value") or data.get("nodeId") or "")
+        state["pageId"] = "index"
+        await _push_panel(surface_id)
+    elif action == ACTION_RESCAN:
+        result = _SCANS.get(state["projectId"])
+        if result:
+            await repowiki_scan(result.handle.root)
+            await _push_panel(surface_id)
+    elif action == ACTION_OPEN_CITATION:
+        path = str(data.get("path") or "")
+        if path:
+            # The editor is the point: a citation the reader cannot open is a
+            # footnote. `openFile` wants an ABSOLUTE path — a relative one
+            # would resolve against whichever editor mounted last — and
+            # `reveal` because this jump *is* what the user clicked.
+            await cognia.ctx.editor.openFile(
+                path,
+                {"line": int(data.get("line") or 1), "reveal": True},
+            )
+    return payload
