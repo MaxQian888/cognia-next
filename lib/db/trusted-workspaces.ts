@@ -34,6 +34,16 @@ export interface TrustedWorkspace {
   approvedConfigDigest?: string
   /** Wall-clock millis of that approval. */
   approvedConfigAt?: number
+  /**
+   * Declarations from that configuration already OFFERED on this device —
+   * `cap:<kind>:<id>` and `root:<declaredId>` (see `lib/workspace/repo-declared`).
+   *
+   * Recorded separately from what they created, and deliberately not cleared
+   * when the thing is removed. A repository suggests; the user answers once;
+   * re-offering on the next pull would overturn that answer silently, which is
+   * exactly the failure a shared config file invites.
+   */
+  seededDeclarations?: string[]
 }
 
 /** The full trust row for a path, or undefined when it was never trusted. */
@@ -57,6 +67,25 @@ export async function approveWorkspaceConfig(path: string, digest: string): Prom
     approvedConfigDigest: digest,
     approvedConfigAt: Date.now(),
   })
+  return true
+}
+
+/**
+ * Record an approval together with the declarations it seeded.
+ *
+ * One write, because they are one decision: persisting the seed record without
+ * what it seeded loses the suggestion permanently, and the reverse re-offers it
+ * on every pull.
+ */
+export async function recordSeededDeclarations(
+  path: string,
+  seeded: readonly string[]
+): Promise<boolean> {
+  if (!path) return false
+  const key = normalize(path)
+  const row = await getDb().trustedWorkspaces.get(key)
+  if (!row) return false
+  await getDb().trustedWorkspaces.put({ ...row, seededDeclarations: [...seeded] })
   return true
 }
 

@@ -8,13 +8,19 @@ import userEvent from "@testing-library/user-event"
 
 import type { Project } from "@/types"
 
-const projects: Array<Pick<Project, "id" | "roots">> = [
+const mockProjects: Array<Pick<Project, "id" | "roots">> = [
   { id: "p1", roots: [{ id: "r1", path: "/repos/app", isPrimary: true }] } as never,
 ]
 let trustEnabled = true
 
+// `mock`-prefixed so the hoisted `jest.mock` factory may close over it — a
+// plain const here is in the temporal dead zone when the factory runs.
+const mockUpdateProject = jest.fn()
 jest.mock("@/stores/project/project-store", () => ({
-  useProjectStore: (selector: (s: unknown) => unknown) => selector({ projects }),
+  useProjectStore: Object.assign(
+    (selector: (s: unknown) => unknown) => selector({ projects: mockProjects }),
+    { getState: () => ({ projects: mockProjects, updateProject: mockUpdateProject }) }
+  ),
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
@@ -42,6 +48,10 @@ function deps(over: Record<string, unknown> = {}) {
     isRestricted: jest.fn(async () => false),
     approvedDigestFor: jest.fn(async () => undefined),
     approve: jest.fn(async () => true),
+    // Injected so the seeding half never reaches Dexie from a component test.
+    trustRecord: jest.fn(async () => undefined),
+    recordSeeded: jest.fn(async () => true),
+    applyToWorkspace: mockUpdateProject,
     ...over,
   }
 }

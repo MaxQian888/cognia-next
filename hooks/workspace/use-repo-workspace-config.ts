@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   approveWorkspaceConfig as persistApproval,
+  getTrustedWorkspace,
+  recordSeededDeclarations,
   type TrustedWorkspace,
 } from "@/lib/db/trusted-workspaces"
 import {
@@ -27,7 +29,9 @@ import {
   type EvaluateWorkspaceConfigDeps,
   type WorkspaceConfigVerdict,
 } from "@/lib/project-environment/workspace-config-trust"
+import { declaredWorkspaceOf, seedDeclarations } from "@/lib/workspace/repo-declared"
 import { isTauri } from "@/lib/tauri"
+import type { Project } from "@/types"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
 
@@ -44,8 +48,12 @@ export interface RepoWorkspaceConfigState {
 
 export interface UseRepoWorkspaceConfigDeps extends Partial<EvaluateWorkspaceConfigDeps> {
   approve: (path: string, digest: string) => Promise<boolean>
-  /** Injected for tests that do not want the settings store. */
-  trustRecord?: (path: string) => Promise<TrustedWorkspace | undefined>
+  /** The trust row, for the declarations already offered on this device. */
+  trustRecord: (path: string) => Promise<TrustedWorkspace | undefined>
+  /** Persist the seeded set. Written together with the workspace change. */
+  recordSeeded: (path: string, seeded: readonly string[]) => Promise<boolean>
+  /** Apply the seeded roots and capability overlay to the workspace row. */
+  applyToWorkspace: (projectId: string, patch: Partial<Project>) => void
 }
 
 const LOADING: WorkspaceConfigVerdict = { kind: "absent" }
@@ -129,11 +137,33 @@ export function useRepoWorkspaceConfig(
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
   const approve = useCallback(async () => {
-    if (verdict.kind !== "unapproved" || !approvalKey) return
+    if (verdict.kind !== "unapproved" || !approvalKey || !project) return
     setApproving(true)
     try {
       const persist = deps?.approve ?? persistApproval
       await persist(approvalKey, verdict.digest)
+      // Approval is the moment the user says yes to THIS content, so it is also
+      // the moment the repository's non-script declarations take effect. Seeded
+      // once and recorded, so removing a seeded root or clearing a seeded
+      // capability sticks rather than coming back on the next pull.
+      const readTrust = deps?.trustRecord ?? getTrustedWorkspace
+      const alreadySeeded = (await readTrust(approvalKey).catch(() => undefined))
+        ?.seededDeclarations
+      const seed = seedDeclarations({
+        declared: declaredWorkspaceOf(verdict.config),
+        overlay: project.capabilityOverlay,
+        roots: project.roots ?? [],
+        alreadySeeded: alreadySeeded ?? [],
+        repositoryRoot: approvalKey,
+      })
+      if (seed.changed) {
+        const apply =
+          deps?.applyToWorkspace ??
+          ((id: string, patch: Partial<Project>) =>
+            useProjectStore.getState().updateProject(id, patch))
+        apply(project.id, { capabilityOverlay: seed.overlay, roots: seed.roots })
+        await (deps?.recordSeeded ?? recordSeededDeclarations)(approvalKey, seed.seeded)
+      }
     } finally {
       setApproving(false)
       // Re-read rather than assume: the file can change between render and
@@ -141,7 +171,7 @@ export function useRepoWorkspaceConfig(
       // agree with.
       setNonce((n) => n + 1)
     }
-  }, [verdict, approvalKey, deps])
+  }, [verdict, approvalKey, project, deps])
 
   return { verdict, loading, approving, approvalKey, approve, refresh }
 }

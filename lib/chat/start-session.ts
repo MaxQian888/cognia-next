@@ -6,6 +6,9 @@ import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message
 import type { ChatSession } from "@cognia/agent-config-types"
 import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
 import { primaryRootOf } from "@/lib/workspace/roots"
+import { loadDeclaredWorkspace } from "@/lib/workspace/repo-declared"
+import { useSettingsStore } from "@/stores/settings"
+import { isTauri } from "@/lib/tauri"
 import { createSessionExecutionContext } from "@/lib/task-workspace/session-execution-context"
 import {
   createManagedWorkspaceContext,
@@ -90,6 +93,20 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
       ? projects.find((candidate) => candidate.id === ownerProjectId)
       : undefined
     const root = project ? primaryRootOf(project) : undefined
+    // What the repository declares, and only once the user has approved it.
+    // It sits BELOW the workspace's own remembered default: the file changes on
+    // every pull, and a setting that silently reverts is worse than one that
+    // was never offered. Above the hardcoded fallback, because "this project
+    // runs in its own worktree" is exactly the thing a new contributor should
+    // not have to be told out of band.
+    const declared =
+      project && root
+        ? await loadDeclaredWorkspace(project, {
+            configRoot: root.path,
+            trustEnabled: useSettingsStore.getState().settings?.workspaceTrust?.enabled !== false,
+            onWeb: !isTauri(),
+          }).catch(() => null)
+        : null
     const executionContext =
       project && root
         ? createSessionExecutionContext({
@@ -99,9 +116,12 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
             rootId: root.id,
             environmentId: project.defaultEnvironmentId,
             requestedLocation:
-              executionLocation ?? project.defaultExecutionLocation ?? "managedWorktree",
+              executionLocation ??
+              project.defaultExecutionLocation ??
+              declared?.executionLocation ??
+              "managedWorktree",
             isGitRepository: false,
-            base: executionBase,
+            base: executionBase ?? declared?.base,
             now: Date.now(),
           })
         : createManagedWorkspaceContext(session.id, Date.now())

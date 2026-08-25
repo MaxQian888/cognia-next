@@ -4,13 +4,19 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 
 import type { Project } from "@/types"
 
-const projects: Array<Pick<Project, "id" | "roots">> = [
+const mockProjects: Array<Pick<Project, "id" | "roots">> = [
   { id: "p1", roots: [{ id: "r1", path: "/repos/app", isPrimary: true }] } as never,
 ]
 let trustEnabled = true
 
+// `mock`-prefixed so the hoisted `jest.mock` factory may close over it — a
+// plain const here is in the temporal dead zone when the factory runs.
+const mockUpdateProject = jest.fn()
 jest.mock("@/stores/project/project-store", () => ({
-  useProjectStore: (selector: (s: unknown) => unknown) => selector({ projects }),
+  useProjectStore: Object.assign(
+    (selector: (s: unknown) => unknown) => selector({ projects: mockProjects }),
+    { getState: () => ({ projects: mockProjects, updateProject: mockUpdateProject }) }
+  ),
 }))
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (s: unknown) => unknown) =>
@@ -30,12 +36,17 @@ function deps(over: Record<string, unknown> = {}) {
     isRestricted: jest.fn(async () => false),
     approvedDigestFor: jest.fn(async () => undefined),
     approve: jest.fn(async () => true),
+    // Injected so the seeding half never reaches Dexie from a component test.
+    trustRecord: jest.fn(async () => undefined),
+    recordSeeded: jest.fn(async () => true),
+    applyToWorkspace: mockUpdateProject,
     ...over,
   }
 }
 
 beforeEach(() => {
   trustEnabled = true
+  mockUpdateProject.mockClear()
 })
 
 describe("useRepoWorkspaceConfig", () => {
@@ -114,5 +125,82 @@ describe("useRepoWorkspaceConfig", () => {
     const { result } = renderHook(() => useRepoWorkspaceConfig("gone", "/repos/app", deps()))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.approvalKey).toBeNull()
+  })
+})
+
+describe("seeding what the repository declares", () => {
+  const DECLARING = {
+    version: 1,
+    roots: [
+      { id: "app", path: ".", role: "primary" },
+      { id: "web", path: "packages/web", role: "additional" },
+    ],
+    capabilities: { mcpServer: { jira: true } },
+  }
+
+  function declaringDeps(over: Record<string, unknown> = {}) {
+    return deps({ readFile: jest.fn(async () => JSON.stringify(DECLARING)), ...over })
+  }
+
+  it("applies the declared roots and capabilities the moment the user approves", async () => {
+    const recordSeeded = jest.fn(async () => true)
+    const { result } = renderHook(() =>
+      useRepoWorkspaceConfig("p1", "/repos/app", declaringDeps({ recordSeeded }))
+    )
+    await waitFor(() => expect(result.current.verdict.kind).toBe("unapproved"))
+    await act(async () => {
+      await result.current.approve()
+    })
+    expect(mockUpdateProject).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({
+        capabilityOverlay: { mcpServer: { jira: true } },
+        roots: expect.arrayContaining([
+          expect.objectContaining({ path: "/repos/app/packages/web" }),
+        ]),
+      })
+    )
+    // The seed record and the thing it seeded are one decision.
+    expect(recordSeeded).toHaveBeenCalledWith(
+      "/repos/app",
+      expect.arrayContaining(["cap:mcpServer:jira", "root:web"])
+    )
+  })
+
+  it("does not re-offer a declaration the user already answered", async () => {
+    const recordSeeded = jest.fn(async () => true)
+    const { result } = renderHook(() =>
+      useRepoWorkspaceConfig(
+        "p1",
+        "/repos/app",
+        declaringDeps({
+          recordSeeded,
+          trustRecord: jest.fn(async () => ({
+            path: "/repos/app",
+            trustedAt: 1,
+            seededDeclarations: ["cap:mcpServer:jira", "root:web"],
+          })),
+        })
+      )
+    )
+    await waitFor(() => expect(result.current.verdict.kind).toBe("unapproved"))
+    await act(async () => {
+      await result.current.approve()
+    })
+    expect(mockUpdateProject).not.toHaveBeenCalled()
+    expect(recordSeeded).not.toHaveBeenCalled()
+  })
+
+  it("writes nothing when the repository declares nothing to seed", async () => {
+    const recordSeeded = jest.fn(async () => true)
+    const { result } = renderHook(() =>
+      useRepoWorkspaceConfig("p1", "/repos/app", deps({ recordSeeded }))
+    )
+    await waitFor(() => expect(result.current.verdict.kind).toBe("unapproved"))
+    await act(async () => {
+      await result.current.approve()
+    })
+    expect(mockUpdateProject).not.toHaveBeenCalled()
+    expect(recordSeeded).not.toHaveBeenCalled()
   })
 })

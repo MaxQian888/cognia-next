@@ -11,6 +11,13 @@ jest.mock("@/lib/plugin/messaging/message-bus", () => ({
   SystemEvents: { SESSION_CREATED: "session:created" },
 }))
 
+// An ES module namespace is non-configurable, so `jest.spyOn` cannot replace an
+// export on it. `mock`-prefixed so the hoisted factory may close over it.
+const mockLoadDeclaredWorkspace = jest.fn(async () => null as unknown)
+jest.mock("@/lib/workspace/repo-declared", () => ({
+  loadDeclaredWorkspace: (...args: unknown[]) => mockLoadDeclaredWorkspace(...(args as [])),
+}))
+
 const emitMock = emitSystemBusEvent as jest.MockedFunction<typeof emitSystemBusEvent>
 
 const dbFixture = createDbTestFixture()
@@ -20,6 +27,7 @@ beforeEach(async () => {
   jest.restoreAllMocks()
   await dbFixture.restore()
   emitMock.mockClear()
+  mockLoadDeclaredWorkspace.mockReset().mockResolvedValue(null)
   useChatStore.getState().clear()
   useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
 })
@@ -176,6 +184,97 @@ describe("startNewSession", () => {
     })
     expect(updateProject).toHaveBeenCalledWith(project.id, {
       defaultExecutionLocation: "managedWorktree",
+    })
+  })
+
+  describe("what the repository declares", () => {
+    const project = {
+      id: "p_declared",
+      name: "Declared",
+      roots: [{ id: "root-1", path: "/repo", isPrimary: true }],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      isArchived: false,
+      pinned: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+    }
+
+    function mountProject(over: Record<string, unknown> = {}) {
+      jest.spyOn(useProjectStore, "getState").mockReturnValue({
+        ...useProjectStore.getState(),
+        projects: [{ ...project, ...over }],
+        activeProjectId: project.id,
+        addSessionToProject: jest.fn(),
+        updateProject: jest.fn(),
+      } as ReturnType<typeof useProjectStore.getState>)
+    }
+
+    function declares(config: Record<string, unknown> | null) {
+      mockLoadDeclaredWorkspace.mockResolvedValue(config as never)
+    }
+
+    it("uses the declared execution default when the workspace has none of its own", async () => {
+      // The thing a new contributor should not have to be told out of band.
+      mountProject()
+      declares({
+        executionLocation: "managedWorktree",
+        base: { kind: "remoteDefault" },
+        roots: [],
+        capabilities: {},
+      })
+
+      const session = await startNewSession()
+      expect(session.executionContext).toMatchObject({
+        location: "managedWorktree",
+        execution: { base: { kind: "remoteDefault" } },
+      })
+    })
+
+    it("loses to the workspace's own remembered default", async () => {
+      // The file changes on every pull; a setting that silently reverts is
+      // worse than one that was never offered.
+      mountProject({ defaultExecutionLocation: "local" })
+      declares({
+        executionLocation: "managedWorktree",
+        base: { kind: "remoteDefault" },
+        roots: [],
+        capabilities: {},
+      })
+
+      const session = await startNewSession()
+      expect(session.executionContext).toMatchObject({ location: "local" })
+    })
+
+    it("loses to the choice made in the new-chat picker", async () => {
+      mountProject()
+      declares({
+        executionLocation: "local",
+        base: { kind: "workingState" },
+        roots: [],
+        capabilities: {},
+      })
+
+      const session = await startNewSession({ executionLocation: "managedWorktree" })
+      expect(session.executionContext).toMatchObject({ location: "managedWorktree" })
+    })
+
+    it("keeps the hardcoded default when nothing is declared", async () => {
+      mountProject()
+      declares(null)
+
+      const session = await startNewSession()
+      expect(session.executionContext).toMatchObject({ location: "managedWorktree" })
+    })
+
+    it("does not take the turn down when the declaration cannot be read", async () => {
+      mountProject()
+      mockLoadDeclaredWorkspace.mockRejectedValue(new Error("filesystem unavailable"))
+
+      await expect(startNewSession()).resolves.toMatchObject({ id: expect.any(String) })
     })
   })
 
