@@ -28815,7 +28815,7 @@
         "openConsoleSecurityAria": "Open Lark Open Platform → Security settings for this app",
         "principals": {
           "actionFailed": "Action failed: {reason}",
-          "help": "Maps tenant + app + open_id to this Cognia account. With the principal registry flag on, only bound people can run anything — everyone else is parked with a bind code.",
+          "help": "Maps tenant + app + open_id to a person. With the principal registry flag on, only bound people can run anything — everyone else is parked with a bind code. Being bound is permission to reach the agent, not membership of anything.",
           "principalDisable": "Disable",
           "principalEnable": "Enable",
           "principalStatus": {
@@ -28834,6 +28834,12 @@
           "requestsEmpty": "No pending bind requests.",
           "requestsLabel": "Pending bind requests",
           "seeded": "Registry seeded from existing contacts.",
+          "standing": {
+            "guest": "Guest",
+            "org-member": "Organisation member",
+            "unaffiliated": "Not a member"
+          },
+          "standingAria": "Workspace standing",
           "tenantDisable": "Disable tenant",
           "tenantEnable": "Enable tenant",
           "tenantLabel": "Tenant",

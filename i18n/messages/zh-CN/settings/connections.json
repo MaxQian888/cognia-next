@@ -878,7 +878,7 @@
     "openConsoleSecurityAria": "在飞书开放平台打开当前应用的安全设置页",
     "principals": {
       "actionFailed": "操作失败：{reason}",
-      "help": "把 租户 + 应用 + open_id 映射到当前 Cognia 账号。启用主体注册表后，只有已绑定的人才能触发执行，其他人一律被挂起并收到一个绑定码。",
+      "help": "把 租户 + 应用 + open_id 映射到一个人。开启 principal 注册表开关后，只有已绑定的人才能发起执行，其他人一律挂起并收到绑定码。绑定只代表可以触达 Agent，不代表拥有任何成员身份。",
       "principalDisable": "停用",
       "principalEnable": "启用",
       "principalStatus": {
@@ -897,6 +897,12 @@
       "requestsEmpty": "暂无待审批的绑定申请。",
       "requestsLabel": "待审批绑定申请",
       "seeded": "已从既有联系人播种注册表。",
+      "standing": {
+        "guest": "访客",
+        "org-member": "组织成员",
+        "unaffiliated": "非成员"
+      },
+      "standingAria": "工作区身份",
       "tenantDisable": "停用租户",
       "tenantEnable": "启用租户",
       "tenantLabel": "租户",

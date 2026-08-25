@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { getDb } from "@/lib/db/schema"
+import { listUsers, resolvePersonStanding } from "@/lib/db/identity"
+import type { PersonStanding } from "@/types/identity"
 import {
   approveFeishuBind,
   registerFeishuTenant,
@@ -43,6 +45,20 @@ const PRINCIPAL_BADGE_VARIANT: Record<
   active: "default",
   disabled: "secondary",
   unlinked: "outline",
+}
+
+/**
+ * How much access this person actually has — ADR-0149 §4, derived on read.
+ *
+ * `unaffiliated` is the state almost every bound IM sender is in, and it is
+ * deliberately not styled as a problem: being able to reach the agent and
+ * being a member of something are different grants, and the registry only
+ * makes the first one.
+ */
+const STANDING_BADGE_VARIANT: Record<PersonStanding, "default" | "secondary" | "outline"> = {
+  "org-member": "default",
+  guest: "secondary",
+  unaffiliated: "outline",
 }
 
 export interface LarkPrincipalsProps {
@@ -96,6 +112,28 @@ export function LarkPrincipals({ adapterId }: LarkPrincipalsProps) {
               .toArray(),
       [tenantKey, appId]
     ) ?? []
+
+  // Keyed on the ids rather than the array: `useLiveQuery` hands back a new
+  // array on every tick, which would re-run this on every keystroke elsewhere.
+  const personKey = principals.map((principal) => principal.cogniaUserId).join(",")
+  const people = useLiveQuery(
+    async () => {
+      const ids = [...new Set(personKey.split(",").filter(Boolean))]
+      if (ids.length === 0) {
+        return { names: new Map<string, string>(), standings: new Map<string, PersonStanding>() }
+      }
+      const [users, standings] = await Promise.all([
+        listUsers(ids),
+        Promise.all(ids.map(async (id) => [id, await resolvePersonStanding(id)] as const)),
+      ])
+      return {
+        names: new Map(users.map((user) => [user.id, user.displayName])),
+        standings: new Map<string, PersonStanding>(standings),
+      }
+    },
+    [personKey],
+    { names: new Map<string, string>(), standings: new Map<string, PersonStanding>() }
+  )
 
   /**
    * Every mutation reports its own failure instead of rejecting into an
@@ -230,11 +268,41 @@ export function LarkPrincipals({ adapterId }: LarkPrincipalsProps) {
               {principals.map((principal) => (
                 <li
                   key={principal.id}
-                  className="flex items-center justify-between gap-2 text-xs"
+                  className="flex items-start justify-between gap-2 text-xs"
                   data-testid={`lark-principal-${principal.id}`}
                 >
-                  <span className="font-mono break-all">{principal.openId}</span>
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    {/*
+                      Falling back to the raw id rather than "unknown": a
+                      pre-Batch-5 row holds a LocalProfile id here, and an id
+                      an operator can search for beats a word that says
+                      nothing. Same call as the device console's owner row.
+                    */}
+                    <span
+                      className="truncate"
+                      title={principal.cogniaUserId}
+                      data-testid={`lark-principal-person-${principal.id}`}
+                    >
+                      {people.names.get(principal.cogniaUserId) ?? principal.cogniaUserId}
+                    </span>
+                    <span className="font-mono text-muted-foreground truncate">
+                      {principal.openId}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <Badge
+                      variant={
+                        STANDING_BADGE_VARIANT[
+                          people.standings.get(principal.cogniaUserId) ?? "unaffiliated"
+                        ]
+                      }
+                      aria-label={t("standingAria")}
+                      data-testid={`lark-principal-standing-${principal.id}`}
+                    >
+                      {t(
+                        `standing.${people.standings.get(principal.cogniaUserId) ?? "unaffiliated"}`
+                      )}
+                    </Badge>
                     <Badge
                       variant={PRINCIPAL_BADGE_VARIANT[principal.status]}
                       aria-label={t("principalStatusAria")}

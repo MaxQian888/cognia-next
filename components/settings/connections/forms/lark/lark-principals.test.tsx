@@ -21,6 +21,7 @@ import {
   getFeishuTenant,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
+import { putWorkspaceMembership, upsertUser } from "@/lib/db/identity"
 import { LarkPrincipals } from "./lark-principals"
 
 const ADAPTER_ID = "lark-admin-1"
@@ -149,7 +150,7 @@ describe("LarkPrincipals", () => {
     expect(screen.queryByTestId(`lark-bind-request-${other.id}`)).not.toBeInTheDocument()
   })
 
-  async function seedBoundPrincipal() {
+  async function seedBoundPrincipal(cogniaUserId = "usr_ada") {
     await seedAdapter()
     await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
     return createFeishuPrincipal({
@@ -157,7 +158,7 @@ describe("LarkPrincipals", () => {
       appId: "cli_1",
       openId: "ou_1",
       cogniaAccountId: "acct_a",
-      cogniaUserId: "acct_a",
+      cogniaUserId,
     })
   }
 
@@ -199,5 +200,61 @@ describe("LarkPrincipals", () => {
 
     const error = await screen.findByTestId("lark-principals-error")
     expect(error.textContent).toContain("lacks tenant scope")
+  })
+
+  it("names the person behind a principal instead of only their open_id", async () => {
+    const principal = await seedBoundPrincipal()
+    await upsertUser({ id: "usr_ada", displayName: "Ada Lovelace", createdAt: 1, updatedAt: 1 })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    // The name arrives on the live query's first resolution, one tick after
+    // the fallback paints.
+    await waitFor(async () => {
+      expect(await screen.findByTestId(`lark-principal-person-${principal.id}`)).toHaveTextContent(
+        "Ada Lovelace"
+      )
+    })
+    // The open_id is still shown — it is what an operator matches against the
+    // Feishu console — but it is no longer the only thing on the row.
+    expect(await screen.findByTestId(`lark-principal-${principal.id}`)).toHaveTextContent("ou_1")
+  })
+
+  it("falls back to the raw id for a row bound before the identity plane existed", async () => {
+    // Pre-Batch-5 rows hold a LocalProfile id here. A searchable id beats a
+    // word that says nothing.
+    const principal = await seedBoundPrincipal("acct_a")
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    expect(await screen.findByTestId(`lark-principal-person-${principal.id}`)).toHaveTextContent(
+      "acct_a"
+    )
+  })
+
+  it("reports what access the person actually has, which is usually none", async () => {
+    const principal = await seedBoundPrincipal()
+    await upsertUser({ id: "usr_ada", displayName: "Ada", createdAt: 1, updatedAt: 1 })
+    render(<LarkPrincipals adapterId={ADAPTER_ID} />)
+
+    // Being bound is permission to reach the agent, not membership of
+    // anything — the badge is what stops those two reading as one grant.
+    await waitFor(async () => {
+      expect(
+        await screen.findByTestId(`lark-principal-standing-${principal.id}`)
+      ).toHaveTextContent("standing.unaffiliated")
+    })
+
+    await putWorkspaceMembership({
+      workspaceId: "proj_1",
+      orgId: "org_acme",
+      userId: "usr_ada",
+      role: "viewer",
+      now: 2,
+    })
+
+    await waitFor(async () => {
+      expect(
+        await screen.findByTestId(`lark-principal-standing-${principal.id}`)
+      ).toHaveTextContent("standing.guest")
+    })
   })
 })
