@@ -17,6 +17,7 @@ import {
   type StylePackId,
 } from "@/types/appearance/style-pack"
 import { cn } from "@/lib/utils"
+import { Surface } from "./surface"
 
 /**
  * Render a pack's geometry locally so the choice is legible before it is made.
@@ -26,9 +27,11 @@ import { cn } from "@/lib/utils"
 function PackPreview({ packId }: { packId: StylePackId }) {
   const pack = STYLE_PACKS[packId]
   return (
-    <div
+    <Surface
       aria-hidden
-      className="pointer-events-none flex flex-col gap-1.5 rounded-panel border bg-muted/40 p-2"
+      layer="base"
+      radius="panel"
+      className="pointer-events-none flex flex-col gap-1.5 border p-2"
       style={
         {
           "--radius": `${pack.radiusBaseRem}rem`,
@@ -36,18 +39,20 @@ function PackPreview({ packId }: { packId: StylePackId }) {
         } as React.CSSProperties
       }
     >
-      <div
-        className="flex items-center gap-1.5 rounded-panel border bg-background p-1.5"
+      <Surface
+        layer="raised"
+        radius="panel"
+        className="flex items-center gap-1.5 border p-1.5"
         style={{ boxShadow: pack.elevationMax === 0 ? "none" : undefined }}
       >
         <span className="h-2 w-6 shrink-0 rounded-pill bg-primary/40" />
         <span className="h-1.5 flex-1 rounded-control bg-muted-foreground/20" />
-      </div>
+      </Surface>
       <div className="flex gap-1.5">
         <span className="h-3 flex-1 rounded-control bg-primary/70" />
         <span className="h-3 w-6 rounded-control border" />
       </div>
-    </div>
+    </Surface>
   )
 }
 

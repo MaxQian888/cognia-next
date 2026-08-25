@@ -69,10 +69,20 @@ function isBarePanel(cls) {
 }
 
 function listFiles() {
-  const out = execFileSync("git", ["ls-files", ...ROOTS.map((r) => `${r}/**/*.tsx`)], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  })
+  // `--others --exclude-standard` alongside `--cached`: a gate meant to catch
+  // NEW code that only sees committed files is exactly backwards — a violation
+  // would pass until the commit introducing it had already landed.
+  const out = execFileSync(
+    "git",
+    [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      ...ROOTS.map((r) => `${r}/**/*.tsx`),
+    ],
+    { cwd: REPO_ROOT, encoding: "utf8" }
+  )
   return out
     .split("\n")
     .filter(Boolean)
