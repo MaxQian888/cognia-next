@@ -291,6 +291,9 @@ class WorkspaceHandle:
     paths: list[str] = field(default_factory=list)
     truncated: bool = False
     skipped_sensitive: int = 0
+    #: Commit the checkout was at when the host handed it over. Empty when the
+    #: path is not a repository, or the host has no git bridge.
+    head_ref: str = ""
 
     @property
     def root_path(self) -> Path:
@@ -329,6 +332,7 @@ async def acquire_workspace(
         origin=str(raw.get("origin") or "local-path"),
         ephemeral=bool(raw.get("ephemeral")),
         remote=raw.get("remote") if isinstance(raw.get("remote"), dict) else None,
+        head_ref=str(raw.get("headRef") or ""),
     )
     await refresh_paths(handle, max_files=max_files, max_file_size=max_file_size)
     return handle
@@ -363,7 +367,13 @@ async def refresh_paths(
 
 
 async def changed_since(handle: WorkspaceHandle, ref: str) -> set[str]:
-    """Repo-relative paths that differ between ``ref`` and the checkout."""
+    """Repo-relative paths that differ between ``ref`` and the checkout.
+
+    Raises whatever the host raises. The caller that wants "unavailable" and
+    "nothing changed" collapsed into one answer is
+    :func:`repowiki.ingest.git_diff.changed_paths_since`; the caller that needs
+    them apart — staleness — must not have that decision made for it.
+    """
     changed = await get_host().workspace_changed_since(handle.as_spec(), ref)
     if not changed:
         return set()

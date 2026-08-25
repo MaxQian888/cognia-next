@@ -34,6 +34,10 @@ ADR-0087 记录过的形状——**契约描述的是意图，不是代码**。
   但没有任何东西能*获得*一份检出。有三种机制能产出检出（`cloneToWorkspace`、
   `git_clone`、任务工作区的 worktree 管理器），它们返回三种互不兼容的句柄，
   而且一个都不能从插件侧触达。
+- **一个检出说不出自己停在哪个 commit 上。** `PluginWorkspaceHandle` 现在带
+  `headRef`，在 acquire 时填好。没有它，`changedSince` 除了增量路径以外就不可用：
+  空 diff 与「宿主算不出来的 diff」分不开，于是「什么都没变」和「根本没人查过」
+  是同一个答案。
 - **没有任何命令能枚举一个仓库。** `fs_list_workspace_dir` 按设计是 depth-1
   （项目树是懒加载的）；`fs_search_workspace` 封顶 200 条、深度 12。
   「这个根下所有未被忽略的文件」这件事，无处可问。

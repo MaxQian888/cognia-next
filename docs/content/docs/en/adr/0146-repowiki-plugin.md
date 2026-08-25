@@ -97,6 +97,31 @@ A `modes` entry declares "RepoWiki mode" for the main conversation:
 `permissionMode: "plan"`, because this mode answers questions about a repository
 and an answer that edits it is not an answer.
 
+### Freshness has three states, not two
+
+The panel badges whether the wiki still describes the checkout it was built
+from, by diffing the commit `ctx.workspace.acquire` reported at scan time
+against the checkout now. Two states would have been a bug: an unanswerable
+check — not a repository, no git bridge, no commit recorded — renders exactly
+like a current wiki, so the user trusts a wiki nobody vouched for. "Freshness
+unknown" is its own badge, muted rather than destructive, because *we could not
+tell* is not *your wiki is wrong*, and it still offers the rescan. *Why* it
+could not be answered joins the existing warnings banner rather than riding on
+the badge: A2UI has no tooltip field, so a reason attached there would have been
+a string nothing ever paints — a diagnostic demoted to decoration.
+
+This is also the one caller that must not use `changed_paths_since`, the
+incremental path's helper: that one collapses "the host could not answer" into
+the same empty set as "nothing changed", which is precisely the distinction a
+freshness badge is made of.
+
+The check runs when a panel opens, when it switches repository, and after a
+rescan — the three moments the badge is looked at. Not per page click: reading
+page four cannot change the repository the wiki was built from. The side
+conversation reads the same cached answer, because a model answering from a
+stale wiki without saying so is the same defect as a badge that never
+appears.
+
 ### Rewrite the tests the swap invalidated; never delete them
 
 The suites that drove `litellm`, the `git` subprocesses, the CLI and the server

@@ -99,12 +99,61 @@ def test_the_repository_picker_appears_only_with_something_to_pick():
     assert "project-picker" in _by_id(_panel(projects=[{"projectId": "a"}]))["header"]["children"]
 
 
+FRESH = {"known": True, "stale": False, "changedCount": 0, "changed": [], "reason": ""}
+STALE = {"known": True, "stale": True, "changedCount": 3, "changed": ["a"], "reason": ""}
+UNKNOWN = {"known": False, "stale": False, "changedCount": 0, "changed": [], "reason": "no bridge"}
+
+
 def test_staleness_brings_its_own_way_out():
     # A badge that says "out of date" with no way to act on it is a complaint.
-    components = _by_id(_panel(stale=True))
+    components = _by_id(_panel(staleness=STALE))
     assert components["stale"]["variant"] == "destructive"
+    assert "3 changed" in components["stale"]["text"]
     assert components["rescan"]["action"] == ACTION_RESCAN
     assert components["header"]["children"][-2:] == ["stale", "rescan"]
+
+
+def test_a_current_wiki_is_the_only_state_that_earns_silence():
+    # Nothing in the header, because an absent badge reads as "up to date" and
+    # here that reading is correct.
+    components = _by_id(_panel(staleness=FRESH))
+    assert "stale" not in components
+    assert "rescan" not in components
+    assert "stale" not in components["header"]["children"]
+
+
+def test_an_unknown_answer_says_so_instead_of_looking_current():
+    # The bug this exists to prevent: an unanswerable freshness check renders
+    # exactly like a fresh wiki, so the user trusts a wiki nobody vouched for.
+    components = _by_id(_panel(staleness=UNKNOWN))
+    assert components["stale"]["text"] == "Freshness unknown"
+    # Not destructive: "we could not tell" is not "your wiki is wrong".
+    assert components["stale"]["variant"] == "secondary"
+    # Still offers the way out — a forced rescan is how the user resolves it.
+    assert components["rescan"]["action"] == ACTION_RESCAN
+    # And the reason renders, in the one component that displays prose. A2UI
+    # Badge has no tooltip field, so hanging it there would have been a string
+    # nothing ever paints.
+    assert "no bridge" in components["warnings"]["message"]
+
+
+def test_an_unknown_reason_joins_the_existing_banner_rather_than_adding_one():
+    components = _by_id(_panel(staleness=UNKNOWN, warnings=["a truncated walk"]))
+    assert components["root"]["children"].count("warnings") == 1
+    assert components["warnings"]["message"] == "a truncated walk · Freshness unknown: no bridge"
+
+
+def test_a_stale_wiki_does_not_manufacture_a_banner():
+    # It is out of date, not partially scanned; the badge already says so.
+    components = _by_id(_panel(staleness=STALE))
+    assert "warnings" not in components
+
+
+def test_no_staleness_check_at_all_renders_no_badge():
+    # `None` means the panel never asked (no wiki loaded yet), which is not the
+    # same as asking and failing.
+    components = _by_id(_panel(staleness=None))
+    assert "stale" not in components
 
 
 def test_warnings_sit_between_the_header_and_the_body_as_one_banner():
@@ -120,4 +169,4 @@ def test_warnings_sit_between_the_header_and_the_body_as_one_banner():
 def test_every_component_is_json_shaped_because_it_crosses_the_wire():
     import json
 
-    json.dumps(_panel(stale=True, warnings=["x"], projects=[{"projectId": "a"}]))
+    json.dumps(_panel(staleness=STALE, warnings=["x"], projects=[{"projectId": "a"}]))

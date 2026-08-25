@@ -27,7 +27,7 @@ import {
   type WorkspaceWalkResult,
 } from "@/lib/files/workspace-fs"
 import { isDescendant } from "@/lib/claude/instructions/paths"
-import { gitCloneGuarded, gitDiffRefsFiles, gitReadBlobAtRef } from "@/lib/git/commands"
+import { gitCloneGuarded, gitDiffRefsFiles, gitLog, gitReadBlobAtRef } from "@/lib/git/commands"
 import { transport } from "@/lib/tauri"
 
 import { parseRepoSpec, repoCacheSegments, type RepoSpec } from "./repo-spec"
@@ -48,6 +48,16 @@ export interface PluginWorkspaceHandle {
   remote?: { host: string; owner: string; repo: string; url: string; ref?: string }
   /** True when the checkout is ours to delete. */
   ephemeral: boolean
+  /**
+   * Commit the checkout was at when it was acquired. Absent when the path is
+   * not a git repository, or when this runtime has no git bridge.
+   *
+   * The point of recording it here is that `changedSince` becomes answerable:
+   * a caller that stored the ref knows a later empty diff means "nothing
+   * changed", not "I asked about a ref the host could not resolve". Without
+   * it those two answers are the same empty array.
+   */
+  headRef?: string
 }
 
 export class WorkspaceAcquireError extends Error {
@@ -68,6 +78,8 @@ export interface AcquireDeps {
   /** Delete a cached checkout. Resolves `false` when it was already gone. */
   removeRepoCache: (segments: string[]) => Promise<boolean>
   clone: typeof gitCloneGuarded
+  /** Newest commit of a checkout. `null` when it is not a repository. */
+  headOf?: (root: string) => Promise<string | null>
 }
 
 /**
@@ -130,7 +142,12 @@ export async function acquireWorkspace(
           "Open the folder first, or pass a git URL to clone it."
       )
     }
-    return { root: resolved.path, origin: resolved.origin, ephemeral: false }
+    return {
+      root: resolved.path,
+      origin: resolved.origin,
+      ephemeral: false,
+      ...(await headRefFields(resolved.path, deps)),
+    }
   }
 
   const destination = await deps.repoCacheDir(repoCacheSegments(resolved.spec))
@@ -151,7 +168,30 @@ export async function acquireWorkspace(
       ...(resolved.spec.ref ? { ref: resolved.spec.ref } : {}),
     },
     ephemeral: true,
+    ...(await headRefFields(root, deps)),
   }
+}
+
+/**
+ * The checkout's current commit, as a spreadable fragment.
+ *
+ * Never fatal: a directory that is not a repository, or a runtime with no git
+ * bridge, is a workspace we can still walk and read. Losing the ref costs a
+ * caller the ability to ask "what changed since", not the checkout.
+ */
+async function headRefFields(root: string, deps: AcquireDeps): Promise<{ headRef?: string }> {
+  const headOf = deps.headOf ?? defaultHeadOf
+  try {
+    const head = await headOf(root)
+    return head ? { headRef: head } : {}
+  } catch {
+    return {}
+  }
+}
+
+async function defaultHeadOf(root: string): Promise<string | null> {
+  const [head] = await gitLog(root, 1, 0)
+  return head?.hash ?? null
 }
 
 /**
@@ -207,5 +247,6 @@ export function defaultAcquireDeps(
     removeRepoCache: (segments) =>
       transport.call<boolean>("plugin_workspace_repo_remove", { pluginId, segments }),
     clone: gitCloneGuarded,
+    headOf: defaultHeadOf,
   }
 }

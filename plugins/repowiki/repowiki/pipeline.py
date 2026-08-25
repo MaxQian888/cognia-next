@@ -25,7 +25,7 @@ from repowiki.core.models import ProjectContext
 from repowiki.core.rag import SimpleRAG
 from repowiki.core.rag_store import RagStore
 from repowiki.core.wiki_builder import Wiki, WikiBuilder
-from repowiki.host import LLMClient, WorkspaceHandle, acquire_workspace
+from repowiki.host import LLMClient, WorkspaceHandle, acquire_workspace, changed_since
 from repowiki.ingest.git_diff import changed_paths_since
 from repowiki.ingest.local import ingest_handle
 from repowiki.project import project_id_for, repo_map
@@ -68,6 +68,58 @@ class ScanResult:
             "truncated": self.handle.truncated,
             "skippedSensitive": self.handle.skipped_sensitive,
         }
+
+
+@dataclass
+class Staleness:
+    """Whether the wiki still describes the checkout it was built from.
+
+    ``known`` is the field that matters. A wiki whose staleness cannot be
+    determined — the checkout is not a repository, the host has no git bridge,
+    the commit it was built at was never recorded — must not be *badged* as
+    current, because "no badge" reads as "up to date" and that is a claim we
+    cannot make. It is also not badged as stale, which would send the user into
+    a re-scan that changes nothing.
+    """
+
+    known: bool = False
+    stale: bool = False
+    #: Repo-relative paths that moved since the scan. Empty when not stale.
+    changed: list[str] = field(default_factory=list)
+    #: Why staleness is unknown. Empty when ``known``.
+    reason: str = ""
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "known": self.known,
+            "stale": self.stale,
+            "changedCount": len(self.changed),
+            "changed": self.changed[:50],
+            "reason": self.reason,
+        }
+
+
+async def staleness(result: ScanResult) -> Staleness:
+    """Compare the checkout now against the commit the wiki was built at.
+
+    This is the one caller that must *not* use
+    :func:`repowiki.ingest.git_diff.changed_paths_since`: that helper collapses
+    "the host could not answer" into the same empty set as "nothing changed",
+    which is exactly the distinction a staleness badge is made of.
+
+    The ref comes from the host at acquire time, so it is known-resolvable —
+    which is what makes an empty diff here mean "unchanged" rather than
+    "unknown ref".
+    """
+    ref = result.handle.head_ref
+    if not ref:
+        return Staleness(reason="the checkout reported no commit to compare against")
+    try:
+        changed = await changed_since(result.handle, ref)
+    except Exception as exc:  # noqa: BLE001 — unknown, not stale, and say so
+        logger.warning("staleness check failed for %s: %s", result.project_id, exc)
+        return Staleness(reason=f"{type(exc).__name__}: {exc}")
+    return Staleness(known=True, stale=bool(changed), changed=sorted(changed))
 
 
 def spec_for(source: str) -> dict[str, Any]:

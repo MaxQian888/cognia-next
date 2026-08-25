@@ -72,7 +72,7 @@ def build_panel(
     pages: list[dict[str, Any]],
     active_page: dict[str, Any] | None,
     project_root: str = "",
-    stale: bool = False,
+    staleness: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
     projects: list[dict[str, Any]] | None = None,
     empty_label: str = "No wiki yet — run a scan to build one.",
@@ -85,6 +85,20 @@ def build_panel(
     """
     warnings = warnings or []
     projects = projects or []
+    # Three states, not two. `known and not stale` is the only one that earns
+    # silence; an unknown answer has to say so, because an absent badge is read
+    # as "current" and that is precisely the claim we cannot make.
+    known = bool((staleness or {}).get("known"))
+    stale = known and bool((staleness or {}).get("stale"))
+    unknown = staleness is not None and not known
+    show_rescan = stale or unknown
+    # Why the check could not be answered goes in the banner, not on the badge.
+    # A hover has no touch equivalent and A2UI has no tooltip field, so a
+    # reason attached to the Badge would be a string nothing ever renders —
+    # which is how a diagnostic becomes decoration.
+    reason = str((staleness or {}).get("reason") or "").strip()
+    if unknown and reason:
+        warnings = [*warnings, f"Freshness unknown: {reason}"]
 
     root_children = ["header"]
     if warnings:
@@ -101,7 +115,7 @@ def build_panel(
         {
             "id": "header",
             "component": "Row",
-            "children": _header_children(projects, stale),
+            "children": _header_children(projects, show_rescan),
             "gap": 8,
             "align": "center",
         },
@@ -156,13 +170,20 @@ def build_panel(
                 "action": ACTION_SELECT_PROJECT,
             }
         )
-    if stale:
+    if show_rescan:
+        changed_count = int((staleness or {}).get("changedCount") or 0)
         components.append(
             {
                 "id": "stale",
                 "component": "Badge",
-                "text": "Out of date",
-                "variant": "destructive",
+                "text": (
+                    f"Out of date · {changed_count} changed"
+                    if stale and changed_count
+                    else "Out of date"
+                    if stale
+                    else "Freshness unknown"
+                ),
+                "variant": "destructive" if stale else "secondary",
             }
         )
         components.append(
@@ -190,7 +211,7 @@ def build_panel(
     return components
 
 
-def _header_children(projects: list[dict[str, Any]], stale: bool) -> list[str]:
+def _header_children(projects: list[dict[str, Any]], show_rescan: bool) -> list[str]:
     """Title, then the repository picker, then the staleness pair.
 
     Warnings are deliberately not here: an Alert wedged into a header Row next
@@ -200,6 +221,6 @@ def _header_children(projects: list[dict[str, Any]], stale: bool) -> list[str]:
     children = ["title"]
     if projects:
         children.append("project-picker")
-    if stale:
+    if show_rescan:
         children.extend(["stale", "rescan"])
     return children

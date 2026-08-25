@@ -47,15 +47,37 @@ upgrade in place.
 
 ## Tools
 
-| Tool                  | What it does                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| `repowiki_scan`       | Acquire, ingest, analyse, build. `since` re-analyses only modules with changed files. |
-| `repowiki_map`        | Files ranked by dependency PageRank. No model calls.                                  |
-| `repowiki_get_page`   | One page, as markdown.                                                                |
-| `repowiki_search`     | Hybrid TF-IDF + BM25 over code and pages. Returns cited excerpts.                     |
-| `repowiki_export`     | Write the wiki to disk.                                                               |
-| `repowiki_list`       | Repositories scanned this session.                                                    |
-| `repowiki_project_id` | Resolve a source to its stable id without scanning.                                   |
+| Tool                     | What it does                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| `repowiki_scan`          | Acquire, ingest, analyse, build. `since` re-analyses only modules with changed files. |
+| `repowiki_map`           | Files ranked by dependency PageRank. No model calls.                                  |
+| `repowiki_get_page`      | One page, as markdown.                                                                |
+| `repowiki_search`        | Hybrid TF-IDF + BM25 over code and pages. Returns cited excerpts.                     |
+| `repowiki_export`        | Write the wiki to disk.                                                               |
+| `repowiki_list`          | Repositories scanned this session.                                                    |
+| `repowiki_project_id`    | Resolve a source to its stable id without scanning.                                   |
+| `repowiki_build_panel`   | Build the reader panel's surface. Called by the host when the panel is shown.         |
+| `repowiki_panel_context` | Grounding text for the side conversation. Called by the host at send time.            |
+
+## Panels
+
+Two declarative context panels, neither of which hands the host any JavaScript
+(ADR-0145):
+
+- **`kind: "a2ui"`** — the reader. A `Tree` outline, a `Markdown` body, and
+  citations routed back here so a click opens the project editor at the line.
+- **`kind: "chat"`** — a side conversation grounded in a few KB: the overview,
+  the page list, the top of the reading order, and the instruction to call
+  `repowiki_search` for anything else.
+
+The reader badges whether the wiki still matches the checkout, and that badge
+has **three** states rather than two. A freshness check that cannot be answered
+— not a repository, no git bridge, no commit recorded at scan time — renders
+identically to a current wiki unless it says so, so "Freshness unknown" is its
+own muted badge and still offers the rescan. The check runs when the panel
+opens, when it switches repository, and after a rescan; the side conversation
+reads the same answer, because a model answering from a stale wiki without
+saying so is the same defect as a badge that never appears.
 
 ## Tests
 
@@ -63,7 +85,7 @@ upgrade in place.
 pnpm plugin:repowiki:test
 ```
 
-202 tests. Upstream shipped 164; the rest came from rewriting the suites the
+224 tests. Upstream shipped 164; the rest came from rewriting the suites the
 layer swap invalidated rather than deleting them — the properties they pinned
 (project-id determinism, the "empty changed-set means re-analyse everything"
 contract, the PageRank ranking) all survive the port, only their transports

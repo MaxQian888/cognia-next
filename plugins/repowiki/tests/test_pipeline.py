@@ -15,7 +15,7 @@ import pytest
 
 from repowiki.config import Config
 from repowiki.host import HostBridge, configure_paths, set_host
-from repowiki.pipeline import build_index, reading_order, scan, spec_for
+from repowiki.pipeline import build_index, reading_order, scan, spec_for, staleness
 
 
 def _write_repo(root):
@@ -31,8 +31,21 @@ def _write_repo(root):
 class FakeHost(HostBridge):
     """A host that serves one local checkout and a canned model."""
 
-    def __init__(self, root, *, entries=None, changed=None, truncated=False, skipped=0):
+    def __init__(
+        self,
+        root,
+        *,
+        entries=None,
+        changed=None,
+        truncated=False,
+        skipped=0,
+        head_ref="c0ffee",
+        diff_raises=None,
+    ):
         self.root = str(root)
+        self._head_ref = head_ref
+        self._diff_raises = diff_raises
+        self.diff_refs: list[str] = []
         self._entries = entries
         self._changed = changed or []
         self._truncated = truncated
@@ -63,7 +76,10 @@ class FakeHost(HostBridge):
 
     async def workspace_acquire(self, spec):
         self.specs.append(spec)
-        return {"root": self.root, "origin": "local-path", "ephemeral": False}
+        acquired = {"root": self.root, "origin": "local-path", "ephemeral": False}
+        if self._head_ref:
+            acquired["headRef"] = self._head_ref
+        return acquired
 
     async def workspace_walk(self, handle, options):
         entries = self._entries
@@ -78,6 +94,9 @@ class FakeHost(HostBridge):
         }
 
     async def workspace_changed_since(self, handle, ref):
+        self.diff_refs.append(ref)
+        if self._diff_raises:
+            raise self._diff_raises
         if ref == "unknown-ref":
             raise RuntimeError("bad revision")
         return self._changed
@@ -186,3 +205,72 @@ async def test_index_reuse_can_be_refused(repo):
     await build_index(result, config=Config())
     rebuilt = await build_index(result, config=Config(), reuse=False)
     assert rebuilt.chunks
+
+
+# ---------------------------------------------------------------------------
+# Staleness
+# ---------------------------------------------------------------------------
+#
+# The badge these back is the one thing in the panel that makes a claim about
+# code the wiki does not contain, so all three of its states are pinned. The
+# failure they exist to prevent is the quiet one: an unanswerable check that
+# renders identically to a fresh wiki.
+
+
+async def test_a_scan_records_the_commit_it_was_built_at(repo):
+    set_host(FakeHost(repo, head_ref="abc123"))
+    result = await scan(str(repo), config=Config())
+    # Without this the freshness check has no ref, and an empty diff would be
+    # indistinguishable from a diff nobody could compute.
+    assert result.handle.head_ref == "abc123"
+
+
+async def test_no_changes_since_the_recorded_commit_reads_as_current(repo):
+    host = FakeHost(repo, changed=[])
+    set_host(host)
+    result = await scan(str(repo), config=Config())
+
+    answer = await staleness(result)
+    assert answer.known and not answer.stale
+    # It asked about the scan's own commit, not HEAD or an empty string.
+    assert host.diff_refs[-1] == result.handle.head_ref
+
+
+async def test_changed_files_since_the_recorded_commit_read_as_stale(repo):
+    set_host(FakeHost(repo, changed=["core/engine.py", "README.md"]))
+    result = await scan(str(repo), config=Config())
+
+    answer = await staleness(result)
+    assert answer.known and answer.stale
+    assert answer.changed == ["README.md", "core/engine.py"]
+    assert answer.to_summary()["changedCount"] == 2
+
+
+async def test_a_checkout_with_no_recorded_commit_is_unknown_not_current(repo):
+    # A directory that is not a repository, or a host with no git bridge. The
+    # answer must not be "current" — nobody checked.
+    set_host(FakeHost(repo, head_ref=""))
+    result = await scan(str(repo), config=Config())
+
+    answer = await staleness(result)
+    assert not answer.known
+    assert not answer.stale
+    assert answer.reason
+
+
+async def test_a_failed_diff_is_unknown_rather_than_swallowed_into_current(repo):
+    # `changed_paths_since` deliberately collapses this into an empty set for
+    # the incremental path. Staleness must not inherit that decision, or a host
+    # that cannot answer would badge every wiki as up to date.
+    set_host(FakeHost(repo, diff_raises=RuntimeError("no git bridge")))
+    result = await scan(str(repo), config=Config())
+
+    answer = await staleness(result)
+    assert not answer.known
+    assert "no git bridge" in answer.reason
+
+
+async def test_the_staleness_summary_is_serialisable_because_it_crosses_the_wire(repo):
+    set_host(FakeHost(repo, changed=["a.py"]))
+    result = await scan(str(repo), config=Config())
+    json.dumps((await staleness(result)).to_summary())

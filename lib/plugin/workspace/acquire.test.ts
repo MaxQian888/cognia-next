@@ -12,6 +12,9 @@ function deps(overrides: Partial<AcquireDeps> = {}): AcquireDeps {
     repoCacheDir: async (segments) => `/plugins/demo/data/repos/${segments.join("/")}`,
     removeRepoCache: async () => true,
     clone: (async (_url: string, destination: string) => destination) as AcquireDeps["clone"],
+    // Default to "not a repository" so the handle shape stays exact; the
+    // headRef tests below opt in.
+    headOf: async () => null,
     ...overrides,
   }
 }
@@ -133,6 +136,60 @@ describe("acquireWorkspace", () => {
     await expect(
       acquireWorkspace({ kind: "git-url", url: "/home/u/project" }, deps())
     ).rejects.toThrow(/is a path, not a remote/)
+  })
+
+  it("records the commit a local checkout is at", async () => {
+    // Without this, `changedSince` has no ref to compare against and an empty
+    // diff cannot be told apart from a diff nobody could compute.
+    const handle = await acquireWorkspace(
+      { kind: "current-project" },
+      deps({ headOf: async () => "abc123" })
+    )
+    expect(handle.headRef).toBe("abc123")
+  })
+
+  it("records the commit a clone landed on", async () => {
+    const seen: string[] = []
+    const handle = await acquireWorkspace(
+      { kind: "git-url", url: "https://github.com/o/r.git" },
+      deps({
+        headOf: async (root: string) => {
+          seen.push(root)
+          return "deadbee"
+        },
+      })
+    )
+    expect(handle.headRef).toBe("deadbee")
+    // Asked about the checkout, not the user's open project.
+    expect(seen).toEqual(["/plugins/demo/data/repos/github.com/o/r"])
+  })
+
+  it("omits headRef rather than failing when the path is not a repository", async () => {
+    const handle = await acquireWorkspace(
+      { kind: "current-project" },
+      deps({ headOf: async () => null })
+    )
+    expect(handle).toEqual({
+      root: "/home/u/project",
+      origin: "current-project",
+      ephemeral: false,
+    })
+    expect("headRef" in handle).toBe(false)
+  })
+
+  it("still hands back the checkout when the git bridge throws", async () => {
+    // A directory we can walk and read is worth having even with no git. What
+    // is lost is the ability to ask "what changed since" — not the workspace.
+    const handle = await acquireWorkspace(
+      { kind: "current-project" },
+      deps({
+        headOf: async () => {
+          throw new Error("no git bridge")
+        },
+      })
+    )
+    expect(handle.root).toBe("/home/u/project")
+    expect(handle.headRef).toBeUndefined()
   })
 
   it("reports a missing git bridge instead of returning an empty root", async () => {

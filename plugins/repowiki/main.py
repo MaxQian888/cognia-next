@@ -31,7 +31,7 @@ from repowiki.panel import (
     ACTION_SELECT_PROJECT,
     build_panel,
 )
-from repowiki.pipeline import ScanResult, build_index, reading_order, scan
+from repowiki.pipeline import ScanResult, build_index, reading_order, scan, staleness
 from repowiki.project import project_id_for
 
 #: project_id -> the most recent scan. Bounded by how many repositories the
@@ -284,9 +284,31 @@ def repowiki_project_id(source: str) -> dict:
 
 _PANEL_STATE: dict[str, dict] = {}
 
+#: Last freshness answer per project id. Keyed by project, not by surface: two
+#: panels on the same wiki are looking at the same checkout, and asking git the
+#: same question twice would be the only difference.
+_FRESHNESS: dict[str, dict] = {}
+
 
 def _panel_state(surface_id: str) -> dict:
     return _PANEL_STATE.setdefault(surface_id, {"projectId": "", "pageId": "index"})
+
+
+async def _refresh_freshness(project_id: str) -> dict | None:
+    """Recompute and cache whether ``project_id``'s wiki is still current.
+
+    Called when a panel opens, when it switches repository, and after a rescan
+    — the three moments the user is actually looking at the badge. Not on every
+    page click: a git diff per click buys nothing, because reading page 4 of a
+    wiki cannot change the repository it was built from.
+    """
+    result = _SCANS.get(project_id)
+    if result is None:
+        _FRESHNESS.pop(project_id, None)
+        return None
+    summary = (await staleness(result)).to_summary()
+    _FRESHNESS[project_id] = summary
+    return summary
 
 
 def _project_for_resource(resource: dict | None) -> str:
@@ -331,6 +353,7 @@ async def _push_panel(surfaceId: str, *, create: bool = False) -> dict:
             {"projectId": pid, "projectName": scan_result.wiki.project_name}
             for pid, scan_result in sorted(_SCANS.items())
         ],
+        staleness=_FRESHNESS.get(state["projectId"]) if result else None,
     )
 
     if create:
@@ -356,6 +379,7 @@ async def repowiki_build_panel(surfaceId: str, resource: dict | None = None) -> 
     state = _panel_state(surfaceId)
     if not state["projectId"]:
         state["projectId"] = _project_for_resource(resource)
+    await _refresh_freshness(state["projectId"])
     return await _push_panel(surfaceId, create=True)
 
 
@@ -399,6 +423,23 @@ def repowiki_panel_context(resource: dict | None = None) -> dict:
         "Call `repowiki_search` for anything else; it returns cited excerpts. "
         "Call `repowiki_get_page` with a page id above to read a full page.",
     ]
+    # A model answering from a wiki that no longer matches the code, without
+    # saying so, is the same defect as a badge that never appears. The panel
+    # already computed this; reading the cache costs nothing.
+    freshness = _FRESHNESS.get(project_id)
+    if freshness and freshness.get("stale"):
+        lines.insert(
+            1,
+            f"> This wiki is out of date: {freshness.get('changedCount', 0)} file(s) "
+            "changed since it was built. Say so when an answer depends on code "
+            "that may have moved.",
+        )
+    elif freshness and not freshness.get("known"):
+        lines.insert(
+            1,
+            "> Whether this wiki is current could not be determined "
+            f"({freshness.get('reason') or 'no reason reported'}).",
+        )
     return {"text": "\n".join(lines), "projectId": project_id}
 
 
@@ -426,11 +467,13 @@ async def repowiki_panel_action(payload):
     elif action == ACTION_SELECT_PROJECT:
         state["projectId"] = str(data.get("value") or data.get("nodeId") or "")
         state["pageId"] = "index"
+        await _refresh_freshness(state["projectId"])
         await _push_panel(surface_id)
     elif action == ACTION_RESCAN:
         result = _SCANS.get(state["projectId"])
         if result:
             await repowiki_scan(result.handle.root)
+            await _refresh_freshness(state["projectId"])
             await _push_panel(surface_id)
     elif action == ACTION_OPEN_CITATION:
         path = str(data.get("path") or "")

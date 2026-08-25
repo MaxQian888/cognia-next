@@ -38,6 +38,11 @@ Three problems the same investigation turned up, none of them Python-specific:
   checkout. Three mechanisms could produce one (`cloneToWorkspace`, `git_clone`,
   the task-workspace worktree manager), they returned three incompatible
   handles, and none was reachable from a plugin.
+- **A checkout could not say what commit it was at.** `PluginWorkspaceHandle`
+  now carries `headRef`, filled at acquire time. Without it `changedSince` is
+  unusable for anything but the incremental path: an empty diff cannot be told
+  apart from a diff the host could not compute, so "nothing changed" and
+  "nobody checked" are the same answer.
 - **No command could enumerate a repository.** `fs_list_workspace_dir` is
   depth-1 by design (the project tree loads lazily); `fs_search_workspace` caps
   at 200 results and depth 12. There was no "every unignored file under this
