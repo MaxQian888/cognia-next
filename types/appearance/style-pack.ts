@@ -109,7 +109,7 @@ export const STYLE_PACKS: Record<StylePackId, StylePackTokens> = {
     density: "compact",
     microLabel: "mono-upper",
     letterSpacingEm: -0.005,
-    composerSkin: "dense",
+    composerSkin: "sharp",
   },
 }
 

@@ -220,6 +220,10 @@
       "focus": {
         "label": "Minimal",
         "hint": "Just the text and the model. Everything else folds behind “⋯”."
+      },
+      "sharp": {
+        "hint": "Square box, square send button, monospace input. Default under the Sharp style pack.",
+        "label": "Sharp"
       }
     }
   }

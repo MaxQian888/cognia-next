@@ -66,6 +66,7 @@ import {
   toolbarSitsInBox,
   type ResolvedComposerSkin,
 } from "@/lib/chat/composer-skin"
+import { resolveStylePack } from "@/types/appearance/style-pack"
 import { buildLinkContextBlocks, mergeContextBlocks } from "@/lib/chat/link-context"
 import {
   AlertDialog,
@@ -2551,13 +2552,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
   const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  const stylePack = useSettingsStore((s) => s.settings?.stylePack)
   const isMobileShell = usePlatform() === "mobile"
-  // One resolver owns preset ← overrides ← mobile floors, so the box never has
-  // to reason about any of it. `classic` (the default) resolves to today's
-  // exact geometry and emits no variables at all.
+  // One resolver owns pack default ← preset ← overrides ← mobile floors, so the
+  // box never has to reason about any of it. `classic` (the default under the
+  // Soft pack) resolves to today's exact geometry and emits no variables at
+  // all. The pack only supplies the DEFAULT: an explicit skin choice still wins
+  // (ADR-0148).
+  const packSkin = resolveStylePack(stylePack).composerSkin
   const skin = useMemo(
-    () => resolveComposerSkin(composerBehavior, { isMobile: isMobileShell }),
-    [composerBehavior, isMobileShell]
+    () => resolveComposerSkin(composerBehavior, { isMobile: isMobileShell, packSkin }),
+    [composerBehavior, isMobileShell, packSkin]
   )
   const compactLayout = skin.compactLayout
   // `compactLayout` (the legacy desktop setting) has always put the row inside

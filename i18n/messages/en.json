@@ -29619,6 +29619,10 @@
           "full": {
             "hint": "Every control spelled out inline, with cost and context on their own rail.",
             "label": "Detailed"
+          },
+          "sharp": {
+            "hint": "Square box, square send button, monospace input. Default under the Sharp style pack.",
+            "label": "Sharp"
           }
         },
         "title": "Composer style"

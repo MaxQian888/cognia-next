@@ -109,7 +109,17 @@ describe("mobile floors", () => {
       { isMobile: true }
     )
     expect(skin.padXPx).toBeGreaterThanOrEqual(10)
-    expect(skin.radiusPx).toBeGreaterThanOrEqual(12)
+  })
+
+  /**
+   * There is deliberately no radius floor (ADR-0148). Touch size is a
+   * usability red line; corner radius is aesthetics, and a 12px floor made the
+   * phone composer the only rounded object left under the Sharp pack.
+   */
+  it("lets a square composer stay square on a phone", () => {
+    const skin = resolveComposerSkin({ skin: "sharp" }, { isMobile: true })
+    expect(skin.radiusPx).toBe(0)
+    expect(skin.sendSizePx).toBeGreaterThanOrEqual(MOBILE_MIN_TOUCH_PX)
   })
 
   it("leaves a skin that already clears the floor alone", () => {
@@ -162,9 +172,27 @@ describe("skin proposes, width disposes", () => {
 })
 
 describe("the table stays coherent", () => {
-  it("gives every skin a distinct toolbar arrangement", () => {
-    const layouts = COMPOSER_SKIN_IDS.map((id) => COMPOSER_SKINS[id].toolbarLayout)
-    expect(new Set(layouts).size).toBe(COMPOSER_SKIN_IDS.length)
+  /**
+   * There are six skins and five toolbar arrangements, so "one layout each" is
+   * no longer expressible — `sharp` shares `rail` with `dense`, differing in
+   * geometry rather than in where the status row sits. The two invariants that
+   * actually matter survive: every arrangement is reachable, and no two skins
+   * are the same skin under different names.
+   */
+  it("reaches every toolbar arrangement", () => {
+    const layouts = new Set(COMPOSER_SKIN_IDS.map((id) => COMPOSER_SKINS[id].toolbarLayout))
+    for (const layout of ["detached", "embedded", "rail", "expanded", "folded"] as const) {
+      expect(layouts.has(layout)).toBe(true)
+    }
+  })
+
+  it("keeps every skin distinct from every other", () => {
+    const seen = new Map<string, string>()
+    for (const id of COMPOSER_SKIN_IDS) {
+      const key = JSON.stringify(COMPOSER_SKINS[id])
+      expect(seen.get(key)).toBeUndefined()
+      seen.set(key, id)
+    }
   })
 
   it("emits a complete, unit-bearing variable set for every non-classic skin", () => {

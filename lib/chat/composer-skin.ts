@@ -23,7 +23,7 @@
  */
 
 /** Stable ids. `classic` is the default and must stay first. */
-export const COMPOSER_SKIN_IDS = ["classic", "airy", "dense", "full", "focus"] as const
+export const COMPOSER_SKIN_IDS = ["classic", "airy", "dense", "full", "focus", "sharp"] as const
 
 export type ComposerSkinId = (typeof COMPOSER_SKIN_IDS)[number]
 
@@ -117,6 +117,21 @@ export const COMPOSER_SKINS: Record<ComposerSkinId, ComposerSkinTokens> = {
     mono: false,
     toolbarLayout: "folded",
   },
+  // The Sharp style pack's composer (ADR-0148). `classic` is preserved by
+  // construction — it renders literal Tailwind and ignores overrides — so a
+  // squared-off app would otherwise keep a `rounded-2xl` box with a circular
+  // send button in the one place people look most. This is the pack's default,
+  // not a forced choice: picking any other skin still wins.
+  sharp: {
+    radiusPx: 0,
+    padXPx: 8,
+    padYPx: 8,
+    gapPx: 8,
+    sendSizePx: 32,
+    sendShape: "rounded",
+    mono: true,
+    toolbarLayout: "rail",
+  },
 }
 
 /**
@@ -168,8 +183,12 @@ export interface ResolvedComposerSkin extends ComposerSkinTokens {
  * corners and its typography but not its 26px send button.
  */
 export const MOBILE_MIN_TOUCH_PX = 44
-/** Corners below this read as a hairline seam at phone density. */
-const MOBILE_MIN_RADIUS_PX = 12
+/**
+ * Deliberately no radius floor (ADR-0148). Touch SIZE is a usability red line
+ * and stays enforced below; corner radius is pure aesthetics, and holding a
+ * 12px floor made the phone composer the only rounded object left on a squared
+ * screen. A square button is no harder to hit than a round one.
+ */
 const MOBILE_MIN_PAD_PX = 10
 
 /** Clamp so a hand-edited settings row cannot produce an unusable box. */
@@ -199,9 +218,13 @@ function isSkinId(value: unknown): value is ComposerSkinId {
  */
 export function resolveComposerSkin(
   settings: ComposerSkinSettings | undefined,
-  opts: { isMobile: boolean }
+  opts: { isMobile: boolean; packSkin?: ComposerSkinId }
 ): ResolvedComposerSkin {
-  const id = isSkinId(settings?.skin) ? settings.skin : DEFAULT_COMPOSER_SKIN
+  // The active style pack supplies the default; an explicit user choice still
+  // wins (ADR-0148). `packSkin` is optional so every existing caller keeps
+  // resolving to `classic` exactly as before.
+  const fallback = isSkinId(opts.packSkin) ? opts.packSkin : DEFAULT_COMPOSER_SKIN
+  const id = isSkinId(settings?.skin) ? settings.skin : fallback
   const preset = COMPOSER_SKINS[id]
   const isClassic = id === "classic"
 
@@ -220,7 +243,7 @@ export function resolveComposerSkin(
   }
 
   const o = settings?.skinOverrides ?? {}
-  let radiusPx = clamp(o.radiusPx ?? preset.radiusPx, RADIUS_RANGE)
+  const radiusPx = clamp(o.radiusPx ?? preset.radiusPx, RADIUS_RANGE)
   let padXPx = clamp(o.padXPx ?? preset.padXPx, PAD_RANGE)
   let padYPx = clamp(o.padYPx ?? preset.padYPx, PAD_RANGE)
   let sendSizePx = preset.sendSizePx
@@ -229,7 +252,6 @@ export function resolveComposerSkin(
   if (opts.isMobile) {
     // Floors, not overrides: a skin that already exceeds them is left alone.
     sendSizePx = Math.max(sendSizePx, MOBILE_MIN_TOUCH_PX)
-    radiusPx = Math.max(radiusPx, MOBILE_MIN_RADIUS_PX)
     padXPx = Math.max(padXPx, MOBILE_MIN_PAD_PX)
     padYPx = Math.max(padYPx, MOBILE_MIN_PAD_PX)
     // `expanded` lays every chip out inline with its label; a phone has no room
