@@ -1,0 +1,86 @@
+{
+  "id": "cognia-repowiki",
+  "name": "RepoWiki",
+  "version": "0.1.0",
+  "description": "Generate a browsable wiki for any repository — dependency graph, per-module analysis, Mermaid diagrams, and cited search.",
+  "type": "python",
+  "capabilities": ["tools"],
+  "pythonMain": "main.py",
+  "pythonVenv": "isolated",
+  "pythonDependencies": ["pydantic>=2.0", "aiosqlite>=0.20.0", "networkx>=3.0"],
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0",
+    "python": ">=3.10"
+  },
+  "permissions": [
+    "python:execute",
+    "agent:control",
+    "filesystem:read",
+    "filesystem:write",
+    "git:read"
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "model": {
+        "type": "string",
+        "title": "Model",
+        "description": "Model id for the analysis passes. Empty lets the host choose.",
+        "default": ""
+      },
+      "language": {
+        "type": "string",
+        "title": "Output language",
+        "description": "Language the wiki is written in.",
+        "enum": ["en", "zh", "ja", "ko"],
+        "default": "en"
+      },
+      "concurrency": {
+        "type": "number",
+        "title": "Concurrent module analyses",
+        "description": "How many modules are analysed at once. The host's own outbound gate still applies.",
+        "default": 5
+      },
+      "max_files": {
+        "type": "number",
+        "title": "File cap",
+        "description": "Stop scanning after this many files.",
+        "default": 1000
+      },
+      "max_context_tokens": {
+        "type": "number",
+        "title": "Context budget",
+        "description": "Token budget for the project context sent with each pass. 0 means unlimited.",
+        "default": 32000
+      },
+      "rag_top_k": {
+        "type": "number",
+        "title": "Search results",
+        "description": "How many excerpts a search returns by default.",
+        "default": 5
+      },
+      "rag_index_wiki": {
+        "type": "boolean",
+        "title": "Search the generated pages too",
+        "description": "Index the wiki's own prose alongside the code, so a question about the architecture page hits the page.",
+        "default": true
+      }
+    }
+  },
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
+    }
+  }
+}

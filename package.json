@@ -203,6 +203,7 @@
     "scripts:test:plugin": "node --test scripts/plugin/*.test.mjs scripts/scaffold/*.test.mjs",
     "scripts:test:sync": "node --test scripts/sync/*.test.mjs",
     "sdk:python:test": "uv run --project plugin-sdk/python pytest plugin-sdk/python",
+    "plugin:repowiki:test": "uv run --project plugins/repowiki --with pytest --with pytest-asyncio python -m pytest plugins/repowiki/tests",
     "sdk:rust:test": "cargo test --locked -p cognia-plugin-runtime",
     "sdk:scaffold:test": "node scripts/plugin/test-author-scaffold.mjs",
     "sdk:ts:build": "pnpm --dir packages/provider-types run build && pnpm --dir packages/plugin-sdk run build && pnpm --dir packages/agent run build",

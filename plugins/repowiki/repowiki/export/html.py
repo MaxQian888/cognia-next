@@ -1,0 +1,206 @@
+"""Export the wiki as one self-contained HTML file.
+
+Genuinely self-contained, which upstream's was not: it pulled Mermaid from
+jsDelivr and hid every page but one behind an `onclick` handler, so an export
+opened offline showed one page and no diagrams. A generated artifact that stops
+working without a network is not an artifact.
+
+So: no scripts and no external requests at all. Every page is stacked into one
+long document with anchor navigation — Ctrl-F reaches the whole wiki, and it
+prints. Mermaid blocks keep their source in a `<pre data-mermaid>`, which reads
+as the diagram it is and is the hook a host-side renderer would upgrade in
+place; rendering it here would need a browser, and this file is written by a
+Python process.
+"""
+
+from __future__ import annotations
+
+import html
+from pathlib import Path
+
+from repowiki.core.wiki_builder import Wiki
+
+
+def export_html(wiki: Wiki, output_path: str | Path) -> None:
+    """generate a single self-contained HTML file with sidebar navigation."""
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    pages_html = []
+    nav_html = []
+
+    for item in wiki.sidebar:
+        if item.page_id:
+            nav_html.append(
+                f'<a class="nav-item" href="#page-{html.escape(item.page_id)}">'
+                f'{html.escape(item.title)}</a>'
+            )
+        else:
+            nav_html.append(f'<div class="nav-group">{html.escape(item.title)}</div>')
+        for child in item.children:
+            nav_html.append(
+                f'<a class="nav-item nav-child" href="#page-{html.escape(child.page_id)}">'
+                f'{html.escape(child.title)}</a>'
+            )
+
+    for page in wiki.pages:
+        content = _markdown_to_html(page.content)
+        pages_html.append(
+            f'<section id="page-{html.escape(page.id)}" class="wiki-page">{content}</section>'
+        )
+
+    template = _HTML_TEMPLATE.format(
+        title=html.escape(wiki.project_name),
+        nav="".join(nav_html),
+        pages="".join(pages_html),
+    )
+
+    out.write_text(template, encoding="utf-8")
+
+
+def _markdown_to_html(md: str) -> str:
+    """minimal markdown to HTML conversion (no dependencies)."""
+    import re
+    lines = md.split("\n")
+    result = []
+    in_code = False
+    code_lang = ""
+    code_lines: list[str] = []
+    list_type: str | None = None  # "ul", "ol", or None when not inside a list
+
+    def close_list() -> None:
+        nonlocal list_type
+        if list_type is not None:
+            result.append(f"</{list_type}>")
+            list_type = None
+
+    for line in lines:
+        # fenced code blocks
+        if line.startswith("```"):
+            if in_code:
+                code = html.escape("\n".join(code_lines))
+                if code_lang == "mermaid":
+                    # The source, labelled — not a placeholder for a script
+                    # that will never load. `data-mermaid` is the upgrade hook.
+                    result.append(
+                        '<figure class="mermaid"><figcaption>Diagram (Mermaid source)'
+                        f'</figcaption><pre data-mermaid="1"><code>{code}</code></pre></figure>'
+                    )
+                else:
+                    result.append(f'<pre><code class="language-{code_lang}">{code}</code></pre>')
+                code_lines = []
+                in_code = False
+            else:
+                close_list()
+                in_code = True
+                code_lang = line[3:].strip() or "text"
+            continue
+
+        if in_code:
+            code_lines.append(line)
+            continue
+
+        # list items: wrap consecutive items in a single <ul>/<ol> so ordered
+        # lists keep their numbers and the markup stays valid HTML
+        if line.startswith("- "):
+            if list_type != "ul":
+                close_list()
+                result.append("<ul>")
+                list_type = "ul"
+            result.append(f"<li>{_inline_md(line[2:])}</li>")
+            continue
+        if re.match(r"^\d+\. ", line):
+            if list_type != "ol":
+                close_list()
+                result.append("<ol>")
+                list_type = "ol"
+            text = re.sub(r"^\d+\. ", "", line)
+            result.append(f"<li>{_inline_md(text)}</li>")
+            continue
+
+        # any other line ends an open list
+        close_list()
+
+        # headings
+        if line.startswith("# "):
+            result.append(f"<h1>{_inline_md(line[2:])}</h1>")
+        elif line.startswith("## "):
+            result.append(f"<h2>{_inline_md(line[3:])}</h2>")
+        elif line.startswith("### "):
+            result.append(f"<h3>{_inline_md(line[4:])}</h3>")
+        elif line.startswith("> "):
+            result.append(f"<blockquote>{_inline_md(line[2:])}</blockquote>")
+        elif line.strip() == "":
+            result.append("<br>")
+        else:
+            result.append(f"<p>{_inline_md(line)}</p>")
+
+    close_list()
+    return "\n".join(result)
+
+
+def _inline_md(text: str) -> str:
+    """handle inline markdown: bold, code, links."""
+    import re
+    text = html.escape(text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"`(.+?)`", r"<code>\1</code>", text)
+    text = re.sub(r"\[(.+?)\]\((.+?)\)", r'<a href="\2">\1</a>', text)
+    return text
+
+
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} - RepoWiki</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: flex; height: 100vh; color: #1a1a1a; background: #fff; }}
+.sidebar {{ width: 260px; border-right: 1px solid #e5e7eb; padding: 16px;
+  overflow-y: auto; flex-shrink: 0; background: #fafafa; }}
+.sidebar h2 {{ font-size: 16px; margin-bottom: 12px; color: #111; }}
+.nav-item {{ display: block; padding: 6px 12px; color: #374151; text-decoration: none;
+  border-radius: 6px; font-size: 14px; cursor: pointer; }}
+.nav-item:hover {{ background: #e5e7eb; }}
+.nav-item.active {{ background: #dbeafe; color: #1d4ed8; font-weight: 500; }}
+.nav-child {{ padding-left: 28px; font-size: 13px; }}
+.nav-group {{ padding: 8px 12px 4px; font-size: 12px; font-weight: 600;
+  text-transform: uppercase; color: #6b7280; margin-top: 8px; }}
+.content {{ flex: 1; padding: 32px 48px; overflow-y: auto; max-width: 900px; }}
+h1 {{ font-size: 28px; margin-bottom: 16px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }}
+h2 {{ font-size: 22px; margin: 24px 0 12px; }}
+h3 {{ font-size: 18px; margin: 20px 0 8px; }}
+p {{ margin: 8px 0; line-height: 1.7; }}
+li {{ margin: 4px 0 4px 24px; line-height: 1.6; }}
+blockquote {{ border-left: 3px solid #3b82f6; padding: 8px 16px; margin: 12px 0;
+  background: #eff6ff; color: #1e40af; border-radius: 0 4px 4px 0; }}
+pre {{ background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px;
+  overflow-x: auto; margin: 12px 0; font-size: 13px; line-height: 1.5; }}
+code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }}
+pre code {{ background: none; padding: 0; }}
+strong {{ font-weight: 600; }}
+a {{ color: #2563eb; }}
+.wiki-page {{ scroll-margin-top: 24px; padding-bottom: 40px;
+  border-bottom: 1px solid #e5e7eb; margin-bottom: 40px; }}
+.wiki-page:last-child {{ border-bottom: none; }}
+.mermaid {{ margin: 16px 0; }}
+.mermaid figcaption {{ font-size: 12px; color: #6b7280; margin-bottom: 4px; }}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <h2>{title}</h2>
+  {nav}
+  <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb;
+    font-size: 11px; color: #9ca3af;">
+    Generated by RepoWiki
+  </div>
+</div>
+<div class="content" id="content">
+  {pages}
+</div>
+</body>
+</html>"""

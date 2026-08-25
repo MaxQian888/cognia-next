@@ -48,6 +48,11 @@ junit.xml
 __pycache__/
 *.pyc
 
+# python test-gate leftovers (a plugin's own venv is host-managed at runtime;
+# these are what `uv run` and pytest drop while the gate executes)
+.venv/
+.pytest_cache/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
