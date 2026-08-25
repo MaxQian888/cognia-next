@@ -68,6 +68,7 @@ export const EXEMPTIONS = {
   "lint:fix": "writer — the gate is `lint`",
   "lint:i18n:baseline": "writer — regenerates the i18n baseline",
   "audit:colocated-tests:baseline": "writer — regenerates the co-located-test baseline",
+  "audit:identity-vocabulary:baseline": "writer — regenerates the identity-vocabulary baseline",
   "audit:network-egress:baseline": "writer — regenerates the network-egress allowlist",
   "audit:loading-states:baseline": "writer — regenerates the loading-state baseline",
   "audit:unreachable-components:baseline":
@@ -139,6 +140,7 @@ export const EXEMPTIONS = {
   "audit:ai-elements:test": "covered by scripts:test:gates",
   "audit:hooks:test": "covered by scripts:test:gates",
   "audit:data-governance:test": "covered by scripts:test:gates",
+  "audit:identity-vocabulary:test": "covered by scripts:test:gates",
   "lint:static-export:test": "covered by scripts:test:gates",
   "clean:cache:test": "covered by scripts:test:build",
   "terminal-host:prepare:test": "covered by scripts:test:build",

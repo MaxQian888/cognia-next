@@ -1,0 +1,1006 @@
+{
+  "version": 1,
+  "note": "ADR-0149: pre-existing bare `accountId` / `account_id` occurrences, recorded when the identity-vocabulary gate landed. These counts may only shrink — rename when you touch the file, never add a new bare one. Regenerate with `pnpm audit:identity-vocabulary:baseline` after paying debt down.",
+  "total": 2946,
+  "entries": {
+    "app/servers/detail/page.tsx": {
+      "bareAccountId": 1
+    },
+    "app/servers/page.tsx": {
+      "bareAccountId": 1
+    },
+    "cli/src/cli/durability-command.ts": {
+      "bareAccountId": 3
+    },
+    "cli/src/handoff/host-state-client.ts": {
+      "bareAccountId": 24
+    },
+    "cli/src/serve/account.ts": {
+      "bareAccountId": 6
+    },
+    "cli/src/serve/bridge-client.ts": {
+      "bareAccountId": 5
+    },
+    "cli/src/serve/durability.ts": {
+      "bareAccountId": 7
+    },
+    "cli/src/serve/persistence/backend.ts": {
+      "bareAccountId": 3
+    },
+    "cli/src/serve/persistence/store.ts": {
+      "bareAccountId": 2
+    },
+    "cli/src/serve/protocol.ts": {
+      "bareAccountId": 5
+    },
+    "cli/src/serve/serve-command.ts": {
+      "bareAccountId": 7
+    },
+    "cli/src/tui/commands/registry.ts": {
+      "bareAccountId": 3
+    },
+    "cli/src/tui/commands/types.ts": {
+      "bareAccountId": 1
+    },
+    "cli/src/tui/components/App.tsx": {
+      "bareAccountId": 5
+    },
+    "cli/src/tui/components/app/use-apply-effect.ts": {
+      "bareAccountId": 4
+    },
+    "cli/src/tui/components/overlays/LimitsPanel.tsx": {
+      "bareAccountId": 2
+    },
+    "cli/src/tui/runtime/limits-controller.ts": {
+      "bareAccountId": 1
+    },
+    "cli/src/tui/runtime/limits-data.ts": {
+      "bareAccountId": 5
+    },
+    "cli/src/worker/worker-connect.ts": {
+      "bareAccountId": 1
+    },
+    "components/account/account-manage-dialog.tsx": {
+      "bareAccountId": 2
+    },
+    "components/account/manage/account-list.tsx": {
+      "bareAccountId": 1
+    },
+    "components/account/manage/account-status.ts": {
+      "bareAccountId": 3
+    },
+    "components/account/manage/use-account-switch.ts": {
+      "bareAccountId": 11
+    },
+    "components/account/runtime-target-menu-section.tsx": {
+      "bareAccountId": 13
+    },
+    "components/chat/composer-popover.tsx": {
+      "bareAccountId": 7
+    },
+    "components/chat/header-account-switcher.tsx": {
+      "bareAccountId": 9
+    },
+    "components/desktop/status-bar-usage.tsx": {
+      "bareAccountId": 3
+    },
+    "components/eval/case-list.tsx": {
+      "bareAccountId": 4
+    },
+    "components/eval/eval-lab-workspace.tsx": {
+      "bareAccountId": 8
+    },
+    "components/integrations/integrations-hub.tsx": {
+      "bareAccountId": 3
+    },
+    "components/logging/diagnostics-workspace.tsx": {
+      "bareAccountId": 2
+    },
+    "components/mobile/connection-state-sheets/mobile-paired-servers-sheet.tsx": {
+      "bareAccountId": 2
+    },
+    "components/mobile/pair-onboarding-client.tsx": {
+      "bareAccountId": 13
+    },
+    "components/mobile/pair/paired-step.tsx": {
+      "bareAccountId": 6
+    },
+    "components/onboarding/express-sign-in.tsx": {
+      "bareAccountId": 1
+    },
+    "components/onboarding/steps/provider-step.tsx": {
+      "bareAccountId": 1
+    },
+    "components/performance/perf-captures-tab.tsx": {
+      "bareAccountId": 18
+    },
+    "components/pet/pet-mount.tsx": {
+      "bareAccountId": 2
+    },
+    "components/providers/companion-boot-provider.tsx": {
+      "bareAccountId": 2
+    },
+    "components/providers/companion-outbound-runner-provider.tsx": {
+      "bareAccountId": 11
+    },
+    "components/providers/initializers/anthropic-usage-scheduler-initializer.tsx": {
+      "bareAccountId": 10
+    },
+    "components/providers/initializers/codex-usage-scheduler-initializer.tsx": {
+      "bareAccountId": 4
+    },
+    "components/providers/web-companion-boot-provider.tsx": {
+      "bareAccountId": 2
+    },
+    "components/providers/workflow-runtime-provider.tsx": {
+      "bareAccountId": 1
+    },
+    "components/servers/ops-context.tsx": {
+      "bareAccountId": 29
+    },
+    "components/settings/account/account-overview-section.tsx": {
+      "bareAccountId": 3
+    },
+    "components/settings/characters-section.tsx": {
+      "bareAccountId": 4
+    },
+    "components/settings/connections/forms/wechat-personal-config.tsx": {
+      "bareAccountId": 4
+    },
+    "components/settings/subscription/account-list.tsx": {
+      "bareAccountId": 2
+    },
+    "components/settings/subscription/account-preset-selector.tsx": {
+      "bareAccountId": 5
+    },
+    "components/settings/subscription/account-usage-chips.tsx": {
+      "bareAccountId": 9
+    },
+    "components/settings/subscription/balance-card.tsx": {
+      "bareAccountId": 13
+    },
+    "components/settings/subscription/limits-meters-card.tsx": {
+      "bareAccountId": 16
+    },
+    "components/settings/subscription/provider-quota-panel.tsx": {
+      "bareAccountId": 2
+    },
+    "components/settings/subscription/provider-tab-opencode.tsx": {
+      "bareAccountId": 2
+    },
+    "components/settings/subscription/tabs/overview-tab.tsx": {
+      "bareAccountId": 1
+    },
+    "components/sites/new-site-dialog.tsx": {
+      "bareAccountId": 5
+    },
+    "components/sites/tabs/site-domains-tab.tsx": {
+      "bareAccountId": 1
+    },
+    "components/workflow/editor/inspector/forms/trigger-forms.tsx": {
+      "bareAccountId": 1
+    },
+    "crates/cognia-automation/src/automation/locked_use.rs": {
+      "bareAccountIdRust": 6
+    },
+    "crates/cognia-files/src/files.rs": {
+      "bareAccountIdRust": 10
+    },
+    "crates/cognia-scheduling/src/workflow/triggers/webhook_router.rs": {
+      "bareAccountIdRust": 2
+    },
+    "crates/cognia-subscription/src/active.rs": {
+      "bareAccountIdRust": 12
+    },
+    "crates/cognia-subscription/src/anthropic/credential.rs": {
+      "bareAccountIdRust": 23
+    },
+    "crates/cognia-subscription/src/codex/discovery.rs": {
+      "bareAccountIdRust": 7
+    },
+    "crates/cognia-subscription/src/codex/mod.rs": {
+      "bareAccountIdRust": 2
+    },
+    "crates/cognia-subscription/src/migration.rs": {
+      "bareAccountIdRust": 19
+    },
+    "crates/cognia-subscription/src/opencode/commands.rs": {
+      "bareAccountIdRust": 3
+    },
+    "crates/cognia-subscription/src/vault.rs": {
+      "bareAccountIdRust": 7
+    },
+    "hooks/chat/use-remote-doc-search.ts": {
+      "bareAccountId": 7
+    },
+    "hooks/chat/use-remote-doc-staging.ts": {
+      "bareAccountId": 3
+    },
+    "hooks/diagnostic-service/use-diagnostic-connection.ts": {
+      "bareAccountId": 23
+    },
+    "hooks/logging/use-incident-submission.ts": {
+      "bareAccountId": 6
+    },
+    "lib/accounts/account-db.ts": {
+      "bareAccountId": 34
+    },
+    "lib/accounts/account-types.ts": {
+      "bareAccountId": 3
+    },
+    "lib/accounts/legacy-migration.ts": {
+      "bareAccountId": 6
+    },
+    "lib/accounts/password-client.ts": {
+      "bareAccountId": 5
+    },
+    "lib/ai/agent/external/env-builder.ts": {
+      "bareAccountId": 2
+    },
+    "lib/ai/eval/artifact-crypto.ts": {
+      "bareAccountId": 15
+    },
+    "lib/ai/eval/assets.ts": {
+      "bareAccountId": 4
+    },
+    "lib/chat/branch-session.ts": {
+      "bareAccountId": 2
+    },
+    "lib/claude/build-options.ts": {
+      "bareAccountId": 10
+    },
+    "lib/claude/env-resolver.ts": {
+      "bareAccountId": 13
+    },
+    "lib/claude/ipc.ts": {
+      "bareAccountId": 1
+    },
+    "lib/codeserver/remote-relay.ts": {
+      "bareAccountId": 2
+    },
+    "lib/companion/credential-book/adapter.ts": {
+      "bareAccountId": 4
+    },
+    "lib/companion/credential-book/index.ts": {
+      "bareAccountId": 2
+    },
+    "lib/companion/credential-book/legacy-migration.ts": {
+      "bareAccountId": 3
+    },
+    "lib/companion/credential-book/stores.ts": {
+      "bareAccountId": 3
+    },
+    "lib/companion/desktop-write-source.ts": {
+      "bareAccountId": 8
+    },
+    "lib/companion/event-bridge.ts": {
+      "bareAccountId": 1
+    },
+    "lib/companion/host-orchestration.ts": {
+      "bareAccountId": 26
+    },
+    "lib/companion/host-removal.ts": {
+      "bareAccountId": 25
+    },
+    "lib/companion/mobile-host-adoption.ts": {
+      "bareAccountId": 3
+    },
+    "lib/connectors/adapters/_shared/a2ui-mapper.ts": {
+      "bareAccountId": 3
+    },
+    "lib/connectors/adapters/lark/menu-actions.ts": {
+      "bareAccountId": 2
+    },
+    "lib/connectors/adapters/lark/plus-create.ts": {
+      "bareAccountId": 2
+    },
+    "lib/connectors/adapters/wechat-personal/index.ts": {
+      "bareAccountId": 1
+    },
+    "lib/connectors/bus.ts": {
+      "bareAccountId": 6
+    },
+    "lib/connectors/entry/tokens.ts": {
+      "bareAccountId": 5
+    },
+    "lib/connectors/principal/admin.ts": {
+      "bareAccountId": 12
+    },
+    "lib/connectors/principal/bootstrap.ts": {
+      "bareAccountId": 7
+    },
+    "lib/connectors/principal/resolve.ts": {
+      "bareAccountId": 6
+    },
+    "lib/data/destinations/config.ts": {
+      "bareAccountId": 1
+    },
+    "lib/db/connector-conversation-state.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/connector-inbound-jobs.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/connector-types.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/external-services.ts": {
+      "bareAccountId": 1
+    },
+    "lib/db/host-dispatch-queue.ts": {
+      "bareAccountId": 14
+    },
+    "lib/db/integrations.ts": {
+      "bareAccountId": 42
+    },
+    "lib/db/lark-entry.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/mobile-outbound-queue.ts": {
+      "bareAccountId": 22
+    },
+    "lib/db/mobile-outbound-types.ts": {
+      "bareAccountId": 1
+    },
+    "lib/db/mobile-step-receipts.ts": {
+      "bareAccountId": 10
+    },
+    "lib/db/paired-devices.ts": {
+      "bareAccountId": 4
+    },
+    "lib/db/schema.ts": {
+      "bareAccountId": 55
+    },
+    "lib/db/sessions.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/sites.ts": {
+      "bareAccountId": 3
+    },
+    "lib/db/work-submissions.ts": {
+      "bareAccountId": 11
+    },
+    "lib/db/workflow-apps.ts": {
+      "bareAccountId": 50
+    },
+    "lib/db/workflow-conversations.ts": {
+      "bareAccountId": 48
+    },
+    "lib/db/workflow-deployments.ts": {
+      "bareAccountId": 10
+    },
+    "lib/db/workflow-human-input-files.ts": {
+      "bareAccountId": 14
+    },
+    "lib/db/workflow-human-input.ts": {
+      "bareAccountId": 4
+    },
+    "lib/dev/expose-test-globals.tsx": {
+      "bareAccountId": 6
+    },
+    "lib/dev/workflow-fixtures.ts": {
+      "bareAccountId": 1
+    },
+    "lib/diagnostic-service/connection.ts": {
+      "bareAccountId": 14
+    },
+    "lib/diagnostic-service/installation-identity.ts": {
+      "bareAccountId": 3
+    },
+    "lib/docs-providers/providers/lark/index.ts": {
+      "bareAccountId": 3
+    },
+    "lib/docs-providers/types.ts": {
+      "bareAccountId": 1
+    },
+    "lib/external-bridge/handlers/workflow.ts": {
+      "bareAccountId": 9
+    },
+    "lib/external-services/grants.ts": {
+      "bareAccountId": 4
+    },
+    "lib/external-services/lifecycle.ts": {
+      "bareAccountId": 2
+    },
+    "lib/external-services/openapi/importer.ts": {
+      "bareAccountId": 3
+    },
+    "lib/external-services/providers/mcp-chat.ts": {
+      "bareAccountId": 1
+    },
+    "lib/files/allowed-roots-sync.ts": {
+      "bareAccountId": 3
+    },
+    "lib/headless/runtimes/initializers.ts": {
+      "bareAccountId": 2
+    },
+    "lib/headless/runtimes/plugin-runtime.ts": {
+      "bareAccountId": 8
+    },
+    "lib/headless/types.ts": {
+      "bareAccountId": 2
+    },
+    "lib/integrations/action-runner.ts": {
+      "bareAccountId": 34
+    },
+    "lib/integrations/events.ts": {
+      "bareAccountId": 11
+    },
+    "lib/integrations/github-auth.ts": {
+      "bareAccountId": 2
+    },
+    "lib/integrations/github-delivery-recovery.ts": {
+      "bareAccountId": 2
+    },
+    "lib/integrations/github-issue-loop.ts": {
+      "bareAccountId": 7
+    },
+    "lib/integrations/github-lifecycle.ts": {
+      "bareAccountId": 6
+    },
+    "lib/integrations/ingress-client.ts": {
+      "bareAccountId": 15
+    },
+    "lib/integrations/migration.ts": {
+      "bareAccountId": 5
+    },
+    "lib/integrations/providers.ts": {
+      "bareAccountId": 9
+    },
+    "lib/issues/github-writeback.ts": {
+      "bareAccountId": 1
+    },
+    "lib/issues/run/github-loop-adapter.ts": {
+      "bareAccountId": 1
+    },
+    "lib/perf/budget-service.ts": {
+      "bareAccountId": 15
+    },
+    "lib/perf/capture-controller.ts": {
+      "bareAccountId": 16
+    },
+    "lib/perf/capture-crypto.ts": {
+      "bareAccountId": 2
+    },
+    "lib/perf/capture-portability.ts": {
+      "bareAccountId": 19
+    },
+    "lib/perf/capture-service.ts": {
+      "bareAccountId": 18
+    },
+    "lib/perf/quota.ts": {
+      "bareAccountId": 13
+    },
+    "lib/perf/security-generation.ts": {
+      "bareAccountId": 4
+    },
+    "lib/pet/bones/generate.ts": {
+      "bareAccountId": 2
+    },
+    "lib/pet/runtime/init-pet.ts": {
+      "bareAccountId": 2
+    },
+    "lib/placement/host-dispatch-runner.ts": {
+      "bareAccountId": 3
+    },
+    "lib/placement/host-dispatch-runtime.ts": {
+      "bareAccountId": 7
+    },
+    "lib/platform/web-companion.ts": {
+      "bareAccountId": 1
+    },
+    "lib/plugin/api/integrations-api.ts": {
+      "bareAccountId": 19
+    },
+    "lib/plugin/auth/auth-provider-registry.ts": {
+      "bareAccountId": 1
+    },
+    "lib/plugin/bridge/integrations-bridge.ts": {
+      "bareAccountId": 19
+    },
+    "lib/provider-diagnostics/balance.ts": {
+      "bareAccountId": 28
+    },
+    "lib/provider-diagnostics/companion.ts": {
+      "bareAccountId": 5
+    },
+    "lib/runtime/account-runtime-target.ts": {
+      "bareAccountId": 64
+    },
+    "lib/runtime/browser-vault.ts": {
+      "bareAccountId": 55
+    },
+    "lib/runtime/runtime-target-context.ts": {
+      "bareAccountId": 5
+    },
+    "lib/runtime/runtime-target-lifecycle.ts": {
+      "bareAccountId": 1
+    },
+    "lib/runtime/target-database-migration.ts": {
+      "bareAccountId": 12
+    },
+    "lib/runtime/target-registry.ts": {
+      "bareAccountId": 59
+    },
+    "lib/server-ops/client.ts": {
+      "bareAccountId": 7
+    },
+    "lib/sites/authoring-policy.ts": {
+      "bareAccountId": 8
+    },
+    "lib/sites/cloudflare/client.ts": {
+      "bareAccountId": 54
+    },
+    "lib/sites/cloudflare/service.ts": {
+      "bareAccountId": 47
+    },
+    "lib/sites/cloudflare/version-uploader.ts": {
+      "bareAccountId": 4
+    },
+    "lib/sites/console-model.ts": {
+      "bareAccountId": 4
+    },
+    "lib/storybook/fixtures/settings-subscription.ts": {
+      "bareAccountId": 1
+    },
+    "lib/subscription/anthropic/refresh.ts": {
+      "bareAccountId": 11
+    },
+    "lib/subscription/anthropic/sidecar-sync.ts": {
+      "bareAccountId": 3
+    },
+    "lib/subscription/anthropic/usage-endpoint.ts": {
+      "bareAccountId": 1
+    },
+    "lib/subscription/balance/adapters/_shared.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/deepinfra.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/deepseek.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/moonshot.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/novita.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/openrouter.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/ppio.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/siliconflow.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/stepfun.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/adapters/threeotwo.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/balance/hooks.ts": {
+      "bareAccountId": 6
+    },
+    "lib/subscription/balance/runner.ts": {
+      "bareAccountId": 5
+    },
+    "lib/subscription/balance/store.ts": {
+      "bareAccountId": 5
+    },
+    "lib/subscription/codex/chat-bridge.ts": {
+      "bareAccountId": 8
+    },
+    "lib/subscription/codex/discovery.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/codex/oauth.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/codex/refresh.ts": {
+      "bareAccountId": 6
+    },
+    "lib/subscription/codex/scheduler.ts": {
+      "bareAccountId": 4
+    },
+    "lib/subscription/codex/usage-probe.ts": {
+      "bareAccountId": 3
+    },
+    "lib/subscription/core/account-lifecycle.ts": {
+      "bareAccountId": 35
+    },
+    "lib/subscription/core/hooks.ts": {
+      "bareAccountId": 21
+    },
+    "lib/subscription/core/transport.ts": {
+      "bareAccountId": 11
+    },
+    "lib/subscription/limits/aggregate.ts": {
+      "bareAccountId": 6
+    },
+    "lib/subscription/limits/coalesce.ts": {
+      "bareAccountId": 7
+    },
+    "lib/subscription/limits/custom/runner.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/limits/descriptor/engine.ts": {
+      "bareAccountId": 15
+    },
+    "lib/subscription/limits/hooks.ts": {
+      "bareAccountId": 13
+    },
+    "lib/subscription/limits/meters.ts": {
+      "bareAccountId": 3
+    },
+    "lib/subscription/limits/policy.ts": {
+      "bareAccountId": 7
+    },
+    "lib/subscription/limits/runner.ts": {
+      "bareAccountId": 12
+    },
+    "lib/subscription/limits/sources/anthropic.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/limits/sources/balance.ts": {
+      "bareAccountId": 4
+    },
+    "lib/subscription/limits/sources/codex.ts": {
+      "bareAccountId": 6
+    },
+    "lib/subscription/limits/sources/volcengine.ts": {
+      "bareAccountId": 2
+    },
+    "lib/subscription/limits/store.ts": {
+      "bareAccountId": 4
+    },
+    "lib/subscription/opencode/chat-bridge.ts": {
+      "bareAccountId": 3
+    },
+    "lib/sync/companion-sync.ts": {
+      "bareAccountId": 1
+    },
+    "lib/sync/host-state-service.ts": {
+      "bareAccountId": 17
+    },
+    "lib/tauri/companion-auth.ts": {
+      "bareAccountId": 1
+    },
+    "lib/tauri/companion-storage.ts": {
+      "bareAccountId": 14
+    },
+    "lib/tauri/transport-companion.ts": {
+      "bareAccountId": 2
+    },
+    "lib/tauri/transport-routing.ts": {
+      "bareAccountId": 1
+    },
+    "lib/terminal/transport-ws.ts": {
+      "bareAccountId": 1
+    },
+    "lib/tray/types.ts": {
+      "bareAccountId": 1
+    },
+    "lib/tray/usage-format.ts": {
+      "bareAccountId": 2
+    },
+    "lib/work-submission/chat-adapter.ts": {
+      "bareAccountId": 7
+    },
+    "lib/work-submission/crypto.ts": {
+      "bareAccountId": 8
+    },
+    "lib/work-submission/host-adapter.ts": {
+      "bareAccountId": 4
+    },
+    "lib/work-submission/service.ts": {
+      "bareAccountId": 11
+    },
+    "lib/work-submission/stored-chat-dispatch.ts": {
+      "bareAccountId": 4
+    },
+    "lib/workflow/api/workflow-api-service.ts": {
+      "bareAccountId": 22
+    },
+    "lib/workflow/apps/api-key-service.ts": {
+      "bareAccountId": 13
+    },
+    "lib/workflow/apps/app-api-service.ts": {
+      "bareAccountId": 15
+    },
+    "lib/workflow/apps/app-execution.ts": {
+      "bareAccountId": 2
+    },
+    "lib/workflow/apps/batch-service.ts": {
+      "bareAccountId": 30
+    },
+    "lib/workflow/apps/chatflow-service.ts": {
+      "bareAccountId": 18
+    },
+    "lib/workflow/apps/custom-domain-service.ts": {
+      "bareAccountId": 13
+    },
+    "lib/workflow/apps/dify-bridge-service.ts": {
+      "bareAccountId": 19
+    },
+    "lib/workflow/apps/dify-compat.ts": {
+      "bareAccountId": 50
+    },
+    "lib/workflow/apps/file-upload-service.ts": {
+      "bareAccountId": 10
+    },
+    "lib/workflow/apps/human-input-service.ts": {
+      "bareAccountId": 8
+    },
+    "lib/workflow/apps/mcp-service.ts": {
+      "bareAccountId": 1
+    },
+    "lib/workflow/apps/public-app-service.ts": {
+      "bareAccountId": 16
+    },
+    "lib/workflow/apps/quota-service.ts": {
+      "bareAccountId": 3
+    },
+    "lib/workflow/apps/result-sharing-service.ts": {
+      "bareAccountId": 6
+    },
+    "lib/workflow/knowledge/artifacts.ts": {
+      "bareAccountId": 14
+    },
+    "lib/workflow/nodes/actions/human-input.ts": {
+      "bareAccountId": 1
+    },
+    "lib/workflow/nodes/knowledge/index.ts": {
+      "bareAccountId": 1
+    },
+    "lib/workflow/nodes/params-schemas.ts": {
+      "bareAccountId": 1
+    },
+    "lib/workflow/publish/publication-lifecycle.ts": {
+      "bareAccountId": 17
+    },
+    "lib/workflow/quality/quality-service.ts": {
+      "bareAccountId": 48
+    },
+    "lib/workflow/review/review-service.ts": {
+      "bareAccountId": 32
+    },
+    "lib/workflow/runtime/execution-authority.ts": {
+      "bareAccountId": 9
+    },
+    "lib/workflow/runtime/human-input-crypto.ts": {
+      "bareAccountId": 8
+    },
+    "lib/workflow/runtime/placed-trigger.ts": {
+      "bareAccountId": 4
+    },
+    "lib/workflow/runtime/remote-step-broker.ts": {
+      "bareAccountId": 5
+    },
+    "lib/workflow/runtime/trigger-subscriptions.ts": {
+      "bareAccountId": 5
+    },
+    "lib/workflow/versioning/version-snapshot.ts": {
+      "bareAccountId": 5
+    },
+    "lib/workflow/versioning/version-workbench.ts": {
+      "bareAccountId": 7
+    },
+    "packages/agent-config-types/src/host-state.ts": {
+      "bareAccountId": 5
+    },
+    "packages/agent-config-types/src/index.ts": {
+      "bareAccountId": 5
+    },
+    "packages/agent-config-types/src/work-submission.ts": {
+      "bareAccountId": 4
+    },
+    "packages/provider-types/src/provider-diagnostics.ts": {
+      "bareAccountId": 2
+    },
+    "plugins/agent-team-examples/src/demo-balance-adapter.ts": {
+      "bareAccountId": 6
+    },
+    "plugins/eval/src/index.ts": {
+      "bareAccountId": 7
+    },
+    "plugins/github-delivery/src/index.ts": {
+      "bareAccountId": 1
+    },
+    "plugins/workflow-ai/src/tools/run-by-name-tools.ts": {
+      "bareAccountId": 3
+    },
+    "src-tauri/src/account_auth.rs": {
+      "bareAccountIdRust": 9
+    },
+    "src-tauri/src/cli_bridge/handlers.rs": {
+      "bareAccountIdRust": 4
+    },
+    "src-tauri/src/companion_api/a2a/handler.rs": {
+      "bareAccountIdRust": 1
+    },
+    "src-tauri/src/companion_api/acp/handler.rs": {
+      "bareAccountIdRust": 26
+    },
+    "src-tauri/src/companion_api/acp/registry.rs": {
+      "bareAccountIdRust": 33
+    },
+    "src-tauri/src/companion_api/api.rs": {
+      "bareAccountIdRust": 21
+    },
+    "src-tauri/src/companion_api/browser_gateway.rs": {
+      "bareAccountIdRust": 34
+    },
+    "src-tauri/src/companion_api/host_identity.rs": {
+      "bareAccountIdRust": 1
+    },
+    "src-tauri/src/companion_api/jwt.rs": {
+      "bareAccountIdRust": 17
+    },
+    "src-tauri/src/companion_api/lark_entry.rs": {
+      "bareAccountIdRust": 4
+    },
+    "src-tauri/src/companion_api/middleware.rs": {
+      "bareAccountIdRust": 23
+    },
+    "src-tauri/src/companion_api/remote_execution.rs": {
+      "bareAccountIdRust": 10
+    },
+    "src-tauri/src/companion_api/rpc.rs": {
+      "bareAccountIdRust": 18
+    },
+    "src-tauri/src/companion_api/rpc/chat.rs": {
+      "bareAccountIdRust": 2
+    },
+    "src-tauri/src/companion_api/rpc/data_sync.rs": {
+      "bareAccountIdRust": 8
+    },
+    "src-tauri/src/companion_api/rpc/diagnostics.rs": {
+      "bareAccountIdRust": 10
+    },
+    "src-tauri/src/companion_api/rpc/filesystem.rs": {
+      "bareAccountIdRust": 2
+    },
+    "src-tauri/src/companion_api/rpc/host_state.rs": {
+      "bareAccountIdRust": 10
+    },
+    "src-tauri/src/companion_api/rpc/native_tools.rs": {
+      "bareAccountIdRust": 18
+    },
+    "src-tauri/src/companion_api/rpc/plugins.rs": {
+      "bareAccountIdRust": 7
+    },
+    "src-tauri/src/companion_api/rpc/service_plane.rs": {
+      "bareAccountIdRust": 2
+    },
+    "src-tauri/src/companion_api/rpc/source_control.rs": {
+      "bareAccountIdRust": 18
+    },
+    "src-tauri/src/companion_api/rpc/terminal.rs": {
+      "bareAccountIdRust": 2
+    },
+    "src-tauri/src/companion_api/rpc/tests.rs": {
+      "bareAccountIdRust": 1
+    },
+    "src-tauri/src/companion_api/signaling/dispatch.rs": {
+      "bareAccountIdRust": 1
+    },
+    "src-tauri/src/companion_api/sync_bridge.rs": {
+      "bareAccountIdRust": 8
+    },
+    "src-tauri/src/companion_api/workflow_api.rs": {
+      "bareAccountIdRust": 5
+    },
+    "src-tauri/src/companion_api/workflow_app_api.rs": {
+      "bareAccountIdRust": 23
+    },
+    "src-tauri/src/companion_api/ws_bridge.rs": {
+      "bareAccountIdRust": 18
+    },
+    "src-tauri/src/companion_api/ws.rs": {
+      "bareAccountIdRust": 1
+    },
+    "src-tauri/src/headless/brain.rs": {
+      "bareAccountIdRust": 6
+    },
+    "src-tauri/src/mcp_oauth/headless_store.rs": {
+      "bareAccountIdRust": 33
+    },
+    "src-tauri/src/mcp_oauth/headless.rs": {
+      "bareAccountIdRust": 29
+    },
+    "src-tauri/src/subscription/commands.rs": {
+      "bareAccountIdRust": 35
+    },
+    "stores/account/account-store.ts": {
+      "bareAccountId": 82
+    },
+    "stores/agent/agent-team-store/store.ts": {
+      "bareAccountId": 6
+    },
+    "stores/artifact/artifact-store.ts": {
+      "bareAccountId": 6
+    },
+    "stores/editor/project-editor-session-store.ts": {
+      "bareAccountId": 9
+    },
+    "stores/remote-host/remote-host-store.ts": {
+      "bareAccountId": 2
+    },
+    "types/connectors/interaction.ts": {
+      "bareAccountId": 1
+    },
+    "types/execution/run.ts": {
+      "bareAccountId": 1
+    },
+    "types/external-service.ts": {
+      "bareAccountId": 3
+    },
+    "types/integrations/binding.ts": {
+      "bareAccountId": 1
+    },
+    "types/mobile/mobile-step-receipt.ts": {
+      "bareAccountId": 1
+    },
+    "types/mobile/paired-device.ts": {
+      "bareAccountId": 1
+    },
+    "types/placement/host-dispatch.ts": {
+      "bareAccountId": 1
+    },
+    "types/plugin/plugin-integration.ts": {
+      "bareAccountId": 19
+    },
+    "types/sites.ts": {
+      "bareAccountId": 1
+    },
+    "types/subscription/account.ts": {
+      "bareAccountId": 1
+    },
+    "types/subscription/balance.ts": {
+      "bareAccountId": 2
+    },
+    "types/subscription/credential.ts": {
+      "bareAccountId": 1
+    },
+    "types/subscription/descriptor.ts": {
+      "bareAccountId": 2
+    },
+    "types/subscription/limits.ts": {
+      "bareAccountId": 3
+    },
+    "types/workflow/api-key.ts": {
+      "bareAccountId": 1
+    },
+    "types/workflow/app.ts": {
+      "bareAccountId": 2
+    },
+    "types/workflow/batch.ts": {
+      "bareAccountId": 2
+    },
+    "types/workflow/conversation.ts": {
+      "bareAccountId": 4
+    },
+    "types/workflow/deployment.ts": {
+      "bareAccountId": 3
+    },
+    "types/workflow/human-input.ts": {
+      "bareAccountId": 2
+    },
+    "types/workflow/knowledge-pipeline.ts": {
+      "bareAccountId": 1
+    },
+    "types/workflow/quality.ts": {
+      "bareAccountId": 3
+    },
+    "types/workflow/review.ts": {
+      "bareAccountId": 2
+    },
+    "types/workflow/visual.ts": {
+      "bareAccountId": 1
+    }
+  }
+}

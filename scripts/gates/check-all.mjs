@@ -204,6 +204,9 @@ const REGISTRY = [
   { script: "audit:loading-states", group: "audit" },
   { script: "audit:unreachable-components", group: "audit" },
   { script: "audit:workspace-attribution", group: "audit" },
+  // ADR-0149: "account" means four different things and none of them is a
+  // person. The counts may only shrink.
+  { script: "audit:identity-vocabulary", group: "audit" },
   // Hook contracts are synthesized from one literal, so a hook the host never
   // fires still advertises itself to plugin authors as stable + implemented.
   // This keeps the `VIRTUAL_HOOK_POINTS` dormancy label honest in both
