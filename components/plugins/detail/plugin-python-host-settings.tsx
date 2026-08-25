@@ -3,20 +3,30 @@
 // Host-level runtime settings card for python/hybrid plugins — rendered at
 // the top of the Configure sub-tab, above the manifest configSchema form.
 // These knobs configure the HOST PROCESS (interpreter, env, timeouts, idle
-// shutdown), not the plugin's own config; they persist on the Dexie plugins
-// row and apply on the next (re)load of the host.
+// shutdown, the outbound RPC gate), not the plugin's own config; they persist
+// on the Dexie plugins row and apply on the next (re)load of the host.
 //
-// The card also owns the dependency-install consent flow: pip installs hit
-// the network and write a venv, so they only ever run from the explicit
-// confirm dialog here (progress streams into the Logs tab).
+// The card also owns the environment: which installer provisions it, whether
+// it is shared with other Python plugins, and the dependency-install consent
+// flow. Installs hit the network and write a venv, so they only ever run from
+// the explicit confirm dialog here (progress streams into the Logs tab), and
+// the outcome — including the reason a shared environment was downgraded to
+// an isolated one — is reported back into this card (ADR-0145).
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
-import { DownloadIcon, ServerCogIcon } from "lucide-react"
+import { AlertTriangleIcon, DownloadIcon, PackageIcon, ServerCogIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -31,9 +41,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { getPythonHostSettings, setPythonHostSettings } from "@/lib/db/plugins"
-import type { PythonHostSettings } from "@/types/plugin"
+import type { PythonHostSettings, PythonInstallOutcome } from "@/types/plugin"
 
 const ENV_LINE = /^[A-Za-z_][A-Za-z0-9_]*=.*$/
+
+/** `auto` is the stored absence of a choice; the Select needs a real value. */
+type InstallerKind = "auto" | "uv" | "pip" | "custom"
+/** `default` means "whatever the manifest asked for" — also a stored absence. */
+type ScopeChoice = "default" | "shared" | "isolated"
 
 function envToText(env: Record<string, string> | undefined): string {
   return Object.entries(env ?? {})
@@ -60,6 +75,18 @@ function parseOptionalInt(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
+/**
+ * One argv element per line. Whitespace is never a separator here: a template
+ * argument is routinely a path with spaces, and splitting on them would break
+ * exactly the installers a custom template exists to reach.
+ */
+function parseArgvText(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+}
+
 export function PluginPythonHostSettings({
   pluginId,
   pythonDependencies = [],
@@ -76,11 +103,26 @@ export function PluginPythonHostSettings({
   const [useVenv, setUseVenv] = useState(true)
   const [idleShutdownMin, setIdleShutdownMin] = useState("")
   const [maxConcurrentCalls, setMaxConcurrentCalls] = useState("")
+  const [maxOutboundHostCalls, setMaxOutboundHostCalls] = useState("")
+  const [installerKind, setInstallerKind] = useState<InstallerKind>("auto")
+  const [installerPath, setInstallerPath] = useState("")
+  const [createArgsText, setCreateArgsText] = useState("")
+  const [installArgsText, setInstallArgsText] = useState("")
+  const [scopeChoice, setScopeChoice] = useState<ScopeChoice>("default")
+  /** The installer that was persisted when the card loaded, for the switch warning. */
+  const [savedInstallerKind, setSavedInstallerKind] = useState<InstallerKind>("auto")
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedTick, setSavedTick] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [installError, setInstallError] = useState<string | null>(null)
+  const [installOutcome, setInstallOutcome] = useState<PythonInstallOutcome | null>(null)
+  const [uvVersion, setUvVersion] = useState<string | null>(null)
+  const [pythonVersion, setPythonVersion] = useState<string | null>(null)
+  /** Null until the runtime answers; stays null off Tauri, where it has none. */
+  const [runtimeProbed, setRuntimeProbed] = useState(false)
+  const [installingUv, setInstallingUv] = useState(false)
+  const [uvError, setUvError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -98,6 +140,16 @@ export function PluginPythonHostSettings({
         setMaxConcurrentCalls(
           settings?.maxConcurrentCalls != null ? String(settings.maxConcurrentCalls) : ""
         )
+        setMaxOutboundHostCalls(
+          settings?.maxOutboundHostCalls != null ? String(settings.maxOutboundHostCalls) : ""
+        )
+        const kind = (settings?.installer?.kind ?? "auto") as InstallerKind
+        setInstallerKind(kind)
+        setSavedInstallerKind(kind)
+        setInstallerPath(settings?.installer?.path ?? "")
+        setCreateArgsText((settings?.installer?.createArgs ?? []).join("\n"))
+        setInstallArgsText((settings?.installer?.installArgs ?? []).join("\n"))
+        setScopeChoice(settings?.venvScope ?? "default")
       } finally {
         if (!cancelled) setLoaded(true)
       }
@@ -107,22 +159,90 @@ export function PluginPythonHostSettings({
     }
   }, [pluginId])
 
+  // Interpreter + uv presence. Off Tauri there is no native host at all, so a
+  // failure here means "nothing to report", never "the runtime is broken".
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { getPluginManager } = await import("@/lib/plugin/core/manager")
+        const info = await getPluginManager().getPythonRuntimeInfo()
+        if (cancelled) return
+        setPythonVersion(info?.version ?? null)
+        setUvVersion(info?.uv_version ?? null)
+        setRuntimeProbed(Boolean(info?.available))
+      } catch {
+        if (!cancelled) setRuntimeProbed(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pluginId])
+
   const envValid = useMemo(() => parseEnvText(envText) !== null, [envText])
 
-  const handleSave = async () => {
+  // A custom installer that cannot create or install is refused by the host at
+  // provision time; refusing it here means the user finds out while looking at
+  // the field rather than three clicks later inside an install log.
+  const customValid = useMemo(() => {
+    if (installerKind !== "custom") return true
+    return installerPath.trim() !== "" && parseArgvText(installArgsText).length > 0
+  }, [installerKind, installerPath, installArgsText])
+
+  const installerChanged = installerKind !== savedInstallerKind
+
+  const buildSettings = useCallback((): PythonHostSettings | null => {
     const env = parseEnvText(envText)
-    if (env === null) return
+    if (env === null) return null
+    const createArgs = parseArgvText(createArgsText)
+    const installArgs = parseArgvText(installArgsText)
+    const installerPathValue = installerPath.trim()
+    const wantsInstaller =
+      installerKind !== "auto" ||
+      installerPathValue !== "" ||
+      createArgs.length > 0 ||
+      installArgs.length > 0
+    return {
+      interpreterPath: interpreterPath.trim() || undefined,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      callTimeoutMs: parseOptionalInt(callTimeoutMs),
+      useVenv: useVenv ? undefined : false,
+      idleShutdownMin: parseOptionalInt(idleShutdownMin),
+      maxConcurrentCalls: parseOptionalInt(maxConcurrentCalls),
+      maxOutboundHostCalls: parseOptionalInt(maxOutboundHostCalls),
+      installer: wantsInstaller
+        ? {
+            kind: installerKind,
+            path: installerPathValue || undefined,
+            createArgs: createArgs.length > 0 ? createArgs : undefined,
+            installArgs: installArgs.length > 0 ? installArgs : undefined,
+          }
+        : undefined,
+      venvScope: scopeChoice === "default" ? undefined : scopeChoice,
+    }
+  }, [
+    envText,
+    createArgsText,
+    installArgsText,
+    installerPath,
+    installerKind,
+    interpreterPath,
+    callTimeoutMs,
+    useVenv,
+    idleShutdownMin,
+    maxConcurrentCalls,
+    maxOutboundHostCalls,
+    scopeChoice,
+  ])
+
+  const handleSave = async () => {
+    const settings = buildSettings()
+    if (settings === null || !customValid) return
     setSaving(true)
     try {
-      const settings: PythonHostSettings = {
-        interpreterPath: interpreterPath.trim() || undefined,
-        env: Object.keys(env).length > 0 ? env : undefined,
-        callTimeoutMs: parseOptionalInt(callTimeoutMs),
-        useVenv: useVenv ? undefined : false,
-        idleShutdownMin: parseOptionalInt(idleShutdownMin),
-        maxConcurrentCalls: parseOptionalInt(maxConcurrentCalls),
-      }
       await setPythonHostSettings(pluginId, settings)
+      setSavedInstallerKind(installerKind)
       setSavedTick(true)
       setTimeout(() => setSavedTick(false), 2000)
     } finally {
@@ -135,11 +255,26 @@ export function PluginPythonHostSettings({
     setInstallError(null)
     try {
       const { getPluginManager } = await import("@/lib/plugin/core/manager")
-      await getPluginManager().installPythonDeps(pluginId, pythonDependencies)
+      const outcome = await getPluginManager().installPythonDeps(pluginId, pythonDependencies)
+      setInstallOutcome(outcome ?? null)
     } catch (error) {
       setInstallError(String(error))
     } finally {
       setInstalling(false)
+    }
+  }
+
+  const handleInstallUv = async () => {
+    setInstallingUv(true)
+    setUvError(null)
+    try {
+      const { getPluginManager } = await import("@/lib/plugin/core/manager")
+      const version = await getPluginManager().installUv()
+      setUvVersion(version)
+    } catch (error) {
+      setUvError(String(error))
+    } finally {
+      setInstallingUv(false)
     }
   }
 
@@ -174,7 +309,9 @@ export function PluginPythonHostSettings({
             id={`py-env-${pluginId}`}
             value={envText}
             onChange={(e) => setEnvText(e.target.value)}
-            placeholder="API_KEY=value"
+            placeholder={
+              /* i18n-exempt: KEY=VALUE is the literal env-file syntax */ "API_KEY=value"
+            }
             rows={3}
             aria-invalid={!envValid}
           />
@@ -219,6 +356,19 @@ export function PluginPythonHostSettings({
           />
         </div>
 
+        <div className="space-y-1.5">
+          <Label htmlFor={`py-outbound-${pluginId}`}>{t("maxOutboundHostCalls")}</Label>
+          <Input
+            id={`py-outbound-${pluginId}`}
+            type="number"
+            min={1}
+            value={maxOutboundHostCalls}
+            onChange={(e) => setMaxOutboundHostCalls(e.target.value)}
+            placeholder="8"
+          />
+          <p className="text-xs text-muted-foreground">{t("maxOutboundHostCallsHint")}</p>
+        </div>
+
         <div className="flex items-center gap-2 pt-5">
           <Switch
             id={`py-venv-${pluginId}`}
@@ -229,6 +379,156 @@ export function PluginPythonHostSettings({
         </div>
       </div>
 
+      <div className="border-t pt-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <PackageIcon className="size-4 text-muted-foreground" />
+          <div>
+            <h4 className="text-sm font-medium">{t("environment.title")}</h4>
+            <p className="text-xs text-muted-foreground">{t("environment.description")}</p>
+          </div>
+        </div>
+
+        {runtimeProbed && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>{t("environment.interpreterVersion", { version: pythonVersion ?? "—" })}</span>
+            {uvVersion ? (
+              <span>{t("environment.uvPresent", { version: uvVersion })}</span>
+            ) : (
+              <>
+                <span>{t("environment.uvMissing")}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleInstallUv}
+                  disabled={installingUv}
+                >
+                  {installingUv ? t("environment.uvInstalling") : t("environment.uvInstall")}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+        {uvError && (
+          <p className="text-xs text-destructive" role="alert">
+            {t("environment.uvError", { message: uvError })}
+          </p>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`py-installer-${pluginId}`}>{t("environment.installer")}</Label>
+            <Select
+              value={installerKind}
+              onValueChange={(value) => setInstallerKind(value as InstallerKind)}
+            >
+              <SelectTrigger
+                id={`py-installer-${pluginId}`}
+                aria-label={t("environment.installer")}
+                aria-describedby={installerChanged ? `py-installer-switch-${pluginId}` : undefined}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">{t("environment.installerAuto")}</SelectItem>
+                <SelectItem value="uv">{t("environment.installerUv")}</SelectItem>
+                <SelectItem value="pip">{t("environment.installerPip")}</SelectItem>
+                <SelectItem value="custom">{t("environment.installerCustom")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={`py-scope-${pluginId}`}>{t("environment.scope")}</Label>
+            <Select
+              value={scopeChoice}
+              onValueChange={(value) => setScopeChoice(value as ScopeChoice)}
+            >
+              <SelectTrigger id={`py-scope-${pluginId}`} aria-label={t("environment.scope")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">{t("environment.scopeDefault")}</SelectItem>
+                <SelectItem value="shared">{t("environment.scopeShared")}</SelectItem>
+                <SelectItem value="isolated">{t("environment.scopeIsolated")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("environment.scopeHint")}</p>
+          </div>
+
+          {installerKind !== "pip" && installerKind !== "auto" && (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor={`py-installer-path-${pluginId}`}>
+                {t("environment.installerPath")}
+              </Label>
+              <Input
+                id={`py-installer-path-${pluginId}`}
+                value={installerPath}
+                onChange={(e) => setInstallerPath(e.target.value)}
+                placeholder={t("environment.installerPathPlaceholder")}
+              />
+            </div>
+          )}
+
+          {installerKind === "custom" && (
+            <>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor={`py-create-args-${pluginId}`}>{t("environment.createArgs")}</Label>
+                <Textarea
+                  id={`py-create-args-${pluginId}`}
+                  value={createArgsText}
+                  onChange={(e) => setCreateArgsText(e.target.value)}
+                  placeholder={
+                    /* i18n-exempt: literal argv for `python -m venv`, plus the host's own substitution tokens */
+                    "venv\n--python\n{python}\n{venv}"
+                  }
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">{t("environment.createArgsHint")}</p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor={`py-install-args-${pluginId}`}>
+                  {t("environment.installArgs")}
+                </Label>
+                <Textarea
+                  id={`py-install-args-${pluginId}`}
+                  value={installArgsText}
+                  onChange={(e) => setInstallArgsText(e.target.value)}
+                  placeholder={
+                    /* i18n-exempt: literal installer argv, plus the host's own substitution tokens */
+                    "add\n--python\n{venvPython}\n{specs}"
+                  }
+                  rows={3}
+                  aria-invalid={!customValid}
+                />
+                <p
+                  className={
+                    customValid ? "text-xs text-muted-foreground" : "text-xs text-destructive"
+                  }
+                >
+                  {customValid
+                    ? t("environment.installArgsHint")
+                    : t("environment.customIncomplete")}
+                </p>
+              </div>
+              <p className="sm:col-span-2 text-xs text-muted-foreground">
+                {t("environment.customIsolatedNote")}
+              </p>
+            </>
+          )}
+        </div>
+
+        {installerChanged && (
+          <p
+            id={`py-installer-switch-${pluginId}`}
+            data-testid="installer-switch-warning"
+            className="flex items-start gap-1.5 text-xs text-muted-foreground"
+          >
+            <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+            {t("environment.installerSwitchWarning")}
+          </p>
+        )}
+      </div>
+
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">{t("applyHint")}</p>
         <div className="flex items-center gap-2">
@@ -237,7 +537,7 @@ export function PluginPythonHostSettings({
               {t("saved")}
             </span>
           )}
-          <Button size="sm" onClick={handleSave} disabled={saving || !envValid}>
+          <Button size="sm" onClick={handleSave} disabled={saving || !envValid || !customValid}>
             {t("save")}
           </Button>
         </div>
@@ -275,6 +575,28 @@ export function PluginPythonHostSettings({
             <p className="text-xs text-destructive" role="alert">
               {t("deps.error", { message: installError })}
             </p>
+          )}
+          {installOutcome && (
+            <div
+              className="rounded-md border bg-muted/40 p-2 space-y-1"
+              data-testid="py-install-outcome"
+            >
+              <p className="text-xs">
+                {t("deps.outcome", {
+                  installer: installOutcome.installer,
+                  scope: installOutcome.scope,
+                })}
+              </p>
+              <p className="text-xs font-mono break-all text-muted-foreground">
+                {installOutcome.venvDir}
+              </p>
+              {installOutcome.downgradedReason && (
+                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+                  {t("deps.downgraded", { reason: installOutcome.downgradedReason })}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}

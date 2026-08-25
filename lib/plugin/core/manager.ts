@@ -6314,6 +6314,18 @@ export class PluginManager {
   }
 
   /**
+   * Install `uv` with the probed interpreter's own pip, and return its version.
+   *
+   * Offered only when `getPythonRuntimeInfo().uv_version` is null. The host
+   * deliberately installs a package rather than piping the vendor's shell
+   * script — the same trust boundary it already crosses for every plugin that
+   * declares `pythonDependencies`, not a new one.
+   */
+  async installUv(): Promise<string> {
+    return this.invokeNativeHost<string>("plugin_python_install_uv")
+  }
+
+  /**
    * Check if a Python plugin is initialized
    */
   async isPythonPluginInitialized(pluginId: string): Promise<boolean> {

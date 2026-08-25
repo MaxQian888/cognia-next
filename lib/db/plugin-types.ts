@@ -76,6 +76,17 @@ export interface PluginRow {
     useVenv?: boolean
     idleShutdownMin?: number
     maxConcurrentCalls?: number
+    /** ADR-0145 — cap on concurrent plugin -> host RPC calls. */
+    maxOutboundHostCalls?: number
+    /** ADR-0145 — which tool creates the environment and installs packages. */
+    installer?: {
+      kind?: "auto" | "uv" | "pip" | "custom"
+      path?: string
+      createArgs?: string[]
+      installArgs?: string[]
+    }
+    /** ADR-0145 — overrides the manifest's `pythonVenv`. */
+    venvScope?: "shared" | "isolated"
     sandboxed?: boolean
   }
   /**

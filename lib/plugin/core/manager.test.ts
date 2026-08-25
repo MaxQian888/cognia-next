@@ -5193,6 +5193,20 @@ describe("PluginManager", () => {
       expect(unsubscribe).toHaveBeenCalledTimes(1)
     })
 
+    it("routes the guided uv install to the native host", async () => {
+      // The command has existed since ADR-0145 but had no TS caller until the
+      // host-settings card offered it; pin the name so a rename cannot quietly
+      // strand the offer again.
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_install_uv") return "uv 0.5.0"
+        return undefined
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+
+      await expect(manager.installUv()).resolves.toBe("uv 0.5.0")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_install_uv", {})
+    })
+
     it("initializePythonRuntime warns (not errors) when the backend reports unavailable", async () => {
       mockInvoke.mockImplementation(async (cmd: string) => {
         if (cmd === "plugin_python_runtime_info") {

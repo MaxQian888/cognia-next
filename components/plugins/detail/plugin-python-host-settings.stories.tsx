@@ -3,10 +3,15 @@ import type { Meta, StoryObj } from "@storybook/nextjs"
 import { PluginPythonHostSettings } from "./plugin-python-host-settings"
 
 // Python host settings card (python / hybrid plugins) — interpreter path, env
-// vars, call timeout, venv toggle, idle shutdown, concurrency, and an
-// install-dependencies consent block driven by `manifest.pythonDependencies`.
-// Persisted settings load from Dexie (empty here → defaults); the actual
-// install action is a Tauri call that no-ops in this browser Storybook.
+// vars, call timeout, venv toggle, idle shutdown, concurrency, the outbound
+// host-RPC gate (ADR-0145), the environment block (installer, scope, custom
+// argv templates, guided uv install), and an install-dependencies consent
+// block driven by `manifest.pythonDependencies`.
+//
+// Persisted settings load from Dexie (empty here → defaults). The runtime
+// probe and the install actions are Tauri calls that no-op in this browser
+// Storybook, so the interpreter/uv strip stays hidden and the environment
+// controls render at their defaults.
 
 const meta = {
   title: "Plugins/Detail/PluginPythonHostSettings",
