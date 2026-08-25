@@ -43,7 +43,7 @@ describe("on the desktop", () => {
       { invokeFn, isDesktop: desktop }
     )
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      accountId: "acct_a",
+      localAccountId: "acct_a",
       userId: "usr_ada",
       orgId: "org_acme",
     })
@@ -58,7 +58,7 @@ describe("on the desktop", () => {
       { invokeFn, isDesktop: desktop }
     )
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      accountId: "acct_a",
+      localAccountId: "acct_a",
       userId: "usr_ada",
       orgId: null,
     })
@@ -72,7 +72,7 @@ describe("on the desktop", () => {
 
     expect(await unbindHostPerson("acct_a", { invokeFn, isDesktop: desktop })).toBe(true)
     expect(invokeFn).toHaveBeenNthCalledWith(1, ACCOUNT_UNBIND_PERSON_COMMAND, {
-      accountId: "acct_a",
+      localAccountId: "acct_a",
     })
 
     expect(await readHostPerson("acct_a", { invokeFn, isDesktop: desktop })).toEqual({
@@ -80,7 +80,9 @@ describe("on the desktop", () => {
       userId: "usr_ada",
       orgId: null,
     })
-    expect(invokeFn).toHaveBeenNthCalledWith(2, ACCOUNT_PERSON_COMMAND, { accountId: "acct_a" })
+    expect(invokeFn).toHaveBeenNthCalledWith(2, ACCOUNT_PERSON_COMMAND, {
+      localAccountId: "acct_a",
+    })
   })
 
   it("treats a host that recorded nothing as an answer, not a failure", async () => {

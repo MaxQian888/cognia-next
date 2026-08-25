@@ -52,7 +52,7 @@ export async function bindHostPerson(
   const { call, desktop } = resolve(deps)
   if (!desktop) return false
   await call<void>(ACCOUNT_BIND_PERSON_COMMAND, {
-    accountId: input.localAccountId,
+    localAccountId: input.localAccountId,
     userId: input.userId,
     orgId: input.orgId ?? null,
   })
@@ -65,7 +65,7 @@ export async function unbindHostPerson(
 ): Promise<boolean> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return false
-  await call<void>(ACCOUNT_UNBIND_PERSON_COMMAND, { accountId: localAccountId })
+  await call<void>(ACCOUNT_UNBIND_PERSON_COMMAND, { localAccountId })
   return true
 }
 
@@ -80,8 +80,6 @@ export async function readHostPerson(
 ): Promise<HostPerson | null> {
   const { call, desktop } = resolve(deps)
   if (!desktop) return null
-  const result = await call<HostPerson | null>(ACCOUNT_PERSON_COMMAND, {
-    accountId: localAccountId,
-  })
+  const result = await call<HostPerson | null>(ACCOUNT_PERSON_COMMAND, { localAccountId })
   return result ?? null
 }

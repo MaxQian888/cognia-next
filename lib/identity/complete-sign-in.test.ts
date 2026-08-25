@@ -58,7 +58,7 @@ describe("completeSignIn", () => {
     expect(await registry.get("acct_alpha")).toMatchObject({ userId: identity.user.id })
     expect(seen).toHaveLength(1)
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_BIND_PERSON_COMMAND, {
-      accountId: "acct_alpha",
+      localAccountId: "acct_alpha",
       userId: identity.user.id,
       orgId: identity.org!.id,
     })
@@ -143,7 +143,7 @@ describe("completeSignOut", () => {
 
     expect(await registry.get("acct_alpha")).toBeNull()
     expect(invokeFn).toHaveBeenCalledWith(ACCOUNT_UNBIND_PERSON_COMMAND, {
-      accountId: "acct_alpha",
+      localAccountId: "acct_alpha",
     })
   })
 

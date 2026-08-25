@@ -121,13 +121,13 @@ pub fn account_rebind_verifier(
 /// exactly as `bind_host_to_account` treats it.
 #[tauri::command]
 pub fn account_bind_person(
-    account_id: String,
+    local_account_id: String,
     user_id: String,
     org_id: Option<String>,
 ) -> Result<(), String> {
     use crate::companion_api::host_identity::{bind_person, HostIdentityError};
 
-    match bind_person(&account_id, &user_id, org_id.as_deref()) {
+    match bind_person(&local_account_id, &user_id, org_id.as_deref()) {
         Ok(()) => Ok(()),
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
@@ -137,10 +137,10 @@ pub fn account_bind_person(
 /// Forget the person on this profile (sign-out). The profile binding and every
 /// device paired to it survive.
 #[tauri::command]
-pub fn account_unbind_person(account_id: String) -> Result<(), String> {
+pub fn account_unbind_person(local_account_id: String) -> Result<(), String> {
     use crate::companion_api::host_identity::{unbind_person, HostIdentityError};
 
-    match unbind_person(&account_id) {
+    match unbind_person(&local_account_id) {
         Ok(()) => Ok(()),
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
@@ -151,11 +151,11 @@ pub fn account_unbind_person(account_id: String) -> Result<(), String> {
 /// disagreement between its own binding and the host's.
 #[tauri::command]
 pub fn account_person(
-    account_id: String,
+    local_account_id: String,
 ) -> Result<Option<crate::companion_api::host_identity::HostPerson>, String> {
     use crate::companion_api::host_identity::{person, HostIdentityError};
 
-    match person(&account_id) {
+    match person(&local_account_id) {
         Ok(found) => Ok(Some(found)),
         // No security database, or a profile this host has never seen unlocked:
         // both mean "nothing recorded", which is an answer, not a failure.
