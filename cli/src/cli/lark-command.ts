@@ -25,14 +25,15 @@ export const LARK_HELP = `cognia-agent lark — Feishu identity registry (headle
 
 Usage:
   cognia-agent lark list                        pending bind requests + bound principals
-  cognia-agent lark approve <code> [--user id]  approve a bind request
+  cognia-agent lark approve <code> [--user usr_…]
+                                                approve a bind request
   cognia-agent lark reject <code>               close a bind request without binding
   cognia-agent lark disable <principalId>       stop a principal from executing
   cognia-agent lark enable <principalId>        re-activate a principal
   cognia-agent lark unlink <principalId>        detach a principal's Cognia linkage
-  cognia-agent lark rebind <principalId> --user <id>
-                                                point a principal at another
-                                                account-local Cognia user
+  cognia-agent lark rebind <principalId> --user usr_…
+                                                say which person this Feishu
+                                                identity actually belongs to
   cognia-agent lark tenant register             admit this adapter's tenant scope
   cognia-agent lark tenant disable|enable       flip the tenant's admission
   cognia-agent lark authorize [--redirect <u>]  print the send-as-user OAuth
@@ -43,7 +44,9 @@ Usage:
 
 Flags:
   --adapter <id>   Lark adapter id (or COGNIA_LARK_ADAPTER_ID)
-  --user <id>      account-local user id for approve (defaults to the account)
+  --user <id>      person id ("usr_…") for approve/rebind. Omit on approve and
+                   the person is resolved from the Feishu ids — found if they
+                   already exist, created if they do not (ADR-0149)
   --redirect <u>   OAuth redirect_uri for authorize (defaults to
                    $COGNIA_LARK_PUBLIC_BASE/connectors/oauth/lark/callback)
   --server-url <u> companion base URL (or COGNIA_SERVER_URL)

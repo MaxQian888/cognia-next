@@ -5,10 +5,13 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
   createBindRequest,
   createFeishuPrincipal,
+  getFeishuPrincipalById,
   getFeishuTenant,
   upsertFeishuTenant,
 } from "@/lib/db/feishu-principals"
+import { findUserIdByExternalIdentity } from "@/lib/db/identity"
 import { getWebSession, touchWebSession } from "@/lib/db/lark-entry"
+import { isUserId } from "@/types/identity"
 import type { AuditEntry } from "@/types/connectors/audit"
 import {
   approveFeishuBind,
@@ -106,7 +109,12 @@ describe("principal admin", () => {
 
     expect(principal.openId).toBe("ou_new")
     expect(principal.cogniaAccountId).toBe("acct_a")
-    expect(principal.cogniaUserId).toBe("acct_a")
+    // ADR-0149 Batch 5 — a real person, not the LocalProfile that approved it.
+    expect(isUserId(principal.cogniaUserId)).toBe(true)
+    expect(principal.cogniaUserId).not.toBe("acct_a")
+    expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe(
+      principal.cogniaUserId
+    )
     expect(await getFeishuTenant("tk_a", "cli_1")).toBeDefined()
 
     const bound = rows.find((r) => r.kind === "principal.bound")
@@ -281,12 +289,15 @@ describe("principal admin", () => {
       {
         adapterId: "lark-1",
         principalId: principal.id,
-        patch: { cogniaUserId: "user_7", logtoSubject: "sub_secret" },
+        patch: { cogniaUserId: "usr_seven", logtoSubject: "sub_secret" },
       },
       deps
     )
 
-    expect(updated.cogniaUserId).toBe("user_7")
+    expect(updated.cogniaUserId).toBe("usr_seven")
+    // The correction has to move the Lark identity too, or the next automatic
+    // resolution finds whoever the subject still pointed at.
+    expect(await findUserIdByExternalIdentity("lark", "ou_1", "tk_a/cli_1")).toBe("usr_seven")
     expect(updated.version).toBe(2)
     const rebound = rows.find((r) => r.kind === "principal.rebound")
     expect(rebound?.fields?.changed).toEqual(["cogniaUserId", "logtoSubject"])
@@ -336,9 +347,55 @@ describe("principal admin", () => {
     ).rejects.toThrow(/not found/)
     await expect(
       rebindFeishuPrincipalIdentity(
-        { adapterId: "lark-1", principalId: "fp_ghost", patch: { cogniaUserId: "u" } },
+        { adapterId: "lark-1", principalId: "fp_ghost", patch: { cogniaUserId: "usr_ghost" } },
         deps
       )
     ).rejects.toThrow(/not found/)
+  })
+
+  it("refuses a rebind target that is not a person id", async () => {
+    const { rows, deps } = auditSpy()
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_1",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "usr_ada",
+    })
+
+    // A LocalProfile id is the exact mistake this guards: it used to be the
+    // DEFAULT value of the field, so it still looks right to a human.
+    await expect(
+      rebindFeishuPrincipalIdentity(
+        { adapterId: "lark-1", principalId: principal.id, patch: { cogniaUserId: "acct_b" } },
+        deps
+      )
+    ).rejects.toThrow(/not a person id/)
+
+    // Refused before anything moved: no version bump, no audit row.
+    expect((await getFeishuPrincipalById(principal.id))?.cogniaUserId).toBe("usr_ada")
+    expect(rows.some((r) => r.kind === "principal.rebound")).toBe(false)
+  })
+
+  it("re-points the Lark identity when an operator names the person at approval", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest()
+
+    const principal = await approveFeishuBind({ code: request.id, cogniaUserId: "usr_ada" }, deps)
+
+    expect(principal.cogniaUserId).toBe("usr_ada")
+    expect(await findUserIdByExternalIdentity("lark", "ou_new", "tk_a/cli_1")).toBe("usr_ada")
+  })
+
+  it("refuses an approval target that is not a person id", async () => {
+    const { deps } = auditSpy()
+    const request = await seedPendingRequest()
+
+    await expect(
+      approveFeishuBind({ code: request.id, cogniaUserId: "acct_b" }, deps)
+    ).rejects.toThrow(/not a person id/)
+    // The request is still pending — a rejected argument must not consume it.
+    expect((await getDb().feishuPrincipalBindRequests.get(request.id))?.status).toBe("pending")
   })
 })

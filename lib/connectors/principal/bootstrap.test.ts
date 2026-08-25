@@ -5,6 +5,8 @@ import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import { getFeishuPrincipal, getFeishuTenant, upsertFeishuTenant } from "@/lib/db/feishu-principals"
 import type { PlatformIdentityRow } from "@/lib/db/connector-types"
 import type { AuditEntry } from "@/types/connectors/audit"
+import { findUserIdByExternalIdentity, linkExternalIdentity, upsertUser } from "@/lib/db/identity"
+import { isUserId } from "@/types/identity"
 import { bootstrapFeishuRegistry } from "./bootstrap"
 
 const NOW = 1_800_000_000_000
@@ -102,6 +104,7 @@ describe("bootstrapFeishuRegistry", () => {
       tenantId: expect.any(String),
       seeded: 2,
       skipped: 0,
+      peopleCreated: 2,
     })
     const tenant = await getFeishuTenant("tk_a", "cli_1")
     expect(tenant?.cogniaAccountId).toBe("acct_a")
@@ -111,9 +114,44 @@ describe("bootstrapFeishuRegistry", () => {
     expect(first?.platformIdentityId).toBe("pi_1")
     expect(first?.cogniaAccountId).toBe("acct_a")
 
+    // ADR-0149 Batch 5 — two senders are two people. Seeding used to write the
+    // operator's own LocalProfile id into both rows, which said every message
+    // from this workspace was sent by the operator.
+    const second = await getFeishuPrincipal("tk_a", "cli_1", "ou_2")
+    expect(isUserId(first?.cogniaUserId ?? "")).toBe(true)
+    expect(isUserId(second?.cogniaUserId ?? "")).toBe(true)
+    expect(first?.cogniaUserId).not.toBe("acct_a")
+    expect(first?.cogniaUserId).not.toBe(second?.cogniaUserId)
+
+    // Each is reachable from their platform id, so the next message finds the
+    // same person instead of minting a second one.
+    expect(await findUserIdByExternalIdentity("lark", "ou_1", "tk_a/cli_1")).toBe(
+      first?.cogniaUserId
+    )
+
     const summary = rows.find((r) => r.kind === "principal.bound")
     expect(summary?.reason).toBe("bootstrap")
-    expect(summary?.fields).toMatchObject({ seeded: 2, skipped: 0 })
+    expect(summary?.fields).toMatchObject({ seeded: 2, skipped: 0, peopleCreated: 2 })
+  })
+
+  it("reuses a person who already reached the identity plane another way", async () => {
+    // The same human, already known from web SSO. Seeding must find them
+    // rather than mint a duplicate — ADR-0149 §3's whole point.
+    await upsertUser({ id: "usr_ada", displayName: "Ada", createdAt: 1, updatedAt: 1 })
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "lark",
+      subject: "ou_1",
+      tenant: "tk_a/cli_1",
+      now: 1,
+    })
+
+    const { overrides } = deps([identity({ id: "pi_1", remoteUserId: "ou_1" })])
+    const result = await bootstrapFeishuRegistry({ adapterId: "lark-1", adapterRow }, overrides)
+
+    expect(result).toMatchObject({ seeded: 1, peopleCreated: 0 })
+    expect((await getFeishuPrincipal("tk_a", "cli_1", "ou_1"))?.cogniaUserId).toBe("usr_ada")
+    expect(await getDb().users.count()).toBe(1)
   })
 
   it("skips the bot's own identity", async () => {
@@ -127,6 +165,7 @@ describe("bootstrapFeishuRegistry", () => {
       tenantId: expect.any(String),
       seeded: 1,
       skipped: 1,
+      peopleCreated: 1,
     })
     expect(await getFeishuPrincipal("tk_a", "cli_1", "ou_bot")).toBeUndefined()
   })
@@ -142,6 +181,7 @@ describe("bootstrapFeishuRegistry", () => {
       tenantId: expect.any(String),
       seeded: 1,
       skipped: 1,
+      peopleCreated: 1,
     })
   })
 
@@ -184,6 +224,7 @@ describe("bootstrapFeishuRegistry", () => {
       tenantId: expect.any(String),
       seeded: 1,
       skipped: 0,
+      peopleCreated: 1,
     })
     expect(await getFeishuPrincipal("tk_a", "cli_1", "ou_1")).toBeDefined()
     expect(await getFeishuPrincipal("tk_a", "cli_1", "ou_2")).toBeUndefined()

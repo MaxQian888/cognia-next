@@ -342,7 +342,7 @@ describe("runPrincipalAdminIntent", () => {
     expect(outcome.error).toContain("not found")
   })
 
-  it("rebinds a principal to another account-local user", async () => {
+  it("rebinds a principal to another person", async () => {
     await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
     const principal = await createFeishuPrincipal({
       tenantKey: "tk_a",
@@ -353,14 +353,34 @@ describe("runPrincipalAdminIntent", () => {
     })
 
     const outcome = await runPrincipalAdminIntent(
-      { adapterId: "lark-1", op: "rebind", principalId: principal.id, cogniaUserId: "user_7" },
+      { adapterId: "lark-1", op: "rebind", principalId: principal.id, cogniaUserId: "usr_seven" },
       deps()
     )
 
     expect(outcome).toEqual({
       ok: true,
-      result: { principalId: principal.id, cogniaUserId: "user_7", version: 2 },
+      result: { principalId: principal.id, cogniaUserId: "usr_seven", version: 2 },
     })
+  })
+
+  it("rejects a rebind target that is not a person id", async () => {
+    await upsertFeishuTenant({ tenantKey: "tk_a", appId: "cli_1", cogniaAccountId: "acct_a" })
+    const principal = await createFeishuPrincipal({
+      tenantKey: "tk_a",
+      appId: "cli_1",
+      openId: "ou_1",
+      cogniaAccountId: "acct_a",
+      cogniaUserId: "usr_ada",
+    })
+
+    // A named argument error, not a thrown intent failure — `cognia lark
+    // rebind --user bob` should read back as "that is not a person".
+    expect(
+      await runPrincipalAdminIntent(
+        { adapterId: "lark-1", op: "rebind", principalId: principal.id, cogniaUserId: "bob" },
+        deps()
+      )
+    ).toEqual({ ok: false, error: "user_invalid" })
   })
 
   it("requires both a principal and a target user to rebind", async () => {

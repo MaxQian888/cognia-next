@@ -25,6 +25,7 @@ import {
   resolveConnectorsIngressBase,
 } from "@/lib/connectors/server-transport"
 import { isTauri } from "@/lib/tauri"
+import { isUserId } from "@/types/identity"
 import {
   approveFeishuBind,
   listFeishuBindRequests,
@@ -156,6 +157,10 @@ export async function runPrincipalAdminIntent(
       case "rebind": {
         if (!intent.principalId) return { ok: false, error: "principal_required" }
         if (!intent.cogniaUserId) return { ok: false, error: "user_required" }
+        // A named error rather than the thrown one `admin.ts` raises: this is
+        // an operator channel, and `cognia lark rebind --user bob` should read
+        // back as a rejected argument, not a failed intent.
+        if (!isUserId(intent.cogniaUserId)) return { ok: false, error: "user_invalid" }
         const principal = await rebindFeishuPrincipalIdentity({
           adapterId,
           principalId: intent.principalId,

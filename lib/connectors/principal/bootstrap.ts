@@ -24,12 +24,20 @@ import { createFeishuPrincipal, getFeishuTenant } from "@/lib/db/feishu-principa
 import { getDb } from "@/lib/db/schema"
 import { isLarkPrincipalRegistryEnabled } from "../feature-flags"
 import { registerFeishuTenant, withDefaults, type PrincipalAdminDependencies } from "./admin"
+import { resolveLarkPerson } from "./person"
 
 export type BootstrapSkipReason = "flag_off" | "identity_unknown" | "already_registered"
 
 export type BootstrapRegistryResult =
   | { status: "skipped"; reason: BootstrapSkipReason }
-  | { status: "seeded"; tenantId: string; seeded: number; skipped: number }
+  | {
+      status: "seeded"
+      tenantId: string
+      seeded: number
+      skipped: number
+      /** Seeded senders who did not already exist on the identity plane. */
+      peopleCreated: number
+    }
 
 export interface BootstrapRegistryInput {
   adapterId: string
@@ -90,25 +98,41 @@ export async function bootstrapFeishuRegistry(
   const identities = await deps.listIdentities(input.adapterId)
   let seeded = 0
   let skipped = 0
+  let peopleCreated = 0
   for (const identity of identities) {
     if (!identity.remoteUserId || identity.remoteUserId === selfOpenId) {
       skipped += 1
       continue
     }
     try {
+      // ADR-0149 Batch 5 — the seeded rows used to record the LocalProfile id
+      // as the person, which claimed every one of these senders was the
+      // operator. Each is their own `User` on the identity plane, found when
+      // they already exist there and minted when they do not.
+      const person = await resolveLarkPerson({
+        tenantKey,
+        appId,
+        openId: identity.remoteUserId,
+        ...(identity.displayName ? { displayName: identity.displayName } : {}),
+        now: deps.now(),
+      })
       await createFeishuPrincipal({
         tenantKey,
         appId,
         openId: identity.remoteUserId,
         cogniaAccountId: accountId,
-        cogniaUserId: accountId,
+        cogniaUserId: person.userId,
         platformIdentityId: identity.id,
         now: deps.now(),
       })
       seeded += 1
+      if (person.created) peopleCreated += 1
     } catch {
       // Duplicate (tenantKey, appId, openId) — another adapter for the same
       // tenant seeded it, or the directory holds two rows for one person.
+      // Also the fail-closed direction for a person who could not be
+      // resolved: no principal means the sender gets a bind code, which is
+      // what an operator can act on.
       skipped += 1
     }
   }
@@ -120,8 +144,8 @@ export async function bootstrapFeishuRegistry(
     kind: "principal.bound",
     at: deps.now(),
     reason: "bootstrap",
-    fields: { tenantId: tenant.id, tenantKey, appId, accountId, seeded, skipped },
+    fields: { tenantId: tenant.id, tenantKey, appId, accountId, seeded, skipped, peopleCreated },
   })
 
-  return { status: "seeded", tenantId: tenant.id, seeded, skipped }
+  return { status: "seeded", tenantId: tenant.id, seeded, skipped, peopleCreated }
 }

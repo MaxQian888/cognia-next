@@ -1341,7 +1341,15 @@ export interface FeishuPrincipalRow {
   openId: string
   unionId?: string
   cogniaAccountId: string
-  /** Account-local user id; equals the account id for single-user accounts. */
+  /**
+   * The `User` (`usr_…`) this Feishu identity belongs to — ADR-0149 §3.
+   *
+   * Rows written before Batch 5 hold a LocalProfile id (`acct_…`) here, which
+   * is why every reader treats it as an opaque string rather than joining on
+   * it: the registry seeded the operator's own profile id for senders it had
+   * no person for. New rows carry a real person, and `lib/connectors/principal/person.ts`
+   * is the only place one is resolved.
+   */
   cogniaUserId: string
   /** Web SSO linkage (P1.3): populated once the same person logs in via OIDC. */
   logtoSubject?: string

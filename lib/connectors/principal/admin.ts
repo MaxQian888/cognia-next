@@ -40,6 +40,8 @@ import {
   upsertFeishuTenant,
   type RebindFeishuPrincipalPatch,
 } from "@/lib/db/feishu-principals"
+import { isUserId } from "@/types/identity"
+import { bindLarkIdentityTo, resolveLarkPerson } from "./person"
 import { getActiveRuntimeAccountId, hashOpenId } from "./resolve"
 import { revokeWebSessionsForPrincipal } from "@/lib/db/lark-entry"
 
@@ -153,6 +155,25 @@ export async function setFeishuTenantEnabled(
   return { ...tenant, status: next, updatedAt: now }
 }
 
+/**
+ * Validate an operator-supplied person id — ADR-0149 §1, Batch 5.
+ *
+ * `cogniaUserId` used to default to the LocalProfile id, so anything at all
+ * looked plausible in it. Now that the field names a real `User`, a value that
+ * is not one records the wrong human in a registry whose whole job is saying
+ * who somebody is. Refusing is recoverable; a mis-attributed principal is
+ * found months later, if ever.
+ */
+function requirePersonId(value: string): string {
+  if (!isUserId(value)) {
+    throw new Error(
+      `principal-admin: "${value}" is not a person id — ADR-0149 makes cogniaUserId a ` +
+        `"usr_…" id, not a LocalProfile ("acct_…") or a free-form name.`
+    )
+  }
+  return value
+}
+
 // ─── Bind requests ──────────────────────────────────────────────────────────
 
 export interface ListBindRequestsInput {
@@ -172,7 +193,11 @@ export interface ApproveBindInput {
   code: string
   /** Defaults to the account this runtime currently serves. */
   accountId?: string
-  /** Account-local user id; defaults to the account id (single-user account). */
+  /**
+   * The `User` (`usr_…`) this Feishu identity belongs to. Omit and the person
+   * is resolved from the platform ids — found if they already exist on the
+   * identity plane, minted if they do not.
+   */
   cogniaUserId?: string
   /** Web-SSO linkage captured at approval time, when known. */
   logtoSubject?: string
@@ -209,11 +234,37 @@ export async function approveFeishuBind(
     overrides
   )
 
+  // ADR-0149 Batch 5 — the person, not the profile. An operator who named one
+  // is making an explicit statement about who this sender is, so their id wins
+  // and the Lark subject is re-pointed at it; otherwise the platform ids
+  // resolve to a person on their own.
+  const cogniaUserId = input.cogniaUserId
+    ? requirePersonId(input.cogniaUserId)
+    : (
+        await resolveLarkPerson({
+          tenantKey: request.tenantKey,
+          appId: request.appId,
+          openId: request.openId,
+          ...(input.logtoSubject ? { logtoSubject: input.logtoSubject } : {}),
+          now,
+        })
+      ).userId
+
   const principal = await approveBindRequest(input.code, {
     cogniaAccountId: accountId,
-    cogniaUserId: input.cogniaUserId ?? accountId,
+    cogniaUserId,
     now,
   })
+
+  if (input.cogniaUserId) {
+    await bindLarkIdentityTo({
+      userId: cogniaUserId,
+      tenantKey: request.tenantKey,
+      appId: request.appId,
+      openId: request.openId,
+      now,
+    })
+  }
 
   const linkage: RebindFeishuPrincipalPatch = {}
   if (input.logtoSubject) linkage.logtoSubject = input.logtoSubject
@@ -347,6 +398,7 @@ export async function rebindFeishuPrincipalIdentity(
 ): Promise<FeishuPrincipalRow> {
   const deps = withDefaults(overrides)
   const now = deps.now()
+  if (input.patch.cogniaUserId !== undefined) requirePersonId(input.patch.cogniaUserId)
   const changed = Object.keys(input.patch).filter(
     (key) => input.patch[key as keyof RebindFeishuPrincipalPatch] !== undefined
   )
@@ -358,6 +410,19 @@ export async function rebindFeishuPrincipalIdentity(
     return current
   }
   const updated = await rebindFeishuPrincipal(input.principalId, input.patch, now)
+  if (input.patch.cogniaUserId !== undefined) {
+    // "This Lark account is actually Ada" has to move the external identity
+    // too, or the next automatic resolution finds the person the subject still
+    // points at and quietly undoes the operator's correction.
+    await bindLarkIdentityTo({
+      userId: input.patch.cogniaUserId,
+      tenantKey: updated.tenantKey,
+      appId: updated.appId,
+      openId: updated.openId,
+      ...(updated.unionId ? { unionId: updated.unionId } : {}),
+      now,
+    })
+  }
   await deps.audit({
     adapterId: input.adapterId,
     kind: "principal.rebound",
