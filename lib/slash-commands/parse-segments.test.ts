@@ -20,6 +20,12 @@ function richShape(segments: ReturnType<typeof parseSegments>) {
     if (s.kind === "mention") {
       return { k: "men", name: s.name, raw: s.raw, start: s.start, end: s.end }
     }
+    // `RichSegment` also admits `param`, which `splitParamSegments` produces —
+    // never `parseSegments` itself. Named explicitly so this helper fails to
+    // compile rather than silently mis-shaping one if that ever changes.
+    if (s.kind === "param") {
+      return { k: "par", name: s.paramId, raw: s.raw, start: s.start, end: s.end }
+    }
     return { k: "txt", value: s.value, start: s.start, end: s.end }
   })
 }

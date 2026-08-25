@@ -2,9 +2,13 @@ import { render } from "@testing-library/react"
 import { createRef } from "react"
 import { ComposerChipOverlay } from "./composer-chip-overlay"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
+import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { splitParamSegments } from "@/lib/chat/template/param-segments"
 
 const known = (n: string) => ["help", "model", "review"].includes(n)
 const segs = (v: string) => parseSegments(v, known, { mentions: true })
+/** The overlay's real input in the composer: mentions AND parameters split out. */
+const richSegs = (v: string) => splitParamSegments(segs(v), computeCodeRanges(v))
 
 describe("ComposerChipOverlay", () => {
   it("is aria-hidden and does not capture pointer events", () => {
@@ -96,5 +100,67 @@ describe("ComposerChipOverlay", () => {
     const { container } = render(<ComposerChipOverlay value={value} segments={segs(value)} />)
     expect(container.querySelectorAll('[data-chip="mention"]')).toHaveLength(0)
     expect(container.textContent).toContain("user@host.com")
+  })
+
+  describe("{{parameter}} pills", () => {
+    it("pills a parameter token and keeps every character", () => {
+      const value = "fix {{module}} please"
+      const { container } = render(<ComposerChipOverlay value={value} segments={richSegs(value)} />)
+
+      const pills = container.querySelectorAll('[data-chip="param"]')
+      expect(pills).toHaveLength(1)
+      // The pill paints the token itself, never a value: this layer is a
+      // character-for-character mirror of the textarea, so any substitution
+      // here shifts every pill after it out of alignment.
+      expect(pills[0].textContent).toBe("{{module}}")
+      expect(container.textContent).toBe(value)
+    })
+
+    it("reads as empty until something binds a value", () => {
+      const value = "{{module}}"
+      const { container } = render(<ComposerChipOverlay value={value} segments={richSegs(value)} />)
+
+      expect(container.querySelector('[data-chip="param"]')).toHaveAttribute(
+        "data-param-state",
+        "empty"
+      )
+    })
+
+    it("takes its state from the caller, one pill at a time", () => {
+      const value = "{{a}} {{b}} {{c}}"
+      const state = { a: "filled", b: "unresolved", c: "empty" } as const
+      const { container } = render(
+        <ComposerChipOverlay
+          value={value}
+          segments={richSegs(value)}
+          paramState={(id) => state[id as keyof typeof state]}
+        />
+      )
+
+      expect(
+        [...container.querySelectorAll('[data-chip="param"]')].map((el) =>
+          el.getAttribute("data-param-state")
+        )
+      ).toEqual(["filled", "unresolved", "empty"])
+    })
+
+    it("paints nothing inside a fenced block", () => {
+      const value = "live {{x}}\n```\n{{ jinja }}\n```"
+      const { container } = render(<ComposerChipOverlay value={value} segments={richSegs(value)} />)
+
+      const pills = container.querySelectorAll('[data-chip="param"]')
+      expect(pills).toHaveLength(1)
+      expect(pills[0].textContent).toBe("{{x}}")
+      expect(container.textContent).toBe(value)
+    })
+
+    it("paints parameters and mentions side by side", () => {
+      const value = "@src/a.ts needs {{module}}"
+      const { container } = render(<ComposerChipOverlay value={value} segments={richSegs(value)} />)
+
+      expect(container.querySelectorAll('[data-chip="mention"]')).toHaveLength(1)
+      expect(container.querySelectorAll('[data-chip="param"]')).toHaveLength(1)
+      expect(container.textContent).toBe(value)
+    })
   })
 })

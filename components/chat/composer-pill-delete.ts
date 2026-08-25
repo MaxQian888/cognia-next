@@ -1,25 +1,37 @@
-// Atomic deletion for the composer's `/command` and `@mention` pills. The
-// textarea stays the source of truth, but a single Backspace/Delete next to an
-// already-inserted pill should remove the WHOLE token (what the user sees as one
-// chip) instead of nibbling one character and leaving a broken half-token like
-// `/rese`. This is a pure range computation so it can be unit-tested without a
-// textarea; the composer applies the returned range.
+// Atomic deletion for the composer's `/command`, `@mention` and `{{parameter}}`
+// pills. The textarea stays the source of truth, but a single Backspace/Delete
+// next to an already-inserted pill should remove the WHOLE token (what the user
+// sees as one chip) instead of nibbling one character and leaving a broken
+// half-token like `/rese`. This is a pure range computation so it can be
+// unit-tested without a textarea; the composer applies the returned range.
+//
+// Note what this does NOT do: it never prevents the user from editing inside a
+// token. A caret placed in the middle of `{{module}}` still deletes one
+// character, which demotes the pill to ordinary text. That escape hatch is the
+// point of keeping the token in a plain textarea — convenience at the edges,
+// never a cage.
 
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
 
 export type DeleteDirection = "backward" | "forward"
 
+/** The segment kinds that render as a chip, and therefore delete as one. */
+const PILL_KINDS = new Set(["command", "mention", "param"])
+
+type PillSegment = Extract<RichSegment, { kind: "command" | "mention" | "param" }>
+
 /** Exclusive end index of a segment's VISIBLE pill (the part the chip covers). */
-function pillEndOf(seg: Extract<RichSegment, { kind: "command" | "mention" }>): number {
+function pillEndOf(seg: PillSegment): number {
   // Command pills cover only the `/name` head (args render as plain text);
-  // mention pills cover the whole `@token`.
+  // mention and parameter pills cover their whole token.
   return seg.kind === "command" ? seg.start + 1 + seg.name.length : seg.end
 }
 
 /**
- * Range to remove when Backspace/Delete lands on a `/command` or `@mention`
- * pill, so it deletes as one unit. Returns null when the caret isn't hugging a
- * pill (the caller then lets the textarea delete a single character normally).
+ * Range to remove when Backspace/Delete lands on a `/command`, `@mention` or
+ * `{{parameter}}` pill, so it deletes as one unit. Returns null when the caret
+ * isn't hugging a pill (the caller then lets the textarea delete a single
+ * character normally).
  *
  * - `backward` (Backspace): fires when the caret sits at the pill's right edge,
  *   or just past a single trailing space that follows it (so deleting a
@@ -34,9 +46,9 @@ export function pillDeleteRange(
   direction: DeleteDirection
 ): { start: number; end: number } | null {
   for (const seg of segments) {
-    if (seg.kind !== "command" && seg.kind !== "mention") continue
+    if (!PILL_KINDS.has(seg.kind)) continue
     const pillStart = seg.start
-    const pillEnd = pillEndOf(seg)
+    const pillEnd = pillEndOf(seg as PillSegment)
     if (pillEnd <= pillStart) continue
 
     if (direction === "backward") {

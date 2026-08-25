@@ -67,10 +67,31 @@ export interface MentionSegment {
   end: number
 }
 
+export interface ParamSegment {
+  kind: "param"
+  /** Declared parameter id between the braces, with surrounding space trimmed. */
+  paramId: string
+  /** Exact source substring including both brace pairs (for chip ranges). */
+  raw: string
+  /** Inclusive start index in the source (the first `{`). */
+  start: number
+  /** Exclusive end index in the source (just past the last `}`). */
+  end: number
+}
+
 export type InputSegment = CommandSegment | TextSegment
 
-/** Segment list that may additionally contain mention pills (overlay only). */
-export type RichSegment = InputSegment | MentionSegment
+/**
+ * Segment list that may additionally contain pill segments (overlay only).
+ *
+ * `ParamSegment`s are produced by `splitParamSegments` in
+ * `lib/chat/template/param-segments.ts` rather than here: recognising one
+ * requires knowing which spans of the input are code, which is a Markdown
+ * concern this parser has no business learning. The union lives here because
+ * the overlay consumes it, and because `pillDeleteRange` has to see every pill
+ * kind in one list.
+ */
+export type RichSegment = InputSegment | MentionSegment | ParamSegment
 
 export interface ParseSegmentsOptions {
   /**

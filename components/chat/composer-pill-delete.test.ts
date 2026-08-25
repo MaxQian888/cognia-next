@@ -1,8 +1,12 @@
 import { pillDeleteRange } from "./composer-pill-delete"
 import { parseSegments } from "@/lib/slash-commands/parse-segments"
+import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { splitParamSegments } from "@/lib/chat/template/param-segments"
 
 const known = (n: string) => ["reset", "model", "git/commit"].includes(n)
 const segs = (v: string) => parseSegments(v, known, { mentions: true })
+/** The composer's real overlay list: mentions AND parameters split out. */
+const richSegs = (v: string) => splitParamSegments(segs(v), computeCodeRanges(v))
 
 describe("pillDeleteRange — backward (Backspace)", () => {
   it("deletes a whole command at the pill's right edge", () => {
@@ -64,5 +68,35 @@ describe("pillDeleteRange — forward (Delete)", () => {
   it("returns null when the caret is not at a pill's left edge", () => {
     const v = "/reset "
     expect(pillDeleteRange(v, 3, segs(v), "forward")).toBeNull()
+  })
+})
+
+describe("pillDeleteRange — {{parameter}} pills", () => {
+  it("deletes a whole parameter at its right edge", () => {
+    const v = "fix {{module}}"
+    expect(pillDeleteRange(v, 14, richSegs(v), "backward")).toEqual({ start: 4, end: 14 })
+  })
+
+  it("eats one trailing space so a just-inserted parameter goes in one keystroke", () => {
+    const v = "fix {{module}} "
+    expect(pillDeleteRange(v, 15, richSegs(v), "backward")).toEqual({ start: 4, end: 15 })
+  })
+
+  it("deletes a parameter forward from its left edge", () => {
+    const v = "{{module}} now"
+    expect(pillDeleteRange(v, 0, richSegs(v), "forward")).toEqual({ start: 0, end: 11 })
+  })
+
+  it("leaves the caret alone inside a parameter, so the token can be broken", () => {
+    // Demoting a pill back to plain text by editing it is the escape hatch that
+    // makes the textarea approach safe. Atomic deletion must not become a cage.
+    const v = "fix {{module}}"
+    expect(pillDeleteRange(v, 8, richSegs(v), "backward")).toBeNull()
+    expect(pillDeleteRange(v, 8, richSegs(v), "forward")).toBeNull()
+  })
+
+  it("does not treat a parameter inside code as a pill", () => {
+    const v = "`{{module}}`"
+    expect(pillDeleteRange(v, 11, richSegs(v), "backward")).toBeNull()
   })
 })

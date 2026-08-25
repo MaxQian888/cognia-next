@@ -139,6 +139,8 @@ import {
   type SlashCommandResultBlock,
 } from "@/lib/slash-commands/system-blocks"
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { splitParamSegments } from "@/lib/chat/template/param-segments"
 import { pillDeleteRange } from "./composer-pill-delete"
 import { runSegments, type CommandError } from "@/lib/slash-commands/run-segments"
 import {
@@ -650,10 +652,23 @@ function ComposerInner(props: InnerProps) {
     [controller.textInput.value, commandMap]
   )
 
-  // The chip overlay's view: derive `@mention` pills from the already-parsed
-  // `segments` (commands pass through, only text is sub-split) so we don't run a
-  // second full tokenizer pass over the input on every keystroke.
-  const overlaySegments = useMemo(() => splitMentionSegments(segments), [segments])
+  // Which spans of the input are code, so `{{parameter}}` tokens inside a fenced
+  // block or an inline span stay ordinary text. `{{ }}` belongs to Vue,
+  // Handlebars and Jinja too, and pasting one of those into a prompt is
+  // completely ordinary.
+  const codeRanges = useMemo(
+    () => computeCodeRanges(controller.textInput.value),
+    [controller.textInput.value]
+  )
+
+  // The chip overlay's view: derive `@mention` and `{{parameter}}` pills from
+  // the already-parsed `segments` (commands pass through, only text is
+  // sub-split) so we don't run a second full tokenizer pass over the input on
+  // every keystroke.
+  const overlaySegments = useMemo(
+    () => splitParamSegments(splitMentionSegments(segments), codeRanges),
+    [segments, codeRanges]
+  )
 
   // Recent / pinned slash commands for the popover's empty-query view.
   const recentCommands = useComposerCommandStore((s) => s.recentCommands)

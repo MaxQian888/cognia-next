@@ -33,17 +33,45 @@ export const TEXTAREA_TYPOGRAPHY = "px-1 py-1.5 pe-10 text-sm leading-6"
  */
 export const OVERLAY_FONT_SIZE = "max(16px, 1rem)"
 
+/**
+ * How a `{{parameter}}` pill should read.
+ *
+ * - `empty` — declared or typed, no value yet. A dashed outline, so an unfilled
+ *   slot is visible at a glance without shouting.
+ * - `filled` — a value is bound. Same treatment as a `/command` pill.
+ * - `unresolved` — a value is bound but its target is gone on this device (an
+ *   imported template naming a file, agent or workspace that does not exist
+ *   here). Amber, because the send path will fall back to the stored label and
+ *   the user should know before it does, not after.
+ */
+export type ParamPillState = "empty" | "filled" | "unresolved"
+
+const PARAM_PILL_CLASS: Record<ParamPillState, string> = {
+  empty: "border border-dashed border-muted-foreground/50",
+  filled: "bg-primary/10 ring-1 ring-primary/25 ring-inset",
+  unresolved: "bg-amber-500/10 ring-1 ring-amber-500/40 ring-inset",
+}
+
 interface ComposerChipOverlayProps {
   value: string
   /** Segments parsed with `{ mentions: true }` so `@mention` pills paint too. */
   segments: RichSegment[]
+  /**
+   * State of each `{{parameter}}` token. Defaults to `empty`, which is the
+   * honest answer before anything has bound a value — including for a token the
+   * user simply typed, which is a parameter exactly like one a template
+   * inserted.
+   */
+  paramState?: (paramId: string) => ParamPillState
 }
 
 const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayProps>(
-  function ComposerChipOverlay({ value, segments }, innerRef) {
+  function ComposerChipOverlay({ value, segments, paramState }, innerRef) {
     // Nothing to paint when there are no pill segments — render an invisible
     // placeholder so the DOM node is stable but cheap.
-    const hasPill = segments.some((s) => s.kind === "command" || s.kind === "mention")
+    const hasPill = segments.some(
+      (s) => s.kind === "command" || s.kind === "mention" || s.kind === "param"
+    )
 
     return (
       <div
@@ -94,6 +122,23 @@ const ComposerChipOverlayBase = forwardRef<HTMLDivElement, ComposerChipOverlayPr
                       key={`${seg.start}-${i}`}
                       data-chip="mention"
                       className="box-decoration-clone rounded-md bg-muted/60 ring-1 ring-border ring-inset"
+                    >
+                      {seg.raw}
+                    </span>
+                  )
+                }
+                if (seg.kind === "param") {
+                  // The pill paints `{{id}}` itself — it cannot show the value
+                  // instead. This layer is a character-for-character mirror of
+                  // the textarea, so any glyph it renders that the textarea does
+                  // not have shifts every pill after it out of alignment.
+                  const state = paramState?.(seg.paramId) ?? "empty"
+                  return (
+                    <span
+                      key={`${seg.start}-${i}`}
+                      data-chip="param"
+                      data-param-state={state}
+                      className={cn("box-decoration-clone rounded-md", PARAM_PILL_CLASS[state])}
                     >
                       {seg.raw}
                     </span>
