@@ -37,12 +37,20 @@ describe("createChatTemplate", () => {
     expect(row.params).toEqual(params)
   })
 
-  it("mints a readable, collision-resistant id", async () => {
-    const a = await createChatTemplate({ name: "Review This PR", body: "x" })
-    const b = await createChatTemplate({ name: "Review This PR", body: "x" })
+  it("mints a readable id that survives two saves in the same millisecond", async () => {
+    // The table is keyed `&id`; without a random tail the second save silently
+    // overwrites the first.
+    const now = jest.spyOn(Date, "now").mockReturnValue(1_700_000_000_000)
+    try {
+      const a = await createChatTemplate({ name: "Review This PR", body: "x" })
+      const b = await createChatTemplate({ name: "Review This PR", body: "x" })
 
-    expect(a.id).toContain("review-this-pr")
-    expect(a.id).not.toBe(b.id)
+      expect(a.id).toContain("review-this-pr")
+      expect(a.id).not.toBe(b.id)
+      await expect(getDb().chatTemplates.count()).resolves.toBe(2)
+    } finally {
+      now.mockRestore()
+    }
   })
 
   it("registers the schema table, so v193 actually shipped", async () => {

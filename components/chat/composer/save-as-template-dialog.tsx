@@ -24,27 +24,49 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { deriveParams } from "@/lib/chat/template/template"
+import { hasLaunchSpec, type ChatTemplateLaunchSpec } from "@/lib/chat/template/launch-spec"
 
 export interface SaveAsTemplateDialogProps {
   open: boolean
   /** The composer's current text — what will be saved as the body. */
   body: string
+  /**
+   * The current conversation's agent / team / repository / model, offered as
+   * something the template can remember.
+   *
+   * Opt-out rather than opt-in: "run this with the reviewer, in this repo" is
+   * usually the whole reason a message is worth keeping. It stays safe because
+   * a launch spec never applies itself — inserting the template elsewhere
+   * offers to start a new conversation, it does not re-point the current one.
+   */
+  launchSpec?: ChatTemplateLaunchSpec
+  /** Human-readable summary of what `launchSpec` would pin, for the checkbox. */
+  launchSpecSummary?: string
   onOpenChange(open: boolean): void
-  onSave(input: { name: string; description?: string }): Promise<void>
+  onSave(input: {
+    name: string
+    description?: string
+    launchSpec?: ChatTemplateLaunchSpec
+  }): Promise<void>
 }
 
 export function SaveAsTemplateDialog({
   open,
   body,
+  launchSpec,
+  launchSpecSummary,
   onOpenChange,
   onSave,
 }: SaveAsTemplateDialogProps) {
   const t = useTranslations("chat.composer.saveTemplate")
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [rememberSetup, setRememberSetup] = useState(true)
   const [saving, setSaving] = useState(false)
   const params = deriveParams(body)
+  const canRememberSetup = hasLaunchSpec(launchSpec)
 
   const save = async () => {
     const trimmed = name.trim()
@@ -54,6 +76,7 @@ export function SaveAsTemplateDialog({
       await onSave({
         name: trimmed,
         ...(description.trim() ? { description: description.trim() } : {}),
+        ...(canRememberSetup && rememberSetup && launchSpec ? { launchSpec } : {}),
       })
       setName("")
       setDescription("")
@@ -101,6 +124,21 @@ export function SaveAsTemplateDialog({
               onChange={(event) => setDescription(event.target.value)}
             />
           </div>
+          {canRememberSetup ? (
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={rememberSetup}
+                onCheckedChange={(next) => setRememberSetup(next === true)}
+                data-testid="save-template-remember-setup"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span>{t("rememberSetup")}</span>
+                {launchSpecSummary ? (
+                  <span className="text-xs text-muted-foreground">{launchSpecSummary}</span>
+                ) : null}
+              </span>
+            </label>
+          ) : null}
           {/* The body, shown but not editable — see the note at the top. */}
           <pre className="max-h-32 overflow-auto rounded-md bg-muted p-2 text-xs whitespace-pre-wrap">
             {body}

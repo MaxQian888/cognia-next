@@ -14,6 +14,7 @@
 import { getDb } from "./schema"
 import { deriveParams, templateSlug, type ChatTemplateParam } from "@/lib/chat/template/template"
 import type { ChatTemplateParamValue } from "@/lib/chat/template/binding"
+import type { ChatTemplateLaunchSpec } from "@/lib/chat/template/launch-spec"
 
 export interface ChatTemplateRow {
   id: string
@@ -22,6 +23,16 @@ export interface ChatTemplateRow {
   /** Message body, carrying `{{parameter}}` tokens. */
   body: string
   params: ChatTemplateParam[]
+  /**
+   * The session configuration this template expects — agent, team, repository,
+   * model, mode.
+   *
+   * A suggestion, never an instruction. Inserting a template into a
+   * conversation that already runs on something else changes nothing; the
+   * composer offers to start a new conversation instead. Silently re-pointing
+   * a conversation someone is already in makes its own history unreadable.
+   */
+  launchSpec?: ChatTemplateLaunchSpec
   /**
    * Bumped on every content edit.
    *
@@ -51,10 +62,16 @@ export interface ChatTemplateDraft {
   description?: string
   body: string
   params?: ChatTemplateParam[]
+  launchSpec?: ChatTemplateLaunchSpec
 }
 
 function newId(name: string): string {
-  return `tpl_${templateSlug(name)}_${Date.now().toString(36)}`
+  // The random tail is load-bearing, not decoration: the table is keyed `&id`,
+  // and a timestamp alone collides for two templates saved in the same
+  // millisecond — which silently overwrites the first. Same shape as
+  // `prompt-presets.ts`.
+  const suffix = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  return `tpl_${templateSlug(name)}_${suffix}`
 }
 
 /** Newest-first, which is the order the picker offers them in. */
@@ -77,6 +94,7 @@ export async function createChatTemplate(draft: ChatTemplateDraft): Promise<Chat
     // Derived from the body when the caller did not declare them, which is what
     // makes "save what I just wrote" work without a form in the way first.
     params: draft.params ?? deriveParams(draft.body),
+    ...(draft.launchSpec ? { launchSpec: draft.launchSpec } : {}),
     revision: 1,
     usageCount: 0,
     createdAt: now,
@@ -96,7 +114,7 @@ export async function createChatTemplate(draft: ChatTemplateDraft): Promise<Chat
  */
 export async function updateChatTemplate(
   id: string,
-  patch: Partial<Pick<ChatTemplateRow, "name" | "description" | "body" | "params">>
+  patch: Partial<Pick<ChatTemplateRow, "name" | "description" | "body" | "params" | "launchSpec">>
 ): Promise<ChatTemplateRow | undefined> {
   const db = getDb()
   const current = await db.chatTemplates.get(id)

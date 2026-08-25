@@ -159,6 +159,14 @@ import {
 } from "@/lib/chat/template/binding"
 import { TemplateParamPopover } from "./composer/template-param-popover"
 import { SaveAsTemplateDialog } from "./composer/save-as-template-dialog"
+import { TemplateLaunchDiffBar } from "./template-launch-diff-bar"
+import {
+  diffLaunchSpec,
+  launchSpecSeed,
+  type ChatTemplateLaunchSpec,
+  type LaunchSpecDifference,
+} from "@/lib/chat/template/launch-spec"
+import { startNewSession } from "@/lib/chat/start-session"
 import { pillDeleteRange } from "./composer-pill-delete"
 import { runSegments, type CommandError } from "@/lib/slash-commands/run-segments"
 import {
@@ -703,6 +711,16 @@ function ComposerInner(props: InnerProps) {
   const [chatTemplates, setChatTemplates] = useState<ChatTemplateRow[]>([])
   const [templateEpoch, setTemplateEpoch] = useState(0)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  /**
+   * The launch spec of the template just inserted, held only so the diff bar
+   * can offer to start a conversation that matches it. Cleared on dismiss and
+   * whenever the binding goes.
+   */
+  const [pendingLaunchSpec, setPendingLaunchSpec] = useState<{
+    spec: ChatTemplateLaunchSpec
+    templateName: string
+    body: string
+  } | null>(null)
   useEffect(() => {
     let cancelled = false
     listChatTemplates()
@@ -758,8 +776,75 @@ function ComposerInner(props: InnerProps) {
   }, [paramTokens, previewRequested, controller.textInput.value, effectiveBinding])
 
   const tSaveTemplate = useTranslations("chat.composer.saveTemplate")
+  const tLaunchDiff = useTranslations("chat.composer.launchDiff")
+
+  /** What the inserted template's setup would change about THIS conversation. */
+  const launchDifferences: LaunchSpecDifference[] = useMemo(() => {
+    if (!pendingLaunchSpec || !props.session) return []
+    return diffLaunchSpec(pendingLaunchSpec.spec, {
+      model: props.session.model,
+      permissionMode: props.session.permissionMode,
+      systemPrompt: props.session.systemPrompt,
+      workingDir: props.session.workingDir,
+      characterId: props.session.characterId,
+      squadId: props.session.squadId,
+      projectId: props.session.projectId,
+    })
+  }, [pendingLaunchSpec, props.session])
+
+  /** The current conversation's setup, offered to "save as template". */
+  const currentLaunchSpec: ChatTemplateLaunchSpec | undefined = useMemo(() => {
+    const session = props.session
+    if (!session) return undefined
+    return {
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.permissionMode ? { permissionMode: session.permissionMode } : {}),
+      ...(session.workingDir ? { workingDir: session.workingDir } : {}),
+      ...(session.characterId ? { characterId: session.characterId } : {}),
+      ...(session.squadId ? { squadId: session.squadId } : {}),
+      ...(session.projectId ? { workspace: { projectId: session.projectId } } : {}),
+    }
+  }, [props.session])
+
+  const launchFieldLabel = useCallback(
+    (difference: LaunchSpecDifference): string => {
+      const label = {
+        characterId: tLaunchDiff("fieldCharacter"),
+        squadId: tLaunchDiff("fieldSquad"),
+        projectId: tLaunchDiff("fieldProject"),
+        model: tLaunchDiff("fieldModel"),
+        permissionMode: tLaunchDiff("fieldPermissionMode"),
+        workingDir: tLaunchDiff("fieldWorkingDir"),
+        systemPrompt: tLaunchDiff("fieldSystemPrompt"),
+      }[difference.field]
+      // The value itself for anything with a readable one; an opaque id reads
+      // as noise, so those show only which axis differs.
+      const opaque = difference.field === "characterId" || difference.field === "squadId"
+      return opaque ? label : `${label}: ${difference.wanted}`
+    },
+    [tLaunchDiff]
+  )
+
+  /**
+   * Start a fresh conversation configured the way the template asks, and carry
+   * the body across. The current conversation is left exactly as it was.
+   */
+  const startSessionFromTemplate = useCallback(async () => {
+    const pending = pendingLaunchSpec
+    if (!pending) return
+    setPendingLaunchSpec(null)
+    try {
+      await startNewSession(launchSpecSeed(pending.spec))
+      // The composer is not remounted per session, so the draft-hydration
+      // effect clears the box for the new one — set the body after it has,
+      // which is the same frame the session id lands in props.
+      requestAnimationFrame(() => controller.textInput.setInput(pending.body))
+    } catch (err) {
+      loggers.chat.error("composer: starting a session from a template failed", err)
+    }
+  }, [pendingLaunchSpec, controller.textInput])
   const saveCurrentAsTemplate = useCallback(
-    async (input: { name: string; description?: string }) => {
+    async (input: { name: string; description?: string; launchSpec?: ChatTemplateLaunchSpec }) => {
       await createChatTemplate({ ...input, body: controller.textInput.value })
       // Re-read rather than push onto the local list: the store derives the
       // declarations and the id, and re-reading is the only way the `/` menu
@@ -1005,6 +1090,13 @@ function ComposerInner(props: InnerProps) {
           params: seeded,
           insertedAt: Date.now(),
         })
+        // Held only so the diff bar can OFFER a matching conversation. Nothing
+        // about the current one is touched — see `TemplateLaunchDiffBar`.
+        setPendingLaunchSpec(
+          template.launchSpec
+            ? { spec: template.launchSpec, templateName: template.name, body: template.body }
+            : null
+        )
         // Land on the first parameter that still needs a value, with its editor
         // open — the whole point of inserting a template is to fill it in.
         const firstUnset = template.params.find((param) => !seeded[param.id])
@@ -1832,6 +1924,7 @@ function ComposerInner(props: InnerProps) {
       // Parameter values belong to the draft they were typed into.
       setTemplateBinding(undefined)
       setActiveParamId(null)
+      setPendingLaunchSpec(null)
     }
     let cancelled = false
     getChatDraft(sessionId)
@@ -2067,6 +2160,16 @@ function ComposerInner(props: InnerProps) {
           plan-mode banner could otherwise push the input off the bottom of the
           screen. Each band still animates its own height inside it. */}
         <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+          {pendingLaunchSpec ? (
+            <TemplateLaunchDiffBar
+              differences={launchDifferences}
+              templateName={pendingLaunchSpec.templateName}
+              labelFor={launchFieldLabel}
+              onStartNewSession={() => void startSessionFromTemplate()}
+              onDismiss={() => setPendingLaunchSpec(null)}
+              className="mb-1"
+            />
+          ) : null}
           <CommandQueueBar
             segments={segments}
             errors={commandErrors}
@@ -2240,6 +2343,7 @@ function ComposerInner(props: InnerProps) {
         <SaveAsTemplateDialog
           open={saveTemplateOpen}
           body={controller.textInput.value}
+          launchSpec={currentLaunchSpec}
           onOpenChange={setSaveTemplateOpen}
           onSave={saveCurrentAsTemplate}
         />

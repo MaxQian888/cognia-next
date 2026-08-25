@@ -388,6 +388,18 @@
       "send": "⏎ 发送 · ⇧⏎ 换行",
       "tryPrefix": "试试"
     },
+    "launchDiff": {
+      "dismiss": "忽略",
+      "fieldCharacter": "Agent",
+      "fieldModel": "模型",
+      "fieldPermissionMode": "模式",
+      "fieldProject": "工作区",
+      "fieldSquad": "团队",
+      "fieldSystemPrompt": "系统提示词",
+      "fieldWorkingDir": "目录",
+      "startNew": "另开会话",
+      "summary": "{name} 期望的配置与当前会话不同："
+    },
     "links": {
       "limitNote": "共 {total} 个链接，仅读取前 {max} 个",
       "openAria": "打开 {host}",
@@ -540,6 +552,7 @@
       "description": "以后可以从 / 菜单再次使用这条消息。",
       "descriptionWithParams": "{count, plural, =1 {以后可以从 / 菜单再次使用这条消息。每次会询问 1 个参数：{names}。} other {以后可以从 / 菜单再次使用这条消息。每次会询问 # 个参数：{names}。}}",
       "name": "名称",
+      "rememberSetup": "记住当前会话的配置",
       "save": "保存",
       "saved": "模板已保存。",
       "templateDescription": "描述",

@@ -26657,6 +26657,10 @@
           "wallpaper": {
             "description": "Background image, gradient, or color",
             "label": "Wallpaper"
+          },
+          "style": {
+            "description": "Corners, capsules, elevation, density",
+            "label": "Style"
           }
         },
         "mobileTrigger": "Sections",
@@ -26926,6 +26930,27 @@
         "tooLarge": "File is too large (max 32 MB).",
         "uploadHint": "Drop an image here or browse",
         "uploading": "Uploading…"
+      },
+      "stylePack": {
+        "packs": {
+          "sharp": {
+            "description": "Square everything that isn't a circle. No shadows, tighter density, monospace micro-labels.",
+            "name": "Sharp"
+          },
+          "soft": {
+            "description": "The default. Rounded corners, capsule badges, soft shadows.",
+            "name": "Soft"
+          },
+          "studio": {
+            "description": "Restrained corners and hairline rules, matching the Cognia website. No oversized pills.",
+            "name": "Studio"
+          }
+        },
+        "radiusFollowsPack": "Following the active pack. Move the slider to pin your own value.",
+        "radiusOverridesPack": "Overriding the active pack. Reset the slider to follow it again.",
+        "resetOverrides": "Reset to pack defaults",
+        "sectionHint": "Sets shape — corners, capsules, elevation, border weight, density. Independent of colour, so any pack works with any theme.",
+        "sectionLabel": "Style pack"
       }
     },
     "artifacts": {

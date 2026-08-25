@@ -388,6 +388,18 @@
       "send": "⏎ Send · ⇧⏎ New line",
       "tryPrefix": "Try"
     },
+    "launchDiff": {
+      "dismiss": "Dismiss",
+      "fieldCharacter": "Agent",
+      "fieldModel": "Model",
+      "fieldPermissionMode": "Mode",
+      "fieldProject": "Workspace",
+      "fieldSquad": "Team",
+      "fieldSystemPrompt": "System prompt",
+      "fieldWorkingDir": "Directory",
+      "startNew": "Start a new chat",
+      "summary": "{name} expects a different setup:"
+    },
     "links": {
       "limitNote": "Reading the first {max} of {total} links",
       "openAria": "Open {host}",
@@ -540,6 +552,7 @@
       "description": "Reuse this message later from the / menu.",
       "descriptionWithParams": "{count, plural, =1 {Reuse this message later from the / menu. One parameter will be asked for each time: {names}.} other {Reuse this message later from the / menu. # parameters will be asked for each time: {names}.}}",
       "name": "Name",
+      "rememberSetup": "Remember this conversation's setup",
       "save": "Save",
       "saved": "Template saved.",
       "templateDescription": "Description",
