@@ -35,7 +35,15 @@ import {
   useState,
 } from "react"
 import { useTranslations } from "next-intl"
-import { useChatStore, type ChatStatus as StoreChatStatus } from "@/stores/chat"
+import {
+  selectComposerContextSelections,
+  selectComposerPermissionMode,
+  selectComposerWebSearchOn,
+  useChatStore,
+  useComposerEphemeralSkillIds,
+  useComposerPermissionMode,
+  type ChatStatus as StoreChatStatus,
+} from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
 import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
@@ -511,7 +519,11 @@ function ComposerInner(props: InnerProps) {
   const [commandErrors, setCommandErrors] = useState<CommandError[]>([])
 
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
-  const permissionMode = useChatStore((s) => s.permissionMode)
+  // Read the pane's OWN conversation, matching every write below. Reading
+  // `s.permissionMode` here read the FOCUSED conversation, so in split view the
+  // unfocused composer showed the other pane's mode and Shift+Tab cycled from
+  // it — and the mode reaches the model through `resolveSendOptions`.
+  const permissionMode = useComposerPermissionMode(props.session?.id ?? null)
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
   const updateSession = useUpdateSession()
   // Effective cwd (session override → workspace root → character → default) —
@@ -1729,7 +1741,7 @@ function ComposerInner(props: InnerProps) {
     ghostFeed(value, { suppress })
   }, [controller.textInput.value, caret, trigger, isStreaming, props.disabled, ghostFeed])
 
-  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
+  const ephemeralSkillIds = useComposerEphemeralSkillIds(props.session?.id ?? null)
   const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
 
   return (
@@ -1777,7 +1789,11 @@ function ComposerInner(props: InnerProps) {
           <Collapse>
             <SkillChipRow
               ids={ephemeralSkillIds}
-              onRemove={toggleEphemeralSkill}
+              // Keyed by THIS pane's conversation, matching where the ids above
+              // are read from — the bare action defaults to the focused pane,
+              // so × detached a skill from the conversation beside it and left
+              // this chip standing.
+              onRemove={(skillId) => toggleEphemeralSkill(skillId, props.session?.id ?? null)}
               disabledIds={props.session?.disabledSkillIds}
             />
           </Collapse>
@@ -2018,7 +2034,7 @@ function ComposerCapabilityMenu({
   disabled?: boolean
 }) {
   const controller = usePromptInputController()
-  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
+  const ephemeralSkillIds = useComposerEphemeralSkillIds(session?.id ?? null) ?? []
   const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
   const enhanceEnabled = useSettingsStore(
     (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
@@ -2178,10 +2194,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           args,
           activeSessionId: session?.id ?? null,
           chatStatus: status,
-          currentPermissionMode: useChatStore.getState().permissionMode,
+          // Read AND written against this composer's conversation. The mode
+          // cycle (`lib/slash-commands/builtin.ts`) reads this value and hands
+          // it straight back, so a focused-projection read here made an
+          // unfocused pane silently cycle the pane beside it — and that mode
+          // reaches the model through `resolveSendOptions`.
+          currentPermissionMode: selectComposerPermissionMode(
+            useChatStore.getState(),
+            session?.id ?? null
+          ),
           startNewSession: onStartNewSession,
           openSettings: onOpenSettings,
-          setPermissionMode,
+          setPermissionMode: (mode) => setPermissionMode(mode, session?.id ?? null),
           pushSystemMessage,
         }
         try {
@@ -2369,7 +2393,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // formatted results as a system block. We don't fail the send on
       // search errors — fall back to the original message instead.
       let augmented = text
-      const webOn = useChatStore.getState().webSearchOnForNextSend
+      // THIS composer's conversation, matching where `WebSearchToggle` writes
+      // it. The bare projection is the focused pane, so an unfocused pane's
+      // armed toggle was never consumed (and never cleared, so it stayed lit)
+      // while a send from the focused pane ran the search it had armed.
+      const webOn = selectComposerWebSearchOn(useChatStore.getState(), session?.id ?? null)
       if (webOn && trimmed) {
         const settings = useSettingsStore.getState().settings
         try {
@@ -2405,7 +2433,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             })
           )
         }
-        useChatStore.getState().setWebSearchOnForNextSend(false)
+        useChatStore.getState().setWebSearchOnForNextSend(false, session?.id ?? null)
       }
 
       // ── Context selections ──────────────────────────────────────────
@@ -2416,7 +2444,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       // chip carries an "edit target" badge and the others promote on click
       // (`artifact-selection-chips.tsx`) — where it used to be a `debug` log
       // nobody would ever see.
-      const contextSelections = useChatStore.getState().contextSelections
+      // This pane's staged material, matching the chips that display it and the
+      // `clearContextSelections(session?.id)` below. Reading the focused
+      // projection here sent the OTHER conversation's file and artifact
+      // excerpts in this turn — and cleared selections that were never used.
+      const contextSelections = selectComposerContextSelections(
+        useChatStore.getState(),
+        session?.id ?? null
+      )
       if (contextSelections.length > 0 && session?.id) {
         const selectionCtx = formatContextSelectionsForLLM(contextSelections)
         augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx

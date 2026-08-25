@@ -1183,14 +1183,32 @@ export const useChatStore = create<ChatState>((set) => ({
 
       writeBookmark(owner.sessionId, messageId, next)
 
-      // Two writes into possibly-different slices, so the second has to build
-      // on the first's `sessions` map or it drops the message update. The
-      // starred set stays a union across open panes — a background pane's
-      // renderer reads the focused projection, and narrowing it here would
-      // blank its stars.
-      const withMessage = patchSliceState(s, owner.sessionId, { messages })
+      // Three writes into possibly-different slices, each building on the
+      // previous `sessions` map or it drops the earlier update.
+      //
+      // The OWNER's `bookmarkedIds` matters as much as the active one now that
+      // the field is projected per slice: starring a message in a background
+      // pane used to update only the focused slice, so focusing the owner
+      // re-projected its stale set and the star vanished — while the metadata
+      // and Dexie both said starred, so the next click cleared a flag the UI
+      // believed it was setting. The starred set stays a union across open
+      // panes (a background pane's renderer reads the focused projection, and
+      // narrowing it here would blank its stars).
+      const withMessage = patchSliceState(s, owner.sessionId, { messages, bookmarkedIds })
       const afterMessage = { ...s, ...withMessage } as ChatState
-      return { ...withMessage, ...patchActiveState(afterMessage, { bookmarkedIds }) }
+      const withActive = { ...withMessage, ...patchActiveState(afterMessage, { bookmarkedIds }) }
+
+      // …and every OTHER open pane. The starred set is a UNION across open
+      // conversations, not per-conversation state, so it has to mean the same
+      // thing in whichever slice a renderer happens to resolve to. Patching
+      // only the owner and the active one left a third open conversation
+      // stale: focusing it re-projected a set without the id and the star
+      // vanished again, while Dexie and the metadata both said starred.
+      const sessions = { ...(withActive.sessions ?? s.sessions) }
+      for (const [id, slice] of Object.entries(sessions)) {
+        if (slice.bookmarkedIds !== bookmarkedIds) sessions[id] = { ...slice, bookmarkedIds }
+      }
+      return { ...withActive, sessions }
     }),
   setWebSearchOnForNextSend: (v, sessionId) =>
     set((s) => patchComposerState(s, sessionId, { webSearchOnForNextSend: v })),
@@ -1411,6 +1429,104 @@ export function useSessionToolTimestamps(
       ? (s.sessions[sessionId]?.toolTimestamps ?? EMPTY_TOOL_TIMESTAMPS)
       : EMPTY_TOOL_TIMESTAMPS
   )
+}
+
+// ── Composer draft reads ──────────────────────────────────────────────────
+//
+// The mirror image of `patchComposerState` / `composerSlice` on the write side.
+// Every composer-draft ACTION takes an optional trailing session id so the
+// unfocused split pane writes to its own conversation; without a matching read
+// the pane then rendered the FOCUSED conversation's chips and toggles, so its
+// own controls looked inert — clicking × on a reference chip removed it from a
+// slice nobody was displaying, and Shift+Tab cycled from the other pane's mode
+// and reached the model through `resolveSendOptions`.
+//
+// Same three-step resolution as the writer, so a control cannot read one slice
+// and write another: the named session → the focused one → the bare projection
+// (the pre-session ephemeral case, where the top-level fields ARE the state).
+
+/**
+ * The projected fields a composer read resolves to. Exported so the SEND path
+ * — which reads through `getState()` rather than a hook — resolves the same
+ * slice the chips display and the actions write.
+ */
+export function composerReadSlice(
+  state: ChatState,
+  sessionId: string | null | undefined
+): Pick<ChatState, ProjectedField> {
+  const id = sessionId ?? state.activeSessionId
+  // `state` itself carries every projected field, so the projection case needs
+  // no allocation. `EMPTY_PROJECTION` is the same stable empty the rest of the
+  // store hands out for a slice that does not exist yet.
+  if (id == null) return state
+  return state.sessions[id] ?? (id === state.activeSessionId ? state : EMPTY_PROJECTION)
+}
+
+/** The permission mode of `sessionId`'s conversation. */
+export function selectComposerPermissionMode(
+  state: ChatState,
+  sessionId: string | null | undefined
+): PermissionMode | null {
+  return composerReadSlice(state, sessionId).permissionMode
+}
+/** Staged context selections for `sessionId`'s conversation. */
+export function selectComposerContextSelections(
+  state: ChatState,
+  sessionId: string | null | undefined
+): ContextSelectionRef[] {
+  return composerReadSlice(state, sessionId).contextSelections
+}
+/** Per-send web-search toggle for `sessionId`'s conversation. */
+export function selectComposerWebSearchOn(
+  state: ChatState,
+  sessionId: string | null | undefined
+): boolean {
+  return composerReadSlice(state, sessionId).webSearchOnForNextSend
+}
+/** Ephemeral skill attachments for `sessionId`'s conversation. */
+export function selectComposerEphemeralSkillIds(
+  state: ChatState,
+  sessionId: string | null | undefined
+): string[] {
+  return composerReadSlice(state, sessionId).ephemeralSkillIds
+}
+/** Queued slash-command overrides for `sessionId`'s conversation. */
+export function selectComposerPendingCommandOverrides(
+  state: ChatState,
+  sessionId: string | null | undefined
+): PendingCommandOverrides | null {
+  return composerReadSlice(state, sessionId).pendingCommandOverrides
+}
+
+/** The permission mode of the conversation this composer belongs to. */
+export function useComposerPermissionMode(
+  sessionId: string | null | undefined
+): PermissionMode | null {
+  return useChatStore((s) => selectComposerPermissionMode(s, sessionId))
+}
+/** Staged `@` file/dir references for this composer's conversation. */
+export function useComposerReferencedPaths(sessionId: string | null | undefined): FileReference[] {
+  return useChatStore((s) => composerReadSlice(s, sessionId).referencedPaths)
+}
+/** Staged workflow element chips for this composer's conversation. */
+export function useComposerReferencedWorkflowElements(
+  sessionId: string | null | undefined
+): WorkflowElementRef[] {
+  return useChatStore((s) => composerReadSlice(s, sessionId).referencedWorkflowElements)
+}
+/** Staged context selections for this composer's conversation. */
+export function useComposerContextSelections(
+  sessionId: string | null | undefined
+): ContextSelectionRef[] {
+  return useChatStore((s) => selectComposerContextSelections(s, sessionId))
+}
+/** Per-send web-search toggle for this composer's conversation. */
+export function useComposerWebSearchOn(sessionId: string | null | undefined): boolean {
+  return useChatStore((s) => selectComposerWebSearchOn(s, sessionId))
+}
+/** Ephemeral skill attachments for this composer's conversation. */
+export function useComposerEphemeralSkillIds(sessionId: string | null | undefined): string[] {
+  return useChatStore((s) => selectComposerEphemeralSkillIds(s, sessionId))
 }
 
 interface BranchMetadata {

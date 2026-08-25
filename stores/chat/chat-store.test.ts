@@ -21,6 +21,12 @@ import {
   useSessionMessagesLoading,
   useSessionMessagesLoadError,
   useIsAtStreamCap,
+  composerReadSlice,
+  selectComposerEphemeralSkillIds,
+  selectComposerPendingCommandOverrides,
+  selectComposerPermissionMode,
+  selectComposerWebSearchOn,
+  selectComposerContextSelections,
   type FileReference,
   type LastSendCacheEntry,
   type PendingCommandOverrides,
@@ -630,6 +636,25 @@ describe("useChatStore", () => {
       })
       // Best-effort mirror: the store stays authoritative and nothing throws.
       expect(result.current.bookmarkedIds).toEqual(["m1"])
+    })
+
+    it("keeps the owner's star when the message lives in a background pane", () => {
+      // bookmarkedIds is projected per slice now, so writing only the ACTIVE
+      // slice left the owner's stale — focusing it re-projected a set without
+      // the id and the star vanished, while Dexie and the metadata said
+      // starred. The next click then cleared a flag the UI thought it was
+      // setting.
+      const { result } = renderHook(() => useChatStore())
+      act(() => result.current.setSessionMessages("ses_bg", [bookmarkMsg("bg1")]))
+      act(() => result.current.setActiveSession("ses_focused"))
+      act(() => result.current.setMessages([bookmarkMsg("f1")]))
+
+      act(() => result.current.toggleBookmark("bg1"))
+      expect(result.current.bookmarkedIds).toContain("bg1")
+
+      // Focusing the owner must still show it starred.
+      act(() => result.current.setActiveSession("ses_bg"))
+      expect(result.current.bookmarkedIds).toContain("bg1")
     })
 
     it("setMessages keeps another open pane's bookmarks", () => {
@@ -1724,5 +1749,69 @@ describe("contextSelections", () => {
     })
     act(() => useChatStore.getState().setActiveSession("s2"))
     expect(useChatStore.getState().contextSelections).toHaveLength(0)
+  })
+})
+
+describe("composer draft reads", () => {
+  beforeEach(() => {
+    useChatStore.getState().clear()
+  })
+
+  it("resolves the NAMED conversation, not the focused one", () => {
+    // The mirror of the write side. Every composer-draft action takes a
+    // trailing session id; a read that ignored it made a split pane render the
+    // pane beside it, and the send path consume the wrong conversation's draft.
+    const store = useChatStore.getState()
+    act(() => {
+      store.setActiveSession("ses_focused")
+      store.setPermissionMode("plan", "ses_focused")
+      store.setWebSearchOnForNextSend(true, "ses_focused")
+      store.setEphemeralSkillIds(["focused-skill"], "ses_focused")
+      store.setPermissionMode("acceptEdits", "ses_background")
+      store.setEphemeralSkillIds(["bg-skill"], "ses_background")
+    })
+
+    const state = useChatStore.getState()
+    expect(selectComposerPermissionMode(state, "ses_background")).toBe("acceptEdits")
+    expect(selectComposerEphemeralSkillIds(state, "ses_background")).toEqual(["bg-skill"])
+    // Never written for the background pane, so it keeps the slice default —
+    // emphatically NOT the focused pane's armed toggle.
+    expect(selectComposerWebSearchOn(state, "ses_background")).toBe(false)
+    expect(selectComposerWebSearchOn(state, "ses_focused")).toBe(true)
+  })
+
+  it("falls back to the focused conversation when no session is named", () => {
+    // `null` is not "no session" — it is "whoever has focus", which is what
+    // every un-migrated caller relies on.
+    const store = useChatStore.getState()
+    act(() => {
+      store.setActiveSession("ses_focused")
+      store.setPermissionMode("plan", "ses_focused")
+    })
+    expect(selectComposerPermissionMode(useChatStore.getState(), null)).toBe("plan")
+    expect(selectComposerPermissionMode(useChatStore.getState(), undefined)).toBe("plan")
+  })
+
+  it("reads the bare projection before any session exists", () => {
+    // The pre-session ephemeral case: the top-level fields ARE the state.
+    act(() => {
+      useChatStore.getState().setActiveSession(null)
+      useChatStore.getState().setPermissionMode("bypassPermissions")
+    })
+    expect(selectComposerPermissionMode(useChatStore.getState(), null)).toBe("bypassPermissions")
+  })
+
+  it("hands a session with no slice a STABLE empty draft", () => {
+    // A fresh object here would give zustand a new reference on every store
+    // change and re-render every composer on every stream frame.
+    act(() => useChatStore.getState().setActiveSession("ses_focused"))
+    const first = composerReadSlice(useChatStore.getState(), "ses_never_opened")
+    act(() => useChatStore.getState().setPermissionMode("plan", "ses_focused"))
+    const second = composerReadSlice(useChatStore.getState(), "ses_never_opened")
+    expect(second).toBe(first)
+    expect(selectComposerContextSelections(useChatStore.getState(), "ses_never_opened")).toEqual([])
+    expect(
+      selectComposerPendingCommandOverrides(useChatStore.getState(), "ses_never_opened")
+    ).toBeNull()
   })
 })

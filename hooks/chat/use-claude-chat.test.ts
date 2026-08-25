@@ -521,6 +521,18 @@ jest.mock("@/stores/chat", () => ({
     },
   }),
   selectIsAtStreamCap: (s: unknown, id: string) => selectIsAtStreamCapMock(s, id),
+  // Same per-conversation resolution the real store exports: the send path
+  // reads THIS session's draft, not the focused projection.
+  selectComposerEphemeralSkillIds: (s: ChatStateLike, id?: string | null) =>
+    (id ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.ephemeralSkillIds : null) ??
+    s.ephemeralSkillIds ??
+    [],
+  selectComposerPendingCommandOverrides: (s: ChatStateLike, id?: string | null) =>
+    (id
+      ? (s as ChatStateLike & Record<string, never>).sessions?.[id]?.pendingCommandOverrides
+      : null) ??
+    s.pendingCommandOverrides ??
+    null,
 }))
 
 // The unified execution broker governs the concurrency cap; stub it so a test
@@ -607,6 +619,13 @@ import {
   recordSessionGrant,
   __resetForTesting as resetComputerUseSessionGrants,
 } from "@/lib/claude/computer-use-session-grants"
+
+// The FIRST `renderHook(() => useClaudeChat())` pays for cold-loading the real
+// hook's module graph — ~4.5s, against a 5s default, while every test after it
+// runs in single-digit milliseconds. That margin is thinner than parallel-worker
+// contention, so the cold test tipped over intermittently and reported as a
+// broken send guard when it was only slow.
+jest.setTimeout(30_000)
 
 beforeEach(() => {
   resetComputerUseSessionGrants()
@@ -1432,7 +1451,9 @@ describe("useClaudeChat — actions", () => {
     await act(async () => {
       await result.current.send("hi")
     })
-    expect(chatState.setPendingCommandOverrides).toHaveBeenCalledWith(null)
+    // Cleared against THIS conversation, matching where they were read from —
+    // the bare call cleared whichever pane happened to have focus.
+    expect(chatState.setPendingCommandOverrides).toHaveBeenCalledWith(null, "sess-1")
   })
 
   it("send() consults the plugin onUserPromptSubmit hook before sending", async () => {

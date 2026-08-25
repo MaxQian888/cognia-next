@@ -22,7 +22,7 @@ import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { generateSafeEmbedding } from "@/lib/rag/safe-embedding"
 import { resolveMemoryConfig } from "@/types/memory/memory"
 import type { ChatSession, SendOptions } from "@cognia/agent-config-types"
-import { useChatStore } from "@/stores/chat"
+import { selectComposerEphemeralSkillIds, useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import { renderWorkingSetForCompaction } from "@/lib/chat/working-set"
@@ -137,7 +137,12 @@ export async function buildSendOptions(
   // Per-message ephemeral skills attached via the composer's SkillPicker.
   // These are unioned with character.skillIds in resolveSendOptions and
   // cleared after the send dispatches.
-  const ephemeralSkillIds = useChatStore.getState().ephemeralSkillIds ?? []
+  //
+  // Keyed by THIS session, matching where the picker writes them: the bare
+  // top-level field is the FOCUSED conversation, so a send from an unfocused
+  // split pane attached the other pane's skills and never its own.
+  const ephemeralSkillIds =
+    selectComposerEphemeralSkillIds(useChatStore.getState(), session?.id ?? null) ?? []
 
   // ADR-0019 — when this session has an active goal, hand it to the resolver
   // so the goal's `<objective>` system section is appended to this turn. The

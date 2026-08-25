@@ -111,7 +111,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import { useChatStore } from "@/stores/chat"
+import { composerReadSlice, useChatStore } from "@/stores/chat"
 import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -248,9 +248,12 @@ describe("Composer — data-hooks integration", () => {
 
     // Drive a permissionMode change through the chat-store; the inner
     // composer's useEffect should detect the divergence from the session row
-    // and route the mutation through the adapter.
+    // and route the mutation through the adapter. Keyed by the composer's own
+    // conversation, which is both where the composer writes it and where it
+    // reads it back — the bare call lands on the FOCUSED session's projection,
+    // and this composer's session is never focused here.
     await act(async () => {
-      useChatStore.getState().setPermissionMode("acceptEdits")
+      useChatStore.getState().setPermissionMode("acceptEdits", "ses_42")
     })
 
     await waitFor(() => {
@@ -852,8 +855,15 @@ describe("Composer — effective cwd (workspace fallback)", () => {
     // The catch handled it: no fall-through to capture, and a system message
     // was appended.
     expect(executeShellMock).not.toHaveBeenCalled()
+    // Appended to THIS composer's conversation (`appendMessageToSession`), not
+    // to whichever one has focus — an unfocused pane echoing its shell result
+    // into the pane beside it is the bug that keying fixed.
     await waitFor(() =>
-      expect(useChatStore.getState().messages.some((m) => m.role === "system")).toBe(true)
+      expect(
+        composerReadSlice(useChatStore.getState(), "ses_42").messages.some(
+          (m) => m.role === "system"
+        )
+      ).toBe(true)
     )
   })
 

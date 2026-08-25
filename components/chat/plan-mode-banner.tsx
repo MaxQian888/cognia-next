@@ -8,11 +8,16 @@
 
 import { useTranslations } from "next-intl"
 import { NotebookPenIcon } from "lucide-react"
-import { useChatStore } from "@/stores/chat"
+import { useComposerPermissionMode } from "@/stores/chat"
+
+import { useComposerSessionId } from "./composer/composer-session-context"
 
 export function PlanModeBanner() {
   const t = useTranslations("chat.planMode")
-  const permissionMode = useChatStore((s) => s.permissionMode)
+  // The conversation whose composer this banner sits above, not the focused
+  // one: rendered inside an unfocused split pane it announced plan mode for the
+  // pane beside it, and hid it for its own.
+  const permissionMode = useComposerPermissionMode(useComposerSessionId())
   if (permissionMode !== "plan") return null
 
   return (

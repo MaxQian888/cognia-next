@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
 }))
 
 import { ArtifactSelectionChips } from "./artifact-selection-chips"
+import { ComposerSessionProvider } from "./composer-session-context"
 import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
@@ -203,5 +204,32 @@ describe("ArtifactSelectionChips", () => {
     // Bare mode renders chips directly without the padded wrapper div.
     expect(container.querySelector(".pt-2")).toBeNull()
     expect(screen.getByTestId("artifact-selection-chip")).toBeInTheDocument()
+  })
+
+  it("stages the pane's OWN selections, and removes by an index into them", () => {
+    // `remove` takes an INDEX, so reading a different slice than the one being
+    // written dropped whichever selection happened to sit at that index in the
+    // other conversation.
+    act(() => {
+      useChatStore.getState().setActiveSession("ses_focused")
+      useChatStore.getState().addContextSelection(sel({ title: "Focused only" }))
+      useChatStore.getState().addContextSelection(sel({ title: "Background A" }), "ses_background")
+      useChatStore.getState().addContextSelection(sel({ title: "Background B" }), "ses_background")
+    })
+
+    render(
+      <ComposerSessionProvider value="ses_background">
+        <ArtifactSelectionChips />
+      </ComposerSessionProvider>
+    )
+    const chips = screen.getAllByTestId("artifact-selection-chip")
+    expect(chips).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: /removeSelectionAria.*Background A/ }))
+    const state = useChatStore.getState()
+    expect(state.sessions["ses_background"]?.contextSelections.map((c) => c.title)).toEqual([
+      "Background B",
+    ])
+    expect(state.contextSelections.map((c) => c.title)).toEqual(["Focused only"])
   })
 })

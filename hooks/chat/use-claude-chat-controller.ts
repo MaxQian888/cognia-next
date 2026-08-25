@@ -143,7 +143,11 @@ import type {
   SendContent,
   SendOptions,
 } from "@cognia/agent-config-types"
-import { useChatStore } from "@/stores/chat"
+import {
+  selectComposerEphemeralSkillIds,
+  selectComposerPendingCommandOverrides,
+  useChatStore,
+} from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
 import { slotKeyForTurn } from "@/lib/execution/slot-key"
 import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
@@ -697,15 +701,17 @@ export function useClaudeChat() {
       }
 
       // ephemeralSkillIds were consumed by buildSendOptions; clear them so
-      // the next turn starts with a fresh attachment set.
-      if ((useChatStore.getState().ephemeralSkillIds ?? []).length > 0) {
-        useChatStore.getState().clearEphemeralSkillIds?.()
+      // the next turn starts with a fresh attachment set. Keyed by THIS
+      // conversation — the bare projection is the focused pane, so a send from
+      // a background pane read and cleared the other pane's attachments.
+      if (selectComposerEphemeralSkillIds(useChatStore.getState(), sessionId).length > 0) {
+        useChatStore.getState().clearEphemeralSkillIds?.(sessionId)
       }
 
       // Apply per-command frontmatter overrides set by the composer when the
       // user picked a custom slash command. Cleared after merge so the next
-      // turn doesn't inherit them.
-      const pending = useChatStore.getState().pendingCommandOverrides
+      // turn doesn't inherit them. Same per-conversation keying as above.
+      const pending = selectComposerPendingCommandOverrides(useChatStore.getState(), sessionId)
       if (pending) {
         sendOptions = {
           ...sendOptions,
@@ -717,7 +723,7 @@ export function useClaudeChat() {
             ? Array.from(new Set([...(sendOptions.additionalDirectories ?? []), ...pending.paths]))
             : sendOptions.additionalDirectories,
         }
-        useChatStore.getState().setPendingCommandOverrides(null)
+        useChatStore.getState().setPendingCommandOverrides(null, sessionId)
       }
 
       // Plugin PostToolUse (W3.1): only pay for the sidecar's

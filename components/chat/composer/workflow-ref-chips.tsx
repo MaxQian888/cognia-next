@@ -8,7 +8,7 @@
 
 import { useTranslations } from "next-intl"
 import { BoxIcon, SplineIcon, XIcon } from "lucide-react"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useComposerReferencedWorkflowElements } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { useComposerSessionId } from "./composer-session-context"
 
@@ -22,9 +22,10 @@ export interface WorkflowRefChipsProps {
 
 export function WorkflowRefChips({ bare = false }: WorkflowRefChipsProps = {}) {
   const t = useTranslations("chat.composer.workflowRefs")
-  const refs = useChatStore((s) => s.referencedWorkflowElements)
-  const remove = useChatStore((s) => s.removeReferencedWorkflowElement)
   const composerSessionId = useComposerSessionId()
+  // This pane's conversation, matching the `remove` write below.
+  const refs = useComposerReferencedWorkflowElements(composerSessionId)
+  const remove = useChatStore((s) => s.removeReferencedWorkflowElement)
 
   if (refs.length === 0) return null
   const chips = (

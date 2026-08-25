@@ -42,9 +42,19 @@
  * deterministic state. Taming them fully (fake timers) is part of increment 2.
  */
 
+// The send path writes through Dexie (session row touch, message persist,
+// title claim). jsdom ships no IndexedDB, so without this every one of those
+// writes throws `MissingAPIError` and `send` bails into a diagnostic BEFORE it
+// ever reaches the sidecar — the boundary this suite exists to assert.
+import "fake-indexeddb/auto"
+
 import { useState } from "react"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import {
+  registerPluginHookContribution,
+  unregisterPluginHookContribution,
+} from "@/lib/plugin/registries/hook-registry"
 
 // ---- sidecar / platform boundary -----------------------------------------
 // `stores/index.ts` calls `isTauri()` at module top-level; declaring the mock
@@ -251,6 +261,13 @@ afterAll(() => {
   globalThis.requestAnimationFrame = realRaf
   globalThis.cancelAnimationFrame = realCaf
 })
+
+// Every test here boots the REAL send pipeline (prompt-submit hooks →
+// resolveSendOptions → sidecar → event fold → store → render) against a fake
+// IndexedDB, so a cold test costs seconds rather than milliseconds. Under
+// parallel workers that pushed the first test past jest's 5s default and the
+// whole suite reported as broken pipeline behaviour when it was only slow.
+jest.setTimeout(30_000)
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -561,6 +578,11 @@ const { usePluginStore } = require("@/stores/plugin-runtime") as {
 }
 
 function seedHookPlugin(hooks: Record<string, unknown>) {
+  // BOTH halves, because the dispatcher reads both. `getPluginsByPriority`
+  // resolves contributors from the hook REGISTRY (`listHookContributors`);
+  // the store row is what `isPluginHooksEnabled` then consults for liveness.
+  // Seeding only the store left the registry empty, so no contributor was ever
+  // found and the hook silently never ran.
   usePluginStore.setState({
     plugins: {
       "tool-firewall": {
@@ -573,10 +595,12 @@ function seedHookPlugin(hooks: Record<string, unknown>) {
       },
     },
   })
+  registerPluginHookContribution("tool-firewall", hooks as never)
 }
 
 describe("plugin tool hooks (W3.1 integration)", () => {
   afterEach(() => {
+    unregisterPluginHookContribution("tool-firewall")
     usePluginStore.setState({ plugins: {} })
   })
 
@@ -595,8 +619,20 @@ describe("plugin tool hooks (W3.1 integration)", () => {
       input: { command: "rm -rf /" },
     })
 
+    // `approveTool(sessionId, requestId, decision, message, updatedInput,
+    // remoteExecutionContext, attribution)` — the trailing three grew after
+    // this test was written, and `attribution` is the load-bearing one here:
+    // it records that the DENY came from policy, not from the user.
     await waitFor(() =>
-      expect(approveToolMock).toHaveBeenCalledWith(SID, "req-1", "deny", "firewalled")
+      expect(approveToolMock).toHaveBeenCalledWith(
+        SID,
+        "req-1",
+        "deny",
+        "firewalled",
+        undefined,
+        undefined,
+        { authority: "policy-deny" }
+      )
     )
     expect(onPreToolUse).toHaveBeenCalledWith("Bash", { command: "rm -rf /" }, SID)
   })
@@ -619,9 +655,17 @@ describe("plugin tool hooks (W3.1 integration)", () => {
     })
 
     await waitFor(() =>
-      expect(approveToolMock).toHaveBeenCalledWith(SID, "req-2", "allow", undefined, {
-        command: "ls",
-      })
+      expect(approveToolMock).toHaveBeenCalledWith(
+        SID,
+        "req-2",
+        "allow",
+        undefined,
+        { command: "ls" },
+        undefined,
+        // A plugin REWRITE is a policy rule, not a policy denial — the two
+        // authorities are what the approval record is later audited on.
+        { authority: "policy-rule" }
+      )
     )
   })
 

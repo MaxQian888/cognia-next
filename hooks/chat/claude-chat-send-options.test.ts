@@ -21,6 +21,18 @@ jest.mock("@/stores/chat", () => ({
       sessions: {},
     }),
   },
+  // The send path resolves ad-hoc skills against THIS session's slice now, so
+  // the seam has to expose the selector the same way the real store does.
+  selectComposerEphemeralSkillIds: (
+    state: {
+      sessions?: Record<string, { ephemeralSkillIds?: string[] }>
+      ephemeralSkillIds?: string[]
+    },
+    sessionId?: string | null
+  ) =>
+    (sessionId ? state.sessions?.[sessionId]?.ephemeralSkillIds : undefined) ??
+    state.ephemeralSkillIds ??
+    [],
 }))
 jest.mock("@/stores/git/git-store", () => ({
   useGitStore: { getState: () => ({ status: null }) },

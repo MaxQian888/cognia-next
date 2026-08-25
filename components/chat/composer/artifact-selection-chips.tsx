@@ -25,7 +25,7 @@ import {
   ScanTextIcon,
   XIcon,
 } from "lucide-react"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useComposerContextSelections } from "@/stores/chat"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -66,10 +66,13 @@ function selectionKey(sel: ContextSelectionRef): string {
 
 export function ArtifactSelectionChips({ bare = false }: ArtifactSelectionChipsProps = {}) {
   const t = useTranslations("artifacts.review")
-  const selections = useChatStore((s) => s.contextSelections)
+  const composerSessionId = useComposerSessionId()
+  // This pane's conversation, matching the `remove` / `promote` writes below —
+  // and `remove` takes an INDEX, so reading a different slice than the one
+  // being written would drop whichever selection happened to sit at that index.
+  const selections = useComposerContextSelections(composerSessionId)
   const remove = useChatStore((s) => s.removeContextSelection)
   const promote = useChatStore((s) => s.promoteContextSelection)
-  const composerSessionId = useComposerSessionId()
 
   if (selections.length === 0) return null
 

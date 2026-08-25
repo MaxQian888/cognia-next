@@ -26,6 +26,8 @@ let settingsState: {
 
 jest.mock("@/stores/chat", () => ({
   useChatStore: <T,>(selector: (s: typeof chatState) => T) => selector(chatState),
+  // The toggle reads its own conversation's flag now, matching where it writes.
+  useComposerWebSearchOn: () => chatState.webSearchOnForNextSend,
 }))
 
 jest.mock("@/stores/settings", () => ({
@@ -94,7 +96,9 @@ describe("WebSearchToggle", () => {
     }
     renderWithTooltip(<WebSearchToggle />)
     fireEvent.click(screen.getByRole("button"))
-    expect(setOnMock).toHaveBeenCalledWith(true)
+    // The trailing arg is the composer's conversation — `undefined` outside a
+    // `ComposerSessionProvider`, which the store reads as "the focused one".
+    expect(setOnMock).toHaveBeenCalledWith(true, undefined)
   })
 
   it("reflects 'on' state via aria-pressed", () => {

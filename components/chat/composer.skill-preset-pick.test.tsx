@@ -48,7 +48,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Composer } from "./composer"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import { useChatStore } from "@/stores/chat"
+import { selectComposerEphemeralSkillIds, useChatStore } from "@/stores/chat"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
@@ -116,7 +116,11 @@ describe("Composer — @skill: pick enables the skill (no text inserted)", () =>
     fireEvent.keyDown(ta, { key: "Enter" })
     await new Promise((r) => setTimeout(r, 30))
 
-    expect(useChatStore.getState().ephemeralSkillIds).toContain("sk_b")
+    // Read against the composer's OWN conversation, which is where the pick
+    // writes it (`toggleEphemeralSkill(id, props.session?.id)`). The top-level
+    // projection only mirrors the FOCUSED session, and this composer's session
+    // is never focused here — so reading it proved nothing about the pick.
+    expect(selectComposerEphemeralSkillIds(useChatStore.getState(), session.id)).toContain("sk_b")
     // The `@skill:…` token is removed — no literal text left behind.
     expect(ta.value).not.toContain("@skill:")
     expect(onSend).not.toHaveBeenCalled()

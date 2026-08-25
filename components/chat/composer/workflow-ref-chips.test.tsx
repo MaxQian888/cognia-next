@@ -4,6 +4,7 @@
 import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { useChatStore } from "@/stores/chat"
 import { WorkflowRefChips } from "./workflow-ref-chips"
+import { ComposerSessionProvider } from "./composer-session-context"
 
 // Echo translation keys so we don't need an intl provider.
 jest.mock("next-intl", () => ({
@@ -54,5 +55,38 @@ describe("WorkflowRefChips", () => {
     render(<WorkflowRefChips />)
     fireEvent.click(within(screen.getByTestId("workflow-ref-chip-n_a")).getByRole("button"))
     expect(useChatStore.getState().referencedWorkflowElements).toHaveLength(0)
+  })
+
+  it("lists the pane's OWN conversation's chips, not the focused pane's", () => {
+    // Split view: an unfocused pane rendered the chips beside it, so clicking ×
+    // removed a reference from a slice nobody was displaying.
+    act(() => {
+      useChatStore.getState().setActiveSession("ses_focused")
+      useChatStore.getState().addReferencedWorkflowElement({
+        type: "node",
+        id: "n_focused",
+        label: "Focused node",
+        kind: "ai.prompt",
+      })
+      useChatStore
+        .getState()
+        .addReferencedWorkflowElement(
+          { type: "node", id: "n_bg", label: "Background node", kind: "ai.prompt" },
+          "ses_background"
+        )
+    })
+
+    render(
+      <ComposerSessionProvider value="ses_background">
+        <WorkflowRefChips />
+      </ComposerSessionProvider>
+    )
+    expect(screen.getByTestId("workflow-ref-chip-n_bg")).toBeInTheDocument()
+    expect(screen.queryByTestId("workflow-ref-chip-n_focused")).not.toBeInTheDocument()
+
+    fireEvent.click(within(screen.getByTestId("workflow-ref-chip-n_bg")).getByRole("button"))
+    const state = useChatStore.getState()
+    expect(state.sessions["ses_background"]?.referencedWorkflowElements).toHaveLength(0)
+    expect(state.referencedWorkflowElements.map((r) => r.id)).toEqual(["n_focused"])
   })
 })

@@ -8,7 +8,7 @@
 import { useTranslations } from "next-intl"
 import { GlobeIcon } from "lucide-react"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useComposerWebSearchOn } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import {
   SEARCH_PROVIDERS,
@@ -27,9 +27,10 @@ export function WebSearchToggle({ disabled: streamingDisabled }: WebSearchToggle
   const t = useTranslations("webSearchToggle")
   const tComposer = useTranslations("chat.composer")
 
-  const on = useChatStore((s) => s.webSearchOnForNextSend)
-  const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
   const composerSessionId = useComposerSessionId()
+  // This pane's conversation, matching the `setOn` write below.
+  const on = useComposerWebSearchOn(composerSessionId)
+  const setOn = useChatStore((s) => s.setWebSearchOnForNextSend)
 
   const settings = useSettingsStore((s) => s.settings)
   const searchEnabled = settings?.searchEnabled ?? false

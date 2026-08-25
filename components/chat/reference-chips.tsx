@@ -7,7 +7,7 @@
 
 import { useTranslations } from "next-intl"
 import { FileIcon, FolderIcon, XIcon } from "lucide-react"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useComposerReferencedPaths } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useComposerSessionId } from "./composer/composer-session-context"
@@ -23,9 +23,12 @@ export interface ReferenceChipsProps {
 
 export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
   const t = useTranslations("chat.composer.references")
-  const refs = useChatStore((s) => s.referencedPaths)
-  const remove = useChatStore((s) => s.removeReferencedPath)
   const composerSessionId = useComposerSessionId()
+  // The pane's own conversation, matching the `remove` write below: reading the
+  // focused projection made an unfocused pane list the other pane's chips, so
+  // clicking × removed a chip from a slice nobody was displaying.
+  const refs = useComposerReferencedPaths(composerSessionId)
+  const remove = useChatStore((s) => s.removeReferencedPath)
 
   if (refs.length === 0) return null
   const chips = (

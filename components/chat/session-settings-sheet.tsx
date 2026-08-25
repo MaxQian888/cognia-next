@@ -101,7 +101,7 @@ import { cn } from "@/lib/utils"
 import { closeSession } from "@/lib/claude/ipc"
 import { branchSessionAtMessage } from "@/lib/chat/branch-session"
 import { selectVisibleMessages } from "@/stores/chat/chat-store"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, useComposerEphemeralSkillIds } from "@/stores/chat"
 import { useProjectStore } from "@/stores/project/project-store"
 import { resolveSessionWorkspace } from "@/lib/workspace/session-workspace"
 import { SessionWorkspaceMove } from "./session-workspace-move"
@@ -264,7 +264,10 @@ export function SessionSettingsSheet({
   const skills = useSkillsByIds(character?.skillIds)
   // Ad-hoc skills attached to the next message (composer state) so the badge
   // counter + attached section reflect the net effective set for the send.
-  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
+  // Keyed by THIS sheet's session: the top-level projection is the focused
+  // conversation, so a sheet opened over a background pane counted the other
+  // pane's attachments.
+  const ephemeralSkillIds = useComposerEphemeralSkillIds(session.id)
   const ephemeralSkills = useSkillsByIds(ephemeralSkillIds)
   const disabledSkillIds = useMemo(
     () => new Set(session.disabledSkillIds ?? []),

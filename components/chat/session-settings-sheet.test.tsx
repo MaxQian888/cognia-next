@@ -67,7 +67,11 @@ jest.mock("@/stores/chat", () => {
     messages: [],
     activeBranchByGroup: {},
   })
-  return { useChatStore }
+  // The sheet reads the ad-hoc skill attachments per SESSION now (the
+  // top-level projection is the focused conversation, so a sheet over a
+  // background pane counted the other pane's).
+  const useComposerEphemeralSkillIds = () => mockEphemeralSkillIds
+  return { useChatStore, useComposerEphemeralSkillIds }
 })
 
 jest.mock("sonner", () => ({
