@@ -1,4 +1,5 @@
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+import { isCredentialKey } from "./contracts"
 import type {
   TemplateDefinitionEnvelope,
   TemplateDomain,
@@ -115,6 +116,13 @@ export interface CrudTemplatePort {
   isActive?(resourceIds: Array<{ domain: string; id: string }>): boolean | Promise<boolean>
 }
 
+/**
+ * Structurally non-portable keys. Credentials are NOT listed here — they go
+ * through `isCredentialKey`, which matches key *stems* rather than exact names.
+ * Listing them exactly is what let `AgentTeamConfig.defaultApiKey` survive
+ * projection: the set held `apiKey`, the field is `defaultApiKey`, and nothing
+ * looked past the first character.
+ */
 const NON_PORTABLE_KEYS = new Set([
   "id",
   "createdAt",
@@ -126,14 +134,6 @@ const NON_PORTABLE_KEYS = new Set([
   "sessionId",
   "status",
   "published",
-  "credentials",
-  "credentialId",
-  "credentialRef",
-  "apiKey",
-  "token",
-  "secret",
-  "webhookSecret",
-  "subscriptionId",
   "twinId",
   "knowledgeTwinIds",
   "memoryIds",
@@ -170,7 +170,11 @@ function stripNonPortable(value: unknown, preserveIdentity = false): TemplateJso
   if (!json || typeof json !== "object") return json
   return Object.fromEntries(
     Object.entries(json)
-      .filter(([key]) => (preserveIdentity && key === "id") || !NON_PORTABLE_KEYS.has(key))
+      .filter(
+        ([key]) =>
+          (preserveIdentity && key === "id") ||
+          (!NON_PORTABLE_KEYS.has(key) && !isCredentialKey(key))
+      )
       .map(([key, nested]) => [key, stripNonPortable(nested, preserveIdentity)])
   )
 }
@@ -507,7 +511,7 @@ function disableWorkflowAutomation(value: TemplateJson): TemplateJson {
   if (!value || typeof value !== "object") return value
   const next = Object.fromEntries(
     Object.entries(value)
-      .filter(([key]) => !NON_PORTABLE_KEYS.has(key))
+      .filter(([key]) => !NON_PORTABLE_KEYS.has(key) && !isCredentialKey(key))
       .map(([key, nested]) => [key, disableWorkflowAutomation(nested)])
   )
   if (

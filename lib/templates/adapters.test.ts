@@ -180,6 +180,37 @@ describe("template domain adapters", () => {
     expect(deleteTeam).toHaveBeenCalledWith("created-team")
   })
 
+  it("strips a credential field whose name the exact-key list never covered", async () => {
+    // `AgentTeamConfig.defaultApiKey` survived projection because
+    // `NON_PORTABLE_KEYS` held the bare `apiKey` and matched on equality, so a
+    // published team template carried a live key to whoever imported it. Both
+    // filter sites in this module now go through `isCredentialKey`.
+    const adapter = createWorkflowTemplateAdapter({ create: jest.fn(), snapshot: jest.fn() })
+
+    const payload = (await adapter.project({
+      id: "wf-2",
+      schemaVersion: 2,
+      name: "Leaky",
+      nodes: [
+        {
+          id: "n1",
+          type: "action.http",
+          data: { params: { defaultApiKey: "sk-live-abc123", bearerToken: "brr", maxTokens: 512 } },
+        },
+      ],
+      edges: [],
+      createdAt: 1,
+      updatedAt: 2,
+    })) as Record<string, unknown>
+
+    const serialized = JSON.stringify(payload)
+    expect(serialized).not.toContain("sk-live-abc123")
+    expect(serialized).not.toContain("defaultApiKey")
+    expect(serialized).not.toContain("bearerToken")
+    // ...without taking the innocent look-alikes with it.
+    expect(serialized).toContain("maxTokens")
+  })
+
   it("projects workflows without callable publication, credentials, or enabled triggers", async () => {
     const adapter = createWorkflowTemplateAdapter({
       create: jest.fn(),

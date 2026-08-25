@@ -1,6 +1,7 @@
 import {
   TEMPLATE_API_VERSION,
   createTemplateDefinition,
+  isCredentialKey,
   suggestTemplateVersionBump,
   validateTemplateDefinition,
 } from "./contracts"
@@ -62,6 +63,79 @@ describe("template contracts", () => {
         "portable.private-field",
         "portable.credential-field",
         "portable.local-path-field",
+      ])
+    )
+  })
+
+  describe("isCredentialKey", () => {
+    // The set used to hold exact names only, so `AgentTeamConfig.defaultApiKey`
+    // was neither stripped on projection nor flagged on validation and rode a
+    // published template to another device in clear text.
+    it.each([
+      "apiKey",
+      "defaultApiKey",
+      "api_key",
+      "openaiApiKey",
+      "accessToken",
+      "refreshToken",
+      "botToken",
+      "appSecret",
+      "clientSecret",
+      "webhookSecret",
+      "credentials",
+      "credentialId",
+      "credentialRef",
+      "vaultPassword",
+      "sshPrivateKey",
+      "token",
+      "subscriptionId",
+    ])("flags %s", (key) => {
+      expect(isCredentialKey(key)).toBe(true)
+    })
+
+    // Suffix matching, never substring — the repo is full of these and a
+    // greedy `token` / `key` stem would strip them out of every template.
+    it.each([
+      "maxTokens",
+      "maxThinkingTokens",
+      "budgetTokens",
+      "cacheCreationInputTokens",
+      "totalTokenUsage",
+      "cacheKey",
+      "bindingKey",
+      "aliasKey",
+      "authorPublicKey",
+      "secretRef",
+      "tokenizer",
+    ])("leaves %s alone", (key) => {
+      expect(isCredentialKey(key)).toBe(false)
+    })
+  })
+
+  it("flags a credential field the exact-name list used to miss", async () => {
+    const definition = await createTemplateDefinition({
+      id: "team.leaky",
+      domain: "agentTeam",
+      status: "draft",
+      revision: 1,
+      metadata: { name: "Leaky team" },
+      payload: { config: { defaultApiKey: "sk-live-abc123" } },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+      provenance: { source: "user" },
+    })
+
+    const result = validateTemplateDefinition(definition)
+
+    expect(result.ok).toBe(false)
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "portable.credential-field",
+          path: expect.stringContaining("defaultApiKey"),
+        }),
       ])
     )
   })

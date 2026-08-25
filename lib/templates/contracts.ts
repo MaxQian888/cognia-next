@@ -154,14 +154,70 @@ const FORBIDDEN_PRIVATE_KEYS = new Set([
   "memoryIds",
   "privateMemories",
 ])
+/**
+ * Credential-bearing key *stems*, matched against the end of a normalised key.
+ *
+ * Exact-set matching is what let `defaultApiKey` through: `AgentTeamConfig`
+ * carries one, the set held only the bare `apiKey`, and the same bare-key check
+ * backs both this validator and `NON_PORTABLE_KEYS` in `adapters.ts` — so the
+ * field was neither stripped on projection nor flagged on validation, and rode
+ * a published template to another device in clear text.
+ *
+ * Suffix matching, not substring: the repo is full of innocent
+ * `budgetTokens` / `cacheCreationInputTokens` / `maxThinkingTokens` /
+ * `cacheKey` / `bindingKey` fields, so `token` and `key` are never stems on
+ * their own. Every stem below is unambiguous at the end of a key; the plural
+ * forms are spelled out rather than derived, because stripping a trailing `s`
+ * would turn `maxTokens` into a false positive.
+ */
+const CREDENTIAL_KEY_STEMS = [
+  "apikey",
+  "apikeys",
+  "apitoken",
+  "accesskey",
+  "accesskeys",
+  "accesstoken",
+  "refreshtoken",
+  "authtoken",
+  "bearertoken",
+  "bottoken",
+  "apptoken",
+  "appkey",
+  "clientsecret",
+  "webhooksecret",
+  "secret",
+  "secrets",
+  "credential",
+  "credentials",
+  "credentialid",
+  "credentialref",
+  "password",
+  "passphrase",
+  "privatekey",
+]
+
+/**
+ * The generic names, which are credentials on their own but far too common as
+ * a suffix to match that way (`maxTokens`, `cacheKey`, …).
+ */
 const FORBIDDEN_CREDENTIAL_KEYS = new Set([
   "apiKey",
   "token",
   "secret",
-  "webhookSecret",
   "credentialId",
   "subscriptionId",
 ])
+
+/**
+ * Whether an object key carries a credential and therefore may never be
+ * packaged. Shared with `stripNonPortable` in `adapters.ts` so the strip list
+ * and the validator can no longer disagree about what a secret looks like.
+ */
+export function isCredentialKey(key: string): boolean {
+  if (FORBIDDEN_CREDENTIAL_KEYS.has(key)) return true
+  const normalized = key.toLowerCase().replace(/[_-]/g, "")
+  return CREDENTIAL_KEY_STEMS.some((stem) => normalized.endsWith(stem))
+}
 const FORBIDDEN_PATH_KEYS = new Set(["localPath", "tauriPath", "absolutePath"])
 
 function canonicalize(value: TemplateJson): TemplateJson {
@@ -249,7 +305,7 @@ function pushForbiddenPayloadIssues(
         severity: "error",
       })
     }
-    if (FORBIDDEN_CREDENTIAL_KEYS.has(key)) {
+    if (isCredentialKey(key)) {
       issues.push({
         code: "portable.credential-field",
         path: nestedPath,
