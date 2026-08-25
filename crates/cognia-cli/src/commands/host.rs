@@ -2595,7 +2595,11 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains(&format!("idempotency-key: {key}").to_ascii_lowercase()));
-        assert!(request.ends_with(r#"{"limit":10}"#));
+        let body = request.split_once("\r\n\r\n").expect("request body").1;
+        assert_eq!(
+            serde_json::from_str::<Value>(body).expect("JSON request body"),
+            json!({"limit": 10})
+        );
         server.handle.join().expect("TLS server");
     }
 
