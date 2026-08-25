@@ -1,0 +1,40 @@
+[package]
+name = "cognia-collab-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+description = "Cognia collaboration plane — server-authoritative Issues over ADR-0149 identity."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_collab_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cognia-collab-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+clap = { version = "4", features = ["derive", "env"] }
+cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["grants"] }
+deadpool-postgres = "0.14"
+parking_lot = "0.12"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres-rustls = "0.14"
+tower-http = { version = "0.7", features = ["request-id", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

@@ -38,13 +38,24 @@ pub const SET_TENANT_SQL: &str = "SELECT set_config('app.tenant_id', $1, true)";
 /// Bind the acting user for the current transaction. One bind parameter.
 pub const SET_USER_SQL: &str = "SELECT set_config('app.user_id', $1, true)";
 
-/// The expression a policy uses to read the tenant back.
+/// The expression a `uuid`-tenanted policy uses to read the tenant back.
 ///
 /// `nullif(..., '')` is what makes an unset value `NULL` rather than a cast
 /// error, so a connection that never bound a tenant matches no rows instead of
 /// raising — deny by default, which is the correct failure direction.
+///
+/// This is `services/diagnostic-server`'s spelling, where a tenant is a `uuid`
+/// in a column literally named `tenant_id`.
 pub const TENANT_PREDICATE: &str =
     "tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid";
+
+/// The same expression for a plane whose tenant is an ADR-0149 `org_…` id.
+///
+/// Two spellings exist because the two planes disagree on the id type, not
+/// because anybody was careless. ADR-0149 §1 froze `org_…` as a prefixed
+/// string, so `::uuid` here would raise on every row rather than match none —
+/// a cast error is not a deny, it is a 500.
+pub const ORG_PREDICATE: &str = "org_id = nullif(current_setting('app.tenant_id', true), '')";
 
 #[cfg(test)]
 mod tests {
@@ -74,9 +85,22 @@ mod tests {
     }
 
     #[test]
-    fn the_predicate_treats_an_unset_tenant_as_no_rows() {
-        assert!(TENANT_PREDICATE.contains("nullif("));
-        assert!(TENANT_PREDICATE.contains("current_setting('app.tenant_id', true)"));
+    fn every_predicate_treats_an_unset_tenant_as_no_rows() {
+        for predicate in [TENANT_PREDICATE, ORG_PREDICATE] {
+            assert!(predicate.contains("nullif("), "{predicate}");
+            assert!(
+                predicate.contains("current_setting('app.tenant_id', true)"),
+                "{predicate}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_org_predicate_does_not_cast_a_prefixed_id_to_uuid() {
+        // `org_0123…` is not a uuid. A cast here raises per row rather than
+        // matching none, which turns a deny into a 500.
+        assert!(!ORG_PREDICATE.contains("::uuid"));
+        assert!(TENANT_PREDICATE.contains("::uuid"));
     }
 
     /// Parity guard against the live consumer. These constants describe what

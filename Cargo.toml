@@ -72,6 +72,9 @@ members = [
   # ADR-0149 — identity primitives (people, orgs, membership resolution,
   # tenant-scoped grants) shared by the app and by tenant-scoped services.
   "crates/cognia-tenant-auth",
+  # ADR-0149 §6 — the collaboration plane. Server-authoritative Issues; the
+  # client keeps a read-only cache.
+  "crates/cognia-collab-server",
 ]
 exclude = [
   "services/signaling-server",

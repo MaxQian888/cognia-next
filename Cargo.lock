@@ -2036,6 +2036,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "cognia-collab-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "clap",
+ "cognia-tenant-auth",
+ "deadpool-postgres",
+ "parking_lot",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "tower",
+ "tower-http 0.7.0",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "cognia-connectors"
 version = "0.1.0"
 dependencies = [
