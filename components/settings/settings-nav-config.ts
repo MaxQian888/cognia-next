@@ -11,6 +11,7 @@ import {
   Layers3Icon,
   PuzzleIcon,
   BookmarkIcon,
+  FileCode2Icon,
   DatabaseIcon,
   MonitorIcon,
   SquareCodeIcon,
@@ -93,6 +94,7 @@ export type SettingsSectionId =
   | "subagents"
   | "teams"
   | "presets"
+  | "chatTemplates"
   | "artifacts"
   | "canvas"
   | "shortcuts"
@@ -476,6 +478,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "presets",
     group: "interface",
     icon: BookmarkIcon,
+  },
+  {
+    id: "chatTemplates",
+    labelKey: "chatTemplates",
+    descriptionKey: "chatTemplates",
+    group: "interface",
+    icon: FileCode2Icon,
   },
   {
     id: "artifacts",
@@ -1115,6 +1124,23 @@ export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[
   characters: ["persona", "agent"],
   skills: ["skill", "instruction", "prompt", "kit"],
   teams: ["multi-agent", "round-robin", "supervisor"],
+  chatTemplates: [
+    "chat template",
+    "chat templates",
+    "message template",
+    "saved message",
+    "parameter",
+    "parameters",
+    "placeholder",
+    "snippet",
+    "reusable message",
+    "会话模板",
+    "消息模板",
+    "模板",
+    "参数",
+    "占位符",
+    "常用语",
+  ],
   presets: [
     "preset",
     "presets",

@@ -70,6 +70,10 @@ const TeamsSection = dynamic(() => import("./teams-section").then((m) => m.Teams
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const ChatTemplatesSection = dynamic(
+  () => import("./chat-templates-section").then((m) => m.ChatTemplatesSection),
+  { ssr: false }
+)
 const PromptPresetsSection = dynamic(
   () => import("./prompt-presets-section").then((m) => m.PromptPresetsSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -579,6 +583,8 @@ function SectionContent({
       return <TeamsSection />
     case "presets":
       return <PromptPresetsSection />
+    case "chatTemplates":
+      return <ChatTemplatesSection />
     case "artifacts":
       return <ArtifactsSection />
     case "canvas":

@@ -5128,6 +5128,18 @@
         "send": "⏎ Send · ⇧⏎ New line",
         "tryPrefix": "Try"
       },
+      "launchDiff": {
+        "dismiss": "Dismiss",
+        "fieldCharacter": "Agent",
+        "fieldModel": "Model",
+        "fieldPermissionMode": "Mode",
+        "fieldProject": "Workspace",
+        "fieldSquad": "Team",
+        "fieldSystemPrompt": "System prompt",
+        "fieldWorkingDir": "Directory",
+        "startNew": "Start a new chat",
+        "summary": "{name} expects a different setup:"
+      },
       "links": {
         "limitNote": "Reading the first {max} of {total} links",
         "openAria": "Open {host}",
@@ -5280,6 +5292,7 @@
         "description": "Reuse this message later from the / menu.",
         "descriptionWithParams": "{count, plural, =1 {Reuse this message later from the / menu. One parameter will be asked for each time: {names}.} other {Reuse this message later from the / menu. # parameters will be asked for each time: {names}.}}",
         "name": "Name",
+        "rememberSetup": "Remember this conversation's setup",
         "save": "Save",
         "saved": "Template saved.",
         "templateDescription": "Description",
@@ -6663,6 +6676,22 @@
       "trust": "Trust workspace",
       "workspaceLabel": "Workspace"
     }
+  },
+  "chatTemplatesSettings": {
+    "body": "Message",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleted": "Deleted {name}.",
+    "description": "Description",
+    "edit": "Edit",
+    "empty": "No saved templates yet. Write a message with parameters in it and use the bookmark control beside the composer.",
+    "hasSetup": "Carries a setup",
+    "name": "Name",
+    "noParameters": "none",
+    "parameters": "Parameters",
+    "save": "Save",
+    "saved": "Template saved.",
+    "used": "{count, plural, =0 {never used} =1 {used once} other {used # times}}"
   },
   "cliHandoff": {
     "failed": "Failed to import the handed-off session",
@@ -26646,6 +26675,10 @@
             "description": "Appearance panels added by plugins",
             "label": "Plugins"
           },
+          "style": {
+            "description": "Corners, capsules, elevation, density",
+            "label": "Style"
+          },
           "theme": {
             "description": "Preset palettes and light/dark mode",
             "label": "Theme & presets"
@@ -26657,10 +26690,6 @@
           "wallpaper": {
             "description": "Background image, gradient, or color",
             "label": "Wallpaper"
-          },
-          "style": {
-            "description": "Corners, capsules, elevation, density",
-            "label": "Style"
           }
         },
         "mobileTrigger": "Sections",
@@ -26713,6 +26742,27 @@
         "title": "Reset appearance settings?"
       },
       "resetToDefault": "Reset {name} to default",
+      "stylePack": {
+        "packs": {
+          "sharp": {
+            "description": "Square everything that isn't a circle. No shadows, tighter density, monospace micro-labels.",
+            "name": "Sharp"
+          },
+          "soft": {
+            "description": "The default. Rounded corners, capsule badges, soft shadows.",
+            "name": "Soft"
+          },
+          "studio": {
+            "description": "Restrained corners and hairline rules, matching the Cognia website. No oversized pills.",
+            "name": "Studio"
+          }
+        },
+        "radiusFollowsPack": "Following the active pack. Move the slider to pin your own value.",
+        "radiusOverridesPack": "Overriding the active pack. Reset the slider to follow it again.",
+        "resetOverrides": "Reset to pack defaults",
+        "sectionHint": "Sets shape — corners, capsules, elevation, border weight, density. Independent of colour, so any pack works with any theme.",
+        "sectionLabel": "Style pack"
+      },
       "tabs": {
         "a11y": "Accessibility",
         "advanced": "Advanced",
@@ -26930,27 +26980,6 @@
         "tooLarge": "File is too large (max 32 MB).",
         "uploadHint": "Drop an image here or browse",
         "uploading": "Uploading…"
-      },
-      "stylePack": {
-        "packs": {
-          "sharp": {
-            "description": "Square everything that isn't a circle. No shadows, tighter density, monospace micro-labels.",
-            "name": "Sharp"
-          },
-          "soft": {
-            "description": "The default. Rounded corners, capsule badges, soft shadows.",
-            "name": "Soft"
-          },
-          "studio": {
-            "description": "Restrained corners and hairline rules, matching the Cognia website. No oversized pills.",
-            "name": "Studio"
-          }
-        },
-        "radiusFollowsPack": "Following the active pack. Move the slider to pin your own value.",
-        "radiusOverridesPack": "Overriding the active pack. Reset the slider to follow it again.",
-        "resetOverrides": "Reset to pack defaults",
-        "sectionHint": "Sets shape — corners, capsules, elevation, border weight, density. Independent of colour, so any pack works with any theme.",
-        "sectionLabel": "Style pack"
       }
     },
     "artifacts": {
@@ -30426,6 +30455,7 @@
       "canvas": "Monaco-based code/document editor with AI actions, version history, inline suggestions, sandboxed execution and collaboration.",
       "ccswitch": "Reuse providers, MCP servers, prompts and skills from CCSwitch — switch the active subscription with one click.",
       "characters": "Reusable personas with their own model and skills.",
+      "chatTemplates": "Saved messages with parameters — insert them from the / menu and fill in the blanks.",
       "companion": "Mobile companion server — bind mode (loopback / LAN), QR pairing, paired devices, and revocation.",
       "connections": "Configure messaging platform adapters (Telegram, Discord, Slack, ...) and manage the outbound delivery queue.",
       "conversation": "Auto titles and the conversation timeline minimap",
@@ -33830,6 +33860,7 @@
       "canvas": "Canvas",
       "ccswitch": "CCSwitch",
       "characters": "Characters",
+      "chatTemplates": "Chat templates",
       "companion": "Mobile companion",
       "connections": "Connections",
       "conversation": "Conversation",

@@ -5128,6 +5128,18 @@
         "send": "⏎ 发送 · ⇧⏎ 换行",
         "tryPrefix": "试试"
       },
+      "launchDiff": {
+        "dismiss": "忽略",
+        "fieldCharacter": "Agent",
+        "fieldModel": "模型",
+        "fieldPermissionMode": "模式",
+        "fieldProject": "工作区",
+        "fieldSquad": "团队",
+        "fieldSystemPrompt": "系统提示词",
+        "fieldWorkingDir": "目录",
+        "startNew": "另开会话",
+        "summary": "{name} 期望的配置与当前会话不同："
+      },
       "links": {
         "limitNote": "共 {total} 个链接，仅读取前 {max} 个",
         "openAria": "打开 {host}",
@@ -5280,6 +5292,7 @@
         "description": "以后可以从 / 菜单再次使用这条消息。",
         "descriptionWithParams": "{count, plural, =1 {以后可以从 / 菜单再次使用这条消息。每次会询问 1 个参数：{names}。} other {以后可以从 / 菜单再次使用这条消息。每次会询问 # 个参数：{names}。}}",
         "name": "名称",
+        "rememberSetup": "记住当前会话的配置",
         "save": "保存",
         "saved": "模板已保存。",
         "templateDescription": "描述",
@@ -6663,6 +6676,22 @@
       "trust": "信任工作区",
       "workspaceLabel": "工作区"
     }
+  },
+  "chatTemplatesSettings": {
+    "body": "消息正文",
+    "cancel": "取消",
+    "delete": "删除",
+    "deleted": "已删除 {name}。",
+    "description": "描述",
+    "edit": "编辑",
+    "empty": "还没有保存的模板。写一条带参数的消息，然后用输入框旁边的书签按钮保存。",
+    "hasSetup": "带会话配置",
+    "name": "名称",
+    "noParameters": "无",
+    "parameters": "参数",
+    "save": "保存",
+    "saved": "模板已保存。",
+    "used": "{count, plural, =0 {未使用过} =1 {用过 1 次} other {用过 # 次}}"
   },
   "cliHandoff": {
     "failed": "导入移交的会话失败",
@@ -26646,6 +26675,10 @@
             "description": "插件提供的外观面板",
             "label": "插件"
           },
+          "style": {
+            "description": "圆角、胶囊、层级与密度",
+            "label": "风格"
+          },
           "theme": {
             "description": "预设配色与明暗模式",
             "label": "主题与预设"
@@ -26657,10 +26690,6 @@
           "wallpaper": {
             "description": "背景图片、渐变或纯色",
             "label": "壁纸"
-          },
-          "style": {
-            "description": "圆角、胶囊、层级与密度",
-            "label": "风格"
           }
         },
         "mobileTrigger": "分类",
@@ -26713,6 +26742,27 @@
         "title": "确认重置外观设置？"
       },
       "resetToDefault": "将{name}恢复为默认",
+      "stylePack": {
+        "packs": {
+          "sharp": {
+            "description": "除真正的圆形外一律方化。没有阴影，密度更紧，微标签使用等宽字体。",
+            "name": "硬朗"
+          },
+          "soft": {
+            "description": "当前默认。圆润的边角、胶囊徽章与柔和阴影。",
+            "name": "柔和"
+          },
+          "studio": {
+            "description": "克制的圆角与发丝线，与 Cognia 官网一致。没有过大的胶囊。",
+            "name": "克制"
+          }
+        },
+        "radiusFollowsPack": "当前跟随风格包。拖动滑杆即可固定为你自己的值。",
+        "radiusOverridesPack": "当前覆盖了风格包。把滑杆重置即可重新跟随。",
+        "resetOverrides": "恢复风格包默认值",
+        "sectionHint": "决定形状——圆角、胶囊、层级阴影、边框粗细与密度。与配色相互独立，任意风格包都能搭配任意主题。",
+        "sectionLabel": "风格包"
+      },
       "tabs": {
         "a11y": "无障碍",
         "advanced": "高级",
@@ -26930,27 +26980,6 @@
         "tooLarge": "文件过大（不超过 32 MB）。",
         "uploadHint": "把图片拖到这里或点击浏览",
         "uploading": "上传中…"
-      },
-      "stylePack": {
-        "packs": {
-          "sharp": {
-            "description": "除真正的圆形外一律方化。没有阴影，密度更紧，微标签使用等宽字体。",
-            "name": "硬朗"
-          },
-          "soft": {
-            "description": "当前默认。圆润的边角、胶囊徽章与柔和阴影。",
-            "name": "柔和"
-          },
-          "studio": {
-            "description": "克制的圆角与发丝线，与 Cognia 官网一致。没有过大的胶囊。",
-            "name": "克制"
-          }
-        },
-        "radiusFollowsPack": "当前跟随风格包。拖动滑杆即可固定为你自己的值。",
-        "radiusOverridesPack": "当前覆盖了风格包。把滑杆重置即可重新跟随。",
-        "resetOverrides": "恢复风格包默认值",
-        "sectionHint": "决定形状——圆角、胶囊、层级阴影、边框粗细与密度。与配色相互独立，任意风格包都能搭配任意主题。",
-        "sectionLabel": "风格包"
       }
     },
     "artifacts": {
@@ -30426,6 +30455,7 @@
       "canvas": "基于 Monaco 的代码/文档编辑器，提供 AI 操作、版本历史、内联建议、沙盒执行与协作。",
       "ccswitch": "复用 CCSwitch 中的服务商、MCP 服务器、提示词与技能，一键切换激活订阅。",
       "characters": "复用的角色，可独立配置模型与技能。",
+      "chatTemplates": "保存下来的、带参数的消息 —— 从 / 菜单插入后填空即可。",
       "companion": "移动端伴侣服务器 — 绑定模式（仅本机 / 局域网）、扫码配对、已配对设备列表与吊销。",
       "connections": "配置消息平台适配器（Telegram、Discord、Slack 等）并管理出站队列。",
       "conversation": "自动标题与对话时间线缩略图",
@@ -33830,6 +33860,7 @@
       "canvas": "画布",
       "ccswitch": "CCSwitch",
       "characters": "角色",
+      "chatTemplates": "会话模板",
       "companion": "移动端伴侣",
       "connections": "平台连接",
       "conversation": "会话",
