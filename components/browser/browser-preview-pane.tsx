@@ -200,10 +200,28 @@ export function BrowserPreviewPane({
   const devtools = useBrowserDevtools()
   const [developerOpen, setDeveloperOpen] = useState(false)
   const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
+  const activeChatSessionId = useChatStore((state) => state.activeSessionId)
+  /**
+   * The chat session this pane's annotations, CDP grants and Adjust drafts
+   * belong to.
+   *
+   * `useSelectionToChat` already falls back to the focused session for every
+   * write it performs, so a pane that read only the `sessionId` prop disagreed
+   * with the code it called: on `/browser` and in the sites publish tab —
+   * neither of which passes one — "Add to queue" happily wrote an annotation
+   * under the active session while the queue that displays it stayed pinned to
+   * `undefined`, stranding the row for its full 30-day retention. The developer
+   * panel and Browser Adjust were simply unreachable there for the same reason.
+   * One derived id keeps writer and reader in agreement.
+   */
+  const effectiveSessionId = sessionId ?? activeChatSessionId ?? undefined
   const annotationQueue =
     useLiveQuery(
-      () => (sessionId ? listActionableBrowserAnnotations(sessionId) : Promise.resolve([])),
-      [sessionId],
+      () =>
+        effectiveSessionId
+          ? listActionableBrowserAnnotations(effectiveSessionId)
+          : Promise.resolve([]),
+      [effectiveSessionId],
       []
     ) ?? []
   const pendingAnnotations = annotationQueue.filter((annotation) => annotation.status === "pending")
@@ -257,7 +275,6 @@ export function BrowserPreviewPane({
   const remoteBrowserEnabled = useSettingsStore(
     (state) => state.settings?.remoteBrowserEnabled ?? false
   )
-  const activeChatSessionId = useChatStore((state) => state.activeSessionId)
   const activeProjectId = useProjectStore((state) => state.activeProjectId)
 
   useEffect(() => {
@@ -388,7 +405,7 @@ export function BrowserPreviewPane({
       const annotations = await Promise.all(
         targets.map((target) =>
           queueAnnotation(target, outgoingComment, {
-            sessionId,
+            sessionId: effectiveSessionId,
             baseUrl,
             intent: annotationIntent,
             severity: annotationSeverity,
@@ -414,7 +431,7 @@ export function BrowserPreviewPane({
     selections,
     comment,
     currentUrl,
-    sessionId,
+    effectiveSessionId,
     queueAnnotation,
     clearSelection,
     t,
@@ -435,7 +452,7 @@ export function BrowserPreviewPane({
         selections.length > 0 ? selections : selection,
         outgoingComment,
         {
-          sessionId,
+          sessionId: effectiveSessionId,
           captureRect: getRect() ?? undefined,
           detailLevel,
         }
@@ -458,7 +475,7 @@ export function BrowserPreviewPane({
     selection,
     selections,
     comment,
-    sessionId,
+    effectiveSessionId,
     getRect,
     sendComment,
     clearSelection,
@@ -471,7 +488,7 @@ export function BrowserPreviewPane({
     setSending(true)
     try {
       const ok = await sendAnnotations(pendingAnnotations, {
-        sessionId,
+        sessionId: effectiveSessionId,
         captureRect: getRect() ?? undefined,
         detailLevel,
       })
@@ -485,7 +502,7 @@ export function BrowserPreviewPane({
     } finally {
       setSending(false)
     }
-  }, [pendingAnnotations, sessionId, getRect, sendAnnotations, t, detailLevel])
+  }, [pendingAnnotations, effectiveSessionId, getRect, sendAnnotations, t, detailLevel])
 
   const transitionQueuedAnnotation = useCallback(
     async (id: string, status: "resolved" | "dismissed") => {
@@ -516,7 +533,10 @@ export function BrowserPreviewPane({
     if (!rect) return
     setCapturing(true)
     try {
-      const ok = await sendScreenshot(rect, { sessionId, pageUrl: currentUrl ?? undefined })
+      const ok = await sendScreenshot(rect, {
+        sessionId: effectiveSessionId,
+        pageUrl: currentUrl ?? undefined,
+      })
       if (ok) toast.success(t("screenshot.sent"))
       else toast.error(t("comment.noSession"))
     } catch {
@@ -524,7 +544,7 @@ export function BrowserPreviewPane({
     } finally {
       setCapturing(false)
     }
-  }, [getRect, sendScreenshot, sessionId, currentUrl, t])
+  }, [getRect, sendScreenshot, effectiveSessionId, currentUrl, t])
 
   const openQuickUrl = useCallback((url: string) => {
     setUrlInput(url)
@@ -592,7 +612,7 @@ export function BrowserPreviewPane({
     if (remoteBrowserEnabled) {
       return (
         <RemoteBrowserPreview
-          chatSessionId={sessionId ?? activeChatSessionId ?? "browser-preview"}
+          chatSessionId={effectiveSessionId ?? "browser-preview"}
           parentChatSessionId={parentChatSessionId}
           workspaceId={workspaceId ?? activeProjectId ?? "default"}
           profileId={profileId}
@@ -648,7 +668,7 @@ export function BrowserPreviewPane({
       <TooltipIconButton
         tooltip={tCdp("title")}
         aria-label={tCdp("title")}
-        disabled={!committedUrl || !sessionId}
+        disabled={!committedUrl || !effectiveSessionId}
         className={cn(developerOpen && "bg-primary/15 text-primary")}
         onClick={() => setDeveloperOpen((current) => !current)}
       >
@@ -918,10 +938,10 @@ export function BrowserPreviewPane({
             )}
           >
             <ScrollArea className="min-h-0 flex-1">
-              {developerOpen && currentUrl && sessionId && (
+              {developerOpen && currentUrl && effectiveSessionId && (
                 <BrowserCdpControls
-                  sessionId={sessionId}
-                  browserSessionId={ownerId ?? `browser:${sessionId}`}
+                  sessionId={effectiveSessionId}
+                  browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
                   pageUrl={currentUrl}
                 />
               )}
@@ -957,10 +977,13 @@ export function BrowserPreviewPane({
                     rows={2}
                     className="resize-none text-sm"
                   />
-                  {currentUrl && sessionId && (
+                  {/* The Esc / Ctrl+Enter bindings in `onCommentKeyDown` have
+                      always worked; nothing ever told the user about them. */}
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t("comment.hint")}</p>
+                  {currentUrl && effectiveSessionId && (
                     <BrowserAdjustControls
-                      sessionId={sessionId}
-                      browserSessionId={ownerId ?? `browser:${sessionId}`}
+                      sessionId={effectiveSessionId}
+                      browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
                       pageUrl={currentUrl}
                       selector={selection.selector}
                       onAccept={acceptAdjustment}
@@ -1083,7 +1106,7 @@ export function BrowserPreviewPane({
       <BrowserRecorderPanel
         pageUrl={currentUrl ?? null}
         onLayoutChange={refreshBounds}
-        onSendToChat={(markdown) => void sendText(markdown, { sessionId })}
+        onSendToChat={(markdown) => void sendText(markdown, { sessionId: effectiveSessionId })}
       />
       {/* ADR-0127: live console + network from the overlay's push channels. */}
       <BrowserDevtoolsDrawer

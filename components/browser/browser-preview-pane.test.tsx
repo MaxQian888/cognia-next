@@ -16,6 +16,7 @@ const mockSendAnnotations = jest.fn().mockResolvedValue(true)
 const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockPendingAnnotations: Array<Record<string, unknown>> = []
 let mockRemoteBrowserEnabled = false
+let mockActiveChatSessionId: string | null = "active-chat"
 
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
@@ -23,7 +24,7 @@ jest.mock("@/stores/settings/settings-store", () => ({
 }))
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
-    selector({ activeSessionId: "active-chat" }),
+    selector({ activeSessionId: mockActiveChatSessionId }),
 }))
 jest.mock("@/stores/project/project-store", () => ({
   useProjectStore: (selector: (state: unknown) => unknown) =>
@@ -151,12 +152,37 @@ jest.mock("@/hooks/browser/use-selection-to-chat", () => ({
   }),
 }))
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => mockPendingAnnotations,
+  // Run the factory so a test can assert which session the queue was scoped
+  // to; the rows themselves still come from the fixture.
+  useLiveQuery: (factory: () => unknown) => {
+    void factory()
+    return mockPendingAnnotations
+  },
 }))
 jest.mock("@/lib/db/browser-annotations", () => ({
   deleteExpiredBrowserAnnotations: jest.fn().mockResolvedValue(0),
   listActionableBrowserAnnotations: jest.fn().mockResolvedValue([]),
   transitionBrowserAnnotation: (...args: unknown[]) => mockTransitionAnnotation(...args),
+}))
+// Both are separately tested and pull in the Dexie graph; stub them so this
+// suite can assert the session gate without a database.
+jest.mock("@/components/browser/browser-cdp-controls", () => ({
+  BrowserCdpControls: (props: { sessionId: string; browserSessionId: string }) => (
+    <div
+      data-testid="cdp-controls"
+      data-session={props.sessionId}
+      data-browser-session={props.browserSessionId}
+    />
+  ),
+}))
+jest.mock("@/components/browser/browser-adjust-controls", () => ({
+  BrowserAdjustControls: (props: { sessionId: string; browserSessionId: string }) => (
+    <div
+      data-testid="adjust-controls"
+      data-session={props.sessionId}
+      data-browser-session={props.browserSessionId}
+    />
+  ),
 }))
 jest.mock("@/lib/browser/client", () => ({
   browserClient: {
@@ -175,6 +201,7 @@ jest.mock("@/lib/browser/client", () => ({
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
+import { listActionableBrowserAnnotations } from "@/lib/db/browser-annotations"
 import { browserClient } from "@/lib/browser/client"
 import { requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { addressDisplayParts, BrowserPreviewPane } from "./browser-preview-pane"
@@ -231,6 +258,8 @@ beforeEach(() => {
   mockTransitionAnnotation.mockReset().mockResolvedValue(true)
   mockPendingAnnotations = []
   mockRemoteBrowserEnabled = false
+  mockActiveChatSessionId = "active-chat"
+  ;(listActionableBrowserAnnotations as jest.Mock).mockClear()
   mockOpenExternal.mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedReload as jest.Mock).mockClear()
   ;(browserClient.embedSetZoom as jest.Mock).mockClear()
@@ -627,7 +656,9 @@ it("sends a screenshot of the preview to chat", async () => {
   await waitFor(() =>
     expect(mockSendScreenshot).toHaveBeenCalledWith(
       { x: 0, y: 0, width: 100, height: 100 },
-      { sessionId: undefined, pageUrl: "http://localhost:3000/" }
+      // No `sessionId` prop -> the focused chat session, the same one
+      // `useSelectionToChat` would have fallen back to internally.
+      { sessionId: "active-chat", pageUrl: "http://localhost:3000/" }
     )
   )
   expect(toast.success).toHaveBeenCalled()
@@ -660,7 +691,7 @@ it("sends a selection comment to chat and clears on success", async () => {
   fireEvent.click(screen.getByRole("button", { name: /Send to chat/i }))
   await waitFor(() =>
     expect(mockSendComment).toHaveBeenCalledWith([SELECTION], "make it blue", {
-      sessionId: undefined,
+      sessionId: "active-chat",
       captureRect: { x: 0, y: 0, width: 100, height: 100 },
       detailLevel: "standard",
     })
@@ -1072,5 +1103,105 @@ describe("⌘-click link claim", () => {
     renderPane(<BrowserPreviewPane onRequestReveal={reveal} />)
     expect(claim("https://example.com/docs")).toBe(true)
     expect(reveal).not.toHaveBeenCalled()
+  })
+})
+
+// D1: the pane used to read only its `sessionId` prop while the hook it calls
+// fell back to the focused chat session. `/browser` and the sites publish tab
+// pass no prop, so the two disagreed: "Add to queue" wrote a row the queue
+// could never show, and the developer panel and Browser Adjust never rendered.
+describe("session binding without a sessionId prop", () => {
+  it("scopes the annotation queue to the focused chat session", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(listActionableBrowserAnnotations).toHaveBeenCalledWith("active-chat")
+  })
+
+  it("still prefers an explicit sessionId prop over the focused session", () => {
+    renderPane(<BrowserPreviewPane sessionId="s1" />)
+    expect(listActionableBrowserAnnotations).toHaveBeenCalledWith("s1")
+    expect(listActionableBrowserAnnotations).not.toHaveBeenCalledWith("active-chat")
+  })
+
+  it("queues an annotation under the same session the queue reads", async () => {
+    mockSelection = SELECTION
+    mockQueueAnnotation.mockResolvedValue({ id: "a1", selection: SELECTION })
+    renderPane(<BrowserPreviewPane />)
+    fireEvent.change(screen.getByPlaceholderText(/Describe the change/i), {
+      target: { value: "increase contrast" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }))
+    await waitFor(() =>
+      expect(mockQueueAnnotation).toHaveBeenCalledWith(
+        SELECTION,
+        "increase contrast",
+        expect.objectContaining({ sessionId: "active-chat" })
+      )
+    )
+    expect(listActionableBrowserAnnotations).toHaveBeenCalledWith("active-chat")
+  })
+
+  it("enables the developer panel once a page is committed", () => {
+    renderPane(<BrowserPreviewPane />)
+    const developer = screen.getByRole("button", { name: "Developer mode (CDP)" })
+    expect(developer).toBeDisabled()
+    commitUrl("http://localhost:3000/")
+    expect(screen.getByRole("button", { name: "Developer mode (CDP)" })).toBeEnabled()
+  })
+
+  it("renders the developer panel against the focused session", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("http://localhost:3000/")
+    fireEvent.click(screen.getByRole("button", { name: "Developer mode (CDP)" }))
+    const controls = screen.getByTestId("cdp-controls")
+    expect(controls).toHaveAttribute("data-session", "active-chat")
+    expect(controls).toHaveAttribute("data-browser-session", "browser:active-chat")
+  })
+
+  it("renders Browser Adjust for a selection", () => {
+    mockSelection = SELECTION
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("http://localhost:3000/")
+    expect(screen.getByTestId("adjust-controls")).toHaveAttribute("data-session", "active-chat")
+  })
+
+  it("keeps an explicit ownerId as the browser-session identity", () => {
+    mockSelection = SELECTION
+    renderPane(<BrowserPreviewPane ownerId="sites:abc" />)
+    commitUrl("http://localhost:3000/")
+    expect(screen.getByTestId("adjust-controls")).toHaveAttribute(
+      "data-browser-session",
+      "sites:abc"
+    )
+  })
+
+  it("writes nothing and explains itself when no session exists at all", async () => {
+    mockActiveChatSessionId = null
+    mockSelection = SELECTION
+    mockQueueAnnotation.mockResolvedValue(undefined)
+    renderPane(<BrowserPreviewPane />)
+    expect(listActionableBrowserAnnotations).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByPlaceholderText(/Describe the change/i), {
+      target: { value: "increase contrast" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add to queue" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Open a chat session first"))
+    expect(mockQueueAnnotation).toHaveBeenCalledWith(
+      SELECTION,
+      "increase contrast",
+      expect.objectContaining({ sessionId: undefined })
+    )
+  })
+
+  it("keeps the developer panel unreachable when no session exists at all", () => {
+    mockActiveChatSessionId = null
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("http://localhost:3000/")
+    expect(screen.getByRole("button", { name: "Developer mode (CDP)" })).toBeDisabled()
+  })
+
+  it("surfaces the comment shortcuts that were already implemented", () => {
+    mockSelection = SELECTION
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.getByText("Esc to dismiss · Ctrl+Enter to send")).toBeInTheDocument()
   })
 })

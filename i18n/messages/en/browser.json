@@ -226,9 +226,6 @@
     "failed": "Could not capture the preview",
     "sent": "Screenshot sent to chat"
   },
-  "selection": {
-    "selector": "Selector"
-  },
   "title": "Browser",
   "url": {
     "placeholder": "http://localhost:3000"

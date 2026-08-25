@@ -226,9 +226,6 @@
     "failed": "无法截取预览画面",
     "sent": "截图已发送到对话"
   },
-  "selection": {
-    "selector": "选择器"
-  },
   "title": "浏览器",
   "url": {
     "placeholder": "http://localhost:3000"
