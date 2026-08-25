@@ -14,9 +14,12 @@ use super::types::{
     GitStatus, GitTag, GitWorktree, RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
+use super::stack::{
+    RestackOutcome, StackCapabilities, StackLayerState, StackPushOutcome,
+};
 use super::{
     blame, branch, commit, diff, diff_stat, history, interactive_rebase, merge, read, remote, repo,
-    reset, restore, sequencer, stage, stash, status, tag, worktree,
+    reset, restore, sequencer, stack, stage, stash, status, tag, worktree,
 };
 
 /// Run a synchronous git2 read on the blocking pool.
@@ -424,6 +427,73 @@ pub async fn git_sequencer_continue(repo_path: String) -> Result<(), GitError> {
 #[tauri::command]
 pub async fn git_sequencer_abort(repo_path: String) -> Result<(), GitError> {
     sequencer::sequencer_abort(&repo_path).await
+}
+
+// ---------------------------------------------------------------- stacks
+
+#[tauri::command]
+pub async fn git_stack_capabilities(repo_path: String) -> Result<StackCapabilities, GitError> {
+    stack::capabilities(&repo_path).await
+}
+
+#[tauri::command]
+pub async fn git_stack_parents(repo_path: String) -> Result<Vec<(String, String)>, GitError> {
+    blocking("git_stack_parents", move || {
+        Ok(stack::parent_map(&repo_path)?.into_iter().collect())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_stack_set_parent(
+    repo_path: String,
+    branch: String,
+    parent: Option<String>,
+) -> Result<(), GitError> {
+    stack::set_parent(&repo_path, &branch, parent.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn git_stack_validate(
+    repo_path: String,
+    branches: Vec<String>,
+) -> Result<Vec<StackLayerState>, GitError> {
+    stack::validate(&repo_path, &branches).await
+}
+
+#[tauri::command]
+pub async fn git_stack_restack(
+    repo_path: String,
+    onto: String,
+    branches: Vec<String>,
+) -> Result<RestackOutcome, GitError> {
+    stack::restack(&repo_path, &onto, &branches).await
+}
+
+#[tauri::command]
+pub async fn git_stack_history(
+    repo_path: String,
+    branch: String,
+) -> Result<Vec<(String, String)>, GitError> {
+    stack::history(&repo_path, &branch).await
+}
+
+#[tauri::command]
+pub async fn git_stack_revert(
+    repo_path: String,
+    branch: String,
+    history_ref: String,
+) -> Result<String, GitError> {
+    stack::revert_to_history(&repo_path, &branch, &history_ref).await
+}
+
+#[tauri::command]
+pub async fn git_stack_push(
+    repo_path: String,
+    remote: String,
+    branches: Vec<String>,
+) -> Result<StackPushOutcome, GitError> {
+    stack::push_stack(&repo_path, &remote, &branches).await
 }
 
 #[tauri::command]

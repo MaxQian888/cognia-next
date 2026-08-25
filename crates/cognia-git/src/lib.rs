@@ -29,6 +29,7 @@ pub mod repo;
 pub mod reset;
 pub mod restore;
 pub mod sequencer;
+pub mod stack;
 pub mod stage;
 pub mod stash;
 pub mod status;

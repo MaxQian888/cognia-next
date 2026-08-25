@@ -177,6 +177,55 @@ where
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Run `git <args>` in `cwd` and report only whether it succeeded.
+///
+/// For the handful of git commands whose *answer* is the exit code rather than
+/// an error: `merge-base --is-ancestor` exits 1 to mean "no", and
+/// `rev-parse --verify --quiet` exits 1 to mean "that ref does not exist".
+/// Routing those through [`run`] would turn a fact into a `CommandFailed`, and
+/// the caller would have to string-match its way back to the boolean.
+///
+/// A spawn failure is still an error — "git is not installed" is not "no".
+pub async fn succeeds<I, S>(cwd: &Path, args: I) -> Result<bool, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let _perf = cognia_instrument::guard("git.exec");
+    let output = base_command(cwd)
+        .args(args)
+        .output()
+        .await
+        .map_err(spawn_error)?;
+    Ok(output.status.success())
+}
+
+/// Run `git <args>` in `cwd` and return everything it produced, exit status
+/// included, without deciding that a non-zero exit was a failure.
+///
+/// For capability probes. `git <cmd> -h` prints its usage and exits 129 —
+/// success by every measure that matters here — and a missing subcommand
+/// reports "is not a git command" on stderr with a different non-zero code.
+/// [`capture`] throws both away as errors, which is exactly backwards when the
+/// output IS the answer.
+pub async fn capture_output<I, S>(cwd: &Path, args: I) -> Result<(bool, String, String), GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let _perf = cognia_instrument::guard("git.exec");
+    let output = base_command(cwd)
+        .args(args)
+        .output()
+        .await
+        .map_err(spawn_error)?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
+}
+
 /// Run `git <args>` feeding `stdin` to the process — used for
 /// `git apply --cached` where the patch arrives on stdin.
 pub async fn run_with_stdin<I, S>(cwd: &Path, args: I, stdin: &str) -> Result<(), GitError>
