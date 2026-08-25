@@ -5296,6 +5296,12 @@
         "switchPrompt": "Switch to the target app now; Cognia will capture it in a moment."
       },
       "stopTooltip": "Stop",
+      "templateParams": {
+        "hint": "Enter or Esc to close · Tab for the next parameter",
+        "placeholder": "Value",
+        "position": "{index} of {total}",
+        "unfilled": "{count, plural, =1 {1 parameter still needs a value} other {# parameters still need values}}"
+      },
       "toolbar": {
         "breakdownAgents": "Subagents",
         "breakdownClaudeMd": "CLAUDE.md / system prompt",

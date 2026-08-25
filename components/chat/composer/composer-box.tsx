@@ -28,7 +28,11 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import type { PermissionMode } from "@/stores/chat/chat-store"
 
-import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "../composer-chip-overlay"
+import {
+  ComposerChipOverlay,
+  TEXTAREA_TYPOGRAPHY,
+  type ParamPillState,
+} from "../composer-chip-overlay"
 import type { RichSegment } from "@/lib/slash-commands/parse-segments"
 import { ComposerGhostText } from "./composer-ghost-text"
 import { CharCounter } from "./char-counter"
@@ -84,8 +88,16 @@ export interface ComposerBoxProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void
   onSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => void
+  /**
+   * Pointer release inside the text. Distinct from `onSelect`, which also fires
+   * for arrow keys — a panel that opened every time the caret drifted through a
+   * `{{parameter}}` would flash at someone simply reading back what they wrote.
+   */
+  onMouseUp?: (e: React.MouseEvent<HTMLTextAreaElement>) => void
   onCompositionStart: () => void
   onCompositionEnd: () => void
+  /** How to paint each `{{parameter}}` chip. See `ComposerChipOverlay`. */
+  paramState?: (paramId: string) => ParamPillState
 
   // ── inline completion ───────────────────────────────────────────────────
   ghost: { ghost: string; candidates: readonly unknown[]; index: number; dismiss: () => void }
@@ -140,8 +152,10 @@ export function ComposerBox({
   onKeyDown,
   onPaste,
   onSelect,
+  onMouseUp,
   onCompositionStart,
   onCompositionEnd,
+  paramState,
   ghost,
   ghostSourceLabel,
   acceptGhost,
@@ -264,6 +278,7 @@ export function ComposerBox({
           ref={chipOverlayRef}
           value={textInput.value}
           segments={overlaySegments}
+          paramState={paramState}
         />
         <ComposerGhostText
           ref={ghostOverlayRef}
@@ -312,6 +327,7 @@ export function ComposerBox({
             const ghostEl = ghostOverlayRef.current
             if (ghostEl) ghostEl.style.transform = offset
           }}
+          onMouseUp={onMouseUp}
           onSelect={onSelect}
           placeholder={disabled ? t("placeholderDisabled") : (placeholder ?? t("placeholder"))}
           ref={textareaRef}

@@ -5296,6 +5296,12 @@
         "switchPrompt": "请切换到目标应用，Cognia 稍后会截取它。"
       },
       "stopTooltip": "停止",
+      "templateParams": {
+        "hint": "回车或 Esc 关闭 · Tab 跳到下一个参数",
+        "placeholder": "值",
+        "position": "第 {index} / {total} 个",
+        "unfilled": "{count, plural, =1 {还有 1 个参数没填} other {还有 # 个参数没填}}"
+      },
       "toolbar": {
         "breakdownAgents": "子智能体",
         "breakdownClaudeMd": "CLAUDE.md / 系统提示词",

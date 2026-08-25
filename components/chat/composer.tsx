@@ -140,7 +140,15 @@ import {
 } from "@/lib/slash-commands/system-blocks"
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
-import { splitParamSegments } from "@/lib/chat/template/param-segments"
+import { listParamIds, splitParamSegments } from "@/lib/chat/template/param-segments"
+import {
+  paramState as paramStateOfValue,
+  pruneBinding,
+  withParamValue,
+  type ChatTemplateBinding,
+  type ChatTemplateParamValue,
+} from "@/lib/chat/template/binding"
+import { TemplateParamPopover } from "./composer/template-param-popover"
 import { pillDeleteRange } from "./composer-pill-delete"
 import { runSegments, type CommandError } from "@/lib/slash-commands/run-segments"
 import {
@@ -669,6 +677,50 @@ function ComposerInner(props: InnerProps) {
     () => splitParamSegments(splitMentionSegments(segments), codeRanges),
     [segments, codeRanges]
   )
+
+  // ── `{{parameter}}` values ────────────────────────────────────────────────
+  // The tokens live in the text (so a reload recovers them for free); their
+  // values live on the draft row, because the chip overlay is a
+  // character-for-character mirror of the textarea and a pill can only ever
+  // paint the token it covers.
+  const [templateBinding, setTemplateBinding] = useState<ChatTemplateBinding | undefined>()
+  /** Which parameter the editor panel is open on, if any. */
+  const [activeParamId, setActiveParamId] = useState<string | null>(null)
+
+  const paramTokens = useMemo(
+    () => overlaySegments.filter((seg) => seg.kind === "param"),
+    [overlaySegments]
+  )
+  const paramIds = useMemo(
+    () => listParamIds(controller.textInput.value, codeRanges),
+    [controller.textInput.value, codeRanges]
+  )
+  // Values whose token has left the text are dropped here rather than in an
+  // effect: breaking a token is how the user demotes a chip, and the value has
+  // to go with it or retyping `{{module}}` later would resurrect an answer from
+  // a sentence that no longer exists. Deriving keeps it out of a setState loop.
+  const effectiveBinding = useMemo(
+    () => (templateBinding ? pruneBinding(templateBinding, paramIds) : undefined),
+    [templateBinding, paramIds]
+  )
+  const paramPillState = useCallback(
+    (paramId: string) => paramStateOfValue(effectiveBinding?.params[paramId]),
+    [effectiveBinding]
+  )
+  /** The parameter token containing `caret`, or null. */
+  const paramTokenAt = useCallback(
+    (caret: number) => paramTokens.find((seg) => caret >= seg.start && caret <= seg.end) ?? null,
+    [paramTokens]
+  )
+  const setParamValue = useCallback((paramId: string, value: ChatTemplateParamValue) => {
+    setTemplateBinding((prev) =>
+      withParamValue(
+        prev ?? { templateId: "", version: "", params: {}, insertedAt: Date.now() },
+        paramId,
+        value
+      )
+    )
+  }, [])
 
   // Recent / pinned slash commands for the popover's empty-query view.
   const recentCommands = useComposerCommandStore((s) => s.recentCommands)
@@ -1272,6 +1324,29 @@ function ComposerInner(props: InnerProps) {
   }, [ghost, controller.textInput])
 
   // --- Textarea key handling --------------------------------------------
+  /**
+   * Move the caret to the parameter after (or before) the caret and open it.
+   * Returns false when there is nowhere to go, so the caller can let the key
+   * do its normal job.
+   */
+  const stepToParam = useCallback(
+    (direction: 1 | -1): boolean => {
+      const ta = textareaRef.current
+      if (!ta || paramTokens.length === 0) return false
+      const caretAt = ta.selectionStart ?? 0
+      const ordered = direction === 1 ? paramTokens : [...paramTokens].reverse()
+      const next =
+        ordered.find((seg) => (direction === 1 ? seg.start > caretAt : seg.end < caretAt)) ??
+        ordered[0]
+      if (!next) return false
+      ta.setSelectionRange(next.start, next.start)
+      setCaret(next.start)
+      setActiveParamId(next.paramId)
+      return true
+    },
+    [paramTokens, textareaRef]
+  )
+
   // Local handles so the key handler depends on the specific props it reads,
   // not the whole `props` object (react-hooks/exhaustive-deps).
   const turnStatus = props.status
@@ -1376,6 +1451,31 @@ function ComposerInner(props: InnerProps) {
         }
       }
       // Inline ghost-text acceptance (only when no `/@!#` popover is open).
+      // Tab walks the `{{parameter}}` chips. Only claimed when the text
+      // actually HAS parameters — otherwise Tab keeps its normal job of moving
+      // focus out of the composer, which is the only way a keyboard user
+      // reaches the toolbar.
+      if (
+        e.key === "Tab" &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !trigger &&
+        !ghost.ghost &&
+        paramTokens.length > 0
+      ) {
+        if (stepToParam(1)) {
+          e.preventDefault()
+          return
+        }
+      }
+      // Escape closes the parameter editor before anything else claims it.
+      if (e.key === "Escape" && activeParamId) {
+        e.preventDefault()
+        setActiveParamId(null)
+        return
+      }
       // Tab accepts the dim continuation; Esc dismisses it; Alt+]/Alt+[ walk
       // the ranked alternatives (the same bindings VS Code uses for cycling
       // inline suggestions). All fall through to existing behavior when there
@@ -1456,6 +1556,9 @@ function ComposerInner(props: InnerProps) {
       history,
       controller.textInput,
       overlaySegments,
+      paramTokens,
+      stepToParam,
+      activeParamId,
       ghost,
       acceptGhost,
       inputHistoryRecall,
@@ -1486,10 +1589,39 @@ function ComposerInner(props: InnerProps) {
     [controller.textInput, history]
   )
 
-  const onSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    const ta = e.currentTarget
-    setCaret(ta.selectionStart ?? ta.value.length)
-  }, [])
+  const onSelect = useCallback(
+    (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+      const ta = e.currentTarget
+      const caretAt = ta.selectionStart ?? ta.value.length
+      setCaret(caretAt)
+      // Close the parameter editor once the caret leaves the token it belongs
+      // to — including when the user breaks the token, which stops it being a
+      // parameter at all. It never OPENS from here: `onSelect` also fires for
+      // arrow keys, and a panel that appeared every time the caret drifted
+      // through `{{module}}` would flash at someone reading back their own
+      // sentence.
+      if (activeParamId && paramTokenAt(caretAt)?.paramId !== activeParamId) {
+        setActiveParamId(null)
+      }
+    },
+    [activeParamId, paramTokenAt]
+  )
+
+  /**
+   * Open the editor for the parameter the user just clicked in.
+   *
+   * Pointer release, not `onSelect`: clicking a chip is a deliberate "edit
+   * this", where arrowing past one is not.
+   */
+  const onTextareaMouseUp = useCallback(
+    (e: React.MouseEvent<HTMLTextAreaElement>) => {
+      const ta = e.currentTarget
+      const caretAt = ta.selectionStart ?? 0
+      if (caretAt !== (ta.selectionEnd ?? caretAt)) return // a drag-selection, not a click
+      setActiveParamId(paramTokenAt(caretAt)?.paramId ?? null)
+    },
+    [paramTokenAt]
+  )
 
   // ── Mobile inline mention popover ──────────────────────────────────────
   // When `mobileMentionMembers` is supplied, the chat shell wants the inline
@@ -1551,6 +1683,9 @@ function ComposerInner(props: InnerProps) {
       attachments.clear()
       // Folded-paste bodies are in-memory only (not persisted); drop them too.
       setPastedBlocks({})
+      // Parameter values belong to the draft they were typed into.
+      setTemplateBinding(undefined)
+      setActiveParamId(null)
     }
     let cancelled = false
     getChatDraft(sessionId)
@@ -1561,6 +1696,8 @@ function ComposerInner(props: InnerProps) {
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
+        // The tokens come back with the text; their values come back here.
+        setTemplateBinding(row?.templateBinding)
         // Attachments whose binary survived are re-staged for real: the file
         // comes back, ready to send. Seed the store with its cached extraction
         // first so re-staging doesn't re-parse a document we already read.
@@ -1670,11 +1807,23 @@ function ComposerInner(props: InnerProps) {
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
     try {
-      setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments)
+      // `undefined` keeps the default debounce. The binding is passed on every
+      // save (never omitted) so clearing the last parameter actually clears the
+      // stored value — omission means "preserve" in `setDraft`.
+      setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments, undefined, {
+        templateBinding: effectiveBinding ?? null,
+      })
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
-  }, [controller.textInput.value, draftAttachments, sessionId, draftHydratedFor, persistDrafts])
+  }, [
+    controller.textInput.value,
+    draftAttachments,
+    sessionId,
+    draftHydratedFor,
+    persistDrafts,
+    effectiveBinding,
+  ])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
   // support, e.g. older iOS/Android WebViews). field-sizing-content in the
@@ -1894,6 +2043,8 @@ function ComposerInner(props: InnerProps) {
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           onSelect={onSelect}
+          onMouseUp={onTextareaMouseUp}
+          paramState={paramPillState}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
           ghost={ghost}
@@ -1935,6 +2086,19 @@ function ComposerInner(props: InnerProps) {
         />
 
         <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
+
+        <TemplateParamPopover
+          paramId={activeParamId}
+          value={activeParamId ? effectiveBinding?.params[activeParamId] : undefined}
+          anchor={containerEl}
+          position={
+            activeParamId
+              ? { index: paramIds.indexOf(activeParamId), total: paramIds.length }
+              : undefined
+          }
+          onChange={(value) => activeParamId && setParamValue(activeParamId, value)}
+          onClose={() => setActiveParamId(null)}
+        />
 
         <ComposerPopover
           ref={popoverRef}
