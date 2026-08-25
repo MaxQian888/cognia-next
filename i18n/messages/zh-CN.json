@@ -4116,6 +4116,11 @@
       "empty": "暂无最近页面",
       "label": "历史"
     },
+    "lease": {
+      "busyHint": "同一时间只能运行一个内置浏览器。你可以在此处接管，或切回正在使用它的面板。",
+      "busyTitle": "预览已在另一个面板中打开",
+      "takeOver": "在此接管"
+    },
     "loading": {
       "label": "页面加载中",
       "title": "正在加载 {host}…"
@@ -4196,9 +4201,6 @@
     "screenshot": {
       "failed": "无法截取预览画面",
       "sent": "截图已发送到对话"
-    },
-    "selection": {
-      "selector": "选择器"
     },
     "title": "浏览器",
     "url": {

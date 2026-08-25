@@ -134,3 +134,19 @@ it("unsubscribes on unmount", async () => {
   unmount()
   expect(mockUnlisten).toHaveBeenCalled()
 })
+
+// `embedDrainSelection` empties a buffer that lives in the page, so it is a
+// one-shot read. With two panes mounted both would wake on the same event and
+// race; the loser burns five retries and silently drops the pick. Only the
+// lease holder subscribes.
+it("does not subscribe or drain when this pane does not own the webview", async () => {
+  ;(browserClient.embedDrainSelection as jest.Mock).mockResolvedValue([SELECTION])
+  const { result, unmount } = renderHook(() => useElementSelection({ enabled: false }))
+  await act(async () => {
+    await Promise.resolve()
+  })
+  expect(mockListeners[BROWSER_EVENTS.elementSelected]).toBeUndefined()
+  expect(browserClient.embedDrainSelection).not.toHaveBeenCalled()
+  expect(result.current.selection).toBeNull()
+  unmount()
+})

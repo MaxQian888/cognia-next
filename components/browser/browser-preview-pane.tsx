@@ -8,6 +8,7 @@ import {
   GlobeIcon,
   Loader2Icon,
   LockIcon,
+  MonitorXIcon,
   MoreHorizontalIcon,
   MousePointerSquareDashedIcon,
   SearchIcon,
@@ -196,8 +197,8 @@ export function BrowserPreviewPane({
   })
   const [webviewReady, setWebviewReady] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
-  // ADR-0127: console / network rings for the DevTools drawer (single pane).
-  const devtools = useBrowserDevtools()
+  // ADR-0127: console / network rings for the DevTools drawer. Gated on the
+  // lease below so a second mounted pane does not mirror the owner's feeds.
   const [developerOpen, setDeveloperOpen] = useState(false)
   const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
   const activeChatSessionId = useChatStore((state) => state.activeSessionId)
@@ -245,7 +246,8 @@ export function BrowserPreviewPane({
   // the always-on-top layer stops eating input.
   const { phase, hasPainted, begin: beginLoad } = useBrowserLoading({ url: committedUrl })
   const regionVisible = useRegionVisibility(reservedRef)
-  const shouldShowLivePage = !!committedUrl && hasPainted && regionVisible
+  // `owned` is resolved by `useBrowserPaneWebview` below; the visibility it
+  // consumes is computed there from the same three inputs plus the lease.
 
   const handleWebviewReady = useCallback(() => setWebviewReady(true), [])
   const handleWebviewError = useCallback(
@@ -258,16 +260,17 @@ export function BrowserPreviewPane({
     },
     [t]
   )
-  const { getRect, refreshBounds } = useBrowserPaneWebview(reservedRef, {
+  const { getRect, refreshBounds, owned, takeLease } = useBrowserPaneWebview(reservedRef, {
     url: committedUrl,
     ownerId,
     onReady: handleWebviewReady,
     onError: handleWebviewError,
     onRectChange: handleRectChange,
-    visible: shouldShowLivePage,
+    visible: !!committedUrl && hasPainted && regionVisible,
   })
+  const devtools = useBrowserDevtools({ paneId: "browser-embed", enabled: owned })
   const { selection, selections, navigated, selectMode, setSelectMode, clearSelection } =
-    useElementSelection({ driver: browserClient.embedSetSelectMode })
+    useElementSelection({ driver: browserClient.embedSetSelectMode, enabled: owned })
   const { sendComment, queueAnnotation, sendAnnotations, sendScreenshot, sendText } =
     useSelectionToChat()
   const { driver, lastAction } = useBrowserAgentActivity()
@@ -291,8 +294,10 @@ export function BrowserPreviewPane({
   // Re-apply zoom whenever the page becomes live (covers webview recreation)
   // or the user changes it. Native zoom persists across in-page navigations.
   useEffect(() => {
-    if (shouldShowLivePage && webviewReady) void browserClient.embedSetZoom(zoom).catch(() => {})
-  }, [shouldShowLivePage, webviewReady, zoom])
+    if (owned && committedUrl && hasPainted && regionVisible && webviewReady) {
+      void browserClient.embedSetZoom(zoom).catch(() => {})
+    }
+  }, [owned, committedUrl, hasPainted, regionVisible, webviewReady, zoom])
   useEffect(() => {
     void deleteExpiredBrowserAnnotations(new Date().getTime())
   }, [])
@@ -302,11 +307,11 @@ export function BrowserPreviewPane({
   const panelDetailsLabel = t("panel.details")
   const panelCollapseLabel = t("panel.collapse")
   useEffect(() => {
-    if (!isTauri() || !committedUrl || !webviewReady) return
+    if (!isTauri() || !owned || !committedUrl || !webviewReady) return
     void browserClient
       .embedSetPanelLabels({ details: panelDetailsLabel, collapse: panelCollapseLabel })
       .catch(() => {})
-  }, [committedUrl, panelDetailsLabel, panelCollapseLabel, webviewReady])
+  }, [owned, committedUrl, panelDetailsLabel, panelCollapseLabel, webviewReady])
 
   // The preview's real location (follows in-page navigations and redirects).
   const currentUrl = navigated?.url ?? committedUrl
@@ -629,6 +634,13 @@ export function BrowserPreviewPane({
     editingUrl || urlInput !== (currentUrl ?? "") ? null : addressDisplayParts(urlInput)
   const SchemeIcon = addressDisplay?.secure ? LockIcon : GlobeIcon
 
+  // Every control below that issues a `browserClient` command needs the lease:
+  // without it the native side answers "owner token does not match", and most
+  // of those calls are un-awaited, so the rejection surfaces as an unhandled
+  // promise rather than as anything the user can act on. Disabling them is the
+  // honest form — the takeover button in the reserved region is the way back.
+  const nativeReady = !!committedUrl && owned
+
   // Page-inspection actions: the ones a reviewer reaches for on every pass.
   // First to stay inline, last to collapse.
   const inspectActions = (
@@ -642,7 +654,7 @@ export function BrowserPreviewPane({
       <TooltipIconButton
         tooltip={t("actions.screenshot")}
         aria-label={t("actions.screenshot")}
-        disabled={!committedUrl || capturing}
+        disabled={!nativeReady || capturing}
         onClick={() => void onScreenshot()}
       >
         <CameraIcon />
@@ -650,7 +662,7 @@ export function BrowserPreviewPane({
       <TooltipIconButton
         tooltip={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
         aria-label={selectMode ? t("actions.cancelSelect") : t("actions.selectElement")}
-        disabled={!committedUrl}
+        disabled={!nativeReady}
         className={cn(selectMode && "bg-primary/15 text-primary")}
         onClick={() => void setSelectMode(!selectMode)}
       >
@@ -659,7 +671,7 @@ export function BrowserPreviewPane({
       <TooltipIconButton
         tooltip={t("actions.find")}
         aria-label={t("actions.find")}
-        disabled={!committedUrl}
+        disabled={!nativeReady}
         className={cn(findOpen && "bg-primary/15 text-primary")}
         onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
       >
@@ -668,7 +680,7 @@ export function BrowserPreviewPane({
       <TooltipIconButton
         tooltip={tCdp("title")}
         aria-label={tCdp("title")}
-        disabled={!committedUrl || !effectiveSessionId}
+        disabled={!nativeReady || !effectiveSessionId}
         className={cn(developerOpen && "bg-primary/15 text-primary")}
         onClick={() => setDeveloperOpen((current) => !current)}
       >
@@ -680,8 +692,11 @@ export function BrowserPreviewPane({
   // Page-setup actions: set once and left alone, so they collapse first.
   const pageActions = (
     <>
-      <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!committedUrl} />
-      <BrowserCookieImportAction currentUrl={currentUrl} onReload={reloadAfterCookieImport} />
+      <BrowserZoomControl zoom={zoom} onZoomChange={setZoom} disabled={!nativeReady} />
+      <BrowserCookieImportAction
+        currentUrl={owned ? currentUrl : null}
+        onReload={reloadAfterCookieImport}
+      />
       <TooltipIconButton
         tooltip={t("actions.openExternal")}
         aria-label={t("actions.openExternal")}
@@ -727,7 +742,7 @@ export function BrowserPreviewPane({
         // Best-effort Cmd/Ctrl+F while the React chrome has focus; when the
         // native webview holds focus the toolbar Find button is the trigger.
         if (isFindShortcut(e)) {
-          if (!committedUrl) return
+          if (!nativeReady) return
           e.preventDefault()
           setFindOpen(true)
         }
@@ -750,7 +765,7 @@ export function BrowserPreviewPane({
           </div>
         )}
         <BrowserNavigationControls
-          disabled={!committedUrl}
+          disabled={!nativeReady}
           onBack={() => {
             beginLoad()
             void browserClient.embedBack()
@@ -866,7 +881,26 @@ export function BrowserPreviewPane({
           className="relative min-h-0 min-w-0 flex-1"
           data-testid="browser-reserved-region"
         >
-          {committedUrl && !hasPainted && (
+          {!owned && (
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background p-6 text-center animate-in fade-in duration-200"
+              role="status"
+              aria-live="polite"
+              data-testid="browser-lease-busy"
+            >
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
+                <MonitorXIcon className="size-6 text-muted-foreground" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">{t("lease.busyTitle")}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">{t("lease.busyHint")}</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={takeLease}>
+                {t("lease.takeOver")}
+              </Button>
+            </div>
+          )}
+          {owned && committedUrl && !hasPainted && (
             <div
               className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background p-6 text-center animate-in fade-in duration-200"
               role="status"
@@ -887,7 +921,7 @@ export function BrowserPreviewPane({
               </div>
             </div>
           )}
-          {!committedUrl && (
+          {owned && !committedUrl && (
             <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center animate-in fade-in duration-200">
               <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
                 <GlobeIcon className="size-6 text-muted-foreground" />

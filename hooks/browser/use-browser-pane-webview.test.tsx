@@ -43,6 +43,24 @@ const RECT: ElementRect = { x: 0, y: 0, width: 100, height: 100 }
 /** Deliver the initial rect the way the real useElementRect does on mount. */
 const deliverRect = (rect: ElementRect = RECT) => act(() => mockOnRect?.(rect))
 
+/** Let the create/destroy promise chains settle. */
+const settle = () =>
+  act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+/**
+ * Mount one pane and keep hold of ITS rect callback. Index-based lookup into
+ * `mockOnRects` is not safe: the mocked `useElementRect` re-registers on every
+ * render, and ownership changes re-render.
+ */
+const mountPane = (url: string, ownerId: string) => {
+  const slot = mockOnRects.length
+  const hook = renderHook(() => useBrowserPaneWebview(ref, { url, ownerId }))
+  return { ...hook, deliverRect: () => act(() => mockOnRects[slot]?.(RECT)) }
+}
+
 beforeEach(() => {
   mockOnRect = undefined
   mockOnRects = []
@@ -108,12 +126,18 @@ it("forwards rect changes to onRectChange without re-rendering", () => {
     renders += 1
     return useBrowserPaneWebview(ref, { url: "http://localhost:3000/", onRectChange })
   })
-  const rendersAfterMount = renders
+  // The very first rect is what creates the webview and claims the lease, and
+  // ownership is observable state — so it legitimately re-renders once. The
+  // invariant that matters is every rect after that: a scroll or resize burst
+  // must reach `onRectChange` without touching React at all.
   deliverRect()
+  const rendersAfterClaim = renders
   act(() => mockOnRect?.({ x: 1, y: 2, width: 30, height: 40 }))
+  act(() => mockOnRect?.({ x: 3, y: 4, width: 30, height: 40 }))
+  act(() => mockOnRect?.({ x: 5, y: 6, width: 30, height: 40 }))
   expect(onRectChange).toHaveBeenCalledWith(RECT)
   expect(onRectChange).toHaveBeenCalledWith({ x: 1, y: 2, width: 30, height: 40 })
-  expect(renders).toBe(rendersAfterMount)
+  expect(renders).toBe(rendersAfterClaim)
 })
 
 it("exposes the latest rect via getRect", () => {
@@ -275,41 +299,17 @@ it("destroys the webview on unmount", () => {
 })
 
 it("leases the singleton webview and hands it to the next mounted owner", async () => {
-  const first = renderHook(() =>
-    useBrowserPaneWebview(ref, { url: "http://localhost:3000/", ownerId: "browser" })
-  )
-  act(() => mockOnRects[0]?.(RECT))
-  const second = renderHook(() =>
-    useBrowserPaneWebview(ref, { url: "http://localhost:4173/", ownerId: "sites" })
-  )
-  act(() => mockOnRects[1]?.(RECT))
+  const first = mountPane("http://localhost:3000/", "browser")
+  first.deliverRect()
+  const second = mountPane("http://localhost:4173/", "sites")
+  second.deliverRect()
   expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
 
   first.unmount()
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-  })
+  await settle()
   expect(browserClient.embedDestroy).toHaveBeenCalledTimes(1)
   expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:4173/", RECT)
   second.unmount()
-})
-
-it("setVisible is a no-op before the webview is created", async () => {
-  const { result } = renderHook(() => useBrowserPaneWebview(ref, { url: null }))
-  await act(async () => {
-    await result.current.setVisible(true)
-  })
-  expect(browserClient.embedSetVisible).not.toHaveBeenCalled()
-})
-
-it("setVisible forwards to the client with the current rect", async () => {
-  const { result } = renderHook(() => useBrowserPaneWebview(ref, { url: "http://localhost:3000/" }))
-  deliverRect()
-  await act(async () => {
-    await result.current.setVisible(false)
-  })
-  expect(browserClient.embedSetVisible).toHaveBeenCalledWith(false, RECT)
 })
 
 it("parks the webview off-screen right after creating it when starting hidden", async () => {
@@ -359,4 +359,70 @@ it("does not churn bounds while parked, then reveals at the fresh rect", () => {
   ;(browserClient.embedSetVisible as jest.Mock).mockClear()
   rerender({ visible: true })
   expect(browserClient.embedSetVisible).toHaveBeenCalledWith(true, moved)
+})
+
+// There is exactly one native child webview, so at most one mounted pane can
+// drive it. Before the lease was observable, the losing pane sat on its loading
+// placeholder for the full settle timeout and then showed a blank region, while
+// its toolbar kept firing commands the native side rejected.
+describe("lease ownership", () => {
+  it("reports ownership to the pane that holds the lease", () => {
+    const first = mountPane("http://localhost:3000/", "first")
+    first.deliverRect()
+    const second = mountPane("http://localhost:4173/", "second")
+    second.deliverRect()
+
+    expect(first.result.current.owned).toBe(true)
+    expect(second.result.current.owned).toBe(false)
+    expect(browserClient.embedCreate).toHaveBeenCalledTimes(1)
+
+    first.unmount()
+    second.unmount()
+  })
+
+  it("hands the lease over on takeLease, tearing the old webview down first", async () => {
+    const first = mountPane("http://localhost:3000/", "first")
+    first.deliverRect()
+    const second = mountPane("http://localhost:4173/", "second")
+    second.deliverRect()
+
+    act(() => second.result.current.takeLease())
+    await settle()
+
+    expect(browserClient.embedDestroy).toHaveBeenCalledTimes(1)
+    expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:4173/", RECT)
+    expect(second.result.current.owned).toBe(true)
+    expect(first.result.current.owned).toBe(false)
+
+    first.unmount()
+    second.unmount()
+  })
+
+  it("lets the dispossessed pane take the lease back", async () => {
+    const first = mountPane("http://localhost:3000/", "first")
+    first.deliverRect()
+    const second = mountPane("http://localhost:4173/", "second")
+    second.deliverRect()
+
+    act(() => second.result.current.takeLease())
+    await settle()
+    act(() => first.result.current.takeLease())
+    await settle()
+
+    expect(first.result.current.owned).toBe(true)
+    expect(second.result.current.owned).toBe(false)
+    expect(browserClient.embedCreate).toHaveBeenLastCalledWith("http://localhost:3000/", RECT)
+
+    first.unmount()
+    second.unmount()
+  })
+
+  it("is a no-op for the pane that already holds it", () => {
+    const only = mountPane("http://localhost:3000/", "only")
+    only.deliverRect()
+    expect(only.result.current.owned).toBe(true)
+    act(() => only.result.current.takeLease())
+    expect(browserClient.embedDestroy).not.toHaveBeenCalled()
+    only.unmount()
+  })
 })

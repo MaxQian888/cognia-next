@@ -33,6 +33,16 @@ export interface UseElementSelectionOptions {
    * callers may inject a different driver.
    */
   driver?: (on: boolean) => Promise<void>
+  /**
+   * Whether this pane owns the shared page→Rust channel. Defaults to true.
+   *
+   * `embedDrainSelection` empties a buffer that lives in the page, so it is a
+   * one-shot read: with two panes mounted, both wake on the same
+   * `browser://element-selected` event, both drain, and the loser burns its
+   * five retries before silently dropping the pick. Only the lease holder may
+   * subscribe.
+   */
+  enabled?: boolean
 }
 
 /**
@@ -42,13 +52,14 @@ export interface UseElementSelectionOptions {
  */
 export function useElementSelection(options: UseElementSelectionOptions = {}): UseElementSelection {
   const driver = options.driver ?? browserClient.embedSetSelectMode
+  const enabled = options.enabled !== false
   const [selection, setSelection] = useState<BrowserSelection | null>(null)
   const [selections, setSelections] = useState<BrowserSelection[]>([])
   const [navigated, setNavigated] = useState<BrowserNavigated | null>(null)
   const [selectMode, setSelectModeState] = useState(false)
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !enabled) return
     let cancelled = false
     let draining = false
     let handledGeneration = 0
@@ -115,7 +126,7 @@ export function useElementSelection(options: UseElementSelectionOptions = {}): U
       cancelled = true
       for (const unlisten of subs) safeUnlisten(unlisten)
     }
-  }, [])
+  }, [enabled])
 
   const setSelectMode = useCallback(
     async (on: boolean) => {

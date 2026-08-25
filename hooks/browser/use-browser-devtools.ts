@@ -45,12 +45,28 @@ export function appendRing<T>(ring: readonly T[], next: readonly T[], cap = DEVT
   return merged
 }
 
-export function useBrowserDevtools(paneId?: string | null): UseBrowserDevtools {
+export interface UseBrowserDevtoolsOptions {
+  /**
+   * Restrict the feed to one native pane label. Every embedded pane is
+   * `"browser-embed"` today, so this cannot separate two mounted panes on its
+   * own — {@link UseBrowserDevtoolsOptions.enabled} is what does that.
+   */
+  paneId?: string | null
+  /**
+   * Whether this pane owns the embedded webview. Defaults to true. A pane that
+   * does not own it would otherwise mirror the owner's console and network
+   * feeds into a drawer describing a page it is not showing.
+   */
+  enabled?: boolean
+}
+
+export function useBrowserDevtools(options: UseBrowserDevtoolsOptions = {}): UseBrowserDevtools {
+  const { paneId, enabled = true } = options
   const [consoleRing, setConsoleRing] = useState<ConsoleEntry[]>([])
   const [networkRing, setNetworkRing] = useState<NetworkEntry[]>([])
 
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !enabled) return
     let cancelled = false
     const unlisteners: Array<() => void> = []
     const accepts = (id: string) => !paneId || id === paneId
@@ -85,7 +101,7 @@ export function useBrowserDevtools(paneId?: string | null): UseBrowserDevtools {
       cancelled = true
       for (const u of unlisteners) safeUnlisten(u)
     }
-  }, [paneId])
+  }, [paneId, enabled])
 
   const clearConsole = useCallback(() => setConsoleRing([]), [])
   const clearNetwork = useCallback(() => setNetworkRing([]), [])

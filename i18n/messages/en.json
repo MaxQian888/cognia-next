@@ -4116,6 +4116,11 @@
       "empty": "No recent pages",
       "label": "History"
     },
+    "lease": {
+      "busyHint": "Only one embedded browser can run at a time. Take it over here, or switch back to the panel that has it.",
+      "busyTitle": "The preview is open in another panel",
+      "takeOver": "Take over here"
+    },
     "loading": {
       "label": "Loading page",
       "title": "Loading {host}…"
@@ -4196,9 +4201,6 @@
     "screenshot": {
       "failed": "Could not capture the preview",
       "sent": "Screenshot sent to chat"
-    },
-    "selection": {
-      "selector": "Selector"
     },
     "title": "Browser",
     "url": {

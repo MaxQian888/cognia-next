@@ -59,7 +59,7 @@ describe("useBrowserDevtools (ADR-0127)", () => {
   })
 
   it("filters by paneId when one is given and ignores malformed payloads", async () => {
-    const { result } = renderHook(() => useBrowserDevtools("mine"))
+    const { result } = renderHook(() => useBrowserDevtools({ paneId: "mine" }))
     await act(flush)
     act(() => {
       handlers.get("browser://console")!({
@@ -83,5 +83,30 @@ describe("useBrowserDevtools (ADR-0127)", () => {
     expect(next[0]).toBe(2)
     expect(next.at(-1)).toBe(DEVTOOLS_RING + 1)
     expect(appendRing(ring, [])).toBe(ring)
+  })
+
+  // Two panes can be mounted at once but only one owns the native webview.
+  // A non-owner mirroring the owner's feeds would describe a page it is not
+  // showing, so it must not subscribe at all.
+  it("does not subscribe when this pane does not own the webview", async () => {
+    const { result, unmount } = renderHook(() => useBrowserDevtools({ enabled: false }))
+    await act(flush)
+    expect(handlers.has("browser://console")).toBe(false)
+    expect(handlers.has("browser://network")).toBe(false)
+    expect(result.current.console).toEqual([])
+    expect(result.current.network).toEqual([])
+    unmount()
+  })
+
+  it("subscribes once ownership arrives", async () => {
+    const { rerender, unmount } = renderHook(({ enabled }) => useBrowserDevtools({ enabled }), {
+      initialProps: { enabled: false },
+    })
+    await act(flush)
+    expect(handlers.has("browser://console")).toBe(false)
+    rerender({ enabled: true })
+    await act(flush)
+    expect(handlers.has("browser://console")).toBe(true)
+    unmount()
   })
 })

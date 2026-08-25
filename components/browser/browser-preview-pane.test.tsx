@@ -17,6 +17,9 @@ const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockPendingAnnotations: Array<Record<string, unknown>> = []
 let mockRemoteBrowserEnabled = false
 let mockActiveChatSessionId: string | null = "active-chat"
+let mockOwned = true
+let mockDevtoolsOptions: Record<string, unknown> | undefined
+const mockTakeLease = jest.fn()
 
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
@@ -123,7 +126,12 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
     useEffect(() => {
       if (mockWebviewReady) onReady?.()
     }, [onReady])
-    return { getRect: () => mockRect, setVisible: jest.fn(), refreshBounds: mockRefreshBounds }
+    return {
+      getRect: () => mockRect,
+      refreshBounds: mockRefreshBounds,
+      owned: mockOwned,
+      takeLease: mockTakeLease,
+    }
   },
 }))
 jest.mock("@/hooks/browser/use-browser-loading", () => ({
@@ -131,6 +139,21 @@ jest.mock("@/hooks/browser/use-browser-loading", () => ({
 }))
 jest.mock("@/hooks/browser/use-region-visibility", () => ({
   useRegionVisibility: () => mockRegionVisible,
+}))
+// Record the options so the ownership gate is assertable; the drawer's own
+// behaviour is covered by use-browser-devtools.test.ts.
+jest.mock("@/hooks/browser/use-browser-devtools", () => ({
+  useBrowserDevtools: (options?: Record<string, unknown>) => {
+    mockDevtoolsOptions = options
+    return {
+      console: [],
+      network: [],
+      problemCount: 0,
+      failedRequests: 0,
+      clearConsole: jest.fn(),
+      clearNetwork: jest.fn(),
+    }
+  },
 }))
 jest.mock("@/hooks/browser/use-element-selection", () => ({
   useElementSelection: () => ({
@@ -259,6 +282,9 @@ beforeEach(() => {
   mockPendingAnnotations = []
   mockRemoteBrowserEnabled = false
   mockActiveChatSessionId = "active-chat"
+  mockOwned = true
+  mockDevtoolsOptions = undefined
+  mockTakeLease.mockClear()
   ;(listActionableBrowserAnnotations as jest.Mock).mockClear()
   mockOpenExternal.mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedReload as jest.Mock).mockClear()
@@ -1203,5 +1229,61 @@ describe("session binding without a sessionId prop", () => {
     mockSelection = SELECTION
     renderPane(<BrowserPreviewPane />)
     expect(screen.getByText("Esc to dismiss · Ctrl+Enter to send")).toBeInTheDocument()
+  })
+})
+
+// D6: only one pane can drive the single native webview. Before ownership was
+// observable, the losing pane sat on its loading placeholder for the full 20s
+// settle timeout and then showed an unexplained blank region, while its toolbar
+// kept firing commands the native side rejected with "owner token does not
+// match" — as un-awaited, invisible promise rejections.
+describe("lease ownership", () => {
+  it("explains itself and offers a takeover instead of a blank region", () => {
+    mockOwned = false
+    renderPane(<BrowserPreviewPane />)
+    const busy = screen.getByTestId("browser-lease-busy")
+    expect(busy).toBeInTheDocument()
+    expect(within(busy).getByText("The preview is open in another panel")).toBeInTheDocument()
+    fireEvent.click(within(busy).getByRole("button", { name: "Take over here" }))
+    expect(mockTakeLease).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows neither the empty state nor the loading placeholder while dispossessed", () => {
+    mockOwned = false
+    mockHasPainted = false
+    renderPane(<BrowserPreviewPane />)
+    expect(screen.queryByTestId("browser-loading")).toBeNull()
+    expect(screen.queryByText("Preview a web page")).toBeNull()
+  })
+
+  it("disables every control that would drive the native webview", () => {
+    mockOwned = false
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    for (const name of [
+      "Send screenshot to chat",
+      "Select element",
+      "Find",
+      "Back",
+      "Forward",
+      "Reload",
+      "Zoom in",
+      "Zoom out",
+    ]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled()
+    }
+  })
+
+  it("keeps those controls usable for the owning pane", () => {
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    for (const name of ["Send screenshot to chat", "Select element", "Find", "Back"]) {
+      expect(screen.getByRole("button", { name })).toBeEnabled()
+    }
+    expect(screen.queryByTestId("browser-lease-busy")).toBeNull()
+  })
+
+  it("does not mirror the owner's console and network feeds", () => {
+    mockOwned = false
+    renderPane(<BrowserPreviewPane />)
+    expect(mockDevtoolsOptions).toEqual({ paneId: "browser-embed", enabled: false })
   })
 })
