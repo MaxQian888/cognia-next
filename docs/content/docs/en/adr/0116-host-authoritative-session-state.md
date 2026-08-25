@@ -5,8 +5,8 @@ description: "AHP-inspired ordered state channels above Agent RPC v2"
 
 # ADR-0116: Host-authoritative cross-surface session state
 
-- Status: Accepted. The `migrationStage` rollout ladder was removed on 2026-08-20 — HostState is unconditional (see the amendment at the end).
-- Date: 2026-08-14
+**Status:** Accepted, amended 2026-08-20 — HostState is unconditional (see the amendment at the end)
+**Date:** 2026-08-14
 
 ## Context
 

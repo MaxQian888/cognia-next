@@ -5,8 +5,8 @@ description: "Agent RPC v2 之上的 AHP-inspired 有序状态 channel"
 
 # ADR-0116：Host 权威的多端会话状态
 
-- 状态：已接受，分阶段发布
-- 日期：2026-08-14
+**状态：** 已接受，2026-08-20 修订——HostState 无条件生效（见文末修订）
+**日期：** 2026-08-14
 
 ## 背景
 
@@ -68,3 +68,21 @@ legacy repository；无需破坏性反向迁移。
 执行。revision conflict 和永久 rejection 会持续可见。代价是持久化 ledger、
 snapshot projection、lease recovery 与兼容窗口。snapshot 上限为 512 KiB，并排除
 device-local UI 状态、secret、local path、附件二进制和完整 transcript 历史。
+
+## 2026-08-20 修订——迁移阶梯被移除
+
+`HostStateMigrationStage` 有六个取值，而 `hostStateMigrationStageAllowsWrites`
+只放行其中三个。生产代码从未传入过 `start({ migrationStage })`，因此每个 host
+都停留在默认的 `legacy-authoritative`，`commitHostStateAction` 以
+`host_state_not_authoritative` 拒绝了所有写入。四个客户端外壳都会在路由前检查
+该阶段，于是永久走 legacy table sync 路径——而 `host_feature_manifest` 却在无
+条件宣告 `session.state-sync@1`。
+
+阶梯、写入闸门、`migrationStage` 线上字段以及四处客户端守卫都已删除。权威
+始终就是它实际的样子：lease 加 `hostGeneration`。兼容性通过省略保留——旧客户端
+读到缺失的 `migrationStage` 会得到 `undefined`，其自身的
+`hostStateMigrationStageAllowsWrites(undefined)` 返回 false，于是与此前完全一致
+地回落到 legacy table sync。
+
+`HOST_STATE_PROTOCOL_VERSION` 仍为 1；历史上的 Dexie `version(168)` 索引依然写着
+`migrationStage`，因为迁移历史不可变，而从现在起写入的行根本不携带该属性。

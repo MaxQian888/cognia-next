@@ -115,6 +115,7 @@
     "0113-agent-team-multi-host-remote-dispatch",
     "0114-chat-message-presentation",
     "0115-unified-memory-rag-infrastructure",
+    "0116-host-authoritative-session-state",
     "0117-composed-agent-modes-and-creator",
     "0118-keyless-model-request-replay",
     "0119-pi-native-rpc-integration",

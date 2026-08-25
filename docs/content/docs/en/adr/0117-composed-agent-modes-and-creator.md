@@ -5,8 +5,8 @@ description: "Five independent axes replace the flat AgentModeType union"
 
 # ADR-0117: Composed agent modes, Creator, and code tool presentation
 
-- Status: Accepted, staged rollout
-- Date: 2026-08-14
+**Status:** Accepted, staged rollout
+**Date:** 2026-08-14
 
 ## Context
 

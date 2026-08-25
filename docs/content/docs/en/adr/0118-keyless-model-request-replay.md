@@ -5,8 +5,8 @@ description: "Record the real request surface once, replay agent runs with no AP
 
 # ADR-0118: Keyless deterministic model-request replay
 
-- Status: Accepted, staged rollout
-- Date: 2026-08-14
+**Status:** Accepted, staged rollout
+**Date:** 2026-08-14
 
 ## Context
 
