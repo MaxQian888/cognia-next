@@ -65,6 +65,10 @@ pub fn capture_with_policy(
     root: &Path,
     policy: &ResourceTrackingPolicy,
 ) -> Result<(WorkspaceSnapshot, HashMap<String, Vec<u8>>), String> {
+    // Every acquisition pays this walk, and it reads each file whole into
+    // memory before hashing it, so the span is the one number that says
+    // whether provisioning cost is dominated by the snapshot or by git.
+    let _perf = cognia_instrument::guard("workspace.snapshot_capture");
     let canonical_root = root
         .canonicalize()
         .map_err(|error| format!("canonicalize root {}: {error}", root.display()))?;
@@ -415,6 +419,7 @@ pub fn materialize(
     snapshot: &WorkspaceSnapshot,
     blobs: &HashMap<String, Vec<u8>>,
 ) -> Result<(), String> {
+    let _perf = cognia_instrument::guard("workspace.snapshot_materialize");
     fs::create_dir_all(root).map_err(|error| format!("create {}: {error}", root.display()))?;
     for entry in snapshot.entries.values() {
         let target = root.join(PathBuf::from(&entry.path));
@@ -483,6 +488,51 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    /// Count of observations recorded for `name`, or 0 if the span is unknown.
+    ///
+    /// Deliberately reads a delta rather than calling `REGISTRY.reset()`: the
+    /// registry is a process-global shared by every test in this crate, and
+    /// resetting it would race with whatever else is mid-flight.
+    fn span_count(name: &str) -> u64 {
+        cognia_instrument::registry::REGISTRY
+            .snapshot()
+            .iter()
+            .find(|row| row.name == name)
+            .map(|row| row.count)
+            .unwrap_or(0)
+    }
+
+    /// Batch 2 rewrites `capture_with_policy` to stop reading the whole tree.
+    /// This pins the span across that rewrite: without it the optimisation
+    /// could land together with the loss of the only number proving it worked.
+    #[test]
+    fn capture_records_a_span() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+        let before = span_count("workspace.snapshot_capture");
+        capture(root.path()).unwrap();
+        assert!(
+            span_count("workspace.snapshot_capture") > before,
+            "capture_with_policy must record workspace.snapshot_capture"
+        );
+    }
+
+    #[test]
+    fn materialize_records_a_span() {
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("a.txt"), "a\n").unwrap();
+        let (snapshot, blobs) = capture(root.path()).unwrap();
+
+        let restored = TempDir::new().unwrap();
+        let before = span_count("workspace.snapshot_materialize");
+        materialize(restored.path(), &snapshot, &blobs).unwrap();
+        assert!(
+            span_count("workspace.snapshot_materialize") > before,
+            "materialize must record workspace.snapshot_materialize"
+        );
+    }
 
     #[test]
     fn captures_conventionally_named_directories_when_policy_does_not_classify_them() {

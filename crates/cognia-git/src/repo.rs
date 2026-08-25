@@ -23,6 +23,10 @@ pub async fn init(path: &str) -> Result<()> {
 /// works when the destination itself does not exist yet. `--` prevents a
 /// remote or destination beginning with `-` from being parsed as an option.
 pub async fn clone_repo(remote_url: &str, destination: &str) -> Result<String> {
+    cognia_instrument::timed("git.clone", clone_repo_inner(remote_url, destination)).await
+}
+
+async fn clone_repo_inner(remote_url: &str, destination: &str) -> Result<String> {
     let remote_url = remote_url.trim();
     if remote_url.is_empty() {
         return Err(GitError::InvalidArgument("empty clone URL".into()));
@@ -188,6 +192,18 @@ fn dir_size_bytes(root: &std::path::Path) -> u64 {
 /// bare [`clone_repo`] stays as-is for the Source Control panel, where the user
 /// typed the URL themselves.
 pub async fn clone_repo_guarded(
+    remote_url: &str,
+    destination: &str,
+    guards: &CloneGuards,
+) -> Result<String> {
+    cognia_instrument::timed(
+        "git.clone_guarded",
+        clone_repo_guarded_inner(remote_url, destination, guards),
+    )
+    .await
+}
+
+async fn clone_repo_guarded_inner(
     remote_url: &str,
     destination: &str,
     guards: &CloneGuards,
@@ -496,6 +512,43 @@ mod tests {
             "# cloned\n"
         );
         assert!(Repository::open(destination).is_ok());
+    }
+
+    /// Reads `(count, error_count)` for a span without resetting the registry —
+    /// it is a process-global shared with every other test in this crate.
+    fn span_counts(name: &str) -> (u64, u64) {
+        cognia_instrument::registry::REGISTRY
+            .snapshot()
+            .iter()
+            .find(|row| row.name == name)
+            .map(|row| (row.count, row.error_count))
+            .unwrap_or((0, 0))
+    }
+
+    /// A clone that fails must be recorded as a failure. This is the whole
+    /// reason `clone_repo` wraps an inner fn in `timed` instead of holding a
+    /// plain `guard`: a guard defaults to success, so a clone that burned the
+    /// full 120 s budget and then errored would land in the p50/p95 as if it
+    /// had worked — quietly poisoning the baseline these spans exist to
+    /// establish.
+    #[tokio::test]
+    async fn clone_spans_record_failure_as_an_error() {
+        let (count_before, errors_before) = span_counts("git.clone");
+
+        // Relative destination: refused before git is ever started.
+        assert!(clone_repo("https://example.test/repo.git", "nested/repo")
+            .await
+            .is_err());
+
+        // Deltas are asserted as increases, not exact values: `git.clone` is a
+        // process-global counter and the sibling clone tests run concurrently
+        // on the same registry, so any exact arithmetic here is a flake.
+        let (count_after, errors_after) = span_counts("git.clone");
+        assert!(count_after > count_before, "the span must be recorded");
+        assert!(
+            errors_after > errors_before,
+            "a failed clone must count as an error, not a success"
+        );
     }
 
     #[tokio::test]

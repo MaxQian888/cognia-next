@@ -679,6 +679,7 @@ impl TaskWorkspaceService {
         input: BeginTaskRun,
         borrowed: Option<BorrowedExecution>,
     ) -> Result<TaskRun, String> {
+        let _perf = cognia_instrument::guard("workspace.begin_run");
         validate_id("taskId", &input.task_id)?;
         validate_id("runId", &input.run_id)?;
         if let Some(workspace_key) = input.workspace_key.as_deref() {
@@ -1845,6 +1846,7 @@ impl TaskWorkspaceService {
         &self,
         input: AcquireWorkspaceBundle,
     ) -> Result<crate::WorkspaceBundle, String> {
+        let _perf = cognia_instrument::guard("workspace.acquire_bundle");
         if input.owner_type == WorkspaceOwnerType::Imported {
             return Err("imported environments can only be registered by reconciliation".into());
         }
@@ -1881,6 +1883,7 @@ impl TaskWorkspaceService {
 
         let mut acquired = Vec::with_capacity(groups.len());
         for group in &groups {
+            let _perf_root = cognia_instrument::guard("workspace.acquire_root");
             let logical_id = group
                 .logical_root_ids
                 .first()
@@ -3856,6 +3859,7 @@ fn apply_provisioning(
     execution_root: &Path,
     provisioning: &WorkspaceProvisioning,
 ) -> Result<(), String> {
+    let _perf = cognia_instrument::guard("workspace.apply_provisioning");
     if !provisioning.sparse_paths.is_empty() {
         for path in &provisioning.sparse_paths {
             validate_event_relative_path(path)?;
@@ -3985,6 +3989,7 @@ fn create_execution(
     lock_reason: Option<&str>,
     provisioning: Option<&WorkspaceProvisioning>,
 ) -> Result<(IsolationKind, Option<String>), String> {
+    let _perf = cognia_instrument::guard("workspace.create_execution");
     if is_git_root(workspace_root) {
         let lock_reason = lock_reason
             .filter(|reason| !reason.is_empty())
@@ -4045,6 +4050,7 @@ fn create_execution(
 }
 
 fn resolve_git_base(workspace_root: &Path, base: &WorkspaceBaseSpec) -> Result<String, String> {
+    let _perf = cognia_instrument::guard("workspace.resolve_git_base");
     match base {
         WorkspaceBaseSpec::WorkingState | WorkspaceBaseSpec::LocalHead => Ok("HEAD".into()),
         WorkspaceBaseSpec::GitRef { git_ref } if !git_ref.trim().is_empty() => {

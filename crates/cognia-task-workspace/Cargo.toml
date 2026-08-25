@@ -17,6 +17,11 @@ path = "src/bin/cognia-task-workspace-worker.rs"
 
 [dependencies]
 base64 = "0.23"
+# ADR-0067 Phase 1 span registry. Provisioning is the hot path this crate is
+# judged on, and it had no timing at all: `cognia_instrument::guard` writes
+# into the same process-global registry the `/performance` panel reads, so a
+# span added here shows up next to `git.exec` with no extra plumbing.
+cognia-instrument = { path = "../cognia-instrument" }
 flate2 = "1"
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 hex = "0.4"
