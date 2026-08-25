@@ -6,6 +6,7 @@ import type {
 } from "@/types/logging"
 import { pushCrashBreadcrumb } from "@/lib/native/crash-context"
 import { isTauri } from "@/lib/tauri"
+import { recordDrop } from "@cognia/logging/types/transport"
 
 /**
  * Breadcrumb transport — forwards warn+ frontend log entries to the Rust
@@ -60,6 +61,7 @@ export class BreadcrumbTransport implements Transport {
     queueDepth: 0,
     retryCount: 0,
     droppedEntries: 0,
+    droppedByReason: {},
     updatedAt: new Date().toISOString(),
   }
 
@@ -82,9 +84,15 @@ export class BreadcrumbTransport implements Transport {
       return
     }
     if (this.isRateLimited()) {
+      // Rate limiting refuses the entry itself; nothing was queued to lose.
       this.health = {
         ...this.health,
         droppedEntries: this.health.droppedEntries + 1,
+        droppedByReason: recordDrop(
+          { ...(this.health.droppedByReason ?? {}) },
+          "entry-rejected",
+          1
+        ),
         updatedAt: new Date().toISOString(),
       }
       return

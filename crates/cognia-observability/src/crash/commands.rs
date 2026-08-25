@@ -128,6 +128,8 @@ pub struct CrashLoggingDiagnostics {
     pub rotated_log_keep: usize,
     pub last_prune_pruned: Option<usize>,
     pub last_prune_remaining: Option<usize>,
+    /// Rotated log files the startup sweep deleted. `None` = no sweep yet.
+    pub last_rotated_prune_pruned: Option<usize>,
 }
 
 #[tauri::command]
@@ -147,6 +149,7 @@ pub async fn crash_logging_diagnostics() -> Result<CrashLoggingDiagnostics, Stri
         rotated_log_keep: crate::crash::retention::ROTATED_LOG_KEEP,
         last_prune_pruned: last_prune.map(|o| o.pruned),
         last_prune_remaining: last_prune.map(|o| o.remaining),
+        last_rotated_prune_pruned: crate::crash::retention::last_rotated_prune(),
     })
 }
 

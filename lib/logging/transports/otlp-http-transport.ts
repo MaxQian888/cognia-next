@@ -17,6 +17,7 @@
  */
 
 import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/types/logging"
+import { recordDrop, type LogDropCounts, type LogDropReason } from "@cognia/logging/types/transport"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 import { hasNoLeakingPii } from "@cognia/redact"
@@ -118,6 +119,19 @@ export class OtlpHttpTransport implements Transport {
   private lastFailureAt: string | undefined
   private lastError: string | undefined
   private droppedEntries = 0
+  /** The same losses, attributed — see `LOG_DROP_REASONS`. */
+  private droppedByReason: LogDropCounts = {}
+
+  /**
+   * The ONLY way this transport loses an entry. Keeping the total and the
+   * per-reason breakdown in one place is what makes them agree — two
+   * separate `+=` sites is how they drift.
+   */
+  private recordDropped(reason: LogDropReason, count: number): void {
+    if (!Number.isFinite(count) || count <= 0) return
+    this.droppedEntries += count
+    recordDrop(this.droppedByReason, reason, count)
+  }
   private retryCount = 0
   private flushChain: Promise<void> = Promise.resolve()
   private readonly activeControllers = new Set<AbortController>()
@@ -182,7 +196,7 @@ export class OtlpHttpTransport implements Transport {
     const span = extractSpanFromEntry(entry)
     if (!span) return
     if (this.closed) {
-      this.droppedEntries += 1
+      this.recordDropped("shutdown-discarded", 1)
       return
     }
     if (!this.options.endpoint) return // exporter unconfigured — silently drop
@@ -202,7 +216,7 @@ export class OtlpHttpTransport implements Transport {
   private async flushQueuedBatches(): Promise<void> {
     if (this.buffer.length === 0) return
     if (!this.options.endpoint) {
-      this.droppedEntries += this.buffer.length
+      this.recordDropped("ship-failed", this.buffer.length)
       this.buffer = []
       return
     }
@@ -225,7 +239,7 @@ export class OtlpHttpTransport implements Transport {
   /** Consent withdrawal path: drop buffered spans without invoking the exporter. */
   discardPending(): void {
     this.discardEpoch += 1
-    this.droppedEntries += this.buffer.length + this.inFlightCount
+    this.recordDropped("shutdown-discarded", this.buffer.length + this.inFlightCount)
     this.buffer = []
     this.inFlightCount = 0
     for (const controller of this.activeControllers) controller.abort()
@@ -244,6 +258,7 @@ export class OtlpHttpTransport implements Transport {
       queueDepth: this.getPendingCount(),
       retryCount: this.retryCount,
       droppedEntries: this.droppedEntries,
+      droppedByReason: { ...this.droppedByReason },
       lastSuccessAt: this.lastSuccessAt,
       lastFailureAt: this.lastFailureAt,
       lastError: this.lastError,
@@ -265,7 +280,7 @@ export class OtlpHttpTransport implements Transport {
     const payload = spansToOtlp(batch, this.options.resource)
     const body = JSON.stringify(payload)
     if (!hasNoLeakingPiiInOtlp(payload)) {
-      this.droppedEntries += batch.length
+      this.recordDropped("entry-rejected", batch.length)
       this.lastFailureAt = new Date().toISOString()
       this.lastError = "OTLP payload rejected by privacy gate"
       return
@@ -277,7 +292,7 @@ export class OtlpHttpTransport implements Transport {
         await this.exportBatch(batch.slice(midpoint), batchEpoch)
         return
       }
-      this.droppedEntries += 1
+      this.recordDropped("entry-rejected", 1)
       this.lastFailureAt = new Date().toISOString()
       this.lastError = `OTLP payload exceeds ${this.options.maxRequestBytes} byte limit`
       return
@@ -352,7 +367,7 @@ export class OtlpHttpTransport implements Transport {
     }
 
     if (batchEpoch !== this.discardEpoch) return
-    this.droppedEntries += batch.length
+    this.recordDropped("ship-failed", batch.length)
     this.lastFailureAt = new Date().toISOString()
     this.lastError = lastError?.message ?? "OTLP export failed"
     consoleApi.warn("agent-trace OTLP export failed", lastError)

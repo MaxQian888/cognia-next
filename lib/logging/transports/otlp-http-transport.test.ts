@@ -631,3 +631,53 @@ describe("OtlpHttpTransport options + resource", () => {
     ])
   })
 })
+
+describe("drop attribution", () => {
+  it("attributes an export failure to ship-failed and keeps the totals honest", async () => {
+    const { dropCountsSumTo } = await import("@cognia/logging/types/transport")
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 1,
+      flushInterval: 0,
+      maxRetries: 0,
+      fetchImpl: (async () => makeErrorResponse(500)) as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "a" })))
+    await t.flush()
+
+    const health = t.getHealth()
+    expect(health.droppedEntries).toBeGreaterThan(0)
+    expect(health.droppedByReason?.["ship-failed"]).toBe(health.droppedEntries)
+    expect(dropCountsSumTo(health)).toBe(true)
+  })
+
+  it("attributes a consent discard to shutdown-discarded, not to a shipping failure", async () => {
+    const { dropCountsSumTo } = await import("@cognia/logging/types/transport")
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      bufferSize: 100,
+      flushInterval: 0,
+      fetchImpl: (async () => makeOkResponse()) as unknown as typeof fetch,
+    })
+    t.log(makeEntry(makeSpan({ id: "a" })))
+    t.discardPending()
+
+    const health = t.getHealth()
+    expect(health.droppedEntries).toBeGreaterThan(0)
+    expect(health.droppedByReason?.["shutdown-discarded"]).toBe(health.droppedEntries)
+    expect(health.droppedByReason?.["ship-failed"]).toBeUndefined()
+    expect(dropCountsSumTo(health)).toBe(true)
+  })
+
+  it("starts with nothing lost and nothing to explain", async () => {
+    const { dropCountsSumTo } = await import("@cognia/logging/types/transport")
+    const t = new OtlpHttpTransport({
+      endpoint: "http://collector.local/v1/traces",
+      flushInterval: 0,
+      fetchImpl: (async () => makeOkResponse()) as unknown as typeof fetch,
+    })
+    const health = t.getHealth()
+    expect(health.droppedEntries).toBe(0)
+    expect(dropCountsSumTo(health)).toBe(true)
+  })
+})

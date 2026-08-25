@@ -24,6 +24,7 @@ import type {
 } from "@/lib/telemetry/events/track-event"
 import type { TransportHealthSnapshot } from "@/types/logging"
 import { hasNoLeakingPii } from "@cognia/redact"
+import { recordDrop, type LogDropCounts, type LogDropReason } from "@cognia/logging/types/transport"
 
 export interface PostHogDestination {
   enabled: boolean
@@ -207,6 +208,20 @@ class PostHogBatchExporter implements BehaviorEventExporter {
   private lastFailureAt: string | undefined
   private lastError: string | undefined
   private droppedEntries = 0
+  /** The same losses, attributed — see `LOG_DROP_REASONS`. */
+  private droppedByReason: LogDropCounts = {}
+
+  /**
+   * The ONLY way this transport loses an entry. Keeping the total and the
+   * per-reason breakdown in one place is what makes them agree — two
+   * separate `+=` sites is how they drift.
+   */
+  private recordDropped(reason: LogDropReason, count: number): void {
+    if (!Number.isFinite(count) || count <= 0) return
+    this.droppedEntries += count
+    recordDrop(this.droppedByReason, reason, count)
+  }
+
   private retryCount = 0
   private discardReason = new Error("PostHog consent was withdrawn")
   private readonly activeControllers = new Set<AbortController>()
@@ -280,7 +295,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
       while (this.queue.length > this.options.maxQueuedEvents) {
         const dropped = this.queue.shift()
         if (dropped) {
-          this.droppedEntries += 1
+          this.recordDropped("overflow-evicted", 1)
           this.lastFailureAt = new Date().toISOString()
           this.lastError = "PostHog queue overflow"
           dropped.reject(new Error(this.lastError))
@@ -418,7 +433,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
     const reason = batchEpoch === this.discardEpoch ? failure : this.discardReason
     if (batchEpoch === this.discardEpoch) {
       this.inFlightCount = Math.max(0, this.inFlightCount - batch.length)
-      this.droppedEntries += batch.length
+      this.recordDropped("ship-failed", batch.length)
       this.lastFailureAt = new Date().toISOString()
       this.lastError = reason.message
     }
@@ -438,6 +453,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
       queueDepth,
       retryCount: this.retryCount,
       droppedEntries: this.droppedEntries,
+      droppedByReason: { ...this.droppedByReason },
       lastSuccessAt: this.lastSuccessAt,
       lastFailureAt: this.lastFailureAt,
       lastError: this.lastError,
@@ -481,7 +497,7 @@ class PostHogBatchExporter implements BehaviorEventExporter {
     this.discardEpoch += 1
     const dropped = this.queue
     this.queue = []
-    this.droppedEntries += dropped.length + this.inFlightCount
+    this.recordDropped("shutdown-discarded", dropped.length + this.inFlightCount)
     this.inFlightCount = 0
     for (const controller of this.activeControllers) controller.abort(reason)
     this.activeControllers.clear()

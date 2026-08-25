@@ -21,6 +21,7 @@
  */
 
 import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/types/logging"
+import { recordDrop, type LogDropCounts, type LogDropReason } from "@cognia/logging/types/transport"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 import { bulkInsertSpans, pruneOlderThan } from "@/lib/db/agent-traces"
@@ -64,6 +65,20 @@ export class AgentTraceTransport implements Transport {
   private lastFailureAt: string | undefined
   private lastError: string | undefined
   private droppedEntries = 0
+  /** The same losses, attributed — see `LOG_DROP_REASONS`. */
+  private droppedByReason: LogDropCounts = {}
+
+  /**
+   * The ONLY way this transport loses an entry. Keeping the total and the
+   * per-reason breakdown in one place is what makes them agree — two
+   * separate `+=` sites is how they drift.
+   */
+  private recordDropped(reason: LogDropReason, count: number): void {
+    if (!Number.isFinite(count) || count <= 0) return
+    this.droppedEntries += count
+    recordDrop(this.droppedByReason, reason, count)
+  }
+
   private writes = 0
 
   constructor(options?: AgentTraceTransportOptions) {
@@ -117,7 +132,7 @@ export class AgentTraceTransport implements Transport {
     } catch (err) {
       this.lastFailureAt = new Date().toISOString()
       this.lastError = err instanceof Error ? err.message : String(err)
-      this.droppedEntries += batch.length
+      this.recordDropped("ship-failed", batch.length)
       consoleApi.error("agent-trace flush failed", err)
     }
   }
@@ -134,6 +149,7 @@ export class AgentTraceTransport implements Transport {
       queueDepth: this.buffer.length,
       retryCount: 0,
       droppedEntries: this.droppedEntries,
+      droppedByReason: { ...this.droppedByReason },
       lastSuccessAt: this.lastSuccessAt,
       lastFailureAt: this.lastFailureAt,
       lastError: this.lastError,

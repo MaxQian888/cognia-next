@@ -1850,10 +1850,15 @@ pub fn run() {
                     );
                 }
                 if let Some(log_dir) = logging::native_bootstrap::log_dir() {
-                    crash::retention::prune_rotated_logs(
+                    // The count was always returned and always discarded, so a
+                    // sweep that deleted twenty files looked like one that
+                    // deleted none. Record it — retention that cannot say what
+                    // it removed is indistinguishable from logs never written.
+                    let pruned = crash::retention::prune_rotated_logs(
                         &log_dir,
                         crash::retention::ROTATED_LOG_KEEP,
                     );
+                    crash::retention::record_rotated_prune(pruned);
                 }
             });
 

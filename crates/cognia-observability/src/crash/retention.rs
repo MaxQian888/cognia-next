@@ -54,6 +54,28 @@ pub fn record_last_prune(outcome: PruneOutcome) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(outcome);
 }
 
+static LAST_ROTATED_PRUNE: Mutex<Option<usize>> = Mutex::new(None);
+
+/// Record how many rotated log files the startup sweep deleted.
+///
+/// [`prune_rotated_logs`] always returned this count and every caller threw
+/// it away, so a sweep that deleted nothing and a sweep that deleted twenty
+/// files looked identical from outside: bounded storage with no account of
+/// what the bound cost. Retention that cannot say what it removed is
+/// indistinguishable from logs that were never written.
+pub fn record_rotated_prune(pruned: usize) {
+    *LAST_ROTATED_PRUNE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(pruned);
+}
+
+/// How many rotated logs the last sweep deleted, if one has run this session.
+pub fn last_rotated_prune() -> Option<usize> {
+    *LAST_ROTATED_PRUNE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// The startup prune outcome, if a prune has run this session.
 pub fn last_prune() -> Option<PruneOutcome> {
     *LAST_PRUNE
@@ -360,5 +382,19 @@ mod tests {
         prune_crash_reports(dir.path(), &RetentionPolicy::default(), Utc::now());
         let recorded = last_prune().expect("a prune was recorded");
         assert!(recorded.remaining <= 1);
+    }
+
+    #[test]
+    fn a_rotated_sweep_is_recorded_rather_than_discarded() {
+        // Before this the count came back from `prune_rotated_logs` and every
+        // caller dropped it, so nothing could say what retention had cost.
+        record_rotated_prune(7);
+        assert_eq!(last_rotated_prune(), Some(7));
+        record_rotated_prune(0);
+        assert_eq!(
+            last_rotated_prune(),
+            Some(0),
+            "a sweep that deleted nothing must be distinguishable from no sweep at all"
+        );
     }
 }
