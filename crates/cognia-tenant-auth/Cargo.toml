@@ -1,0 +1,28 @@
+[package]
+name = "cognia-tenant-auth"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+description = "ADR-0149 identity primitives: people, orgs, membership resolution and tenant-scoped grants."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[features]
+# The identity core (ids, roles, membership resolution) is dependency-light on
+# purpose: `src-tauri` links it just to stop persisting unvalidated ids, and
+# should not pay for HMAC machinery it never calls.
+default = []
+grants = ["dep:base64", "dep:hmac", "dep:sha2", "dep:serde_json", "dep:uuid"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+base64 = { version = "0.23", optional = true }
+hmac = { version = "0.13", optional = true }
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.11", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+
+[dev-dependencies]
+serde_json = "1"
