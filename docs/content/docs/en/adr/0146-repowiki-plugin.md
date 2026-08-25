@@ -97,6 +97,21 @@ A `modes` entry declares "RepoWiki mode" for the main conversation:
 `permissionMode: "plan"`, because this mode answers questions about a repository
 and an answer that edits it is not an answer.
 
+### The wiki follows the app's language, and so does the panel
+
+`language` defaults to `auto`, resolved against `ctx.i18n.getCurrentLocale()`
+before a scan; an explicit setting wins, because someone reading in Chinese may
+well want an English wiki for an English-speaking team. An unmapped locale
+falls back to English rather than passing a locale code into a prompt, where a
+table miss would have silently meant English anyway and looked like it worked.
+
+The panel's own chrome — seven strings — comes from a label table with English
+defaults, translated through `ctx.i18n.t` against the plugin's manifest bundle.
+Fallback is *per key*, so a partial bundle leaves the rest in English instead of
+painting raw dotted keys. `lint:i18n` scans `.tsx` and would never have caught
+any of this, so a test asserts that every string the panel paints comes from
+that table.
+
 ### Freshness has three states, not two
 
 The panel badges whether the wiki still describes the checkout it was built

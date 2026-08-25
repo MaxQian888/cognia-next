@@ -5511,7 +5511,7 @@
       "type": "PluginI18nAPI",
       "stability": "stable",
       "introducedIn": "0.1.0",
-      "runtimes": ["frontend", "hybrid"],
+      "runtimes": ["frontend", "hybrid", "python"],
       "platforms": ["desktop", "web", "mobile"],
       "transport": "direct",
       "factory": "context.i18n",

@@ -40,7 +40,11 @@ class Config:
     #: host holds provider credentials and a plugin never sees them.
     api_key: str = ""
     api_base: str = ""
-    language: str = "en"
+    #: "auto" defers to the app's language (ADR-0146 decision 26); the plugin
+    #: resolves it against `ctx.i18n.getCurrentLocale()` before a scan. It stays
+    #: "auto" offline, where `_lang_instruction` reads it as English — which is
+    #: the right answer when there is no app to follow.
+    language: str = "auto"
     max_file_size: int = 200 * 1024  # 200 KB
     max_files: int = 1000
     output_dir: str = "./wiki"

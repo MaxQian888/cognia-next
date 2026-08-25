@@ -70,6 +70,11 @@ Two declarative context panels, neither of which hands the host any JavaScript
   the page list, the top of the reading order, and the instruction to call
   `repowiki_search` for anything else.
 
+The wiki is written in the app's language unless the plugin's `language`
+setting names one, and the panel's own chrome is translated through
+`ctx.i18n.t` against this manifest's `i18n.locales`. Fallback is per key, so a
+partial bundle leaves the rest in English rather than painting dotted keys.
+
 The reader badges whether the wiki still matches the checkout, and that badge
 has **three** states rather than two. A freshness check that cannot be answered
 — not a repository, no git bridge, no commit recorded at scan time — renders
@@ -85,7 +90,7 @@ saying so is the same defect as a badge that never appears.
 pnpm plugin:repowiki:test
 ```
 
-224 tests. Upstream shipped 164; the rest came from rewriting the suites the
+238 tests. Upstream shipped 164; the rest came from rewriting the suites the
 layer swap invalidated rather than deleting them — the properties they pinned
 (project-id determinism, the "empty changed-set means re-analyse everything"
 contract, the PageRank ranking) all survive the port, only their transports

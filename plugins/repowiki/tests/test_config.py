@@ -57,7 +57,16 @@ def test_from_host_defaults_when_the_host_says_nothing():
     cfg = Config.from_host(None)
     assert cfg.model == ""
     assert cfg.concurrency == 5
-    assert cfg.language == "en"
+    # Not "en": the wiki follows the app's language unless the user picked one,
+    # and `main._config` is what turns "auto" into a real language. Hardcoding
+    # "en" here is how a Chinese user gets an English wiki by default.
+    assert cfg.language == "auto"
+
+
+def test_an_explicit_language_beats_the_app(monkeypatch):
+    # The setting exists precisely so someone reading in Chinese can generate
+    # an English wiki for an English-speaking team.
+    assert Config.from_host({"language": "ja"}).language == "ja"
 
 
 def test_offline_load_still_honours_the_tuning_env_knobs(monkeypatch):

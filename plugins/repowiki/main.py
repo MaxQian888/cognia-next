@@ -15,6 +15,8 @@ trade; the durable copies are the analyzer cache and the RAG snapshot on disk.
 
 from __future__ import annotations
 
+import logging
+
 import cognia
 from cognia import get_config, hook, progress, tool
 
@@ -29,10 +31,13 @@ from repowiki.panel import (
     ACTION_OPEN_PAGE,
     ACTION_RESCAN,
     ACTION_SELECT_PROJECT,
+    DEFAULT_LABELS,
     build_panel,
 )
 from repowiki.pipeline import ScanResult, build_index, reading_order, scan, staleness
 from repowiki.project import project_id_for
+
+logger = logging.getLogger(__name__)
 
 #: project_id -> the most recent scan. Bounded by how many repositories the
 #: user actually opens, which is small; a scan holds file contents, so this is
@@ -41,8 +46,58 @@ _SCANS: dict[str, ScanResult] = {}
 _INDEXES: dict[str, object] = {}
 
 
+#: App locale -> the language the prompts ask the model to write in. The
+#: manifest's `language` setting overrides it; "auto" defers to this.
+_LOCALE_TO_LANGUAGE = {"en": "en", "zh-CN": "zh", "zh-TW": "zh", "ja": "ja", "ko": "ko"}
+
+#: Resolved once per host process. `ctx.i18n` is an RPC away, and a wiki whose
+#: language flipped mid-scan because the user changed the app's language would
+#: be worse than one that is consistently the language it started in.
+_LOCALE: str = ""
+_LABELS: dict[str, str] = dict(DEFAULT_LABELS)
+
+
 def _config() -> Config:
-    return Config.from_host(get_config())
+    cfg = Config.from_host(get_config())
+    if cfg.language in ("", "auto"):
+        # Decision 26: the wiki follows the app unless the user says otherwise.
+        cfg.language = _LOCALE_TO_LANGUAGE.get(_LOCALE, "en")
+    return cfg
+
+
+async def _resolve_locale_and_labels() -> None:
+    """Read the app's language, and translate the panel chrome once.
+
+    `ctx.i18n.t` resolves against this plugin's own manifest bundle, so these
+    are the plugin's strings — not the app's — and a key the host cannot
+    resolve comes back as the key itself. That is why the fallback is per key:
+    a partial bundle must leave the other six in English rather than painting
+    raw dotted keys into the panel.
+
+    Failure is not fatal. A headless host with no i18n namespace gets an
+    English panel, which is the same panel it had before this existed.
+
+    Called again when a panel opens, because the user can change the app's
+    language while the plugin is loaded and ``i18n.onLocaleChange`` registers a
+    host-side callback — which is precisely what cannot cross a stdio boundary
+    (ADR-0145). Re-asking at the moment the panel is about to be painted is the
+    poll that replaces the subscription we cannot have.
+    """
+    global _LOCALE
+    try:
+        _LOCALE = str(await cognia.ctx.i18n.getCurrentLocale() or "")
+    except Exception as exc:  # noqa: BLE001 — degrade to English, never abort
+        logger.info("i18n.getCurrentLocale unavailable (%s); panel stays English", exc)
+        return
+    for key, fallback in DEFAULT_LABELS.items():
+        try:
+            value = await cognia.ctx.i18n.t(key)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("i18n.t(%s) failed: %s", key, exc)
+            continue
+        # `t` echoes the key back when nothing resolved it; that is not a label.
+        if isinstance(value, str) and value and value != key:
+            _LABELS[key] = value
 
 
 async def on_startup() -> None:
@@ -56,6 +111,7 @@ async def on_startup() -> None:
     the user's home directory.
     """
     configure_paths(await cognia.ctx.fs.getDataDir())
+    await _resolve_locale_and_labels()
 
 
 def on_config_updated(config: dict) -> None:
@@ -354,6 +410,7 @@ async def _push_panel(surfaceId: str, *, create: bool = False) -> dict:
             for pid, scan_result in sorted(_SCANS.items())
         ],
         staleness=_FRESHNESS.get(state["projectId"]) if result else None,
+        labels=_LABELS,
     )
 
     if create:
@@ -379,6 +436,7 @@ async def repowiki_build_panel(surfaceId: str, resource: dict | None = None) -> 
     state = _panel_state(surfaceId)
     if not state["projectId"]:
         state["projectId"] = _project_for_resource(resource)
+    await _resolve_locale_and_labels()
     await _refresh_freshness(state["projectId"])
     return await _push_panel(surfaceId, create=True)
 

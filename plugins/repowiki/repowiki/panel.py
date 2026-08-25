@@ -17,6 +17,7 @@ Two components carry it, both added to the A2UI catalog for this:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 #: Actions the panel emits. Namespaced because `onA2UIAction` is a broadcast:
@@ -66,6 +67,24 @@ def _page_nodes(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [node(page) for page in roots]
 
 
+#: Every string the panel paints, with its English default.
+#:
+#: The panel builder stays pure — it takes the resolved text rather than
+#: reaching for a translator — because it is also the unit under test, and a
+#: layout test that needs a host attached is a layout test nobody runs. The
+#: caller resolves these through ``ctx.i18n.t`` against the plugin's own
+#: manifest bundle; anything it cannot resolve falls back to the value here.
+DEFAULT_LABELS: dict[str, str] = {
+    "panel.empty": "No wiki yet — run a scan to build one.",
+    "panel.outOfDate": "Out of date",
+    "panel.outOfDateCount": "Out of date · {count} changed",
+    "panel.freshnessUnknown": "Freshness unknown",
+    "panel.freshnessUnknownReason": "Freshness unknown: {reason}",
+    "panel.rescan": "Rescan",
+    "panel.partialScan": "Partial scan",
+}
+
+
 def build_panel(
     *,
     project_name: str,
@@ -75,7 +94,7 @@ def build_panel(
     staleness: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
     projects: list[dict[str, Any]] | None = None,
-    empty_label: str = "No wiki yet — run a scan to build one.",
+    labels: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the component list for the reader surface.
 
@@ -85,6 +104,8 @@ def build_panel(
     """
     warnings = warnings or []
     projects = projects or []
+    text = {**DEFAULT_LABELS, **(labels or {})}
+    empty_label = text["panel.empty"]
     # Three states, not two. `known and not stale` is the only one that earns
     # silence; an unknown answer has to say so, because an absent badge is read
     # as "current" and that is precisely the claim we cannot make.
@@ -98,7 +119,7 @@ def build_panel(
     # which is how a diagnostic becomes decoration.
     reason = str((staleness or {}).get("reason") or "").strip()
     if unknown and reason:
-        warnings = [*warnings, f"Freshness unknown: {reason}"]
+        warnings = [*warnings, text["panel.freshnessUnknownReason"].format(reason=reason)]
 
     root_children = ["header"]
     if warnings:
@@ -177,11 +198,11 @@ def build_panel(
                 "id": "stale",
                 "component": "Badge",
                 "text": (
-                    f"Out of date · {changed_count} changed"
+                    text["panel.outOfDateCount"].format(count=changed_count)
                     if stale and changed_count
-                    else "Out of date"
+                    else text["panel.outOfDate"]
                     if stale
-                    else "Freshness unknown"
+                    else text["panel.freshnessUnknown"]
                 ),
                 "variant": "destructive" if stale else "secondary",
             }
@@ -190,7 +211,7 @@ def build_panel(
             {
                 "id": "rescan",
                 "component": "Button",
-                "text": "Rescan",
+                "text": text["panel.rescan"],
                 "variant": "outline",
                 "action": ACTION_RESCAN,
             }
@@ -201,7 +222,7 @@ def build_panel(
                 "id": "warnings",
                 "component": "Alert",
                 "variant": "warning",
-                "title": "Partial scan",
+                "title": text["panel.partialScan"],
                 # One alert, not one per warning: a stack of banners above the
                 # page pushes the thing the user came to read off screen.
                 "message": " · ".join(warnings),

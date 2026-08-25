@@ -173,6 +173,14 @@ from Python and always will be.** `contextPanels.register`, the three
 all take or return functions. They are named and refused rather than hidden,
 because "no such method" sends an author looking for a typo.
 
+**`ctx.i18n` is open, minus its two subscriptions.** A plugin can read the
+app's locale and translate its own manifest bundle, which is what lets a
+Python-authored surface be anything other than English. `onLocaleChange` and
+`registerTranslations` are refused automatically — both are already marked
+`returned-disposer`, so the derived rule caught them without a line of new
+code, which is the point of deriving it. The cost is that a plugin has to
+*re-ask* rather than be told: it polls the locale at the moment it paints.
+
 **`ctx.dexie` and `ctx.db` stay closed to Python.** Both hand back live handles.
 A plugin that wants durable structured state uses `ctx.storage`, or its own file
 under the data directory `ctx.fs.getDataDir()` returns.

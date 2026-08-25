@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from repowiki.panel import (
     ACTION_OPEN_CITATION,
+    DEFAULT_LABELS,
     ACTION_OPEN_PAGE,
     ACTION_RESCAN,
     ACTION_SELECT_PROJECT,
@@ -82,7 +83,7 @@ def test_citations_route_to_the_plugin_rather_than_the_hosts_default():
 
 
 def test_an_unscanned_panel_says_so_in_both_halves():
-    components = _by_id(_panel(pages=[], active_page=None, empty_label="Nothing yet"))
+    components = _by_id(_panel(pages=[], active_page=None, labels={"panel.empty": "Nothing yet"}))
     assert components["outline"]["nodes"] == []
     assert components["outline"]["emptyLabel"] == "Nothing yet"
     assert "Nothing yet" in components["page"]["content"]
@@ -170,3 +171,55 @@ def test_every_component_is_json_shaped_because_it_crosses_the_wire():
     import json
 
     json.dumps(_panel(staleness=STALE, warnings=["x"], projects=[{"projectId": "a"}]))
+
+
+def test_every_chrome_string_comes_from_the_label_table():
+    # The guard against a seventh string being added inline: a label the host
+    # never translates is an English string in a Chinese UI, and nothing else
+    # in this repo would catch it (lint:i18n scans .tsx, and this is Python
+    # prose that crosses the wire as data).
+    #
+    # `message` is excluded because the warnings banner is scan output — the
+    # scanner's own diagnostics, which are data the panel relays rather than
+    # chrome it authors. The labelled half of it is asserted separately below.
+    components = _panel(staleness=UNKNOWN, warnings=["w"], pages=[], active_page=None)
+    painted = {
+        str(value)
+        for component in components
+        for key, value in component.items()
+        if key in ("text", "title", "emptyLabel") and isinstance(value, str)
+    }
+    painted -= {"Demo"}  # the project name is data, not chrome
+    prefixes = [default.split("{")[0].rstrip(" ·") for default in DEFAULT_LABELS.values()]
+    for value in painted:
+        assert any(value.startswith(prefix) for prefix in prefixes), (
+            f"{value!r} is painted but is not in DEFAULT_LABELS"
+        )
+
+
+def test_the_freshness_reason_is_labelled_even_though_the_reason_is_not():
+    components = _by_id(
+        _panel(staleness=UNKNOWN, labels={"panel.freshnessUnknownReason": "无法判断：{reason}"})
+    )
+    assert components["warnings"]["message"] == "无法判断：no bridge"
+
+
+def test_a_translated_label_replaces_the_english_default():
+    components = _by_id(
+        _panel(
+            staleness=STALE,
+            labels={
+                "panel.outOfDateCount": "已过期 · 变更 {count} 个文件",
+                "panel.rescan": "重新扫描",
+            },
+        )
+    )
+    assert components["stale"]["text"] == "已过期 · 变更 3 个文件"
+    assert components["rescan"]["text"] == "重新扫描"
+
+
+def test_a_partial_label_set_falls_back_per_key_rather_than_wholesale():
+    # A host that resolves four of seven keys must not blank the other three.
+    components = _by_id(_panel(staleness=STALE, labels={"panel.rescan": "重新扫描"}))
+    assert components["rescan"]["text"] == "重新扫描"
+    assert components["stale"]["text"] == DEFAULT_LABELS["panel.outOfDateCount"].format(count=3)

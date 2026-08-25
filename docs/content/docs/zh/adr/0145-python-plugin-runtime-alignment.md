@@ -143,6 +143,12 @@ A2UI 目录新增 `Markdown`——它是聊天渲染器的**包装**，不是第
 与 `a2ui.registerTemplate` 都收发函数。它们被**具名拒绝**而不是藏起来，
 因为「没有这个方法」只会把作者送去找拼写错误。
 
+**`ctx.i18n` 已开放，除了它的两个订阅方法。** 插件可以读到应用当前的 locale，
+并翻译自己 manifest 里的词条——这正是让一个 Python 编写的界面不至于只能是英文的东西。
+`onLocaleChange` 与 `registerTranslations` 被自动拒绝：它们本来就标着
+`resourceEffect: "returned-disposer"`，所以那条**推导出来的**规则不写一行新代码就抓住了它们
+——这正是「推导」的意义。代价是插件只能**重新问**而不能被通知：它在要绘制的那一刻去轮询 locale。
+
 **`ctx.dexie` 与 `ctx.db` 对 Python 保持关闭。** 两者都返回活的句柄。
 需要持久化结构数据的插件用 `ctx.storage`，或者在 `ctx.fs.getDataDir()`
 返回的数据目录下写自己的文件。

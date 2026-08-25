@@ -60,12 +60,26 @@
       "en": {
         "panel.reader": "RepoWiki",
         "panel.ask": "Ask the wiki",
-        "mode.repowiki": "RepoWiki"
+        "mode.repowiki": "RepoWiki",
+        "panel.empty": "No wiki yet — run a scan to build one.",
+        "panel.outOfDate": "Out of date",
+        "panel.outOfDateCount": "Out of date · {count} changed",
+        "panel.freshnessUnknown": "Freshness unknown",
+        "panel.freshnessUnknownReason": "Freshness unknown: {reason}",
+        "panel.rescan": "Rescan",
+        "panel.partialScan": "Partial scan"
       },
       "zh-CN": {
         "panel.reader": "仓库百科",
         "panel.ask": "向百科提问",
-        "mode.repowiki": "仓库百科"
+        "mode.repowiki": "仓库百科",
+        "panel.empty": "还没有百科 — 先扫描一次来生成。",
+        "panel.outOfDate": "已过期",
+        "panel.outOfDateCount": "已过期 · {count} 个文件有变更",
+        "panel.freshnessUnknown": "无法判断是否最新",
+        "panel.freshnessUnknownReason": "无法判断是否最新：{reason}",
+        "panel.rescan": "重新扫描",
+        "panel.partialScan": "扫描不完整"
       }
     }
   },
@@ -92,9 +106,9 @@
       "language": {
         "type": "string",
         "title": "Output language",
-        "description": "Language the wiki is written in.",
-        "enum": ["en", "zh", "ja", "ko"],
-        "default": "en"
+        "description": "Language the wiki is written in. 'auto' follows the app's language.",
+        "enum": ["auto", "en", "zh", "ja", "ko"],
+        "default": "auto"
       },
       "concurrency": {
         "type": "number",
