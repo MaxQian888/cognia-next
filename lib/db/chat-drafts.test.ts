@@ -367,3 +367,61 @@ describe("draft attachment binaries + quota", () => {
     expect((await getDraft("ses_meta"))!.attachments![0]!.name).toBe("m.txt")
   })
 })
+
+describe("draft template binding", () => {
+  const binding = {
+    templateId: "user.chat.review",
+    version: "1.2.0",
+    params: { module: { kind: "text" as const, value: "login" } },
+    insertedAt: 1,
+  }
+
+  it("stores the binding alongside the text", async () => {
+    await setDraft("s-bind", "review {{module}}", [], { templateBinding: binding })
+
+    await expect(getDraft("s-bind")).resolves.toMatchObject({ templateBinding: binding })
+  })
+
+  it("preserves the binding on a plain text save", async () => {
+    // The composer's persist effect fires on every keystroke with text and
+    // attachments only. If an omitted binding cleared, typing one character
+    // would erase every parameter value in the draft.
+    await setDraft("s-bind", "review {{module}}", [], { templateBinding: binding })
+    await setDraft("s-bind", "review {{module}} now", [])
+
+    await expect(getDraft("s-bind")).resolves.toMatchObject({
+      text: "review {{module}} now",
+      templateBinding: binding,
+    })
+  })
+
+  it("clears the binding when explicitly passed null", async () => {
+    await setDraft("s-bind", "review {{module}}", [], { templateBinding: binding })
+    await setDraft("s-bind", "plain prose", [], { templateBinding: null })
+
+    const row = await getDraft("s-bind")
+    expect(row?.text).toBe("plain prose")
+    expect(row?.templateBinding).toBeUndefined()
+  })
+
+  it("drops the binding with the row when the draft empties out", async () => {
+    await setDraft("s-bind", "review {{module}}", [], { templateBinding: binding })
+    await setDraft("s-bind", "", [])
+
+    await expect(getDraft("s-bind")).resolves.toBeNull()
+  })
+
+  it("carries the binding through a debounced save", async () => {
+    jest.useFakeTimers()
+    try {
+      setDraftDebounced("s-bind", "review {{module}}", [], 500, { templateBinding: binding })
+      jest.advanceTimersByTime(500)
+      jest.useRealTimers()
+      await flushDebouncedDraftWrites()
+
+      await expect(getDraft("s-bind")).resolves.toMatchObject({ templateBinding: binding })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})

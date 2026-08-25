@@ -1,5 +1,6 @@
 import { getDb } from "./schema"
 import { enqueueHostStateIntentIfAvailable } from "./mobile-outbound-queue"
+import type { ChatTemplateBinding } from "@/lib/chat/template/binding"
 
 /**
  * An attachment that was staged in the composer when a draft was saved.
@@ -74,12 +75,39 @@ export interface ChatDraftRow {
   originClientId?: string
   /** Wire-safe metadata only; attachment bytes remain device-local. */
   attachmentRefs?: Array<{ name: string; mediaType: string; size: number; hash?: string }>
+  /**
+   * The template this draft was inserted from, and what its `{{parameters}}`
+   * are set to.
+   *
+   * Values cannot live in `text` — the chip overlay is a character-for-character
+   * mirror of the textarea, so a pill can only paint the token it covers. They
+   * ride the draft row instead, which is what makes a reload restore a
+   * half-filled template exactly.
+   *
+   * DEVICE-LOCAL for now: `draft.replace` carries `text` and `attachments`
+   * only, so a draft that reaches another device arrives with its tokens but
+   * without their values. That degrades safely rather than silently — the
+   * receiving composer reads the tokens straight out of the text, finds nothing
+   * bound, and refuses to send rather than shipping a literal `{{module}}` to
+   * the model.
+   */
+  templateBinding?: ChatTemplateBinding
 }
 
 export interface SetDraftOptions {
   originClientId?: string
   /** Authority may provide an exact revision; local writes increment instead. */
   revision?: number
+  /**
+   * Template binding to store with the draft.
+   *
+   * Three-way on purpose: omit to PRESERVE whatever the row already holds,
+   * pass a binding to replace it, pass `null` to clear it. Preserve has to be
+   * the default because the composer's persist effect fires on every keystroke
+   * with text and attachments only — anything else would erase the parameter
+   * values the moment the user typed a character.
+   */
+  templateBinding?: ChatTemplateBinding | null
 }
 
 /**
@@ -140,12 +168,17 @@ export async function setDraft(
   // channel and makes the next broadcast reuse a revision. Serialized per
   // session so concurrent saves cannot read the same revision and both claim it.
   await withDraftRevisionLock(sessionId, async () => {
-    const revision = options.revision ?? ((await db.chatDrafts.get(sessionId))?.revision ?? 0) + 1
+    const previous = await db.chatDrafts.get(sessionId)
+    const revision = options.revision ?? (previous?.revision ?? 0) + 1
+    // Omitted means keep; `null` means clear. See `SetDraftOptions`.
+    const templateBinding =
+      options.templateBinding === undefined ? previous?.templateBinding : options.templateBinding
     await db.chatDrafts.put({
       sessionId,
       text,
       updatedAt: Date.now(),
       revision,
+      ...(templateBinding ? { templateBinding } : {}),
       ...(options.originClientId || hostStateRow?.clientId
         ? { originClientId: options.originClientId ?? hostStateRow?.clientId }
         : {}),
@@ -245,13 +278,14 @@ export function setDraftDebounced(
   sessionId: string,
   text: string,
   attachments: DraftAttachmentMeta[] = [],
-  delayMs = 500
+  delayMs = 500,
+  options: SetDraftOptions = {}
 ): void {
   const existing = debounceTimers.get(sessionId)
   if (existing) clearTimeout(existing)
   const timer = setTimeout(() => {
     debounceTimers.delete(sessionId)
-    const write = setDraft(sessionId, text, attachments).catch(() => undefined)
+    const write = setDraft(sessionId, text, attachments, options).catch(() => undefined)
     debouncedWrites.add(write)
     void write.finally(() => debouncedWrites.delete(write))
   }, delayMs)

@@ -292,3 +292,63 @@ describe("HostState durable store", () => {
     await expect(getDb().hostStateActions.count()).resolves.toBe(1)
   })
 })
+
+describe("HostState draft replacement and template bindings", () => {
+  beforeEach(async () => {
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    await getDb().delete()
+    __resetDbForTesting()
+    activateAccountDatabase(scope.accountId, scope.targetId)
+    await getDb().sessions.put({
+      id: "session-1",
+      title: "Session",
+      transcriptRevision: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }, 30_000)
+
+  afterEach(async () => {
+    await getDb().delete()
+    __resetDbForTesting()
+  })
+
+  it("keeps this device's parameter values when a remote draft edit lands", async () => {
+    // `draft.replace` carries text and attachments only, and the handler writes
+    // with `put`, which replaces the whole row. Without an explicit carry-over
+    // an incoming edit silently empties a half-filled template — the values are
+    // not in the text and nothing else holds them.
+    const templateBinding = {
+      templateId: "user.chat.review",
+      version: "1.0.0",
+      params: { module: { kind: "text" as const, value: "login" } },
+      insertedAt: 1,
+    }
+    await getDb().chatDrafts.put({
+      sessionId: "session-1",
+      text: "review {{module}}",
+      updatedAt: 1,
+      templateBinding,
+    })
+
+    await acquireWritableLease()
+    await commitHostStateAction({
+      action: draftAction({
+        action: { kind: "draft.replace", text: "review {{module}} today", attachments: [] },
+      }),
+      mutation: {
+        kind: "draft.replaced",
+        text: "review {{module}} today",
+        attachments: [],
+        draftRevision: 1,
+        revision: 1,
+      },
+      now: 1,
+    })
+
+    await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({
+      text: "review {{module}} today",
+      templateBinding,
+    })
+  })
+})

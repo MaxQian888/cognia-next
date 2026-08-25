@@ -980,6 +980,57 @@ describe("HostStateService", () => {
     sync.stop()
   })
 
+  it("keeps this device's parameter values when a snapshot replaces the draft", async () => {
+    // `persistConfirmedState` writes the draft with `put`, replacing the whole
+    // row, and the wire format carries text and attachments only. Without an
+    // explicit carry-over, the first snapshot after a reconnect silently empties
+    // a half-filled template — the values are not in the text and nothing else
+    // holds them.
+    const templateBinding = {
+      templateId: "user.chat.review",
+      version: "1.0.0",
+      params: { module: { kind: "text" as const, value: "login" } },
+      insertedAt: 1,
+    }
+    await getDb().chatDrafts.put({
+      sessionId: "session-1",
+      text: "review {{module}}",
+      updatedAt: 1,
+      templateBinding,
+    })
+
+    const initial = createEmptyHostStateSession(channel, "session-1")
+    const snapshot: HostStateSnapshot = {
+      channel,
+      hostId,
+      hostGeneration: 4,
+      cutHostSeq: 8,
+      revision: 0,
+      digest: hostStateDigest({
+        ...initial,
+        draft: { ...initial.draft, text: "review {{module}} today" },
+      }),
+      state: { ...initial, draft: { ...initial.draft, text: "review {{module}} today" } },
+    }
+    const transport: Transport = {
+      subscribe: () => () => undefined,
+      call: async (command) =>
+        (command === "host_state_status" ? writableStatus : snapshot) as never,
+    }
+
+    const sync = await installHostStateSync({
+      transport,
+      ...scope,
+      channels: async () => [channel],
+    })
+
+    await expect(getDb().chatDrafts.get("session-1")).resolves.toMatchObject({
+      text: "review {{module}} today",
+      templateBinding,
+    })
+    sync.stop()
+  })
+
   it("reapplies durable pending actions over a fresh snapshot after reload", async () => {
     const initial = createEmptyHostStateSession(channel, "session-1")
     const pendingAction = action(

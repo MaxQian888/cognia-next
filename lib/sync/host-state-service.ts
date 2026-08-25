@@ -619,6 +619,12 @@ async function persistConfirmedState(
       revision: optimisticState.draft.revision,
       attachmentRefs: optimisticState.draft.attachments,
       ...(attachments.length > 0 ? { attachments } : {}),
+      // `put` replaces the whole row, and the wire format carries text and
+      // attachments only — so without this the arriving snapshot would silently
+      // erase the `{{parameter}}` values held on THIS device. Preserving is
+      // also the right merge: an orphaned value is pruned when its token is
+      // gone from the text, so keeping one can never resurrect a stale answer.
+      ...(existingDraft?.templateBinding ? { templateBinding: existingDraft.templateBinding } : {}),
     }),
   ])
   await materializeOptimisticMessages(optimisticState)

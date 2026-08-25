@@ -700,7 +700,12 @@ async function persistBusinessProjection(
         updatedAt: now,
       })
       return
-    case "draft.replace":
+    case "draft.replace": {
+      // `put` replaces the whole row and the wire format carries text and
+      // attachments only, so the `{{parameter}}` values held on this device
+      // have to be read back and re-attached — otherwise a remote draft edit
+      // silently empties a half-filled template.
+      const existing = await db.chatDrafts.get(action.sessionId)
       await db.chatDrafts.put({
         sessionId: action.sessionId,
         text: action.action.text,
@@ -710,8 +715,10 @@ async function persistBusinessProjection(
         originClientId: action.clientId,
         attachmentRefs: action.action.attachments,
         ...(action.action.attachments.length > 0 ? { attachments: action.action.attachments } : {}),
+        ...(existing?.templateBinding ? { templateBinding: existing.templateBinding } : {}),
       })
       return
+    }
     case "message.enqueue": {
       const instantTitle = action.action.text.replace(/\s+/g, " ").trim().slice(0, 40)
       const message: StoredMessage = {
