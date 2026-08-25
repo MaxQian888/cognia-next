@@ -1176,6 +1176,12 @@ mod tests {
             .acquire_workspace_bundle(cognia_task_workspace::AcquireWorkspaceBundle {
                 owner_type: cognia_task_workspace::WorkspaceOwnerType::Session,
                 owner_ref: Some("session-test".into()),
+                // This run belongs to no Workspace and the fixture repository
+                // declares no provisioning — the case ADR-0147 documents as the
+                // common one, and the only thing this test is exercising is what
+                // a failing watcher does to a borrowed run.
+                project_id: None,
+                provisioning: None,
                 environment_kind: cognia_task_workspace::WorkspaceEnvironmentKind::Managed,
                 base: cognia_task_workspace::WorkspaceBaseSpec::WorkingState,
                 roots: vec![cognia_task_workspace::WorkspaceBundleRootInput {
