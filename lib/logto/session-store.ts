@@ -12,6 +12,18 @@
  * failed at the moment the token was persisted — after a successful browser
  * round-trip, which is the worst possible place to discover it. We provision it
  * the same way `lib/plugin/api/secrets-api.ts` does, from the backup auto-key.
+ *
+ * ## One session per LocalProfile (ADR-0149)
+ *
+ * The session used to live at a single global key, so two LocalProfiles on one
+ * machine shared one login — which is exactly the conflation ADR-0149 exists to
+ * undo: a profile is an encryption boundary and the person signed into it is a
+ * separate fact. The key is now scoped by profile.
+ *
+ * A blob left at the legacy global key is DELETED rather than adopted. Nothing
+ * records which profile it belonged to, and guessing would show one person's
+ * token inside another person's profile. Signing in again is cheap; being
+ * quietly signed in as somebody else is not.
  */
 
 import {
@@ -21,13 +33,33 @@ import {
   setWebKeyringPassphrase,
   type KeyringRef,
 } from "@/lib/keyring"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { isTauri } from "@/lib/tauri"
 
 import type { LogtoSession } from "./client"
 
-/** Keyring location of the active Logto session. */
-export const LOGTO_KEYRING: KeyringRef = { namespace: "logto", key: "session" }
+export const LOGTO_KEYRING_NAMESPACE = "logto"
+
+/**
+ * The pre-ADR-0149 global key. Read only to delete it — see the header.
+ */
+export const LEGACY_LOGTO_KEYRING: KeyringRef = {
+  namespace: LOGTO_KEYRING_NAMESPACE,
+  key: "session",
+}
+
+/**
+ * Keyring location of one LocalProfile's Logto session.
+ *
+ * The profile defaults to whichever one this runtime is serving —
+ * `getActiveAccountId()` derives it from the open Dexie database name, so there
+ * is no second "current profile" to drift from it. Callers pass an explicit id
+ * only when acting on a profile other than the open one.
+ */
+export function logtoKeyringFor(localAccountId = getActiveAccountId()): KeyringRef {
+  return { namespace: LOGTO_KEYRING_NAMESPACE, key: `session:${localAccountId}` }
+}
 
 let webPassphraseProvisioned = false
 
@@ -52,16 +84,19 @@ export function __resetLogtoWebPassphraseForTests(): void {
   webPassphraseProvisioned = false
 }
 
-/** Persist (upsert) the active Logto session. */
-export async function saveLogtoSession(session: LogtoSession): Promise<void> {
+/** Persist (upsert) this profile's Logto session. */
+export async function saveLogtoSession(
+  session: LogtoSession,
+  localAccountId?: string
+): Promise<void> {
   await ensureWebPassphrase()
-  await setSecret(LOGTO_KEYRING, JSON.stringify(session))
+  await setSecret(logtoKeyringFor(localAccountId), JSON.stringify(session))
 }
 
-/** Load the active Logto session, or `null` if none is stored / it is corrupt. */
-export async function loadLogtoSession(): Promise<LogtoSession | null> {
+/** Load this profile's Logto session, or `null` if none is stored / it is corrupt. */
+export async function loadLogtoSession(localAccountId?: string): Promise<LogtoSession | null> {
   await ensureWebPassphrase()
-  const raw = await getSecret(LOGTO_KEYRING)
+  const raw = await getSecret(logtoKeyringFor(localAccountId))
   if (!raw) return null
   try {
     return JSON.parse(raw) as LogtoSession
@@ -70,8 +105,22 @@ export async function loadLogtoSession(): Promise<LogtoSession | null> {
   }
 }
 
-/** Remove the active Logto session (sign out). Idempotent. */
-export async function clearLogtoSession(): Promise<void> {
+/** Remove this profile's Logto session (sign out). Idempotent. */
+export async function clearLogtoSession(localAccountId?: string): Promise<void> {
   await ensureWebPassphrase()
-  await clearSecret(LOGTO_KEYRING)
+  await clearSecret(logtoKeyringFor(localAccountId))
+}
+
+/**
+ * Drop any session left at the pre-ADR-0149 global key.
+ *
+ * Idempotent and safe to call on every boot. It deletes rather than migrates,
+ * because the blob carries no record of which profile it belonged to.
+ */
+export async function discardLegacyGlobalLogtoSession(): Promise<boolean> {
+  await ensureWebPassphrase()
+  const raw = await getSecret(LEGACY_LOGTO_KEYRING)
+  if (!raw) return false
+  await clearSecret(LEGACY_LOGTO_KEYRING)
+  return true
 }

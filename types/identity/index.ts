@@ -26,8 +26,13 @@
 export const USER_ID_PREFIX = "usr_"
 export const ORG_ID_PREFIX = "org_"
 
-export const USER_ID_PATTERN = /^usr_[A-Za-z0-9][A-Za-z0-9_-]{3,63}$/
-export const ORG_ID_PATTERN = /^org_[A-Za-z0-9][A-Za-z0-9_-]{3,63}$/
+/**
+ * Three characters minimum after the prefix. Machine-minted ids are 24, so
+ * this floor exists only to reject the empty and near-empty shapes a bug
+ * produces — `usr_`, `usr_a` — not to make the id look impressive.
+ */
+export const USER_ID_PATTERN = /^usr_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/
+export const ORG_ID_PATTERN = /^org_[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/
 
 /**
  * Roles inside an Org, most privileged first.
@@ -150,6 +155,27 @@ export interface EffectiveWorkspaceAccess {
    * drifts the moment someone is promoted into the Org.
    */
   guest: boolean
+}
+
+/**
+ * Mint an id. Mirrors `generateAccountId` in `lib/accounts/account-db.ts`,
+ * including its non-crypto fallback, so all three id spaces are minted the same
+ * way and a reader comparing them finds no surprises.
+ */
+function generateId(prefix: string): string {
+  const cryptoObject = globalThis.crypto
+  if (typeof cryptoObject?.randomUUID === "function") {
+    return `${prefix}${cryptoObject.randomUUID().replaceAll("-", "").slice(0, 24)}`
+  }
+  return `${prefix}${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`
+}
+
+export function generateUserId(): string {
+  return generateId(USER_ID_PREFIX)
+}
+
+export function generateOrgId(): string {
+  return generateId(ORG_ID_PREFIX)
 }
 
 export function isUserId(value: string): boolean {

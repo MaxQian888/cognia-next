@@ -1,5 +1,7 @@
 import {
   ORG_ROLES,
+  generateOrgId,
+  generateUserId,
   WORKSPACE_CAPABILITIES,
   WORKSPACE_ROLES,
   allowsCapability,
@@ -25,6 +27,15 @@ describe("id shapes", () => {
     expect(isOrgId("tnt_9f2c1a")).toBe(false)
     expect(isUserId("usr_")).toBe(false)
     expect(isUserId("usr_ab")).toBe(false)
+    // Three after the prefix is the floor — a real short id must still pass.
+    expect(isUserId("usr_ada")).toBe(true)
+  })
+
+  it("mints ids that pass its own validators", () => {
+    expect(isUserId(generateUserId())).toBe(true)
+    expect(isOrgId(generateOrgId())).toBe(true)
+    expect(generateUserId()).not.toBe(generateUserId())
+    expect(isOrgId(generateUserId())).toBe(false)
   })
 
   it("derives join keys deterministically, so a re-invite cannot duplicate a row", () => {

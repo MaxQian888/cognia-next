@@ -6,17 +6,25 @@ jest.mock("@/lib/keyring", () => ({
 }))
 jest.mock("@/lib/data/backup-key", () => ({ getDefaultBackupPassphrase: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+// The default profile is derived from the open Dexie database name; mocking it
+// keeps this suite off the 700-table schema and makes the key deterministic.
+jest.mock("@/lib/accounts/active-account-id", () => ({
+  getActiveAccountId: jest.fn(() => "acct_active"),
+}))
 
 import { getSecret, setSecret, clearSecret, setWebKeyringPassphrase } from "@/lib/keyring"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { isTauri } from "@/lib/tauri"
+import { getActiveAccountId } from "@/lib/accounts/active-account-id"
 
 import type { LogtoSession } from "./client"
 import {
   saveLogtoSession,
   loadLogtoSession,
   clearLogtoSession,
-  LOGTO_KEYRING,
+  discardLegacyGlobalLogtoSession,
+  logtoKeyringFor,
+  LEGACY_LOGTO_KEYRING,
   __resetLogtoWebPassphraseForTests,
 } from "./session-store"
 
@@ -26,6 +34,7 @@ const clearMock = clearSecret as jest.Mock
 const setPassphraseMock = setWebKeyringPassphrase as jest.Mock
 const backupKeyMock = getDefaultBackupPassphrase as jest.Mock
 const isTauriMock = isTauri as jest.Mock
+const activeAccountMock = getActiveAccountId as jest.Mock
 
 const sampleSession: LogtoSession = {
   issuer: "https://logto.test/oidc",
@@ -39,12 +48,13 @@ const sampleSession: LogtoSession = {
   scopes: ["openid", "brain:rpc"],
 }
 
-const ref = { namespace: LOGTO_KEYRING.namespace, key: LOGTO_KEYRING.key }
+const ref = logtoKeyringFor("acct_active")
 
 beforeEach(() => {
   jest.clearAllMocks()
   __resetLogtoWebPassphraseForTests()
   isTauriMock.mockReturnValue(true)
+  activeAccountMock.mockReturnValue("acct_active")
 })
 
 describe("logto session store", () => {
@@ -124,5 +134,58 @@ describe("encrypted-vault passphrase provisioning", () => {
     await saveLogtoSession(sampleSession)
     expect(setPassphraseMock).not.toHaveBeenCalled()
     expect(setMock).toHaveBeenCalled()
+  })
+})
+
+describe("one session per LocalProfile (ADR-0149)", () => {
+  it("scopes the key by profile, so two profiles never share a login", () => {
+    expect(logtoKeyringFor("acct_work")).toEqual({
+      namespace: "logto",
+      key: "session:acct_work",
+    })
+    expect(logtoKeyringFor("acct_work")).not.toEqual(logtoKeyringFor("acct_personal"))
+  })
+
+  it("defaults to the profile this runtime is serving", async () => {
+    activeAccountMock.mockReturnValue("acct_personal")
+    await saveLogtoSession(sampleSession)
+    expect(setMock).toHaveBeenCalledWith(
+      logtoKeyringFor("acct_personal"),
+      JSON.stringify(sampleSession)
+    )
+  })
+
+  it("acts on an explicitly named profile when one is given", async () => {
+    await saveLogtoSession(sampleSession, "acct_other")
+    expect(setMock).toHaveBeenCalledWith(logtoKeyringFor("acct_other"), expect.any(String))
+
+    getMock.mockResolvedValue(JSON.stringify(sampleSession))
+    await loadLogtoSession("acct_other")
+    expect(getMock).toHaveBeenCalledWith(logtoKeyringFor("acct_other"))
+
+    await clearLogtoSession("acct_other")
+    expect(clearMock).toHaveBeenCalledWith(logtoKeyringFor("acct_other"))
+  })
+
+  it("never reuses the pre-ADR-0149 global key for a profile", () => {
+    expect(LEGACY_LOGTO_KEYRING.key).toBe("session")
+    expect(logtoKeyringFor("acct_active").key).not.toBe(LEGACY_LOGTO_KEYRING.key)
+  })
+})
+
+describe("discardLegacyGlobalLogtoSession", () => {
+  it("deletes a blob left at the global key rather than adopting it", async () => {
+    // Adopting would show one person's token inside another person's profile,
+    // and nothing in the blob records who it belonged to.
+    getMock.mockResolvedValue(JSON.stringify(sampleSession))
+    expect(await discardLegacyGlobalLogtoSession()).toBe(true)
+    expect(clearMock).toHaveBeenCalledWith(LEGACY_LOGTO_KEYRING)
+    expect(setMock).not.toHaveBeenCalled()
+  })
+
+  it("is a no-op when there is nothing to discard", async () => {
+    getMock.mockResolvedValue(null)
+    expect(await discardLegacyGlobalLogtoSession()).toBe(false)
+    expect(clearMock).not.toHaveBeenCalled()
   })
 })

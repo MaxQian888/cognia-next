@@ -39,11 +39,41 @@ export interface EncryptedPerformanceBudgetProfileRow {
   updatedAt: number
 }
 
+/**
+ * A LocalProfile's binding to a `User` — ADR-0149 §9.
+ *
+ * This lives in the REGISTRY, not in a per-profile database, because it is a
+ * fact about profiles: which person does this password-protected database
+ * belong to. It is the renderer's half of the widened `host_bindings` triple
+ * `(localProfile, user, org)` that `src-tauri/src/companion_api/host_identity.rs`
+ * keeps on the host side.
+ *
+ * `localAccountId` is the primary key, so a profile binds to exactly one person.
+ * `userId` is deliberately NOT unique: one person may keep several profiles on
+ * one machine — work and personal data separation is the whole point of
+ * ADR-0054's database-per-profile isolation, and signing in should not collapse
+ * it.
+ */
+export interface UserBindingRow {
+  localAccountId: string
+  userId: string
+  /** The Org the session was scoped to, when the token carried one. */
+  orgId?: string
+  /** The Logto subject presented at bind time — an identifier, never a key. */
+  logtoSubject: string
+  logtoIssuer: string
+  displayName?: string
+  email?: string
+  boundAt: number
+  updatedAt: number
+}
+
 export class CogniaAccountRegistryDB extends Dexie {
   accounts!: Table<LocalAccountRecord, string>
   state!: Table<AccountRegistryState, typeof ACCOUNT_REGISTRY_STATE_ID>
   performanceQuotaReservations!: Table<PerformanceQuotaReservationRow, string>
   performanceBudgetProfiles!: Table<EncryptedPerformanceBudgetProfileRow, string>
+  userBindings!: Table<UserBindingRow, string>
 
   constructor(name = ACCOUNT_REGISTRY_DB_NAME) {
     super(name)
@@ -56,6 +86,10 @@ export class CogniaAccountRegistryDB extends Dexie {
       performanceQuotaReservations:
         "&id, accountId, targetDatabase, captureId, status, [accountId+status], updatedAt",
       performanceBudgetProfiles: "&id, accountId, [accountId+metricIdHash], updatedAt",
+    })
+    // ADR-0149: which person does this profile belong to.
+    this.version(3).stores({
+      userBindings: "&localAccountId, userId, orgId, logtoSubject, updatedAt",
     })
   }
 }
