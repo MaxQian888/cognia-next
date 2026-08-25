@@ -1202,16 +1202,16 @@ describe("session binding without a sessionId prop", () => {
 
   it("enables the developer panel once a page is committed", () => {
     renderPane(<BrowserPreviewPane />)
-    const developer = screen.getByRole("button", { name: "Developer mode (CDP)" })
+    const developer = screen.getByRole("button", { name: "Developer mode" })
     expect(developer).toBeDisabled()
     commitUrl("http://localhost:3000/")
-    expect(screen.getByRole("button", { name: "Developer mode (CDP)" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Developer mode" })).toBeEnabled()
   })
 
   it("renders the developer panel against the focused session", () => {
     renderPane(<BrowserPreviewPane />)
     commitUrl("http://localhost:3000/")
-    fireEvent.click(screen.getByRole("button", { name: "Developer mode (CDP)" }))
+    fireEvent.click(screen.getByRole("button", { name: "Developer mode" }))
     const controls = screen.getByTestId("cdp-controls")
     expect(controls).toHaveAttribute("data-session", "active-chat")
     expect(controls).toHaveAttribute("data-browser-session", "browser:active-chat")
@@ -1256,7 +1256,7 @@ describe("session binding without a sessionId prop", () => {
     mockActiveChatSessionId = null
     renderPane(<BrowserPreviewPane />)
     commitUrl("http://localhost:3000/")
-    expect(screen.getByRole("button", { name: "Developer mode (CDP)" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Developer mode" })).toBeDisabled()
   })
 
   it("surfaces the comment shortcuts that were already implemented", () => {

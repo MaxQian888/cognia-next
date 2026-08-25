@@ -20,7 +20,19 @@ export interface BrowserAdjustmentFeedback {
   updatedAt: number
 }
 
-export type CdpCapability = "dom" | "console" | "network" | "performance" | "runtime"
+/**
+ * What a developer-mode grant may reach.
+ *
+ * Deliberately narrower than the CDP domain list: the native side is an
+ * `eval_with_callback` bridge over the embedded page, not a real CDP endpoint
+ * (`src-tauri/src/browser/cdp.rs`), so `dom` and `runtime` are everything it
+ * can honestly serve. Console and network output already have a first-class,
+ * always-on home in the DevTools drawer, fed by the overlay's push channels
+ * (`browser://console` / `browser://network`); offering them here as well
+ * produced grants no action could ever spend. Performance had no backing at
+ * all on either side.
+ */
+export type CdpCapability = "dom" | "runtime"
 
 /** Explicit, expiring, session-bound authority for local embedded-browser CDP. */
 export interface CdpGrant {

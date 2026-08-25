@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -19,7 +21,23 @@ import { listCdpAuditEvents } from "@/lib/db/browser-cdp"
 import type { CdpAuditEvent, CdpCapability, CdpGrant } from "@/types/browser-developer"
 import { ChevronDownIcon } from "lucide-react"
 
-const CAPABILITIES: CdpCapability[] = ["dom", "runtime", "console", "network", "performance"]
+const CAPABILITIES: CdpCapability[] = ["dom", "runtime"]
+/** Keep a returned value from flooding a 320px rail (and the DOM). */
+const MAX_RESULT_CHARS = 4000
+
+/** Pretty-print whatever the bridge returned; fall back to String() for cycles. */
+function formatCdpValue(value: unknown): { text: string; truncated: boolean } {
+  let text: string
+  try {
+    text = typeof value === "string" ? value : JSON.stringify(value, null, 2)
+  } catch {
+    text = String(value)
+  }
+  if (text === undefined) text = String(value)
+  return text.length > MAX_RESULT_CHARS
+    ? { text: text.slice(0, MAX_RESULT_CHARS), truncated: true }
+    : { text, truncated: false }
+}
 
 export function BrowserCdpControls({
   sessionId,
@@ -37,6 +55,8 @@ export function BrowserCdpControls({
   const grantRef = useRef<CdpGrant | null>(null)
   const [audit, setAudit] = useState<CdpAuditEvent[]>([])
   const [busy, setBusy] = useState(false)
+  const [expression, setExpression] = useState("document.title")
+  const [result, setResult] = useState<{ method: string; value: unknown } | null>(null)
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null)
 
   const refreshAudit = useCallback(async () => {
@@ -69,6 +89,7 @@ export function BrowserCdpControls({
   const run = async (operation: () => Promise<void>) => {
     setBusy(true)
     setMessage(null)
+    setResult(null)
     try {
       await operation()
     } catch (cause) {
@@ -104,23 +125,32 @@ export function BrowserCdpControls({
       setGrant(null)
     })
 
-  const inspect = () =>
+  /**
+   * Run one method and SHOW what came back. The returned `{method, value}` used
+   * to be dropped on the floor in favour of a fixed "completed" string, which
+   * made the whole panel indistinguishable from a no-op.
+   */
+  const execute = (capability: CdpCapability, method: string, params: Record<string, unknown>) =>
     run(async () => {
       if (!grant) return
-      await executeCdpCommand(
-        {
-          grantId: grant.id,
-          sessionId,
-          browserSessionId,
-          pageUrl,
-          capability: "dom",
-          method: "DOM.getDocument",
-          executionTarget: "local",
-        },
-        {}
+      setResult(
+        await executeCdpCommand(
+          {
+            grantId: grant.id,
+            sessionId,
+            browserSessionId,
+            pageUrl,
+            capability,
+            method,
+            executionTarget: "local",
+          },
+          params
+        )
       )
-      setMessage({ kind: "success", text: t("result") })
     })
+
+  const inspect = () => execute("dom", "DOM.getDocument", {})
+  const evaluate = () => execute("runtime", "Runtime.evaluate", { expression })
 
   return (
     <Collapsible className="group/collapsible border-b p-3" data-testid="browser-cdp-controls">
@@ -194,6 +224,64 @@ export function BrowserCdpControls({
                 {t("revoke")}
               </Button>
             </div>
+            {grant.capabilities.includes("runtime") && (
+              <div className="space-y-1.5">
+                <Label htmlFor="cdp-expression" className="text-xs">
+                  {t("expression")}
+                </Label>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    id="cdp-expression"
+                    value={expression}
+                    onChange={(event) => setExpression(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && expression.trim()) {
+                        event.preventDefault()
+                        void evaluate()
+                      }
+                    }}
+                    className="h-7 font-mono text-[11px]"
+                    placeholder={t("expressionPlaceholder")}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !expression.trim()}
+                    onClick={() => void evaluate()}
+                  >
+                    {t("evaluate")}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {result && (
+          <div className="space-y-1" data-testid="browser-cdp-result">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs">{t("resultTitle", { method: result.method })}</Label>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1.5 text-[10px]"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(formatCdpValue(result.value).text)
+                    .then(() => setMessage({ kind: "success", text: t("copied") }))
+                    .catch(() => undefined)
+                }}
+              >
+                {t("copy")}
+              </Button>
+            </div>
+            <ScrollArea className="max-h-40 rounded-md border bg-muted/40">
+              <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px]">
+                {formatCdpValue(result.value).text}
+              </pre>
+            </ScrollArea>
+            {formatCdpValue(result.value).truncated && (
+              <p className="text-[10px] text-muted-foreground">{t("valueTruncated")}</p>
+            )}
           </div>
         )}
         {message && (

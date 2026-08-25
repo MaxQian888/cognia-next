@@ -53,9 +53,11 @@ fn capability_for_method(method: &str) -> Option<&'static str> {
     match method.split_once('.').map(|value| value.0) {
         Some("DOM") => Some("dom"),
         Some("Runtime") => Some("runtime"),
-        Some("Console") | Some("Log") => Some("console"),
-        Some("Network") => Some("network"),
-        Some("Performance") => Some("performance"),
+        // Console / Network / Performance are deliberately absent: this is an
+        // eval bridge, not a CDP endpoint, and mapping those families only
+        // produced grants whose every method fell through to "not implemented".
+        // Console and network output are served by the overlay's push channels
+        // instead (`browser://console` / `browser://network`).
         _ => None,
     }
 }
@@ -73,12 +75,10 @@ fn validate_grant(grant: &NativeCdpGrant) -> Result<(), String> {
         return Err("CDP grant expiry must be within one hour".to_string());
     }
     if grant.capabilities.is_empty()
-        || grant.capabilities.iter().any(|value| {
-            !matches!(
-                value.as_str(),
-                "dom" | "runtime" | "console" | "network" | "performance"
-            )
-        })
+        || grant
+            .capabilities
+            .iter()
+            .any(|value| !matches!(value.as_str(), "dom" | "runtime"))
     {
         return Err("CDP grant contains an unsupported capability".to_string());
     }
@@ -192,7 +192,39 @@ mod tests {
             "http://localhost:3000"
         );
         assert_eq!(capability_for_method("Runtime.evaluate"), Some("runtime"));
+        assert_eq!(capability_for_method("DOM.getDocument"), Some("dom"));
         assert_eq!(capability_for_method("Storage.getCookies"), None);
+    }
+
+    /// Every capability a grant may hold must have at least one method behind
+    /// it, or the UI offers authority that no action can ever spend. Console,
+    /// network and performance were exactly that until they were dropped.
+    #[test]
+    fn every_grantable_capability_has_a_method_family() {
+        let mut seen: Vec<&str> = ["DOM.getDocument", "Runtime.evaluate"]
+            .into_iter()
+            .filter_map(capability_for_method)
+            .collect();
+        seen.sort_unstable();
+        assert_eq!(seen, ["dom", "runtime"]);
+
+        for retired in [
+            "Log.getEntries",
+            "Console.clearMessages",
+            "Network.getResponseBody",
+            "Performance.getMetrics",
+        ] {
+            assert_eq!(capability_for_method(retired), None, "{retired} must not map");
+            let grant = NativeCdpGrant {
+                id: "grant".into(),
+                session_id: "session".into(),
+                browser_session_id: "browser".into(),
+                origin: "http://localhost:3000".into(),
+                capabilities: vec![retired.split('.').next().unwrap().to_lowercase()],
+                expires_at: now_ms() + 1000,
+            };
+            assert!(validate_grant(&grant).is_err(), "{retired} must not be grantable");
+        }
     }
 
     #[test]
