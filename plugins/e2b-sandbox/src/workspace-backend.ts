@@ -102,8 +102,12 @@ export class E2BWorkspaceBackend implements E2BBackend {
       const cwd = `/tmp/cognia/${safeRepo}/${stamp.replace(/[^a-zA-Z0-9._-]/g, "_")}`
       await execChecked(sandbox, { cmd: `mkdir -p ${shellEscape(cwd)}` })
       const remote = `https://x-access-token:${opts.token}@github.com/${opts.repoFullName}.git`
+      // Partial, not shallow: a `--depth`-truncated history cannot be rebased
+      // past its boundary, which is what a branch sitting on top of another
+      // branch has to do whenever the one below it moves. `--filter=blob:none`
+      // keeps the full commit graph and fetches file contents on demand.
       await execChecked(sandbox, {
-        cmd: `git clone --branch ${shellEscape(opts.branch)} --depth 20 ${shellEscape(remote)} ${shellEscape(cwd)}`,
+        cmd: `git clone --branch ${shellEscape(opts.branch)} --single-branch --filter=blob:none ${shellEscape(remote)} ${shellEscape(cwd)}`,
       })
       this.pool.addWorkspace(cwd, sandbox, "on")
       return {

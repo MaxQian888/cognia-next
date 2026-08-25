@@ -31,6 +31,11 @@ describe("E2BWorkspaceBackend", () => {
     expect(calls.some((c) => c.startsWith("mkdir -p"))).toBe(true)
     expect(calls.some((c) => c.includes("git clone"))).toBe(true)
     expect(calls.some((c) => c.includes("ghs_test"))).toBe(true)
+    // Never shallow: a truncated history cannot be rebased past its boundary,
+    // which is what a stacked branch has to do when the branch below it moves.
+    const clone = calls.find((c) => c.includes("git clone"))!
+    expect(clone).not.toContain("--depth")
+    expect(clone).toContain("--filter=blob:none")
   })
 
   it("passes AgentENV apiUrl to the SDK factory as domain", async () => {

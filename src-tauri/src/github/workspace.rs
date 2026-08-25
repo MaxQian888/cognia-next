@@ -77,8 +77,31 @@ pub struct StatResult {
     pub mtime: Option<f64>,
 }
 
+/// Arguments for every clone this subsystem performs.
+///
+/// Partial rather than shallow. `--depth` truncates history, and a truncated
+/// history cannot be rebased past its boundary — which is exactly what a branch
+/// stacked on another branch must do when the one below it moves. It is also
+/// not the bargain it appears to be: GitHub's published measurements put a
+/// shallow *fetch* from such a clone well behind a full one, and every later
+/// fetch in the workspace inherits that cost. `--filter=blob:none` keeps the
+/// whole commit graph and omits only historical file contents, which nothing
+/// here reads. `--single-branch` is explicit because it used to be implied by
+/// `--depth`, and dropping that without saying so would start fetching every
+/// branch in the repository.
+fn clone_args<'a>(remote: &'a str, destination: &'a str, branch: &'a str) -> [&'a str; 6] {
+    [
+        remote,
+        destination,
+        "--branch",
+        branch,
+        "--single-branch",
+        "--filter=blob:none",
+    ]
+}
+
 /// Allocate a worktree under `<base_dir>/<sanitized-repo>/<base36-stamp>` and
-/// shallow-clone the requested branch into it. Returns the absolute path and
+/// clone the requested branch into it. Returns the absolute path and
 /// allocation timestamp so the TS side can synthesize a `WorkspaceHandle`.
 #[tauri::command]
 pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, String> {
@@ -109,15 +132,8 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     let clone_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
     let mut command = Command::new("git");
     command
-        .args([
-            "clone",
-            &remote,
-            &path_str,
-            "--branch",
-            clone_branch,
-            "--depth",
-            "20",
-        ])
+        .arg("clone")
+        .args(clone_args(&remote, &path_str, clone_branch))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_git_auth_env(&mut command, &args.token);
@@ -160,16 +176,18 @@ pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result
     let staging_path = staging.path().to_path_buf();
     let staging_str = staging_path.to_string_lossy().into_owned();
 
+    // This second clone is a trust boundary, not redundancy: `mirror_worktree`
+    // copies the agent's files across but never its `.git`, so the commit and
+    // push below run against a repository the agent could not have written to.
+    // Committing in the agent's own workspace instead would run whatever it
+    // left in `.git/hooks`, and honour whatever it wrote to `.git/config`
+    // (`core.sshCommand`, `core.fsmonitor`), while our token is in the
+    // environment. On the Issue→PR path the agent's instructions come from an
+    // issue body, which anyone can write.
     let mut clone = Command::new("git");
-    clone.args([
-        "clone",
-        &remote,
-        &staging_str,
-        "--branch",
-        base_branch,
-        "--depth",
-        "20",
-    ]);
+    clone
+        .arg("clone")
+        .args(clone_args(&remote, &staging_str, base_branch));
     if let Some(token) = args.token.as_deref() {
         apply_git_auth_env(&mut clone, token);
     } else {
@@ -481,6 +499,23 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    /// Both clone sites go through one helper so they cannot drift apart, and
+    /// neither may go back to a shallow clone: stacked branches rebase past the
+    /// boundary a `--depth` clone would impose.
+    #[test]
+    fn clones_are_partial_and_never_shallow() {
+        let args = clone_args("https://github.com/o/r.git", "/tmp/dest", "main");
+        assert!(!args.contains(&"--depth"), "shallow breaks rebasing a stack");
+        assert!(args.contains(&"--filter=blob:none"));
+        assert!(
+            args.contains(&"--single-branch"),
+            "dropping --depth removed the implied --single-branch"
+        );
+        assert_eq!(args[0], "https://github.com/o/r.git");
+        assert_eq!(args[1], "/tmp/dest");
+        assert_eq!(args[3], "main");
+    }
 
     #[test]
     fn sanitize_repo_name_replaces_unsafe_chars() {

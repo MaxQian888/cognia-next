@@ -467,10 +467,7 @@ fn capture_git_backed(
 ///
 /// Objects Git does not have are simply absent from the result; the caller
 /// decides whether that is fatal.
-pub fn git_read_blobs(
-    root: &Path,
-    hashes: &[String],
-) -> Result<HashMap<String, Vec<u8>>, String> {
+pub fn git_read_blobs(root: &Path, hashes: &[String]) -> Result<HashMap<String, Vec<u8>>, String> {
     use std::io::{BufRead, BufReader, Read, Write};
 
     let mut resolved = HashMap::new();
@@ -834,7 +831,11 @@ fn base_pin_ref(execution_root: &Path) -> String {
 ///
 /// Best-effort: a repository that refuses the ref is not a reason to fail an
 /// acquisition, and a blob-backed snapshot needs no pin at all.
-pub fn pin_snapshot_base(workspace_root: &Path, execution_root: &Path, snapshot: &WorkspaceSnapshot) {
+pub fn pin_snapshot_base(
+    workspace_root: &Path,
+    execution_root: &Path,
+    snapshot: &WorkspaceSnapshot,
+) {
     let SnapshotBase::GitCommit { commit } = &snapshot.base else {
         return;
     };
@@ -1157,7 +1158,10 @@ mod tests {
         let (snapshot, blobs) = capture(dir.path()).unwrap();
 
         let entry = &snapshot.entries["new.txt"];
-        assert_eq!(blobs.get(&entry.hash).map(Vec::as_slice), Some(&b"fresh\n"[..]));
+        assert_eq!(
+            blobs.get(&entry.hash).map(Vec::as_slice),
+            Some(&b"fresh\n"[..])
+        );
     }
 
     /// A directory that is not a repository keeps the original behaviour.
@@ -1247,7 +1251,10 @@ mod tests {
         let hash = snapshot.entries["tracked.txt"].hash.clone();
 
         let resolved = git_read_blobs(dir.path(), &[hash.clone()]).unwrap();
-        assert_eq!(resolved.get(&hash).map(Vec::as_slice), Some(&b"committed\n"[..]));
+        assert_eq!(
+            resolved.get(&hash).map(Vec::as_slice),
+            Some(&b"committed\n"[..])
+        );
     }
 
     #[test]
@@ -1289,7 +1296,10 @@ mod tests {
         let wt = checkout.path().join("wt");
 
         // Straight from the commit, before the overlay.
-        assert_eq!(fs::read_to_string(wt.join("tracked.txt")).unwrap(), "committed\n");
+        assert_eq!(
+            fs::read_to_string(wt.join("tracked.txt")).unwrap(),
+            "committed\n"
+        );
         assert!(wt.join("also.txt").exists());
 
         let applied = apply_git_overlay(
@@ -1304,7 +1314,10 @@ mod tests {
         .unwrap();
 
         assert!(applied);
-        assert_eq!(fs::read_to_string(wt.join("tracked.txt")).unwrap(), "changed\n");
+        assert_eq!(
+            fs::read_to_string(wt.join("tracked.txt")).unwrap(),
+            "changed\n"
+        );
         assert_eq!(fs::read_to_string(wt.join("new.txt")).unwrap(), "fresh\n");
         assert!(!wt.join("also.txt").exists(), "deletion must be replayed");
     }
@@ -1325,7 +1338,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!applied, "a blob-backed snapshot must fall back to materialize");
+        assert!(
+            !applied,
+            "a blob-backed snapshot must fall back to materialize"
+        );
     }
 
     /// Batch 2 rewrites `capture_with_policy` to stop reading the whole tree.
@@ -1415,4 +1431,3 @@ fn create_symlink(path: &Path, bytes: &[u8]) -> Result<(), String> {
         String::from_utf8(bytes.to_vec()).map_err(|_| "invalid symlink target".to_string())?;
     symlink_file(target, path).map_err(|error| format!("symlink {}: {error}", path.display()))
 }
-

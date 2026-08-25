@@ -55,6 +55,19 @@ pub struct TaskWorkspaceService {
     watchers: WatchManager,
     /// `WorktreeCreate` / `WorktreeRemove` producer (ADR-0111 decision 9).
     lifecycle: crate::lifecycle::WorktreeLifecycleEmitter,
+    /// One mutex per repository, keyed by Git common directory.
+    ///
+    /// Every task-workspace command runs on the blocking pool, so two
+    /// acquisitions for the same repository genuinely execute at the same time
+    /// and race on Git's own administrative state — `index.lock`, the
+    /// `worktrees/` directory, the ref store. Git reports that as a spurious
+    /// "Unable to create '.../index.lock': File exists" and the acquisition
+    /// fails for a reason that has nothing to do with the caller.
+    ///
+    /// Keyed by common directory rather than by workspace root so a repository
+    /// and every linked worktree cut from it share one lock: they share the one
+    /// administrative area that is being protected.
+    git_admin_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 #[derive(Clone)]
@@ -250,6 +263,7 @@ impl TaskWorkspaceService {
             origin_hints: Mutex::new(HashMap::new()),
             watchers: WatchManager::new(),
             lifecycle: crate::lifecycle::WorktreeLifecycleEmitter::default(),
+            git_admin_locks: Mutex::new(HashMap::new()),
         };
         service.recover_incomplete_runs()?;
         service.recover_workspace_bundle_turns()?;
@@ -824,18 +838,25 @@ impl TaskWorkspaceService {
                     now,
                 )
                 .map_err(|error| error.to_string())?;
-            let created = create_execution(
-                &root,
-                &execution_root,
-                &input.base,
-                &baseline,
-                &blobs,
-                record.locked_by.as_deref(),
-                // The single-root task path carries no repository declaration:
-                // it is reached by callers that never read one.
-                None,
-                &tracking_policy,
-            );
+            // `git worktree add` mutates the repository's administrative state.
+            // Two acquisitions for the same repository run in parallel on the
+            // blocking pool, so without this they collide on `index.lock`.
+            let admin = self.git_admin_lock(&root);
+            let created = {
+                let _admin = admin.as_ref().map(|lock| lock.lock());
+                create_execution(
+                    &root,
+                    &execution_root,
+                    &input.base,
+                    &baseline,
+                    &blobs,
+                    record.locked_by.as_deref(),
+                    // The single-root task path carries no repository declaration:
+                    // it is reached by callers that never read one.
+                    None,
+                    &tracking_policy,
+                )
+            };
             let (created_kind, isolation_ref) = match created {
                 Ok(created) => created,
                 Err(error) => {
@@ -1936,16 +1957,21 @@ impl TaskWorkspaceService {
                 self.registry
                     .set_project(&record.workspace_id, input.project_id.as_deref())
                     .map_err(|error| error.to_string())?;
-                if let Err(error) = create_execution(
-                    source_root,
-                    &execution_root,
-                    &input.base,
-                    &baseline,
-                    &blobs,
-                    record.locked_by.as_deref(),
-                    input.provisioning.as_ref(),
-                    &crate::ResourceTrackingPolicy::default(),
-                ) {
+                let admin = self.git_admin_lock(source_root);
+                let created = {
+                    let _admin = admin.as_ref().map(|lock| lock.lock());
+                    create_execution(
+                        source_root,
+                        &execution_root,
+                        &input.base,
+                        &baseline,
+                        &blobs,
+                        record.locked_by.as_deref(),
+                        input.provisioning.as_ref(),
+                        &crate::ResourceTrackingPolicy::default(),
+                    )
+                };
+                if let Err(error) = created {
                     self.discard_managed_workspace(&record, now);
                     return Err(error);
                 }
@@ -2458,26 +2484,26 @@ impl TaskWorkspaceService {
             .ok_or_else(|| format!("workspace {workspace_id} has no restorable archive"))?;
         let blobs = {
             let mut store = self.store.lock();
-            hydrate_snapshot_blobs(
-                &mut store,
-                &snapshot,
-                Path::new(&record.source_root),
-                now,
-            )?
+            hydrate_snapshot_blobs(&mut store, &snapshot, Path::new(&record.source_root), now)?
         };
-        if let Err(error) = create_execution(
-            Path::new(&record.source_root),
-            execution_root,
-            &WorkspaceBaseSpec::WorkingState,
-            &snapshot,
-            &blobs,
-            record.locked_by.as_deref(),
-            // Rematerializing an existing record restores the snapshot it was
-            // captured with. Re-provisioning here would apply a declaration the
-            // record was not created under.
-            None,
-            &crate::ResourceTrackingPolicy::default(),
-        ) {
+        let admin = self.git_admin_lock(Path::new(&record.source_root));
+        let created = {
+            let _admin = admin.as_ref().map(|lock| lock.lock());
+            create_execution(
+                Path::new(&record.source_root),
+                execution_root,
+                &WorkspaceBaseSpec::WorkingState,
+                &snapshot,
+                &blobs,
+                record.locked_by.as_deref(),
+                // Rematerializing an existing record restores the snapshot it was
+                // captured with. Re-provisioning here would apply a declaration the
+                // record was not created under.
+                None,
+                &crate::ResourceTrackingPolicy::default(),
+            )
+        };
+        if let Err(error) = created {
             return Err(error);
         }
         match self.registry.transition(
@@ -2602,6 +2628,20 @@ impl TaskWorkspaceService {
                 .map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+
+    /// Mutex guarding Git's administrative state for the repository containing
+    /// `workspace_root`.
+    ///
+    /// Returns an owned handle rather than a guard so the caller decides the
+    /// hold: the registry lock must never be held across it, or two threads
+    /// taking the pair in opposite orders would deadlock.
+    fn git_admin_lock(&self, workspace_root: &Path) -> Option<Arc<Mutex<()>>> {
+        let key = git_common_dir(workspace_root)?;
+        let mut locks = self.git_admin_locks.lock();
+        Some(Arc::clone(
+            locks.entry(key).or_insert_with(|| Arc::new(Mutex::new(()))),
+        ))
     }
 
     fn discard_managed_workspace(&self, record: &WorkspaceRecord, now: i64) {
@@ -4035,17 +4075,13 @@ fn create_execution(
             // blob-backed baseline still requires below — would throw away the
             // checkout that was just paid for and read the whole tree back out
             // of Git to reproduce it.
-            let result = match crate::snapshot::apply_git_overlay(
-                execution_root,
-                baseline,
-                blobs,
-                policy,
-            ) {
-                Ok(true) => Ok(()),
-                Ok(false) => clear_worktree_contents(execution_root)
-                    .and_then(|_| materialize(execution_root, baseline, blobs)),
-                Err(error) => Err(error),
-            };
+            let result =
+                match crate::snapshot::apply_git_overlay(execution_root, baseline, blobs, policy) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => clear_worktree_contents(execution_root)
+                        .and_then(|_| materialize(execution_root, baseline, blobs)),
+                    Err(error) => Err(error),
+                };
             if let Err(error) = result {
                 unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
                 cleanup_git_worktree(workspace_root, execution_root, "");
@@ -4074,6 +4110,55 @@ fn create_execution(
     Ok((IsolationKind::Shadow, None))
 }
 
+/// How long a `git fetch origin` is treated as still fresh.
+///
+/// A `remoteDefault` base refetched on every acquisition, which on a fan-out —
+/// a team run opening several workspaces at once, a bundle with several roots —
+/// meant one network round trip per root to learn a default branch name that
+/// changes approximately never. Short enough that a task still starts from what
+/// the remote said moments ago, long enough that a burst pays for one fetch.
+const REMOTE_FETCH_TTL: Duration = Duration::from_secs(30);
+
+/// Last successful `git fetch origin` per repository, keyed by common directory.
+static LAST_REMOTE_FETCH: std::sync::OnceLock<Mutex<HashMap<String, std::time::Instant>>> =
+    std::sync::OnceLock::new();
+
+/// Fetch `origin` unless this repository was fetched within [`REMOTE_FETCH_TTL`].
+///
+/// Keyed by common directory so the worktrees cut from one repository share the
+/// window — they share the remote-tracking refs a fetch updates.
+fn fetch_origin_throttled(workspace_root: &Path) -> Result<(), String> {
+    let key = git_common_dir(workspace_root)
+        .unwrap_or_else(|| workspace_root.to_string_lossy().into_owned());
+    {
+        let seen = LAST_REMOTE_FETCH
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock();
+        if let Some(at) = seen.get(&key) {
+            if at.elapsed() < REMOTE_FETCH_TTL {
+                return Ok(());
+            }
+        }
+    }
+    let fetch = Command::new("git")
+        .args(["-C"])
+        .arg(workspace_root)
+        .args(["fetch", "origin"])
+        .output()
+        .map_err(|error| format!("start git fetch origin: {error}"))?;
+    if !fetch.status.success() {
+        return Err(format!(
+            "refresh remote default failed: {}",
+            String::from_utf8_lossy(&fetch.stderr).trim()
+        ));
+    }
+    LAST_REMOTE_FETCH
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .insert(key, std::time::Instant::now());
+    Ok(())
+}
+
 fn resolve_git_base(workspace_root: &Path, base: &WorkspaceBaseSpec) -> Result<String, String> {
     let _perf = cognia_instrument::guard("workspace.resolve_git_base");
     match base {
@@ -4083,18 +4168,7 @@ fn resolve_git_base(workspace_root: &Path, base: &WorkspaceBaseSpec) -> Result<S
         }
         WorkspaceBaseSpec::GitRef { .. } => Err("gitRef base cannot be empty".into()),
         WorkspaceBaseSpec::RemoteDefault => {
-            let fetch = Command::new("git")
-                .args(["-C"])
-                .arg(workspace_root)
-                .args(["fetch", "origin"])
-                .output()
-                .map_err(|error| format!("start git fetch origin: {error}"))?;
-            if !fetch.status.success() {
-                return Err(format!(
-                    "refresh remote default failed: {}",
-                    String::from_utf8_lossy(&fetch.stderr).trim()
-                ));
-            }
+            fetch_origin_throttled(workspace_root)?;
             let output = Command::new("git")
                 .args(["-C"])
                 .arg(workspace_root)
@@ -4245,10 +4319,7 @@ fn remove_managed_execution(record: &WorkspaceRecord) -> Result<(), String> {
             )
         }),
         IsolationKind::GitWorktree => {
-            crate::snapshot::unpin_snapshot_base(
-                Path::new(&record.source_root),
-                execution_root,
-            );
+            crate::snapshot::unpin_snapshot_base(Path::new(&record.source_root), execution_root);
             let expected = record
                 .locked_by
                 .as_deref()
@@ -6101,6 +6172,77 @@ mod tests {
             fs::read_to_string(workspace.path().join("tracked.txt")).unwrap(),
             "uncommitted baseline\n"
         );
+    }
+
+    #[test]
+    /// A `remoteDefault` acquisition used to hit the network every time. The
+    /// second call inside the window must not run `git` at all — proven here by
+    /// breaking `origin` in between: without the throttle the second call would
+    /// try to fetch a remote that no longer resolves and fail.
+    #[test]
+    fn fetching_origin_is_skipped_inside_the_freshness_window() {
+        use git2::Repository;
+
+        let origin = TempDir::new().unwrap();
+        let origin_repo = Repository::init_bare(origin.path()).unwrap();
+        drop(origin_repo);
+
+        let clone_dir = TempDir::new().unwrap();
+        let repo = Repository::init(clone_dir.path()).unwrap();
+        repo.remote("origin", &origin.path().to_string_lossy())
+            .unwrap();
+        drop(repo);
+
+        fetch_origin_throttled(clone_dir.path()).expect("first fetch should reach the remote");
+
+        // Point origin at a path that does not exist. A real fetch now fails.
+        let repo = Repository::open(clone_dir.path()).unwrap();
+        repo.remote_set_url("origin", "/nonexistent/definitely-not-a-repo")
+            .unwrap();
+        drop(repo);
+
+        fetch_origin_throttled(clone_dir.path())
+            .expect("the second call inside the window must not fetch");
+    }
+
+    /// The lock is keyed by Git common directory, not by workspace root.
+    ///
+    /// A repository and every managed worktree cut from it share one
+    /// administrative area — one `index.lock`, one `worktrees/` directory, one
+    /// ref store — so they have to share one mutex. Keying by root would hand
+    /// each worktree its own lock and protect nothing.
+    #[test]
+    fn the_git_admin_lock_is_shared_across_a_repository_and_its_worktrees() {
+        use git2::Repository;
+
+        let data = TempDir::new().unwrap();
+        let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
+
+        let repo_dir = TempDir::new().unwrap();
+        Repository::init(repo_dir.path()).unwrap();
+        let nested = repo_dir.path().join("sub/dir");
+        fs::create_dir_all(&nested).unwrap();
+
+        let other_dir = TempDir::new().unwrap();
+        Repository::init(other_dir.path()).unwrap();
+
+        let root_lock = service.git_admin_lock(repo_dir.path()).unwrap();
+        let nested_lock = service.git_admin_lock(&nested).unwrap();
+        let other_lock = service.git_admin_lock(other_dir.path()).unwrap();
+
+        assert!(
+            Arc::ptr_eq(&root_lock, &nested_lock),
+            "paths inside one repository must share a lock"
+        );
+        assert!(
+            !Arc::ptr_eq(&root_lock, &other_lock),
+            "a separate repository must not be serialized behind this one"
+        );
+
+        // A directory outside any repository has no administrative state to
+        // guard, so there is nothing to lock.
+        let bare = TempDir::new().unwrap();
+        assert!(service.git_admin_lock(bare.path()).is_none());
     }
 
     #[test]
