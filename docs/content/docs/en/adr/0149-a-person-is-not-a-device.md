@@ -346,6 +346,37 @@ is listed under §9, but nothing needs it yet, and it is what makes "which perso
 does this tenant belong to" a single-row lookup — which is exactly how an
 enrolling device learns its owner. It should be relaxed when two profiles
 genuinely share one Org's tenant, and not before.
-| **5** | `ExternalIdentity` absorbs IM principals; Guest lands | `lib/connectors/principal/*` — `bootstrap.ts` stops falling back to `accountId` |
+| **5** | ✅ `ExternalIdentity` absorbs IM principals | `lib/identity/external-person.ts` (find-or-mint by external subject), `lib/connectors/principal/person.ts` (the Lark id ranking), `bootstrap.ts` and `approveFeishuBind` no longer fall back to `accountId`, Dexie v196 `subject` index, and the principals card's person + standing badge. **Guest is derivable and rendered but has no producer** — see below. |
+**Batch 5 notes.** Three things this ADR did not anticipate:
+
+1. **Guest cannot land in this batch, and shipping the derivation is the
+   honest half.** A guest is a `User` holding Workspace membership without Org
+   membership. Nothing writes `workspaceMemberships` in production: the
+   collaboration server owns those rows, and the client has no configured
+   endpoint to pull them from — `pullCollabIssues` itself has no production
+   caller yet either. So Batch 5 ships the derivation (`personStandingFrom`,
+   `resolvePersonStanding`) and the surface that renders it, and the `guest`
+   value stays unreachable until Batch 7 gives the plane a configuration and a
+   membership pull. `lib/db/workspace-membership-producers.test.ts` pins that:
+   it walks the tree for a writer and fails on the day one appears, so the
+   claim cannot rot into a stale comment.
+
+2. **An IM-first person and a web-first person are two `User`s, and merging
+   them is an operator decision.** Sign-in derives its id from `(issuer, sub)`,
+   which nothing minted from a Lark `open_id` can reproduce. Convergence
+   happens automatically only in the direction the evidence exists: a principal
+   carrying a `logtoSubject` resolves to the person who already signed in with
+   it. In the other order the operator rebinds the principal to the real
+   `usr_…`, which now re-points the external identity too. No automatic path
+   merges two people — that would attribute one human's messages to another.
+
+3. **`cogniaUserId` had to become validated, not just populated.** The field
+   defaulted to the LocalProfile id for so long that `acct_…` still *looks*
+   right in it, and `cognia lark rebind --user bob` was accepted. It is now
+   refused at both the operator channel (`user_invalid`) and the mutation
+   floor. Rows written before this batch keep their `acct_…` value; the
+   principals card falls back to showing the raw id rather than a word that
+   says nothing, the same call the device console's owner row makes.
+
 | **6** | `share-server` gains tenancy and identity; `ops-controller` gains RLS | `services/share-server/{src,worker}`, `crates/cognia-ops-controller/migrations/` |
 | **7** | Workspace, Plans and Runs on the collaboration plane | follows Batch 3 |

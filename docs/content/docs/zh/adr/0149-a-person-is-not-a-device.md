@@ -298,6 +298,29 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 `host_bindings.tenant_id` 在 4a 期间保留 `UNIQUE`。放宽它列在 §9，但目前没有任何东西
 需要它；而正是这个约束让"这个租户属于哪个人"成为单行查询——入册中的设备就是这样得知
 自己归属谁的。它应该在两个 profile 真正共享同一个 Org 租户时再放宽，不是更早。
-| **5** | `ExternalIdentity` 收编 IM principal；Guest 落地 | `lib/connectors/principal/*`——`bootstrap.ts` 不再退化到 `accountId` |
+| **5** | ✅ `ExternalIdentity` 收编 IM principal | `lib/identity/external-person.ts`（按外部 subject 找人或建人）、`lib/connectors/principal/person.ts`（Lark 三种 id 的强弱排序）、`bootstrap.ts` 与 `approveFeishuBind` 不再退化到 `accountId`、Dexie v196 的 `subject` 索引、principals 卡片的「人 + 身份」徽章。**Guest 可推导、可渲染，但没有生产者**——见下。 |
+**Batch 5 补记。** 三件本 ADR 没有预料到的事：
+
+1. **Guest 在这一批里落不了地，只交推导那一半才是诚实的。** Guest 的定义是「持有
+   Workspace 成员身份、但不在 Org 里」的 `User`。而生产环境里没有任何代码会写
+   `workspaceMemberships`：这些行归协作服务器所有，客户端至今没有可配置的端点去拉
+   ——`pullCollabIssues` 本身也还没有生产调用方。所以 Batch 5 交付的是推导
+   （`personStandingFrom`、`resolvePersonStanding`）与渲染它的界面，`guest` 这个取值
+   在 Batch 7 给协作面配上配置与成员拉取之前一直不可达。
+   `lib/db/workspace-membership-producers.test.ts` 把这件事钉住：它扫描代码树寻找写
+   入方，一旦出现就失败——这样这句话不会烂成一条过期注释。
+
+2. **先从 IM 来的人和先从 Web 来的人是两个 `User`，合并是运维决定。** 登录侧的 id
+   由 `(issuer, sub)` 推导，从 Lark `open_id` 铸出来的人无法复现它。只有在证据存在的
+   那个方向上会自动收敛：带 `logtoSubject` 的 principal 会解析到那个已经用它登录过的
+   人。反方向则由运维把 principal 重绑到真正的 `usr_…`，而重绑现在会同时改指外部身份
+   行。没有任何自动路径会合并两个人——那等于把一个人的消息记到另一个人头上。
+
+3. **`cogniaUserId` 不能只是「填对」，还必须校验。** 这个字段长期默认为
+   LocalProfile id，以至于 `acct_…` 放在里面到今天仍然「看起来是对的」，而
+   `cognia lark rebind --user bob` 一直被接受。现在运维通道（`user_invalid`）与写入
+   底层都会拒绝。本批之前写下的行保留其 `acct_…` 值；principals 卡片回落显示裸 id，
+   而不是一个什么也没说的词——与设备控制台归属行是同一个判断。
+
 | **6** | `share-server` 补租户与身份；`ops-controller` 补 RLS | `services/share-server/{src,worker}`、`crates/cognia-ops-controller/migrations/` |
 | **7** | Workspace、Plans 与 Runs 上协作面 | 承接 Batch 3 |
