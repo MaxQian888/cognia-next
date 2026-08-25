@@ -539,6 +539,20 @@ describe("getDb", () => {
     }
   })
 
+  it("v193 opens the saved chat templates table with the indexes the picker needs", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(193)
+
+    expect(db.chatTemplates.schema.primKey.name).toBe("id")
+    // The picker sorts by recency of use, falling back to recency of edit —
+    // both need an index or the list is a full scan on every keystroke.
+    expect(db.chatTemplates.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["name", "updatedAt", "lastUsedAt"])
+    )
+  })
+
   it("v170 opens the issue tracker tables with the indexes its queries need", async () => {
     const db = getDb()
     await db.open()

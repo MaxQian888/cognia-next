@@ -305,6 +305,7 @@ import { isTauri } from "@/lib/platform/detect"
 import { backfillProjectScopeV86 } from "./project-scope-backfill"
 import { backfillTriggeredBySourceV91 } from "./triggered-by-source-backfill"
 import { backfillSessionLineageV131 } from "./session-lineage-backfill"
+import type { ChatTemplateRow } from "./chat-templates"
 
 /**
  * Idempotently backfill `roots` on a project row from the legacy
@@ -4583,6 +4584,17 @@ export class CogniaDB extends Dexie {
         })
       })
 
+    // v193 — saved chat templates (message body + `{{parameter}}` declarations).
+    // A table of its own rather than a projection: ADR-0100's rule is that the
+    // template catalog projects a domain's store and never owns one, so this
+    // domain needs a writer to project FROM. Account-wide, not workspace-scoped
+    // — a phrase you reuse is yours, not the repository's; templates that
+    // belong to a repository travel in the repository (ADR-0147's file, not
+    // this table). See `lib/db/chat-templates.ts`.
+    this.version(193).stores({
+      chatTemplates: "&id, name, updatedAt, lastUsedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4590,6 +4602,8 @@ export class CogniaDB extends Dexie {
     }
   }
 
+  // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
+  chatTemplates!: Table<ChatTemplateRow, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.
