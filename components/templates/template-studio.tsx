@@ -11,6 +11,7 @@ import {
   FileArchiveIcon,
   PlusIcon,
   SearchIcon,
+  Trash2Icon,
   UploadIcon,
   ChevronDownIcon,
 } from "lucide-react"
@@ -19,11 +20,13 @@ import { useTemplateCatalog } from "@/hooks/use-template-catalog"
 import type {
   TemplateDefinitionEnvelope,
   TemplateDomain,
+  TemplateInputSpec,
   TemplateJson,
   TemplatePlatform,
   TemplateTrust,
   TemplateVersionBump,
 } from "@/lib/templates/contracts"
+import { isTemplateInputId, listTemplateTokens } from "@/lib/templates/contracts"
 import type { InspectedTemplatePackage } from "@/lib/templates/package"
 import type { TemplatePreflightPlan } from "@/lib/templates/service"
 import { getTemplateRuntime } from "@/lib/templates/runtime"
@@ -39,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
@@ -243,7 +247,12 @@ export function TemplateStudio() {
    * payload that fails validation and names the reasons, and swallowing that
    * here would leave the user staring at an unchanged box.
    */
-  const saveDraft = async (edits: { name: string; description: string; payload: TemplateJson }) => {
+  const saveDraft = async (edits: {
+    name: string
+    description: string
+    payload: TemplateJson
+    inputs: TemplateInputSpec[]
+  }) => {
     if (!selected) return
     const saved = await runtime.service.saveDraft(
       {
@@ -254,6 +263,7 @@ export function TemplateStudio() {
           description: edits.description || undefined,
         },
         payload: edits.payload,
+        inputs: edits.inputs,
       },
       selected.revision
     )
@@ -751,14 +761,59 @@ function TemplateDraftEditor({
   t,
 }: {
   definition: TemplateDefinitionEnvelope
-  onSave(edits: { name: string; description: string; payload: TemplateJson }): Promise<void>
+  onSave(edits: {
+    name: string
+    description: string
+    payload: TemplateJson
+    inputs: TemplateInputSpec[]
+  }): Promise<void>
   t: ReturnType<typeof useTranslations<"templateStudio">>
 }) {
   const [name, setName] = useState(definition.metadata.name)
   const [description, setDescription] = useState(definition.metadata.description ?? "")
   const [payloadText, setPayloadText] = useState(() => JSON.stringify(definition.payload, null, 2))
+  const [inputs, setInputs] = useState<TemplateInputSpec[]>(() =>
+    structuredClone(definition.inputs)
+  )
   const [error, setError] = useState<string>()
   const [saving, setSaving] = useState(false)
+
+  /**
+   * The tokens the payload actually uses, split by whether anything declares
+   * them — recomputed from the TEXT on every keystroke, so the answer tracks
+   * what the user is typing rather than the last thing they saved.
+   *
+   * Null while the JSON is unparseable: mid-edit is not a moment to complain
+   * about missing declarations. `listTemplateTokens` is the same classifier
+   * `interpolation.unknown` uses on save, so this list cannot disagree with the
+   * error the save would produce — including the workflow domain, where a
+   * `{{ $node['a'].output }}` expression belongs to the workflow engine and is
+   * not an authoring gap at all.
+   */
+  const tokens = useMemo(() => {
+    let payload: TemplateJson
+    try {
+      payload = JSON.parse(payloadText) as TemplateJson
+    } catch {
+      return null
+    }
+    return listTemplateTokens(
+      payload,
+      new Set(inputs.map((input) => input.id)),
+      definition.domain === "workflow"
+    )
+  }, [payloadText, inputs, definition.domain])
+
+  // Tokens that could become an input, and tokens that could not. Offering to
+  // declare something that would then fail the `input.id` check is worse than
+  // not offering, so the two are separated and only the first gets a button.
+  const declarable = (tokens?.unknown ?? []).filter(isTemplateInputId)
+  const undeclarable = (tokens?.unknown ?? []).filter((token) => !isTemplateInputId(token))
+
+  const patchInput = (index: number, patch: Partial<TemplateInputSpec>) =>
+    setInputs((prev) =>
+      prev.map((input, i) => (i === index ? ({ ...input, ...patch } as TemplateInputSpec) : input))
+    )
 
   const save = async () => {
     const trimmed = name.trim()
@@ -776,7 +831,7 @@ function TemplateDraftEditor({
     setError(undefined)
     setSaving(true)
     try {
-      await onSave({ name: trimmed, description: description.trim(), payload })
+      await onSave({ name: trimmed, description: description.trim(), payload, inputs })
     } catch (err) {
       // `saveDraft` refuses an invalid payload and names every reason. Show it
       // verbatim — a generic "save failed" would hide which field is wrong.
@@ -814,6 +869,68 @@ function TemplateDraftEditor({
           spellCheck={false}
         />
       </div>
+      <div className="space-y-2 rounded-md border p-3">
+        <div className="flex items-center justify-between gap-2">
+          <Label>{t("inputs.title")}</Label>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              setInputs((prev) => [...prev, { id: "", label: "", kind: "string", required: true }])
+            }
+          >
+            <PlusIcon className="size-3.5" />
+            {t("inputs.add")}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{t("inputs.hint")}</p>
+        {inputs.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("inputs.none")}</p>
+        ) : (
+          inputs.map((input, index) => (
+            <TemplateInputRow
+              key={index}
+              input={input}
+              t={t}
+              onPatch={(patch) => patchInput(index, patch)}
+              onRemove={() => setInputs((prev) => prev.filter((_, i) => i !== index))}
+            />
+          ))
+        )}
+        {declarable.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-muted-foreground">
+              {t("inputs.undeclared", { ids: declarable.join(", ") })}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                setInputs((prev) => [
+                  ...prev,
+                  ...declarable.map((id): TemplateInputSpec => ({
+                    id,
+                    // The id is the only thing the payload told us; a label
+                    // that repeats it is honest, and it is one field to fix.
+                    label: id,
+                    // Required by default: a token in the payload with nothing
+                    // behind it is what `interpolation.unknown` was refusing.
+                    required: true,
+                    kind: "string",
+                  })),
+                ])
+              }
+            >
+              {t("inputs.declareAll")}
+            </Button>
+          </div>
+        ) : null}
+        {undeclarable.length > 0 ? (
+          <p className="text-xs text-destructive">
+            {t("inputs.undeclarableHint", { ids: undeclarable.join(", ") })}
+          </p>
+        ) : null}
+      </div>
       {error ? (
         <Alert variant="destructive">
           <AlertTriangleIcon />
@@ -823,6 +940,178 @@ function TemplateDraftEditor({
       <Button onClick={() => void save()} disabled={saving}>
         {saving ? t("draftEditor.saving") : t("draftEditor.save")}
       </Button>
+    </div>
+  )
+}
+
+/** Every input kind the contract accepts, in the order the editor offers them. */
+const INPUT_KINDS = [
+  "string",
+  "number",
+  "boolean",
+  "enum",
+  "resource",
+  "secretRef",
+  "twinSlot",
+  "model",
+  "provider",
+  "tool",
+  "skill",
+  "character",
+  "workflow",
+] as const
+
+/** The kinds that carry a free-form resource hint rather than a value. */
+const RESOURCE_KINDS = new Set<string>([
+  "resource",
+  "secretRef",
+  "twinSlot",
+  "model",
+  "provider",
+  "tool",
+  "skill",
+  "character",
+  "workflow",
+])
+
+/**
+ * A default value stored as the type its input declares.
+ *
+ * Every field in this editor is a text box, so without this a `number` input
+ * would carry the string `"3"` — the union permits it and no validator objects,
+ * which is exactly how a wrongly-typed value survives all the way to whatever
+ * consumes it. Applied on kind change too: switching `string` → `number` must
+ * not leave prose sitting in a numeric default.
+ */
+function coerceInputDefault(
+  kind: TemplateInputSpec["kind"],
+  raw: string | number | boolean | undefined
+): string | number | boolean | undefined {
+  if (raw === undefined || raw === "") return undefined
+  if (kind === "number") {
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  if (kind === "boolean") return raw === true || raw === "true"
+  if (kind === "enum" || RESOURCE_KINDS.has(kind)) return undefined
+  return String(raw)
+}
+
+function TemplateInputRow({
+  input,
+  onPatch,
+  onRemove,
+  t,
+}: {
+  input: TemplateInputSpec
+  onPatch(patch: Partial<TemplateInputSpec>): void
+  onRemove(): void
+  t: ReturnType<typeof useTranslations<"templateStudio">>
+}) {
+  const options = input.kind === "enum" ? input.options : []
+  const defaultValue = "defaultValue" in input ? input.defaultValue : undefined
+
+  return (
+    <div className="space-y-2 rounded-md border p-2" data-testid="template-input-row">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          className="h-8 w-40 font-mono text-xs"
+          aria-label={t("inputs.id")}
+          value={input.id}
+          onChange={(event) => onPatch({ id: event.target.value })}
+        />
+        <Input
+          className="h-8 min-w-0 flex-1"
+          aria-label={t("inputs.label")}
+          value={input.label}
+          onChange={(event) => onPatch({ label: event.target.value })}
+        />
+        <Select
+          value={input.kind}
+          onValueChange={(raw) => {
+            const kind = raw as TemplateInputSpec["kind"]
+            onPatch({
+              kind,
+              // An enum with no options is refused by `input.enum-options`, so
+              // switching to it seeds one empty choice rather than producing a
+              // draft that cannot be saved.
+              ...(kind === "enum" ? { options: options.length > 0 ? options : [""] } : {}),
+              defaultValue: coerceInputDefault(kind, defaultValue),
+            } as Partial<TemplateInputSpec>)
+          }}
+        >
+          <SelectTrigger className="h-8 w-36" aria-label={t("inputs.kind")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {INPUT_KINDS.map((kind) => (
+              <SelectItem key={kind} value={kind}>
+                {t(`inputKindNames.${kind}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <label className="flex shrink-0 items-center gap-1.5 text-xs">
+          <Checkbox
+            checked={input.required}
+            onCheckedChange={(checked) => onPatch({ required: checked === true })}
+          />
+          {t("inputs.required")}
+        </label>
+        <Button variant="ghost" size="icon" aria-label={t("inputs.remove")} onClick={onRemove}>
+          <Trash2Icon className="size-4" />
+        </Button>
+      </div>
+      {input.kind === "enum" ? (
+        <Textarea
+          className="min-h-16 text-xs"
+          aria-label={t("inputs.options")}
+          value={options.join("\n")}
+          onChange={(event) =>
+            onPatch({
+              options: event.target.value.split("\n").map((line) => line.trim()),
+            } as Partial<TemplateInputSpec>)
+          }
+        />
+      ) : RESOURCE_KINDS.has(input.kind) ? (
+        <Input
+          className="h-8"
+          aria-label={t("inputs.resourceKind")}
+          placeholder={t("inputs.resourceKind")}
+          value={"resourceKind" in input ? (input.resourceKind ?? "") : ""}
+          onChange={(event) =>
+            onPatch({ resourceKind: event.target.value || undefined } as Partial<TemplateInputSpec>)
+          }
+        />
+      ) : input.kind === "boolean" ? (
+        <Select
+          value={defaultValue === undefined ? "" : String(defaultValue)}
+          onValueChange={(value) =>
+            onPatch({ defaultValue: value === "true" } as Partial<TemplateInputSpec>)
+          }
+        >
+          <SelectTrigger className="h-8 w-36" aria-label={t("inputs.default")}>
+            <SelectValue placeholder={t("inputs.default")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="true">{t("inputs.booleanTrue")}</SelectItem>
+            <SelectItem value="false">{t("inputs.booleanFalse")}</SelectItem>
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input
+          className="h-8"
+          type={input.kind === "number" ? "number" : "text"}
+          aria-label={t("inputs.default")}
+          placeholder={t("inputs.default")}
+          value={defaultValue === undefined ? "" : String(defaultValue)}
+          onChange={(event) =>
+            onPatch({
+              defaultValue: coerceInputDefault(input.kind, event.target.value),
+            } as Partial<TemplateInputSpec>)
+          }
+        />
+      )}
     </div>
   )
 }

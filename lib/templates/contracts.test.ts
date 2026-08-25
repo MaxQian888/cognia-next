@@ -2,6 +2,7 @@ import {
   TEMPLATE_API_VERSION,
   createTemplateDefinition,
   isCredentialKey,
+  listTemplateTokens,
   suggestTemplateVersionBump,
   validateTemplateDefinition,
 } from "./contracts"
@@ -273,5 +274,58 @@ describe("template contracts", () => {
       bump: "major",
       reasons: [expect.stringContaining("tone")],
     })
+  })
+})
+
+describe("listTemplateTokens", () => {
+  const declared = new Set(["teamName"])
+
+  it("separates declared inputs from tokens nothing declares", () => {
+    expect(
+      listTemplateTokens(
+        { a: "{{teamName}}", b: ["{{depth}}", "{{ teamName }}"], c: 1 },
+        declared,
+        false
+      )
+    ).toEqual({ input: ["teamName"], unknown: ["depth"] })
+  })
+
+  // A workflow expression belongs to the workflow engine, not to the author —
+  // offering to "declare" one would turn a live expression into a dead string.
+  it("does not report a workflow expression as an authoring gap", () => {
+    const payload = { value: "{{ $node['a'].output }}" }
+    expect(listTemplateTokens(payload, declared, true).unknown).toEqual([])
+    // ...and outside the workflow domain the very same token IS a gap, exactly
+    // as `interpolation.unknown` treats it on save.
+    expect(listTemplateTokens(payload, declared, false).unknown).toEqual(["$node['a'].output"])
+  })
+
+  it("reports each token once, in the order it is first met", () => {
+    expect(listTemplateTokens(["{{b}}", "{{a}}", "{{b}}"], new Set(), false).unknown).toEqual([
+      "b",
+      "a",
+    ])
+  })
+
+  // The Studio's "declare these" offer must be exactly the set that would fail
+  // validation, so the two are checked against each other here.
+  it("matches what validation refuses", async () => {
+    const definition = await createTemplateDefinition({
+      id: "t.tokens",
+      domain: "skill",
+      status: "draft",
+      revision: 1,
+      metadata: { name: "T" },
+      payload: { prompt: "Hello {{who}}" },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+      provenance: { source: "user" },
+    })
+    const refused = validateTemplateDefinition(definition)
+      .issues.filter((issue) => issue.code === "interpolation.unknown")
+      .map((issue) => issue.message.split(": ").pop())
+    expect(listTemplateTokens(definition.payload, new Set(), false).unknown).toEqual(refused)
   })
 })

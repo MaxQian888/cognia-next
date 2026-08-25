@@ -147,6 +147,17 @@ export interface TemplateValidationResult {
 }
 
 const IDENTIFIER = /^[a-z0-9](?:[a-z0-9._:-]{0,126}[a-z0-9])?$/i
+
+/**
+ * Whether `value` may be a template input id.
+ *
+ * Exported so an authoring surface can refuse a name BEFORE the save bounces:
+ * the Studio offers to declare the undeclared tokens it finds in a payload, and
+ * an offer that produces an `input.id` error is worse than no offer.
+ */
+export function isTemplateInputId(value: string): boolean {
+  return IDENTIFIER.test(value)
+}
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
 const FORBIDDEN_PRIVATE_KEYS = new Set([
   "twinId",
@@ -325,6 +336,66 @@ function pushForbiddenPayloadIssues(
   }
 }
 
+/** What a `{{ }}` token in a payload turns out to be. */
+export type TemplateTokenKind = "input" | "workflowExpression" | "unknown"
+
+/**
+ * Classify one token's contents.
+ *
+ * The single definition of "is this an input reference?", shared by the
+ * validator below and by the Studio's authoring surface. Two copies of this
+ * decision would let the editor offer to declare an input for a workflow
+ * expression, or stay quiet about a token that then fails on save.
+ */
+export function classifyTemplateToken(
+  expression: string,
+  inputIds: ReadonlySet<string>,
+  allowWorkflowExpressions: boolean
+): TemplateTokenKind {
+  const trimmed = expression.trim()
+  if (IDENTIFIER.test(trimmed) && inputIds.has(trimmed)) return "input"
+  if (allowWorkflowExpressions && tokenize(trimmed).length > 0) return "workflowExpression"
+  return "unknown"
+}
+
+/**
+ * Every `{{ }}` token in a payload, split by what it turns out to be.
+ *
+ * The Studio uses `unknown` to offer "declare these": an undeclared token is
+ * precisely what `interpolation.unknown` refuses on save, so the editor can say
+ * so while it is still fixable rather than after the save bounces. Ids come back
+ * de-duplicated, in the order first met, because that is the order someone
+ * reading the payload would meet them in.
+ */
+export function listTemplateTokens(
+  payload: TemplateJson,
+  inputIds: ReadonlySet<string>,
+  allowWorkflowExpressions: boolean
+): { input: string[]; unknown: string[] } {
+  const input: string[] = []
+  const unknown: string[] = []
+  const walk = (value: TemplateJson): void => {
+    if (typeof value === "string") {
+      for (const match of value.matchAll(/\{\{([^{}]+)\}\}/g)) {
+        const expression = match[1].trim()
+        const kind = classifyTemplateToken(expression, inputIds, allowWorkflowExpressions)
+        if (kind === "input" && !input.includes(expression)) input.push(expression)
+        // A workflow expression is not an authoring gap — it belongs to the
+        // workflow engine and is evaluated when the workflow runs.
+        if (kind === "unknown" && !unknown.includes(expression)) unknown.push(expression)
+      }
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach(walk)
+      return
+    }
+    if (value && typeof value === "object") Object.values(value).forEach(walk)
+  }
+  walk(payload)
+  return { input, unknown }
+}
+
 function pushInterpolationIssues(
   value: TemplateJson,
   path: string,
@@ -343,9 +414,7 @@ function pushInterpolationIssues(
     }
     for (const match of value.matchAll(/\{\{([^{}]+)\}\}/g)) {
       const expression = match[1].trim()
-      const declaredInput = IDENTIFIER.test(expression) && inputIds.has(expression)
-      const workflowExpression = allowWorkflowExpressions && tokenize(expression).length > 0
-      if (!declaredInput && !workflowExpression) {
+      if (classifyTemplateToken(expression, inputIds, allowWorkflowExpressions) === "unknown") {
         issues.push({
           code: "interpolation.unknown",
           path,
@@ -422,7 +491,7 @@ export function validateTemplateDefinition(
     error("input.duplicate", "inputs", "Template input ids must be unique")
   }
   for (const [index, input] of definition.inputs.entries()) {
-    if (!IDENTIFIER.test(input.id)) {
+    if (!isTemplateInputId(input.id)) {
       error("input.id", `inputs[${index}].id`, "Input id is invalid")
     }
     if (input.kind === "enum" && input.options.length === 0) {

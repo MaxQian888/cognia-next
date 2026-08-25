@@ -37397,6 +37397,21 @@
       "inert": "导入不会创建资源，也不会运行模板内容。",
       "title": "导入模板包"
     },
+    "inputKindNames": {
+      "boolean": "是 / 否",
+      "character": "角色",
+      "enum": "单选",
+      "model": "模型",
+      "number": "数字",
+      "provider": "提供方",
+      "resource": "资源",
+      "secretRef": "密钥",
+      "skill": "技能",
+      "string": "文本",
+      "tool": "工具",
+      "twinSlot": "数字分身",
+      "workflow": "工作流"
+    },
     "inputKinds": {
       "boolean": "输入 true 或 false",
       "character": "角色 ID",
@@ -37411,6 +37426,25 @@
       "tool": "工具 ID",
       "twinSlot": "Twin ID",
       "workflow": "工作流 ID"
+    },
+    "inputs": {
+      "add": "新增输入项",
+      "booleanFalse": "否",
+      "booleanTrue": "是",
+      "declareAll": "全部声明",
+      "default": "默认值",
+      "hint": "载荷里写成参数标记的地方，取值来自这里声明的输入项。",
+      "id": "标识",
+      "kind": "类型",
+      "label": "名称",
+      "none": "还没有声明任何输入项。",
+      "options": "可选项，每行一个",
+      "remove": "删除输入项",
+      "required": "必填",
+      "resourceKind": "资源类型",
+      "title": "输入项",
+      "undeclarableHint": "{ids} 不能作为输入标识——标识只能是字母、数字和 . _ : -",
+      "undeclared": "载荷里用到但没声明：{ids}"
     },
     "inspector": {
       "empty": "请选择一个模板，以检查其定义和可用操作。",

@@ -37397,6 +37397,21 @@
       "inert": "Importing does not create resources or run template content.",
       "title": "Import template package"
     },
+    "inputKindNames": {
+      "boolean": "Yes / no",
+      "character": "Character",
+      "enum": "Choice",
+      "model": "Model",
+      "number": "Number",
+      "provider": "Provider",
+      "resource": "Resource",
+      "secretRef": "Secret",
+      "skill": "Skill",
+      "string": "Text",
+      "tool": "Tool",
+      "twinSlot": "Twin",
+      "workflow": "Workflow"
+    },
     "inputKinds": {
       "boolean": "Enter true or false",
       "character": "Character ID",
@@ -37411,6 +37426,25 @@
       "tool": "Tool ID",
       "twinSlot": "Twin ID",
       "workflow": "Workflow ID"
+    },
+    "inputs": {
+      "add": "Add an input",
+      "booleanFalse": "No",
+      "booleanTrue": "Yes",
+      "declareAll": "Declare them",
+      "default": "Default value",
+      "hint": "A parameter tokenised in the payload takes its value from an input declared here.",
+      "id": "Id",
+      "kind": "Type",
+      "label": "Label",
+      "none": "No inputs declared.",
+      "options": "Choices, one per line",
+      "remove": "Remove input",
+      "required": "Required",
+      "resourceKind": "Resource kind",
+      "title": "Inputs",
+      "undeclarableHint": "{ids} cannot be an input id — an id is letters, digits and . _ : -",
+      "undeclared": "Used in the payload but not declared: {ids}"
     },
     "inspector": {
       "empty": "Select a template to inspect its definition and available actions.",

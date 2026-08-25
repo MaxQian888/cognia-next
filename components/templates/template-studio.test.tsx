@@ -146,6 +146,100 @@ describe("TemplateStudio", () => {
       expect(screen.getByText("messages.draftSaved")).toBeInTheDocument()
     })
 
+    // Regression: `createDraft` passes `inputs: []` and the editor had no way to
+    // add one, so a Studio-authored template could not parameterise anything —
+    // the interpolation the payload validator has always insisted on had no
+    // authoring surface to produce it.
+    it("declares the payload's undeclared tokens and saves them", async () => {
+      mockSaveDraft.mockResolvedValue(
+        draftDefinition({ revision: 5, contentHash: "sha256:notes-2" })
+      )
+      await openDraftEditor()
+
+      fireEvent.change(screen.getByLabelText("draftEditor.payload"), {
+        target: { value: '{"name":"{{topic}} notes","content":"about {{topic}}"}' },
+      })
+      // Reported once, not once per occurrence, and offered while it is still
+      // fixable rather than after the save bounces.
+      expect(screen.getByText("inputs.undeclared")).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "inputs.declareAll" }))
+      // Declared now, so the offer is gone.
+      expect(screen.queryByText("inputs.undeclared")).not.toBeInTheDocument()
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "draftEditor.save" }))
+      })
+
+      expect(mockSaveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputs: [{ id: "topic", label: "topic", required: true, kind: "string" }],
+        }),
+        4
+      )
+    })
+
+    it("adds, edits and removes an input by hand", async () => {
+      mockSaveDraft.mockResolvedValue(draftDefinition({ revision: 5 }))
+      await openDraftEditor()
+
+      expect(screen.getByText("inputs.none")).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "inputs.add" }))
+      fireEvent.change(screen.getByLabelText("inputs.id"), { target: { value: "depth" } })
+      fireEvent.change(screen.getByLabelText("inputs.label"), { target: { value: "Depth" } })
+      fireEvent.change(screen.getByLabelText("inputs.default"), { target: { value: "quick" } })
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "draftEditor.save" }))
+      })
+      expect(mockSaveDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          inputs: [
+            { id: "depth", label: "Depth", required: true, kind: "string", defaultValue: "quick" },
+          ],
+        }),
+        4
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: "inputs.remove" }))
+      expect(screen.getByText("inputs.none")).toBeInTheDocument()
+    })
+
+    it("keeps the inputs an existing draft already declares", async () => {
+      catalogDefinitions = [
+        draftDefinition({
+          inputs: [{ id: "topic", label: "Topic", required: false, kind: "string" }],
+        }),
+      ]
+      await openDraftEditor()
+
+      expect(screen.getByLabelText("inputs.id")).toHaveValue("topic")
+      expect(screen.getByLabelText("inputs.label")).toHaveValue("Topic")
+    })
+
+    // A workflow expression belongs to the workflow engine. Offering to declare
+    // one would turn a live expression into a dead string on the next save.
+    it("does not offer to declare a workflow expression in a workflow payload", async () => {
+      catalogDefinitions = [draftDefinition({ domain: "workflow" })]
+      await openDraftEditor()
+
+      fireEvent.change(screen.getByLabelText("draftEditor.payload"), {
+        target: { value: '{"value":"{{ $node[\'a\'].output }}"}' },
+      })
+      expect(screen.queryByText("inputs.undeclared")).not.toBeInTheDocument()
+    })
+
+    // Declaring `$node['a'].output` would produce an `input.id` error on save —
+    // an offer that cannot succeed is worse than no offer.
+    it("says why a token cannot become an input rather than offering to declare it", async () => {
+      await openDraftEditor()
+
+      fireEvent.change(screen.getByLabelText("draftEditor.payload"), {
+        target: { value: '{"value":"{{ $node[\'a\'].output }}"}' },
+      })
+      expect(screen.queryByRole("button", { name: "inputs.declareAll" })).not.toBeInTheDocument()
+      expect(screen.getByText("inputs.undeclarableHint")).toBeInTheDocument()
+    })
+
     it("refuses to save an unparseable payload instead of sending it", async () => {
       await openDraftEditor()
 
