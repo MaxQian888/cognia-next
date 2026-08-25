@@ -9,6 +9,8 @@ import {
   normalizePreviewUrl,
   resolveTrustTier,
   screenshotToFile,
+  BROWSER_NAV_INTENTS,
+  toBrowserNavIntent,
 } from "./protocol"
 
 describe("browser action dialog contract", () => {
@@ -282,5 +284,20 @@ describe("BROWSER_EVENTS", () => {
     expect(BROWSER_EVENTS.navigated).toBe("browser://navigated")
     expect(BROWSER_EVENTS.loaded).toBe("browser://loaded")
     expect(BROWSER_EVENTS.proxyError).toBe("browser://proxy-error")
+  })
+})
+
+describe("browser navigation intents", () => {
+  it("pins the vocabulary shared with the Rust NAV_INTENTS constant", () => {
+    expect(BROWSER_NAV_INTENTS).toEqual(["push", "replace", "traverse"])
+  })
+
+  it("defaults anything unrecognized to push, matching the Rust side", () => {
+    expect(toBrowserNavIntent("replace")).toBe("replace")
+    expect(toBrowserNavIntent("traverse")).toBe("traverse")
+    expect(toBrowserNavIntent("push")).toBe("push")
+    for (const bad of [undefined, null, "", "nonsense", 7, {}]) {
+      expect(toBrowserNavIntent(bad)).toBe("push")
+    }
   })
 })

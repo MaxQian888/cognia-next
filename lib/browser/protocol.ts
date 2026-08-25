@@ -123,9 +123,50 @@ export interface BrowserSelectionSignal {
   generation: number
 }
 
+/**
+ * Whether a reported URL change was a real document load or a same-document
+ * (SPA) route change. `"document"` fires at the *start* of a navigation, so a
+ * redirect chain reports one per hop — history models must key off
+ * `browser://loaded` instead and use this only for address-bar sync.
+ */
+export type BrowserNavKind = "document" | "spa"
+
+/**
+ * How a reported URL change relates to the page's own history stack.
+ *
+ * Neither WKWebView nor WebView2 exposes `canGoBack` through Tauri, so the
+ * renderer models the stack itself and needs all three: `push` grows it,
+ * `replace` overwrites the current entry, and `traverse` (`popstate`) moves
+ * inside a stack that already exists. Treating a traverse as a push would grow
+ * the stack on every Back and leave Forward permanently unreachable.
+ */
+export type BrowserNavIntent = "push" | "replace" | "traverse"
+
+/**
+ * The intent vocabulary, as a value. Mirrors `NAV_INTENTS` in
+ * `src-tauri/src/browser/commands.rs`; both sides pin the literal in a test so
+ * a one-sided change is visible instead of silently normalizing to `push`.
+ */
+export const BROWSER_NAV_INTENTS: readonly BrowserNavIntent[] = [
+  "push",
+  "replace",
+  "traverse",
+] as const
+
+/** Narrow an untrusted `intent` field, defaulting to `push` like the Rust side. */
+export function toBrowserNavIntent(value: unknown): BrowserNavIntent {
+  return BROWSER_NAV_INTENTS.includes(value as BrowserNavIntent)
+    ? (value as BrowserNavIntent)
+    : "push"
+}
+
 export interface BrowserNavigated {
   paneId: string
   url: string
+  /** Absent on payloads produced before the overlay reported it. */
+  kind?: BrowserNavKind
+  /** Absent on payloads produced before the overlay reported it. */
+  intent?: BrowserNavIntent
 }
 
 /** Payload for `browser://loaded` — the preview finished loading a document. */

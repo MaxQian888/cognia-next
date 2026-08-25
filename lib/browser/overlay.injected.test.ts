@@ -557,7 +557,7 @@ type Win = Record<string, unknown> & {
       close: () => void
       location: { href: string; assign: (u: string) => boolean }
     }
-    scheduleNavReport: () => void
+    scheduleNavReport: (intent?: string) => void
     signalLoaded: () => void
     installLoadHook: () => void
   }
@@ -918,10 +918,65 @@ describe("navigation plumbing", () => {
       window.history.replaceState({}, "", "/spa-page-2")
       jest.advanceTimersByTime(200)
       expect(signal).toHaveBeenCalledTimes(1)
-      expect(signal).toHaveBeenCalledWith({ url: "http://localhost/spa-page-2" })
+      // A push inside the window outranks the replace that followed it — the
+      // stack did grow, so the renderer must not overwrite its current entry.
+      expect(signal).toHaveBeenCalledWith({
+        url: "http://localhost/spa-page-2",
+        intent: "push",
+      })
       // No further URL change → no further report.
       jest.advanceTimersByTime(500)
       expect(signal).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("reports a lone replaceState as replace", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalNav = signal
+      window.history.replaceState({}, "", "/replaced-only")
+      jest.advanceTimersByTime(200)
+      expect(signal).toHaveBeenCalledWith({
+        url: "http://localhost/replaced-only",
+        intent: "replace",
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("reports popstate as traverse so Back does not grow the renderer stack", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalNav = signal
+      window.history.replaceState({}, "", "/traversed")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+      jest.advanceTimersByTime(200)
+      expect(signal).toHaveBeenCalledWith({
+        url: "http://localhost/traversed",
+        intent: "traverse",
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("defaults an unknown intent to push", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalNav = signal
+      window.history.replaceState({}, "", "/unknown-intent")
+      win().__cogniaOverlay.scheduleNavReport("nonsense")
+      jest.advanceTimersByTime(200)
+      expect(signal).toHaveBeenCalledWith({
+        url: "http://localhost/unknown-intent",
+        intent: "push",
+      })
     } finally {
       jest.useRealTimers()
     }

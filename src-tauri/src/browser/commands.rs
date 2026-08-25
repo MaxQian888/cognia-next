@@ -29,7 +29,11 @@ pub(crate) enum NavDisposition {
     /// Selection sentinel: emit `browser://element-selected`, cancel.
     Selection(serde_json::Value),
     /// SPA-nav sentinel: emit `browser://navigated` for the reported URL, cancel.
-    SpaNavigated(String),
+    SpaNavigated {
+        url: String,
+        /// How the page changed its own history — see {@link NAV_INTENTS}.
+        intent: &'static str,
+    },
     /// Load-complete sentinel: emit `browser://loaded` for the reported URL, cancel.
     Loaded(String),
     /// ADR-0127 push sentinels: emit `browser://console` / `browser://network`
@@ -59,6 +63,27 @@ pub(crate) fn is_sentinel_host(url_str: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// How a reported URL change relates to the page's own history stack.
+///
+/// The renderer models the back/forward stack itself (there is no `can_go_back`
+/// on either webview), so it has to distinguish these three: a `push` grows the
+/// stack, a `replace` overwrites the current entry, and a `traverse`
+/// (`popstate`) moves within a stack that already exists. Collapsing traverse
+/// into push — the obvious binary "replace: bool" — would grow the stack on
+/// every Back and make Forward permanently unreachable.
+pub(crate) const NAV_INTENTS: [&str; 3] = ["push", "replace", "traverse"];
+
+/// Normalize a reported intent, defaulting to `push` for an older overlay that
+/// does not send one. `push` is the conservative default: it is exactly what
+/// the renderer did for every SPA navigation before intents existed.
+fn nav_intent(payload: &serde_json::Value) -> &'static str {
+    match payload.get("intent").and_then(|v| v.as_str()) {
+        Some("replace") => "replace",
+        Some("traverse") => "traverse",
+        _ => "push",
+    }
+}
+
 pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
     if let Some(payload) = overlay::parse_selection(url_str) {
         return NavDisposition::Selection(payload);
@@ -66,7 +91,10 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
     if let Some(payload) = overlay::parse_spa_navigation(url_str) {
         let reported = payload.get("url").and_then(|v| v.as_str()).unwrap_or("");
         if reported.starts_with("http://") || reported.starts_with("https://") {
-            return NavDisposition::SpaNavigated(reported.to_string());
+            return NavDisposition::SpaNavigated {
+                url: reported.to_string(),
+                intent: nav_intent(&payload),
+            };
         }
         // Malformed / non-http payload: still cancel the sentinel navigation.
         return NavDisposition::Block;
@@ -116,10 +144,22 @@ pub(crate) fn classify_navigation(url_str: &str) -> NavDisposition {
     NavDisposition::Block
 }
 
-fn emit_navigated(app: &AppHandle, pane_label: &str, url_str: &str) {
+/// Emit `browser://navigated`.
+///
+/// `kind` separates a real document load (`"document"`) from a same-document
+/// SPA URL change (`"spa"`); the renderer's history model only grows its stack
+/// on `browser://loaded`, so a `"document"` report — which fires at the *start*
+/// of a navigation and therefore once per hop of a redirect chain — is used for
+/// address-bar sync only. `intent` is one of {@link NAV_INTENTS}.
+fn emit_navigated(app: &AppHandle, pane_label: &str, url_str: &str, kind: &str, intent: &str) {
     let _ = app.emit(
         "browser://navigated",
-        serde_json::json!({ "paneId": pane_label, "url": url_str }),
+        serde_json::json!({
+            "paneId": pane_label,
+            "url": url_str,
+            "kind": kind,
+            "intent": intent,
+        }),
     );
 }
 
@@ -184,8 +224,8 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
             let _ = app.emit("browser://element-selected", &payload);
             false
         }
-        NavDisposition::SpaNavigated(url) => {
-            emit_navigated(app, pane_label, &url);
+        NavDisposition::SpaNavigated { url, intent } => {
+            emit_navigated(app, pane_label, &url, "spa", intent);
             // A route change replaces the DOM the last snapshot described.
             emit_snapshot_dirty(app, pane_label, &url, None, None, "navigated");
             false
@@ -216,7 +256,7 @@ pub(crate) fn handle_navigation(app: &AppHandle, pane_label: &str, url_str: &str
             false
         }
         NavDisposition::AllowAndReport => {
-            emit_navigated(app, pane_label, url_str);
+            emit_navigated(app, pane_label, url_str, "document", "push");
             true
         }
         NavDisposition::Allow => true,
@@ -357,12 +397,54 @@ mod tests {
             "https://cognia.invalid/__cognia_nav?data=%7B%22url%22%3A%22http%3A%2F%2Fa%2Fb%22%7D";
         assert_eq!(
             classify_navigation(ok),
-            NavDisposition::SpaNavigated("http://a/b".to_string())
+            NavDisposition::SpaNavigated {
+                url: "http://a/b".to_string(),
+                intent: "push",
+            }
         );
         // Non-http reported URL: cancelled, never re-emitted.
         let bad =
             "https://cognia.invalid/__cognia_nav?data=%7B%22url%22%3A%22file%3A%2F%2F%2Fx%22%7D";
         assert_eq!(classify_navigation(bad), NavDisposition::Block);
+    }
+
+    #[test]
+    fn spa_nav_reports_the_history_intent_and_defaults_to_push() {
+        let mk = |json: &str| {
+            let mut u = url::Url::parse("https://cognia.invalid/__cognia_nav").unwrap();
+            u.query_pairs_mut().append_pair("data", json);
+            u.to_string()
+        };
+        for (intent, expected) in [
+            (r#""push""#, "push"),
+            (r#""replace""#, "replace"),
+            (r#""traverse""#, "traverse"),
+            // Unknown / absent / non-string all fall back to `push`, which is
+            // what the renderer did before intents existed.
+            (r#""nonsense""#, "push"),
+            ("null", "push"),
+            ("7", "push"),
+        ] {
+            let url = mk(&format!(r#"{{"url":"http://a/b","intent":{intent}}}"#));
+            assert_eq!(
+                classify_navigation(&url),
+                NavDisposition::SpaNavigated {
+                    url: "http://a/b".to_string(),
+                    intent: expected,
+                },
+                "intent {intent} should normalize to {expected}"
+            );
+        }
+        let no_intent = mk(r#"{"url":"http://a/b"}"#);
+        assert!(matches!(
+            classify_navigation(&no_intent),
+            NavDisposition::SpaNavigated { intent: "push", .. }
+        ));
+    }
+
+    #[test]
+    fn nav_intents_are_the_three_the_renderer_models() {
+        assert_eq!(NAV_INTENTS, ["push", "replace", "traverse"]);
     }
 
     #[test]
