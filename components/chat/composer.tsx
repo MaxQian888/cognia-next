@@ -144,6 +144,8 @@ import type { ParamSegment } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { splitParamSegments } from "@/lib/chat/template/param-segments"
 import { renderParamTokens } from "@/lib/chat/template/render-params"
+import { seedParamValues, unfilledRequiredParams } from "@/lib/chat/template/template"
+import { useTemplateResourceSearch } from "@/hooks/chat/use-template-resource-search"
 import {
   createChatTemplate,
   listChatTemplates,
@@ -153,7 +155,6 @@ import {
 import {
   paramState as paramStateOfValue,
   pruneBinding,
-  unfilledParams,
   withParamValue,
   type ChatTemplateBinding,
   type ChatTemplateParamValue,
@@ -753,10 +754,57 @@ function ComposerInner(props: InnerProps) {
     () => (templateBinding ? pruneBinding(templateBinding, paramIds) : undefined),
     [templateBinding, paramIds]
   )
-  const paramPillState = useCallback(
-    (paramId: string) => paramStateOfValue(effectiveBinding?.params[paramId]),
-    [effectiveBinding]
+  /**
+   * Whether a bound reference still points at something on THIS device.
+   *
+   * Only answered for the kinds whose whole population is already in memory. A
+   * file is deliberately never judged: the workspace may simply not be loaded
+   * yet, and a dangling `@path` is exactly what typing one by hand produces —
+   * flagging it would be inventing a failure the composer does not otherwise
+   * have. An empty candidate list means "this composer has no source for that
+   * kind", not "the target is gone", so it is not evidence either.
+   */
+  const isResourceResolvable = useCallback(
+    (value: Extract<ChatTemplateParamValue, { kind: "resource" }>) => {
+      if (value.resourceKind === "subagent") {
+        return chatAgents.length === 0 || chatAgents.some((agent) => agent.handle === value.id)
+      }
+      if (value.resourceKind === "agent") {
+        const list = props.mentionables ?? []
+        return list.length === 0 || list.some((target) => target.name === value.id)
+      }
+      return true
+    },
+    [chatAgents, props.mentionables]
   )
+  const paramPillState = useCallback(
+    (paramId: string) => paramStateOfValue(effectiveBinding?.params[paramId], isResourceResolvable),
+    [effectiveBinding, isResourceResolvable]
+  )
+  /**
+   * The declarations behind the tokens currently in the box — labels, which
+   * parameters are optional, and which open an `@` picker instead of a text
+   * field.
+   *
+   * Only honoured when the saved template is still at the revision this draft
+   * was inserted at. The binding pins a version and never follows the template
+   * (see `ChatTemplateBinding`), so reading a NEWER declaration list here would
+   * quietly re-interpret a half-written message: a parameter demoted to
+   * optional after the fact would stop blocking a send that the user set up
+   * expecting it to. On a mismatch every token falls back to "required free
+   * text", which is what an undeclared token already is.
+   */
+  const paramDeclarations = useMemo(() => {
+    if (!effectiveBinding) return []
+    const row = chatTemplates.find((template) => template.id === effectiveBinding.templateId)
+    if (!row || String(row.revision) !== effectiveBinding.version) return []
+    return row.params
+  }, [chatTemplates, effectiveBinding])
+  const searchTemplateResources = useTemplateResourceSearch({
+    cwd,
+    chatAgents,
+    mentionables: props.mentionables,
+  })
   /** The parameter token containing `caret`, or null. */
   const paramTokenAt = useCallback(
     (caret: number) => paramTokens.find((seg) => caret >= seg.start && caret <= seg.end) ?? null,
@@ -1079,12 +1127,10 @@ function ComposerInner(props: InnerProps) {
         )
         controller.textInput.setInput(result.value)
         // Seed from what this template was set to last time — in practice most
-        // values repeat — but only for parameters the body still declares, so a
-        // value orphaned by an edit cannot come back.
-        const declared = new Set(template.params.map((param) => param.id))
-        const seeded = Object.fromEntries(
-          Object.entries(template.lastParams ?? {}).filter(([id]) => declared.has(id))
-        )
+        // values repeat — falling back to the declared default. Both are
+        // filtered to parameters the body still declares, so a value orphaned
+        // by an edit cannot come back.
+        const seeded = seedParamValues(template.params, template.lastParams)
         setTemplateBinding({
           templateId: template.id,
           version: String(template.revision),
@@ -1331,7 +1377,7 @@ function ComposerInner(props: InnerProps) {
     // say how many are missing, and put the caret on the first one so the fix
     // is one keystroke away. Checked BEFORE the optimistic clear so nothing has
     // to be restored.
-    const missingParams = unfilledParams(paramIds, effectiveBinding)
+    const missingParams = unfilledRequiredParams(paramIds, effectiveBinding, paramDeclarations)
     if (missingParams.length > 0) {
       toast.error(tTemplateParams("unfilled", { count: missingParams.length }))
       const first = paramTokens.find((seg) => seg.paramId === missingParams[0])
@@ -1524,6 +1570,7 @@ function ComposerInner(props: InnerProps) {
     controller.textInput,
     paramIds,
     paramTokens,
+    paramDeclarations,
     effectiveBinding,
     tTemplateParams,
     tCommands,
@@ -2351,6 +2398,12 @@ function ComposerInner(props: InnerProps) {
 
         <TemplateParamPopover
           paramId={activeParamId}
+          param={
+            activeParamId
+              ? (paramDeclarations.find((param) => param.id === activeParamId) ?? null)
+              : null
+          }
+          searchResources={searchTemplateResources}
           value={activeParamId ? effectiveBinding?.params[activeParamId] : undefined}
           anchor={containerEl}
           position={

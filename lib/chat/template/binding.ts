@@ -28,7 +28,19 @@
  */
 export type ChatTemplateParamValue =
   | { kind: "text"; value: string }
-  | { kind: "resource"; resourceKind: string; id: string; label: string }
+  | {
+      kind: "resource"
+      resourceKind: string
+      id: string
+      label: string
+      /**
+       * The exact token the `@` menu would have inserted for this pick, e.g.
+       * `@src/app.ts`. Absent on a value that arrived from a device where the
+       * pick could not be replayed, which is precisely when the label is the
+       * only honest thing left to say.
+       */
+      raw?: string
+    }
 
 /**
  * The template a draft was inserted from, and what its parameters are set to.
@@ -59,14 +71,16 @@ export function isParamFilled(value: ChatTemplateParamValue | undefined): boolea
 /**
  * The text a parameter contributes when the message is sent.
  *
- * For a resource this is the LABEL, not the id — a prompt reads "the auth
- * module", never `root-a1b2c3`. Kinds that need something else in the body (a
- * file becoming `@src/a.ts`) override this at render time; kinds whose whole
- * effect is a side effect (a skill, a staged document) contribute nothing.
+ * For a resource that is the token the `@` menu would have inserted — the file
+ * mention the agent can actually open, not a prose description of it. When the
+ * token is missing (a value that travelled from another device) the LABEL is
+ * what goes in: a prompt reads "the auth module", never a raw `root-a1b2c3`,
+ * and a mention that would resolve to nothing here is worse than a phrase.
  */
 export function paramValueText(value: ChatTemplateParamValue | undefined): string {
   if (!value) return ""
-  return value.kind === "text" ? value.value : value.label
+  if (value.kind === "text") return value.value
+  return value.raw ?? value.label
 }
 
 /**
@@ -85,18 +99,6 @@ export function paramState(
   const filled = value as ChatTemplateParamValue
   if (filled.kind === "resource" && isResolvable && !isResolvable(filled)) return "unresolved"
   return "filled"
-}
-
-/**
- * The declared parameters of `paramIds` that are still unfilled, in the order
- * given. The caller decides which of those are required — this module has no
- * opinion, because a token the user typed by hand has no declaration at all.
- */
-export function unfilledParams(
-  paramIds: readonly string[],
-  binding: ChatTemplateBinding | undefined
-): string[] {
-  return paramIds.filter((id) => !isParamFilled(binding?.params[id]))
 }
 
 /** A binding with one parameter set, leaving the others untouched. */

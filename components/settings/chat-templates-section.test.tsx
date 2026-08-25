@@ -76,3 +76,44 @@ describe("ChatTemplatesSection", () => {
     await waitFor(async () => expect(await listChatTemplates()).toEqual([]))
   })
 })
+
+describe("ChatTemplatesSection — parameter declarations", () => {
+  it("makes a parameter optional, so a send no longer waits on it", async () => {
+    const row = await createChatTemplate({ name: "Review", body: "review {{module}}" })
+    await mount()
+    await waitFor(() => expect(screen.getByText("Review")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "edit" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "paramRequired" }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+    })
+
+    const saved = await getChatTemplate(row.id)
+    expect(saved?.params).toEqual([
+      { id: "module", label: "module", required: false, kind: "string" },
+    ])
+    // A declaration change IS content: a draft quoting the old revision must
+    // not silently inherit the new rules.
+    expect(saved?.revision).toBe(2)
+  })
+
+  it("keeps an edited label when the body is rewritten around it", async () => {
+    const row = await createChatTemplate({ name: "Review", body: "review {{module}}" })
+    await mount()
+    await waitFor(() => expect(screen.getByText("Review")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "edit" }))
+    fireEvent.change(screen.getByLabelText("paramLabel"), { target: { value: "Which module" } })
+    fireEvent.change(screen.getByLabelText("body"), {
+      target: { value: "please review {{module}} today" },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "save" }))
+    })
+
+    const saved = await getChatTemplate(row.id)
+    expect(saved?.params[0].label).toBe("Which module")
+    expect(saved?.body).toBe("please review {{module}} today")
+  })
+})

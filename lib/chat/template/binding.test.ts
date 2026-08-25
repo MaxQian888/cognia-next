@@ -3,7 +3,6 @@ import {
   paramState,
   paramValueText,
   pruneBinding,
-  unfilledParams,
   withParamValue,
   type ChatTemplateBinding,
   type ChatTemplateParamValue,
@@ -77,16 +76,6 @@ describe("paramState", () => {
     const resolver = jest.fn(() => false)
     expect(paramState(text("x"), resolver)).toBe("filled")
     expect(resolver).not.toHaveBeenCalled()
-  })
-})
-
-describe("unfilledParams", () => {
-  it("returns the unfilled ids in the order given", () => {
-    expect(unfilledParams(["a", "b", "c"], binding({ b: text("set") }))).toEqual(["a", "c"])
-  })
-
-  it("treats a missing binding as everything unfilled", () => {
-    expect(unfilledParams(["a", "b"], undefined)).toEqual(["a", "b"])
   })
 })
 

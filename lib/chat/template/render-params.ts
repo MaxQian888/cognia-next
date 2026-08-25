@@ -26,7 +26,7 @@ export interface RenderParamsResult {
  * An unfilled parameter is left as its literal token rather than collapsing to
  * an empty string. Silently deleting it would produce a sentence with a hole in
  * it that reads as finished — the caller is expected to refuse the send instead
- * (see `unfilledParams`), and a visible `{{module}}` is the better failure if
+ * (see `unfilledRequiredParams`), and a visible `{{module}}` is the better failure if
  * one ever slips through.
  */
 export function renderParamTokens(

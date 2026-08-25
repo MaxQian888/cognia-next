@@ -584,10 +584,14 @@
     "stopTooltip": "Stop",
     "templateParams": {
       "hint": "Enter or Esc to close · Tab for the next parameter",
+      "loading": "Searching…",
+      "noMatches": "Nothing matches",
+      "pickHint": "Pick one · Esc to close · Tab for the next parameter",
       "placeholder": "Value",
       "position": "{index} of {total}",
       "previewOff": "Back to editing",
       "previewOn": "Preview with values filled in",
+      "searchPlaceholder": "Search…",
       "unfilled": "{count, plural, =1 {1 parameter still needs a value} other {# parameters still need values}}"
     },
     "toolbar": {

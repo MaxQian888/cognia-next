@@ -19,6 +19,11 @@ jest.mock("@/lib/shell/exec", () => ({
   formatShellResult: jest.fn(),
 }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
+const searchWorkspace = jest.fn(async () => [] as unknown[])
+jest.mock("@/lib/files/workspace-search", () => ({
+  searchWorkspace: (...args: unknown[]) => searchWorkspace(...(args as [])),
+  __resetWorkspaceSearchCache: jest.fn(),
+}))
 jest.mock("./composer/voice-controls", () => ({ VoiceControls: () => null }))
 
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -62,11 +67,14 @@ const session: ChatSession = {
   updatedAt: 0,
 }
 
-async function mount(onSend: (content: unknown) => void = () => undefined) {
+async function mount(
+  onSend: (content: unknown) => void = () => undefined,
+  sessionOverride: Partial<ChatSession> = {}
+) {
   const view = render(
     <Wrapper>
       <Composer
-        session={session}
+        session={{ ...session, ...sessionOverride }}
         onStartNewSession={async () => undefined}
         onOpenSettings={() => undefined}
         onSend={onSend}
@@ -365,4 +373,75 @@ describe("Composer — {{parameter}} chips", () => {
       await waitFor(() => expect(chips()[0]).toHaveAttribute("data-param-state", "filled"))
     }, 20_000)
   })
+})
+
+describe("Composer — reference parameters", () => {
+  // The whole chain: a declaration says "this one is a workspace file", the
+  // picker answers from the same source the `@` menu does, and the send
+  // substitutes the token that menu would have inserted.
+  it("picks a file through the shared source and sends the mention it produces", async () => {
+    searchWorkspace.mockResolvedValue([
+      {
+        relPath: "src/app.ts",
+        absolutePath: "/repo/src/app.ts",
+        isDir: false,
+        size: 0,
+        mtimeMs: 0,
+      },
+    ])
+    await createChatTemplate({
+      name: "Review a file",
+      body: "review {{target}}",
+      params: [
+        { id: "target", label: "Target", required: true, kind: "resource", resourceKind: "file" },
+      ],
+    })
+    const sent: unknown[] = []
+    const { ta } = await mount((content) => sent.push(content), { workingDir: "/repo" })
+
+    fireEvent.change(ta, { target: { value: "/" } })
+    fireEvent.mouseDown(await screen.findByText("Review a file"))
+    await waitFor(() => expect(ta.value).toBe("review {{target}} "))
+
+    // A field would mean typing a path by hand; the declaration promised a picker.
+    const search = await screen.findByTestId("template-param-search")
+    expect(search).toBeInTheDocument()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+    fireEvent.click(await screen.findByRole("option", { name: /src\/app\.ts/ }))
+
+    await waitFor(() => expect(chips()[0]).toHaveAttribute("data-param-state", "filled"))
+    await submit(ta)
+
+    expect(textOf(sent[0])).toContain("@src/app.ts")
+    expect(textOf(sent[0])).not.toContain("{{target}}")
+  }, 30_000)
+
+  it("sends without a parameter the template declared optional", async () => {
+    await createChatTemplate({
+      name: "Optional note",
+      body: "ship it {{note}}",
+      params: [{ id: "note", label: "Note", required: false, kind: "string" }],
+    })
+    const sent: unknown[] = []
+    const { ta } = await mount((content) => sent.push(content))
+
+    fireEvent.change(ta, { target: { value: "/" } })
+    fireEvent.mouseDown(await screen.findByText("Optional note"))
+    await waitFor(() => expect(ta.value).toBe("ship it {{note}} "))
+
+    await submit(ta)
+    expect(sent).toHaveLength(1)
+  }, 30_000)
+
+  it("still refuses a send when an undeclared token is empty", async () => {
+    const sent: unknown[] = []
+    const { ta } = await mount((content) => sent.push(content))
+
+    fireEvent.change(ta, { target: { value: "review {{module}}" } })
+    await submit(ta)
+
+    expect(sent).toHaveLength(0)
+  }, 30_000)
 })

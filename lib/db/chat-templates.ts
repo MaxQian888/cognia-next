@@ -45,9 +45,11 @@ export interface ChatTemplateRow {
    * What the parameters were set to last time this template was used.
    *
    * Pre-filled on the next insert, because in practice nine uses out of ten
-   * repeat most of the values. Resource values are re-validated before they are
-   * offered — an id that no longer resolves is left blank rather than filled
-   * with something that will fail later.
+   * repeat most of the values. A remembered value is offered as-is, including a
+   * reference: the composer paints one that no longer resolves as unresolved
+   * (`paramState`) rather than dropping it, because a chip the user can see and
+   * re-pick beats a field that silently emptied itself between two uses of the
+   * same template.
    */
   lastParams?: Record<string, ChatTemplateParamValue>
   usageCount: number

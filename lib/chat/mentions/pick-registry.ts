@@ -74,6 +74,18 @@ export function getMentionPickHandler(kind: PopoverItem["kind"]): MentionPickHan
   return handlers.get(kind as MentionPickKind)
 }
 
+/**
+ * Every registered handler, in registration order.
+ *
+ * Exists so a rule ABOUT the registry can be checked against the registry
+ * itself rather than against a hand-kept list that drifts — see
+ * `lib/chat/template/resource-kinds.ts`, whose set of parameter-eligible kinds
+ * is defined as "the insertion-style picks" and is pinned by walking this.
+ */
+export function listMentionPickHandlers(): MentionPickHandler[] {
+  return [...handlers.values()]
+}
+
 /** Test-only: drop non-built-in registrations (built-ins are re-registered). */
 export function __resetMentionPickHandlersForTests(): void {
   handlers.clear()

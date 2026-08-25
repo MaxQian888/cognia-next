@@ -11,6 +11,13 @@
 // bumps the template's revision. Renaming does not: a draft records the
 // revision it quoted, so bumping over a cosmetic edit would make every open
 // draft claim to be out of date.
+//
+// This is also the only place a parameter's TYPE can be set. The composer
+// derives every token as required free text, which is right for a phrase you
+// typed once; turning one into a workspace-file reference or a closed list of
+// choices is a decision about a template you intend to reuse, and it belongs
+// next to the body it describes rather than in a popover you are trying to type
+// past.
 
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
@@ -28,7 +35,21 @@ import {
   updateChatTemplate,
   type ChatTemplateRow,
 } from "@/lib/db/chat-templates"
-import { deriveParams } from "@/lib/chat/template/template"
+import {
+  deriveParams,
+  paramKindChange,
+  type ChatTemplateParam,
+  type ChatTemplateParamKind,
+} from "@/lib/chat/template/template"
+import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "@/lib/chat/template/resource-kinds"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export function ChatTemplatesSection() {
   const t = useTranslations("chatTemplatesSettings")
@@ -141,9 +162,26 @@ function TemplateEditor({
   const [description, setDescription] = useState(row.description ?? "")
   const [body, setBody] = useState(row.body)
   const [saving, setSaving] = useState(false)
+  /**
+   * Declarations edited so far, by id.
+   *
+   * Kept beside the body rather than in place of it: the BODY decides which
+   * parameters exist and in what order (`deriveParams`), and this only carries
+   * what a token cannot say about itself. A declaration for a token that has
+   * since been deleted simply stops being merged, and comes back if the token
+   * does — which is what makes deleting a line and undoing it harmless.
+   */
+  const [edited, setEdited] = useState<Record<string, ChatTemplateParam>>({})
   // Shown live so the consequence of editing the body — which parameters this
   // template will ask for — is visible before saving, not discovered later.
-  const params = deriveParams(body, row.params)
+  const params = deriveParams(body, row.params).map((param) => edited[param.id] ?? param)
+
+  const patchParam = (id: string, patch: Partial<ChatTemplateParam>) =>
+    setEdited((prev) => {
+      const base = prev[id] ?? params.find((param) => param.id === id)
+      if (!base) return prev
+      return { ...prev, [id]: { ...base, ...patch } }
+    })
 
   const save = async () => {
     if (!name.trim() || saving) return
@@ -153,6 +191,7 @@ function TemplateEditor({
         name: name.trim(),
         description: description.trim() || undefined,
         body,
+        params,
       })
       toast.success(t("saved"))
       onSaved()
@@ -189,17 +228,25 @@ function TemplateEditor({
             onChange={(event) => setBody(event.target.value)}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">{t("parameters")}</span>
-          {params.length === 0 ? (
-            <span className="text-xs text-muted-foreground">{t("noParameters")}</span>
-          ) : (
-            params.map((param) => (
-              <Badge key={param.id} variant="secondary" className="font-mono text-xs">
-                {param.id}
-              </Badge>
-            ))
-          )}
+        <div className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs font-medium">{t("parameters")}</span>
+            {params.length === 0 ? (
+              <span className="text-xs text-muted-foreground">{t("noParameters")}</span>
+            ) : null}
+          </div>
+          {params.length > 0 ? (
+            <>
+              <p className="text-xs text-muted-foreground">{t("paramsHint")}</p>
+              {params.map((param) => (
+                <ParamDeclarationRow
+                  key={param.id}
+                  param={param}
+                  onPatch={(patch) => patchParam(param.id, patch)}
+                />
+              ))}
+            </>
+          ) : null}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>
@@ -211,5 +258,108 @@ function TemplateEditor({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/** The declaration controls for one `{{token}}` in the body. */
+function ParamDeclarationRow({
+  param,
+  onPatch,
+}: {
+  param: ChatTemplateParam
+  onPatch(patch: Partial<ChatTemplateParam>): void
+}) {
+  const t = useTranslations("chatTemplatesSettings")
+
+  return (
+    <div className="space-y-2 rounded-md border p-2" data-testid={`param-row-${param.id}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary" className="shrink-0 font-mono text-xs">
+          {param.id}
+        </Badge>
+        <Input
+          className="h-8 min-w-0 flex-1"
+          aria-label={t("paramLabel")}
+          value={param.label}
+          onChange={(event) => onPatch({ label: event.target.value })}
+        />
+        <Select
+          value={param.kind}
+          onValueChange={(kind) => onPatch(paramKindChange(param, kind as ChatTemplateParamKind))}
+        >
+          <SelectTrigger className="h-8 w-32" aria-label={t("paramKind")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="string">{t("kindString")}</SelectItem>
+            <SelectItem value="enum">{t("kindEnum")}</SelectItem>
+            <SelectItem value="resource">{t("kindResource")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <label className="flex shrink-0 items-center gap-1.5 text-xs">
+          <Checkbox
+            checked={param.required}
+            onCheckedChange={(checked) => onPatch({ required: checked === true })}
+          />
+          {t("paramRequired")}
+        </label>
+      </div>
+      {param.kind === "resource" ? (
+        <Select
+          value={param.resourceKind ?? "file"}
+          onValueChange={(resourceKind) =>
+            onPatch({ resourceKind: resourceKind as ResourceParamKind })
+          }
+        >
+          <SelectTrigger className="h-8 w-48" aria-label={t("paramResource")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {RESOURCE_PARAM_KINDS.map((kind) => (
+              <SelectItem key={kind} value={kind}>
+                {t(
+                  `resource${kind.charAt(0).toUpperCase()}${kind.slice(1)}` as
+                    "resourceFile" | "resourceAgent" | "resourceSubagent"
+                )}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : param.kind === "enum" ? (
+        <div className="space-y-1">
+          <Textarea
+            className="min-h-16 text-xs"
+            aria-label={t("paramOptions")}
+            value={(param.options ?? []).join("\n")}
+            onChange={(event) =>
+              onPatch({
+                options: event.target.value
+                  .split("\n")
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+          <p className="text-xs text-muted-foreground">{t("paramOptionsHint")}</p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            className="h-8 min-w-0 flex-1"
+            aria-label={t("paramDefault")}
+            placeholder={t("paramDefault")}
+            value={param.defaultValue ?? ""}
+            onChange={(event) => onPatch({ defaultValue: event.target.value || undefined })}
+          />
+          <label className="flex shrink-0 items-center gap-1.5 text-xs">
+            <Checkbox
+              checked={param.multiline === true}
+              onCheckedChange={(checked) => onPatch({ multiline: checked === true })}
+            />
+            {t("paramMultiline")}
+          </label>
+        </div>
+      )}
+    </div>
   )
 }
