@@ -21367,6 +21367,7 @@
     },
     "refresh": "Refresh",
     "rename": "Rename",
+    "rootFollowing": "{name} · following",
     "rootLabel": "Project root",
     "rootMain": "main (repository)",
     "saveAll": "Save All ({count})",

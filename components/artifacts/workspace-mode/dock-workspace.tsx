@@ -1,9 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { GitCompareArrowsIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import type { ChatSession } from "@cognia/agent-config-types"
+import type { Project } from "@/types"
+import type { SessionExecutionContext } from "@/types/execution-context"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { CodeServerPane, joinProjectPath } from "@/components/editor/project/code-server-pane"
@@ -27,7 +29,10 @@ import { refreshGitStatus } from "@/lib/git/load"
 import { isTauri } from "@/lib/tauri"
 import { listTaskRuns, listTaskWorkspaces } from "@/lib/task-workspace/client"
 import { cn } from "@/lib/utils"
-import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import { resolveSessionExecutionRoot } from "@/lib/workspace/session-root"
+import { resolvePanelRoot } from "@/lib/workspace/panel-follow"
+import { PanelRootChip } from "@/components/workspace/panel-root-chip"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { useGitStore } from "@/stores/git/git-store"
@@ -111,7 +116,14 @@ export function DockWorkspace({ activeSessionId, layout = "desktop" }: DockWorks
     )
   }
 
-  const { project, root } = resolveSessionProjectRoot(session, projects)
+  // The conversation's execution root, not the workspace's primary root — the
+  // editor is where a user reads what the agent just wrote, and pointing it at
+  // the checkout a worktree was cut from shows them a stale copy of the file.
+  const { project, root: followedRoot } = resolveSessionExecutionRoot(session, projects)
+  const executionContext = session.executionContext ?? null
+  // Worktree discovery still runs from the REPOSITORY: `git worktree list` in a
+  // worktree would label that worktree "main" and skip the real one.
+  const repoRoot = project ? primaryRootOf(project)?.path : undefined
   if (!project) {
     return (
       <WorkspaceEmpty
@@ -122,7 +134,8 @@ export function DockWorkspace({ activeSessionId, layout = "desktop" }: DockWorks
     )
   }
 
-  if (!root) {
+  const workingDir = repoRoot ?? followedRoot
+  if (!workingDir) {
     return (
       <WorkspaceEmpty
         testId="workspace-root-missing"
@@ -132,16 +145,42 @@ export function DockWorkspace({ activeSessionId, layout = "desktop" }: DockWorks
     )
   }
 
-  return <WorkspaceEditorBody sessionId={session.id} workingDir={root.path} layout={layout} />
+  return (
+    <WorkspaceEditorBody
+      sessionId={session.id}
+      workingDir={workingDir}
+      followedRoot={followedRoot}
+      executionContext={executionContext}
+      project={project}
+      layout={layout}
+    />
+  )
 }
 
 function WorkspaceEditorBody({
   sessionId,
   workingDir,
+  followedRoot,
+  executionContext,
+  project,
   layout,
 }: {
   sessionId: string
   workingDir: string
+  /**
+   * Where the bound conversation runs; the editor follows it unless pinned.
+   * Absent on the reveal path, which names a directory directly and has no
+   * follow relationship to show.
+   */
+  followedRoot?: string | null
+  /**
+   * Passed down rather than re-read through `useSessionExecutionContext`: the
+   * component above already holds the live session row, and a second
+   * subscription to it could momentarily disagree with the root this body was
+   * handed.
+   */
+  executionContext?: SessionExecutionContext | null
+  project?: Pick<Project, "roots"> | null
   layout: "desktop" | "mobile"
 }) {
   const t = useTranslations("artifacts.workspace")
@@ -202,6 +241,7 @@ function WorkspaceEditorBody({
   const workbench = useProjectEditorWorkbench({
     scopeKey,
     workingDir,
+    followedRoot,
     beforeOpen: showFileSurface,
     // Whichever engine is mounted owns project-editor jumps; in Pro IDE mode the
     // CodeServerPane registers the opener instead.
@@ -244,7 +284,31 @@ function WorkspaceEditorBody({
     selectRoot,
     closeFile,
     setActivePath,
+    pinned,
+    resumeFollow,
   } = editor
+
+  // One resolver for every directory-facing panel. The pin layer is fed from
+  // the editor's own selection rather than a separate store — for this panel
+  // the selection IS the pin, so a second home for it would be a second answer.
+  const rootTarget = useMemo(() => {
+    const target = resolvePanelRoot({
+      panel: "editor",
+      executionContext,
+      activeProject: project,
+      pinnedRoot: pinned ? rootPath : null,
+    })
+    // The reveal path names a directory outright and carries neither a binding
+    // nor a workspace. Reporting "no root" while the editor is plainly rooted
+    // somewhere is the exact dishonesty this chip exists to remove.
+    if (!target.root) return { root: rootPath, source: "workspace" as const, managed: false }
+    if (target.source !== "pinned" || target.managed) return target
+    // A pin onto SOME OTHER worktree is still a worktree, and the chip's job is
+    // to say so. The resolver can only recognise the conversation's own alias;
+    // the roots list is the only thing that knows about the rest.
+    const selected = roots.find((candidate) => candidate.key === rootPath)
+    return selected && !selected.isMain ? { ...target, managed: true } : target
+  }, [executionContext, project, pinned, rootPath, roots])
 
   const gitRootDir = useGitStore((state) => state.rootDir)
   const repoState = useGitStore((state) => state.repoState)
@@ -266,9 +330,15 @@ function WorkspaceEditorBody({
 
   useEffect(() => {
     if (!request || request.id === processedRequest.current) return
-    if (request.sessionId !== sessionId || request.rootPath !== workingDir) return
-    if (rootKey !== workingDir || rootPath !== workingDir) {
-      selectRoot(workingDir)
+    if (request.sessionId !== sessionId) return
+    // Match the request against the roots this editor can actually select, not
+    // against the repository root. An agent edit inside a managed worktree
+    // arrives with the worktree's path, and comparing it to the repository made
+    // every such reveal fall out here silently — no error, no panel, no clue.
+    const requestedRoot = roots.find((candidate) => candidate.key === request.rootPath)?.key
+    if (!requestedRoot) return
+    if (rootKey !== requestedRoot || rootPath !== requestedRoot) {
+      selectRoot(requestedRoot)
       return
     }
     processedRequest.current = request.id
@@ -306,7 +376,7 @@ function WorkspaceEditorBody({
   }, [
     request,
     sessionId,
-    workingDir,
+    roots,
     rootKey,
     rootPath,
     engine,
@@ -368,7 +438,7 @@ function WorkspaceEditorBody({
       data-testid="dock-workspace"
       onKeyDown={workbench.onKeyDown}
     >
-      {roots.length > 1 || hasTaskScope ? (
+      {roots.length > 1 || hasTaskScope || rootTarget.root ? (
         <div
           className="flex shrink-0 items-center gap-2 border-b px-2 py-1"
           data-testid="dock-workspace-toolbar"
@@ -377,7 +447,19 @@ function WorkspaceEditorBody({
             roots={roots}
             rootKey={rootKey}
             onSelect={selectRoot}
+            followedRoot={followedRoot}
             density={layout === "mobile" ? "touch" : "compact"}
+          />
+          <PanelRootChip
+            panel="editor"
+            target={rootTarget}
+            {
+              /* Only while pinned. Following has no "pin here" to offer — the
+                root switcher above is how you pin, and a control that did
+                nothing would be the dead affordance the chip exists to avoid. */
+              ...(pinned ? { onTogglePin: resumeFollow } : {})
+            }
+            className="min-w-0"
           />
           {hasTaskScope ? (
             <div

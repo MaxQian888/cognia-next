@@ -57,6 +57,7 @@
   },
   "refresh": "刷新",
   "rename": "重命名",
+  "rootFollowing": "{name} · 跟随对话",
   "rootLabel": "项目根目录",
   "rootMain": "main（主仓库）",
   "saveAll": "全部保存（{count}）",

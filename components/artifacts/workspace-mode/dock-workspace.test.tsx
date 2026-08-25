@@ -3,7 +3,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 let backendAvailable = true
-let session: { id: string; projectId?: string } | undefined
+let session:
+  { id: string; projectId?: string; executionContext?: Record<string, unknown> } | undefined
 let projects: Array<{
   id: string
   roots: Array<{ id: string; path: string; isPrimary?: boolean }>
@@ -23,6 +24,8 @@ let activePath: string | null = null
 let editorRootKey = "/repo"
 let editorRootPath = "/repo"
 let editorRoots = [{ key: "/repo", label: "main", path: "/repo", isMain: true }]
+let editorPinned = false
+const resumeFollow = jest.fn()
 interface TestOpenFile {
   absolutePath: string
   relPath: string
@@ -136,13 +139,25 @@ jest.mock("@/components/editor/project/use-project-editor", () => ({
       setDraft,
       saveFile,
       saveAll,
+      pinned: editorPinned,
+      resumeFollow,
     }
   },
 }))
 
 jest.mock("@/components/editor/project/project-root-switcher", () => ({
-  ProjectRootSwitcher: ({ onSelect }: { onSelect: (key: string) => void }) => (
-    <button data-testid="root-switcher" onClick={() => onSelect("/other")}>
+  ProjectRootSwitcher: ({
+    onSelect,
+    followedRoot,
+  }: {
+    onSelect: (key: string) => void
+    followedRoot?: string | null
+  }) => (
+    <button
+      data-testid="root-switcher"
+      data-followed={followedRoot ?? ""}
+      onClick={() => onSelect("/other")}
+    >
       root
     </button>
   ),
@@ -286,6 +301,8 @@ beforeEach(() => {
   editorRootKey = "/repo"
   editorRootPath = "/repo"
   editorRoots = [{ key: "/repo", label: "main", path: "/repo", isMain: true }]
+  editorPinned = false
+  resumeFollow.mockClear()
   activeFile = null
   openFiles = []
   act(() => useArtifactDockLayoutStore.getState().resetLayout())
@@ -314,10 +331,64 @@ describe("DockWorkspace", () => {
     expect(screen.getByTestId("workspace-root-missing")).toBeInTheDocument()
   })
 
-  it("omits the workspace toolbar when it has no controls to show", () => {
+  it("always names the directory it is looking at, even with a single root", () => {
+    // A panel that silently retargets is worse than one that needs a click. The
+    // toolbar used to disappear entirely when there was nothing to switch
+    // between, which is exactly the case where the user has no other way to
+    // learn which tree the editor is on.
     render(<DockWorkspace activeSessionId="session-1" />)
 
-    expect(screen.queryByTestId("dock-workspace-toolbar")).not.toBeInTheDocument()
+    expect(screen.getByTestId("dock-workspace-toolbar")).toBeInTheDocument()
+    expect(screen.getByTestId("panel-root-name")).toHaveTextContent("repo")
+  })
+
+  it("follows the conversation's worktree rather than the workspace root", () => {
+    session = {
+      id: "session-1",
+      projectId: "project-1",
+      executionContext: {
+        location: "managedWorktree",
+        projectRoot: "/repo",
+        workspaceBinding: { kind: "managed", workspaceId: "ws-1" },
+        managedWorkspace: { availability: "available", localRoot: "/repo/.wt/feature" },
+      },
+    }
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    // Discovery still enumerates worktrees from the REPOSITORY...
+    expect(mockUseProjectEditor).toHaveBeenCalledWith(
+      expect.objectContaining({ workingDir: "/repo", followedRoot: "/repo/.wt/feature" })
+    )
+    // ...and the switcher marks which entry means "follow".
+    expect(screen.getByTestId("root-switcher")).toHaveAttribute(
+      "data-followed",
+      "/repo/.wt/feature"
+    )
+    // The chip says it is a worktree alias, not an ordinary checkout.
+    expect(screen.getByTestId("panel-root-chip")).toHaveAttribute("data-managed", "true")
+  })
+
+  it("offers resume-follow only once the selection diverges", () => {
+    render(<DockWorkspace activeSessionId="session-1" />)
+    // Following: the root switcher is how you pin, so a pin control here would
+    // be a dead affordance.
+    expect(screen.queryByTestId("panel-root-pin")).not.toBeInTheDocument()
+
+    editorPinned = true
+    editorRootKey = "/repo/.wt/feature"
+    editorRootPath = "/repo/.wt/feature"
+    editorRoots = [
+      { key: "/repo", label: "main", path: "/repo", isMain: true },
+      { key: "/repo/.wt/feature", label: "feature", path: "/repo/.wt/feature", isMain: false },
+    ]
+    render(<DockWorkspace activeSessionId="session-1" />)
+
+    const chips = screen.getAllByTestId("panel-root-chip")
+    const pinnedChip = chips[chips.length - 1]!
+    expect(pinnedChip).toHaveAttribute("data-source", "pinned")
+    // A pin onto a worktree is still a worktree — the roots list is the only
+    // thing that knows that, so the panel corrects the resolver's answer.
+    expect(pinnedChip).toHaveAttribute("data-managed", "true")
   })
 
   it("keeps the workspace surfaces inside a resized workbench", () => {

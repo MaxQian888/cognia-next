@@ -38,6 +38,7 @@ import {
   type EditorTabState,
 } from "@/lib/editor-workbench/editor-tab-model"
 import { languageFromPath, type EditorLanguage } from "@/components/editor/editor-language"
+import { reconcileSelectedRoot } from "@/lib/workspace/panel-follow"
 import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
 import { loggers } from "@cognia/logging"
 import { getDb } from "@/lib/db/schema"
@@ -76,6 +77,13 @@ export interface UseProjectEditorArgs {
   scopeKey: string
   /** The team's base working directory (the main repo root). */
   workingDir: string
+  /**
+   * Where this editor would follow to — the bound conversation's execution
+   * root. The persisted `rootKey` IS the pin: equal to this means following,
+   * anything else means the user deliberately pinned. Omitted (Agent Team's
+   * editor, tests) leaves the pre-follow behaviour untouched.
+   */
+  followedRoot?: string | null
   /** Injectable deps for testing. */
   deps?: Partial<ProjectEditorDeps>
 }
@@ -114,7 +122,50 @@ export function joinRootRel(root: string, relPath: string): string {
   return relPath ? `${base}/${relPath}` : base
 }
 
-export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEditorArgs) {
+/**
+ * Make sure the conversation's execution root is selectable.
+ *
+ * `git worktree list` covers worktrees of the repo it is run in; a managed
+ * workspace can live outside that (a shadow checkout for a non-Git root, a
+ * bundle alias). Without this, an editor asked to follow such a root would
+ * find the selection unavailable and fall back to the repo — silently showing
+ * a different tree than the agent is editing.
+ */
+function withFollowedRoot(roots: ProjectRoot[], followedRoot?: string | null): ProjectRoot[] {
+  const followed = followedRoot?.trim()
+  if (!followed || roots.some((root) => root.key === followed)) return roots
+  return [
+    ...roots,
+    {
+      key: followed,
+      label: followed.split(/[\\/]/).filter(Boolean).pop() ?? followed,
+      path: followed,
+      isMain: false,
+    },
+  ]
+}
+
+/** The initial reconciliation, batched with worktree discovery. */
+function reconcileSelected(
+  current: string,
+  roots: ProjectRoot[],
+  followedRoot?: string | null
+): string {
+  return (
+    reconcileSelectedRoot({
+      selected: current,
+      followed: followedRoot,
+      available: roots.map((root) => root.key),
+    }).selected ?? current
+  )
+}
+
+export function useProjectEditor({
+  scopeKey,
+  workingDir,
+  followedRoot,
+  deps,
+}: UseProjectEditorArgs) {
   const d = useMemo(() => ({ ...defaultDeps, ...deps }), [deps])
 
   const persisted = useProjectEditorSessionStore((s) => s.sessions[scopeKey])
@@ -123,7 +174,9 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
   const [roots, setRoots] = useState<ProjectRoot[]>([
     { key: workingDir, label: "main", path: workingDir, isMain: true },
   ])
-  const [rootKey, setRootKey] = useState<string>(persisted?.rootKey || workingDir)
+  const [rootKey, setRootKey] = useState<string>(
+    persisted?.rootKey || followedRoot?.trim() || workingDir
+  )
   const [rootsReady, setRootsReady] = useState(false)
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -207,20 +260,76 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
             isMain: false,
           })
         }
-        setRoots(next)
-        setRootKey((current) => (next.some((root) => root.key === current) ? current : workingDir))
+        const merged = withFollowedRoot(next, followedRoot)
+        setRoots(merged)
+        // Reconciled in the SAME batch as `rootsReady`, not in the effect
+        // below: the session-restore effect gates on `persisted.rootKey ===
+        // rootKey`, and a reconciliation deferred by one commit would let it
+        // restore a stale root's open files before the correction landed.
+        setRootKey((current) => reconcileSelected(current, merged, followedRoot))
         setRootsReady(true)
       })
       .catch((err) => {
         if (cancelled) return
         editorLogger.debug("worktree list failed", { err: String(err) })
-        setRootKey(workingDir)
+        // Discovery failing must not strand the editor on the repo root while
+        // the conversation runs somewhere else — the follow target is known
+        // independently of `git worktree list`.
+        const merged = withFollowedRoot(
+          [{ key: workingDir, label: "main", path: workingDir, isMain: true }],
+          followedRoot
+        )
+        setRoots(merged)
+        setRootKey((current) => reconcileSelected(current, merged, followedRoot))
         setRootsReady(true)
       })
     return () => {
       cancelled = true
     }
-  }, [d, workingDir])
+  }, [d, workingDir, followedRoot])
+
+  // ── Follow / pin reconciliation ─────────────────────────────────────────
+  // The persisted `rootKey` IS the pin (see `reconcileSelectedRoot`). Pruning a
+  // stale selection happens with worktree discovery above; this effect handles
+  // only the other half — a follow target that MOVES, because the user switched
+  // to a conversation running elsewhere or a managed worktree finished
+  // materializing. An editor that was following moves with it; a pinned one
+  // does not.
+  const previousFollowedRef = useRef<string | null>(followedRoot?.trim() || null)
+  useEffect(() => {
+    const followed = followedRoot?.trim() || null
+    const previous = previousFollowedRef.current
+    // Guarded on an actual change, not just on re-running: without this the
+    // effect fires on the discovery commit too, one render before the batched
+    // reconciliation above is visible, and re-decides from a stale `rootKey`.
+    if (previous === followed) return
+    previousFollowedRef.current = followed
+    if (!rootsReady) return
+    setRootKey(
+      (current) =>
+        reconcileSelectedRoot({
+          selected: current,
+          followed,
+          previousFollowed: previous,
+          available: roots.map((root) => root.key),
+        }).selected ?? current
+    )
+  }, [followedRoot, roots, rootsReady])
+
+  const pinned = useMemo(
+    () =>
+      reconcileSelectedRoot({
+        selected: rootKey,
+        followed: followedRoot,
+        available: roots.map((root) => root.key),
+      }).pinned,
+    [rootKey, followedRoot, roots]
+  )
+
+  const resumeFollow = useCallback(() => {
+    const followed = followedRoot?.trim()
+    if (followed) setRootKey(followed)
+  }, [followedRoot])
 
   // ── LSP workspace root: register the active root, re-register on switch ──
   useEffect(() => {
@@ -542,6 +651,12 @@ export function useProjectEditor({ scopeKey, workingDir, deps }: UseProjectEdito
     roots,
     rootKey,
     rootPath,
+    /** Where this editor would follow to, or null when nothing is bound. */
+    followedRoot: followedRoot?.trim() || null,
+    /** True when the selection deliberately diverges from the follow target. */
+    pinned,
+    /** Return to following the bound conversation. */
+    resumeFollow,
     openFiles,
     activePath,
     activeFile,

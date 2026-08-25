@@ -46,6 +46,7 @@ export interface MonacoReadHandles {
 export function useProjectEditorWorkbench({
   scopeKey,
   workingDir,
+  followedRoot,
   deps,
   beforeOpen,
   registerProjectOpener = true,
@@ -54,7 +55,7 @@ export function useProjectEditorWorkbench({
   const bindings = useKeybindingStore((state) => state.bindings)
   const [sideTab, setSideTab] = useState<"files" | "search">("files")
   const [mobilePane, setMobilePane] = useState<"files" | "search" | "editor">("files")
-  const editor = useProjectEditor({ scopeKey, workingDir, deps })
+  const editor = useProjectEditor({ scopeKey, workingDir, followedRoot, deps })
   const { activeFile, activePath, openFile, rootPath, saveAll, saveFile } = editor
 
   // Monaco's live handles mount inside ProjectEditorFileWorkbench, but the
