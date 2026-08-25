@@ -12,7 +12,8 @@ use crate::{
     ResourceEventKind, ResourceKind, RunState, TaskResourceManifest, TaskResourceSummary, TaskRun,
     TaskWorkspace, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent, TaskWorkspaceState,
     TransferChunk, TransferRegistry, UploadHandle, WatchManager, WorkspaceBaseSpec,
-    WorkspaceOwnerType, WorkspaceRecord, WorkspaceRegistry, WorkspaceSourceBinding, WorkspaceState,
+    WorkspaceOwnerType, WorkspaceProvisioning, WorkspaceRecord, WorkspaceRegistry,
+    WorkspaceSourceBinding, WorkspaceState,
 };
 use parking_lot::Mutex;
 use std::{
@@ -829,6 +830,9 @@ impl TaskWorkspaceService {
                 &baseline,
                 &blobs,
                 record.locked_by.as_deref(),
+                // The single-root task path carries no repository declaration:
+                // it is reached by callers that never read one.
+                None,
             );
             let (created_kind, isolation_ref) = match created {
                 Ok(created) => created,
@@ -1935,6 +1939,7 @@ impl TaskWorkspaceService {
                     &baseline,
                     &blobs,
                     record.locked_by.as_deref(),
+                    input.provisioning.as_ref(),
                 ) {
                     self.discard_managed_workspace(&record, now);
                     return Err(error);
@@ -2462,6 +2467,10 @@ impl TaskWorkspaceService {
             &snapshot,
             &blobs,
             record.locked_by.as_deref(),
+            // Rematerializing an existing record restores the snapshot it was
+            // captured with. Re-provisioning here would apply a declaration the
+            // record was not created under.
+            None,
         ) {
             return Err(error);
         }
@@ -3825,6 +3834,148 @@ fn validate_event_relative_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Apply a repository's provisioning declaration to a freshly created worktree.
+///
+/// Order matters and is not arbitrary:
+///
+///   1. **sparse-checkout first.** Narrowing the tree deletes the paths it
+///      excludes, so linking or copying before it would have the link removed
+///      out from under the caller.
+///   2. **cache links next.** They are directories the build wants present
+///      before anything reads them, and a symlink is cheap.
+///   3. **includes last.** They are real file copies and the most likely to
+///      fail on a large tree; failing after the cheap steps keeps the rollback
+///      window short.
+///
+/// Every path is re-validated here rather than trusted. The renderer's parser
+/// already rejects `..` and absolute paths, but this function is reachable from
+/// any caller of the acquire command — a plugin, the CLI, a paired device — and
+/// "someone upstream checked it" is how a path traversal ships.
+fn apply_provisioning(
+    workspace_root: &Path,
+    execution_root: &Path,
+    provisioning: &WorkspaceProvisioning,
+) -> Result<(), String> {
+    if !provisioning.sparse_paths.is_empty() {
+        for path in &provisioning.sparse_paths {
+            validate_event_relative_path(path)?;
+        }
+        // Cone mode: directory-granular, orders of magnitude faster than the
+        // pattern matcher on a large tree, and the only mode whose semantics a
+        // repository author can predict from a path list.
+        let init = Command::new("git")
+            .args(["-C"])
+            .arg(execution_root)
+            .args(["sparse-checkout", "init", "--cone"])
+            .output()
+            .map_err(|error| format!("start git sparse-checkout init: {error}"))?;
+        if !init.status.success() {
+            return Err(format!(
+                "git sparse-checkout init failed: {}",
+                String::from_utf8_lossy(&init.stderr).trim()
+            ));
+        }
+        let set = Command::new("git")
+            .args(["-C"])
+            .arg(execution_root)
+            .args(["sparse-checkout", "set"])
+            .args(&provisioning.sparse_paths)
+            .output()
+            .map_err(|error| format!("start git sparse-checkout set: {error}"))?;
+        if !set.status.success() {
+            return Err(format!(
+                "git sparse-checkout set failed: {}",
+                String::from_utf8_lossy(&set.stderr).trim()
+            ));
+        }
+    }
+
+    for link in &provisioning.cache_links {
+        validate_event_relative_path(&link.source)?;
+        validate_event_relative_path(&link.target)?;
+        let source = workspace_root.join(&link.source);
+        let target = execution_root.join(&link.target);
+        // A cache that does not exist in the source checkout yet is not an
+        // error: the point of the link is that the first build fills it.
+        if !source.exists() {
+            fs::create_dir_all(&source)
+                .map_err(|error| format!("create {}: {error}", source.display()))?;
+        }
+        if target.exists() || fs::symlink_metadata(&target).is_ok() {
+            // Already provisioned (a re-acquisition, or the repository tracks
+            // the path). Replacing it would discard a real directory.
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+        symlink_dir(&source, &target)?;
+    }
+
+    for path in &provisioning.include {
+        validate_event_relative_path(path)?;
+        let source = workspace_root.join(path);
+        // Absent is not an error either: `include` names the gitignored files a
+        // build wants, and a contributor who has not created their `.env` yet
+        // must still get a worktree.
+        if !source.exists() {
+            continue;
+        }
+        let target = execution_root.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+        copy_included(&source, &target)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn symlink_dir(source: &Path, target: &Path) -> Result<(), String> {
+    std::os::unix::fs::symlink(source, target)
+        .map_err(|error| format!("link {} -> {}: {error}", target.display(), source.display()))
+}
+
+#[cfg(windows)]
+fn symlink_dir(source: &Path, target: &Path) -> Result<(), String> {
+    // Requires Developer Mode or elevation on Windows. The error is surfaced
+    // rather than swallowed: a build that silently rebuilds its cache every
+    // acquisition looks like a performance mystery, not a missing permission.
+    std::os::windows::fs::symlink_dir(source, target)
+        .map_err(|error| format!("link {} -> {}: {error}", target.display(), source.display()))
+}
+
+/// Copy one included path — a file, or a directory tree.
+fn copy_included(source: &Path, target: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|error| format!("read {}: {error}", source.display()))?;
+    if metadata.is_symlink() {
+        // Following a symlink out of the checkout is exactly the escape the
+        // relative-path check exists to prevent, one indirection later.
+        return Ok(());
+    }
+    if metadata.is_file() {
+        fs::copy(source, target)
+            .map(|_| ())
+            .map_err(|error| format!("copy {}: {error}", source.display()))
+    } else if metadata.is_dir() {
+        fs::create_dir_all(target)
+            .map_err(|error| format!("create {}: {error}", target.display()))?;
+        let entries =
+            fs::read_dir(source).map_err(|error| format!("read {}: {error}", source.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("read {}: {error}", source.display()))?;
+            copy_included(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
 fn create_execution(
     workspace_root: &Path,
     execution_root: &Path,
@@ -3832,6 +3983,7 @@ fn create_execution(
     baseline: &WorkspaceSnapshot,
     blobs: &HashMap<String, Vec<u8>>,
     lock_reason: Option<&str>,
+    provisioning: Option<&WorkspaceProvisioning>,
 ) -> Result<(IsolationKind, Option<String>), String> {
     if is_git_root(workspace_root) {
         let lock_reason = lock_reason
@@ -3867,6 +4019,17 @@ fn create_execution(
             let result = clear_worktree_contents(execution_root)
                 .and_then(|_| materialize(execution_root, baseline, blobs));
             if let Err(error) = result {
+                unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
+                cleanup_git_worktree(workspace_root, execution_root, "");
+                return Err(error);
+            }
+        }
+        // Provisioning is part of creating the tree, not a later touch-up: a
+        // half-provisioned worktree handed to an agent is worse than none, so a
+        // failure here rolls the whole acquisition back the same way a failed
+        // materialize does.
+        if let Some(provisioning) = provisioning.filter(|value| !value.is_empty()) {
+            if let Err(error) = apply_provisioning(workspace_root, execution_root, provisioning) {
                 unlock_git_worktree(workspace_root, execution_root, IsolationKind::GitWorktree);
                 cleanup_git_worktree(workspace_root, execution_root, "");
                 return Err(error);
@@ -4946,6 +5109,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WorkspaceCacheLink;
     use crate::{
         ChangeKind, IsolationKind, ResourceCaptureClass, ResourceEventKind, ResourceTrackingPolicy,
         RunState, TaskWorkspaceState,
@@ -5002,6 +5166,267 @@ mod tests {
         repository
             .commit(Some("HEAD"), &signature, &signature, "seed", &tree, &[])
             .unwrap();
+    }
+
+    fn provisioning_repository() -> TempDir {
+        let repository = TempDir::new().unwrap();
+        git2::Repository::init(repository.path()).unwrap();
+        seed_git_repository(repository.path());
+        repository
+    }
+
+    #[test]
+    fn provisioning_links_a_cache_and_copies_the_gitignored_files_a_build_needs() {
+        let repository = provisioning_repository();
+        let source = repository.path();
+        fs::create_dir_all(source.join("node_modules/pkg")).unwrap();
+        fs::write(source.join("node_modules/pkg/index.js"), "cached").unwrap();
+        fs::write(source.join(".env"), "TOKEN=local").unwrap();
+
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(&execution_root).unwrap();
+
+        apply_provisioning(
+            source,
+            &execution_root,
+            &WorkspaceProvisioning {
+                cache_links: vec![WorkspaceCacheLink {
+                    source: "node_modules".into(),
+                    target: "node_modules".into(),
+                }],
+                include: vec![".env".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // The link resolves back into the source checkout, which is the point:
+        // a worktree that rebuilds `node_modules` from nothing on every
+        // acquisition is the cost this exists to remove.
+        assert_eq!(
+            fs::read_to_string(execution_root.join("node_modules/pkg/index.js")).unwrap(),
+            "cached"
+        );
+        assert!(fs::symlink_metadata(execution_root.join("node_modules"))
+            .unwrap()
+            .is_symlink());
+        // A copy, not a link: the worktree may edit its own `.env`.
+        assert_eq!(
+            fs::read_to_string(execution_root.join(".env")).unwrap(),
+            "TOKEN=local"
+        );
+        assert!(!fs::symlink_metadata(execution_root.join(".env"))
+            .unwrap()
+            .is_symlink());
+    }
+
+    #[test]
+    fn provisioning_refuses_every_path_that_escapes_the_checkout() {
+        // The renderer's parser rejects these too, but this function is
+        // reachable from any caller of the acquire command — "someone upstream
+        // checked it" is how a path traversal ships.
+        let repository = provisioning_repository();
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(&execution_root).unwrap();
+
+        for provisioning in [
+            WorkspaceProvisioning {
+                include: vec!["../outside".into()],
+                ..Default::default()
+            },
+            WorkspaceProvisioning {
+                include: vec!["/etc/passwd".into()],
+                ..Default::default()
+            },
+            WorkspaceProvisioning {
+                cache_links: vec![WorkspaceCacheLink {
+                    source: "../../secrets".into(),
+                    target: "cache".into(),
+                }],
+                ..Default::default()
+            },
+            WorkspaceProvisioning {
+                cache_links: vec![WorkspaceCacheLink {
+                    source: "cache".into(),
+                    target: "../escape".into(),
+                }],
+                ..Default::default()
+            },
+            WorkspaceProvisioning {
+                sparse_paths: vec!["../elsewhere".into()],
+                ..Default::default()
+            },
+        ] {
+            let error = apply_provisioning(repository.path(), &execution_root, &provisioning)
+                .expect_err("expected the escape to be refused");
+            assert!(error.contains("escapes workspace"), "unexpected: {error}");
+        }
+    }
+
+    #[test]
+    fn provisioning_does_not_follow_a_symlink_out_of_the_checkout() {
+        let repository = provisioning_repository();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("secret"), "leaked").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            outside.path().join("secret"),
+            repository.path().join("link"),
+        )
+        .unwrap();
+        #[cfg(not(unix))]
+        return;
+
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(&execution_root).unwrap();
+
+        apply_provisioning(
+            repository.path(),
+            &execution_root,
+            &WorkspaceProvisioning {
+                include: vec!["link".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // A confined relative path that resolves outside is the same escape,
+        // one indirection later.
+        assert!(!execution_root.join("link").exists());
+    }
+
+    #[test]
+    fn provisioning_tolerates_what_a_fresh_clone_does_not_have_yet() {
+        let repository = provisioning_repository();
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(&execution_root).unwrap();
+
+        apply_provisioning(
+            repository.path(),
+            &execution_root,
+            &WorkspaceProvisioning {
+                // The contributor has not created their `.env` yet, and the
+                // cache is empty because nothing has built. Neither may refuse
+                // them a worktree.
+                include: vec![".env".into()],
+                cache_links: vec![WorkspaceCacheLink {
+                    source: "target".into(),
+                    target: "target".into(),
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert!(!execution_root.join(".env").exists());
+        assert!(repository.path().join("target").is_dir());
+        assert!(execution_root.join("target").exists());
+    }
+
+    #[test]
+    fn provisioning_leaves_an_already_provisioned_target_alone() {
+        // Re-acquisition, or a repository that tracks the path. Replacing it
+        // would discard a real directory.
+        let repository = provisioning_repository();
+        fs::create_dir_all(repository.path().join("cache")).unwrap();
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(execution_root.join("cache")).unwrap();
+        fs::write(execution_root.join("cache/real.txt"), "mine").unwrap();
+
+        apply_provisioning(
+            repository.path(),
+            &execution_root,
+            &WorkspaceProvisioning {
+                cache_links: vec![WorkspaceCacheLink {
+                    source: "cache".into(),
+                    target: "cache".into(),
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(execution_root.join("cache/real.txt")).unwrap(),
+            "mine"
+        );
+    }
+
+    #[test]
+    fn provisioning_narrows_a_worktree_to_the_declared_paths() {
+        let repository = provisioning_repository();
+        fs::create_dir_all(repository.path().join("packages/web")).unwrap();
+        fs::write(repository.path().join("packages/web/app.ts"), "web").unwrap();
+        fs::create_dir_all(repository.path().join("packages/api")).unwrap();
+        fs::write(repository.path().join("packages/api/server.ts"), "api").unwrap();
+        let add = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["add", "-A"])
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+        let commit = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args([
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-m",
+                "packages",
+            ])
+            .output()
+            .unwrap();
+        assert!(commit.status.success());
+
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        let created = Command::new("git")
+            .args(["-C"])
+            .arg(repository.path())
+            .args(["worktree", "add", "--detach"])
+            .arg(&execution_root)
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert!(created.status.success());
+
+        apply_provisioning(
+            repository.path(),
+            &execution_root,
+            &WorkspaceProvisioning {
+                sparse_paths: vec!["packages/web".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert!(execution_root.join("packages/web/app.ts").exists());
+        assert!(!execution_root.join("packages/api/server.ts").exists());
+    }
+
+    #[test]
+    fn an_empty_declaration_is_a_no_op() {
+        let repository = provisioning_repository();
+        let worktree = TempDir::new().unwrap();
+        let execution_root = worktree.path().join("wt");
+        fs::create_dir_all(&execution_root).unwrap();
+        assert!(WorkspaceProvisioning::default().is_empty());
+        apply_provisioning(
+            repository.path(),
+            &execution_root,
+            &WorkspaceProvisioning::default(),
+        )
+        .unwrap();
+        assert_eq!(fs::read_dir(&execution_root).unwrap().count(), 0);
     }
 
     #[test]
@@ -6147,6 +6572,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: Some("project-a".into()),
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -6192,6 +6618,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-bundle".into()),
@@ -6270,6 +6697,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -6319,6 +6747,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-other".into()),
@@ -6355,6 +6784,7 @@ mod tests {
 
         let error = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-rollback".into()),
@@ -6402,6 +6832,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-lifecycle".into()),
@@ -6456,6 +6887,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::User,
                 owner_ref: Some("project-1".into()),
@@ -6496,6 +6928,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-lifecycle-mutation".into()),
@@ -6534,6 +6967,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-git-archive".into()),
@@ -6847,6 +7281,7 @@ mod tests {
                 TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
             let bundle = service
                 .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                    provisioning: None,
                     project_id: None,
                     owner_type: WorkspaceOwnerType::Session,
                     owner_ref: Some("session-1".into()),
@@ -6913,6 +7348,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -6992,6 +7428,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -7039,6 +7476,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -7173,6 +7611,7 @@ mod tests {
             .unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),
@@ -7252,6 +7691,7 @@ mod tests {
         let service = TaskWorkspaceService::open(ServiceConfig::new(data.path().into())).unwrap();
         let bundle = service
             .acquire_workspace_bundle(crate::AcquireWorkspaceBundle {
+                provisioning: None,
                 project_id: None,
                 owner_type: WorkspaceOwnerType::Session,
                 owner_ref: Some("session-1".into()),

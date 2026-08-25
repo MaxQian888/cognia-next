@@ -37,6 +37,7 @@
 import type { Project } from "@/types"
 import type { SessionExecutionLocation, SessionWorkspaceBaseSpec } from "@/types/execution-context"
 import type { WorkspaceRoot } from "@/types/workspace"
+import type { WorkspaceProvisioning } from "@/lib/task-workspace/types"
 
 import {
   evaluateWorkspaceConfig,
@@ -62,6 +63,12 @@ export interface DeclaredWorkspace {
   base: SessionWorkspaceBaseSpec
   roots: WorkspaceConfigRoot[]
   capabilities: WorkspaceConfigCapabilities
+  /**
+   * Sparse paths, cache links and includes, forwarded verbatim to the native
+   * worktree provisioner. Undefined when the repository declares none, so the
+   * acquire payload stays absent rather than carrying three empty arrays.
+   */
+  provisioning?: WorkspaceProvisioning
 }
 
 /**
@@ -78,11 +85,17 @@ export function declaredExecutionLocation(
 }
 
 export function declaredWorkspaceOf(config: WorkspaceRepositoryConfigV1): DeclaredWorkspace {
+  const provisioning: WorkspaceProvisioning = {
+    ...(config.sparsePaths.length ? { sparsePaths: config.sparsePaths } : {}),
+    ...(config.cacheLinks.length ? { cacheLinks: config.cacheLinks } : {}),
+    ...(config.include.length ? { include: config.include } : {}),
+  }
   return {
     executionLocation: declaredExecutionLocation(config),
     base: config.defaults.base as SessionWorkspaceBaseSpec,
     roots: config.roots,
     capabilities: config.capabilities,
+    ...(Object.keys(provisioning).length ? { provisioning } : {}),
   }
 }
 

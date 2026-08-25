@@ -79,6 +79,31 @@ export interface WorkspaceRootLease {
   aliasPath: string
 }
 
+/**
+ * One directory linked into an execution root instead of copied — a package
+ * cache (`node_modules`, `target`, `.venv`) a worktree would otherwise rebuild
+ * from nothing on every acquisition. Both halves are repository-relative and
+ * re-validated host-side.
+ */
+export interface WorkspaceCacheLink {
+  source: string
+  target: string
+}
+
+/**
+ * How a repository wants its managed worktrees provisioned. Forwarded only
+ * after the user approved that declaration on this device — see
+ * `lib/project-environment/workspace-config-trust`.
+ */
+export interface WorkspaceProvisioning {
+  /** Cone-mode sparse-checkout paths. Empty means a full checkout. */
+  sparsePaths?: string[]
+  /** Directories symlinked from the source checkout into the worktree. */
+  cacheLinks?: WorkspaceCacheLink[]
+  /** Gitignored paths copied in, which a worktree otherwise lacks. */
+  include?: string[]
+}
+
 export interface AcquireWorkspaceBundle {
   ownerType: Exclude<WorkspaceOwnerType, "imported">
   ownerRef: string | null
@@ -97,6 +122,12 @@ export interface AcquireWorkspaceBundle {
     role: "primary" | "additional"
     sourceRoot: string
   }>
+  /**
+   * Repository-declared provisioning, applied to a Git worktree as part of
+   * creating it. Absent for every caller that has no approved declaration —
+   * the overwhelmingly common case.
+   */
+  provisioning?: WorkspaceProvisioning
 }
 
 export interface WorkspaceBundle {

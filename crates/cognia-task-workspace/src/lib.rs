@@ -55,11 +55,11 @@ pub use types::{
     TaskWorkspaceState, WorkspaceBaseKind, WorkspaceBaseSpec, WorkspaceBundle,
     WorkspaceBundleOutcome, WorkspaceBundleRootInput, WorkspaceBundleTurnLease,
     WorkspaceBundleTurnOutcome, WorkspaceBundleTurnRunLease, WorkspaceBundleTurnRunOutcome,
-    WorkspaceEnvironmentAction, WorkspaceEnvironmentKind, WorkspaceEnvironmentOwnership,
-    WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy, WorkspaceMaintenanceEvent,
-    WorkspaceMaintenanceEventKind, WorkspaceMaintenanceRequest, WorkspaceMaintenanceResult,
-    WorkspaceOwnerType, WorkspaceRecord, WorkspaceRootLease, WorkspaceRootRole,
-    WorkspaceSourceBinding, WorkspaceState,
+    WorkspaceCacheLink, WorkspaceEnvironmentAction, WorkspaceEnvironmentKind,
+    WorkspaceEnvironmentOwnership, WorkspaceEnvironmentSummary, WorkspaceLifecyclePolicy,
+    WorkspaceMaintenanceEvent, WorkspaceMaintenanceEventKind, WorkspaceMaintenanceRequest,
+    WorkspaceMaintenanceResult, WorkspaceOwnerType, WorkspaceProvisioning, WorkspaceRecord,
+    WorkspaceRootLease, WorkspaceRootRole, WorkspaceSourceBinding, WorkspaceState,
 };
 pub use watcher::{
     ResourceEventChange, ResourceEventKind, TaskWorkspaceEventSink, TaskWorkspaceResourceEvent,

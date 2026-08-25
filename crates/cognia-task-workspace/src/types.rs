@@ -736,6 +736,46 @@ pub struct WorkspaceBundleRootInput {
     pub source_root: String,
 }
 
+/// One directory linked into an execution root instead of copied.
+///
+/// The use case is a package cache — `node_modules`, `target`, `.venv` — that a
+/// worktree would otherwise have to rebuild from nothing on every acquisition.
+/// Both halves are repository-relative and are re-validated host-side; a
+/// declaration arriving over the wire is never trusted to have been checked by
+/// whoever wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCacheLink {
+    pub source: String,
+    pub target: String,
+}
+
+/// How a repository wants its managed worktrees provisioned.
+///
+/// Applied only to a Git worktree isolation — a shadow workspace already
+/// materializes an explicit snapshot, so narrowing it or linking into it would
+/// contradict the snapshot it was built from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceProvisioning {
+    /// Cone-mode sparse-checkout paths. Empty means a full checkout.
+    #[serde(default)]
+    pub sparse_paths: Vec<String>,
+    /// Directories symlinked from the source checkout into the worktree.
+    #[serde(default)]
+    pub cache_links: Vec<WorkspaceCacheLink>,
+    /// Paths copied in from the source checkout — the gitignored files a build
+    /// needs (`.env`, local certificates) and that a worktree therefore lacks.
+    #[serde(default)]
+    pub include: Vec<String>,
+}
+
+impl WorkspaceProvisioning {
+    pub fn is_empty(&self) -> bool {
+        self.sparse_paths.is_empty() && self.cache_links.is_empty() && self.include.is_empty()
+    }
+}
+
 /// Filesystem-bound request to provision every writable root for one task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -752,6 +792,11 @@ pub struct AcquireWorkspaceBundle {
     #[serde(default)]
     pub base: WorkspaceBaseSpec,
     pub roots: Vec<WorkspaceBundleRootInput>,
+    /// What the repository declares about provisioning, forwarded only after
+    /// the user approved that declaration on the calling device. Absent for
+    /// every caller that has none — the overwhelmingly common case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provisioning: Option<WorkspaceProvisioning>,
 }
 
 /// A collection of `WorkspaceRootLease`s acquired atomically for one execution.

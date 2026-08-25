@@ -151,3 +151,67 @@ describe("ensureSessionExecutionBundle", () => {
     ).rejects.toThrow("contains stale Project root: removed-root")
   })
 })
+
+describe("repository-declared provisioning", () => {
+  beforeEach(() => {
+    acquireWorkspaceBundle.mockReset().mockResolvedValue(bundle)
+    getWorkspaceBundle.mockReset()
+  })
+
+  it("forwards an approved declaration into the acquisition that creates the worktree", async () => {
+    // Not a later touch-up: a half-provisioned tree handed to an agent is worse
+    // than none, so it has to ride along with the create.
+    await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context,
+      project,
+      loadProvisioning: async () => ({
+        sparsePaths: ["packages/web"],
+        cacheLinks: [{ source: "node_modules", target: "node_modules" }],
+        include: [".env"],
+      }),
+    })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provisioning: {
+          sparsePaths: ["packages/web"],
+          cacheLinks: [{ source: "node_modules", target: "node_modules" }],
+          include: [".env"],
+        },
+      })
+    )
+  })
+
+  it("omits the field entirely when the repository declares nothing", async () => {
+    // An absent field, not three empty arrays — the host treats "no declaration"
+    // and "an empty one" the same, and the payload should say which it is.
+    await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context,
+      project,
+      loadProvisioning: async () => undefined,
+    })
+
+    expect(acquireWorkspaceBundle).toHaveBeenCalledWith(
+      expect.not.objectContaining({ provisioning: expect.anything() })
+    )
+  })
+
+  it("does not re-provision a bundle that already exists", async () => {
+    getWorkspaceBundle.mockResolvedValue(bundle)
+    const loadProvisioning = jest.fn(async () => ({ include: [".env"] }))
+
+    await ensureSessionExecutionBundle({
+      sessionId: "session-1",
+      context: { ...context, execution: { ...context.execution!, bundleId: "bundle-1" } },
+      project,
+      loadProvisioning,
+    })
+
+    expect(acquireWorkspaceBundle).not.toHaveBeenCalled()
+    // Reading it would be wasted work, and applying it would mutate a worktree
+    // an agent may be mid-turn in.
+    expect(loadProvisioning).not.toHaveBeenCalled()
+  })
+})
