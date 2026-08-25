@@ -1,5 +1,6 @@
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
 import { isCredentialKey } from "./contracts"
+import { interpolateTemplatePayload, resolveTemplateInputs } from "./interpolate"
 import type {
   TemplateDefinitionEnvelope,
   TemplateDomain,
@@ -215,6 +216,57 @@ function bindingsFromPlan(plan: TemplatePreflightPlan): Record<string, string> {
   return Object.fromEntries(plan.bindings.map((binding) => [binding.slotId, binding.resourceId]))
 }
 
+/**
+ * The bindings that may be written INTO a payload.
+ *
+ * A sensitive binding is deliberately not one of them. The payload is persisted,
+ * packaged and shipped — `pushForbiddenPayloadIssues` refuses a credential field
+ * in one for exactly that reason — so substituting a secret reference into it
+ * would smuggle past that check through the back door. Adapters still receive
+ * the full binding map and resolve secrets through the channel built for it.
+ */
+export function interpolatableBindings(
+  bindings: readonly { slotId: string; resourceId: string; sensitive?: boolean }[]
+): Record<string, string> {
+  return Object.fromEntries(
+    bindings.filter((binding) => !binding.sensitive).map((b) => [b.slotId, b.resourceId])
+  )
+}
+
+/**
+ * The payload as it should reach a live resource: `{{inputId}}` replaced by the
+ * value the plan bound.
+ *
+ * Everything around this already worked — the validator rejects a token that
+ * names no declared input, preflight blocks a plan whose required inputs are
+ * unbound, the Studio collects a value for each — and then the raw payload went
+ * to the adapter, so a parameterised template created a resource containing the
+ * literal `{{teamName}}`.
+ */
+function resolvedPayload<T extends TemplateJson>(
+  definition: TemplateDefinitionEnvelope,
+  bindings: Readonly<Record<string, string>>
+): T {
+  return interpolateTemplatePayload(
+    definition.payload,
+    resolveTemplateInputs(definition.inputs, bindings)
+  ) as T
+}
+
+/**
+ * The same, for an update: the values come from what the instance was created
+ * with, because an update has no plan of its own to read them from. An instance
+ * written before bindings were recorded has none, and its payload goes through
+ * untouched — the same behaviour it was created with, which is the only answer
+ * that does not silently rewrite a resource on the next version bump.
+ */
+export function resolvedUpdatePayload<T extends TemplateJson>(
+  next: TemplateDefinitionEnvelope,
+  instance: { bindings?: Record<string, string> }
+): T {
+  return resolvedPayload<T>(next, instance.bindings ?? {})
+}
+
 function standardPreflight(
   definition: TemplateDefinitionEnvelope,
   bindings: Record<string, string>,
@@ -401,8 +453,11 @@ export function createAgentTeamTemplateAdapter(port: AgentTeamTemplatePort): Tem
     },
 
     async instantiate({ definition, plan }) {
-      const payload = definitionPayload<AgentTeamTemplatePayload>(definition)
       const bindings = bindingsFromPlan(plan)
+      const payload = resolvedPayload<AgentTeamTemplatePayload>(
+        definition,
+        interpolatableBindings(plan.bindings)
+      )
       const teamTwinIds = payload.twinSlots
         .filter((slot) => slot.scope === "team")
         .map((slot) => bindings[slot.id])
@@ -490,7 +545,7 @@ export function createAgentTeamTemplateAdapter(port: AgentTeamTemplatePort): Tem
 
     async update({ instance, next }) {
       if (!port.update) throw new Error("AgentTeam in-place template update is unavailable")
-      return port.update(instance.resources, next.payload)
+      return port.update(instance.resources, resolvedUpdatePayload(next, instance))
     },
 
     async rollback(token) {
@@ -580,7 +635,11 @@ function createCrudTemplateAdapter(
       return standardPreflight(definition, bindings, summary)
     },
     async instantiate({ definition, plan }) {
-      const created = await port.create(definition.payload, bindingsFromPlan(plan))
+      const bindings = bindingsFromPlan(plan)
+      const created = await port.create(
+        resolvedPayload(definition, interpolatableBindings(plan.bindings)),
+        bindings
+      )
       return { resources: [{ domain, id: created.id }], rollbackToken: null }
     },
     snapshot(resourceIds) {
@@ -589,7 +648,11 @@ function createCrudTemplateAdapter(
     diff: genericDiff,
     async update({ instance, next }) {
       if (!port.update) throw new Error(`${domain} in-place template update is unavailable`)
-      const updated = await port.update(instance.resources, next.payload, {})
+      const updated = await port.update(
+        instance.resources,
+        resolvedUpdatePayload(next, instance),
+        {}
+      )
       return { resources: [{ domain, id: updated.id }] }
     },
     isActive: port.isActive

@@ -272,3 +272,129 @@ describe("template domain adapters", () => {
     ])
   })
 })
+
+describe("template inputs actually reach the created resource", () => {
+  async function parameterisedTeam() {
+    return createTemplateDefinition({
+      id: "team.param",
+      domain: "agentTeam",
+      status: "draft",
+      revision: 1,
+      metadata: { name: "Parameterised" },
+      payload: {
+        team: {
+          name: "{{teamName}} review",
+          description: "",
+          task: "Review at {{depth}} depth",
+          config: {},
+        },
+        lead: { localId: "lead", name: "{{teamName}} lead", description: "", config: {} },
+        teammates: [],
+        tasks: [],
+        twinSlots: [],
+      },
+      inputs: [
+        { id: "teamName", kind: "string", label: "Team name", required: true },
+        { id: "depth", kind: "string", label: "Depth", required: false, defaultValue: "quick" },
+      ],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop"] },
+      provenance: { source: "user" },
+    })
+  }
+
+  // Every guard around this worked — the validator refuses a token naming no
+  // declared input, preflight blocks an unbound required one, the Studio
+  // collects a value — and then the raw payload went to the adapter, so a
+  // parameterised template created a team literally called "{{teamName}} review".
+  it("substitutes a bound input instead of creating the literal token", async () => {
+    const createTeam = jest.fn(async () => ({ id: "team-created" }))
+    const adapter = createAgentTeamTemplateAdapter({
+      createTeam,
+      addTeammate: jest.fn(async () => ({ id: "lead-created" })),
+      createTask: jest.fn(),
+      deleteTeam: jest.fn(),
+      snapshot: jest.fn(),
+    })
+    const definition = await parameterisedTeam()
+    const plan = await adapter.preflight({
+      definition,
+      platform: "desktop",
+      bindings: { teamName: "Platform" },
+    })
+
+    await adapter.instantiate({ definition, plan, idempotencyKey: "once" })
+
+    expect(createTeam).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Platform review",
+        // The unbound optional input falls back to its declared default.
+        task: "Review at quick depth",
+      })
+    )
+  })
+
+  // The payload is persisted, packaged and shipped; `pushForbiddenPayloadIssues`
+  // refuses a credential field in one for exactly that reason. Substituting a
+  // secret reference into it would smuggle past that check.
+  it("never writes a sensitive binding into the payload", async () => {
+    const createTeam = jest.fn(async () => ({ id: "team-created" }))
+    const adapter = createAgentTeamTemplateAdapter({
+      createTeam,
+      addTeammate: jest.fn(async () => ({ id: "lead-created" })),
+      createTask: jest.fn(),
+      deleteTeam: jest.fn(),
+      snapshot: jest.fn(),
+    })
+    const definition = await parameterisedTeam()
+    const plan = await adapter.preflight({
+      definition,
+      platform: "desktop",
+      bindings: { teamName: "Platform" },
+    })
+
+    await adapter.instantiate({
+      definition,
+      plan: {
+        ...plan,
+        bindings: plan.bindings.map((binding) => ({ ...binding, sensitive: true })),
+      },
+      idempotencyKey: "once",
+    })
+
+    expect(createTeam).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "{{teamName}} review" })
+    )
+  })
+
+  it("re-uses the instance's recorded values on an update", async () => {
+    const update = jest.fn(async () => ({ id: "team-created" }))
+    const adapter = createAgentTeamTemplateAdapter({
+      createTeam: jest.fn(),
+      addTeammate: jest.fn(),
+      createTask: jest.fn(),
+      deleteTeam: jest.fn(),
+      snapshot: jest.fn(),
+      update,
+    })
+    const definition = await parameterisedTeam()
+
+    await adapter.update({
+      instance: {
+        resources: [{ domain: "agentTeam", id: "team-created" }],
+        bindings: { teamName: "Platform" },
+      } as never,
+      next: definition,
+      diff: { changes: [], conflicts: [] },
+      idempotencyKey: "again",
+    })
+
+    expect(update).toHaveBeenCalledWith(
+      [{ domain: "agentTeam", id: "team-created" }],
+      expect.objectContaining({
+        team: expect.objectContaining({ name: "Platform review" }),
+      })
+    )
+  })
+})

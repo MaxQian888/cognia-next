@@ -1,5 +1,6 @@
 import { sha256Hex } from "@/lib/share/hash"
 import { TemplateCatalog } from "./catalog"
+import { interpolatableBindings, resolvedUpdatePayload } from "./adapters"
 import {
   canonicalTemplateStringify,
   createTemplateDefinition,
@@ -606,6 +607,7 @@ export class TemplateService {
         snapshot: definition,
       },
       bindingFingerprint,
+      bindings: interpolatableBindings(input.plan.bindings),
       resources: result.resources,
       baseline: await adapter.snapshot(result.resources),
       createdAt: now,
@@ -633,7 +635,10 @@ export class TemplateService {
     if (!adapter) throw new Error(`Template domain ${next.domain} is catalog-only`)
     const active = adapter.isActive ? await adapter.isActive(instance.resources) : false
     const local = await adapter.snapshot(instance.resources)
-    const diff = adapter.diff(instance.baseline, local, next.payload)
+    // Diff the payload as it WOULD be written, not as it is stored: comparing an
+    // interpolated live resource against a payload still full of `{{inputId}}`
+    // reports every parameterised field as a conflict.
+    const diff = adapter.diff(instance.baseline, local, resolvedUpdatePayload(next, instance))
     const issues: TemplatePreflightIssue[] = []
     if (active) {
       issues.push({

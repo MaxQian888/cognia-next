@@ -28,6 +28,17 @@ export interface TemplateInstanceRecord {
     snapshot: TemplateDefinitionEnvelope
   }
   bindingFingerprint: string
+  /**
+   * The non-sensitive input values this instance was created with.
+   *
+   * Recorded because an update has no plan of its own: without them the next
+   * version's payload would be written back with its `{{inputId}}` tokens
+   * un-substituted, undoing the interpolation the instance was created with.
+   * Sensitive bindings are deliberately absent — see `interpolatableBindings`.
+   * Absent entirely on instances created before this was recorded, which is
+   * exactly the set whose payloads were never interpolated either.
+   */
+  bindings?: Record<string, string>
   resources: TemplateResourceRef[]
   baseline: TemplateJson
   createdAt: number
