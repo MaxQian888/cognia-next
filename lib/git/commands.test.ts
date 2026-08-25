@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
 const isTauriMock = jest.fn()
 const isCapacitorMock = jest.fn()
 const hasWebCompanionTargetMock = jest.fn()
@@ -670,5 +673,40 @@ describe("when in Tauri", () => {
     expect(callMock).toHaveBeenCalledWith("git_watch_start", { repoPath: "/r" })
     await gitWatchStop("/r")
     expect(callMock).toHaveBeenCalledWith("git_watch_stop", { repoPath: "/r" })
+  })
+})
+
+/**
+ * The guard for the failure this file cannot see.
+ *
+ * `resolveOperationAvailability` answers `unsupported: unknown-command` for any
+ * command with no descriptor in `protocol/companion-commands.json`, and it does
+ * so BEFORE the "no client target means local host" branch — so a wrapper added
+ * without a descriptor is dead on the desktop too, as a permanently disabled
+ * button rather than as an error. `pnpm audit:companion-command-manifest` only
+ * checks descriptor→handler, so nothing else catches it.
+ */
+describe("every git command this module calls has a descriptor", () => {
+  const source = readFileSync(join(process.cwd(), "lib/git/commands.ts"), "utf8")
+  const called = [
+    ...new Set(
+      [...source.matchAll(/transport\.call<?[^>]*>?\(\s*"([a-z0-9_]+)"/g)].map(
+        (match) => match[1] as string
+      )
+    ),
+  ].sort()
+  const manifest = JSON.parse(
+    readFileSync(join(process.cwd(), "protocol/companion-commands.json"), "utf8")
+  ) as { commands: Array<{ name: string }> }
+  const described = new Set(manifest.commands.map((command) => command.name))
+
+  it("found the calls to check", () => {
+    // A scan that matched nothing passes the assertion below it.
+    expect(called.length).toBeGreaterThan(40)
+    expect(called).toContain("git_stack_validate")
+  })
+
+  it("has no wrapper whose command is missing from the manifest", () => {
+    expect(called.filter((command) => !described.has(command))).toEqual([])
   })
 })

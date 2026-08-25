@@ -3326,6 +3326,42 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "connectors_attachment_delete",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "connectors_attachment_enforce_budget",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "connectors_attachment_evict_adapter",
+      "target": "service",
+      "operation": "write",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "connectors_attachment_fetch",
       "target": "service",
       "operation": "side-effect",
@@ -3333,6 +3369,18 @@
       "risk": "critical",
       "approval": "signed-policy",
       "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "connectors_attachment_list",
+      "target": "service",
+      "operation": "read",
+      "capability": "service.internal",
+      "risk": "critical",
+      "approval": "signed-policy",
+      "idempotency": "structural",
       "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
@@ -5511,6 +5559,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "git_clone_guarded",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "git_commit",
       "target": "execution",
       "operation": "write",
@@ -5847,6 +5907,18 @@
       "outputSchema": "#/components/schemas/RpcResult"
     },
     {
+      "name": "git_read_blob_at_ref",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
       "name": "git_rebase",
       "target": "execution",
       "operation": "write",
@@ -6023,6 +6095,102 @@
       "approval": "interactive",
       "idempotency": "required",
       "transports": ["http", "websocket", "webrtc"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_capabilities",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_history",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_parents",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_push",
+      "target": "execution",
+      "operation": "side-effect",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_restack",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_revert",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "high",
+      "approval": "interactive",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_set_parent",
+      "target": "execution",
+      "operation": "write",
+      "capability": "git.write",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "required",
+      "transports": ["internal"],
+      "inputSchema": "#/components/schemas/RpcArgs",
+      "outputSchema": "#/components/schemas/RpcResult"
+    },
+    {
+      "name": "git_stack_validate",
+      "target": "execution",
+      "operation": "read",
+      "capability": "workspace.read",
+      "risk": "low",
+      "approval": "none",
+      "idempotency": "structural",
+      "transports": ["internal"],
       "inputSchema": "#/components/schemas/RpcArgs",
       "outputSchema": "#/components/schemas/RpcResult"
     },
