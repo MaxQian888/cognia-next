@@ -94,6 +94,11 @@ const REGISTRY = [
   // existed, nothing on a PR ever ran that check.
   { script: "web:typecheck", group: "types" },
 
+  // ADR-0148 — panel surfaces go through <Surface>, corners and depth go
+  // through the token scale. Ratcheted against a baseline: the list may shrink,
+  // never grow.
+  { script: "audit:surfaces", group: "lint" },
+
   { script: "lint:i18n", group: "i18n" },
   { script: "i18n:build:check", group: "i18n" },
 
