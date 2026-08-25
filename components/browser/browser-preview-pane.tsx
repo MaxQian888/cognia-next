@@ -24,6 +24,7 @@ import {
   BrowserAgentIndicator,
   useBrowserAgentActivity,
 } from "@/components/browser/browser-agent-indicator"
+import { onBrowserUrlRequest } from "@/lib/browser/open-url-request"
 import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserAdjustControls } from "@/components/browser/browser-adjust-controls"
 import { BrowserCdpControls } from "@/components/browser/browser-cdp-controls"
@@ -147,6 +148,7 @@ export function BrowserPreviewPane({
   profileId,
   initialUrl,
   ownerId,
+  onRequestReveal,
 }: {
   sessionId?: string
   parentChatSessionId?: string
@@ -154,6 +156,12 @@ export function BrowserPreviewPane({
   profileId?: string
   initialUrl?: string
   ownerId?: string
+  /**
+   * Bring this pane's surface to the front, returning whether it worked. Only
+   * a host that can be hidden while still mounted needs to supply it — see the
+   * `onBrowserUrlRequest` handler below.
+   */
+  onRequestReveal?: () => boolean
 }) {
   const t = useTranslations("browser")
   const tCdp = useTranslations("browserCdp")
@@ -522,6 +530,36 @@ export function BrowserPreviewPane({
     setUrlInput(url)
     setCommittedUrl(url)
   }, [])
+
+  // ⌘-clicking a link in the composer lands here rather than in the OS browser.
+  //
+  // Claiming is what tells the caller not to fall back to the OS browser, so a
+  // pane may only claim when the user will actually SEE the result. Being
+  // mounted is not that: dock panels are `retention: "stateful"`, so the
+  // browser panel stays mounted behind whichever tab is showing, and a claim
+  // from there navigates a pane nobody can look at — which reads as the link
+  // silently doing nothing. `regionVisible` already answers this correctly
+  // (it watches aria-hidden / inert / modal / portal occlusion); a host that
+  // can reveal itself gets one chance to do so first.
+  const revealRef = useRef(onRequestReveal)
+  useEffect(() => {
+    revealRef.current = onRequestReveal
+  }, [onRequestReveal])
+  const regionVisibleRef = useRef(regionVisible)
+  useEffect(() => {
+    regionVisibleRef.current = regionVisible
+  }, [regionVisible])
+  useEffect(
+    () =>
+      onBrowserUrlRequest((url) => {
+        const normalized = normalizePreviewUrl(url)
+        if (!normalized) return false
+        if (!regionVisibleRef.current && revealRef.current?.() !== true) return false
+        openQuickUrl(normalized)
+        return true
+      }),
+    [openQuickUrl]
+  )
 
   const reloadAfterCookieImport = useCallback(async () => {
     beginLoad()

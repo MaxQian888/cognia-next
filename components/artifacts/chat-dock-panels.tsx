@@ -236,7 +236,17 @@ export function useArtifactSurfacePanels({
         // embedded-webview lease behind it — was torn down every time.
         scope: "session",
         preferredMode: "wide",
-        renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
+        renderer: () => (
+          <BrowserPreviewPane
+            sessionId={activeSessionId ?? undefined}
+            // `retention: "stateful"` keeps this panel mounted behind whichever
+            // tab is showing, so a ⌘-clicked link must bring it to the front
+            // before it may claim the URL — otherwise the link reads as a no-op.
+            onRequestReveal={() =>
+              useContextWorkbenchStore.getState().smartReveal(scopeKey, "browser", "wide")
+            }
+          />
+        ),
       },
       {
         // Named for what it shows — every artifact in scope — not "history".
@@ -481,7 +491,17 @@ export function useSessionSurfacePanels({
         retention: "stateful",
         scope: "session",
         preferredMode: "wide",
-        renderer: () => <BrowserPreviewPane sessionId={activeSessionId ?? undefined} />,
+        renderer: () => (
+          <BrowserPreviewPane
+            sessionId={activeSessionId ?? undefined}
+            // `retention: "stateful"` keeps this panel mounted behind whichever
+            // tab is showing, so a ⌘-clicked link must bring it to the front
+            // before it may claim the URL — otherwise the link reads as a no-op.
+            onRequestReveal={() =>
+              useContextWorkbenchStore.getState().smartReveal(scopeKey, "browser", "wide")
+            }
+          />
+        ),
       },
       {
         id: PROJECT_OVERVIEW_PANEL_ID,

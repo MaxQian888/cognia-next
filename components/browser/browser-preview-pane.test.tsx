@@ -176,6 +176,7 @@ jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
 import { browserClient } from "@/lib/browser/client"
+import { requestBrowserUrl } from "@/lib/browser/open-url-request"
 import { addressDisplayParts, BrowserPreviewPane } from "./browser-preview-pane"
 
 const SELECTION: BrowserSelection = {
@@ -1012,5 +1013,64 @@ describe("devtools drawer", () => {
     const drawer = document.querySelector('[data-testid="browser-devtools-drawer"]')
     expect(drawer).not.toBeNull()
     expect(drawer).toHaveAttribute("data-expanded", "false")
+  })
+})
+
+// A ⌘-clicked composer link is broadcast to every mounted pane and CLAIMED by
+// whichever one can show the result (`lib/browser/open-url-request.ts`). A pane
+// that is mounted but not visible must decline so the caller falls back to the
+// OS browser instead of navigating out of sight.
+describe("⌘-click link claim", () => {
+  /** The claim runs synchronously inside dispatchEvent; act() flushes its state. */
+  const claim = (url: string) => {
+    let claimed = false
+    act(() => {
+      claimed = requestBrowserUrl(url)
+    })
+    return claimed
+  }
+
+  it("claims and navigates when the pane is on screen", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(claim("example.com/docs")).toBe(true)
+    expect(urlBar()).toHaveValue("https://example.com/docs")
+  })
+
+  it("declines a malformed URL so the caller can fall back", () => {
+    renderPane(<BrowserPreviewPane />)
+    expect(claim("   ")).toBe(false)
+    expect(urlBar()).toHaveValue("")
+  })
+
+  it("declines while hidden when the host cannot reveal it", () => {
+    mockRegionVisible = false
+    renderPane(<BrowserPreviewPane />)
+    expect(claim("https://example.com/docs")).toBe(false)
+    expect(urlBar()).toHaveValue("")
+  })
+
+  it("declines while hidden when the host's reveal fails", () => {
+    mockRegionVisible = false
+    const reveal = jest.fn(() => false)
+    renderPane(<BrowserPreviewPane onRequestReveal={reveal} />)
+    expect(claim("https://example.com/docs")).toBe(false)
+    expect(reveal).toHaveBeenCalledTimes(1)
+    expect(urlBar()).toHaveValue("")
+  })
+
+  it("reveals itself, then claims, when the host can bring it forward", () => {
+    mockRegionVisible = false
+    const reveal = jest.fn(() => true)
+    renderPane(<BrowserPreviewPane onRequestReveal={reveal} />)
+    expect(claim("https://example.com/docs")).toBe(true)
+    expect(reveal).toHaveBeenCalledTimes(1)
+    expect(urlBar()).toHaveValue("https://example.com/docs")
+  })
+
+  it("does not ask to reveal a pane that is already visible", () => {
+    const reveal = jest.fn(() => true)
+    renderPane(<BrowserPreviewPane onRequestReveal={reveal} />)
+    expect(claim("https://example.com/docs")).toBe(true)
+    expect(reveal).not.toHaveBeenCalled()
   })
 })
