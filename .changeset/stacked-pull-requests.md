@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Stacked branches are now a first-class thing in Source Control. A stack is a chain of branches where each is based on the one below it, and the parent pointer lives in the repository's own Git config — so a stack created in a terminal, or pulled from another machine, is simply there, and a clone reads the same shape. The new Stacks panel lists every stack it finds, says per stack whether it is actually safe, and names the layer that is not: a layer that no longer contains its parent still publishes, and its pull request would quietly carry the layer below it. Each problem comes with the one action that fixes it, and the restack button appears only when a restack is what would help. Restacking prefers `git replay`, which moves the branches without touching any working tree, and refuses a layer that is checked out somewhere rather than leaving that worktree out of step with its own HEAD. Every branch it moves has its previous tip pinned first, so the move is undoable.

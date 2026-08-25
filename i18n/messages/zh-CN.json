@@ -36407,6 +36407,46 @@
       "rebaseOnto": "将当前分支变基到此",
       "revert": "还原此提交"
     },
+    "stacks": {
+      "title": "栈",
+      "description": "分支链，每一层都基于下面一层。父指针存在本仓库的 Git 配置里，因此克隆之后依然成立。",
+      "empty": "这个仓库还没有记录任何栈。",
+      "emptyHint": "选一个分支，再选它所基于的分支。在你明确要求之前不会推送任何东西。",
+      "trunk": "基于 {branch}",
+      "layerCount": "{count, plural, other {# 层}}",
+      "healthy": "每一层都正确地位于下面一层之上。",
+      "restack": "重新堆叠",
+      "restacking": "正在重新堆叠…",
+      "unstack": "解除堆叠",
+      "stackOn": "堆叠到",
+      "branch": "分支",
+      "parent": "基于",
+      "record": "记录",
+      "checkedOutAt": "已检出于 {path}",
+      "problem": {
+        "missingBranch": "{branch} 还不存在。",
+        "behindParent": "{branch} 已不再包含 {parent}——它的 PR 会把下面一层的改动也带上。",
+        "parentMismatch": "{branch} 记录的父层是 {recorded}，不是 {expected}。",
+        "parentUnrecorded": "尚未告诉 Git {branch} 基于 {expected}。",
+        "checkedOut": "{branch} 正被某个工作树检出，移动它会让那个工作树与自身 HEAD 不一致。",
+        "forkOnly": "你只能推送到 {repository} 的 fork。栈无法跨越 fork 边界——除最底层外，每一层的 base 分支目标仓库都看不到。"
+      },
+      "remedy": {
+        "none": "无需处理。",
+        "restack": "重新堆叠即可修复。",
+        "createBranch": "请先推送或创建缺失的分支。",
+        "releaseWorktree": "请先关闭占用该层的工作树。",
+        "repair": "记录的形状与实际形状不一致——请确认哪一个是对的。",
+        "blocked": "无法从这里发布。"
+      },
+      "result": {
+        "upToDate": "已经是最新的。",
+        "restacked": "已移动 {count} 个分支。",
+        "conflict": "{branch} 出现冲突。请在 {worktree} 中解决后继续。",
+        "refused": "没有移动任何分支。"
+      },
+      "error": "栈操作失败：{message}"
+    },
     "stash": {
       "apply": "应用",
       "description": "保存并恢复工作区更改。",

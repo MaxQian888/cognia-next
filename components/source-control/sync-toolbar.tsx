@@ -17,6 +17,7 @@ import {
   GitBranchPlusIcon,
   GitMergeIcon,
   HistoryIcon,
+  LayersIcon,
   Undo2Icon,
   MoreHorizontalIcon,
   RefreshCwIcon,
@@ -63,6 +64,7 @@ interface SyncToolbarProps {
   onOpenTags: () => void
   onOpenCompare: () => void
   onOpenWorktrees?: () => void
+  onOpenStacks?: () => void
   onRefresh: () => void
 }
 
@@ -104,6 +106,7 @@ export function SyncToolbar({
   onOpenTags,
   onOpenCompare,
   onOpenWorktrees = () => {},
+  onOpenStacks = () => {},
   onRefresh,
 }: SyncToolbarProps) {
   const t = useTranslations("sourceControl")
@@ -300,6 +303,17 @@ export function SyncToolbar({
           >
             <GitBranchPlusIcon className="size-3.5" />
             {t("worktrees.title")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!can("git_stack_validate")}
+            onSelect={(e) => {
+              e.preventDefault()
+              onOpenStacks()
+            }}
+            data-testid="more-stacks"
+          >
+            <LayersIcon className="size-3.5" />
+            {t("stacks.title")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => void actions.reset("soft", "HEAD~1")}

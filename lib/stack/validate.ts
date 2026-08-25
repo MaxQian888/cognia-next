@@ -38,6 +38,23 @@ export type StackProblem =
    */
   | { kind: "forkOnly"; repository: string }
 
+/**
+ * Every problem kind, as a runtime list.
+ *
+ * The panel builds a message key from the kind (`problem.${kind}`), which
+ * `lint:i18n` cannot see. This is what the catalogue guard checks against, so a
+ * new problem without a message fails a test rather than rendering a raw key at
+ * the moment someone's stack is broken.
+ */
+export const STACK_PROBLEM_KINDS = [
+  "missingBranch",
+  "behindParent",
+  "parentMismatch",
+  "parentUnrecorded",
+  "checkedOut",
+  "forkOnly",
+] as const
+
 export type StackRemedy =
   | "none"
   /** Run a restack: the layers exist but no longer sit on each other. */
@@ -58,6 +75,16 @@ export interface StackVerdict {
   /** The single most useful next action, for a one-button surface. */
   remedy: StackRemedy
 }
+
+/** Every remedy, for the same catalogue guard. */
+export const STACK_REMEDIES = [
+  "none",
+  "restack",
+  "createBranch",
+  "releaseWorktree",
+  "repair",
+  "blocked",
+] as const
 
 /**
  * Precedence when several things are wrong at once.

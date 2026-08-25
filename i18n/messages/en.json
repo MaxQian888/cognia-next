@@ -36407,6 +36407,46 @@
       "rebaseOnto": "Rebase current branch onto this",
       "revert": "Revert this commit"
     },
+    "stacks": {
+      "title": "Stacks",
+      "description": "Chains of branches where each one is based on the one below it. The parent is stored in this repository's Git config, so a stack survives a clone.",
+      "empty": "No stacks recorded in this repository yet.",
+      "emptyHint": "Pick a branch and the branch it sits on. Nothing is pushed until you say so.",
+      "trunk": "on {branch}",
+      "layerCount": "{count, plural, =1 {# layer} other {# layers}}",
+      "healthy": "Every layer sits on the one below it.",
+      "restack": "Restack",
+      "restacking": "Restacking…",
+      "unstack": "Unstack",
+      "stackOn": "Stack on",
+      "branch": "Branch",
+      "parent": "Sits on",
+      "record": "Record",
+      "checkedOutAt": "checked out at {path}",
+      "problem": {
+        "missingBranch": "{branch} does not exist yet.",
+        "behindParent": "{branch} no longer contains {parent} — its pull request would include the layer below it.",
+        "parentMismatch": "{branch} is recorded as sitting on {recorded}, not {expected}.",
+        "parentUnrecorded": "Git has not been told that {branch} sits on {expected}.",
+        "checkedOut": "{branch} is checked out in a worktree, so moving it would leave that worktree out of step.",
+        "forkOnly": "You can only push to a fork of {repository}. A stack cannot cross a fork boundary — every layer above the bottom would be based on a branch the target repository cannot see."
+      },
+      "remedy": {
+        "none": "Nothing to do.",
+        "restack": "A restack will fix this.",
+        "createBranch": "Push or create the missing branch first.",
+        "releaseWorktree": "Close the worktree holding that layer first.",
+        "repair": "The recorded shape and the real one disagree — choose which is right.",
+        "blocked": "This cannot be published from here."
+      },
+      "result": {
+        "upToDate": "Already up to date.",
+        "restacked": "{count, plural, =1 {# branch moved} other {# branches moved}}.",
+        "conflict": "{branch} hit a conflict. Resolve it in {worktree}, then continue.",
+        "refused": "Nothing was moved."
+      },
+      "error": "Stack operation failed: {message}"
+    },
     "stash": {
       "apply": "Apply",
       "description": "Save and restore working-tree changes.",

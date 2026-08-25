@@ -57,6 +57,7 @@ import { RestoreDialog } from "./restore-dialog"
 import { PanelRootChip } from "@/components/workspace/panel-root-chip"
 import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
 import { RootSwitcher } from "./root-switcher"
+import { StackPanel } from "./stack-panel"
 import { StashPanel } from "./stash-panel"
 import { SyncToolbar } from "./sync-toolbar"
 import { TagPanel } from "./tag-panel"
@@ -114,6 +115,7 @@ export function SourceControlPanel() {
 
   const [cloneOpen, setCloneOpen] = useState(false)
   const [stashOpen, setStashOpen] = useState(false)
+  const [stacksOpen, setStacksOpen] = useState(false)
   const [remoteOpen, setRemoteOpen] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
@@ -298,6 +300,7 @@ export function SourceControlPanel() {
               onOpenTags={() => setTagOpen(true)}
               onOpenCompare={() => setCompareOpen(true)}
               onOpenWorktrees={() => setWorktreesOpen(true)}
+              onOpenStacks={() => setStacksOpen(true)}
               onRefresh={refreshSafely}
             />
             <Button
@@ -498,6 +501,12 @@ export function SourceControlPanel() {
         onOpenChange={setWorktreesOpen}
         rootDir={rootDir}
         canMutate={can}
+      />
+      <StackPanel
+        open={stacksOpen}
+        onOpenChange={setStacksOpen}
+        rootDir={rootDir}
+        branches={branches}
       />
       <RestoreDialog
         rootDir={rootDir}

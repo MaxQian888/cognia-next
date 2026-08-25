@@ -1,7 +1,13 @@
 import type { GitStackLayerState } from "@/types/git"
 
 import type { Stack } from "./model"
-import { canPublish, canRestack, validateStack } from "./validate"
+import {
+  STACK_PROBLEM_KINDS,
+  STACK_REMEDIES,
+  canPublish,
+  canRestack,
+  validateStack,
+} from "./validate"
 
 const STACK: Pick<Stack, "trunk" | "layers"> = {
   trunk: "main",
@@ -141,5 +147,35 @@ describe("validateStack", () => {
     // wins over both of the others.
     expect(verdict.remedy).toBe("createBranch")
     expect(verdict.problems).toHaveLength(3)
+  })
+})
+
+describe("the unions the panel builds message keys from", () => {
+  it("lists every problem kind the validator can produce", () => {
+    // Derived from the code paths above rather than re-listed: a new problem
+    // that never reaches this list renders a raw key at the exact moment
+    // somebody's stack is broken.
+    const produced = new Set<string>()
+    const cases: Parameters<typeof validateStack>[0][] = [
+      { stack: STACK, states: [state({ branch: "me/a", head: null })] },
+      {
+        stack: STACK,
+        states: [state({ branch: "me/a", parent: "main", containsParent: false })],
+      },
+      { stack: STACK, states: [state({ branch: "me/a", parent: "other" })] },
+      { stack: STACK, states: [state({ branch: "me/a", parent: null })] },
+      { stack: STACK, states: [state({ branch: "me/a", parent: "main", checkedOutIn: "/w" })] },
+      { stack: STACK, states: HEALTHY, forkOnlyRepository: "octo/app" },
+    ]
+    for (const input of cases) {
+      for (const problem of validateStack(input).problems) produced.add(problem.kind)
+    }
+    expect([...produced].sort()).toEqual([...STACK_PROBLEM_KINDS].sort())
+  })
+
+  it("lists every remedy", () => {
+    expect([...STACK_REMEDIES].sort()).toEqual(
+      ["blocked", "createBranch", "none", "releaseWorktree", "repair", "restack"].sort()
+    )
   })
 })
