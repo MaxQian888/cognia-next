@@ -1970,16 +1970,30 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     commandRules && Object.keys(commandRules).length > 0 ? { Bash: commandRules } : undefined,
     toolRules
   )
-  if (Object.keys(mergedRuleset).length > 0) {
-    opts.permissionRuleset = deterministicRulesetSort(mergedRuleset)
+  // Fold in what the user REFUSED in this conversation. A refusal becomes an
+  // explicit `deny`, which `canUseTool` honours ahead of `alwaysAllowTools` —
+  // so a later widening cannot resurrect something already turned down. If the
+  // session refused more than the memory can track it fails closed here: every
+  // auto-approval is stripped and the session asks about everything, rather
+  // than pretending a refusal it can no longer hold is still in force.
+  const { applySessionDenials } = await import("@/lib/claude/permissions/session-denials")
+  const sessionPermissions = applySessionDenials(session?.id, {
+    ruleset: mergedRuleset,
+    ...(appSettings?.alwaysAllowTools && appSettings.alwaysAllowTools.length > 0
+      ? { alwaysAllowTools: [...appSettings.alwaysAllowTools].sort() }
+      : {}),
+  })
+
+  if (Object.keys(sessionPermissions.ruleset).length > 0) {
+    opts.permissionRuleset = deterministicRulesetSort(sessionPermissions.ruleset)
   }
 
   // Session-global "Allow always" list — honored directly in the sidecar gates
   // so an always-allowed tool skips the redundant `permission_request`
   // round-trip (previously only the renderer's `allowListRef` short-circuited).
   // Sorted for prompt-cache stability.
-  if (appSettings?.alwaysAllowTools && appSettings.alwaysAllowTools.length > 0) {
-    opts.alwaysAllowTools = [...appSettings.alwaysAllowTools].sort()
+  if (sessionPermissions.alwaysAllowTools && sessionPermissions.alwaysAllowTools.length > 0) {
+    opts.alwaysAllowTools = sessionPermissions.alwaysAllowTools
   }
 
   // --- Tool whitelist/blacklist --------------------------------------------

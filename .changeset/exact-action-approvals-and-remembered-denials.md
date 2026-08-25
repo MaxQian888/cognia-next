@@ -1,0 +1,5 @@
+---
+"cognia-next": patch
+---
+
+"Allow always" now grants the command you approved, not its whole family, and "Deny" is remembered. Approving `git status` used to write a permanent `Bash(git *)` rule, so one click on a read-only command also, and forever, approved `git push --force`, `git reset --hard` and `git clean -fdx`. The derived rule is now the approved command itself; a family grant is still available, but only if you author it deliberately in Settings → Agent → Permissions. In the other direction, a refusal used to buy nothing — the same call asked again next turn, and any widening in between started auto-approving the very thing you had just turned down. A refusal is now remembered for the conversation and sent as an explicit deny, which the tool gate honours ahead of any always-allow grant. If a session refuses more calls than the memory can hold it fails closed: every auto-approval is dropped for that session and it asks about everything, rather than silently forgetting a refusal.

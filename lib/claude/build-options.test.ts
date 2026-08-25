@@ -2888,6 +2888,53 @@ describe("resolveSendOptions — permission ruleset merge", () => {
     expect(JSON.stringify(a.permissionRuleset)).toBe(JSON.stringify(b.permissionRuleset))
   })
 
+  it("projects a session refusal into the ruleset as an explicit deny", async () => {
+    const { __resetSessionDenialsForTesting, rememberDenial } =
+      await import("@/lib/claude/permissions/session-denials")
+    __resetSessionDenialsForTesting()
+    rememberDenial("sess-deny", "Bash", { command: "git push --force" })
+    const opts = await resolveSendOptions({
+      session: { id: "sess-deny" } as never,
+      appSettings: {
+        agentPermissions: { commandRules: { "git *": "allow" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({
+      Bash: { "git *": "allow", "git push --force": "deny" },
+    })
+    __resetSessionDenialsForTesting()
+  })
+
+  it("keeps a refusal ahead of a bare-name always-allow grant", async () => {
+    const { __resetSessionDenialsForTesting, rememberDenial } =
+      await import("@/lib/claude/permissions/session-denials")
+    __resetSessionDenialsForTesting()
+    rememberDenial("sess-deny-2", "Bash", { command: "rm -rf /tmp/x" })
+    const opts = await resolveSendOptions({
+      session: { id: "sess-deny-2" } as never,
+      appSettings: { alwaysAllowTools: ["Bash"] } as unknown as AppSettings,
+    })
+    // Both are sent; `canUseTool` returns on the deny before it reads the list.
+    expect(opts.alwaysAllowTools).toEqual(["Bash"])
+    expect(opts.permissionRuleset).toEqual({ Bash: { "rm -rf /tmp/x": "deny" } })
+    __resetSessionDenialsForTesting()
+  })
+
+  it("leaves a session with no refusals exactly as before", async () => {
+    const { __resetSessionDenialsForTesting } =
+      await import("@/lib/claude/permissions/session-denials")
+    __resetSessionDenialsForTesting()
+    const opts = await resolveSendOptions({
+      session: { id: "sess-clean" } as never,
+      appSettings: {
+        agentPermissions: { commandRules: { "git *": "allow" } },
+        alwaysAllowTools: ["Read"],
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" } })
+    expect(opts.alwaysAllowTools).toEqual(["Read"])
+  })
+
   it("omits permissionRuleset entirely when no rules are configured", async () => {
     const opts = await resolveSendOptions({
       appSettings: { agentPermissions: {} } as unknown as AppSettings,

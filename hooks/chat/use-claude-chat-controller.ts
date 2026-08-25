@@ -2283,6 +2283,14 @@ export function useClaudeChat() {
           return
         }
       }
+      // Remember a refusal for the rest of this conversation. Without this a
+      // "Deny" bought nothing: the same call asked again next turn, and any
+      // widening in between (a new always-allow, a broader rule in Settings)
+      // would start auto-approving the very thing the user just refused.
+      if (decision === "deny") {
+        const { rememberDenial } = await import("@/lib/claude/permissions/session-denials")
+        rememberDenial(approval.sessionId, approval.toolName, approval.input)
+      }
       // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
       // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
       // matching calls auto-resolve via the sidecar ruleset — falling back to a
