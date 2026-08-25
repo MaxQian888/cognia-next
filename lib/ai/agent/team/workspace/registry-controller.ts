@@ -13,7 +13,9 @@ import type {
   BeginTaskWorkspaceTurn,
   WorkspaceBaseSpec,
   WorkspaceBundle,
+  WorkspaceProvisioning,
 } from "@/lib/task-workspace/types"
+import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import { sanitizePromotionSegment, type PromotionWorkspaceHandle } from "./promotion"
 
 export interface AgentTeamWorkspaceRoot {
@@ -33,6 +35,7 @@ export interface OpenAgentTeamWorkspaceDispatch {
 
 type AcquireBundle = (input: AcquireWorkspaceBundle) => Promise<WorkspaceBundle>
 type CreateBranch = typeof createWorkspaceBranch
+type ResolveProvisioning = (sourceRoot: string) => Promise<WorkspaceProvisioning | undefined>
 type OpenTurn = (
   bundle: Pick<WorkspaceBundle, "bundleId" | "leases">,
   primaryLogicalRootId: string,
@@ -46,6 +49,8 @@ export interface AgentTeamRegistryWorkspaceControllerOptions {
   acquireBundle?: AcquireBundle
   openTurn?: OpenTurn
   createBranch?: CreateBranch
+  /** Test seam; production reads the approved declaration + local consent. */
+  resolveProvisioning?: ResolveProvisioning
 }
 
 export type AgentTeamWorkspaceReconcileMode = "manual" | "merge-all" | "select" | "pipeline"
@@ -88,6 +93,7 @@ export class AgentTeamRegistryWorkspaceController {
   private readonly acquireBundle: AcquireBundle
   private readonly openTurn: OpenTurn
   private readonly createBranch: CreateBranch
+  private readonly resolveProvisioning: ResolveProvisioning
   private readonly bundles = new Map<string, Promise<WorkspaceBundle>>()
   private readonly attempts = new Map<string, number>()
   private readonly candidates = new Map<string, DispatchCandidate>()
@@ -109,6 +115,7 @@ export class AgentTeamRegistryWorkspaceController {
     this.acquireBundle = options.acquireBundle ?? acquireWorkspaceBundle
     this.openTurn = options.openTurn ?? openWorkspaceBundleTurnLease
     this.createBranch = options.createBranch ?? createWorkspaceBranch
+    this.resolveProvisioning = options.resolveProvisioning ?? provisioningForWorkspaceRoot
   }
 
   async openDispatch(input: OpenAgentTeamWorkspaceDispatch): Promise<WorkspaceBundleTurnLease> {
@@ -122,17 +129,26 @@ export class AgentTeamRegistryWorkspaceController {
     const allocationKey = `${input.repositoryId}:${input.workspaceKey ?? input.taskId}`
     let bundlePromise = this.bundles.get(allocationKey)
     if (!bundlePromise) {
-      bundlePromise = this.acquireBundle({
-        ownerType: "team",
-        ownerRef: this.runId,
-        environmentKind: "managed",
-        base: this.base,
-        roots: this.roots.map((root) => ({
-          logicalRootId: root.logicalRootId,
-          role: root.logicalRootId === primary.logicalRootId ? "primary" : "additional",
-          sourceRoot: root.sourceRoot,
-        })),
-      })
+      // A team fanning five tasks out cuts five worktrees, and each one starts
+      // with no `node_modules`. Asking for the workspace's provisioning here is
+      // what turns five cold installs into five links — the chat path has had
+      // it since the declaration landed; this one had not.
+      bundlePromise = this.resolveProvisioning(primary.sourceRoot)
+        .catch(() => undefined)
+        .then((provisioning) =>
+          this.acquireBundle({
+            ownerType: "team",
+            ownerRef: this.runId,
+            environmentKind: "managed",
+            base: this.base,
+            roots: this.roots.map((root) => ({
+              logicalRootId: root.logicalRootId,
+              role: root.logicalRootId === primary.logicalRootId ? "primary" : "additional",
+              sourceRoot: root.sourceRoot,
+            })),
+            ...(provisioning ? { provisioning } : {}),
+          })
+        )
       this.bundles.set(allocationKey, bundlePromise)
       bundlePromise.catch(() => {
         if (this.bundles.get(allocationKey) === bundlePromise) this.bundles.delete(allocationKey)

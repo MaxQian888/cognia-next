@@ -1396,19 +1396,27 @@ export function useClaudeChat() {
             : {}),
         }
         const legacyBundle = legacyWorkspaceEnabled
-          ? await acquireWorkspaceBundle({
-              ownerType: "session",
-              ownerRef: sessionId,
-              environmentKind: "managed",
-              base: { kind: "workingState" },
-              roots: [
-                {
-                  logicalRootId: "primary",
-                  role: "primary",
-                  sourceRoot: workspaceRoot,
-                },
-              ],
-            }).catch(() => null)
+          ? await (async () => {
+              const { provisioningForWorkspaceRoot } =
+                await import("@/lib/task-workspace/workspace-provisioning")
+              const provisioning = await provisioningForWorkspaceRoot(workspaceRoot).catch(
+                () => undefined
+              )
+              return acquireWorkspaceBundle({
+                ownerType: "session",
+                ownerRef: sessionId,
+                environmentKind: "managed",
+                base: { kind: "workingState" },
+                roots: [
+                  {
+                    logicalRootId: "primary",
+                    role: "primary",
+                    sourceRoot: workspaceRoot,
+                  },
+                ],
+                ...(provisioning ? { provisioning } : {}),
+              })
+            })().catch(() => null)
           : null
         const bundleTurnLease =
           executionContext?.location === "managedWorktree" && managedBundle && bundlePrimaryRootId

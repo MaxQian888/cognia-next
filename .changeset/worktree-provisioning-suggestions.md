@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Managed worktrees can now be provisioned with the caches and gitignored files a repository needs, without waiting for that repository to ship a `.cognia/workspace.json`. Cognia reads the workspace root and suggests what it finds evidence for — `node_modules` for a JS lockfile, `target` for `Cargo.toml`, `.venv` for a Python lockfile, and a copy of each ignored `.env` — and each suggestion states its own cost before it is applied, because a cache link points the worktree at a directory inside your own checkout. Nothing is applied until you accept it in the workspace's environment settings, and a declined suggestion is not re-offered. Where pnpm's global virtual store is available the card recommends it instead of sharing, and once it is on the share is no longer suggested. Provisioning now also reaches the five worktree paths that never received it: Agent Team dispatches, scheduled tasks, connector auto-replies, agent child processes, and the legacy chat bundle.

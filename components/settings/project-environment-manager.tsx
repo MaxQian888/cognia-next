@@ -22,6 +22,7 @@ import {
   putProjectEnvironment,
 } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import { ProjectEnvironmentProvisioning } from "./project-environment-provisioning"
 import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
@@ -256,6 +257,10 @@ export function ProjectEnvironmentManager({
           the thing the user did not write, and it decides what the local
           environment is merged on top of. */}
       <ProjectEnvironmentRepoConfig projectId={projectId} executionRoot={executionRoot} />
+      {/* Below the declaration and above the local editor: what the repository
+          asks for is the stronger statement, and a suggestion of ours must not
+          be read as coming from it. */}
+      <ProjectEnvironmentProvisioning projectId={projectId} executionRoot={executionRoot} />
       <div className="flex gap-2">
         <Select
           value={draft?.id ?? "__none__"}

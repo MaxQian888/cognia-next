@@ -50,6 +50,7 @@ import {
   type BeginTaskWorkspaceTurn,
 } from "@/lib/task-workspace/client"
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
+import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
 import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
@@ -123,6 +124,10 @@ async function openScheduledWritableBundle(
   agentKind: string
 ) {
   const primaryLogicalRootId = "primary"
+  // A scheduled run gets a fresh worktree with no `node_modules` every time it
+  // fires. Whatever the workspace provisions its chat worktrees with applies
+  // here for the same reason and by the same consent.
+  const provisioning = await provisioningForWorkspaceRoot(sourceRoot).catch(() => undefined)
   const bundle = await acquireWorkspaceBundle({
     ownerType: "scheduled",
     ownerRef: task.id,
@@ -135,6 +140,7 @@ async function openScheduledWritableBundle(
         sourceRoot,
       },
     ],
+    ...(provisioning ? { provisioning } : {}),
   })
   const lease = await openWorkspaceBundleTurnLease(bundle, primaryLogicalRootId, {
     taskId: `scheduled:${task.id}`,

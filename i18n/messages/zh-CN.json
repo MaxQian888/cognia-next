@@ -21563,6 +21563,33 @@
     "none": "不使用环境",
     "osOverrides": "操作系统专用脚本",
     "plainWarning": "请勿将密钥写入明文变量；下方只保存系统钥匙串引用。",
+    "provisioning": {
+      "accept": "启用",
+      "acceptAll": "全部启用",
+      "activeTitle": "新工作树将使用",
+      "candidate": {
+        "cacheLink": "从当前检出链接 {path}",
+        "include": "把 {path} 复制进每个工作树"
+      },
+      "decline": "不用",
+      "declinedTitle": "已拒绝",
+      "description": "工作树初始只有 Git 跟踪的文件。以下是这个仓库看起来还需要的东西。",
+      "empty": "这个仓库没有可建议的项。",
+      "evidence": "依据：{names}",
+      "pendingTitle": "建议",
+      "pnpm": {
+        "available": "此机器上的 pnpm 可以让每个工作树拥有自己的 node_modules，并从磁盘上的同一个存储链接过去——比共享更快，且不会写进你的检出。执行一次以下命令，然后重新打开本卡片：",
+        "copy": "复制命令",
+        "enabled": "pnpm 的全局虚拟存储已开启，工作树无需共享你的 node_modules 也能快速安装。"
+      },
+      "remove": "停用",
+      "risk": {
+        "copiedSecret": "{path} 含有凭据。每个工作树都会在磁盘上得到一份副本。",
+        "sharedBuildDir": "工作树与你的检出共享这个构建目录，特性不同的分支会互相覆盖重建。",
+        "sharedInstall": "工作树与你的检出共享这个目录。安装了不同依赖的任务会改变你正在使用的内容。"
+      },
+      "title": "工作树供给"
+    },
     "remove": "移除",
     "repoConfig": {
       "approve": "批准并使用",

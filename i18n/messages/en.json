@@ -21563,6 +21563,33 @@
     "none": "No environment",
     "osOverrides": "OS-specific overrides",
     "plainWarning": "Do not place secrets in plain variables. Store only an OS-keyring reference below.",
+    "provisioning": {
+      "accept": "Use it",
+      "acceptAll": "Use all",
+      "activeTitle": "In use for new worktrees",
+      "candidate": {
+        "cacheLink": "Link {path} from this checkout",
+        "include": "Copy {path} into each worktree"
+      },
+      "decline": "No thanks",
+      "declinedTitle": "Declined",
+      "description": "A worktree starts with only the files Git tracks. These are the things this repository looks like it also needs.",
+      "empty": "Nothing to suggest for this repository.",
+      "evidence": "Found: {names}",
+      "pendingTitle": "Suggested",
+      "pnpm": {
+        "available": "pnpm here can give every worktree its own node_modules linked from one store on disk — faster than sharing, and nothing writes into your checkout. Run this once, then reopen this card:",
+        "copy": "Copy command",
+        "enabled": "pnpm's global virtual store is on, so worktrees install fast without sharing your node_modules."
+      },
+      "remove": "Stop using",
+      "risk": {
+        "copiedSecret": "{path} holds credentials. Each worktree gets its own copy on disk.",
+        "sharedBuildDir": "Worktrees share this build directory with your checkout, so branches with different features rebuild over each other.",
+        "sharedInstall": "Worktrees share this directory with your checkout. A task that installs different dependencies changes what you are working in."
+      },
+      "title": "Worktree provisioning"
+    },
     "remove": "Remove",
     "repoConfig": {
       "approve": "Approve and use",

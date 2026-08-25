@@ -240,6 +240,27 @@ export interface Project {
     skill?: Record<string, boolean>
     mcpServer?: Record<string, boolean>
   }
+  /**
+   * Worktree provisioning this device accepted for this workspace — cache
+   * directories to link and gitignored files to copy into a managed worktree.
+   *
+   * Device-local on purpose. A cache link points a worktree at a directory
+   * inside this checkout, so accepting one is a decision about THIS machine's
+   * disk; syncing it to another device would apply a consent that device never
+   * gave. It is also deliberately not folded into the repository declaration
+   * (`.cognia/workspace.json`): that gate's prompt says "the repository asks
+   * for this", and a guess of ours must not borrow those words.
+   *
+   * `reviewed` holds every candidate already decided, accepted or not, so a
+   * declined proposal is not re-offered on the next render. Structural mirror
+   * of `ProvisioningConsent` (`@/lib/workspace/provisioning-inference`), kept
+   * inline for the same reason `knowledgeSettings` is: this module must not
+   * import from `lib/`.
+   */
+  workspaceProvisioning?: {
+    accepted: string[]
+    reviewed: string[]
+  }
 }
 
 export interface CreateProjectInput {

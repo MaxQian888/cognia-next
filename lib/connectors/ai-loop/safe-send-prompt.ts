@@ -33,6 +33,7 @@ import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
 import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 import { groundSendOptionsAnswer } from "@/lib/rag/chat-grounding"
 import { acquireWorkspaceBundle } from "@/lib/task-workspace/client"
+import { provisioningForWorkspaceRoot } from "@/lib/task-workspace/workspace-provisioning"
 import {
   openWorkspaceBundleTurnLease,
   type WorkspaceBundleTurnLease,
@@ -177,12 +178,19 @@ async function openConnectorWorkspaceTurn(
     return null
   }
 
+  // Same provisioning a chat turn in this workspace would get. An IM-driven
+  // turn runs the same agent against the same repository; the only difference
+  // is who asked.
+  const provisioning = await provisioningForWorkspaceRoot(roots[0]?.sourceRoot).catch(
+    () => undefined
+  )
   const acquire: AcquireWorkspaceBundle = {
     ownerType: "session",
     ownerRef: sessionId,
     environmentKind: "managed",
     base: { kind: "remoteDefault" },
     roots,
+    ...(provisioning ? { provisioning } : {}),
   }
   const bundle = await acquireWorkspaceBundle(acquire)
   const turnId =

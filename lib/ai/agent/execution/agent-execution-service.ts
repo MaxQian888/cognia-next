@@ -226,15 +226,21 @@ export async function executeAgentTurn(
     options?.taskWorkspace ??
     (config.cwd ? { enabled: true, agentId: spec.identity.runId, agentKind: surface } : undefined)
   if (tracking?.enabled && config.cwd && spec.executionKind === "agent" && hostAvailable) {
-    const [{ acquireWorkspaceBundle }, { openWorkspaceBundleTurnLease }] = await Promise.all([
+    const [
+      { acquireWorkspaceBundle },
+      { openWorkspaceBundleTurnLease },
+      { provisioningForWorkspaceRoot },
+    ] = await Promise.all([
       import("@/lib/task-workspace/client"),
       import("@/lib/task-workspace/run-lease"),
+      import("@/lib/task-workspace/workspace-provisioning"),
     ])
     const primaryLogicalRootId = "primary"
     const base =
       surface === "chat"
         ? ({ kind: "workingState" } as const)
         : ({ kind: "remoteDefault" } as const)
+    const provisioning = await provisioningForWorkspaceRoot(config.cwd).catch(() => undefined)
     const bundle = await acquireWorkspaceBundle({
       ownerType: "session",
       ownerRef: spec.identity.sessionId,
@@ -247,6 +253,7 @@ export async function executeAgentTurn(
           sourceRoot: config.cwd,
         },
       ],
+      ...(provisioning ? { provisioning } : {}),
     })
     const lease = await openWorkspaceBundleTurnLease(bundle, primaryLogicalRootId, {
       taskId: tracking.taskId ?? `agent:${spec.identity.sessionId}`,

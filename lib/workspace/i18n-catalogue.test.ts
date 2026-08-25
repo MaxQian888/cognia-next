@@ -18,12 +18,27 @@ import { join } from "node:path"
 import { ADOPTION_ORIGINS } from "./adopt-candidates"
 import { WORKSPACE_CAPABILITY_KINDS } from "./capability-overlay"
 import { PINNABLE_PANELS, FOLLOWING_PANELS } from "./panel-follow"
+import { PROVISIONING_CANDIDATE_KINDS, PROVISIONING_RISK_KEYS } from "./provisioning-inference"
 
 const LOCALES = ["en", "zh-CN"] as const
 
 function workspaceMessages(locale: string): Record<string, Record<string, unknown>> {
   const path = join(process.cwd(), "i18n/messages", locale, "workspace.json")
   return JSON.parse(readFileSync(path, "utf8"))
+}
+
+/**
+ * The provisioning card lives under `projectEnvironment`, not `workspace` —
+ * it is rendered by the environment settings — but its dynamic keys come from
+ * `lib/workspace/provisioning-inference`, so they are guarded here with the
+ * rest of the workspace unions.
+ */
+function provisioningMessages(locale: string): Record<string, Record<string, string>> {
+  const path = join(process.cwd(), "i18n/messages", locale, "projectEnvironment.json")
+  return (JSON.parse(readFileSync(path, "utf8")).provisioning ?? {}) as Record<
+    string,
+    Record<string, string>
+  >
 }
 
 /** The three capability states the toggle group renders. */
@@ -78,5 +93,28 @@ describe("the unions the catalogue is checked against", () => {
   it("keeps every panel classified as pinnable or following", () => {
     const all = [...PINNABLE_PANELS, ...FOLLOWING_PANELS]
     expect(new Set(all).size).toBe(all.length)
+  })
+})
+
+describe.each(LOCALES)("worktree provisioning dynamic keys — %s", (locale) => {
+  const provisioning = provisioningMessages(locale)
+
+  it("has a label for every candidate kind", () => {
+    const labels = provisioning.candidate ?? {}
+    const missing = PROVISIONING_CANDIDATE_KINDS.filter((kind) => !labels[kind])
+    expect(missing).toEqual([])
+  })
+
+  it("has a consequence line for every risk a rule can produce", () => {
+    // Each rule states its own cost — "your checkout changes too" and
+    // "branches rebuild over each other" are different warnings, and a rule
+    // added without one would ask for consent while showing a raw key.
+    const risks = provisioning.risk ?? {}
+    const missing = PROVISIONING_RISK_KEYS.filter((key) => !risks[key])
+    expect(missing).toEqual([])
+  })
+
+  it("has no orphan risk line for a rule that no longer exists", () => {
+    expect(Object.keys(provisioning.risk ?? {}).sort()).toEqual([...PROVISIONING_RISK_KEYS].sort())
   })
 })
