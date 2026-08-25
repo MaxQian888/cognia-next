@@ -106,22 +106,28 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Proportional, not absolute (ADR-0148). shadcn ships these as fixed ±px
+     offsets, which means a base of 0 still leaves `rounded-xl` at 4px — so
+     "no rounded corners" was never actually reachable, on this chain or the
+     named one below. Multipliers land on exactly the same 6 / 8 / 10 / 14px at
+     the default 0.625rem base, and collapse to 0 with it. The ramp's shape only
+     differs from before at a hand-set base, where scaling proportionally is
+     what a radius *scale* should do anyway. */
+  --radius-sm: max(0px, calc(var(--radius) * 0.6));
+  --radius-md: max(0px, calc(var(--radius) * 0.8));
+  --radius-lg: max(0px, var(--radius));
+  --radius-xl: max(0px, calc(var(--radius) * 1.4));
   /* ADR-0148 — named radius scale. These ALIAS the derived chain above rather
      than replacing it, so the ~1,777 existing `rounded-sm/md/lg/xl` sites keep
      tracking `--radius` with zero migration. The values are exact at the
      default base (0.625rem = 10px): control 8px (identical to `--radius-md`),
      panel 12px, stage 14px (identical to `--radius-xl`) — the same 8/12/14
-     scale `web/app/globals.css` pins for the marketing site.
-     `max(0px, …)` matters for the Sharp pack: at base 0 a bare calc() yields a
-     negative length, which drops the declaration instead of squaring the
-     corner. */
-  --radius-control: max(0px, calc(var(--radius) - 2px));
-  --radius-panel: max(0px, calc(var(--radius) + 2px));
-  --radius-stage: max(0px, calc(var(--radius) + 4px));
+     scale `web/app/globals.css` pins for the marketing site. Multipliers rather
+     than ±px offsets so a 0 base really does square every step; `max(0px, …)`
+     stays as a guard against a plugin theme writing a negative `--radius`. */
+  --radius-control: max(0px, calc(var(--radius) * 0.8));
+  --radius-panel: max(0px, calc(var(--radius) * 1.2));
+  --radius-stage: max(0px, calc(var(--radius) * 1.4));
   /* Pills are their own axis: `--radius` going to 0 must not square a status
      dot or a spinner. Only surfaces that opt into `rounded-pill` follow the
      style pack. */

@@ -121,13 +121,31 @@ describe("appearance custom properties have a consumer", () => {
   it("derives the named radius scale from the same base as sm/md/lg/xl", () => {
     // The named scale is an ALIAS, not a parallel system — that is what lets
     // the ~1,777 existing `rounded-sm/md/lg/xl` sites follow a style pack with
-    // zero migration. `max(0px, …)` keeps a 0 base from producing a negative
-    // length, which would drop the declaration instead of squaring the corner.
+    // zero migration.
     for (const name of ["control", "panel", "stage"]) {
       expect(STYLESHEETS).toMatch(
         new RegExp(`--radius-${name}:\\s*max\\(0px,\\s*calc\\(var\\(--radius\\)`)
       )
     }
+  })
+
+  it("scales every radius step proportionally so a 0 base really is square", () => {
+    // shadcn ships these as fixed ±px offsets, which leaves `rounded-xl` at 4px
+    // when the base is 0 — "no rounded corners" was unreachable. Multipliers
+    // hit the same 6/8/10/14px at the default base and collapse with it.
+    for (const [step, factor] of [
+      ["sm", "0.6"],
+      ["md", "0.8"],
+      ["xl", "1.4"],
+    ] as const) {
+      expect(STYLESHEETS).toMatch(
+        new RegExp(`--radius-${step}: max\\(0px, calc\\(var\\(--radius\\) \\* ${factor}\\)\\)`)
+      )
+    }
+    // No step may keep an absolute offset, or it survives a 0 base.
+    expect(STYLESHEETS).not.toMatch(
+      /--radius-(sm|md|lg|xl|control|panel|stage):[^;]*var\(--radius\)\s*[-+]\s*\d/
+    )
   })
 
   // ADR-0127 gave the three surfaces the density card names (chat / tables /
