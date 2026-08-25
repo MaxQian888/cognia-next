@@ -61,14 +61,14 @@ const session: ChatSession = {
   updatedAt: 0,
 }
 
-async function mount() {
+async function mount(onSend: (content: unknown) => void = () => undefined) {
   const view = render(
     <Wrapper>
       <Composer
         session={session}
         onStartNewSession={async () => undefined}
         onOpenSettings={() => undefined}
-        onSend={async () => undefined}
+        onSend={onSend}
         onStop={async () => undefined}
       />
     </Wrapper>
@@ -90,6 +90,24 @@ function clickAt(ta: HTMLTextAreaElement, index: number) {
 }
 
 const chips = () => Array.from(document.querySelectorAll('[data-chip="param"]'))
+
+/** Flatten whatever shape the send pipeline handed `onSend` into plain text. */
+const textOf = (content: unknown): string =>
+  Array.isArray(content)
+    ? content
+        .map((part) => (typeof part === "string" ? part : ((part as { text?: string }).text ?? "")))
+        .join("")
+    : typeof content === "string"
+      ? content
+      : ((content as { text?: string })?.text ?? JSON.stringify(content))
+
+/** Enter submits; the pipeline is async, so give it a tick to land. */
+async function submit(ta: HTMLTextAreaElement) {
+  fireEvent.keyDown(ta, { key: "Enter" })
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+}
 /** The popover's field — `getByRole("textbox")` also matches the composer itself. */
 const paramInput = () => within(screen.getByTestId("template-param-popover")).getByRole("textbox")
 
@@ -206,5 +224,47 @@ describe("Composer — {{parameter}} chips", () => {
     const event = fireEvent.keyDown(ta, { key: "Tab" })
 
     expect(event).toBe(true) // not preventDefault-ed
+  })
+
+  it("substitutes the value into the sent message", async () => {
+    const onSend = jest.fn()
+    const { ta } = await mount(onSend)
+    fireEvent.change(ta, { target: { value: "review {{module}} please" } })
+    clickAt(ta, 10)
+    fireEvent.change(paramInput(), { target: { value: "the login flow" } })
+    fireEvent.keyDown(paramInput(), { key: "Enter" })
+
+    await submit(ta)
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(textOf(onSend.mock.calls[0][0])).toContain("review the login flow please")
+  })
+
+  it("refuses to send while a parameter has no value", async () => {
+    // A literal `{{module}}` reaching the model is never what anyone meant, and
+    // the model will cheerfully act as though it understood.
+    const onSend = jest.fn()
+    const { ta } = await mount(onSend)
+    fireEvent.change(ta, { target: { value: "review {{module}}" } })
+
+    await submit(ta)
+
+    expect(onSend).not.toHaveBeenCalled()
+    // The text is still there — the refusal happens before the optimistic
+    // clear, so nothing has to be restored.
+    expect(ta.value).toBe("review {{module}}")
+    // ...and the editor is open on the parameter that is missing.
+    await waitFor(() => expect(screen.getByTestId("template-param-popover")).toBeInTheDocument())
+  })
+
+  it("sends a `{{ }}` inside a code fence untouched", async () => {
+    const onSend = jest.fn()
+    const { ta } = await mount(onSend)
+    fireEvent.change(ta, { target: { value: "```\nname: {{ jinja }}\n```" } })
+
+    await submit(ta)
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(textOf(onSend.mock.calls[0][0])).toContain("{{ jinja }}")
   })
 })

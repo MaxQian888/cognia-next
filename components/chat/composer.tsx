@@ -139,11 +139,14 @@ import {
   type SlashCommandResultBlock,
 } from "@/lib/slash-commands/system-blocks"
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import type { ParamSegment } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
-import { listParamIds, splitParamSegments } from "@/lib/chat/template/param-segments"
+import { splitParamSegments } from "@/lib/chat/template/param-segments"
+import { renderParamTokens } from "@/lib/chat/template/render-params"
 import {
   paramState as paramStateOfValue,
   pruneBinding,
+  unfilledParams,
   withParamValue,
   type ChatTemplateBinding,
   type ChatTemplateParamValue,
@@ -372,6 +375,7 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const tTemplateParams = useTranslations("chat.composer.templateParams")
   const tSkill = useTranslations("chat.composer.skills")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
@@ -688,13 +692,14 @@ function ComposerInner(props: InnerProps) {
   const [activeParamId, setActiveParamId] = useState<string | null>(null)
 
   const paramTokens = useMemo(
-    () => overlaySegments.filter((seg) => seg.kind === "param"),
+    () => overlaySegments.filter((seg): seg is ParamSegment => seg.kind === "param"),
     [overlaySegments]
   )
-  const paramIds = useMemo(
-    () => listParamIds(controller.textInput.value, codeRanges),
-    [controller.textInput.value, codeRanges]
-  )
+  // Derived from the chips rather than from a fresh scan of the text, so the
+  // set that blocks a send is exactly the set the user can see and click. A
+  // second scan would also count `{{x}}` inside a `/command`'s arguments, which
+  // is never a chip and belongs to `applyTemplate`.
+  const paramIds = useMemo(() => [...new Set(paramTokens.map((seg) => seg.paramId))], [paramTokens])
   // Values whose token has left the text are dropped here rather than in an
   // effect: breaking a token is how the user demotes a chip, and the value has
   // to go with it or retyping `{{module}}` later would resurrect an answer from
@@ -1125,6 +1130,30 @@ function ComposerInner(props: InnerProps) {
       // Attachments were never cleared, so there is nothing to restore — the
       // staged files are still live in the controller.
     }
+    // ── Unfilled `{{parameters}}` ─────────────────────────────────────────
+    // A literal `{{module}}` reaching the model is never what anyone meant, and
+    // the model will cheerfully act as though it understood. Refuse the send,
+    // say how many are missing, and put the caret on the first one so the fix
+    // is one keystroke away. Checked BEFORE the optimistic clear so nothing has
+    // to be restored.
+    const missingParams = unfilledParams(paramIds, effectiveBinding)
+    if (missingParams.length > 0) {
+      toast.error(tTemplateParams("unfilled", { count: missingParams.length }))
+      const first = paramTokens.find((seg) => seg.paramId === missingParams[0])
+      const ta = textareaRef.current
+      if (first && ta) {
+        ta.focus()
+        ta.setSelectionRange(first.start, first.start)
+        setCaret(first.start)
+        setActiveParamId(first.paramId)
+      }
+      return
+    }
+    // Substitute on the CHIP RANGES, before the command pipeline: code stays
+    // code because the chip pass already excluded it, and a `/command`'s
+    // arguments stay untouched for `applyTemplate`'s own `$1` pass.
+    const paramRendered = renderParamTokens(text, paramTokens, effectiveBinding)
+
     clearInputOptimistically()
 
     try {
@@ -1155,13 +1184,20 @@ function ComposerInner(props: InnerProps) {
       // left `!ls` behind. And the mode claims only its FIRST LINE — exactly
       // what `detectTrigger` and the popover have always previewed — so lines
       // 2+ continue through the normal command/prose pipeline below.
+      // The mode is decided from the ORIGINAL first character, but sliced out
+      // of the substituted text. Safe together: whenever `text[0]` is `!` or
+      // `#` it is not the start of a `{{token}}`, so substitution cannot have
+      // moved index 0.
       const modeChar = text[0]
-      let pipelineText = text
+      const submittedText = paramRendered.text
+      let pipelineText = submittedText
       let modeRan = false
       if (modeChar === "!" || modeChar === "#") {
-        const newline = text.indexOf("\n")
-        const modeLine = (newline === -1 ? text : text.slice(0, newline)).slice(1).trim()
-        pipelineText = newline === -1 ? "" : text.slice(newline + 1)
+        const newline = submittedText.indexOf("\n")
+        const modeLine = (newline === -1 ? submittedText : submittedText.slice(0, newline))
+          .slice(1)
+          .trim()
+        pipelineText = newline === -1 ? "" : submittedText.slice(newline + 1)
         modeRan = true
         if (modeChar === "!") {
           await props.onSubmitShell(modeLine)
@@ -1189,9 +1225,13 @@ function ComposerInner(props: InnerProps) {
       // or more line-start `/commands`, run them in order: action handlers
       // execute via `props.onCommand` (context-rich), template commands expand
       // inline, and the leftover prose is what gets sent.
-      const pipelineSegments = modeRan
-        ? parseSegments(pipelineText, (name) => commandMap.has(name))
-        : segments
+      // `segments` is memoised over the UNSUBSTITUTED text, so it is stale the
+      // moment a parameter was replaced — re-parse then too, not just after a
+      // first-line mode consumed a line.
+      const pipelineSegments =
+        modeRan || paramRendered.changed
+          ? parseSegments(pipelineText, (name) => commandMap.has(name))
+          : segments
       const hasCommand = pipelineSegments.some((s) => s.kind === "command")
       if (hasCommand) {
         // Remember every runnable command sent (covers typed-not-picked ones).
@@ -1287,6 +1327,10 @@ function ComposerInner(props: InnerProps) {
     attachmentPrepareCountRef,
     setPastedBlocks,
     controller.textInput,
+    paramIds,
+    paramTokens,
+    effectiveBinding,
+    tTemplateParams,
     tCommands,
     tMemory,
     isDesktop,
