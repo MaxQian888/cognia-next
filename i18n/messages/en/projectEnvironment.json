@@ -20,6 +20,53 @@
   "osOverrides": "OS-specific overrides",
   "plainWarning": "Do not place secrets in plain variables. Store only an OS-keyring reference below.",
   "remove": "Remove",
+  "repoConfig": {
+    "approve": "Approve and use",
+    "approved": "Approved",
+    "declaredActions": "Actions ({count})",
+    "declaredCapabilities": "Suggested capabilities ({count})",
+    "declaredExecution": "Runs in",
+    "declaredRoots": "Extra roots ({count})",
+    "declaredSetup": "Setup",
+    "declaredVariables": "Variables ({count})",
+    "description": "Setup steps, actions and variables a repository can ship in .cognia/workspace.json, shared with everyone who opens it.",
+    "diffCurrent": "In the repository now",
+    "diffPrevious": "Previously approved",
+    "executionLocal": "the workspace folder",
+    "executionWorktree": "its own worktree",
+    "missingSecrets": "Not bound yet: {names}",
+    "notify": {
+      "changed": {
+        "body": "The setup you approved has been edited since. It will not run until you review the change.",
+        "title": "This repository's Cognia setup changed"
+      },
+      "invalid": {
+        "body": "{field}: {message}",
+        "title": "This repository's Cognia setup could not be read"
+      },
+      "restricted": {
+        "body": "This checkout is not trusted, so its .cognia/workspace.json was not read. Trust the workspace to use it.",
+        "title": "Repository setup skipped in an untrusted folder"
+      },
+      "unapproved": {
+        "body": "It defines setup steps this workspace has not approved yet. Review it in the workspace's environment settings before it runs.",
+        "title": "This repository ships a Cognia setup"
+      }
+    },
+    "overriddenVariables": "Your local values win for: {names}",
+    "requiredSecrets": "Needs these secrets bound on this device: {names}",
+    "reviewChanges": "Review the change",
+    "status": {
+      "absent": "This repository ships no .cognia/workspace.json.",
+      "approved": "Applied — approved on this device.",
+      "changed": "Changed since you approved it. Until you review, only this device's own setup runs.",
+      "invalid": "Could not be read: {message}",
+      "restricted": "Not read — this workspace is not trusted.",
+      "unapproved": "Waiting for your review. Until then only this device's own setup runs."
+    },
+    "title": "From the repository",
+    "untrustedHint": "Trust this workspace to let it ship setup."
+  },
   "retry": "Retry setup",
   "runAction": "Run {name}",
   "runSetup": "Run setup",

@@ -117,6 +117,7 @@ import {
 } from "@/lib/task-workspace/session-execution-context"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
 import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import {
   createAgentExecutionHandle,
@@ -144,7 +145,8 @@ import type {
 } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 import { getExecutionBroker } from "@/lib/execution/broker"
-import { slotKeyForExecutionContext } from "@/lib/execution/slot-key"
+import { slotKeyForTurn } from "@/lib/execution/slot-key"
+import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import {
@@ -958,6 +960,10 @@ export function useClaudeChat() {
       // watcher releases it on settle; gated by the `isAtCapacity` check above,
       // so it admits immediately. Best-effort: a broker hiccup never blocks the
       // turn the user already committed to.
+      // Resolved before the lease so the slot names the directory this turn
+      // actually writes into. Best-effort: an unresolvable cwd means no slot,
+      // which is what it was before any of this existed.
+      const turnCwd = await resolveEffectiveCwdForSession(session).catch(() => null)
       try {
         await acquireChatLease({
           sessionId,
@@ -968,11 +974,14 @@ export function useClaudeChat() {
           // The cap alone let two conversations bound to one checkout
           // interleave edits, builds and git operations in it.
           //
-          // The session's PERSISTED binding, because the lease is taken before
-          // this turn resolves its own. On the first turn of a managed
-          // conversation that means the source repository, which is right:
-          // cutting the worktree is itself work in the source repository.
-          slotKey: slotKeyForExecutionContext(session?.executionContext),
+          // Keyed off the EFFECTIVE cwd — the same chain the send resolves —
+          // not the execution binding alone. The binding is only the middle
+          // link: two plain conversations in one workspace have no binding and
+          // would have been left unserialized in the very directory they share.
+          slotKey: slotKeyForTurn({
+            executionContext: session?.executionContext,
+            effectiveCwd: turnCwd,
+          }),
         })
       } catch (leaseErr) {
         console.warn("chat lease acquire failed; sending without admission", leaseErr)
@@ -1464,9 +1473,20 @@ export function useClaudeChat() {
           stopAssemblyHeartbeat()
           return
         }
-        const setup = await executeProjectEnvironment({
+        // The repository's own `.cognia/workspace.json`, merged in when the
+        // user has approved it. Resolved through the shared seam rather than
+        // inline, so the trust gate cannot end up applied on only one of the
+        // two run paths (the other is the scheduler executor).
+        const environmentRoot = sendOptions.cwd ?? executionContext.projectRoot
+        const resolvedEnvironment = await resolveEnvironmentForRun({
           environment,
-          executionRoot: sendOptions.cwd ?? executionContext.projectRoot,
+          executionRoot: environmentRoot,
+          surface: "interactive",
+          ...(executionContext.projectId ? { projectId: executionContext.projectId } : {}),
+        })
+        const setup = await executeProjectEnvironment({
+          environment: resolvedEnvironment.environment,
+          executionRoot: environmentRoot,
           scope: executionContext.location,
           surface: "interactive",
           bypassOnFailure: callOptions?.bypassEnvironmentSetup,

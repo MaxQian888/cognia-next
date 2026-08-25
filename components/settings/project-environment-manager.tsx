@@ -22,6 +22,7 @@ import {
   putProjectEnvironment,
 } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import { ProjectEnvironmentRepoConfig } from "./project-environment-repo-config"
 import { useProjectStore } from "@/stores/project/project-store"
 import type {
   ProjectEnvironment,
@@ -251,6 +252,10 @@ export function ProjectEnvironmentManager({
         <p className="text-xs font-medium">{t("title")}</p>
         <p className="text-[10px] text-muted-foreground">{t("description")}</p>
       </div>
+      {/* Above the device-local editor on purpose: what the repository ships is
+          the thing the user did not write, and it decides what the local
+          environment is merged on top of. */}
+      <ProjectEnvironmentRepoConfig projectId={projectId} executionRoot={executionRoot} />
       <div className="flex gap-2">
         <Select
           value={draft?.id ?? "__none__"}

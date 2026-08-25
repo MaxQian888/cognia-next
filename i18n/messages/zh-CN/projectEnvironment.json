@@ -20,6 +20,53 @@
   "osOverrides": "操作系统专用脚本",
   "plainWarning": "请勿将密钥写入明文变量；下方只保存系统钥匙串引用。",
   "remove": "移除",
+  "repoConfig": {
+    "approve": "批准并使用",
+    "approved": "已批准",
+    "declaredActions": "动作（{count}）",
+    "declaredCapabilities": "建议的能力（{count}）",
+    "declaredExecution": "运行于",
+    "declaredRoots": "附加根目录（{count}）",
+    "declaredSetup": "初始化",
+    "declaredVariables": "变量（{count}）",
+    "description": "仓库可以在 .cognia/workspace.json 中携带初始化步骤、动作与变量，随仓库共享给每一个打开它的人。",
+    "diffCurrent": "仓库中当前的",
+    "diffPrevious": "先前批准的",
+    "executionLocal": "工作区目录",
+    "executionWorktree": "独立工作树",
+    "missingSecrets": "尚未绑定：{names}",
+    "notify": {
+      "changed": {
+        "body": "你批准过的初始化脚本此后被改动过。在你复核之前它不会执行。",
+        "title": "该仓库的 Cognia 配置已变更"
+      },
+      "invalid": {
+        "body": "{field}：{message}",
+        "title": "无法读取该仓库的 Cognia 配置"
+      },
+      "restricted": {
+        "body": "此检出未被信任，因此没有读取它的 .cognia/workspace.json。信任该工作区后即可使用。",
+        "title": "未信任目录中的仓库配置已跳过"
+      },
+      "unapproved": {
+        "body": "它定义了本工作区尚未批准的初始化步骤。在工作区的环境设置里查看后才会执行。",
+        "title": "该仓库自带 Cognia 配置"
+      }
+    },
+    "overriddenVariables": "以下变量以你的本机值为准：{names}",
+    "requiredSecrets": "需要在本设备绑定这些密钥：{names}",
+    "reviewChanges": "复核变更",
+    "status": {
+      "absent": "该仓库没有 .cognia/workspace.json。",
+      "approved": "已生效——已在本设备批准。",
+      "changed": "自你批准后已变更。在你复核之前只运行本设备自己的配置。",
+      "invalid": "无法读取：{message}",
+      "restricted": "未读取——此工作区未被信任。",
+      "unapproved": "等待你复核。在此之前只运行本设备自己的配置。"
+    },
+    "title": "来自仓库",
+    "untrustedHint": "信任此工作区后，它才能携带初始化配置。"
+  },
   "retry": "重试初始化",
   "runAction": "运行{name}",
   "runSetup": "运行初始化",

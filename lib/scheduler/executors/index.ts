@@ -52,6 +52,7 @@ import {
 import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import { getProjectEnvironment } from "@/lib/db/project-environments"
 import { executeProjectEnvironment } from "@/lib/project-environment/executor"
+import { resolveEnvironmentForRun } from "@/lib/project-environment/resolve-environment"
 import { registerTaskExecutor } from "../task-scheduler"
 import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
@@ -587,9 +588,19 @@ async function runChatPrompt(
       if (taskLease) await taskLease.settle("failed").catch(() => undefined)
       return { success: false, error: "Scheduled project environment is unavailable" }
     }
-    const setup = await executeProjectEnvironment({
+    // The repository's own `.cognia/workspace.json`, merged in when the user
+    // has approved it. Resolved through the shared seam rather than inline, so
+    // the trust gate cannot end up applied on one of the two run paths.
+    const executionRoot = finalOptions.cwd ?? executionContext.projectRoot
+    const resolved = await resolveEnvironmentForRun({
       environment,
-      executionRoot: finalOptions.cwd ?? executionContext.projectRoot,
+      executionRoot,
+      surface: "scheduled",
+      ...(executionContext.projectId ? { projectId: executionContext.projectId } : {}),
+    })
+    const setup = await executeProjectEnvironment({
+      environment: resolved.environment,
+      executionRoot,
       scope: executionContext.location,
       surface: "scheduled",
     })

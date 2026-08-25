@@ -1,4 +1,9 @@
 import type { WorkspaceBaseSpec } from "@/lib/task-workspace/types"
+import {
+  WORKSPACE_CAPABILITY_KINDS,
+  type WorkspaceCapabilityKind,
+  type WorkspaceCapabilityOverlay,
+} from "@/lib/workspace/capability-overlay"
 import type {
   ProjectEnvironment,
   ProjectEnvironmentAction,
@@ -22,6 +27,18 @@ export interface WorkspaceConfigCacheLink {
   target: string
 }
 
+/**
+ * Capabilities the repository SUGGESTS for a workspace opened on it.
+ *
+ * Same shape as `WorkspaceCapabilityOverlay` (id → on/off, absent inherits),
+ * because it feeds exactly that. It is a suggestion and never an instruction:
+ * a repository telling a new contributor "this project uses the Jira server"
+ * is useful, a repository silently deciding what tools an agent holds is not.
+ * `seedCapabilityOverlay` applies it only where the workspace has no opinion
+ * yet, so a user's own choice always survives the next `git pull`.
+ */
+export type WorkspaceConfigCapabilities = WorkspaceCapabilityOverlay
+
 export interface WorkspaceRepositoryConfigV1 {
   version: 1
   roots: WorkspaceConfigRoot[]
@@ -36,12 +53,19 @@ export interface WorkspaceRepositoryConfigV1 {
   cacheLinks: WorkspaceConfigCacheLink[]
   include: string[]
   requiredSecrets: string[]
+  capabilities: WorkspaceConfigCapabilities
 }
 
 export interface ResolvedProjectEnvironment {
   environment: ProjectEnvironment
   repositoryConfig: WorkspaceRepositoryConfigV1
   missingSecretVariables: string[]
+  /**
+   * Variables the repository declared and this device overrides. Rendered by
+   * the environment panel: "local wins" is only a safe rule while the user can
+   * see where it took effect and put the repository's value back.
+   */
+  overriddenVariables: string[]
 }
 
 export class WorkspaceConfigError extends Error {
@@ -115,6 +139,33 @@ function script(value: unknown, field: string): ProjectEnvironmentScript {
         }
       : {}),
   }
+}
+
+function capabilities(value: unknown): WorkspaceConfigCapabilities {
+  if (value === undefined) return {}
+  const row = object(value, "capabilities")
+  const out: WorkspaceConfigCapabilities = {}
+  for (const [kind, entries] of Object.entries(row)) {
+    if (!(WORKSPACE_CAPABILITY_KINDS as readonly string[]).includes(kind)) {
+      // Loud rather than ignored: a typo'd kind silently doing nothing is how
+      // a repository ends up believing it configured something it did not.
+      throw new WorkspaceConfigError(`Unsupported capability kind: ${kind}`, "capabilities")
+    }
+    const byId = object(entries, `capabilities.${kind}`)
+    const normalized: Record<string, boolean> = {}
+    for (const [id, state] of Object.entries(byId)) {
+      if (typeof state !== "boolean") {
+        throw new WorkspaceConfigError(
+          `capabilities.${kind}.${id} must be true or false`,
+          `capabilities.${kind}`
+        )
+      }
+      const trimmed = text(id, `capabilities.${kind}`)
+      normalized[trimmed] = state
+    }
+    if (Object.keys(normalized).length) out[kind as WorkspaceCapabilityKind] = normalized
+  }
+  return out
 }
 
 function baseSpec(value: unknown): WorkspaceBaseSpec {
@@ -226,6 +277,7 @@ export function parseWorkspaceConfig(source: string): WorkspaceRepositoryConfigV
     cacheLinks,
     include: stringArray(row.include, "include", true),
     requiredSecrets: stringArray(row.requiredSecrets, "requiredSecrets"),
+    capabilities: capabilities(row.capabilities),
   }
 }
 
@@ -240,12 +292,21 @@ export function mergeWorkspaceConfig(
       ...local,
       setupScript: config.setup,
       actions: config.actions,
-      variables: { ...local.variables, ...config.variables },
+      // Local wins. Both sides configure the SAME workspace; the difference is
+      // "this device" versus "shared with the repository", and the more
+      // specific layer has to win — otherwise a value the user set for their
+      // own machine stops working silently on the next `git pull`, with
+      // nothing on screen to connect the two. `overriddenVariables` below is
+      // what keeps that from being invisible in the other direction.
+      variables: { ...config.variables, ...local.variables },
       updatedAt: now,
     },
     repositoryConfig: config,
     missingSecretVariables: config.requiredSecrets.filter(
       (variable) => !boundSecrets.has(variable)
+    ),
+    overriddenVariables: Object.keys(config.variables).filter(
+      (name) => name in local.variables && local.variables[name] !== config.variables[name]
     ),
   }
 }

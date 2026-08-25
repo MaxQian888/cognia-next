@@ -18,6 +18,46 @@ export interface TrustedWorkspace {
    * Free-form; not validated. Surfaced in the trust-management UI.
    */
   note?: string
+  /**
+   * Digest of the `.cognia/workspace.json` the user last approved for this
+   * root, or absent when they never have.
+   *
+   * Trusting a folder and approving the shell scripts a repository ships in it
+   * are deliberately two decisions. Folder trust is granted once and answers
+   * "is this checkout mine"; the repository's setup script arrives through
+   * `git pull` and can change under an already-trusted folder at any time.
+   * Storing the digest is what lets a change be noticed instead of executed.
+   *
+   * Revoking trust deletes the whole row, which drops this with it — correct:
+   * an untrusted workspace has no approved configuration.
+   */
+  approvedConfigDigest?: string
+  /** Wall-clock millis of that approval. */
+  approvedConfigAt?: number
+}
+
+/** The full trust row for a path, or undefined when it was never trusted. */
+export async function getTrustedWorkspace(path: string): Promise<TrustedWorkspace | undefined> {
+  if (!path) return undefined
+  return getDb().trustedWorkspaces.get(normalize(path))
+}
+
+/**
+ * Record the user's approval of the repository configuration currently at this
+ * root. No-op for a root that is not trusted: approving a configuration inside
+ * an untrusted checkout would create a grant the trust gate never sanctioned.
+ */
+export async function approveWorkspaceConfig(path: string, digest: string): Promise<boolean> {
+  if (!path || !digest) return false
+  const key = normalize(path)
+  const row = await getDb().trustedWorkspaces.get(key)
+  if (!row) return false
+  await getDb().trustedWorkspaces.put({
+    ...row,
+    approvedConfigDigest: digest,
+    approvedConfigAt: Date.now(),
+  })
+  return true
 }
 
 /** Whether the given absolute path has been previously trusted. */
