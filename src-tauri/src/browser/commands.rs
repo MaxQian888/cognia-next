@@ -48,7 +48,11 @@ pub(crate) enum NavDisposition {
     Block,
 }
 
-fn is_sentinel_host(url_str: &str) -> bool {
+/// Whether `url_str` targets the overlay's reserved sentinel host. Shared with
+/// `embedded.rs`, which must short-circuit sentinels *before* proxy routing:
+/// they are `https://` URLs, so a proxy-route decision made on one would
+/// recreate the webview pointed at `cognia.invalid`.
+pub(crate) fn is_sentinel_host(url_str: &str) -> bool {
     url::Url::parse(url_str)
         .ok()
         .and_then(|u| u.host_str().map(|h| h == overlay::SENTINEL_HOST))

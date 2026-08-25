@@ -224,15 +224,56 @@ async fn recreate_embed_for_navigation(
     Ok(())
 }
 
+/// Whether a requested navigation participates in proxy routing at all.
+///
+/// Pure so the ordering below is unit-testable — `handle_embed_navigation`
+/// takes an `AppHandle` and can never be exercised from a test.
 #[cfg(desktop)]
-fn handle_embed_navigation(app: &AppHandle, pane_label: &str, url_str: &str) -> bool {
+#[derive(Debug, PartialEq)]
+pub(crate) enum EmbedNavRoute {
+    /// A page→Rust overlay sentinel, or a scheme the embed does not route:
+    /// hand straight to `handle_navigation` and never touch proxy state.
+    Passthrough,
+    /// A real http(s) document load whose proxy route must be resolved.
+    Routed(url::Url),
+}
+
+/// Classify a requested navigation for {@link handle_embed_navigation}.
+///
+/// Sentinels are checked **before** the http(s) test on purpose. They are
+/// `https://cognia.invalid/__cognia_*` URLs, so treating them as ordinary
+/// navigations made `resolve_webview_proxy_url` answer for the sentinel host
+/// instead of the previewed page: with a manual proxy whose bypass list covers
+/// the previewed origin (the default list covers localhost), the first sentinel
+/// flipped the recorded proxy from `Some(None)` to `Some(proxy)`, and the embed
+/// was destroyed and recreated pointing at `cognia.invalid`. The same ordering
+/// also keeps a `proxy_config::current()` failure from swallowing every
+/// selection / console / network / loaded / snapshot signal.
+#[cfg(desktop)]
+pub(crate) fn classify_embed_navigation(url_str: &str) -> EmbedNavRoute {
     let Ok(target) = url::Url::parse(url_str) else {
-        return handle_navigation(app, pane_label, url_str);
+        return EmbedNavRoute::Passthrough;
     };
     if !matches!(target.scheme(), "http" | "https") {
-        return handle_navigation(app, pane_label, url_str);
+        return EmbedNavRoute::Passthrough;
     }
+    if super::commands::is_sentinel_host(url_str) {
+        return EmbedNavRoute::Passthrough;
+    }
+    EmbedNavRoute::Routed(target)
+}
 
+#[cfg(desktop)]
+fn handle_embed_navigation(app: &AppHandle, pane_label: &str, url_str: &str) -> bool {
+    let target = match classify_embed_navigation(url_str) {
+        EmbedNavRoute::Passthrough => return handle_navigation(app, pane_label, url_str),
+        EmbedNavRoute::Routed(target) => target,
+    };
+
+    // Everything from here down is fail-closed on purpose: a real document load
+    // whose proxy route cannot be resolved must be cancelled, not sent direct.
+    // Only sentinels were ever wrongly caught by it — see
+    // `classify_embed_navigation`. Do not "simplify" this back.
     let proxy = match crate::proxy_config::current() {
         Ok(proxy) => proxy,
         Err(error) => {
@@ -622,10 +663,20 @@ fn normalize_selection_drain(raw: String, pane_label: &str) -> Result<String, St
 #[cfg(desktop)]
 const MAX_EVAL_RESULT: usize = 200_000;
 
+/// Truncate to at most {@link MAX_EVAL_RESULT} bytes **on a char boundary**.
+///
+/// `String::truncate` panics when the index splits a multi-byte codepoint, and
+/// the payloads this caps are page HTML — a CJK page's `outerHTML` lands
+/// mid-codepoint roughly two times in three. `floor_char_boundary` is still
+/// unstable, so walk back by hand.
 #[cfg(desktop)]
 fn truncate_eval(mut raw: String) -> String {
     if raw.len() > MAX_EVAL_RESULT {
-        raw.truncate(MAX_EVAL_RESULT);
+        let mut end = MAX_EVAL_RESULT;
+        while end > 0 && !raw.is_char_boundary(end) {
+            end -= 1;
+        }
+        raw.truncate(end);
         raw.push_str("…(truncated)");
     }
     raw
@@ -1317,6 +1368,124 @@ mod tests {
     #[test]
     fn embed_label_is_stable() {
         assert_eq!(EMBED_LABEL, "browser-embed");
+    }
+
+    /// The regression this module's sentinel short-circuit exists for: with a
+    /// manual proxy whose bypass list covers the previewed origin, routing a
+    /// sentinel would flip the recorded proxy and destroy the embed. Composing
+    /// the two pure halves is the only way to pin it — `handle_embed_navigation`
+    /// needs an `AppHandle`.
+    #[test]
+    fn sentinel_navigations_never_reach_proxy_routing() {
+        for path in [
+            "__cognia_select",
+            "__cognia_nav",
+            "__cognia_loaded",
+            "__cognia_console",
+            "__cognia_network",
+            "__cognia_snapshot",
+            // A malformed sentinel (unparseable `data=`) must not be routed
+            // either — `classify_navigation` cancels it downstream.
+            "__cognia_bogus",
+        ] {
+            let url = format!("https://cognia.invalid/{path}?data=%7B%7D");
+            assert_eq!(
+                classify_embed_navigation(&url),
+                EmbedNavRoute::Passthrough,
+                "sentinel {path} must bypass proxy routing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bypassed_page_plus_a_routed_sentinel_would_have_recreated_the_embed() {
+        use crate::proxy_config::{ProxyConfig, ProxyMode, ProxyProtocol};
+
+        let proxy = ProxyConfig {
+            mode: ProxyMode::Manual,
+            protocol: ProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port: 7890,
+            ..ProxyConfig::default()
+        };
+
+        // The previewed page is on the default bypass list -> direct.
+        let page = url::Url::parse("http://localhost:3000/").unwrap();
+        assert_eq!(resolve_webview_proxy_url(&page, &proxy).unwrap(), None);
+
+        // The sentinel host is not, so routing it yields a *different* proxy
+        // decision. `requires_webview_recreation` would then be true and the
+        // embed would be torn down. `classify_embed_navigation` is what stops
+        // this URL from ever reaching that code.
+        let sentinel = url::Url::parse("https://cognia.invalid/__cognia_loaded?data=%7B%7D").unwrap();
+        assert!(resolve_webview_proxy_url(&sentinel, &proxy)
+            .unwrap()
+            .is_some());
+
+        let lease = EmbeddedBrowserLease::default();
+        lease.record_webview_proxy(&None);
+        assert!(lease.requires_webview_recreation(
+            &resolve_webview_proxy_url(&sentinel, &proxy).unwrap()
+        ));
+
+        assert_eq!(
+            classify_embed_navigation(sentinel.as_str()),
+            EmbedNavRoute::Passthrough
+        );
+    }
+
+    #[test]
+    fn real_http_navigations_are_routed() {
+        for url in [
+            "http://localhost:3000/",
+            "https://example.com/a?b=c",
+            "https://cognia.invalid.example.com/",
+        ] {
+            assert!(
+                matches!(classify_embed_navigation(url), EmbedNavRoute::Routed(_)),
+                "{url} must be proxy-routed"
+            );
+        }
+    }
+
+    #[test]
+    fn non_http_schemes_pass_through_to_the_scheme_guard() {
+        for url in [
+            "about:blank",
+            "about:srcdoc",
+            "file:///tmp/index.html",
+            "javascript:alert(1)",
+            "not a url",
+        ] {
+            assert_eq!(
+                classify_embed_navigation(url),
+                EmbedNavRoute::Passthrough,
+                "{url} must be handed to handle_navigation unchanged"
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_eval_never_splits_a_multibyte_char() {
+        // Every char is 3 bytes, so no multiple of 3 divides MAX_EVAL_RESULT
+        // (200_000 % 3 == 2) — the naive `String::truncate` panics here.
+        let raw = "中".repeat(MAX_EVAL_RESULT);
+        let out = truncate_eval(raw);
+        assert!(out.ends_with("…(truncated)"));
+        let body = out.trim_end_matches("…(truncated)");
+        assert!(body.len() <= MAX_EVAL_RESULT);
+        assert!(body.is_char_boundary(body.len()));
+        assert!(body.chars().all(|c| c == '中'));
+    }
+
+    #[test]
+    fn truncate_eval_leaves_short_and_ascii_payloads_alone() {
+        assert_eq!(truncate_eval("hello".to_string()), "hello");
+        let exact = "a".repeat(MAX_EVAL_RESULT);
+        assert_eq!(truncate_eval(exact.clone()), exact);
+        let over = "a".repeat(MAX_EVAL_RESULT + 1);
+        let out = truncate_eval(over);
+        assert_eq!(out.len(), MAX_EVAL_RESULT + "…(truncated)".len());
     }
 
     #[test]
