@@ -15,6 +15,7 @@
     "accept": "接受反馈",
     "accepted": "调整反馈已可发送，实时预览已还原。",
     "color": "颜色（例如 #2563eb）",
+    "failed": "无法应用调整：{message}",
     "font": "字体（例如 16px Inter）",
     "label": "浏览器调整",
     "preview": "预览",
@@ -226,7 +227,6 @@
     "humanControl": "由你控制",
     "takeover": "接管控制",
     "untitledPage": "未命名页面",
-    "url": "远程浏览器地址",
     "waiting": "正在等待远程浏览器…"
   },
   "screenshot": {

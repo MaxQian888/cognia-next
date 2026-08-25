@@ -26,12 +26,12 @@ import { toast } from "sonner"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
+import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
 import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
@@ -148,6 +148,7 @@ export function RemoteBrowserPreview({
   const [clickPointer, setClickPointer] = useState<{ x: number; y: number; key: number } | null>(
     null
   )
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState(1)
   const [findOpen, setFindOpen] = useState(false)
   const [capturing, setCapturing] = useState(false)
@@ -468,108 +469,122 @@ export function RemoteBrowserPreview({
   return (
     <TooltipProvider>
       <div className="flex h-full min-h-0 flex-col" data-testid="remote-browser-preview">
-        <div className="flex items-center gap-2 border-b p-2">
-          <BrowserHistoryMenu
-            recent={recentHistory}
-            onNavigate={navigateHistory}
-            onClear={clearHistory}
-            disabled={recentHistory.length === 0}
-          />
-          <BrowserNavigationControls
-            disabled={connection !== "connected"}
-            backDisabled={!canGoBack}
-            forwardDisabled={!canGoForward}
-            onBack={() => {
-              if (!historyGoBack()) return
-              void engineRef.current
-                ?.back()
-                .then(refreshPages)
-                .catch(() => {})
-            }}
-            onForward={() => {
-              if (!historyGoForward()) return
-              void engineRef.current
-                ?.forward()
-                .then(refreshPages)
-                .catch(() => {})
-            }}
-            onReload={() => {
-              void engineRef.current
-                ?.reload()
-                .then(refreshPages)
-                .catch(() => {})
-            }}
-          />
-          <form className="min-w-0 flex-1" onSubmit={(event) => void navigate(event)}>
-            <Input
-              value={urlInput}
-              onChange={(event) => setUrlInput(event.target.value)}
-              inputMode="url"
-              aria-label={t("url")}
-              placeholder={t("url")}
-              className="h-8"
+        <BrowserToolbar
+          toolbarRef={toolbarRef}
+          loading={connection === "connecting" || connection === "reconnecting"}
+          url={urlInput}
+          onUrlChange={setUrlInput}
+          onSubmit={(event) => void navigate(event)}
+          addressDisplay={
+            urlInput === (activePage?.url ?? "") ? addressDisplayParts(urlInput) : null
+          }
+          collapsedActive={selectMode || findOpen || zoom !== 1}
+          navigation={
+            <BrowserNavigationControls
+              disabled={connection !== "connected"}
+              backDisabled={!canGoBack}
+              forwardDisabled={!canGoForward}
+              onBack={() => {
+                if (!historyGoBack()) return
+                void engineRef.current
+                  ?.back()
+                  .then(refreshPages)
+                  .catch(() => {})
+              }}
+              onForward={() => {
+                if (!historyGoForward()) return
+                void engineRef.current
+                  ?.forward()
+                  .then(refreshPages)
+                  .catch(() => {})
+              }}
+              onReload={() => {
+                void engineRef.current
+                  ?.reload()
+                  .then(refreshPages)
+                  .catch(() => {})
+              }}
             />
-          </form>
-          <Badge variant="outline" className="gap-1" aria-live="polite">
-            {connection === "connecting" || connection === "reconnecting" ? (
-              <Loader2Icon className="size-3 animate-spin" />
-            ) : connection === "failed" || connection === "offline" ? (
-              <CloudOffIcon className="size-3" />
-            ) : (
-              <MonitorUpIcon className="size-3" />
-            )}
-            {t(`connection.${connection}`)}
-          </Badge>
-          <BrowserZoomControl
-            zoom={zoom}
-            onZoomChange={handleZoom}
-            disabled={connection !== "connected"}
-          />
-          <TooltipIconButton
-            tooltip={t("find")}
-            aria-label={t("find")}
-            disabled={connection !== "connected"}
-            className={cn(findOpen && "bg-primary/15 text-primary")}
-            onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
-          >
-            <SearchIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
-            aria-label={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
-            disabled={connection !== "connected"}
-            className={cn(selectMode && "bg-primary/15 text-primary")}
-            onClick={() => setSelectMode((enabled) => !enabled)}
-          >
-            <MousePointerSquareDashedIcon />
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={actionsT("screenshot")}
-            aria-label={actionsT("screenshot")}
-            disabled={connection !== "connected" || capturing}
-            onClick={() => void captureToChat()}
-          >
-            {capturing ? <Loader2Icon className="animate-spin" /> : <CameraIcon />}
-          </TooltipIconButton>
-          <TooltipIconButton
-            tooltip={actionsT("openExternal")}
-            aria-label={actionsT("openExternal")}
-            disabled={!activePage?.url}
-            onClick={() => {
-              if (activePage?.url) void openExternal(activePage.url)
-            }}
-          >
-            <ExternalLinkIcon />
-          </TooltipIconButton>
-          <Button
-            size="sm"
-            variant={lease?.controller.kind === "human" ? "secondary" : "default"}
-            onClick={() => streamRef.current?.takeover()}
-            aria-label={t("takeover")}
-          >
-            {lease?.controller.kind === "human" ? t("humanControl") : t("takeover")}
-          </Button>
-        </div>
+          }
+          inspectActions={
+            <>
+              <BrowserHistoryMenu
+                recent={recentHistory}
+                onNavigate={navigateHistory}
+                onClear={clearHistory}
+                disabled={recentHistory.length === 0}
+              />
+              <TooltipIconButton
+                tooltip={actionsT("screenshot")}
+                aria-label={actionsT("screenshot")}
+                disabled={connection !== "connected" || capturing}
+                onClick={() => void captureToChat()}
+              >
+                {capturing ? <Loader2Icon className="animate-spin" /> : <CameraIcon />}
+              </TooltipIconButton>
+              <TooltipIconButton
+                tooltip={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
+                aria-label={selectMode ? actionsT("cancelSelect") : actionsT("selectElement")}
+                disabled={connection !== "connected"}
+                className={cn(selectMode && "bg-primary/15 text-primary")}
+                onClick={() => setSelectMode((enabled) => !enabled)}
+              >
+                <MousePointerSquareDashedIcon />
+              </TooltipIconButton>
+              <TooltipIconButton
+                tooltip={t("find")}
+                aria-label={t("find")}
+                disabled={connection !== "connected"}
+                className={cn(findOpen && "bg-primary/15 text-primary")}
+                onClick={() => (findOpen ? closeFind() : setFindOpen(true))}
+              >
+                <SearchIcon />
+              </TooltipIconButton>
+            </>
+          }
+          pageActions={
+            <>
+              <BrowserZoomControl
+                zoom={zoom}
+                onZoomChange={handleZoom}
+                disabled={connection !== "connected"}
+              />
+              <TooltipIconButton
+                tooltip={actionsT("openExternal")}
+                aria-label={actionsT("openExternal")}
+                disabled={!activePage?.url}
+                onClick={() => {
+                  if (activePage?.url) void openExternal(activePage.url)
+                }}
+              >
+                <ExternalLinkIcon />
+              </TooltipIconButton>
+            </>
+          }
+          trailing={
+            <>
+              <Badge variant="outline" className="shrink-0 gap-1" aria-live="polite">
+                {connection === "connecting" || connection === "reconnecting" ? (
+                  <Loader2Icon className="size-3 animate-spin" />
+                ) : connection === "failed" || connection === "offline" ? (
+                  <CloudOffIcon className="size-3" />
+                ) : (
+                  <MonitorUpIcon className="size-3" />
+                )}
+                {t(`connection.${connection}`)}
+              </Badge>
+              <Button
+                size="sm"
+                className="shrink-0"
+                variant={lease?.controller.kind === "human" ? "secondary" : "default"}
+                onClick={() => streamRef.current?.takeover()}
+                aria-label={t("takeover")}
+              >
+                {lease?.controller.kind === "human" ? t("humanControl") : t("takeover")}
+              </Button>
+            </>
+          }
+        />
 
         {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 

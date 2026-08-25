@@ -434,9 +434,11 @@ it("falls back to the sandboxed WebPreview URL bar + iframe outside Tauri", () =
   // No native element-selection chrome; instead a WebPreview URL bar.
   expect(screen.getByTestId("browser-web-preview")).toBeInTheDocument()
   expect(urlBar()).toBeInTheDocument()
-  // Typing a URL + Enter points the sandboxed iframe at it.
+  // Typing a URL + Enter points the sandboxed iframe at it. Enter on a
+  // single-input form submits natively, which is what the shared toolbar
+  // relies on; jsdom needs the submit spelled out.
   fireEvent.change(urlBar(), { target: { value: "https://localhost:3000" } })
-  fireEvent.keyDown(urlBar(), { key: "Enter" })
+  fireEvent.submit(urlBar())
   const iframe = container.querySelector("iframe")
   expect(iframe).toHaveAttribute("src", "https://localhost:3000")
   expect(iframe).toHaveAttribute("sandbox")

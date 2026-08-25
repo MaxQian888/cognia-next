@@ -5,11 +5,12 @@ import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { type FormEvent, useRef, useState } from "react"
 
+import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
-import { WebPreview, WebPreviewNavigation } from "@/components/ai-elements/web-preview"
+import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
+import { WebPreview } from "@/components/ai-elements/web-preview"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useElementWidth } from "@/hooks/use-element-width"
@@ -36,6 +37,7 @@ function normalizeWebUrl(input: string): string | null {
  */
 export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
   const t = useTranslations("browser")
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const frameViewportRef = useRef<HTMLDivElement>(null)
   const frameViewportWidth = useElementWidth(frameViewportRef)
   const pageScale =
@@ -54,6 +56,13 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
   if (!seeded) {
     setSeeded(true)
     if (normalizedInitialUrl) push(normalizedInitialUrl)
+  }
+
+  /** Open a brand-new address (quick-open chip): a push, not a traversal. */
+  const goToNew = (url: string) => {
+    push(url)
+    setCurrentUrl(url)
+    setDraftUrl(url)
   }
 
   const goTo = (url: string | null) => {
@@ -82,40 +91,33 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
         data-testid="browser-web-preview"
         defaultUrl={normalizedInitialUrl ?? ""}
       >
-        <WebPreviewNavigation>
-          <BrowserNavigationControls
-            backDisabled={!canGoBack}
-            forwardDisabled={!canGoForward}
-            reloadDisabled={!currentUrl}
-            onBack={() => goTo(goBack())}
-            onForward={() => goTo(goForward())}
-            onReload={() => setReloadKey((key) => key + 1)}
-          />
-          <form className="min-w-0 flex-1" onSubmit={navigate}>
-            <Input
-              className="h-8"
-              value={draftUrl}
-              onChange={(event) => setDraftUrl(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  commitDraft()
-                }
-              }}
-              inputMode="url"
-              placeholder={t("url.placeholder")}
-              aria-label={t("url.placeholder")}
+        <BrowserToolbar
+          toolbarRef={toolbarRef}
+          url={draftUrl}
+          onUrlChange={setDraftUrl}
+          onSubmit={navigate}
+          addressDisplay={draftUrl === currentUrl ? addressDisplayParts(draftUrl) : null}
+          navigation={
+            <BrowserNavigationControls
+              backDisabled={!canGoBack}
+              forwardDisabled={!canGoForward}
+              reloadDisabled={!currentUrl}
+              onBack={() => goTo(goBack())}
+              onForward={() => goTo(goForward())}
+              onReload={() => setReloadKey((key) => key + 1)}
             />
-          </form>
-          <TooltipIconButton
-            tooltip={t("actions.openExternal")}
-            aria-label={t("actions.openExternal")}
-            disabled={!currentUrl}
-            onClick={() => void openExternal(currentUrl)}
-          >
-            <ExternalLinkIcon />
-          </TooltipIconButton>
-        </WebPreviewNavigation>
+          }
+          pageActions={
+            <TooltipIconButton
+              tooltip={t("actions.openExternal")}
+              aria-label={t("actions.openExternal")}
+              disabled={!currentUrl}
+              onClick={() => void openExternal(currentUrl)}
+            >
+              <ExternalLinkIcon />
+            </TooltipIconButton>
+          }
+        />
         <div className="flex min-w-0 items-center gap-3 border-b bg-muted/40 px-3 py-2">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("webFallback.notice")}</p>
           <Button asChild size="sm" variant="outline" className="shrink-0">
@@ -127,11 +129,13 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
           className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
           data-testid="browser-web-frame-viewport"
         >
+          {!currentUrl && <BrowserEmptyState onOpen={goToNew} />}
           <iframe
             key={`${currentUrl}:${reloadKey}`}
             className="absolute left-0 top-0 max-w-none bg-background"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
             src={currentUrl || undefined}
+            hidden={!currentUrl}
             style={{
               width: `${100 / pageScale}%`,
               height: `${100 / pageScale}%`,

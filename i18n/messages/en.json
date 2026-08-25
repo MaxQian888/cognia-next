@@ -3986,6 +3986,7 @@
       "accept": "Accept feedback",
       "accepted": "Adjustment feedback is ready to send. The live preview was reverted.",
       "color": "Color (for example, #2563eb)",
+      "failed": "Could not apply the adjustment: {message}",
       "font": "Font (for example, 16px Inter)",
       "label": "Browser Adjust",
       "preview": "Preview",
@@ -4197,7 +4198,6 @@
       "humanControl": "You're controlling",
       "takeover": "Take control",
       "untitledPage": "Untitled page",
-      "url": "Remote browser URL",
       "waiting": "Waiting for the remote browser…"
     },
     "screenshot": {

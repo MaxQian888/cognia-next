@@ -5,11 +5,8 @@ import {
   BracesIcon,
   CheckIcon,
   ExternalLinkIcon,
-  GlobeIcon,
   Loader2Icon,
-  LockIcon,
   MonitorXIcon,
-  MoreHorizontalIcon,
   MousePointerSquareDashedIcon,
   SearchIcon,
   SendIcon,
@@ -37,6 +34,12 @@ import {
   BrowserConsolePanel,
   BrowserNetworkPanel,
 } from "@/components/browser/browser-devtools-panels"
+import { BrowserEmptyState } from "@/components/browser/browser-empty-state"
+import {
+  BrowserToolbar,
+  addressDisplayParts,
+  toolbarTier,
+} from "@/components/browser/browser-toolbar"
 import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
@@ -45,9 +48,7 @@ import { RemoteBrowserPreview } from "@/components/browser/remote-browser-previe
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
@@ -82,26 +83,9 @@ import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
-/** Common local dev-server addresses offered as one-click chips when empty. */
-const QUICK_OPEN_URLS = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  "http://localhost:8080",
-] as const
 const DETAIL_LEVEL_STORAGE_KEY = "cognia.browser.output-detail"
 const ZOOM_STORAGE_KEY = "cognia.browser.zoom"
 const DETAIL_LEVELS: OutputDetailLevel[] = ["compact", "standard", "detailed", "forensic"]
-
-/**
- * Measured toolbar widths at which the secondary controls stop being inline and
- * pack into the "⋯" popover instead. The pane is docked in the chat right rail
- * as often as it fills the `/browser` page, and that rail's floor is 24% of the
- * window (~300px on a laptop) — well under the ~620px the full control row
- * needs. Wrapping instead of packing cost four toolbar rows and pushed the
- * address bar onto a line of its own.
- */
-const COMPACT_TOOLBAR_PX = 460
-const WIDE_TOOLBAR_PX = 680
 
 /** Host of a URL for display, or the raw string / "" if it can't be parsed. */
 function hostOf(url: string | null): string {
@@ -113,32 +97,7 @@ function hostOf(url: string | null): string {
   }
 }
 
-/**
- * The address bar's read-mode form: scheme (carried by the lock / globe icon),
- * a leading `www.` and a bare trailing slash are dropped, so what survives
- * end-truncation in a narrow rail is the host — not `https://www.exam…`. The
- * host and the rest are returned separately so the path can be dimmed.
- *
- * Returns `null` for anything that isn't a parseable http(s) address; a
- * half-typed draft is always shown verbatim.
- */
-export function addressDisplayParts(
-  url: string
-): { host: string; rest: string; secure: boolean } | null {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return null
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null
-  const rest = `${parsed.pathname}${parsed.search}${parsed.hash}`
-  return {
-    host: parsed.host.replace(/^www\./, ""),
-    rest: rest === "/" ? "" : rest,
-    secure: parsed.protocol === "https:",
-  }
-}
+export { addressDisplayParts }
 
 /**
  * The v0/Lovable-style preview pane: browser chrome (back / forward / reload +
@@ -350,16 +309,7 @@ export function BrowserPreviewPane({
     [currentUrl]
   )
 
-  // How the toolbar packs itself. Width 0 means "not measured yet" (SSR, first
-  // paint, jsdom) — take the widest branch, matching the `/browser` page. Each
-  // tier renders the identical control roster, only in a different container,
-  // so nothing mounts twice and no action becomes unreachable.
-  const tier: "compact" | "medium" | "wide" =
-    toolbarWidth === 0 || toolbarWidth >= WIDE_TOOLBAR_PX
-      ? "wide"
-      : toolbarWidth >= COMPACT_TOOLBAR_PX
-        ? "medium"
-        : "compact"
+  const tier = toolbarTier(toolbarWidth)
 
   /**
    * A back/forward we initiated. The page cannot tell us that a document load
@@ -691,7 +641,6 @@ export function BrowserPreviewPane({
   // An uncommitted draft is never rewritten under the user's cursor.
   const addressDisplay =
     editingUrl || urlInput !== (currentUrl ?? "") ? null : addressDisplayParts(urlInput)
-  const SchemeIcon = addressDisplay?.secure ? LockIcon : GlobeIcon
 
   // Every control below that issues a `browserClient` command needs the lease:
   // without it the native side answers "owner token does not match", and most
@@ -806,139 +755,63 @@ export function BrowserPreviewPane({
         }
       }}
     >
-      <div
-        ref={toolbarRef}
-        className="relative flex items-center gap-1.5 border-b px-2 py-1.5"
-        data-testid="browser-toolbar"
-        data-tier={tier}
-      >
-        {phase === "loading" && (
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden"
-            role="progressbar"
-            aria-label={t("loading.label")}
-            data-testid="browser-progress"
-          >
-            <div className="browser-progress-bar h-full w-1/3 rounded-full bg-primary" />
+      <BrowserToolbar
+        toolbarRef={toolbarRef}
+        loading={phase === "loading"}
+        url={urlInput}
+        onUrlChange={setUrlInput}
+        onSubmit={commitUrl}
+        onUrlKeyDown={onUrlKeyDown}
+        onUrlFocus={() => setEditingUrl(true)}
+        onUrlBlur={() => setEditingUrl(false)}
+        urlInputRef={urlInputRef}
+        addressDisplay={addressDisplay}
+        collapsedActive={collapsedActive}
+        inspectActions={inspectActions}
+        pageActions={pageActions}
+        overflowExtras={
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
+            {detailControl}
           </div>
-        )}
-        <BrowserNavigationControls
-          disabled={!nativeReady}
-          backDisabled={!canGoBack}
-          forwardDisabled={!canGoForward}
-          loading={phase === "loading"}
-          onBack={() => {
-            const target = historyGoBack()
-            if (!target) return
-            expectedTraversalRef.current = target
-            beginLoad()
-            void browserClient.embedBack()
-          }}
-          onForward={() => {
-            const target = historyGoForward()
-            if (!target) return
-            expectedTraversalRef.current = target
-            beginLoad()
-            void browserClient.embedForward()
-          }}
-          onReload={() => {
-            beginLoad()
-            void browserClient.embedReload()
-          }}
-          onStop={() => {
-            void browserClient.embedStop().catch(() => {})
-          }}
-        />
-        <form onSubmit={commitUrl} className="min-w-0 flex-1">
-          <div className="relative">
-            <SchemeIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={urlInputRef}
-              type="text"
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              onFocus={(e) => {
-                setEditingUrl(true)
-                e.target.select()
-              }}
-              onBlur={() => setEditingUrl(false)}
-              onKeyDown={onUrlKeyDown}
-              placeholder={t("url.placeholder")}
-              aria-label={t("url.placeholder")}
-              className={cn(
-                "h-8 rounded-full border-transparent bg-muted/60 pl-8 text-sm shadow-none focus-visible:border-input focus-visible:bg-background",
-                // Read mode paints the pretty form over the field instead of
-                // rewriting `value`, so copying still yields the real URL and
-                // focusing reveals it without a reformat flicker.
-                addressDisplay && "text-transparent"
-              )}
-            />
-            {addressDisplay && (
-              <div
-                aria-hidden
-                data-testid="browser-url-display"
-                // Same border + padding as the Input so the content boxes line
-                // up to the pixel and focusing doesn't nudge the text sideways.
-                className="pointer-events-none absolute inset-0 flex items-center border border-transparent pl-8 pr-3"
-              >
-                <span className="min-w-0 truncate text-sm">
-                  {addressDisplay.host}
-                  {addressDisplay.rest && (
-                    <span className="text-muted-foreground">{addressDisplay.rest}</span>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
-        </form>
-        {tier !== "compact" && <div className="flex shrink-0 items-center">{inspectActions}</div>}
-        {tier === "wide" && <div className="flex shrink-0 items-center">{pageActions}</div>}
-        <BrowserAgentIndicator driver={driver} lastAction={lastAction} compact={tier !== "wide"} />
-        {/* `modal` is load-bearing, not a style choice: the native webview is
-            always-on-top and cannot be clipped, so a non-modal popover would
-            open *behind* the page. Modal makes Radix mark the rest of the app
-            `aria-hidden`, which is exactly what `useRegionVisibility` watches
-            to park the webview off-screen — the same path the history menu and
-            the cookie dialog already rely on. */}
-        <Popover modal>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("actions.more")}
-              data-testid="browser-toolbar-more"
-              className="relative shrink-0"
-            >
-              <MoreHorizontalIcon />
-              {collapsedActive && (
-                <span
-                  aria-hidden
-                  data-testid="browser-toolbar-more-active"
-                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
-                />
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-56 p-2">
-            <div className="flex flex-col gap-2">
-              {tier === "compact" && (
-                <div className="flex flex-wrap items-center gap-0.5">{inspectActions}</div>
-              )}
-              {tier !== "wide" && (
-                <div className="flex flex-wrap items-center gap-0.5">{pageActions}</div>
-              )}
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
-                {detailControl}
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
-      </div>
+        }
+        trailing={
+          <BrowserAgentIndicator
+            driver={driver}
+            lastAction={lastAction}
+            compact={tier !== "wide"}
+          />
+        }
+        navigation={
+          <BrowserNavigationControls
+            disabled={!nativeReady}
+            backDisabled={!canGoBack}
+            forwardDisabled={!canGoForward}
+            loading={phase === "loading"}
+            onBack={() => {
+              const target = historyGoBack()
+              if (!target) return
+              expectedTraversalRef.current = target
+              beginLoad()
+              void browserClient.embedBack()
+            }}
+            onForward={() => {
+              const target = historyGoForward()
+              if (!target) return
+              expectedTraversalRef.current = target
+              beginLoad()
+              void browserClient.embedForward()
+            }}
+            onReload={() => {
+              beginLoad()
+              void browserClient.embedReload()
+            }}
+            onStop={() => {
+              void browserClient.embedStop().catch(() => {})
+            }}
+          />
+        }
+      />
 
       {findOpen && <BrowserFindBarSection onSearch={runFind} onClose={closeFind} />}
 
@@ -991,31 +864,7 @@ export function BrowserPreviewPane({
               </div>
             </div>
           )}
-          {owned && !committedUrl && (
-            <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center animate-in fade-in duration-200">
-              <div className="flex size-12 items-center justify-center rounded-2xl bg-muted">
-                <GlobeIcon className="size-6 text-muted-foreground" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{t("empty.title")}</p>
-                <p className="max-w-sm text-xs text-muted-foreground">{t("empty.hint")}</p>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <span className="text-xs text-muted-foreground">{t("empty.quickOpen")}</span>
-                {QUICK_OPEN_URLS.map((url) => (
-                  <Button
-                    key={url}
-                    size="sm"
-                    variant="outline"
-                    className="h-7 rounded-pill px-3 font-mono text-xs font-normal"
-                    onClick={() => openQuickUrl(url)}
-                  >
-                    {new URL(url).host}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          )}
+          {owned && !committedUrl && <BrowserEmptyState onOpen={openQuickUrl} />}
         </div>
         {railRendered && (
           <aside

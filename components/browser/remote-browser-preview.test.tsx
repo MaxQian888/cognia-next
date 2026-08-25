@@ -1,5 +1,12 @@
 /** @jest-environment jsdom */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+
+// The remote toolbar used to be a flat row of ten controls with no responsive
+// behaviour at all, so it overflowed in the chat rail. It now shares the pane's
+// measured tiering; jsdom has no layout, so a test dictates the width.
+let mockToolbarWidth = 0
+jest.mock("@/hooks/use-element-width", () => ({ useElementWidth: () => mockToolbarWidth }))
+jest.mock("@/components/ui/popover")
 
 jest.mock("next-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
@@ -345,7 +352,7 @@ it("keeps the address bar synchronized with in-page remote navigation", async ()
     })
   })
 
-  expect(screen.getByRole("textbox", { name: "browser.remote.url" })).toHaveValue(
+  expect(screen.getByRole("textbox", { name: "browser.url.placeholder" })).toHaveValue(
     "https://example.com/after-click"
   )
 })
@@ -478,4 +485,33 @@ it("switches and closes pages through the host-neutral engine", async () => {
   await waitFor(() => expect(activatePage).toHaveBeenCalledWith("page-2"))
   fireEvent.click(screen.getAllByRole("button", { name: "browser.remote.closePage" })[1])
   await waitFor(() => expect(closePage).toHaveBeenCalled())
+})
+
+it("packs its secondary controls away in a narrow rail", async () => {
+  mockToolbarWidth = 300
+  try {
+    render(
+      <RemoteBrowserPreview
+        chatSessionId="chat-1"
+        workspaceId="workspace-1"
+        createStream={createStream}
+      />
+    )
+    await waitFor(() => expect(streamOptions).not.toBeNull())
+    const bar = screen.getByTestId("browser-toolbar")
+    expect(bar).toHaveAttribute("data-tier", "compact")
+    // Inline at this width would overflow; they live behind the "⋯" instead.
+    // (The manual popover mock renders its content inline, so scope the check
+    // to the popover body rather than asserting absence from the whole bar.)
+    fireEvent.click(screen.getByTestId("browser-toolbar-more"))
+    const popover = screen.getByTestId("popover-content")
+    expect(
+      within(popover).getByRole("button", { name: "browser.actions.screenshot" })
+    ).toBeInTheDocument()
+    expect(
+      within(popover).getByRole("button", { name: "browser.actions.openExternal" })
+    ).toBeInTheDocument()
+  } finally {
+    mockToolbarWidth = 0
+  }
 })
