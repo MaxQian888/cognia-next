@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
+import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
@@ -8,9 +9,9 @@ const alertVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-card text-card-foreground",
+        default: "text-card-foreground",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current",
+          "text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current",
       },
     },
     defaultVariants: {
@@ -19,13 +20,20 @@ const alertVariants = cva(
   }
 )
 
+/**
+ * Both variants painted `bg-card`, so both are the `raised` tier (ADR-0148) and
+ * the resolved colour is identical. Radius stays `inherit` — the variants' own
+ * `rounded-lg` is the base step, not the `panel` step, and swapping it would
+ * shift the default look by 2px.
+ */
 function Alert({
   className,
   variant,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
-    <div
+    <Surface
+      layer="raised"
       data-slot="alert"
       role="alert"
       className={cn(alertVariants({ variant }), className)}

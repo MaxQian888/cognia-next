@@ -1080,6 +1080,77 @@ html[data-bg-preview="all"] [data-bg-target] {
   }
 }
 
+/* Section 1b — Layer-semantic surfaces (ADR-0148).
+ *
+ * `<Surface>` declares which tier it belongs to and reads `--surface-bg`; these
+ * three rules are the only place that decides what a tier looks like. Two panels on the same tier therefore cannot drift apart, which
+ * is the whole reason the per-component tonality registry produced visibly
+ * uneven translucency in the first place.
+ *
+ * Note what these rules do NOT do: they set custom properties, they never
+ * declare `background-color`. A custom property never competes with a Tailwind
+ * utility for specificity, so unlike Section 2 below this needs no unlayered
+ * override and no `!important` — which is exactly why a migrated surface stops
+ * needing a bespoke entry in the wallpaper stack. */
+
+[data-surface-layer="base"] {
+  --surface-bg: var(--surface-bg-base);
+}
+[data-surface-layer="raised"] {
+  --surface-bg: var(--surface-bg-raised);
+}
+[data-surface-layer="overlay"] {
+  --surface-bg: var(--surface-bg-overlay);
+}
+
+/* Retune the three tiers inside the active wallpaper scope. Fifteen selectors
+   replace what Section 2 needs ~830 lines to say per `data-slot`, and every
+   surface that adopts `<Surface>` is covered the moment it does — including the
+   bespoke shells and rails the slot registry never knew about. */
+body[data-bg-enabled="true"][data-bg-scope="chat"] [data-bg-target="chat"],
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"],
+body[data-bg-enabled="true"][data-bg-scope="sidebar"] [data-bg-target="sidebar"],
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target],
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] {
+  --surface-bg-base: color-mix(
+    in oklch,
+    var(--background) var(--surface-tonality-translucent),
+    transparent
+  );
+  --surface-bg-raised: color-mix(
+    in oklch,
+    var(--card) var(--surface-tonality-translucent),
+    transparent
+  );
+  --surface-bg-overlay: color-mix(
+    in oklch,
+    var(--popover) var(--surface-tonality-glass),
+    transparent
+  );
+  --surface-blur: var(--surface-blur-subtle);
+}
+
+/* Overlays are portaled to <body>, outside every [data-bg-target] subtree, so
+   they only sit over the wallpaper when the scope is document-wide. */
+body[data-bg-enabled="true"][data-bg-scope="all"],
+body[data-bg-enabled="true"][data-bg-scope="global"] {
+  --surface-bg-overlay: color-mix(
+    in oklch,
+    var(--popover) var(--surface-tonality-glass),
+    transparent
+  );
+  --surface-blur: var(--surface-blur-regular);
+}
+
+/* Blur is gated on a wallpaper actually being on. `backdrop-filter` promotes a
+   compositing layer even at blur(0px), and these containers appear inside the
+   virtualized chat list — so it must not ride along as a class on every
+   Surface. */
+body[data-bg-enabled="true"] [data-surface-layer] {
+  backdrop-filter: blur(var(--surface-blur));
+  -webkit-backdrop-filter: blur(var(--surface-blur));
+}
+
 /* Section 2 — Non-portaled inline surfaces (scope-aware, 5-selector
  * compound that mirrors the sidebar-inner rule above). */
 

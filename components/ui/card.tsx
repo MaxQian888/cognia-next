@@ -1,16 +1,31 @@
 import * as React from "react"
 
+import { Surface } from "@/components/surface/surface"
 import { cn } from "@/lib/utils"
 
+/**
+ * Card is the single highest-leverage surface in the app (~559 call sites), and
+ * `SettingsCard` builds on it, so routing it through `<Surface>` is what lets
+ * that whole population participate in wallpaper translucency without touching
+ * a single caller (ADR-0148).
+ *
+ * The look is unchanged: `raised` resolves `--surface-bg` to `var(--card)`, and
+ * `rounded-stage` compiles to the same `calc(var(--radius) + 4px)` that
+ * `rounded-xl` did. The settings-panel fork now clears the tier by setting the
+ * variable rather than by painting `bg-transparent` over it — a variable never
+ * has to win a specificity fight against the background utility.
+ */
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div
+    <Surface
+      layer="raised"
+      radius="stage"
       data-slot="card"
       className={cn(
-        "flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm",
+        "flex flex-col gap-6 border py-6 text-card-foreground shadow-sm",
         "[[data-settings-panel]_&]:min-w-0 [[data-settings-panel]_&]:gap-4",
         "[[data-settings-panel]_&]:rounded-none [[data-settings-panel]_&]:border-x-0 [[data-settings-panel]_&]:border-t-0",
-        "[[data-settings-panel]_&]:border-b [[data-settings-panel]_&]:border-border/60 [[data-settings-panel]_&]:bg-transparent",
+        "[[data-settings-panel]_&]:border-b [[data-settings-panel]_&]:border-border/60 [[data-settings-panel]_&]:[--surface-bg:transparent]",
         "[[data-settings-panel]_&]:py-5 [[data-settings-panel]_&]:shadow-none [[data-settings-panel]_&]:last:border-b-0",
         className
       )}
