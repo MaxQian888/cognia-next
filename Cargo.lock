@@ -2742,6 +2742,7 @@ name = "cognia-task-workspace"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "cognia-instrument",
  "flate2",
  "git2",
  "hex",
