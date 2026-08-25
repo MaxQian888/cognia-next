@@ -33,7 +33,11 @@ import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/brow
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
-import { BrowserDevtoolsDrawer } from "@/components/browser/browser-devtools-drawer"
+import {
+  BrowserConsolePanel,
+  BrowserNetworkPanel,
+} from "@/components/browser/browser-devtools-panels"
+import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
 import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { BrowserWebFallback } from "@/components/browser/browser-web-fallback"
 import { BrowserZoomControl, MAX_ZOOM, MIN_ZOOM } from "@/components/browser/browser-zoom-control"
@@ -200,7 +204,10 @@ export function BrowserPreviewPane({
   const [findOpen, setFindOpen] = useState(false)
   // ADR-0127: console / network rings for the DevTools drawer. Gated on the
   // lease below so a second mounted pane does not mirror the owner's feeds.
-  const [developerOpen, setDeveloperOpen] = useState(false)
+  // Opening developer mode now selects a tab in the bottom dock rather than
+  // toggling a second surface in the side rail. `null` means "no outstanding
+  // request", so the dock can be collapsed again without this re-opening it.
+  const [developerRequest, setDeveloperRequest] = useState(0)
   const {
     recent: recentHistory,
     push: pushHistory,
@@ -406,7 +413,7 @@ export function BrowserPreviewPane({
   // reserved region. Keep it mounted through its slide-out so the exit
   // animation can play, then unmount on animationEnd. Set-state-during-render
   // (not an effect) — same "adjust state on prop change" pattern as syncedNavUrl.
-  const railWanted = developerOpen || !!selection || annotationQueue.length > 0
+  const railWanted = !!selection || annotationQueue.length > 0
   const [railRendered, setRailRendered] = useState(railWanted)
   if (railWanted && !railRendered) setRailRendered(true)
 
@@ -733,8 +740,7 @@ export function BrowserPreviewPane({
         tooltip={tCdp("title")}
         aria-label={tCdp("title")}
         disabled={!nativeReady || !effectiveSessionId}
-        className={cn(developerOpen && "bg-primary/15 text-primary")}
-        onClick={() => setDeveloperOpen((current) => !current)}
+        onClick={() => setDeveloperRequest((n) => n + 1)}
       >
         <BracesIcon />
       </TooltipIconButton>
@@ -1036,13 +1042,6 @@ export function BrowserPreviewPane({
             )}
           >
             <ScrollArea className="min-h-0 flex-1">
-              {developerOpen && currentUrl && effectiveSessionId && (
-                <BrowserCdpControls
-                  sessionId={effectiveSessionId}
-                  browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
-                  pageUrl={currentUrl}
-                />
-              )}
               {selection && (
                 <div className="bg-background p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -1201,21 +1200,44 @@ export function BrowserPreviewPane({
         )}
       </div>
 
-      <BrowserRecorderPanel
-        pageUrl={currentUrl ?? null}
-        onLayoutChange={refreshBounds}
-        onSendToChat={(markdown) => void sendText(markdown, { sessionId: effectiveSessionId })}
-      />
-      {/* ADR-0127: live console + network from the overlay's push channels. */}
-      <BrowserDevtoolsDrawer
-        console={devtools.console}
-        network={devtools.network}
-        problemCount={devtools.problemCount}
-        failedRequests={devtools.failedRequests}
-        onClearConsole={devtools.clearConsole}
-        onClearNetwork={devtools.clearNetwork}
-        onLayoutChange={refreshBounds}
-      />
+      {/* One collapsed strip for the recorder, the ADR-0127 console / network
+          readouts and developer mode — and only once a page is committed, so an
+          empty pane spends nothing on it. */}
+      {committedUrl && (
+        <BrowserToolsDock
+          onLayoutChange={refreshBounds}
+          openRequest={developerRequest > 0 ? { tab: "developer", nonce: developerRequest } : null}
+          consoleCount={devtools.console.length}
+          networkCount={devtools.network.length}
+          problemCount={devtools.problemCount}
+          failedRequests={devtools.failedRequests}
+          recorder={
+            <BrowserRecorderPanel
+              chrome={false}
+              pageUrl={currentUrl ?? null}
+              onLayoutChange={refreshBounds}
+              onSendToChat={(markdown) =>
+                void sendText(markdown, { sessionId: effectiveSessionId })
+              }
+            />
+          }
+          console={
+            <BrowserConsolePanel entries={devtools.console} onClear={devtools.clearConsole} />
+          }
+          network={
+            <BrowserNetworkPanel entries={devtools.network} onClear={devtools.clearNetwork} />
+          }
+          developer={
+            currentUrl && effectiveSessionId ? (
+              <BrowserCdpControls
+                sessionId={effectiveSessionId}
+                browserSessionId={ownerId ?? `browser:${effectiveSessionId}`}
+                pageUrl={currentUrl}
+              />
+            ) : undefined
+          }
+        />
+      )}
     </div>
   )
 }

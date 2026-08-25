@@ -42,7 +42,7 @@ jest.mock("@/components/browser/remote-browser-preview", () => ({
 
 // The recorder panel is a separately-tested unit (browser-recorder-panel.test.tsx)
 // and pulls in the Dexie graph; stub it here and assert only that the pane
-// mounts it and hands it the live URL.
+// mounts it inside the dock and hands it the live URL.
 jest.mock("@/components/browser/browser-recorder-panel", () => ({
   BrowserRecorderPanel: ({
     pageUrl,
@@ -921,33 +921,64 @@ it("begins a load on commit, reload, back and forward", () => {
 
 // The recorder is only useful if the pane actually mounts it and tells it which
 // page is live — a panel that renders but never learns the URL can never arm.
-describe("recorder panel wiring", () => {
-  it("mounts the recorder panel", () => {
+// D10: the recorder and the DevTools readouts used to be two permanently
+// mounted strips stacked under the pane, and the recorder started expanded — so
+// an empty pane spent roughly 100px on chrome before a page was even loaded.
+describe("bottom tools dock", () => {
+  it("mounts nothing under the pane until a page is committed", () => {
     renderPane(<BrowserPreviewPane />)
-    expect(screen.getByTestId("recorder-panel")).toBeInTheDocument()
+    expect(screen.queryByTestId("browser-tools-dock")).toBeNull()
+    expect(screen.queryByTestId("recorder-panel")).toBeNull()
   })
 
-  it("hands it no url before a page is committed", () => {
-    renderPane(<BrowserPreviewPane />)
-    expect(screen.getByTestId("recorder-panel")).toHaveAttribute("data-page-url", "")
-  })
-
-  it("hands it the committed url", () => {
+  it("mounts one collapsed strip once a page is committed", () => {
     renderPane(<BrowserPreviewPane />)
     commitUrl("localhost:3000")
+    const dock = screen.getByTestId("browser-tools-dock")
+    expect(dock).toHaveAttribute("data-expanded", "false")
+    expect(screen.queryByTestId("recorder-panel")).toBeNull()
+  })
+
+  it("hands the recorder the live url once expanded", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    fireEvent.click(screen.getByTestId("browser-tools-toggle"))
     expect(screen.getByTestId("recorder-panel")).toHaveAttribute(
       "data-page-url",
       "http://localhost:3000/"
     )
   })
 
-  it("refreshes native bounds after the recorder body collapses", () => {
+  it("refreshes native bounds when the dock changes height", () => {
+    jest.useFakeTimers()
+    try {
+      renderPane(<BrowserPreviewPane />)
+      commitUrl("localhost:3000")
+      mockRefreshBounds.mockClear()
+      fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+      jest.runOnlyPendingTimers()
+      expect(mockRefreshBounds).toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("opens the dock at developer mode from the toolbar", () => {
     renderPane(<BrowserPreviewPane />)
-    mockRefreshBounds.mockClear()
+    commitUrl("localhost:3000")
+    fireEvent.click(screen.getByRole("button", { name: "Developer mode" }))
+    const dock = screen.getByTestId("browser-tools-dock")
+    expect(dock).toHaveAttribute("data-expanded", "true")
+    expect(dock).toHaveAttribute("data-tab", "developer")
+    expect(screen.getByTestId("cdp-controls")).toBeInTheDocument()
+  })
 
-    fireEvent.click(screen.getByRole("button", { name: "toggle recorder layout" }))
-
-    expect(mockRefreshBounds).toHaveBeenCalledTimes(1)
+  it("keeps the inspection rail for selection only", () => {
+    renderPane(<BrowserPreviewPane />)
+    commitUrl("localhost:3000")
+    fireEvent.click(screen.getByRole("button", { name: "Developer mode" }))
+    // Developer mode no longer opens a second surface beside the page.
+    expect(screen.queryByTestId("browser-inspection-rail")).toBeNull()
   })
 })
 
@@ -1093,17 +1124,6 @@ describe("history", () => {
     // The manual dropdown mock renders items inline; click the earlier page.
     fireEvent.click(screen.getByText("localhost:3000"))
     expect(urlBar()).toHaveValue("http://localhost:3000/")
-  })
-})
-
-// ADR-0127: the DevTools drawer mounts under the pane next to the recorder
-// (collapsed by default) even when no event plane is available.
-describe("devtools drawer", () => {
-  it("mounts collapsed under the pane", () => {
-    renderPane(<BrowserPreviewPane />)
-    const drawer = document.querySelector('[data-testid="browser-devtools-drawer"]')
-    expect(drawer).not.toBeNull()
-    expect(drawer).toHaveAttribute("data-expanded", "false")
   })
 })
 

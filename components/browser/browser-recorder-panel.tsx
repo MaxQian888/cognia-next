@@ -60,6 +60,13 @@ export interface BrowserRecorderPanelProps {
   onLayoutChange?: () => void
   /** Host-specific recorder; absent keeps the embedded desktop recorder. */
   recorder?: UseFlowRecorder
+  /**
+   * Draw the panel's own section wrapper, title and collapse toggle. Default
+   * true keeps the standalone usage (the remote preview mounts this directly)
+   * unchanged; {@link BrowserToolsDock} passes false because it owns one strip
+   * of chrome for every tool.
+   */
+  chrome?: boolean
 }
 
 /** Render a step as one human-readable line for the step list. */
@@ -338,6 +345,7 @@ export function BrowserRecorderPanel({
   now = Date.now,
   onLayoutChange,
   recorder: providedRecorder,
+  chrome = true,
 }: BrowserRecorderPanelProps) {
   const t = useTranslations("browser")
   const stepLabel = useStepLabel()
@@ -347,7 +355,10 @@ export function BrowserRecorderPanel({
   const [name, setName] = useState("")
   const [assertion, setAssertion] = useState("")
   const [secrets, setSecrets] = useState<Record<string, string>>({})
-  const [expanded, setExpanded] = useState(true)
+  // Chrome-less means the dock decides what is visible, so the body is always
+  // rendered; standalone keeps its own toggle.
+  const [ownExpanded, setOwnExpanded] = useState(true)
+  const expanded = chrome ? ownExpanded : true
   const previousExpandedRef = useRef(expanded)
   useLayoutEffect(() => {
     if (previousExpandedRef.current === expanded) return
@@ -370,7 +381,9 @@ export function BrowserRecorderPanel({
 
   const start = useCallback(async () => {
     if (!pageUrl) return
-    setExpanded(true)
+    // Standalone, arming a take reveals the step list. Inside the dock the
+    // surrounding strip owns visibility, so this is a no-op there.
+    setOwnExpanded(true)
     setFlow(null)
     await recorder.start(pageUrl)
   }, [pageUrl, recorder])
@@ -416,115 +429,133 @@ export function BrowserRecorderPanel({
 
   const steps = flow?.steps ?? recorder.steps
 
-  return (
-    <section className="flex flex-col gap-2 border-t p-3" aria-label={t("record.title")}>
-      <header className="flex items-center gap-2">
-        <h2 className="text-sm font-medium">{t("record.title")}</h2>
-        {recorder.recording && (
-          <Badge variant="destructive" className="gap-1">
-            <Circle className="size-2 fill-current" aria-hidden />
-            {t("record.recording", { count: recorder.steps.length })}
-          </Badge>
-        )}
-        <div className="ml-auto flex items-center gap-1">
+  const header = (
+    <header className="flex items-center gap-2">
+      {chrome && <h2 className="text-sm font-medium">{t("record.title")}</h2>}
+      {chrome && recorder.recording && (
+        <Badge variant="destructive" className="gap-1">
+          <Circle className="size-2 fill-current" aria-hidden />
+          {t("record.recording", { count: recorder.steps.length })}
+        </Badge>
+      )}
+      <div className="ml-auto flex items-center gap-1">
+        {chrome && (
           <Button
             size="icon"
             variant="ghost"
             className="size-7"
             aria-label={expanded ? t("record.collapse") : t("record.expand")}
             aria-expanded={expanded}
-            onClick={() => setExpanded((value) => !value)}
+            onClick={() => setOwnExpanded((value) => !value)}
           >
             {expanded ? <ChevronDown aria-hidden /> : <ChevronUp aria-hidden />}
           </Button>
-          {recorder.recording ? (
-            <Button size="sm" variant="secondary" onClick={() => void stop()}>
-              <Square aria-hidden />
-              {t("record.stop")}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void start()}
-              disabled={!pageUrl}
-              title={pageUrl ? undefined : t("record.startHint")}
-            >
-              <Circle aria-hidden />
-              {t("record.start")}
-            </Button>
-          )}
-        </div>
-      </header>
+        )}
+        {recorder.recording ? (
+          <Button size="sm" variant="secondary" onClick={() => void stop()}>
+            <Square aria-hidden />
+            {t("record.stop")}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void start()}
+            disabled={!pageUrl}
+            title={pageUrl ? undefined : t("record.startHint")}
+          >
+            <Circle aria-hidden />
+            {t("record.start")}
+          </Button>
+        )}
+      </div>
+    </header>
+  )
 
-      {expanded && (
-        <>
-          {steps.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-center text-xs">{t("record.empty")}</p>
-          ) : (
-            <ScrollArea className="max-h-48">
-              <ol className="flex flex-col gap-1">
-                {steps.map((step, index) => (
-                  <li
-                    key={`${step.act}-${index}-${step.at}`}
-                    className="flex items-center gap-2 text-xs"
+  const body = (
+    <>
+      {steps.length === 0 ? (
+        <p className="text-muted-foreground py-4 text-center text-xs">{t("record.empty")}</p>
+      ) : (
+        <ScrollArea className="max-h-48">
+          <ol className="flex flex-col gap-1">
+            {steps.map((step, index) => (
+              <li
+                key={`${step.act}-${index}-${step.at}`}
+                className="flex items-center gap-2 text-xs"
+              >
+                <span className="text-muted-foreground w-4 shrink-0 text-right">{index + 1}</span>
+                <span className="truncate">{stepLabel(step)}</span>
+                {recorder.recording && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="ml-auto size-6 shrink-0"
+                    aria-label={t("record.removeStep")}
+                    onClick={() => recorder.removeStep(index)}
                   >
-                    <span className="text-muted-foreground w-4 shrink-0 text-right">
-                      {index + 1}
-                    </span>
-                    <span className="truncate">{stepLabel(step)}</span>
-                    {recorder.recording && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="ml-auto size-6 shrink-0"
-                        aria-label={t("record.removeStep")}
-                        onClick={() => recorder.removeStep(index)}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </ScrollArea>
-          )}
-
-          {recorder.recording && (
-            <div className="flex items-center gap-1">
-              <Input
-                value={assertion}
-                onChange={(e) => setAssertion(e.target.value)}
-                placeholder={t("record.assertionPlaceholder")}
-                aria-label={t("record.addAssertion")}
-                className="h-8 text-xs"
-              />
-              <Button size="sm" variant="ghost" onClick={addAssertion} disabled={!assertion.trim()}>
-                <Plus aria-hidden />
-                {t("record.addAssertion")}
-              </Button>
-            </div>
-          )}
-
-          {flow && (
-            <FlowReview
-              flow={flow}
-              recorder={recorder}
-              name={name}
-              setName={setName}
-              secrets={secrets}
-              setSecrets={setSecrets}
-              onSendToChat={onSendToChat}
-            />
-          )}
-
-          {/* Hidden while a take is live: mid-recording, loading another flow would
-          throw away the take in progress. */}
-          {!recorder.recording && savedRows.length > 0 && (
-            <SavedFlows rows={savedRows} onSelect={select} onRename={rename} onDelete={remove} />
-          )}
-        </>
+                    <Trash2 aria-hidden />
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ol>
+        </ScrollArea>
       )}
+
+      {recorder.recording && (
+        <div className="flex items-center gap-1">
+          <Input
+            value={assertion}
+            onChange={(e) => setAssertion(e.target.value)}
+            placeholder={t("record.assertionPlaceholder")}
+            aria-label={t("record.addAssertion")}
+            className="h-8 text-xs"
+          />
+          <Button size="sm" variant="ghost" onClick={addAssertion} disabled={!assertion.trim()}>
+            <Plus aria-hidden />
+            {t("record.addAssertion")}
+          </Button>
+        </div>
+      )}
+
+      {flow && (
+        <FlowReview
+          flow={flow}
+          recorder={recorder}
+          name={name}
+          setName={setName}
+          secrets={secrets}
+          setSecrets={setSecrets}
+          onSendToChat={onSendToChat}
+        />
+      )}
+
+      {/* Hidden while a take is live: mid-recording, loading another flow would
+          throw away the take in progress. */}
+      {!recorder.recording && savedRows.length > 0 && (
+        <SavedFlows rows={savedRows} onSelect={select} onRename={rename} onDelete={remove} />
+      )}
+    </>
+  )
+
+  if (!chrome) {
+    return (
+      <div className="flex flex-col gap-2" data-testid="browser-recorder-panel">
+        {header}
+        {body}
+      </div>
+    )
+  }
+
+  return (
+    <section
+      className="flex flex-col gap-2 border-t p-3"
+      aria-label={t("record.title")}
+      data-testid="browser-recorder-panel"
+    >
+      {header}
+      {expanded && body}
     </section>
   )
 }

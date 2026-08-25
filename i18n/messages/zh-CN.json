@@ -4084,16 +4084,13 @@
     },
     "devtools": {
       "clear": "清空",
-      "collapse": "收起开发者工具",
       "consoleEmpty": "尚未捕获控制台输出。",
       "consoleTab": "控制台（{count}）",
       "durationMs": "{ms} 毫秒",
-      "expand": "展开开发者工具",
       "failedRequests": "{count} 个失败请求",
       "networkEmpty": "尚未捕获请求。",
       "networkTab": "网络（{count}）",
-      "problems": "{count} 个问题",
-      "title": "开发者工具"
+      "problems": "{count} 个问题"
     },
     "empty": {
       "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
@@ -4204,6 +4201,15 @@
       "sent": "截图已发送到对话"
     },
     "title": "浏览器",
+    "tools": {
+      "collapse": "折叠浏览器工具",
+      "expand": "展开浏览器工具",
+      "label": "浏览器工具",
+      "tabs": {
+        "developer": "开发者",
+        "recorder": "录制"
+      }
+    },
     "url": {
       "placeholder": "http://localhost:3000"
     },
