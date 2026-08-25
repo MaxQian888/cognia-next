@@ -560,6 +560,8 @@
       "hint": "Enter or Esc to close · Tab for the next parameter",
       "placeholder": "Value",
       "position": "{index} of {total}",
+      "previewOff": "Back to editing",
+      "previewOn": "Preview with values filled in",
       "unfilled": "{count, plural, =1 {1 parameter still needs a value} other {# parameters still need values}}"
     },
     "toolbar": {

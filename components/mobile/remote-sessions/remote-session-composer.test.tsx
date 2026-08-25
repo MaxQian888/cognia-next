@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
@@ -45,7 +45,13 @@ jest.mock("@/lib/companion/attachment-upload-client", () => ({
 }))
 
 const toastWarning = jest.fn()
-jest.mock("sonner", () => ({ toast: { warning: (...args: unknown[]) => toastWarning(...args) } }))
+const toastError = jest.fn()
+jest.mock("sonner", () => ({
+  toast: {
+    warning: (...args: unknown[]) => toastWarning(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}))
 
 function pngFile(name = "shot.png", size = 32): File {
   const file = new File([new Uint8Array(size)], name, { type: "image/png" })
@@ -86,6 +92,7 @@ beforeEach(() => {
     optimizedCount: 0,
   }))
   toastWarning.mockClear()
+  toastError.mockClear()
   abortUploadMock.mockClear()
   window.localStorage.clear()
 })
@@ -384,5 +391,41 @@ describe("RemoteSessionComposer", () => {
     const bar = await screen.findByTestId("remote-attachment-progress")
     expect(bar).toHaveAttribute("aria-valuenow", "50")
     gate.release?.()
+  })
+
+  describe("a synced draft with unfilled {{parameters}}", () => {
+    it("refuses to send rather than shipping a literal token to the model", async () => {
+      // `draft.replace` carries the TEXT of a desktop draft but not the values
+      // bound to it, so a half-filled template arrives here with its holes and
+      // nothing to fill them from. The check reads the tokens out of the text
+      // precisely so it still holds on a device the binding never reached.
+      const user = userEvent.setup()
+      const { onSend } = setup()
+
+      // `fireEvent.change`, not `user.type`: userEvent reads `{{` as an escape
+      // for a literal `{`, so typing the token would produce `{module}}`.
+      fireEvent.change(screen.getByTestId("remote-composer-input"), {
+        target: { value: "review {{module}}" },
+      })
+      await user.click(screen.getByTestId("remote-send"))
+
+      expect(onSend).not.toHaveBeenCalled()
+      expect(toastError).toHaveBeenCalled()
+      // The text stays put — there is nowhere else it exists.
+      expect(screen.getByTestId("remote-composer-input")).toHaveValue("review {{module}}")
+    })
+
+    it("sends a `{{ }}` inside an inline code span untouched", async () => {
+      const user = userEvent.setup()
+      const { onSend } = setup()
+
+      fireEvent.change(screen.getByTestId("remote-composer-input"), {
+        target: { value: "what does `{{x}}` mean" },
+      })
+      await user.click(screen.getByTestId("remote-send"))
+
+      expect(onSend).toHaveBeenCalledWith("what does `{{x}}` mean", [], expect.any(Object))
+      expect(toastError).not.toHaveBeenCalled()
+    })
   })
 })

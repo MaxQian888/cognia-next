@@ -267,4 +267,43 @@ describe("Composer — {{parameter}} chips", () => {
     expect(onSend).toHaveBeenCalledTimes(1)
     expect(textOf(onSend.mock.calls[0][0])).toContain("{{ jinja }}")
   })
+
+  describe("preview", () => {
+    it("offers no toggle when the message has no parameters", async () => {
+      // There would be nothing to preview — the box already shows the sentence.
+      const { ta } = await mount()
+      fireEvent.change(ta, { target: { value: "just prose" } })
+
+      expect(screen.queryByTestId("composer-param-preview-toggle")).not.toBeInTheDocument()
+    })
+
+    it("shows the finished sentence, then goes back to editing", async () => {
+      const { ta } = await mount()
+      fireEvent.change(ta, { target: { value: "review {{module}} please" } })
+      clickAt(ta, 10)
+      fireEvent.change(paramInput(), { target: { value: "the login flow" } })
+      fireEvent.keyDown(paramInput(), { key: "Enter" })
+
+      fireEvent.click(screen.getByTestId("composer-param-preview-toggle"))
+
+      expect(screen.getByTestId("composer-param-preview")).toHaveTextContent(
+        "review the login flow please"
+      )
+      // The textarea is hidden, never unmounted — unmounting would drop focus,
+      // the caret, the scroll position and every ref the composer holds on it.
+      expect(document.querySelector("textarea")).toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId("composer-param-preview-toggle"))
+      expect(screen.queryByTestId("composer-param-preview")).not.toBeInTheDocument()
+    })
+
+    it("still shows the token for a value nobody has supplied", async () => {
+      const { ta } = await mount()
+      fireEvent.change(ta, { target: { value: "review {{module}}" } })
+
+      fireEvent.click(screen.getByTestId("composer-param-preview-toggle"))
+
+      expect(screen.getByTestId("composer-param-preview")).toHaveTextContent("review {{module}}")
+    })
+  })
 })

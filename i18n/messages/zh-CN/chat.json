@@ -560,6 +560,8 @@
       "hint": "回车或 Esc 关闭 · Tab 跳到下一个参数",
       "placeholder": "值",
       "position": "第 {index} / {total} 个",
+      "previewOff": "回到编辑",
+      "previewOn": "预览填值后的效果",
       "unfilled": "{count, plural, =1 {还有 1 个参数没填} other {还有 # 个参数没填}}"
     },
     "toolbar": {

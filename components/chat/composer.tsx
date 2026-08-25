@@ -690,6 +690,8 @@ function ComposerInner(props: InnerProps) {
   const [templateBinding, setTemplateBinding] = useState<ChatTemplateBinding | undefined>()
   /** Which parameter the editor panel is open on, if any. */
   const [activeParamId, setActiveParamId] = useState<string | null>(null)
+  /** Show the message with its values substituted, read-only. */
+  const [previewRequested, setPreviewRequested] = useState(false)
 
   const paramTokens = useMemo(
     () => overlaySegments.filter((seg): seg is ParamSegment => seg.kind === "param"),
@@ -717,6 +719,20 @@ function ComposerInner(props: InnerProps) {
     (caret: number) => paramTokens.find((seg) => caret >= seg.start && caret <= seg.end) ?? null,
     [paramTokens]
   )
+  // The one real cost of keeping the token in the text is that you never see
+  // the finished sentence while editing — the chip overlay has to mirror the
+  // textarea character for character, so a pill can only paint `{{module}}`.
+  // This is the answer to that, and it only exists when there is something to
+  // preview.
+  const preview = useMemo(() => {
+    if (paramTokens.length === 0) return null
+    return {
+      on: previewRequested,
+      text: renderParamTokens(controller.textInput.value, paramTokens, effectiveBinding).text,
+      toggle: () => setPreviewRequested((on) => !on),
+    }
+  }, [paramTokens, previewRequested, controller.textInput.value, effectiveBinding])
+
   const setParamValue = useCallback((paramId: string, value: ChatTemplateParamValue) => {
     setTemplateBinding((prev) =>
       withParamValue(
@@ -2089,6 +2105,7 @@ function ComposerInner(props: InnerProps) {
           onSelect={onSelect}
           onMouseUp={onTextareaMouseUp}
           paramState={paramPillState}
+          preview={preview}
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
           ghost={ghost}

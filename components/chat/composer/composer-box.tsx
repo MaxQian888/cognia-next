@@ -19,7 +19,7 @@
 
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from "react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import { ArrowUpIcon, Loader2Icon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, EyeIcon, EyeOffIcon, Loader2Icon, SquareIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -98,6 +98,17 @@ export interface ComposerBoxProps {
   onCompositionEnd: () => void
   /** How to paint each `{{parameter}}` chip. See `ComposerChipOverlay`. */
   paramState?: (paramId: string) => ParamPillState
+  /**
+   * Read-only rendering of the message with its parameters substituted, and the
+   * control that toggles it.
+   *
+   * Null when the message has no parameters — the toggle would show a preview
+   * identical to what is already on screen. This is the answer to the one real
+   * cost of keeping the token in the text: while editing you never see the
+   * finished sentence, because the chip overlay must mirror the textarea
+   * character for character.
+   */
+  preview?: { on: boolean; text: string; toggle: () => void } | null
 
   // ── inline completion ───────────────────────────────────────────────────
   ghost: { ghost: string; candidates: readonly unknown[]; index: number; dismiss: () => void }
@@ -156,6 +167,7 @@ export function ComposerBox({
   onCompositionStart,
   onCompositionEnd,
   paramState,
+  preview,
   ghost,
   ghostSourceLabel,
   acceptGhost,
@@ -274,6 +286,22 @@ export function ComposerBox({
             "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
         )}
       >
+        {preview?.on ? (
+          // Same box, same typography, same padding — so it reads as the input
+          // showing you the finished sentence rather than as a separate panel.
+          <div
+            className={cn(
+              "block min-h-9 w-full break-words whitespace-pre-wrap",
+              compactLayout && "min-h-14 py-1.5",
+              skin.mono && "font-mono",
+              TEXTAREA_TYPOGRAPHY
+            )}
+            data-testid="composer-param-preview"
+            style={{ maxHeight: `${maxHeightRem}rem`, overflowY: "auto" }}
+          >
+            {preview.text}
+          </div>
+        ) : null}
         <ComposerChipOverlay
           ref={chipOverlayRef}
           value={textInput.value}
@@ -304,6 +332,9 @@ export function ComposerBox({
           aria-label={t("ariaMessage")}
           className={cn(
             "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
+            // Hidden, never unmounted: unmounting would drop focus, the caret,
+            // the scroll position and every ref the composer holds on it.
+            preview?.on && "hidden",
             compactLayout && "min-h-14 py-1.5",
             !compactLayout && textInput.value.length === 0 && "h-9 overflow-hidden",
             // A skin may ask for the code font; classic never does.
@@ -335,6 +366,20 @@ export function ComposerBox({
           style={{ maxHeight: `${maxHeightRem}rem` }}
           value={textInput.value}
         />
+        {preview ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={preview.on ? t("templateParams.previewOff") : t("templateParams.previewOn")}
+            aria-pressed={preview.on}
+            data-testid="composer-param-preview-toggle"
+            className="absolute end-1 top-0 size-6 text-muted-foreground/70 hover:text-foreground"
+            onClick={preview.toggle}
+          >
+            {preview.on ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+          </Button>
+        ) : null}
         <CharCounter />
         <MobileGhostAccept
           visible={isMobile && !!ghost.ghost}

@@ -70,6 +70,7 @@
       "tests": "Tests",
       "transcript": "Transcript"
     },
+    "templateParamsUnfilled": "{count, plural, =1 {This draft has 1 parameter that still needs a value. Fill it in on the desktop app.} other {This draft has # parameters that still need values. Fill them in on the desktop app.}}",
     "tests": {
       "conclusions": {
         "failed": "Failed",

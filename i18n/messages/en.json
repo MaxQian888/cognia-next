@@ -5300,6 +5300,8 @@
         "hint": "Enter or Esc to close · Tab for the next parameter",
         "placeholder": "Value",
         "position": "{index} of {total}",
+        "previewOff": "Back to editing",
+        "previewOn": "Preview with values filled in",
         "unfilled": "{count, plural, =1 {1 parameter still needs a value} other {# parameters still need values}}"
       },
       "toolbar": {
@@ -16615,6 +16617,7 @@
           "tests": "Tests",
           "transcript": "Transcript"
         },
+        "templateParamsUnfilled": "{count, plural, =1 {This draft has 1 parameter that still needs a value. Fill it in on the desktop app.} other {This draft has # parameters that still need values. Fill them in on the desktop app.}}",
         "tests": {
           "conclusions": {
             "failed": "Failed",

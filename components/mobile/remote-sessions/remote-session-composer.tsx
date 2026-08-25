@@ -62,6 +62,8 @@ import {
   type UploadableAttachment,
 } from "@/lib/companion/attachment-upload-client"
 import type { RemoteSendOptions } from "@/hooks/data/use-remote-session-stream"
+import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
+import { listParamTokens } from "@/lib/chat/template/param-segments"
 
 interface StagedFile {
   id: string
@@ -268,6 +270,21 @@ export function RemoteSessionComposer({
     const text = draft.trim()
     if (sending) return
     if (!text && staged.length === 0) return
+    // `{{parameter}}` tokens arrive here whenever a desktop draft syncs across:
+    // `draft.replace` carries the TEXT, but not the values bound to it, so a
+    // half-filled template reaches this device with its holes and nothing to
+    // fill them from. Refuse rather than ship a literal `{{module}}` to the
+    // model, which will act as though it understood.
+    //
+    // Deliberately reads the tokens out of the text rather than out of a
+    // binding: that is what makes the refusal hold on a device the binding
+    // never reached, which is the only case that matters here. Filling them is
+    // desktop-only for now, so the message says where to go.
+    const unfilled = listParamTokens(text, computeCodeRanges(text))
+    if (unfilled.length > 0) {
+      toast.error(t("templateParamsUnfilled", { count: unfilled.length }))
+      return
+    }
     const files = staged
     setSending(true)
     try {
@@ -309,7 +326,7 @@ export function RemoteSessionComposer({
     } finally {
       setSending(false)
     }
-  }, [draft, history, onSend, sending, sessionId, staged])
+  }, [draft, history, onSend, sending, sessionId, staged, t])
 
   const blocked = offline || sending
 

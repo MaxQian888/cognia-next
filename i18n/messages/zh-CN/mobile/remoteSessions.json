@@ -70,6 +70,7 @@
       "tests": "测试",
       "transcript": "会话记录"
     },
+    "templateParamsUnfilled": "{count, plural, =1 {此草稿有 1 个参数还没填，请到桌面端补全。} other {此草稿有 # 个参数还没填，请到桌面端补全。}}",
     "tests": {
       "conclusions": {
         "failed": "失败",
