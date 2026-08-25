@@ -21,6 +21,8 @@
  * Default per-tool execution budget in ms. Single source of truth shared by
  * both dispatch channels so they never drift. `0` / non-finite disables the net.
  */
+import { toolError } from "./safety.mjs"
+
 export const DEFAULT_BUILTIN_TOOL_TIMEOUT_MS = 120_000
 
 /**
@@ -85,10 +87,12 @@ export function wrapHandlerWithReadOnlyTimeout(def, timeoutMs, readOnly) {
             () => {},
             () => {}
           )
-          return {
-            content: [{ type: "text", text: toolBudgetMessage(def.name, timeoutMs) }],
-            isError: true,
-          }
+          // Classified at the source: this wrapper is the one place that
+          // KNOWS the failure is a deadline, so the model is told that
+          // rather than left to infer it from the wording.
+          return toolError(toolBudgetMessage(def.name, timeoutMs), undefined, {
+            kind: "timeout",
+          })
         }
         return winner
       },

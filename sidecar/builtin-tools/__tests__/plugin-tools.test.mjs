@@ -261,7 +261,10 @@ test("synthesized tool surfaces error responses as isError content", async () =>
   assert.ok(registered)
   const result = await registered.handler({})
   assert.equal(result.isError, true)
-  assert.match(result.content[0].text, /Error: boom/)
+  assert.match(result.content[0].text, /plugin tool: boom/)
+  // A plugin failure is classified like any other, so the model is told
+  // whether repeating the call could help.
+  assert.equal(result._meta["cognia/failure"].kind, "execution-failed")
 })
 
 test("jsonSchemaToZodShape returns empty shape for non-object schemas", () => {

@@ -13,6 +13,7 @@
 import path from "node:path"
 import fs from "node:fs"
 import { parse as parseBash } from "unbash"
+import { classifyToolFailure, renderFailureForModel } from "./tool-failure.mjs"
 
 // ---- Path traversal -------------------------------------------------------
 
@@ -513,8 +514,13 @@ export function validateShellCommand(command, args) {
  * Setting `isError` lets the SDK surface tool failures distinctly from a
  * happy-path text payload.
  *
+ * `failure` attaches the structured classification under `_meta` so the UI and
+ * telemetry can tell failure kinds apart without parsing the prose the model
+ * reads. That is the two-audience split in the shape MCP allows: one text
+ * block for the model, typed metadata for everyone else.
+ *
  * @param {unknown} payload  Stringified or JSON-friendly value.
- * @param {{ isError?: boolean }} [opts]
+ * @param {{ isError?: boolean, failure?: { kind: string, retryable: boolean } }} [opts]
  */
 export function toolText(payload, opts = {}) {
   // Compact (not pretty-printed) JSON: the model parses either form identically,
@@ -524,6 +530,13 @@ export function toolText(payload, opts = {}) {
   return {
     content: [{ type: "text", text }],
     ...(opts.isError ? { isError: true } : {}),
+    ...(opts.failure
+      ? {
+          _meta: {
+            "cognia/failure": { kind: opts.failure.kind, retryable: opts.failure.retryable },
+          },
+        }
+      : {}),
   }
 }
 
@@ -532,13 +545,21 @@ export function toolText(payload, opts = {}) {
  * message or an Error; in the Error case we strip the stack trace so we
  * don't leak sidecar internals to the agent.
  *
+ * The result now also says WHAT KIND of failure it was and whether repeating
+ * the call could help. Before this, "your disk is full", "you passed the wrong
+ * argument" and "the user said no" all reached the model as one boolean plus
+ * free text, so it retried all three. See `tool-failure.mjs`.
+ *
  * @param {unknown} err
  * @param {string} [contextLabel]  Optional prefix for clarity in chat.
+ * @param {{ kind?: string }} [opts]  Caller-known kind; wins over inference.
  */
-export function toolError(err, contextLabel) {
-  const message = err instanceof Error ? err.message : typeof err === "string" ? err : String(err)
-  const text = contextLabel ? `${contextLabel}: ${message}` : message
-  return toolText(text, { isError: true })
+export function toolError(err, contextLabel, opts = {}) {
+  const failure = classifyToolFailure(err, opts)
+  return toolText(renderFailureForModel(failure, contextLabel), {
+    isError: true,
+    failure: { kind: failure.kind, retryable: failure.retryable },
+  })
 }
 
 /**

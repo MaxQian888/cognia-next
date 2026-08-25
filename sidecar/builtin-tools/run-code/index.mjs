@@ -67,7 +67,12 @@ export function createRunCodeTool({ callTool, probe = probeSandbox, sdkTools = [
           callsUsed: outcome.callsUsed,
           ...(outcome.logs.length > 0 ? { logs: outcome.logs } : {}),
         },
-        { isError: true }
+        {
+          isError: true,
+          // A ceiling, not a mistake in the call: repeating the same program
+          // hits the same ceiling.
+          failure: { kind: "resource-exhausted", retryable: false },
+        }
       )
     } catch (error) {
       if (error instanceof SandboxUnavailableError) {

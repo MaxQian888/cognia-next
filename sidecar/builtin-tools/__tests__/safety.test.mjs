@@ -193,20 +193,29 @@ test("toolText sets isError when requested", () => {
   assert.equal(r.isError, true)
 })
 
-test("toolError formats Error instances", () => {
+test("toolError formats Error instances, with its kind and retry guidance", () => {
   const r = toolError(new Error("boom"), "ctx")
   assert.equal(r.isError, true)
-  assert.equal(r.content[0].text, "ctx: boom")
+  // The message the caller wrote still leads; the classification follows it.
+  assert.match(r.content[0].text, /^ctx: boom\n/)
+  assert.match(r.content[0].text, /\[execution-failed\]/)
+  assert.equal(r._meta["cognia/failure"].kind, "execution-failed")
 })
 
 test("toolError formats plain strings", () => {
   const r = toolError("nope")
   assert.equal(r.isError, true)
-  assert.equal(r.content[0].text, "nope")
+  assert.match(r.content[0].text, /^nope\n/)
 })
 
 test("toolError handles unknown error shapes", () => {
   const r = toolError(42)
   assert.equal(r.isError, true)
-  assert.equal(r.content[0].text, "42")
+  assert.match(r.content[0].text, /^42\n/)
+})
+
+test("toolError tells the model when a repeat cannot help", () => {
+  const r = toolError(Object.assign(new Error("no room"), { code: "ENOSPC" }), "write")
+  assert.equal(r._meta["cognia/failure"].retryable, false)
+  assert.match(r.content[0].text, /\[resource-exhausted\]/)
 })

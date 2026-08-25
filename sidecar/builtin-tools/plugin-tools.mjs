@@ -18,7 +18,7 @@
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
-import { toolText } from "./safety.mjs"
+import { toolError, toolText } from "./safety.mjs"
 
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"
@@ -160,7 +160,7 @@ export function buildPluginToolsServer({
         })
         const response = await pending
         if (response && response.error) {
-          return toolText(`Error: ${response.error}`, { isError: true })
+          return toolError(response.error, "plugin tool")
         }
         const result = response?.result ?? null
         // A plugin that already speaks MCP (image / audio / resource blocks)
