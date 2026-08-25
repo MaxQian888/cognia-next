@@ -36,6 +36,16 @@
     "subscription": "订阅预设",
     "workflow": "工作流"
   },
+  "draftEditor": {
+    "description": "描述",
+    "invalidJson": "载荷不是合法的 JSON。",
+    "name": "名称",
+    "nameRequired": "模板需要一个名称。",
+    "payload": "便携载荷（JSON）",
+    "save": "保存草稿",
+    "saving": "保存中…",
+    "title": "编辑草稿"
+  },
   "empty": {
     "noDescription": "暂无描述",
     "noResults": "没有符合当前筛选条件的模板。"
@@ -106,6 +116,8 @@
   },
   "messages": {
     "draftCreated": "模板草稿已创建。",
+    "draftForked": "该草稿已在别处被改动，你的修改已另存为 {id}。",
+    "draftSaved": "草稿已保存。",
     "imported": "模板包已导入。",
     "instantiated": "模板资源已创建。",
     "published": "模板版本 {version} 已发布。"

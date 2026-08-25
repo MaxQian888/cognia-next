@@ -36,6 +36,16 @@
     "subscription": "Subscription preset",
     "workflow": "Workflow"
   },
+  "draftEditor": {
+    "description": "Description",
+    "invalidJson": "The payload is not valid JSON.",
+    "name": "Name",
+    "nameRequired": "A template needs a name.",
+    "payload": "Portable payload (JSON)",
+    "save": "Save draft",
+    "saving": "Saving…",
+    "title": "Edit draft"
+  },
   "empty": {
     "noDescription": "No description",
     "noResults": "No templates match these filters."
@@ -106,6 +116,8 @@
   },
   "messages": {
     "draftCreated": "Template draft created.",
+    "draftForked": "This draft had already changed elsewhere, so your edit was saved separately as {id}.",
+    "draftSaved": "Draft saved.",
     "imported": "Template package imported.",
     "instantiated": "Template resources created.",
     "published": "Template version {version} published."

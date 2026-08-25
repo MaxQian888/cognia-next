@@ -229,6 +229,45 @@ export function TemplateStudio() {
     setMessage(t("messages.published", { version: published.version }))
   }
 
+  /**
+   * Persist an edit to the selected draft.
+   *
+   * `service.saveDraft` had no caller anywhere in the app. The Studio could
+   * mint a stub payload (`defaultPayload`) and publish it, but never change
+   * what was in it — and the advertised escape hatch, the per-domain "open
+   * editor" link, points two of its six domains at `?mode=template-authoring`,
+   * a parameter nothing in the repository handles. Templates were write-once
+   * from the moment they were created.
+   *
+   * Errors propagate to the editor, which renders them: `saveDraft` refuses a
+   * payload that fails validation and names the reasons, and swallowing that
+   * here would leave the user staring at an unchanged box.
+   */
+  const saveDraft = async (edits: { name: string; description: string; payload: TemplateJson }) => {
+    if (!selected) return
+    const saved = await runtime.service.saveDraft(
+      {
+        ...selected,
+        metadata: {
+          ...selected.metadata,
+          name: edits.name,
+          description: edits.description || undefined,
+        },
+        payload: edits.payload,
+      },
+      selected.revision
+    )
+    setSelectionKey(`hash:${saved.contentHash}`)
+    // A revision clash does not fail — `saveDraft` forks the edit into its own
+    // conflict draft under a new id. Say so, rather than reporting a plain
+    // success against a row the user is no longer looking at.
+    setMessage(
+      saved.id === selected.id
+        ? t("messages.draftSaved")
+        : t("messages.draftForked", { id: saved.id })
+    )
+  }
+
   const exportSelected = async () => {
     if (!selected?.version) return
     const exported = await runtime.service.exportPackage({
@@ -410,6 +449,7 @@ export function TemplateStudio() {
                   onPreflight={() => void runPreflight()}
                   onInstantiate={() => void instantiate()}
                   onPublish={() => void publish()}
+                  onSaveDraft={saveDraft}
                   onExport={() => void exportSelected()}
                   t={t}
                 />
@@ -553,6 +593,7 @@ function TemplateInspector({
   onPreflight,
   onInstantiate,
   onPublish,
+  onSaveDraft,
   onExport,
   t,
 }: {
@@ -564,6 +605,7 @@ function TemplateInspector({
   onPreflight(): void
   onInstantiate(): void
   onPublish(): void
+  onSaveDraft(edits: { name: string; description: string; payload: TemplateJson }): Promise<void>
   onExport(): void
   t: ReturnType<typeof useTranslations<"templateStudio">>
 }) {
@@ -577,6 +619,12 @@ function TemplateInspector({
     )
   }
   const catalogOnly = !FULL_DOMAINS.includes(definition.domain)
+  // A published release is immutable by construction (`DexieTemplateRepository`
+  // refuses to overwrite one), and a catalog-only row is a projection of a
+  // store this platform does not own. That leaves drafts — including the
+  // conflict drafts a clashing save produces, which are otherwise unreachable.
+  const editable =
+    !mobile && !catalogOnly && (definition.status === "draft" || definition.status === "conflict")
   return (
     <Card className="h-fit">
       <CardHeader>
@@ -656,17 +704,121 @@ function TemplateInspector({
         <Collapsible className="group/collapsible">
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="h-auto w-full justify-between px-0 py-1">
-              {t("inspector.payload")}
+              {editable ? t("draftEditor.title") : t("inspector.payload")}
               <ChevronDownIcon className="size-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
-              {JSON.stringify(definition.payload, null, 2)}
-            </pre>
+            {editable ? (
+              // Keyed on the content hash so selecting another row — or a save
+              // landing a new revision — re-seeds the fields instead of leaving
+              // the previous draft's text in the box.
+              <TemplateDraftEditor
+                key={definition.contentHash}
+                definition={definition}
+                onSave={onSaveDraft}
+                t={t}
+              />
+            ) : (
+              <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
+                {JSON.stringify(definition.payload, null, 2)}
+              </pre>
+            )}
           </CollapsibleContent>
         </Collapsible>
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Edit a draft's name, description and payload in place.
+ *
+ * The payload is edited as JSON rather than through a per-domain form: the six
+ * full domains each already own a purpose-built editor, and this is the seam
+ * that makes a draft mutable at all. Parse failures and the validation errors
+ * `saveDraft` raises are rendered here rather than thrown away — a save that
+ * silently does nothing is the failure mode this whole component exists to
+ * remove.
+ */
+function TemplateDraftEditor({
+  definition,
+  onSave,
+  t,
+}: {
+  definition: TemplateDefinitionEnvelope
+  onSave(edits: { name: string; description: string; payload: TemplateJson }): Promise<void>
+  t: ReturnType<typeof useTranslations<"templateStudio">>
+}) {
+  const [name, setName] = useState(definition.metadata.name)
+  const [description, setDescription] = useState(definition.metadata.description ?? "")
+  const [payloadText, setPayloadText] = useState(() => JSON.stringify(definition.payload, null, 2))
+  const [error, setError] = useState<string>()
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError(t("draftEditor.nameRequired"))
+      return
+    }
+    let payload: TemplateJson
+    try {
+      payload = JSON.parse(payloadText) as TemplateJson
+    } catch {
+      setError(t("draftEditor.invalidJson"))
+      return
+    }
+    setError(undefined)
+    setSaving(true)
+    try {
+      await onSave({ name: trimmed, description: description.trim(), payload })
+    } catch (err) {
+      // `saveDraft` refuses an invalid payload and names every reason. Show it
+      // verbatim — a generic "save failed" would hide which field is wrong.
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-3" data-testid="template-draft-editor">
+      <div className="space-y-1.5">
+        <Label htmlFor={`draft-name-${definition.id}`}>{t("draftEditor.name")}</Label>
+        <Input
+          id={`draft-name-${definition.id}`}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`draft-description-${definition.id}`}>{t("draftEditor.description")}</Label>
+        <Input
+          id={`draft-description-${definition.id}`}
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor={`draft-payload-${definition.id}`}>{t("draftEditor.payload")}</Label>
+        <Textarea
+          id={`draft-payload-${definition.id}`}
+          className="max-h-64 min-h-40 overflow-auto font-mono text-xs"
+          value={payloadText}
+          onChange={(event) => setPayloadText(event.target.value)}
+          spellCheck={false}
+        />
+      </div>
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTriangleIcon />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      <Button onClick={() => void save()} disabled={saving}>
+        {saving ? t("draftEditor.saving") : t("draftEditor.save")}
+      </Button>
+    </div>
   )
 }
