@@ -107,6 +107,25 @@ pub trait Store: Send + Sync {
         workspace_id: Option<&str>,
     ) -> Result<Membership, StoreError>;
 
+    /// The Logto organization `org_id` mirrors, if it mirrors one.
+    ///
+    /// Read inside `org_id`'s own RLS scope, so a caller naming an org they do
+    /// not belong to gets `None` rather than a fact about somebody else's org.
+    async fn org_logto_id(&self, org_id: &str) -> Result<Option<String>, StoreError>;
+
+    /// The user an external subject is linked to, within `org_id`.
+    ///
+    /// `None` means the subject has never been linked here. That is the normal
+    /// answer for a stranger with a perfectly valid token: you join an org by
+    /// invitation, not by presenting one.
+    async fn user_for_external_identity(
+        &self,
+        org_id: &str,
+        provider: &str,
+        tenant: Option<&str>,
+        subject: &str,
+    ) -> Result<Option<String>, StoreError>;
+
     /// Every workspace in `org_id` this person was recruited into.
     ///
     /// Separate from [`Store::membership`] because a listing needs the whole
@@ -150,6 +169,10 @@ struct Tables {
     /// `workspace_memberships` actually has. Without the org, a listing
     /// cannot tell one tenant's workspaces from another's.
     workspace_memberships: HashMap<(String, String), (String, WorkspaceRole)>,
+    /// `org_id -> logto organization id`
+    org_logto_ids: HashMap<String, String>,
+    /// `(org_id, provider, tenant, subject) -> user_id`
+    external_identities: HashMap<(String, String, String, String), String>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
 }
@@ -170,6 +193,32 @@ impl InMemoryStore {
             .write()
             .org_memberships
             .insert((org_id.to_owned(), user_id.to_owned()), role);
+    }
+
+    pub fn link_org_to_logto(&self, org_id: &str, logto_organization_id: &str) {
+        self.tables
+            .write()
+            .org_logto_ids
+            .insert(org_id.to_owned(), logto_organization_id.to_owned());
+    }
+
+    pub fn link_external_identity(
+        &self,
+        org_id: &str,
+        provider: &str,
+        tenant: Option<&str>,
+        subject: &str,
+        user_id: &str,
+    ) {
+        self.tables.write().external_identities.insert(
+            (
+                org_id.to_owned(),
+                provider.to_owned(),
+                tenant.unwrap_or_default().to_owned(),
+                subject.to_owned(),
+            ),
+            user_id.to_owned(),
+        );
     }
 
     pub fn add_workspace_member(
@@ -208,6 +257,30 @@ impl Store for InMemoryStore {
                     .map(|(_, role)| *role)
             }),
         })
+    }
+
+    async fn org_logto_id(&self, org_id: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.tables.read().org_logto_ids.get(org_id).cloned())
+    }
+
+    async fn user_for_external_identity(
+        &self,
+        org_id: &str,
+        provider: &str,
+        tenant: Option<&str>,
+        subject: &str,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .external_identities
+            .get(&(
+                org_id.to_owned(),
+                provider.to_owned(),
+                tenant.unwrap_or_default().to_owned(),
+                subject.to_owned(),
+            ))
+            .cloned())
     }
 
     async fn list_workspace_memberships(
@@ -527,6 +600,41 @@ impl Store for PgStore {
             org_role,
             workspace_role,
         })
+    }
+
+    async fn org_logto_id(&self, org_id: &str) -> Result<Option<String>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let row = transaction
+            .query_opt(
+                "SELECT logto_organization_id FROM orgs WHERE id = $1",
+                &[&org_id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(row.and_then(|row| row.get("logto_organization_id")))
+    }
+
+    async fn user_for_external_identity(
+        &self,
+        org_id: &str,
+        provider: &str,
+        tenant: Option<&str>,
+        subject: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        // `tenant IS NOT DISTINCT FROM $2` so a provider with no tenant concept
+        // matches its NULL rows; plain `=` would never match them.
+        let row = transaction
+            .query_opt(
+                "SELECT user_id FROM external_identities \
+                 WHERE provider = $1 AND tenant IS NOT DISTINCT FROM $2 AND subject = $3",
+                &[&provider, &tenant, &subject],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(row.map(|row| row.get("user_id")))
     }
 
     async fn list_workspace_memberships(

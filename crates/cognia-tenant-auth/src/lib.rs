@@ -37,9 +37,16 @@
 //!
 //! Neither is wrong. Folding them together would mean picking one service's
 //! threat model for the other, and they are additionally on incompatible
-//! majors of `jsonwebtoken` (9 vs 11). So **the OIDC verification plane stays
-//! where it is**, and this crate owns the layer above it: what the verified
-//! token *means* once you have it.
+//! majors of `jsonwebtoken` (9 vs 11). So diagnostic-server's static-PEM
+//! verification stays where it is, and this crate owns the layer above it:
+//! what the verified token *means* once you have it.
+//!
+//! **Amended when `cognia-collab-server` landed.** The JWKS half did move here,
+//! as [`oidc`], behind a feature — but for a reason ADR-0149 did not have.
+//! Not because two services had duplicated it (they had not), but because a
+//! third was about to write a third copy in order to exchange an OIDC token for
+//! a grant. One consumer is not a shared crate; two are. It arrived with the
+//! tests the original never had.
 //!
 //! # Why diagnostic-server does not depend on this crate
 //!
@@ -61,6 +68,9 @@ pub mod roles;
 
 #[cfg(feature = "grants")]
 pub mod grant;
+
+#[cfg(feature = "oidc")]
+pub mod oidc;
 
 pub use ids::{IdError, OrgId, UserId};
 pub use membership::{resolve_workspace_access, EffectiveWorkspaceAccess, WorkspaceAccessVia};

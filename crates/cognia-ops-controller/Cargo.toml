@@ -24,6 +24,9 @@ base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 cognia-deployment = { path = "../cognia-deployment" }
+# ADR-0149 §7 — shared OIDC verification. The controller keeps its own
+# scope vocabulary; only the token-verification machinery is shared.
+cognia-tenant-auth = { path = "../cognia-tenant-auth", features = ["oidc"] }
 futures-util = "0.3"
 hex = "0.4"
 ed25519-dalek = "3"

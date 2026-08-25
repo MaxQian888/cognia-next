@@ -162,31 +162,37 @@ CREATE POLICY issue_events_tenant_isolation ON issue_events
     USING      (org_id = nullif(current_setting('app.tenant_id', true), ''))
     WITH CHECK (org_id = nullif(current_setting('app.tenant_id', true), ''));
 
--- A person is visible to a tenant exactly when they are a member of it. Without
--- this, `users` would be a deployment-wide directory readable by any tenant.
+-- A person is visible to a tenant exactly when they belong to it. Without this,
+-- `users` would be a deployment-wide directory readable by any tenant.
+--
+-- "Belongs" means org membership OR workspace membership, because ADR-0149 §4
+-- makes a **guest** — workspace membership with no org membership — a
+-- first-class state. An org-membership-only test would make every guest
+-- invisible to the org whose workspace they were invited into, which among
+-- other things would stop them from ever obtaining a grant.
+CREATE OR REPLACE FUNCTION belongs_to_current_tenant(candidate text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM org_memberships m
+        WHERE m.user_id = candidate
+          AND m.org_id  = nullif(current_setting('app.tenant_id', true), '')
+    ) OR EXISTS (
+        SELECT 1 FROM workspace_memberships w
+        WHERE w.user_id = candidate
+          AND w.org_id  = nullif(current_setting('app.tenant_id', true), '')
+    );
+$$;
+
 DROP POLICY IF EXISTS users_visible_to_their_orgs ON users;
 CREATE POLICY users_visible_to_their_orgs ON users
-    USING (EXISTS (
-        SELECT 1 FROM org_memberships m
-        WHERE m.user_id = users.id
-          AND m.org_id  = nullif(current_setting('app.tenant_id', true), '')
-    ))
-    WITH CHECK (EXISTS (
-        SELECT 1 FROM org_memberships m
-        WHERE m.user_id = users.id
-          AND m.org_id  = nullif(current_setting('app.tenant_id', true), '')
-    ));
+    USING      (belongs_to_current_tenant(users.id))
+    WITH CHECK (belongs_to_current_tenant(users.id));
 
 -- Same reasoning one hop further: an identity is visible with its person.
 DROP POLICY IF EXISTS external_identities_visible_with_their_user ON external_identities;
 CREATE POLICY external_identities_visible_with_their_user ON external_identities
-    USING (EXISTS (
-        SELECT 1 FROM org_memberships m
-        WHERE m.user_id = external_identities.user_id
-          AND m.org_id  = nullif(current_setting('app.tenant_id', true), '')
-    ))
-    WITH CHECK (EXISTS (
-        SELECT 1 FROM org_memberships m
-        WHERE m.user_id = external_identities.user_id
-          AND m.org_id  = nullif(current_setting('app.tenant_id', true), '')
-    ));
+    USING      (belongs_to_current_tenant(external_identities.user_id))
+    WITH CHECK (belongs_to_current_tenant(external_identities.user_id));

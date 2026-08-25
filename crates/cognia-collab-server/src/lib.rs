@@ -28,7 +28,15 @@
 //!   and [`store::PgStore`] (production, and the only one that enforces RLS).
 //! - [`auth`] — the two-step chain: prove the grant, then resolve what its
 //!   bearer may do on *this* request's target.
-//! - [`api`] — the axum router.
+//! - [`api`] — the axum router, including the one door in:
+//!   `POST /v1/orgs/{org_id}/grants` exchanges a verified OIDC access token for
+//!   a five-minute grant. Every other route takes a grant and nothing else
+//!   mints one.
+//!
+//! The exchange verifies the org named in the path *inside that org's own RLS
+//! scope*, which is what lets it run without a privileged escape from
+//! row-level security — otherwise answering "which org does this token belong
+//! to" would require reading rows before any tenant is bound.
 //!
 //! Authorization is not implemented here. It is
 //! `cognia_tenant_auth::resolve_workspace_access`, shared with the client so the

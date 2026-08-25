@@ -13,12 +13,21 @@ publish = false
 # should not pay for HMAC machinery it never calls.
 default = []
 grants = ["dep:base64", "dep:hmac", "dep:sha2", "dep:serde_json", "dep:uuid"]
+# JWKS-discovery OIDC verification. Shared by `cognia-ops-controller` and
+# `cognia-collab-server`; NOT by `services/diagnostic-server`, which is on
+# `jsonwebtoken 9` and outside this workspace (see lib.rs).
+oidc = ["dep:async-trait", "dep:jsonwebtoken", "dep:parking_lot", "dep:reqwest", "dep:serde_json", "dep:anyhow"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
+anyhow = { version = "1", optional = true }
+async-trait = { version = "0.1", optional = true }
 base64 = { version = "0.23", optional = true }
+jsonwebtoken = { version = "11", optional = true }
+parking_lot = { version = "0.12", optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"], optional = true }
 hmac = { version = "0.13", optional = true }
 serde_json = { version = "1", optional = true }
 sha2 = { version = "0.11", optional = true }
@@ -26,3 +35,4 @@ uuid = { version = "1", features = ["v4", "serde"], optional = true }
 
 [dev-dependencies]
 serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt"] }

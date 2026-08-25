@@ -14,8 +14,10 @@ use axum::{
     routing::{get, patch},
     Json, Router,
 };
-use cognia_tenant_auth::grant::GrantSigner;
-use cognia_tenant_auth::WorkspaceCapability;
+use cognia_tenant_auth::grant::{GrantClaims, GrantSigner};
+use cognia_tenant_auth::membership::resolve_workspace_access;
+use cognia_tenant_auth::oidc::Authenticator;
+use cognia_tenant_auth::{OrgId, UserId, WorkspaceCapability};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -25,19 +27,32 @@ use crate::model::{
 };
 use crate::store::{IssuePatch, IssueQuery, NewIssue, Store, StoreError};
 
+/// How long a minted grant lives.
+///
+/// Five minutes, matching `services/diagnostic-server`. Short because the role
+/// is baked into the claim: the TTL is the whole bound on how stale a
+/// membership change can be before it takes effect.
+pub const GRANT_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The provider name `external_identities` files Logto subjects under.
+const LOGTO_PROVIDER: &str = "logto";
+
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn Store>,
     pub signer: Arc<GrantSigner>,
+    /// Verifies the OIDC access token a grant is exchanged for.
+    pub oidc: Arc<dyn Authenticator>,
     /// Injectable so tests can pin timestamps instead of sleeping.
     pub now: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
 
 impl AppState {
-    pub fn new(store: Arc<dyn Store>, signer: GrantSigner) -> Self {
+    pub fn new(store: Arc<dyn Store>, signer: GrantSigner, oidc: Arc<dyn Authenticator>) -> Self {
         Self {
             store,
             signer: Arc::new(signer),
+            oidc,
             now: Arc::new(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -51,6 +66,7 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
         .route(
             "/v1/orgs/{org_id}/issues",
             get(list_issues).post(create_issue),
@@ -84,6 +100,14 @@ enum Failure {
     Store(StoreError),
     Actor(ActorError),
     BadRequest(String),
+    /// The OIDC token itself did not verify.
+    Oidc(cognia_tenant_auth::oidc::AuthError),
+    /// The token verified but names nobody this org knows.
+    ///
+    /// Deliberately the same 403 as "wrong org": distinguishing them would let
+    /// a stranger with a valid token enumerate which orgs exist and which
+    /// subjects they have linked.
+    UnlinkedIdentity,
 }
 
 impl IntoResponse for Failure {
@@ -111,6 +135,11 @@ impl IntoResponse for Failure {
             },
             Self::Actor(error) => (StatusCode::BAD_REQUEST, error.to_string()),
             Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+            Self::Oidc(error) => (StatusCode::UNAUTHORIZED, error.to_string()),
+            Self::UnlinkedIdentity => (
+                StatusCode::FORBIDDEN,
+                "this identity is not a member of that organisation".into(),
+            ),
         };
         (status, Json(ApiError { error: message })).into_response()
     }
@@ -212,6 +241,100 @@ pub struct AppendEventBody {
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MintGrantBody {
+    /// Optional: a grant may be org-scoped, for listing across workspaces.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MintedGrant {
+    pub grant: String,
+    pub user_id: String,
+    pub org_id: String,
+    pub expires_at: i64,
+}
+
+/// Exchange a verified OIDC access token for a short-lived grant.
+///
+/// This is the only door into the plane: every other route takes a grant, and
+/// nothing but this mints one.
+///
+/// The org in the path is a **claim by the client**, and it is verified inside
+/// that org's own RLS scope — the two lookups below only see rows if the caller
+/// really belongs there. That is what lets the exchange run without a
+/// privileged escape from row-level security, which would otherwise be needed
+/// to answer "which org does this token belong to" before a tenant is bound.
+async fn mint_grant(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<MintGrantBody>,
+) -> Result<Json<MintedGrant>, Failure> {
+    let token = crate::auth::bearer_token(authorization(&headers))?;
+    let claims = state
+        .oidc
+        .authenticate(token)
+        .await
+        .map_err(Failure::Oidc)?;
+
+    // The token's organization claim must be the one this org mirrors. A token
+    // for another Logto organization is not a credential here, however valid.
+    let mirrored = state.store.org_logto_id(&org_id).await?;
+    if mirrored.as_deref() != Some(claims.tenant_id.as_str()) {
+        return Err(Failure::UnlinkedIdentity);
+    }
+
+    let user_id = state
+        .store
+        .user_for_external_identity(
+            &org_id,
+            LOGTO_PROVIDER,
+            Some(&claims.tenant_id),
+            &claims.subject,
+        )
+        .await?
+        .ok_or(Failure::UnlinkedIdentity)?;
+
+    let user = UserId::parse(user_id).map_err(|error| {
+        // A linked row whose user id is not an id is a corrupt row, not a
+        // rejected caller.
+        Failure::Store(StoreError::Corrupt(error.to_string()))
+    })?;
+    let org =
+        OrgId::parse(org_id.clone()).map_err(|error| Failure::BadRequest(error.to_string()))?;
+
+    // Bake the role in, so a request does not re-resolve it mid-flight. The
+    // five-minute TTL is what bounds the staleness.
+    let membership = state
+        .store
+        .membership(&org_id, user.as_str(), body.workspace_id.as_deref())
+        .await?;
+    let role = resolve_workspace_access(membership.org_role, membership.workspace_role)
+        .map(|access| access.role);
+    if membership.org_role.is_none() && role.is_none() {
+        // Neither in the org nor in any workspace of it.
+        return Err(Failure::UnlinkedIdentity);
+    }
+
+    let grant_claims = GrantClaims::issue(user, org, body.workspace_id, role, GRANT_TTL)
+        .map_err(|error| Failure::BadRequest(error.to_string()))?;
+    let grant = state
+        .signer
+        .sign(&grant_claims)
+        .map_err(|error| Failure::BadRequest(error.to_string()))?;
+
+    Ok(Json(MintedGrant {
+        grant,
+        user_id: grant_claims.user_id.to_string(),
+        org_id: grant_claims.org_id.to_string(),
+        expires_at: grant_claims.expires_at,
+    }))
+}
 
 async fn list_issues(
     State(state): State<AppState>,
@@ -468,9 +591,43 @@ mod tests {
     }
 
     fn app(store: InMemoryStore) -> Router {
-        let mut state = AppState::new(Arc::new(store), signer());
+        let mut state = AppState::new(
+            Arc::new(store),
+            signer(),
+            Arc::new(cognia_tenant_auth::oidc::TestAuthenticator),
+        );
         state.now = Arc::new(|| 1_000);
         router(state)
+    }
+
+    /// `TestAuthenticator` reads `"<tenant>:<scopes>"` and reports a fixed
+    /// subject, so an exchange test drives the tenant claim directly.
+    const LOGTO_ORG: &str = "logto-org-1";
+
+    fn oidc_token(logto_org: &str) -> String {
+        format!("Bearer {logto_org}:collab:read")
+    }
+
+    /// The subject `TestAuthenticator` always reports.
+    const TEST_SUBJECT: &str = "test-user";
+
+    fn seeded_for_exchange() -> InMemoryStore {
+        let store = seeded();
+        store.link_org_to_logto(ORG, LOGTO_ORG);
+        store.link_external_identity(ORG, "logto", Some(LOGTO_ORG), TEST_SUBJECT, ada().as_str());
+        store
+    }
+
+    async fn mint(
+        store: InMemoryStore,
+        token: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        call(
+            app(store),
+            post(&format!("/v1/orgs/{ORG}/grants"), token, body),
+        )
+        .await
     }
 
     async fn call(app: Router, request: Request<Body>) -> (StatusCode, serde_json::Value) {
@@ -856,5 +1013,147 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    // ── Grant exchange ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn a_linked_identity_receives_a_grant_the_other_routes_accept() {
+        let store = seeded_for_exchange();
+        let (status, minted) = mint(
+            store.clone(),
+            &oidc_token(LOGTO_ORG),
+            serde_json::json!({ "workspaceId": "proj-1" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        assert_eq!(minted["userId"], ada().as_str());
+        assert_eq!(minted["orgId"], ORG);
+
+        // The whole point of the endpoint: what it mints must open the door.
+        let grant = minted["grant"].as_str().unwrap();
+        let (status, issues) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/issues"),
+                &format!("Bearer {grant}"),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{issues}");
+    }
+
+    #[tokio::test]
+    async fn a_token_for_another_logto_organisation_is_refused() {
+        let (status, error) = mint(
+            seeded_for_exchange(),
+            &oidc_token("logto-org-somebody-else"),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{error}");
+    }
+
+    #[tokio::test]
+    async fn an_unlinked_subject_is_refused_however_valid_its_token() {
+        // You join an org by invitation, not by presenting a token.
+        let store = seeded();
+        store.link_org_to_logto(ORG, LOGTO_ORG);
+        let (status, _) = mint(store, &oidc_token(LOGTO_ORG), serde_json::json!({})).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn an_unlinked_subject_and_a_wrong_org_are_indistinguishable() {
+        // Distinguishing them would let a stranger enumerate orgs and subjects.
+        let unlinked = {
+            let store = seeded();
+            store.link_org_to_logto(ORG, LOGTO_ORG);
+            mint(store, &oidc_token(LOGTO_ORG), serde_json::json!({})).await
+        };
+        let wrong_org = mint(
+            seeded_for_exchange(),
+            &oidc_token("logto-org-somebody-else"),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(unlinked.0, wrong_org.0);
+        assert_eq!(unlinked.1, wrong_org.1);
+    }
+
+    #[tokio::test]
+    async fn the_minted_role_is_the_one_storage_says_not_the_one_asked_for() {
+        let store = seeded_for_exchange();
+        // Ada is a plain `member` of proj-1. A grant for a workspace she is
+        // only a viewer in must not let her write.
+        store.add_workspace_member(ORG, "proj-2", ada().as_str(), WorkspaceRole::Viewer);
+        let (_, minted) = mint(
+            store.clone(),
+            &oidc_token(LOGTO_ORG),
+            serde_json::json!({ "workspaceId": "proj-2" }),
+        )
+        .await;
+        let grant = minted["grant"].as_str().unwrap();
+
+        let (status, _) = call(
+            app(store),
+            post(
+                &format!("/v1/orgs/{ORG}/issues"),
+                &format!("Bearer {grant}"),
+                serde_json::json!({
+                    "workspaceId": "proj-2",
+                    "issueProjectId": "cont-1",
+                    "title": "nope",
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn an_org_scoped_grant_needs_no_workspace() {
+        let (status, minted) = mint(
+            seeded_for_exchange(),
+            &oidc_token(LOGTO_ORG),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
+        assert!(minted["expiresAt"].as_i64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn the_exchange_still_needs_a_bearer_token() {
+        let (status, _) = call(
+            app(seeded_for_exchange()),
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/orgs/{ORG}/grants"))
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_guest_can_obtain_a_grant_for_the_workspace_they_were_invited_into() {
+        // ADR-0149 §4: workspace membership without org membership is a
+        // first-class state, and a guest who cannot mint a grant is locked out
+        // of the workspace they were deliberately invited to.
+        let store = InMemoryStore::new();
+        store.link_org_to_logto(ORG, LOGTO_ORG);
+        store.link_external_identity(ORG, "logto", Some(LOGTO_ORG), TEST_SUBJECT, ada().as_str());
+        store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Member);
+
+        let (status, minted) = mint(
+            store,
+            &oidc_token(LOGTO_ORG),
+            serde_json::json!({ "workspaceId": "proj-1" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{minted}");
     }
 }
