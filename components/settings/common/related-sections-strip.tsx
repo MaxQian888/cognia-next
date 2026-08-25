@@ -70,7 +70,7 @@ export function RelatedSectionsStrip({ current, targets }: Props) {
           size="sm"
           onClick={() => goTo(target)}
           className={cn(
-            "h-6 rounded-full bg-background px-2.5 text-[11px] font-normal",
+            "h-6 rounded-pill bg-background px-2.5 text-[11px] font-normal",
             "hover:border-primary/40 hover:bg-accent focus-visible:border-primary/40 focus-visible:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           )}

@@ -845,7 +845,7 @@ export function BrowserPreviewPane({
                     key={url}
                     size="sm"
                     variant="outline"
-                    className="h-7 rounded-full px-3 font-mono text-xs font-normal"
+                    className="h-7 rounded-pill px-3 font-mono text-xs font-normal"
                     onClick={() => openQuickUrl(url)}
                   >
                     {new URL(url).host}

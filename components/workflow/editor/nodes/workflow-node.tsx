@@ -429,7 +429,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       <StatusCornerBadge status={status} />
       {data.authoredBy === "ai" ? (
         <span
-          className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center justify-center rounded-full bg-violet-500 px-1.5 text-[9px] font-bold tracking-wide text-white shadow ring-2 ring-background"
+          className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center justify-center rounded-pill bg-violet-500 px-1.5 text-[9px] font-bold tracking-wide text-white shadow ring-2 ring-background"
           title={tNode("aiBadge.title")}
           data-testid="wf-node-ai-badge"
           aria-label={tNode("aiBadge.label")}
@@ -501,7 +501,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             {decoration.pinned ? (
               <span
                 title={tNode("pinnedTitle")}
-                className="inline-flex items-center rounded-full bg-amber-500/15 px-1 py-px text-amber-600 dark:text-amber-400"
+                className="inline-flex items-center rounded-pill bg-amber-500/15 px-1 py-px text-amber-600 dark:text-amber-400"
                 data-testid="wf-node-pin-badge"
               >
                 <PinIcon className="size-3" aria-hidden="true" />
@@ -510,7 +510,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             {hasErrors ? (
               <span
                 title={diagnosticsTooltip}
-                className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-semibold text-destructive"
+                className="inline-flex items-center gap-0.5 rounded-pill bg-destructive/15 px-1.5 py-px text-[10px] font-semibold text-destructive"
                 data-testid="wf-node-error-badge"
               >
                 <WarnIcon className="size-3" aria-hidden="true" />
@@ -519,7 +519,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             ) : hasWarningsOnly ? (
               <span
                 title={diagnosticsTooltip}
-                className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+                className="inline-flex items-center gap-0.5 rounded-pill bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-600 dark:text-amber-400"
                 data-testid="wf-node-warning-badge"
               >
                 <WarnIcon className="size-3" aria-hidden="true" />

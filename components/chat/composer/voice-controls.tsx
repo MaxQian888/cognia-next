@@ -119,7 +119,7 @@ export function VoiceControls({ onTranscription, disabled }: VoiceControlsProps)
         <span
           aria-live="polite"
           role="status"
-          className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
+          className="flex items-center gap-1.5 rounded-pill bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive"
         >
           <span className="relative flex size-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />

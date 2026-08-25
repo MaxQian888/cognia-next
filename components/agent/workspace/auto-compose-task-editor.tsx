@@ -143,7 +143,7 @@ export function AutoComposeTaskEditor({
                         aria-pressed={on}
                         onClick={() => toggleDependency(i, j)}
                         className={cn(
-                          "rounded-full border px-2 py-0.5 text-[10px] transition-colors",
+                          "rounded-pill border px-2 py-0.5 text-[10px] transition-colors",
                           on
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-border text-muted-foreground hover:bg-muted"

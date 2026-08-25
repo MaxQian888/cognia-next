@@ -66,7 +66,7 @@ export function SupportAgentPanel({ sessionId }: { sessionId: string | null }) {
             variant="ghost"
             size="sm"
             className={cn(
-              "h-6 gap-1.5 rounded-full border px-2 text-[11px] font-normal",
+              "h-6 gap-1.5 rounded-pill border px-2 text-[11px] font-normal",
               diagnosticsEnabled
                 ? "border-success/40 bg-success/10 text-success hover:bg-success/15"
                 : "border-border text-muted-foreground"

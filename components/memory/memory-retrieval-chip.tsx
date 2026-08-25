@@ -85,7 +85,7 @@ export function MemoryRetrievalChip({ mode: modeOverride }: MemoryRetrievalChipP
           variant="ghost"
           size="sm"
           className={cn(
-            "h-7 min-w-0 shrink gap-1.5 rounded-full border px-2 text-xs font-normal @3xl/feature-header:px-2.5",
+            "h-7 min-w-0 shrink gap-1.5 rounded-pill border px-2 text-xs font-normal @3xl/feature-header:px-2.5",
             tone === "danger"
               ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
               : "border-border/70 bg-muted/40 text-muted-foreground hover:text-foreground"

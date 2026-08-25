@@ -281,7 +281,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarPro
       showFitView={false}
       showInteractive={false}
       data-testid="wf-canvas-toolbar"
-      className="absolute! right-auto! bottom-4! left-1/2! top-auto! z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-popover/95 px-1.5 py-1 shadow-md backdrop-blur"
+      className="absolute! right-auto! bottom-4! left-1/2! top-auto! z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-pill border bg-popover/95 px-1.5 py-1 shadow-md backdrop-blur"
     >
       <ToolbarButton
         icon={Plus}

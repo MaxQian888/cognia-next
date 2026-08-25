@@ -590,7 +590,7 @@ function RailButton({
             <span
               aria-hidden
               data-testid={testId ? `${testId}-unread` : undefined}
-              className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-primary px-1 py-px text-[9px] leading-[14px] font-medium text-primary-foreground tabular-nums"
+              className="absolute -top-0.5 -right-0.5 min-w-4 rounded-pill bg-primary px-1 py-px text-[9px] leading-[14px] font-medium text-primary-foreground tabular-nums"
             >
               {badge > 99 ? "99+" : badge}
             </span>

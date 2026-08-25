@@ -19,7 +19,7 @@ function Progress({
       // determinate, accessibly indeterminate. Determinate regions
       // (`LoadingRegion progress={...}`) depend on Radix emitting it.
       value={value}
-      className={cn("relative h-2 w-full overflow-hidden rounded-full bg-primary/20", className)}
+      className={cn("relative h-2 w-full overflow-hidden rounded-pill bg-primary/20", className)}
       {...props}
     >
       <ProgressPrimitive.Indicator

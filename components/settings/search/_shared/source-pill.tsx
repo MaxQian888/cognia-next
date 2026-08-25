@@ -38,7 +38,7 @@ export function SourcePill({
         size="sm"
         onClick={onToggle}
         disabled={disabled}
-        className="h-auto rounded-full px-3 py-1.5 text-inherit hover:bg-transparent hover:text-inherit"
+        className="h-auto rounded-pill px-3 py-1.5 text-inherit hover:bg-transparent hover:text-inherit"
       >
         <span>{icon || "🔗"}</span>
         <span>{name}</span>

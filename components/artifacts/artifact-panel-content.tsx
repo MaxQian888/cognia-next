@@ -363,7 +363,7 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
         {pendingReview && (
           <span
             data-testid="artifact-review-badge"
-            className="ml-1 shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
+            className="ml-1 shrink-0 rounded-pill bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300"
           >
             {t("review.title")}
           </span>

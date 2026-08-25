@@ -99,7 +99,7 @@ export function GuildUnreadPill({ count, testId }: { count: number; testId?: str
   if (count <= 0) return null
   return (
     <span
-      className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
+      className="shrink-0 rounded-pill bg-primary px-1.5 py-0.5 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
       data-testid={testId}
     >
       {count > 99 ? "99+" : count}

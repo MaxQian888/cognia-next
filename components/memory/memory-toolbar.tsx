@@ -114,7 +114,7 @@ export function MemoryToolbar({
               onClick={() => onViewChange(candidate.id)}
               data-testid={`memory-view-${candidate.id}`}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs whitespace-nowrap",
+                "flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs whitespace-nowrap",
                 "motion-safe:transition-colors motion-safe:duration-150",
                 selected
                   ? "border-primary/40 bg-primary/10 text-foreground"

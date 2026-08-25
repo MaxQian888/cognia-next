@@ -494,7 +494,7 @@ export function WallpaperTab() {
                     data-active={active}
                     data-testid={`wallpaper-scope-${card.scope}`}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition",
+                      "flex items-center gap-1.5 rounded-pill border px-2 py-1 text-xs transition",
                       "data-[active=true]:border-primary data-[active=true]:bg-primary/5",
                       "hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     )}

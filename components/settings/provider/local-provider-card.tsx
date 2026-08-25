@@ -365,7 +365,7 @@ function CapabilityBadge({
       <TooltipTrigger asChild>
         <div
           className={cn(
-            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]",
+            "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[10px]",
             enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground opacity-50"
           )}
         >

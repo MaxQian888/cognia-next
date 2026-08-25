@@ -230,7 +230,7 @@ export function MobileTabBar({ className, badges, keyboardHidden = false }: Mobi
                         variant="destructive"
                         data-testid={`mobile-tab-badge-${tab.id}`}
                         aria-label={tBar("unread", { count: badge })}
-                        className="h-4 min-w-[16px] rounded-full px-1 text-[9px] font-semibold"
+                        className="h-4 min-w-[16px] rounded-pill px-1 text-[9px] font-semibold"
                       >
                         {badge > 99 ? "99+" : badge}
                       </Badge>

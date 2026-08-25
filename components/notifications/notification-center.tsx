@@ -207,7 +207,7 @@ export function NotificationCenter({ onNavigate }: NotificationCenterProps) {
               <span
                 data-testid="notification-center-unread"
                 aria-label={t("center.unreadCount", { count: unreadCount })}
-                className="flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-5 text-primary-foreground"
+                className="flex min-w-5 shrink-0 items-center justify-center rounded-pill bg-primary px-1.5 text-[10px] font-semibold leading-5 text-primary-foreground"
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>

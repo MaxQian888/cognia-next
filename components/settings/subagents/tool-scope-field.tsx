@@ -155,7 +155,7 @@ export function ToolScopeField({
               {selected.map((tool) => (
                 <span
                   key={tool}
-                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px]"
+                  className="inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 font-mono text-[10px]"
                   data-testid={`${testId}-chip-${tool}`}
                 >
                   <span className="max-w-[16rem] truncate">{tool}</span>

@@ -53,7 +53,7 @@ export function GlobalSearchScopeTabs({
             onPointerDown={(event) => event.preventDefault()}
             onClick={() => onChange(scope)}
             className={cn(
-              "flex h-6 shrink-0 items-center gap-1 rounded-full px-2.5 text-xs transition-colors",
+              "flex h-6 shrink-0 items-center gap-1 rounded-pill px-2.5 text-xs transition-colors",
               active
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"

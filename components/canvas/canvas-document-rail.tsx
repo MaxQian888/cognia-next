@@ -536,7 +536,7 @@ function FilterChip({ active, label, onClick }: FilterChipProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2 py-0.5 text-[10px] transition",
+        "rounded-pill border px-2 py-0.5 text-[10px] transition",
         active
           ? "border-primary bg-primary/10 text-foreground"
           : "border-border bg-muted/40 text-muted-foreground hover:border-foreground/30"

@@ -31,7 +31,7 @@ export function MobileGhostAccept({ visible, onAccept, onDismiss }: MobileGhostA
         type="button"
         size="sm"
         variant="secondary"
-        className="touch-target h-8 gap-1 rounded-full px-3 text-xs"
+        className="touch-target h-8 gap-1 rounded-pill px-3 text-xs"
         onClick={() => {
           onAccept()
           void impact("light")

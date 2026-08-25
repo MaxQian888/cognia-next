@@ -292,7 +292,7 @@ export function LocalProviderModelManager({
                   size="sm"
                   onClick={() => onModelSelect?.(model.id)}
                   className={cn(
-                    "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                    "h-auto gap-1 rounded-pill px-2 py-0.5 text-xs font-medium",
                     isSelected
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80"

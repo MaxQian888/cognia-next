@@ -32,7 +32,7 @@ export function FilterChips({ filters, activeFilter, onFilterChange }: FilterChi
           key={filter.key}
           value={filter.key}
           data-active={activeFilter === filter.key}
-          className="h-6 rounded-full px-2.5 text-[11px] data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+          className="h-6 rounded-pill px-2.5 text-[11px] data-[state=on]:border-primary/30 data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
         >
           {filter.label}
           {filter.count !== undefined && (

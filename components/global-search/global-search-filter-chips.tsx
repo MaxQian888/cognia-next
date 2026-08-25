@@ -63,7 +63,7 @@ export function GlobalSearchFilterChips({
           onClick={workspaceScope.onWiden}
           title={t("scopeWidenHint")}
           data-testid="global-search-workspace-scope"
-          className="flex h-5 items-center gap-1 rounded-full border border-dashed border-border bg-muted/30 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex h-5 items-center gap-1 rounded-pill border border-dashed border-border bg-muted/30 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <FolderIcon aria-hidden className="size-3" />
           <span>{workspaceScope.name}</span>

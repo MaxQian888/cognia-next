@@ -39,7 +39,7 @@ describe("FloatingActionButton", () => {
     render(<FloatingActionButton aria-label="Add" className="ring-2" />)
     const btn = screen.getByRole("button", { name: "Add" })
     expect(btn).toHaveClass("ring-2")
-    expect(btn).toHaveClass("rounded-full")
+    expect(btn).toHaveClass("rounded-pill")
   })
 
   it("sets data-slot='fab' for downstream querying", () => {

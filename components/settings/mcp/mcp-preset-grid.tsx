@@ -332,7 +332,7 @@ function TagChip({
       size="sm"
       onClick={onClick}
       className={cn(
-        "h-5 rounded-full px-2 text-[10px] font-normal uppercase tracking-wider",
+        "h-5 rounded-pill px-2 text-[10px] font-normal uppercase tracking-wider",
         active
           ? "border-primary/40 bg-primary text-primary-foreground"
           : "border-border text-muted-foreground hover:border-primary/40 hover:bg-accent"

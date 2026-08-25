@@ -211,7 +211,7 @@ export function TaskExecutionHistory({
                 {execution.triggerSource && execution.triggerSource !== "schedule" && (
                   <Badge
                     variant="outline"
-                    className="ml-1.5 rounded-full px-1.5 text-[10px]"
+                    className="ml-1.5 rounded-pill px-1.5 text-[10px]"
                     data-testid="execution-trigger-source"
                   >
                     {t(`triggerSources.${execution.triggerSource}`)}

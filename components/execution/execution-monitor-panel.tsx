@@ -357,7 +357,7 @@ function MonitorControls({
                 aria-pressed={visible}
                 onClick={() => void onToggleKind(kind, !visible)}
                 className={cn(
-                  "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                  "flex items-center gap-1 rounded-pill border px-2 py-0.5 text-[11px] transition-colors",
                   visible
                     ? "border-blue-500/40 bg-blue-500/10 text-foreground"
                     : "border-border/60 text-muted-foreground line-through opacity-70"

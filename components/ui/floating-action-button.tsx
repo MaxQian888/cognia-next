@@ -45,7 +45,7 @@ export function FloatingActionButton({
         position === "fixed" ? "fixed" : "absolute",
         // Respect iOS safe areas — the inset env vars resolve to 0 on browsers
         // that don't expose them, so this is safe on web too.
-        "bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] right-5 z-30 size-14 rounded-full shadow-lg shadow-primary/30 hover:shadow-xl",
+        "bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] right-5 z-30 size-14 rounded-pill shadow-lg shadow-primary/30 hover:shadow-xl",
         className
       )}
       {...rest}

@@ -110,7 +110,7 @@ function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
     <div
       data-testid="runtime-health-badge"
       data-state={state}
-      className="absolute right-2 top-2 z-20 rounded-full bg-background/90 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shadow-sm"
+      className="absolute right-2 top-2 z-20 rounded-pill bg-background/90 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground shadow-sm"
     >
       {state}
     </div>

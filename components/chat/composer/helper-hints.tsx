@@ -50,7 +50,7 @@ export function HelperHints({ onOpenCheatsheet }: HelperHintsProps) {
           type="button"
           onClick={onOpenCheatsheet}
           data-testid="composer-cheatsheet-trigger"
-          className="flex items-center gap-1 rounded-full border border-transparent px-2 py-0.5 text-[10px] underline-offset-2 hover:underline"
+          className="flex items-center gap-1 rounded-pill border border-transparent px-2 py-0.5 text-[10px] underline-offset-2 hover:underline"
         >
           <KeyboardIcon className="size-3" aria-hidden />
           {t("cheatsheetLabel")}
@@ -62,7 +62,7 @@ export function HelperHints({ onOpenCheatsheet }: HelperHintsProps) {
 
 function Hint({ children }: { children: React.ReactNode }) {
   return (
-    <Badge variant="outline" className="rounded-full bg-background/60 px-2 py-0.5 text-[10px]">
+    <Badge variant="outline" className="rounded-pill bg-background/60 px-2 py-0.5 text-[10px]">
       {children}
     </Badge>
   )

@@ -91,7 +91,7 @@ export function RecentErrorsPanel({
       >
         <span className="flex items-center gap-2">
           {copy.title}
-          <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
+          <span className="rounded-pill bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
             {entries.length}
           </span>
         </span>

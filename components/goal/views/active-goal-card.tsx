@@ -95,7 +95,7 @@ export function ActiveGoalCard({ goal, variant = "card" }: Props) {
   const statusChip = (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+        "inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
         style.chip
       )}
     >
@@ -171,6 +171,7 @@ export function ActiveGoalCard({ goal, variant = "card" }: Props) {
 
         {lastReason && (
           <p className="line-clamp-1 text-xs italic text-muted-foreground">
+            {/* i18n-exempt: typographic quotation glyphs around user content, not copy */}
             &ldquo;{lastReason}&rdquo;
           </p>
         )}

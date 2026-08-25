@@ -183,7 +183,7 @@ export function PublicStatusPage({
               role="status"
               aria-live="polite"
               className={cn(
-                "mt-10 inline-flex items-center gap-3 rounded-full px-4 py-2.5 ring-1",
+                "mt-10 inline-flex items-center gap-3 rounded-pill px-4 py-2.5 ring-1",
                 overallStyle.soft,
                 overallStyle.text
               )}

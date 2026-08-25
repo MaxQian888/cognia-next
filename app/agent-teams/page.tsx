@@ -557,7 +557,7 @@ export default function AgentTeamsListPage() {
                 variant={categoryFilter === cat ? "secondary" : "outline"}
                 onClick={() => setCategoryFilter(cat)}
                 aria-pressed={categoryFilter === cat}
-                className="h-7 rounded-full px-2.5 text-xs"
+                className="h-7 rounded-pill px-2.5 text-xs"
               >
                 {cat === "all" ? t("allCategories") : tCat(cat)}
               </Button>

@@ -77,7 +77,7 @@ export function AboutHero() {
           </div>
           <p className="text-sm text-pretty text-muted-foreground">{t("tagline")}</p>
           <div className="flex flex-wrap items-center justify-center gap-2 pt-0.5 sm:justify-start">
-            <span className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-pill border bg-background/70 px-2.5 py-1 text-xs text-muted-foreground">
               <span aria-hidden className="size-1.5 rounded-full bg-primary" />
               {t("versionLine")}
               <span className="font-mono text-foreground">{APP_VERSION}</span>

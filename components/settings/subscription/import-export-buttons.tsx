@@ -397,7 +397,7 @@ function ImportPreview({ body }: ImportPreviewProps) {
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">{safeProviderName(row.provider)}</span>
             {row.hasPreset && (
-              <span className="rounded-full border border-primary/50 px-2 py-0.5 text-[10px] text-primary">
+              <span className="rounded-pill border border-primary/50 px-2 py-0.5 text-[10px] text-primary">
                 {t("preview.hasPreset")}
               </span>
             )}

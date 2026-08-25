@@ -204,7 +204,7 @@ function FilterChip({
       aria-selected={selected}
       onClick={onSelect}
       className={cn(
-        "flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors",
+        "flex items-center gap-1 rounded-pill px-3 py-1 text-xs font-medium transition-colors",
         selected
           ? "bg-primary text-primary-foreground"
           : "bg-muted text-muted-foreground hover:bg-muted/70"

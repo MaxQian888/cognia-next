@@ -1912,6 +1912,21 @@ html[data-elevation-max="0"] * {
   --tw-inset-shadow: 0 0 #0000;
 }
 
+/* `rounded-2xl` / `rounded-3xl` are the only radius utilities with no link to
+   `--radius` — Tailwind resolves them from its own static scale, so 24 sites
+   (the workbench rail's Discord-style squircle among them) would stay visibly
+   round while everything around them squared off. Rebasing them onto the named
+   scale under a pack fixes that without touching their markup, and without
+   moving the default look: the rule simply does not match when no pack
+   attribute is present. Under Studio it also delivers that pack's stated "no
+   oversized pills". */
+html[data-style-pack="studio"] .rounded-2xl,
+html[data-style-pack="studio"] .rounded-3xl,
+html[data-style-pack="sharp"] .rounded-2xl,
+html[data-style-pack="sharp"] .rounded-3xl {
+  border-radius: var(--radius-stage);
+}
+
 /* Micro-labels — timestamps, counts, status words. Opt-in per element via a
    bare `data-micro-label` attribute; the pack decides whether it does anything.
    This is what separates "hard-edged engineering tool" from "the same rounded

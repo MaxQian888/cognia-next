@@ -274,7 +274,7 @@ export function WorkspaceSwitcher({ variant = "rail", className }: WorkspaceSwit
               {t("heading")}
             </span>
             {visible.length > 0 && (
-              <span className="rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+              <span className="rounded-pill bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
                 {visible.length}
               </span>
             )}

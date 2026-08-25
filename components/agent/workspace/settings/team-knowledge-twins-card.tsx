@@ -64,7 +64,7 @@ export function TeamKnowledgeTwinsCard({ team }: TeamKnowledgeTwinsCardProps) {
                 aria-pressed={on}
                 onClick={() => toggle(tw.id)}
                 className={cn(
-                  "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                  "rounded-pill border px-2 py-0.5 text-[11px] transition-colors",
                   on
                     ? "border-primary bg-primary/10 text-primary"
                     : "border-border text-muted-foreground hover:bg-muted"

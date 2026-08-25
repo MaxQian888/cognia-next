@@ -560,7 +560,7 @@ function SessionRowImpl({
                 </span>
               ) : null}
               {unread && unread > 0 ? (
-                <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
+                <span className="shrink-0 rounded-pill bg-primary px-1.5 py-0.5 text-[10px] leading-none text-primary-foreground">
                   {unread > 99 ? "99+" : unread}
                 </span>
               ) : null}

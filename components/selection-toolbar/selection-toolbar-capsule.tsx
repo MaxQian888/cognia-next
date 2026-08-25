@@ -189,7 +189,7 @@ export function SelectionToolbarCapsule({
                 ))}
                 {truncated ? (
                   <span
-                    className="ml-0.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                    className="ml-0.5 rounded-pill bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning"
                     title={t("truncatedHint")}
                   >
                     {t("truncated")}
@@ -244,7 +244,7 @@ function HoverWidthGhost({
             return (
               <span
                 key={action.id}
-                className="flex h-8 items-center gap-1.5 rounded-full px-2 text-xs font-medium"
+                className="flex h-8 items-center gap-1.5 rounded-pill px-2 text-xs font-medium"
               >
                 <action.icon className="size-4" />
                 {isExpanded ? (
@@ -333,7 +333,7 @@ function ActionButton({
         whileTap={reduceMotion ? undefined : { scale: 0.96 }}
         onClick={() => onAction(action.id)}
         className={cn(
-          "relative z-10 flex h-8 items-center gap-1.5 rounded-full px-2 text-xs font-medium",
+          "relative z-10 flex h-8 items-center gap-1.5 rounded-pill px-2 text-xs font-medium",
           "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
           "disabled:pointer-events-none disabled:opacity-60",
           action.hasLocalePicker && "pr-1"

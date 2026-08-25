@@ -509,7 +509,7 @@ function EffortTrack({
           onClick={() => onSelect("off")}
           data-testid="effort-auto-toggle"
           className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 text-[10px] transition-colors",
+            "shrink-0 rounded-pill px-2 py-0.5 text-[10px] transition-colors",
             off
               ? "bg-accent font-medium text-foreground"
               : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",

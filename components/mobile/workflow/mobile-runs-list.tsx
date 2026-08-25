@@ -119,7 +119,7 @@ export function MobileRunsList({ workflowId }: MobileRunsListProps) {
             key={s}
             size="sm"
             variant={status === s ? "default" : "outline"}
-            className={cn("h-7 shrink-0 rounded-full px-3 text-xs")}
+            className={cn("h-7 shrink-0 rounded-pill px-3 text-xs")}
             onClick={() => setStatus(s)}
             data-testid={`mobile-runs-filter-${s}`}
           >

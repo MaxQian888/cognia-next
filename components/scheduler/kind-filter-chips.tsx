@@ -66,7 +66,7 @@ export function KindFilterChips({
 }
 
 const chipClass =
-  "shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors"
+  "shrink-0 rounded-pill border px-2.5 py-1 text-[11px] font-medium transition-colors"
 const activeClass = "border-primary/30 bg-primary/10 text-primary"
 const inactiveClass =
   "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"

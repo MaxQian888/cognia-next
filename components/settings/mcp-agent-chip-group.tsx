@@ -101,7 +101,7 @@ function AgentChip({ status, server, loading }: AgentChipProps) {
       title={tooltip}
       aria-pressed={projected}
       className={cn(
-        "h-5 gap-1 rounded-full px-2 text-[10px] font-medium",
+        "h-5 gap-1 rounded-pill px-2 text-[10px] font-medium",
         projected
           ? "border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90"
           : "border-border bg-transparent text-muted-foreground",

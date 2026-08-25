@@ -79,7 +79,7 @@ export function DynamicParameterForm({
               {source && (
                 <span
                   className={cn(
-                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    "inline-flex items-center rounded-pill px-2 py-0.5 text-xs font-medium",
                     source === "session" &&
                       "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
                     source === "provider" &&

@@ -138,7 +138,7 @@ function GoalRow({ goal, onOpen }: { goal: Goal; onOpen: () => void }) {
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]",
+              "inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[10px]",
               style.chip
             )}
           >

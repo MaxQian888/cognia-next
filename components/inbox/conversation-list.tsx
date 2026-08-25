@@ -220,7 +220,7 @@ export function ConversationList({
               type="button"
               variant="secondary"
               size="sm"
-              className="h-6 gap-1 rounded-full px-2 text-[11px]"
+              className="h-6 gap-1 rounded-pill px-2 text-[11px]"
               onClick={() => toggleChip(chip)}
               aria-label={t("filter.remove", { label: t(`filter.${chip}`) })}
               data-testid={`conversation-filter-chip-${chip}`}

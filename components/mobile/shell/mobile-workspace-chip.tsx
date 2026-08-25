@@ -23,7 +23,7 @@ export function MobileWorkspaceChip({ className }: { className?: string }) {
       data-testid="mobile-workspace-chip"
       aria-label={t("activeLabel", { name })}
       className={cn(
-        "flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground",
+        "flex items-center gap-1 rounded-pill bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground",
         className
       )}
     >

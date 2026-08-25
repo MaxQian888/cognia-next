@@ -39,7 +39,7 @@ export function NotificationBell({ className }: { className?: string }) {
           {hasDirected && (
             <span
               data-testid="notification-badge-count"
-              className="flex min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground"
+              className="flex min-w-3.5 items-center justify-center rounded-pill bg-destructive px-1 text-[9px] font-medium leading-none text-destructive-foreground"
             >
               {directedUnread > 99 ? "99+" : directedUnread}
             </span>

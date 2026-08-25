@@ -307,7 +307,7 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   return (
     <div
       data-testid="wf-selection-toolbar"
-      className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-popover/95 px-2 py-1 shadow-md backdrop-blur"
+      className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-pill border bg-popover/95 px-2 py-1 shadow-md backdrop-blur"
     >
       <span
         className="px-1 text-xs font-medium tabular-nums text-muted-foreground"

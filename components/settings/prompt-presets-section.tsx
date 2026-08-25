@@ -830,7 +830,7 @@ function Chip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "h-auto rounded-full px-2.5 py-0.5 text-xs font-normal",
+        "h-auto rounded-pill px-2.5 py-0.5 text-xs font-normal",
         active
           ? "border-primary bg-primary/10 text-foreground"
           : "border-border bg-muted/30 text-muted-foreground hover:bg-muted"

@@ -260,7 +260,7 @@ const SECTION_TRIGGER_CLASS =
   "h-6 min-w-0 flex-1 justify-start gap-1.5 rounded-md px-1.5 text-left font-normal text-muted-foreground hover:bg-accent/60 hover:text-foreground data-[state=open]:text-foreground/80"
 const SECTION_LABEL_CLASS = "truncate text-[11px] font-semibold tracking-wider uppercase"
 const SECTION_COUNT_CLASS =
-  "shrink-0 rounded-full bg-muted-foreground/10 px-1.5 py-px text-[10px] leading-4 font-medium text-muted-foreground/80 tabular-nums"
+  "shrink-0 rounded-pill bg-muted-foreground/10 px-1.5 py-px text-[10px] leading-4 font-medium text-muted-foreground/80 tabular-nums"
 
 /** Chevron for a collapsible section: points right when folded, down when open. */
 function SectionChevron({ collapsed }: { collapsed: boolean }) {

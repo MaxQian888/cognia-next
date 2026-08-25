@@ -198,7 +198,7 @@ function CategoryChip({
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "h-auto rounded-full px-2 py-0.5 text-[10px] font-normal",
+        "h-auto rounded-pill px-2 py-0.5 text-[10px] font-normal",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         pressed
           ? "border-transparent bg-primary text-primary-foreground"
@@ -324,7 +324,7 @@ function NavRow({
             {isHidden ? <EyeOffDot /> : null}
             {badge !== undefined ? (
               <span
-                className="ml-auto shrink-0 rounded-full bg-primary px-1.5 text-[10px] tabular-nums text-primary-foreground"
+                className="ml-auto shrink-0 rounded-pill bg-primary px-1.5 text-[10px] tabular-nums text-primary-foreground"
                 data-testid={`subagent-nav-badge-${panelId}`}
               >
                 {badge}

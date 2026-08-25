@@ -146,7 +146,7 @@ export function FleetHistoryPanel() {
               data-testid={`fleet-history-filter-${value}`}
               onClick={() => setAgentFilter(value)}
               className={cn(
-                "h-auto rounded-full px-2 py-0.5 text-[10px] font-medium",
+                "h-auto rounded-pill px-2 py-0.5 text-[10px] font-medium",
                 agentFilter === value
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-transparent bg-muted/60 text-muted-foreground hover:bg-muted"

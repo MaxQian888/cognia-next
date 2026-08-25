@@ -257,7 +257,7 @@ export function ProviderStep({ onConnected, onViewChange, heading = true }: Prov
             <span className="text-sm font-medium">
               {connected.providerName ?? t(`provider.${connected.card}.title`)}
             </span>
-            <span className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
+            <span className="rounded-pill border px-2 py-0.5 text-[11px] text-muted-foreground">
               {t("provider.loggedInBadge")}
             </span>
           </span>

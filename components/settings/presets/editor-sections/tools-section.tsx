@@ -215,7 +215,7 @@ function ItemMultiSelect({
                 size="sm"
                 onClick={() => toggle(it.id)}
                 className={
-                  "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-normal " +
+                  "h-auto gap-1 rounded-pill px-2 py-0.5 text-xs font-normal " +
                   (active
                     ? "border-primary bg-primary/10 text-foreground"
                     : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")

@@ -214,7 +214,7 @@ export function MobileCanvas({
     >
       {connectActive ? (
         <div
-          className="pointer-events-none absolute inset-x-0 top-2 z-20 mx-auto w-fit rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md"
+          className="pointer-events-none absolute inset-x-0 top-2 z-20 mx-auto w-fit rounded-pill bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md"
           data-testid="mobile-connect-banner"
         >
           {connectBannerText}

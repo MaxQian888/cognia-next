@@ -570,7 +570,7 @@ function ErrorPageShell({
               <h1 className="text-base font-semibold tracking-tight">{copy.title}</h1>
               {showCategoryBadge && (
                 <span
-                  className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
                   data-testid="error-page-category"
                 >
                   <span

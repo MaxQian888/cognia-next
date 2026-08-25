@@ -304,7 +304,7 @@ export function McpToolRulesCard({ server }: Props) {
               return (
                 <span
                   key={pattern}
-                  className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[10px]"
+                  className="inline-flex items-center gap-1 rounded-pill border bg-background px-2 py-0.5 text-[10px]"
                   data-testid={`mcp-tool-pattern-${pattern}`}
                 >
                   <code className="font-mono">{pattern}</code>
@@ -367,7 +367,7 @@ export function McpToolRulesCard({ server }: Props) {
               {orphanRules.map((name) => (
                 <span
                   key={name}
-                  className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 font-mono text-[10px]"
+                  className="inline-flex items-center gap-1 rounded-pill border bg-background px-2 py-0.5 font-mono text-[10px]"
                 >
                   {name}
                   <Button

@@ -143,7 +143,7 @@ export function NotificationItem({
                 {record.title}
               </span>
               {record.count > 1 && (
-                <span className="mt-0.5 shrink-0 rounded-full bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground">
+                <span className="mt-0.5 shrink-0 rounded-pill bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground">
                   {t("center.groupCount", { count: record.count - 1 })}
                 </span>
               )}

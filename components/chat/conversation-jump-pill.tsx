@@ -91,7 +91,7 @@ export function ConversationJumpPill({
       // either locale.
       aria-label={label}
       className={cn(
-        "pointer-events-auto h-8 gap-1.5 rounded-full px-3 text-xs shadow-md",
+        "pointer-events-auto h-8 gap-1.5 rounded-pill px-3 text-xs shadow-md",
         "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80",
         mode === "newMessages" && "border-primary/40 text-primary"
       )}

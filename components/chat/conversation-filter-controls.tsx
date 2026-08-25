@@ -381,7 +381,7 @@ function FilterTrigger({
       {activeFilters > 0 ? (
         <span
           aria-hidden
-          className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums"
+          className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-pill bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums"
           data-testid={`${testId}-dot`}
         >
           {activeFilters}
@@ -397,7 +397,7 @@ function CountPill({ count, className }: { count: number; className?: string }) 
   return (
     <span
       className={cn(
-        "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] leading-none font-medium text-primary tabular-nums",
+        "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-pill bg-primary/15 px-1 text-[10px] leading-none font-medium text-primary tabular-nums",
         className
       )}
       data-testid="conversation-filter-section-count"
@@ -748,7 +748,7 @@ function FilterDrawer({
                         aria-pressed={active}
                         data-testid={`${testId}-view-${view.id}`}
                         className={cn(
-                          "inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs transition-colors",
+                          "inline-flex h-8 shrink-0 items-center gap-1 rounded-pill border px-3 text-xs transition-colors",
                           active
                             ? "border-primary/40 bg-primary/15 text-primary"
                             : "border-border bg-muted/40 text-foreground"
@@ -1185,7 +1185,7 @@ export function ConversationSearchScopeControl({
           {widened > 0 ? (
             <span
               aria-hidden
-              className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums"
+              className="absolute top-1 right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-pill bg-primary px-0.5 text-[9px] leading-none font-semibold text-primary-foreground tabular-nums"
               data-testid={`${testId}-dot`}
             >
               {widened}
@@ -1385,7 +1385,7 @@ export function ConversationFilterChips({
   return (
     <div className={cn("flex flex-wrap items-center gap-1", className)} data-testid={testId}>
       {sortPinned ? (
-        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
           <ArrowDownUpIcon className="size-2.5" aria-hidden />
           {t(`sort.options.${sortBy}`)}
         </span>

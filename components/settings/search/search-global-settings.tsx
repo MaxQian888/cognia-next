@@ -258,7 +258,7 @@ export function SearchGlobalSettings({ onConfigureProviders }: SearchGlobalSetti
                 size="sm"
                 disabled={!searchEnabled}
                 className={cn(
-                  "h-auto gap-1 rounded-full border-dashed px-3 py-1.5 text-xs font-medium",
+                  "h-auto gap-1 rounded-pill border-dashed px-3 py-1.5 text-xs font-medium",
                   searchEnabled
                     ? "cursor-pointer hover:bg-muted/50 text-muted-foreground"
                     : "opacity-50 cursor-not-allowed text-muted-foreground"

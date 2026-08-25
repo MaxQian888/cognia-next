@@ -1228,7 +1228,7 @@ describe("workspace grouping (the default axis)", () => {
     expect(within(beta).getByTestId("section-chevron")).not.toHaveClass("rotate-90")
     expect(within(beta).getByTestId("section-chevron")).toHaveAttribute("data-collapsed")
     expect(alpha).toHaveClass("flex-1", "hover:bg-accent/60")
-    expect(within(alpha).getByText("1")).toHaveClass("rounded-full", "tabular-nums")
+    expect(within(alpha).getByText("1")).toHaveClass("rounded-pill", "tabular-nums")
   })
 
   it("shows agent metadata for team conversations outside the selected guild", () => {

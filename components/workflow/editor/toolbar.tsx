@@ -155,7 +155,7 @@ export const EditorToolbar = memo(function EditorToolbar({
       />
       <span
         className={cn(
-          "text-xs px-2 py-0.5 rounded-full",
+          "text-xs px-2 py-0.5 rounded-pill",
           dirty
             ? "bg-wf-status-running/15 text-wf-status-running"
             : "bg-wf-status-succeeded/15 text-wf-status-succeeded"

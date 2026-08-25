@@ -388,7 +388,7 @@ function CapabilityChip({ capability, ready }: { capability: BootCapability; rea
       data-capability={capability}
       data-ready={ready ? "true" : "false"}
       className={cn(
-        "inline-flex h-5 items-center gap-1.5 rounded-full border px-2 text-[10px] leading-none transition-colors duration-300",
+        "inline-flex h-5 items-center gap-1.5 rounded-pill border px-2 text-[10px] leading-none transition-colors duration-300",
         ready
           ? "border-success/40 bg-success/10 text-foreground"
           : "border-border bg-transparent text-muted-foreground"

@@ -124,7 +124,7 @@ function DiscoverItemView({ payload, className }: { payload: SharePayload; class
   return (
     <div className={cn("mx-auto w-full max-w-3xl space-y-4", className)}>
       <div>
-        <span className="inline-block rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="inline-block rounded-pill border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {t(`discoverItem.kind.${def.kind}`)}
         </span>
         <h1 className="mt-2 text-xl font-semibold text-foreground">{def.name}</h1>

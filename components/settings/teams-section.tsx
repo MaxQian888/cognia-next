@@ -606,7 +606,7 @@ function TeamEditor({
                   size="sm"
                   onClick={() => toggleMember(c.id)}
                   className={
-                    "h-auto gap-1 rounded-full px-2 py-0.5 text-xs font-normal " +
+                    "h-auto gap-1 rounded-pill px-2 py-0.5 text-xs font-normal " +
                     (active
                       ? "border-primary bg-primary/10 text-foreground"
                       : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
@@ -727,7 +727,7 @@ function TeamEditor({
                     })
                   }}
                   className={
-                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors " +
+                    "inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-xs transition-colors " +
                     (active
                       ? "border-primary bg-primary/10 text-foreground"
                       : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")
@@ -866,7 +866,7 @@ function MemberOverrideCard({ character, member, mcpServers, onPatch }: MemberOv
                     })
                   }}
                   className={
-                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] transition-colors " +
+                    "inline-flex items-center rounded-pill border px-2 py-0.5 text-[11px] transition-colors " +
                     (active
                       ? "border-primary bg-primary/10 text-foreground"
                       : "border-border bg-muted/30 text-muted-foreground hover:bg-muted")

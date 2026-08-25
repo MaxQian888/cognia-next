@@ -64,7 +64,7 @@ export function RuntimeBadge({ runtime, iconOnly = false, className }: RuntimeBa
       data-testid={`runtime-badge-${runtime}`}
       data-runtime={runtime}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors duration-150",
+        "inline-flex items-center gap-1 rounded-pill px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset transition-colors duration-150",
         RUNTIME_CLASSES[runtime],
         iconOnly && "px-1",
         className

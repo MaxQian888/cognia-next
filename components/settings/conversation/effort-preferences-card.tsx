@@ -129,7 +129,7 @@ export function EffortPreferencesCard() {
                 onClick={() => toggleTier(tier)}
                 data-testid={`effort-tier-toggle-${tier}`}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs",
+                  "inline-flex items-center gap-1 rounded-pill border px-2.5 py-1 text-xs",
                   // Same motion vocabulary as the composer's ladder: the press
                   // gives, the check pops in, and the top tier glows because it
                   // is a change in kind rather than one more notch.
