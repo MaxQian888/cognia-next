@@ -18,6 +18,15 @@ export interface UseBrowserLoading {
   /** True once the preview has fully loaded at least one page. */
   hasPainted: boolean
   /**
+   * The URL of the last settled document — the point at which a page has
+   * genuinely been arrived at, which is what the back/forward stack keys off.
+   * A redirect chain reports one `browser://navigated` per hop but settles
+   * once, so this collapses to the final address. Falls back to the committed
+   * target when the safety timeout settles without a signal, so the history
+   * menu is still populated for a page that never reports a load.
+   */
+  loadedUrl: string | null
+  /**
    * Mark an explicit user-initiated navigation as starting. Needed for
    * same-URL reloads and history back/forward, where the committed `url`
    * doesn't change so the url-change effect can't infer a new load.
@@ -53,6 +62,7 @@ export function useBrowserLoading({
 }: UseBrowserLoadingOptions): UseBrowserLoading {
   const [phase, setPhase] = useState<BrowserLoadPhase>(url ? "loading" : "idle")
   const [hasPainted, setHasPainted] = useState(false)
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
   const [trackedUrl, setTrackedUrl] = useState<string | null>(url)
   // Bumped on each new load episode so the safety-timeout effect re-arms.
   const [loadSeq, setLoadSeq] = useState(0)
@@ -69,6 +79,7 @@ export function useBrowserLoading({
     } else {
       setPhase("idle")
       setHasPainted(false)
+      setLoadedUrl(null)
     }
   }
 
@@ -77,9 +88,10 @@ export function useBrowserLoading({
     setLoadSeq((n) => n + 1)
   }, [])
 
-  const settle = useCallback(() => {
+  const settle = useCallback((settledUrl: string | null) => {
     setHasPainted(true)
     setPhase("ready")
+    if (settledUrl) setLoadedUrl(settledUrl)
   }, [])
 
   // Safety timeout: a load episode that never receives a `browser://loaded`
@@ -87,17 +99,19 @@ export function useBrowserLoading({
   // on `loadSeq` so each new episode resets the deadline.
   useEffect(() => {
     if (phase !== "loading") return
-    const timer = setTimeout(settle, settleTimeoutMs)
+    // No signal arrived: settle against the committed target so the pane is
+    // revealed and the history menu still learns where it went.
+    const timer = setTimeout(() => settle(url), settleTimeoutMs)
     return () => clearTimeout(timer)
-  }, [phase, loadSeq, settleTimeoutMs, settle])
+  }, [phase, loadSeq, settleTimeoutMs, settle, url])
 
   // Load-complete signal from the embedded page.
   useEffect(() => {
     if (!isTauri()) return
     let cancelled = false
     let unlisten: (() => void) | null = null
-    void onTauriEvent<BrowserLoaded>(BROWSER_EVENTS.loaded, () => {
-      if (!cancelled) settle()
+    void onTauriEvent<BrowserLoaded>(BROWSER_EVENTS.loaded, (payload) => {
+      if (!cancelled) settle(payload?.url ?? null)
     }).then((fn) => {
       if (cancelled) fn()
       else unlisten = fn
@@ -108,5 +122,5 @@ export function useBrowserLoading({
     }
   }, [settle])
 
-  return { phase, hasPainted, begin }
+  return { phase, hasPainted, loadedUrl, begin }
 }

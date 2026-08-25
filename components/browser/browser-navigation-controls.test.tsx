@@ -42,3 +42,59 @@ it("disables all navigation actions together", () => {
     expect(screen.getByRole("button", { name })).toBeDisabled()
   }
 })
+
+// `browser_embed_stop` shipped with the subsystem but had no human-reachable
+// caller: there was no way to halt a slow load short of navigating away.
+describe("stop while loading", () => {
+  it("turns reload into stop and calls onStop", () => {
+    const onReload = jest.fn()
+    const onStop = jest.fn()
+    render(
+      <TooltipProvider>
+        <BrowserNavigationControls
+          loading
+          onBack={jest.fn()}
+          onForward={jest.fn()}
+          onReload={onReload}
+          onStop={onStop}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.queryByRole("button", { name: "reload" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "stop" }))
+    expect(onStop).toHaveBeenCalledTimes(1)
+    expect(onReload).not.toHaveBeenCalled()
+  })
+
+  it("stays a reload when the caller supplies no way to stop", () => {
+    render(
+      <TooltipProvider>
+        <BrowserNavigationControls
+          loading
+          onBack={jest.fn()}
+          onForward={jest.fn()}
+          onReload={jest.fn()}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "reload" })).toBeInTheDocument()
+  })
+
+  it("keeps stop clickable even when reload is disabled", () => {
+    const onStop = jest.fn()
+    render(
+      <TooltipProvider>
+        <BrowserNavigationControls
+          loading
+          reloadDisabled
+          onBack={jest.fn()}
+          onForward={jest.fn()}
+          onReload={jest.fn()}
+          onStop={onStop}
+        />
+      </TooltipProvider>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "stop" }))
+    expect(onStop).toHaveBeenCalled()
+  })
+})

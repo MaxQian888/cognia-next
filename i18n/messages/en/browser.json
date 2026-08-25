@@ -8,7 +8,8 @@
     "openExternal": "Open in external browser",
     "reload": "Reload",
     "screenshot": "Send screenshot to chat",
-    "selectElement": "Select element"
+    "selectElement": "Select element",
+    "stop": "Stop loading"
   },
   "adjust": {
     "accept": "Accept feedback",

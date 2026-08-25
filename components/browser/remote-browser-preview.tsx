@@ -155,7 +155,15 @@ export function RemoteBrowserPreview({
   const [selection, setSelection] = useState<BrowserSelection | null>(null)
   const [comment, setComment] = useState("")
   const [sendingComment, setSendingComment] = useState(false)
-  const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
+  const {
+    recent: recentHistory,
+    push: pushHistory,
+    goBack: historyGoBack,
+    goForward: historyGoForward,
+    canGoBack,
+    canGoForward,
+    clear: clearHistory,
+  } = useBrowserHistory()
   const { sendComment, sendScreenshotBytes, sendText } = useSelectionToChat()
   const activePage =
     pages.find((page) => page.id === activePageId) ?? pages.find((page) => page.active)
@@ -469,13 +477,17 @@ export function RemoteBrowserPreview({
           />
           <BrowserNavigationControls
             disabled={connection !== "connected"}
+            backDisabled={!canGoBack}
+            forwardDisabled={!canGoForward}
             onBack={() => {
+              if (!historyGoBack()) return
               void engineRef.current
                 ?.back()
                 .then(refreshPages)
                 .catch(() => {})
             }}
             onForward={() => {
+              if (!historyGoForward()) return
               void engineRef.current
                 ?.forward()
                 .then(refreshPages)

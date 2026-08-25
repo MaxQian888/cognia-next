@@ -67,6 +67,7 @@ import {
   type ElementRect,
   type OutputDetailLevel,
   normalizePreviewUrl,
+  toBrowserNavIntent,
 } from "@/lib/browser/protocol"
 import { isTauri } from "@/lib/tauri"
 import { openExternal } from "@/lib/tauri/opener"
@@ -200,7 +201,17 @@ export function BrowserPreviewPane({
   // ADR-0127: console / network rings for the DevTools drawer. Gated on the
   // lease below so a second mounted pane does not mirror the owner's feeds.
   const [developerOpen, setDeveloperOpen] = useState(false)
-  const { recent: recentHistory, push: pushHistory, clear: clearHistory } = useBrowserHistory()
+  const {
+    recent: recentHistory,
+    push: pushHistory,
+    replace: replaceHistory,
+    traverseTo: traverseHistory,
+    goBack: historyGoBack,
+    goForward: historyGoForward,
+    canGoBack,
+    canGoForward,
+    clear: clearHistory,
+  } = useBrowserHistory()
   const activeChatSessionId = useChatStore((state) => state.activeSessionId)
   /**
    * The chat session this pane's annotations, CDP grants and Adjust drafts
@@ -244,7 +255,14 @@ export function BrowserPreviewPane({
   // shown once the page has painted AND the region is visible — otherwise it is
   // parked off-screen so the loading placeholder (or a covering modal) shows and
   // the always-on-top layer stops eating input.
-  const { phase, hasPainted, begin: beginLoad } = useBrowserLoading({ url: committedUrl })
+  const {
+    phase,
+    hasPainted,
+    loadedUrl,
+    begin: beginLoad,
+  } = useBrowserLoading({
+    url: committedUrl,
+  })
   const regionVisible = useRegionVisibility(reservedRef)
   // `owned` is resolved by `useBrowserPaneWebview` below; the visibility it
   // consumes is computed there from the same three inputs plus the lease.
@@ -336,10 +354,44 @@ export function BrowserPreviewPane({
         ? "medium"
         : "compact"
 
-  // Record each visited location for the address-bar history menu.
+  /**
+   * A back/forward we initiated. The page cannot tell us that a document load
+   * is the result of `history.back()` — a cross-document traversal reports
+   * exactly like a fresh navigation — so the pane remembers the address it
+   * asked for and lets that one arrival past without touching the stack.
+   */
+  const expectedTraversalRef = useRef<string | null>(null)
+  const consumeExpectedTraversal = useCallback((url: string) => {
+    if (expectedTraversalRef.current !== url) return false
+    expectedTraversalRef.current = null
+    return true
+  }, [])
+
+  // A settled document is the only reliable "we have arrived" signal: a
+  // redirect chain emits one `browser://navigated` per hop but settles once.
   useEffect(() => {
-    if (currentUrl) pushHistory(currentUrl)
-  }, [currentUrl, pushHistory])
+    if (!loadedUrl) return
+    if (consumeExpectedTraversal(loadedUrl)) return
+    pushHistory(loadedUrl)
+  }, [loadedUrl, pushHistory, consumeExpectedTraversal])
+
+  // Same-document route changes never settle, so they update the stack
+  // directly — and how they update it depends on what the page actually did.
+  useEffect(() => {
+    if (!navigated?.url || navigated.kind !== "spa") return
+    const url = navigated.url
+    if (consumeExpectedTraversal(url)) return
+    switch (toBrowserNavIntent(navigated.intent)) {
+      case "replace":
+        replaceHistory(url)
+        break
+      case "traverse":
+        traverseHistory(url)
+        break
+      default:
+        pushHistory(url)
+    }
+  }, [navigated, pushHistory, replaceHistory, traverseHistory, consumeExpectedTraversal])
 
   // Keep the address bar synced to where the preview actually is — unless the
   // user is mid-edit, in which case their draft wins. Render-time derivation
@@ -766,17 +818,29 @@ export function BrowserPreviewPane({
         )}
         <BrowserNavigationControls
           disabled={!nativeReady}
+          backDisabled={!canGoBack}
+          forwardDisabled={!canGoForward}
+          loading={phase === "loading"}
           onBack={() => {
+            const target = historyGoBack()
+            if (!target) return
+            expectedTraversalRef.current = target
             beginLoad()
             void browserClient.embedBack()
           }}
           onForward={() => {
+            const target = historyGoForward()
+            if (!target) return
+            expectedTraversalRef.current = target
             beginLoad()
             void browserClient.embedForward()
           }}
           onReload={() => {
             beginLoad()
             void browserClient.embedReload()
+          }}
+          onStop={() => {
+            void browserClient.embedStop().catch(() => {})
           }}
         />
         <form onSubmit={commitUrl} className="min-w-0 flex-1">

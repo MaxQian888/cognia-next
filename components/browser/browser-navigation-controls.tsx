@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon } from "lucide-react"
+import { ArrowLeftIcon, ArrowRightIcon, RotateCwIcon, SquareIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -10,9 +10,16 @@ export interface BrowserNavigationControlsProps {
   backDisabled?: boolean
   forwardDisabled?: boolean
   reloadDisabled?: boolean
+  /** A navigation is in flight: the reload button becomes stop. */
+  loading?: boolean
   onBack: () => void
   onForward: () => void
   onReload: () => void
+  /**
+   * Halt the in-flight navigation. Without it the button stays a reload while
+   * loading, matching the old behaviour.
+   */
+  onStop?: () => void
 }
 
 /** Shared navigation chrome for embedded, remote, and iframe browser engines. */
@@ -21,11 +28,17 @@ export function BrowserNavigationControls({
   backDisabled = false,
   forwardDisabled = false,
   reloadDisabled = false,
+  loading = false,
   onBack,
   onForward,
   onReload,
+  onStop,
 }: BrowserNavigationControlsProps) {
   const t = useTranslations("browser.actions")
+  // Stop is the third state of the same button, the way every browser does it.
+  // Without an `onStop` handler the caller has no way to halt a load, so the
+  // button stays a reload rather than becoming a no-op that looks live.
+  const stopping = loading && !!onStop
 
   return (
     <div className="flex shrink-0 items-center">
@@ -46,12 +59,12 @@ export function BrowserNavigationControls({
         <ArrowRightIcon />
       </TooltipIconButton>
       <TooltipIconButton
-        tooltip={t("reload")}
-        aria-label={t("reload")}
-        disabled={disabled || reloadDisabled}
-        onClick={onReload}
+        tooltip={stopping ? t("stop") : t("reload")}
+        aria-label={stopping ? t("stop") : t("reload")}
+        disabled={disabled || (!stopping && reloadDisabled)}
+        onClick={stopping ? onStop : onReload}
       >
-        <RotateCwIcon />
+        {stopping ? <SquareIcon /> : <RotateCwIcon />}
       </TooltipIconButton>
     </div>
   )

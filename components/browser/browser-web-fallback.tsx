@@ -11,6 +11,7 @@ import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { useBrowserHistory } from "@/hooks/browser/use-browser-history"
 import { useElementWidth } from "@/hooks/use-element-width"
 import { normalizePreviewUrl } from "@/lib/browser/protocol"
 import { openExternal } from "@/lib/tauri/opener"
@@ -40,18 +41,23 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
   const pageScale =
     frameViewportWidth > 0 ? Math.min(1, frameViewportWidth / MIN_DESKTOP_PAGE_WIDTH) : 1
   const normalizedInitialUrl = initialUrl ? normalizeWebUrl(initialUrl) : null
-  const [history, setHistory] = useState<string[]>(
-    normalizedInitialUrl ? [normalizedInitialUrl] : []
-  )
-  const [historyIndex, setHistoryIndex] = useState(normalizedInitialUrl ? 0 : -1)
+  // The same back/forward model the embedded pane uses — this component is
+  // where the shape was first proven, so it now consumes the shared hook
+  // instead of keeping a second copy of it.
+  const { push, goBack, goForward, canGoBack, canGoForward } = useBrowserHistory()
   const [currentUrl, setCurrentUrl] = useState(normalizedInitialUrl ?? "")
   const [draftUrl, setDraftUrl] = useState(normalizedInitialUrl ?? "")
   const [reloadKey, setReloadKey] = useState(0)
 
-  const goToHistoryIndex = (nextIndex: number) => {
-    const url = history[nextIndex]
+  // Seed the stack with the initial address exactly once.
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded) {
+    setSeeded(true)
+    if (normalizedInitialUrl) push(normalizedInitialUrl)
+  }
+
+  const goTo = (url: string | null) => {
     if (!url) return
-    setHistoryIndex(nextIndex)
     setCurrentUrl(url)
     setDraftUrl(url)
   }
@@ -59,9 +65,7 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
   const commitDraft = () => {
     const normalized = normalizeWebUrl(draftUrl)
     if (!normalized) return
-    const nextHistory = [...history.slice(0, historyIndex + 1), normalized]
-    setHistory(nextHistory)
-    setHistoryIndex(nextHistory.length - 1)
+    push(normalized)
     setCurrentUrl(normalized)
     setDraftUrl(normalized)
   }
@@ -80,11 +84,11 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
       >
         <WebPreviewNavigation>
           <BrowserNavigationControls
-            backDisabled={historyIndex <= 0}
-            forwardDisabled={historyIndex < 0 || historyIndex >= history.length - 1}
+            backDisabled={!canGoBack}
+            forwardDisabled={!canGoForward}
             reloadDisabled={!currentUrl}
-            onBack={() => goToHistoryIndex(historyIndex - 1)}
-            onForward={() => goToHistoryIndex(historyIndex + 1)}
+            onBack={() => goTo(goBack())}
+            onForward={() => goTo(goForward())}
             onReload={() => setReloadKey((key) => key + 1)}
           />
           <form className="min-w-0 flex-1" onSubmit={navigate}>

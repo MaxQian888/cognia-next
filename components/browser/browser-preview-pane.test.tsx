@@ -17,6 +17,7 @@ const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockPendingAnnotations: Array<Record<string, unknown>> = []
 let mockRemoteBrowserEnabled = false
 let mockActiveChatSessionId: string | null = "active-chat"
+let mockLoadedUrl: string | null = null
 let mockOwned = true
 let mockDevtoolsOptions: Record<string, unknown> | undefined
 const mockTakeLease = jest.fn()
@@ -135,7 +136,12 @@ jest.mock("@/hooks/browser/use-browser-pane-webview", () => ({
   },
 }))
 jest.mock("@/hooks/browser/use-browser-loading", () => ({
-  useBrowserLoading: () => ({ phase: mockPhase, hasPainted: mockHasPainted, begin: mockBeginLoad }),
+  useBrowserLoading: () => ({
+    phase: mockPhase,
+    hasPainted: mockHasPainted,
+    loadedUrl: mockLoadedUrl,
+    begin: mockBeginLoad,
+  }),
 }))
 jest.mock("@/hooks/browser/use-region-visibility", () => ({
   useRegionVisibility: () => mockRegionVisible,
@@ -215,6 +221,7 @@ jest.mock("@/lib/browser/client", () => ({
     embedFindClear: jest.fn().mockResolvedValue(undefined),
     embedBack: jest.fn().mockResolvedValue(undefined),
     embedForward: jest.fn().mockResolvedValue(undefined),
+    embedStop: jest.fn().mockResolvedValue(undefined),
     embedNavigate: jest.fn().mockResolvedValue(undefined),
     embedSetSelectMode: jest.fn().mockResolvedValue(undefined),
     embedClearSelection: jest.fn().mockResolvedValue(undefined),
@@ -247,6 +254,20 @@ const urlBar = () => screen.getByPlaceholderText("http://localhost:3000")
 const toolbar = () => screen.getByTestId("browser-toolbar")
 /** The "⋯" popover body — where a tier packs whatever didn't stay inline. */
 const overflow = () => screen.getByTestId("popover-content")
+
+/**
+ * Report that the preview finished loading `url`. The back/forward stack is
+ * built from settled documents, not from committed targets — a redirect chain
+ * emits one `browser://navigated` per hop but settles once.
+ */
+const settleAt = (view: { rerender: (ui: React.ReactElement) => void }, url: string) => {
+  mockLoadedUrl = url
+  view.rerender(
+    <TooltipProvider>
+      <BrowserPreviewPane />
+    </TooltipProvider>
+  )
+}
 
 /** Type an address into the URL bar and press Enter (form submit). */
 const commitUrl = (value: string) => {
@@ -282,6 +303,7 @@ beforeEach(() => {
   mockPendingAnnotations = []
   mockRemoteBrowserEnabled = false
   mockActiveChatSessionId = "active-chat"
+  mockLoadedUrl = null
   mockOwned = true
   mockDevtoolsOptions = undefined
   mockTakeLease.mockClear()
@@ -293,6 +315,7 @@ beforeEach(() => {
   ;(browserClient.embedFindClear as jest.Mock).mockClear()
   ;(browserClient.embedBack as jest.Mock).mockClear()
   ;(browserClient.embedForward as jest.Mock).mockClear()
+  ;(browserClient.embedStop as jest.Mock).mockClear().mockResolvedValue(undefined)
   ;(browserClient.embedNavigate as jest.Mock).mockClear()
   ;(browserClient.embedClearSelection as jest.Mock).mockClear()
   ;(browserClient.embedSetPanelLabels as jest.Mock).mockClear()
@@ -639,8 +662,11 @@ it("toggles select mode after a URL is committed", () => {
 })
 
 it("drives history and reload through the browser client", () => {
-  renderPane(<BrowserPreviewPane />)
+  const view = renderPane(<BrowserPreviewPane />)
   commitUrl("localhost:3000")
+  // Back and forward now need somewhere to go: two settled pages.
+  settleAt(view, "http://localhost:3000/")
+  settleAt(view, "http://localhost:3000/about")
   fireEvent.click(screen.getByRole("button", { name: "Back" }))
   fireEvent.click(screen.getByRole("button", { name: "Forward" }))
   fireEvent.click(screen.getByRole("button", { name: "Reload" }))
@@ -882,9 +908,11 @@ it("shows the raw address in the loading host when the URL can't be parsed", () 
 })
 
 it("begins a load on commit, reload, back and forward", () => {
-  renderPane(<BrowserPreviewPane />)
+  const view = renderPane(<BrowserPreviewPane />)
   commitUrl("localhost:3000")
   expect(mockBeginLoad).toHaveBeenCalledTimes(1)
+  settleAt(view, "http://localhost:3000/")
+  settleAt(view, "http://localhost:3000/about")
   fireEvent.click(screen.getByRole("button", { name: "Reload" }))
   fireEvent.click(screen.getByRole("button", { name: "Back" }))
   fireEvent.click(screen.getByRole("button", { name: "Forward" }))
@@ -1052,10 +1080,16 @@ describe("find-in-page", () => {
 })
 
 describe("history", () => {
-  it("records visited pages and re-navigates from the history menu", () => {
-    renderPane(<BrowserPreviewPane />)
-    commitUrl("localhost:3000")
+  it("records settled pages and re-navigates from the history menu", () => {
+    const view = renderPane(<BrowserPreviewPane />)
+    // Commit a different address first: it clears the empty state (which offers
+    // its own localhost chips) and keeps the address bar's own rendering of the
+    // URL from colliding with the history row we want to click.
     commitUrl("localhost:5173")
+    // The menu lists where the preview actually arrived, not what was typed —
+    // a redirect would otherwise leave the pre-redirect address in the list.
+    settleAt(view, "http://localhost:3000/")
+    settleAt(view, "http://localhost:5173/")
     // The manual dropdown mock renders items inline; click the earlier page.
     fireEvent.click(screen.getByText("localhost:3000"))
     expect(urlBar()).toHaveValue("http://localhost:3000/")
@@ -1275,7 +1309,7 @@ describe("lease ownership", () => {
 
   it("keeps those controls usable for the owning pane", () => {
     renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
-    for (const name of ["Send screenshot to chat", "Select element", "Find", "Back"]) {
+    for (const name of ["Send screenshot to chat", "Select element", "Find", "Reload"]) {
       expect(screen.getByRole("button", { name })).toBeEnabled()
     }
     expect(screen.queryByTestId("browser-lease-busy")).toBeNull()
@@ -1285,5 +1319,115 @@ describe("lease ownership", () => {
     mockOwned = false
     renderPane(<BrowserPreviewPane />)
     expect(mockDevtoolsOptions).toEqual({ paneId: "browser-embed", enabled: false })
+  })
+})
+
+// D8: back/forward had no disabled state at all — neither webview exposes
+// `canGoBack` through Tauri — so Back on the first page silently did nothing.
+// The stack is modelled in the renderer off the events the page already sends.
+describe("navigation model", () => {
+  const nav = (url: string, extra: Partial<BrowserNavigated> = {}) => {
+    mockNavigated = { paneId: "browser-embed", url, ...extra }
+  }
+
+  it("disables back and forward with nothing to go back to", () => {
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled()
+  })
+
+  it("enables back only after a second page has settled", () => {
+    mockLoadedUrl = "http://localhost:3000/"
+    const { rerender } = renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+
+    mockLoadedUrl = "http://localhost:3000/about"
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane initialUrl="http://localhost:3000/" />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "Back" })).toBeEnabled()
+  })
+
+  it("steps back and forward through the stack via the native commands", () => {
+    mockLoadedUrl = "http://localhost:3000/"
+    const { rerender } = renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    const withLoaded = (url: string) => {
+      mockLoadedUrl = url
+      rerender(
+        <TooltipProvider>
+          <BrowserPreviewPane initialUrl="http://localhost:3000/" />
+        </TooltipProvider>
+      )
+    }
+    withLoaded("http://localhost:3000/about")
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }))
+    expect(browserClient.embedBack).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "Forward" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Forward" }))
+    expect(browserClient.embedForward).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled()
+  })
+
+  it("does not grow the stack when the page reports a traversal it drove", () => {
+    mockLoadedUrl = "http://localhost:3000/"
+    const { rerender } = renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    const reload = () =>
+      rerender(
+        <TooltipProvider>
+          <BrowserPreviewPane initialUrl="http://localhost:3000/" />
+        </TooltipProvider>
+      )
+    nav("http://localhost:3000/about", { kind: "spa", intent: "push" })
+    reload()
+    expect(screen.getByRole("button", { name: "Back" })).toBeEnabled()
+
+    nav("http://localhost:3000/", { kind: "spa", intent: "traverse" })
+    reload()
+    // Position moved back, the stack did not grow — forward is reachable again.
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Forward" })).toBeEnabled()
+  })
+
+  it("overwrites the current entry for a replaceState route change", () => {
+    mockLoadedUrl = "http://localhost:3000/"
+    const { rerender } = renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    nav("http://localhost:3000/?tab=2", { kind: "spa", intent: "replace" })
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane initialUrl="http://localhost:3000/" />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+  })
+
+  it("ignores document-kind navigations, which fire once per redirect hop", () => {
+    mockLoadedUrl = "http://localhost:3000/"
+    const { rerender } = renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    nav("http://localhost:3000/hop", { kind: "document", intent: "push" })
+    rerender(
+      <TooltipProvider>
+        <BrowserPreviewPane initialUrl="http://localhost:3000/" />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
+  })
+
+  it("offers stop while a navigation is in flight", () => {
+    mockPhase = "loading"
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    expect(screen.queryByRole("button", { name: "Reload" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Stop loading" }))
+    expect(browserClient.embedStop).toHaveBeenCalledTimes(1)
+  })
+
+  it("goes back to reload once the page settles", () => {
+    mockPhase = "ready"
+    renderPane(<BrowserPreviewPane initialUrl="http://localhost:3000/" />)
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Stop loading" })).toBeNull()
   })
 })

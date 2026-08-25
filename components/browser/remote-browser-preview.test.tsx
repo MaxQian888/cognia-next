@@ -272,6 +272,19 @@ it("reuses the shared navigation controls with the remote engine", async () => {
   await waitFor(() => expect(streamOptions).not.toBeNull())
   act(() => streamOptions?.onState?.("connected"))
 
+  // Back and forward are enabled from the modelled history stack now, so the
+  // remote has to have actually been somewhere twice.
+  const arriveAt = (url: string) =>
+    act(() =>
+      streamOptions?.onEvent?.({
+        kind: "pages.changed",
+        activePageId: "page-1",
+        pages: [{ id: "page-1", url, title: url, active: true }],
+      })
+    )
+  arriveAt("https://example.com/one")
+  arriveAt("https://example.com/two")
+
   fireEvent.click(screen.getByRole("button", { name: "browser.actions.back" }))
   fireEvent.click(screen.getByRole("button", { name: "browser.actions.forward" }))
   fireEvent.click(screen.getByRole("button", { name: "browser.actions.reload" }))

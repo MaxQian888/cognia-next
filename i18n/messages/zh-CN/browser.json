@@ -8,7 +8,8 @@
     "openExternal": "在外部浏览器打开",
     "reload": "刷新",
     "screenshot": "截图发送到对话",
-    "selectElement": "选择元素"
+    "selectElement": "选择元素",
+    "stop": "停止加载"
   },
   "adjust": {
     "accept": "接受反馈",
