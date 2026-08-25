@@ -76,6 +76,8 @@
     "appVersion": "应用版本",
     "serverVersion": "服务端版本",
     "role": "角色",
+    "owner": "归属",
+    "ownerNone": "无人认领",
     "adminState": "状态",
     "ref": "标识",
     "presence": "在场",

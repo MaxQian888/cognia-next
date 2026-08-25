@@ -301,6 +301,7 @@ mod tests {
             display_name: "Owner".into(),
             role: "owner".into(),
             status: "active".into(),
+            user_id: None,
             created_at: 1,
             updated_at: 1,
             capabilities: vec!["host.admin".into()],

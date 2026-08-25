@@ -125,10 +125,21 @@ pub fn account_bind_person(
     user_id: String,
     org_id: Option<String>,
 ) -> Result<(), String> {
-    use crate::companion_api::host_identity::{bind_person, HostIdentityError};
+    use crate::companion_api::host_identity::{
+        adopt_unowned_devices, bind_person, HostIdentityError,
+    };
 
     match bind_person(&local_account_id, &user_id, org_id.as_deref()) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            // ADR-0149 §5 step one: the devices on this profile that nobody has
+            // claimed belong to whoever just proved they hold it. Best-effort —
+            // a failure here leaves the binding standing, because the person is
+            // the fact that matters and the attribution can be redone.
+            if let Err(error) = adopt_unowned_devices(&local_account_id) {
+                tracing::warn!(%error, "could not attribute unowned devices after sign-in");
+            }
+            Ok(())
+        }
         Err(HostIdentityError::StoreUnavailable) => Ok(()),
         Err(error) => Err(error.to_string()),
     }

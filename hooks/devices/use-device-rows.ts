@@ -36,6 +36,7 @@ import type {
 } from "@/lib/devices/types"
 import { devicePresence } from "@/lib/companion/device-presence-registry"
 import { listExecutionWorkers } from "@/lib/fleet/execution-workers"
+import { listUsers } from "@/lib/db/identity"
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { detectLocalCapabilities } from "@/lib/platform/capabilities"
 import { detectPlatform } from "@/lib/platform/detect"
@@ -80,6 +81,33 @@ async function readHostDevices(): Promise<Map<string, HostDeviceSummaryInput> | 
   }
 }
 
+/**
+ * `usr_…` → display name, from the ADR-0149 identity projection.
+ *
+ * Only the ids the host actually reported are looked up: the projection is a
+ * client cache of the collaboration plane, and reading every person on every
+ * poll to label a handful of devices would be the wrong trade.
+ */
+async function readOwnerNames(
+  hostDevices: Map<string, HostDeviceSummaryInput> | null
+): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(
+      [...(hostDevices?.values() ?? [])]
+        .map((device) => device.userId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ]
+  if (ids.length === 0) return new Map()
+  try {
+    const users = await listUsers(ids)
+    return new Map(users.map((user) => [user.id, user.displayName]))
+  } catch {
+    // The console falls back to the raw id, which still answers "whose?".
+    return new Map()
+  }
+}
+
 async function readWorkers(): Promise<WorkerInput[]> {
   try {
     return await listExecutionWorkers()
@@ -115,6 +143,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
 
   const [hostDevices, setHostDevices] = useState<Map<string, HostDeviceSummaryInput> | null>(null)
   const [workers, setWorkers] = useState<WorkerInput[]>([])
+  const [ownerNames, setOwnerNames] = useState<Map<string, string>>(() => new Map())
   const [loading, setLoading] = useState(true)
   /**
    * The clock the rows are judged against, advanced by the poll rather than
@@ -131,6 +160,7 @@ export function useDeviceRows(): UseDeviceRowsResult {
     const [devices, workerRows] = await Promise.all([readHostDevices(), readWorkers()])
     setHostDevices(devices)
     setWorkers(workerRows)
+    setOwnerNames(await readOwnerNames(devices))
     setLoading(false)
     setNow(Date.now())
   }, [])
@@ -171,9 +201,20 @@ export function useDeviceRows(): UseDeviceRowsResult {
       presence: readPresence(deviceIds),
       sandboxConnections: connections,
       activeHostId,
+      ownerNames,
       now,
     })
-  }, [pairedDevices, hostDevices, hosts, workers, connections, activeHostId, health.available, now])
+  }, [
+    pairedDevices,
+    hostDevices,
+    hosts,
+    workers,
+    connections,
+    activeHostId,
+    ownerNames,
+    health.available,
+    now,
+  ])
 
   return {
     rows,

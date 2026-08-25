@@ -8512,6 +8512,8 @@
       "reachability": "可达性",
       "ref": "标识",
       "role": "角色",
+      "owner": "归属",
+      "ownerNone": "无人认领",
       "serverVersion": "服务端版本",
       "streamCount": "{count, plural, other {# 条事件流}}"
     },

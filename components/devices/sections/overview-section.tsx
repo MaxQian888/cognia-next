@@ -71,6 +71,15 @@ export function OverviewSection({ row }: { row: DeviceRow }) {
             </DeviceFactRow>
           ) : null}
           {row.role ? <DeviceFactRow label={t("overview.role")}>{row.role}</DeviceFactRow> : null}
+          {row.ownerUserId ? (
+            <DeviceFactRow label={t("overview.owner")} mono={!row.ownerLabel}>
+              {row.ownerLabel ?? row.ownerUserId}
+            </DeviceFactRow>
+          ) : row.kind === "paired-device" ? (
+            // Named explicitly rather than omitted: "nobody has claimed this"
+            // is a fact worth reading, and an absent row reads as "unknown".
+            <DeviceFactRow label={t("overview.owner")}>{t("overview.ownerNone")}</DeviceFactRow>
+          ) : null}
           <DeviceFactRow label={t("overview.adminState")}>
             {row.adminState === "active" ? (
               t("adminState.active")

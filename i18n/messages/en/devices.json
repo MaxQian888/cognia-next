@@ -76,6 +76,8 @@
     "appVersion": "App version",
     "serverVersion": "Server version",
     "role": "Role",
+    "owner": "Belongs to",
+    "ownerNone": "Unclaimed",
     "adminState": "State",
     "ref": "Reference",
     "presence": "Presence",

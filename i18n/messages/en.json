@@ -8512,6 +8512,8 @@
       "reachability": "Reachability",
       "ref": "Reference",
       "role": "Role",
+      "owner": "Belongs to",
+      "ownerNone": "Unclaimed",
       "serverVersion": "Server version",
       "streamCount": "{count, plural, =1 {1 stream} other {# streams}}"
     },

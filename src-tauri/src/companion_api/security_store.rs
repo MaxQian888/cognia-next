@@ -143,6 +143,12 @@ pub struct DeviceSummary {
     pub display_name: String,
     pub role: String,
     pub status: String,
+    /// The person this device belongs to — ADR-0149 §5, step one.
+    ///
+    /// `None` for a device enrolled before anyone signed in on this profile,
+    /// which stays a supported state. Reported so the console can answer "whose
+    /// machine is this?"; **not** consulted by any capability check yet.
+    pub user_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub capabilities: Vec<String>,
@@ -413,11 +419,15 @@ impl SecurityStore {
             return Err(SecurityStoreError::InvalidInvitation);
         }
 
+        // ADR-0149 §5: a device belongs to whoever enrolled it, and the only
+        // person this host can name is the one bound to the tenant. `None`
+        // when nobody has signed in, which is a supported state.
+        let owner = host_person_for_tenant(&tx, tenant_id)?;
         tx.execute(
             "INSERT INTO devices
-             (id, tenant_id, display_name, role, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'owner', 'active', ?4, ?4)",
-            params![device_id, tenant_id, display_name, now],
+             (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'owner', 'active', ?4, ?5, ?5)",
+            params![device_id, tenant_id, display_name, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -490,11 +500,12 @@ impl SecurityStore {
         {
             return Err(SecurityStoreError::InvalidInvitation);
         }
+        let owner = host_person_for_tenant(&tx, tenant_id)?;
         tx.execute(
             "INSERT INTO devices
-             (id, tenant_id, display_name, role, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?4)",
-            params![device_id, tenant_id, display_name, now],
+             (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'member', 'active', ?4, ?5, ?5)",
+            params![device_id, tenant_id, display_name, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -550,11 +561,12 @@ impl SecurityStore {
         if consumed_challenge != 1 {
             return Err(SecurityStoreError::InvalidChallenge);
         }
+        let owner = host_person_for_tenant(&tx, tenant_id)?;
         tx.execute(
             "INSERT INTO devices
-             (id, tenant_id, display_name, role, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?5)",
-            params![device_id, tenant_id, display_name, role, now],
+             (id, tenant_id, display_name, role, status, user_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 'active', ?5, ?6, ?6)",
+            params![device_id, tenant_id, display_name, role, owner, now],
         )?;
         tx.execute(
             "INSERT INTO device_keys
@@ -580,6 +592,73 @@ impl SecurityStore {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Record (or clear) the person a device belongs to — ADR-0149 §5, step one.
+    ///
+    /// Pure bookkeeping: nothing consults this column when deciding whether a
+    /// request is allowed. Clearing is offered because adoption can be wrong —
+    /// a shared machine, a device handed on — and a wrong owner that cannot be
+    /// corrected would be worse than no owner at all.
+    pub fn assign_device_user(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+        user_id: Option<&str>,
+        now: i64,
+    ) -> Result<(), SecurityStoreError> {
+        let changed = self.conn.lock().execute(
+            "UPDATE devices SET user_id = ?3, updated_at = ?4
+             WHERE tenant_id = ?1 AND id = ?2",
+            params![tenant_id, device_id, user_id, now],
+        )?;
+        if changed == 0 {
+            return Err(SecurityStoreError::DeviceUnavailable);
+        }
+        Ok(())
+    }
+
+    /// Attribute this tenant's unowned devices to `user_id`, returning how many.
+    ///
+    /// Called at sign-in. A device with no owner was enrolled on a profile
+    /// before anybody signed in on it, and the profile is one person's
+    /// encryption boundary — its password is theirs — so the person who just
+    /// proved they hold it is the honest answer.
+    ///
+    /// Deliberately only touches rows where `user_id IS NULL`. A device already
+    /// attributed to somebody keeps its owner: signing in must never reassign
+    /// another person's machine, which is precisely the failure a blanket
+    /// backfill would cause on a host two people share.
+    pub fn adopt_unowned_devices(
+        &self,
+        tenant_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<usize, SecurityStoreError> {
+        let adopted = self.conn.lock().execute(
+            "UPDATE devices SET user_id = ?2, updated_at = ?3
+             WHERE tenant_id = ?1 AND user_id IS NULL",
+            params![tenant_id, user_id, now],
+        )?;
+        Ok(adopted)
+    }
+
+    /// Which person a device belongs to, or `None` if nobody has claimed it.
+    pub fn device_user(
+        &self,
+        tenant_id: &str,
+        device_id: &str,
+    ) -> Result<Option<String>, SecurityStoreError> {
+        let found: Option<Option<String>> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT user_id FROM devices WHERE tenant_id = ?1 AND id = ?2",
+                params![tenant_id, device_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.flatten())
     }
 
     pub fn has_capability(
@@ -626,7 +705,7 @@ impl SecurityStore {
     pub fn list_devices(&self, tenant_id: &str) -> Result<Vec<DeviceSummary>, SecurityStoreError> {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
-            "SELECT id, display_name, role, status, created_at, updated_at
+            "SELECT id, display_name, role, status, user_id, created_at, updated_at
              FROM devices
              WHERE tenant_id = ?1 AND role != 'service'
              ORDER BY created_at, id",
@@ -637,8 +716,9 @@ impl SecurityStore {
                 display_name: row.get(1)?,
                 role: row.get(2)?,
                 status: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                user_id: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
                 capabilities: Vec::new(),
             })
         })?;
@@ -2047,6 +2127,7 @@ const MIGRATION_DEVICE_STATUS_SUSPENDED: &str = "device-status-suspended-v1";
 /// account unlock has something to adopt.
 const MIGRATION_HOST_BINDING_LEGACY: &str = "host-binding-legacy-v1";
 const MIGRATION_HOST_BINDING_PERSON: &str = "host-binding-person-v1";
+const MIGRATION_DEVICE_USER: &str = "device-user-v1";
 
 /// Steps 4-7 of the rebuild. The column list is spelled out rather than
 /// `SELECT *` so that a future column landing in a different position cannot
@@ -2108,6 +2189,7 @@ fn apply_schema_migrations(
     migrate_device_status_suspended(conn, now, backup_target)?;
     migrate_host_binding_legacy(conn, now)?;
     migrate_host_binding_person(conn, now)?;
+    migrate_device_user(conn, now)?;
     Ok(())
 }
 
@@ -2187,6 +2269,66 @@ fn migrate_host_binding_person(conn: &mut Connection, now: i64) -> Result<(), Se
         }
     }
     mark_migration(&tx, MIGRATION_HOST_BINDING_PERSON, now)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The person bound to a tenant on this host, if any.
+///
+/// `host_bindings.tenant_id` is UNIQUE, so this is a single row by construction
+/// — which is also why relaxing that constraint is not free: it would make this
+/// lookup ambiguous, and every device enrolled afterwards would inherit an
+/// arbitrary one of the candidates.
+fn host_person_for_tenant(
+    conn: &Connection,
+    tenant_id: &str,
+) -> Result<Option<String>, SecurityStoreError> {
+    let found: Option<Option<String>> = conn
+        .query_row(
+            "SELECT user_id FROM host_bindings WHERE tenant_id = ?1",
+            params![tenant_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.flatten())
+}
+
+/// Give `devices` a `user_id` — ADR-0149 §5, step **one** of two.
+///
+/// Pure bookkeeping. The column is added nullable, nothing is backfilled, and
+/// **no decision path reads it**: [`SecurityStore::has_capability`] is byte for
+/// byte what it was, and a test pins that.
+///
+/// The split is not caution for its own sake. `capability_grants` is on the hot
+/// request path — `rpc.rs`, `ws_terminal.rs` and `remote_execution.rs` all reach
+/// it per request — so a release that both introduced the column and started
+/// routing decisions through it would evaluate the new rule against devices
+/// whose `user_id` is still NULL, which is every device that existed before the
+/// upgrade. That is a fleet-wide lockout, and it is exactly what shipping the
+/// two halves apart prevents: by the time the decision moves, the column has
+/// been filling in for a release.
+///
+/// No backfill here for the same reason `migrate_host_binding_person` does
+/// none: a device that predates any sign-in was enrolled by somebody this host
+/// cannot name. Adoption is an explicit act, and it happens at sign-in through
+/// [`SecurityStore::adopt_unowned_devices`], where a person has just proved who
+/// they are.
+fn migrate_device_user(conn: &mut Connection, now: i64) -> Result<(), SecurityStoreError> {
+    if migration_applied(conn, MIGRATION_DEVICE_USER)? {
+        return Ok(());
+    }
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let present: bool = {
+        let mut statement = tx.prepare("PRAGMA table_info('devices')")?;
+        let names = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        names.iter().any(|name| name == "user_id")
+    };
+    if !present {
+        tx.execute("ALTER TABLE devices ADD COLUMN user_id TEXT", [])?;
+    }
+    mark_migration(&tx, MIGRATION_DEVICE_USER, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -2315,6 +2457,9 @@ CREATE TABLE IF NOT EXISTS devices (
     display_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('owner', 'member', 'service')),
     status TEXT NOT NULL CHECK(status IN ('active', 'suspended', 'revoked')),
+    -- ADR-0149 §5 step 1: whose machine this is. Nullable, and NOTHING reads it
+    -- for an authorization decision yet -- see `assign_device_user`.
+    user_id TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (tenant_id, id)
@@ -3257,6 +3402,224 @@ CREATE TABLE devices (
             .capabilities
             .iter()
             .any(|entry| entry == "host.admin"));
+    }
+
+    // ── ADR-0149 §5 step one: devices belong to people ──────────────────────
+
+    const ADA: &str = "usr_aaaaaaaaaaaaaaaaaaaaaaaa";
+    const BOB: &str = "usr_bbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn device_user(store: &SecurityStore, tenant: &str, device: &str) -> Option<String> {
+        store.device_user(tenant, device).unwrap()
+    }
+
+    #[test]
+    fn a_device_enrolled_before_anyone_signs_in_has_no_owner() {
+        // The supported state the whole two-step split exists to protect.
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        assert_eq!(device_user(&store, "tenant-a", "device-a"), None);
+    }
+
+    #[test]
+    fn a_device_enrolled_after_sign_in_inherits_the_bound_person() {
+        let store = SecurityStore::in_memory().unwrap();
+        store.bind_host_account("acct_a", None, 90).unwrap();
+        let tenant = store.host_binding("acct_a").unwrap().unwrap().tenant_id;
+        store.bind_host_person("acct_a", ADA, None, 95).unwrap();
+
+        register(&store, &tenant, "device-a", 100);
+        assert_eq!(
+            device_user(&store, &tenant, "device-a").as_deref(),
+            Some(ADA)
+        );
+    }
+
+    #[test]
+    fn adoption_claims_only_the_unowned() {
+        // Signing in must never reassign somebody else's machine — the failure
+        // a blanket backfill would cause on a host two people share.
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-unowned", 100);
+        register(&store, "tenant-a", "device-bobs", 101);
+        store
+            .assign_device_user("tenant-a", "device-bobs", Some(BOB), 102)
+            .unwrap();
+
+        assert_eq!(
+            store.adopt_unowned_devices("tenant-a", ADA, 110).unwrap(),
+            1
+        );
+        assert_eq!(
+            device_user(&store, "tenant-a", "device-unowned").as_deref(),
+            Some(ADA)
+        );
+        assert_eq!(
+            device_user(&store, "tenant-a", "device-bobs").as_deref(),
+            Some(BOB)
+        );
+    }
+
+    #[test]
+    fn adoption_is_idempotent_and_scoped_to_one_tenant() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        register(&store, "tenant-b", "device-b", 101);
+
+        assert_eq!(
+            store.adopt_unowned_devices("tenant-a", ADA, 110).unwrap(),
+            1
+        );
+        // Every sign-in after the first adopts nothing.
+        assert_eq!(
+            store.adopt_unowned_devices("tenant-a", ADA, 111).unwrap(),
+            0
+        );
+        assert_eq!(device_user(&store, "tenant-b", "device-b"), None);
+    }
+
+    #[test]
+    fn an_owner_can_be_corrected_and_cleared() {
+        // Adoption can be wrong — a shared machine, a device handed on — and a
+        // wrong owner that cannot be corrected is worse than no owner.
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        store
+            .assign_device_user("tenant-a", "device-a", Some(ADA), 110)
+            .unwrap();
+        store
+            .assign_device_user("tenant-a", "device-a", Some(BOB), 111)
+            .unwrap();
+        assert_eq!(
+            device_user(&store, "tenant-a", "device-a").as_deref(),
+            Some(BOB)
+        );
+
+        store
+            .assign_device_user("tenant-a", "device-a", None, 112)
+            .unwrap();
+        assert_eq!(device_user(&store, "tenant-a", "device-a"), None);
+    }
+
+    #[test]
+    fn assigning_an_owner_to_an_unknown_device_is_refused() {
+        let store = SecurityStore::in_memory().unwrap();
+        assert!(matches!(
+            store.assign_device_user("tenant-a", "ghost", Some(ADA), 100),
+            Err(SecurityStoreError::DeviceUnavailable)
+        ));
+    }
+
+    #[test]
+    fn list_devices_reports_the_owner() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        store
+            .assign_device_user("tenant-a", "device-a", Some(ADA), 110)
+            .unwrap();
+
+        let devices = store.list_devices("tenant-a").unwrap();
+        let found = devices
+            .iter()
+            .find(|device| device.device_id == "device-a")
+            .expect("listed");
+        assert_eq!(found.user_id.as_deref(), Some(ADA));
+    }
+
+    /// Step **one** changes no decision. This is the guard that makes shipping
+    /// the column ahead of the reroute safe.
+    #[test]
+    fn ownership_does_not_yet_influence_any_capability_decision() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+
+        let before = store
+            .has_capability("tenant-a", "device-a", "host.admin")
+            .unwrap();
+        assert!(before, "the owner device holds host.admin");
+
+        // Attribute it to somebody with no membership anywhere, then to nobody.
+        for owner in [Some(BOB), None] {
+            store
+                .assign_device_user("tenant-a", "device-a", owner, 110)
+                .unwrap();
+            assert_eq!(
+                store
+                    .has_capability("tenant-a", "device-a", "host.admin")
+                    .unwrap(),
+                before,
+                "has_capability must not read devices.user_id until step two"
+            );
+        }
+    }
+
+    /// The SQL half of the same guard: the decision query must not mention the
+    /// column. A future edit that joins it in fails here rather than in the
+    /// field.
+    #[test]
+    fn the_capability_query_does_not_mention_the_owner_column() {
+        let store = SecurityStore::in_memory().unwrap();
+        register(&store, "tenant-a", "device-a", 100);
+        let plan: Vec<String> = {
+            let conn = store.conn.lock();
+            let mut statement = conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN
+                     SELECT COUNT(*)
+                     FROM capability_grants g
+                     JOIN devices d ON d.tenant_id = g.tenant_id AND d.id = g.device_id
+                     WHERE g.tenant_id = ?1 AND g.device_id = ?2 AND g.capability = ?3
+                       AND g.revoked_at IS NULL AND d.status = 'active'",
+                )
+                .unwrap();
+            let rows = statement
+                .query_map(params!["tenant-a", "device-a", "host.admin"], |row| {
+                    row.get::<_, String>(3)
+                })
+                .unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        };
+        assert!(!plan.join(" ").contains("user_id"), "{plan:?}");
+    }
+
+    #[test]
+    fn the_owner_column_survives_an_upgrade_from_a_database_without_it() {
+        // The migration path real installs take, as opposed to a fresh schema.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE devices (
+                 id TEXT NOT NULL,
+                 tenant_id TEXT NOT NULL,
+                 display_name TEXT NOT NULL,
+                 role TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL,
+                 PRIMARY KEY (tenant_id, id)
+             );
+             INSERT INTO devices VALUES ('device-a', 'tenant-a', 'Phone', 'owner', 'active', 1, 1);
+             CREATE TABLE IF NOT EXISTS security_migrations (
+                 key TEXT PRIMARY KEY NOT NULL,
+                 applied_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+
+        migrate_device_user(&mut conn, 200).unwrap();
+        // Idempotent: a second run is a no-op rather than a duplicate-column error.
+        migrate_device_user(&mut conn, 201).unwrap();
+
+        let owner: Option<String> = conn
+            .query_row(
+                "SELECT user_id FROM devices WHERE id = 'device-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            owner, None,
+            "an existing device is not attributed to a guess"
+        );
     }
 
     #[test]

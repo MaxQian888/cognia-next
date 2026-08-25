@@ -161,6 +161,15 @@ function buildPairedDeviceRow(row: PairedDeviceRow, input: BuildDeviceRowsInput)
     appVersion: row.appVersion,
     fingerprint: row.serverFingerprint,
     role: hostDevice?.role,
+    // Only the host knows this; the Dexie mirror has never carried it.
+    ...(hostDevice?.userId
+      ? {
+          ownerUserId: hostDevice.userId,
+          ...(input.ownerNames?.get(hostDevice.userId)
+            ? { ownerLabel: input.ownerNames.get(hostDevice.userId) }
+            : {}),
+        }
+      : {}),
     adminState,
     adminStateConflict: hostState !== undefined && hostState !== mirror ? true : undefined,
     reachability: deriveReachability(liveness, presence?.eventPlane === "ready", input.now),

@@ -1167,6 +1167,7 @@ mod tests {
             display_name: "Worker A".to_string(),
             role: "member".to_string(),
             status: "active".to_string(),
+            user_id: None,
             created_at: 1,
             updated_at: 2,
             capabilities: vec!["agent.worker".to_string()],

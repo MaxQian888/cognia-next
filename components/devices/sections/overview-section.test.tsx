@@ -89,3 +89,40 @@ describe("OverviewSection", () => {
     expect(screen.getAllByText("This device").length).toBeGreaterThan(0)
   })
 })
+
+describe("device ownership (ADR-0149 §5, step one)", () => {
+  it("names the person a paired device belongs to", () => {
+    render(
+      <OverviewSection
+        row={row({
+          kind: "paired-device",
+          ownerUserId: "usr_ada000000000000000000",
+          ownerLabel: "Ada",
+        })}
+      />
+    )
+    expect(screen.getByText("Belongs to")).toBeInTheDocument()
+    expect(screen.getByText("Ada")).toBeInTheDocument()
+  })
+
+  it("falls back to the id when no name is mirrored", () => {
+    // "Unknown person" would be a worse answer than an id you can search for.
+    render(
+      <OverviewSection
+        row={row({ kind: "paired-device", ownerUserId: "usr_ada000000000000000000" })}
+      />
+    )
+    expect(screen.getByText("usr_ada000000000000000000")).toBeInTheDocument()
+  })
+
+  it("says a paired device is unclaimed rather than omitting the row", () => {
+    render(<OverviewSection row={row({ kind: "paired-device" })} />)
+    expect(screen.getByText("Unclaimed")).toBeInTheDocument()
+  })
+
+  it("says nothing about ownership for this machine", () => {
+    // The local device is not a paired device and has no owner to report.
+    render(<OverviewSection row={row({ kind: "local", isSelf: true })} />)
+    expect(screen.queryByText("Belongs to")).not.toBeInTheDocument()
+  })
+})

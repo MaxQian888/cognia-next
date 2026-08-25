@@ -442,3 +442,77 @@ describe("ordering and summary", () => {
     expect(rowNeedsAttention(row)).toBe(true)
   })
 })
+
+describe("device ownership (ADR-0149 §5, step one)", () => {
+  function hostDevice(overrides: Record<string, unknown> = {}) {
+    return new Map([
+      [
+        "device-a",
+        {
+          deviceId: "device-a",
+          displayName: "Phone",
+          role: "owner",
+          status: "active",
+          createdAt: 1,
+          updatedAt: 2,
+          capabilities: [] as readonly string[],
+          ...overrides,
+        },
+      ],
+    ])
+  }
+
+  function rowsWith(overrides: Partial<BuildDeviceRowsInput>) {
+    return buildDeviceRows(
+      input({ pairedDevices: [phone({ deviceId: "device-a" })], ...overrides })
+    )
+  }
+
+  function pairedRow(rows: DeviceRow[]) {
+    return rows.find((row) => row.deviceId === "device-a")
+  }
+
+  it("carries the owner the host reported", () => {
+    const rows = rowsWith({ hostDevices: hostDevice({ userId: "usr_ada000000000000000000" }) })
+    expect(pairedRow(rows)?.ownerUserId).toBe("usr_ada000000000000000000")
+  })
+
+  it("resolves a display name when the identity projection has one", () => {
+    const rows = rowsWith({
+      hostDevices: hostDevice({ userId: "usr_ada000000000000000000" }),
+      ownerNames: new Map([["usr_ada000000000000000000", "Ada"]]),
+    })
+    expect(pairedRow(rows)?.ownerLabel).toBe("Ada")
+  })
+
+  it("keeps the id when no name is mirrored, rather than hiding the owner", () => {
+    // "Unknown person" is a worse answer than an id you can search.
+    const rows = rowsWith({ hostDevices: hostDevice({ userId: "usr_ada000000000000000000" }) })
+    const row = pairedRow(rows)
+    expect(row?.ownerUserId).toBe("usr_ada000000000000000000")
+    expect(row?.ownerLabel).toBeUndefined()
+  })
+
+  it("omits ownership entirely for a device nobody has claimed", () => {
+    const rows = rowsWith({ hostDevices: hostDevice() })
+    const row = pairedRow(rows)
+    expect(row).toBeDefined()
+    expect("ownerUserId" in (row as object)).toBe(false)
+    expect("ownerLabel" in (row as object)).toBe(false)
+  })
+
+  it("an unowned device is not a restricted device", () => {
+    // Step one changes no decision: the grant rows must be identical whether
+    // or not the host reported an owner.
+    const owned = pairedRow(
+      rowsWith({ hostDevices: hostDevice({ userId: "usr_ada000000000000000000" }) })
+    )
+    const unowned = pairedRow(rowsWith({ hostDevices: hostDevice() }))
+    expect(owned?.grants).toEqual(unowned?.grants)
+  })
+
+  it("reports no owner when the host could not be asked at all", () => {
+    const rows = rowsWith({ hostDevices: undefined })
+    expect(pairedRow(rows)?.ownerUserId).toBeUndefined()
+  })
+})

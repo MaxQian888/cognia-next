@@ -247,8 +247,36 @@ pub fn bind_person(
         })
 }
 
+/// Attribute this profile's unowned devices to the person bound to it.
+///
+/// ADR-0149 §5, step one. Separate from [`bind_person`] so the binding stays a
+/// single fact and this stays a single, reversible act — and so a caller that
+/// only wants to record who signed in does not silently rewrite device rows.
+///
+/// Returns how many devices were adopted. Zero is the normal answer on every
+/// sign-in after the first.
+pub fn adopt_unowned_devices(local_account_namespace: &str) -> Result<usize, HostIdentityError> {
+    let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
+    let binding = store
+        .host_binding(local_account_namespace)
+        .map_err(|error| HostIdentityError::Store(error.to_string()))?
+        .ok_or(HostIdentityError::Unbound)?;
+    // Nothing to attribute devices to. Not an error: a profile can be unlocked
+    // without anybody signing in, and its devices simply stay unowned.
+    let Some(user_id) = binding.user_id else {
+        return Ok(0);
+    };
+    store
+        .adopt_unowned_devices(&binding.tenant_id, &user_id, unix_time_secs())
+        .map_err(|error| HostIdentityError::Store(error.to_string()))
+}
+
 /// Forget the person on a profile (sign-out). The profile binding survives —
 /// signing out is not un-owning a tenant, exactly as locking is not.
+///
+/// Devices keep their owner too. Signing out is not disowning your machines,
+/// and clearing them would make the next sign-in re-adopt devices that were
+/// deliberately assigned to somebody else.
 pub fn unbind_person(local_account_namespace: &str) -> Result<(), HostIdentityError> {
     let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
     store
@@ -434,6 +462,102 @@ mod tests {
             HostIdentityError::MalformedId(_)
         ));
         assert_eq!(person("acct_deadbeef").unwrap().user_id, None);
+    }
+
+    #[test]
+    fn signing_in_attributes_the_profile_s_unowned_devices() {
+        let _scope = store_scope();
+        install();
+        let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
+        let store = crate::companion_api::security_store::security_store().unwrap();
+
+        // A device enrolled before anybody signed in.
+        let challenge = store
+            .issue_challenge(&bound.remote_tenant_id, 100, 60)
+            .unwrap();
+        let invitation = store
+            .create_owner_invitation(&bound.remote_tenant_id, "local-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_owner_device(
+                &bound.remote_tenant_id,
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "device-a",
+                "Phone",
+                "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                "thumb-a",
+                100,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .device_user(&bound.remote_tenant_id, "device-a")
+                .unwrap(),
+            None
+        );
+
+        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        assert_eq!(adopt_unowned_devices("acct_deadbeef").unwrap(), 1);
+        assert_eq!(
+            store
+                .device_user(&bound.remote_tenant_id, "device-a")
+                .unwrap()
+                .as_deref(),
+            Some("usr_ada")
+        );
+    }
+
+    #[test]
+    fn adopting_on_a_profile_with_nobody_signed_in_claims_nothing() {
+        // A profile can be unlocked without anybody signing in, and its devices
+        // simply stay unowned. Not an error.
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+        assert_eq!(adopt_unowned_devices("acct_deadbeef").unwrap(), 0);
+    }
+
+    #[test]
+    fn signing_out_leaves_devices_with_their_owner() {
+        // Signing out is not disowning your machines. Clearing them would make
+        // the next sign-in re-adopt devices deliberately assigned elsewhere.
+        let _scope = store_scope();
+        install();
+        let bound = bind_local_account("acct_deadbeef", "digest-a").unwrap();
+        let store = crate::companion_api::security_store::security_store().unwrap();
+        let challenge = store
+            .issue_challenge(&bound.remote_tenant_id, 100, 60)
+            .unwrap();
+        let invitation = store
+            .create_owner_invitation(&bound.remote_tenant_id, "local-trust-root", 100, 60)
+            .unwrap();
+        store
+            .register_owner_device(
+                &bound.remote_tenant_id,
+                &invitation,
+                &challenge.id,
+                &challenge.nonce,
+                "device-a",
+                "Phone",
+                "-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----",
+                "thumb-a",
+                100,
+            )
+            .unwrap();
+        bind_person("acct_deadbeef", "usr_ada", None).unwrap();
+        adopt_unowned_devices("acct_deadbeef").unwrap();
+
+        unbind_person("acct_deadbeef").unwrap();
+
+        assert_eq!(
+            store
+                .device_user(&bound.remote_tenant_id, "device-a")
+                .unwrap()
+                .as_deref(),
+            Some("usr_ada")
+        );
     }
 
     #[test]

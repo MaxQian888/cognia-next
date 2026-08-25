@@ -186,6 +186,17 @@ export interface DeviceRow {
   pubkey?: string
   /** Remote hosts — the local store id, not the remote device id. */
   hostId?: string
+  /**
+   * Whose machine this is (`usr_…`), when the host knows — ADR-0149 §5.
+   *
+   * Bookkeeping only. It answers a question the console could not answer at
+   * all before ("some device of mine was compromised — which person's?"), and
+   * it is deliberately NOT an input to any grant decision until the reroute
+   * lands. A row without it is unattributed, never restricted.
+   */
+  ownerUserId?: string
+  /** The owner's display name, when the identity projection has one. */
+  ownerLabel?: string
 
   /** Capability baseline platform. Absent when the device never said. */
   platform?: Platform
@@ -279,6 +290,15 @@ export interface HostDeviceSummaryInput {
   status: string
   createdAt: number
   updatedAt: number
+  /**
+   * The `usr_…` this device belongs to — ADR-0149 §5, step one.
+   *
+   * Absent on a device enrolled before anybody signed in on this profile,
+   * which stays a supported state. Reported so the console can answer "whose
+   * machine is this?"; **nothing** gates a capability on it yet, and a device
+   * with no owner is not a device with less access.
+   */
+  userId?: string
   /** Raw SecurityStore capability ids this device holds. */
   capabilities: readonly string[]
 }
@@ -309,5 +329,13 @@ export interface BuildDeviceRowsInput {
   sandboxConnections: readonly SandboxConnectionRow[]
   /** `activeHostId` from the remote-host store; `null` routes locally. */
   activeHostId: string | null
+  /**
+   * `usr_…` → display name, from the ADR-0149 identity projection.
+   *
+   * Absent for a person this client has never mirrored, and the console falls
+   * back to the raw id rather than hiding the fact that the device belongs to
+   * *somebody*. "Unknown person" is a worse answer than an id you can search.
+   */
+  ownerNames?: ReadonlyMap<string, string>
   now: number
 }
