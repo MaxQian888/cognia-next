@@ -55,6 +55,11 @@
       "resolved": "已解决"
     }
   },
+  "backend": {
+    "embedded": "内置预览",
+    "label": "浏览器引擎",
+    "remote": "云端浏览器"
+  },
   "comment": {
     "cancel": "取消",
     "failed": "评论发送失败",
@@ -225,6 +230,8 @@
     "error": "远程浏览器不可用（{code}）",
     "find": "在页面中查找",
     "humanControl": "由你控制",
+    "needsRemoteHost": "连接一台 Cognia 服务器后才能使用云端浏览器",
+    "runtimeUnavailable": "云端浏览器不可用（{reason}）",
     "takeover": "接管控制",
     "untitledPage": "未命名页面",
     "waiting": "正在等待远程浏览器…"

@@ -58,7 +58,13 @@ import type { BrowserPageSummary } from "@/lib/browser/session-types"
 import type { BrowserSelection, SnapshotNode } from "@/lib/browser/protocol"
 import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { openExternal } from "@/lib/tauri/opener"
-import { issueCompanionSocketTicket, loadCompanionConfig } from "@/lib/tauri/transport-companion"
+import { issueCompanionSocketTicket } from "@/lib/tauri/transport-companion"
+import { issueSocketTicket } from "@/lib/tauri/companion-auth"
+import type { CompanionConfig } from "@/lib/tauri/companion-storage"
+import {
+  defaultCompanionEndpointResolver,
+  type CompanionEndpoint,
+} from "@/lib/tauri/companion-endpoint"
 import { transport } from "@/lib/tauri/transport-instance"
 
 interface RemoteSessionRpcSummary {
@@ -75,6 +81,15 @@ interface StreamLike {
   sendInput(input: { kind: "mouse" | "key"; payload: Record<string, unknown> }): boolean
 }
 
+/** What `browser_runtime_status` answers — the only RPC served uncompiled. */
+interface BrowserRuntimeStatus {
+  compiled: boolean
+  enabled: boolean
+  configured: boolean
+  healthy: boolean
+  reason?: string | null
+}
+
 export interface RemoteBrowserPreviewProps {
   chatSessionId: string
   parentChatSessionId?: string
@@ -84,8 +99,20 @@ export interface RemoteBrowserPreviewProps {
   createStream?: (options: RemoteBrowserStreamOptions) => StreamLike
 }
 
-function companionBaseUrl(): string | null {
-  return loadCompanionConfig()?.baseUrl ?? buildTimeServerUrl()
+/**
+ * Where this shell's frame stream lives.
+ *
+ * A desktop driving a remote host keeps its identity in the remote-host store,
+ * not the module-level companion cache, so reading only that cache resolved
+ * `null` and the stream threw `browser_companion_unconfigured` before it ever
+ * opened. `resolveCompanionEndpoint` is the resolver the terminal already uses
+ * for the same reason.
+ */
+async function resolveStreamEndpoint(): Promise<CompanionEndpoint | null> {
+  const endpoint = await defaultCompanionEndpointResolver()
+  if (endpoint) return endpoint
+  const fallback = buildTimeServerUrl()
+  return fallback ? ({ baseUrl: fallback } as CompanionEndpoint) : null
 }
 
 function mouseButton(button: number): "left" | "middle" | "right" {
@@ -144,6 +171,8 @@ export function RemoteBrowserPreview({
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [lease, setLease] = useState<RemoteBrowserLease | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  /** Why the runtime is not usable, straight from the gateway. */
+  const [runtimeReason, setRuntimeReason] = useState<string | null>(null)
   const [urlInput, setUrlInput] = useState(initialUrl ?? "")
   const [clickPointer, setClickPointer] = useState<{ x: number; y: number; key: number } | null>(
     null
@@ -223,20 +252,38 @@ export function RemoteBrowserPreview({
         const engine = new RemoteChromiumEngine(summary.id)
         engineRef.current = engine
         setEngine(engine)
-        configureRemoteBrowserEngine(engine, { enabled: true, healthy: true })
+        // `browser_runtime_status` is the one RPC the gateway answers even when
+        // the runtime feature is not compiled, so it is how a client learns the
+        // difference between "not built", "switched off" and "unhealthy"
+        // instead of assuming health and failing later, opaquely.
+        const status = await transport
+          .call<BrowserRuntimeStatus>("browser_runtime_status", { workspaceId })
+          .catch(() => null)
+        if (status && !status.healthy) {
+          setRuntimeReason(status.reason ?? "browser_runtime_unhealthy")
+        }
+        configureRemoteBrowserEngine(engine, {
+          enabled: status?.enabled ?? true,
+          healthy: status?.healthy ?? true,
+        })
         if (initialUrl) await engine.navigate(initialUrl)
         const currentPages = await engine.listPages()
         if (disposed) return
         setPages(currentPages)
         setActivePageId(currentPages.find((page) => page.active)?.id ?? summary.activePageId)
 
-        const baseUrl = companionBaseUrl()
-        if (!baseUrl) throw new Error("browser_companion_unconfigured")
+        const endpoint = await resolveStreamEndpoint()
+        if (!endpoint?.baseUrl) throw new Error("browser_companion_unconfigured")
         const stream = createStream({
           sessionId: summary.id,
-          serverBaseUrl: baseUrl,
+          serverBaseUrl: endpoint.baseUrl,
           issueTicket: () =>
-            issueCompanionSocketTicket({ channel: "browser", sessionId: summary.id }),
+            endpoint.deviceId
+              ? issueSocketTicket(endpoint as CompanionConfig, {
+                  channel: "browser",
+                  sessionId: summary.id,
+                })
+              : issueCompanionSocketTicket({ channel: "browser", sessionId: summary.id }),
           onFrame: (frame) => void drawFrame(frame),
           onLease: setLease,
           onEvent: (event) => {
@@ -693,7 +740,11 @@ export function RemoteBrowserPreview({
           {connection !== "connected" && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/80 p-6 text-center">
               <p className="text-sm text-muted-foreground">
-                {errorCode ? t("error", { code: errorCode }) : t("waiting")}
+                {errorCode
+                  ? t("error", { code: errorCode })
+                  : runtimeReason
+                    ? t("runtimeUnavailable", { reason: runtimeReason })
+                    : t("waiting")}
               </p>
             </div>
           )}

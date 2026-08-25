@@ -10,6 +10,10 @@
  */
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
 import { routeEngine } from "@/lib/browser/agent-engine"
+import {
+  isBrowserDomainAuthorized,
+  primeBrowserDomainGrants,
+} from "@/lib/browser/domain-authorization"
 import type {
   BrowserActionResult,
   BrowserDialogState,
@@ -36,8 +40,20 @@ import { defineContextProvider } from "@cognia/plugin-sdk"
  */
 let lastUrl: string | null = null
 
+/**
+ * Routing context for one call.
+ *
+ * `domainAuthorized` had no caller at all until now, so `routeEngine`'s
+ * "public origin the user explicitly allowed" arm — the only door to remote
+ * Chromium for a public site — could never fire.
+ */
+function routingContext(url: string) {
+  return { domainAuthorized: isBrowserDomainAuthorized(url) }
+}
+
 function engineFor() {
-  return routeEngine(lastUrl ?? "")
+  const url = lastUrl ?? ""
+  return routeEngine(url, routingContext(url))
 }
 
 const ANNOTATION_INTENTS = ["fix", "change", "question", "approve"] as const
@@ -90,7 +106,8 @@ async function currentRoute() {
   } catch {
     // Preview not open / mid-navigation: fall back to the last known URL.
   }
-  return routeEngine(lastUrl ?? "")
+  const url = lastUrl ?? ""
+  return routeEngine(url, routingContext(url))
 }
 
 async function withSnapshot(result: Record<string, unknown>, initialDelayMs?: number) {
@@ -147,6 +164,11 @@ const definition: PluginDefinition = {
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("browser-tools activated")
+
+    // Grants live in Dexie but `routeEngine` is synchronous, so warm a snapshot
+    // once at activation. Failing to read it leaves nothing authorized, which
+    // keeps every public origin on the embedded engine — the safe direction.
+    void primeBrowserDomainGrants().catch(() => undefined)
 
     ctx.agent?.context?.registerProvider?.(
       defineContextProvider({

@@ -19,6 +19,12 @@ import { openExternal } from "@/lib/tauri/opener"
 
 export interface BrowserWebFallbackProps {
   initialUrl?: string
+  /**
+   * Why the cloud browser is not being used. Absent means "not switched on",
+   * which is the existing invitation to switch it on; present means it IS on
+   * and something else is missing, so inviting again would be nonsense.
+   */
+  unreachableReason?: string
 }
 
 // Cross-origin iframe CSS cannot be rewritten. Give desktop-only pages their
@@ -35,7 +41,7 @@ function normalizeWebUrl(input: string): string | null {
  * Best-effort Web browser surface. It deliberately keeps its own submitted
  * history because cross-origin iframe navigation is opaque to the host page.
  */
-export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
+export function BrowserWebFallback({ initialUrl, unreachableReason }: BrowserWebFallbackProps) {
   const t = useTranslations("browser")
   const toolbarRef = useRef<HTMLDivElement>(null)
   const frameViewportRef = useRef<HTMLDivElement>(null)
@@ -119,10 +125,14 @@ export function BrowserWebFallback({ initialUrl }: BrowserWebFallbackProps) {
           }
         />
         <div className="flex min-w-0 items-center gap-3 border-b bg-muted/40 px-3 py-2">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t("webFallback.notice")}</p>
-          <Button asChild size="sm" variant="outline" className="shrink-0">
-            <Link href="/settings?section=companion">{t("webFallback.enableRemote")}</Link>
-          </Button>
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {unreachableReason ?? t("webFallback.notice")}
+          </p>
+          {!unreachableReason && (
+            <Button asChild size="sm" variant="outline" className="shrink-0">
+              <Link href="/settings?section=companion">{t("webFallback.enableRemote")}</Link>
+            </Button>
+          )}
         </div>
         <div
           ref={frameViewportRef}

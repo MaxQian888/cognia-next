@@ -21,8 +21,26 @@ jest.mock("@/lib/tauri/transport-instance", () => ({
   transport: { call: (...args: unknown[]) => transportCall(...args) },
 }))
 jest.mock("@/lib/tauri/transport-companion", () => ({
-  loadCompanionConfig: () => ({ baseUrl: "https://cloud.example.com" }),
   issueCompanionSocketTicket: (...args: unknown[]) => issueCompanionSocketTicket(...args),
+}))
+// Where the frame stream connects and who signs its ticket. A desktop driving a
+// remote host resolves here rather than through the companion cache.
+let mockStreamEndpoint: Record<string, unknown> | null = { baseUrl: "https://cloud.example.com" }
+let mockRuntimeStatus: Record<string, unknown> | null = {
+  compiled: true,
+  enabled: true,
+  configured: true,
+  healthy: true,
+}
+jest.mock("@/lib/tauri/companion-endpoint", () => ({
+  defaultCompanionEndpointResolver: () => Promise.resolve(mockStreamEndpoint),
+}))
+const issueSocketTicket = jest.fn().mockResolvedValue({
+  ticket: "once-remote",
+  expiresAt: Date.now() + 60_000,
+})
+jest.mock("@/lib/tauri/companion-auth", () => ({
+  issueSocketTicket: (...args: unknown[]) => issueSocketTicket(...args),
 }))
 jest.mock("@/lib/platform/web-companion", () => ({
   buildTimeServerUrl: () => null,
@@ -141,9 +159,14 @@ beforeAll(() => {
 beforeEach(() => {
   jest.clearAllMocks()
   streamOptions = null
+  mockStreamEndpoint = { baseUrl: "https://cloud.example.com" }
+  mockRuntimeStatus = { compiled: true, enabled: true, configured: true, healthy: true }
   transportCall.mockImplementation((name: string) => {
     if (name === "browser_capability") {
       return Promise.resolve({ capabilities: ["browser"] })
+    }
+    if (name === "browser_runtime_status") {
+      return Promise.resolve(mockRuntimeStatus)
     }
     if (name === "browser_session_ensure") {
       return Promise.resolve({
@@ -514,4 +537,45 @@ it("packs its secondary controls away in a narrow rail", async () => {
   } finally {
     mockToolbarWidth = 0
   }
+})
+
+// A desktop driving a remote host keeps its identity in the remote-host store,
+// so reading only the companion cache resolved null and the stream threw
+// `browser_companion_unconfigured` before it ever opened.
+it("signs its ticket with the resolved endpoint when one carries a device", async () => {
+  mockStreamEndpoint = { baseUrl: "https://host.example", deviceId: "device-1" }
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  await waitFor(() => expect(streamOptions).not.toBeNull())
+  expect(streamOptions?.serverBaseUrl).toBe("https://host.example")
+  await streamOptions?.issueTicket()
+  expect(issueSocketTicket).toHaveBeenCalledWith(
+    expect.objectContaining({ deviceId: "device-1" }),
+    { channel: "browser", sessionId: "browser-1" }
+  )
+  expect(issueCompanionSocketTicket).not.toHaveBeenCalled()
+})
+
+it("reports why the runtime is unusable instead of assuming health", async () => {
+  mockRuntimeStatus = {
+    compiled: false,
+    enabled: false,
+    configured: false,
+    healthy: false,
+    reason: "workspace-runtime-exec is not compiled",
+  }
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  // This suite's intl mock renders the key alone, without its values.
+  await screen.findByText("browser.remote.runtimeUnavailable")
 })

@@ -25,6 +25,8 @@ jest.mock("@/lib/browser/client", () => ({
 import { browserClient } from "@/lib/browser/client"
 import {
   configureRemoteBrowserEngine,
+  EMBEDDED_UNSUPPORTED_FEATURES,
+  embeddedUnsupportedMessage,
   routeEngine,
   EmbeddedEngine,
   embeddedSnapshotCacheStats,
@@ -427,5 +429,47 @@ describe("EmbeddedEngine.screenshot", () => {
   it("rejects when no preview is open", async () => {
     setActivePaneRect(null)
     await expect(new EmbeddedEngine().screenshot()).rejects.toThrow(/not open/)
+  })
+})
+
+// Working rule 7, type half: what the embedded webview cannot do is declared
+// once, and every refusal a model reads is built from it — a bare "not
+// supported" left the model retrying and the human unaware a setting existed.
+describe("embedded feature gaps", () => {
+  it("names both the gap and the way out", () => {
+    const message = embeddedUnsupportedMessage("setFiles")
+    expect(message).toContain("File upload")
+    expect(message).toContain("remote-chromium")
+    expect(message).toContain("Settings")
+  })
+
+  it("keeps the declared list and the methods that throw in agreement", async () => {
+    const engine = new EmbeddedEngine()
+    const thrown = await Promise.all(
+      (
+        [
+          ["createPage", () => engine.createPage()],
+          ["drag", () => engine.drag("a", "b")],
+          ["handleDialog", () => engine.handleDialog({ accept: true })],
+          ["setFiles", () => engine.setFiles("a", [])],
+          ["downloads", () => engine.downloads()],
+          ["scopedScreenshot", () => engine.screenshot({ scope: "full" })],
+        ] as const
+      ).map(async ([feature, call]) => {
+        const error = await call().then(
+          () => null,
+          (cause: unknown) => cause as Error
+        )
+        return [feature, error?.message] as const
+      })
+    )
+    for (const [feature, message] of thrown) {
+      expect(message).toBe(
+        embeddedUnsupportedMessage(feature as keyof typeof EMBEDDED_UNSUPPORTED_FEATURES)
+      )
+    }
+    expect(thrown.map(([feature]) => feature).sort()).toEqual(
+      Object.keys(EMBEDDED_UNSUPPORTED_FEATURES).sort()
+    )
   })
 })

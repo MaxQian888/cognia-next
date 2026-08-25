@@ -201,6 +201,36 @@ export function embeddedSnapshotCacheStats() {
   return embeddedSnapshotCache.getStats()
 }
 
+/**
+ * What the embedded webview cannot do, and what can.
+ *
+ * These are real gaps, not stubs: a single always-on-top child webview has no
+ * tabs, no OS drag source, no native dialog channel, no file-chooser hook and
+ * no download manager, and it can only be captured at its own viewport rect.
+ * They are declared once so the refusal a model reads always says *why* and
+ * *what enables it* — a bare "not supported" left the model retrying, and left
+ * the human with no idea that a setting existed.
+ *
+ * Per working rule 7 this is the type-level half of that dormancy; the UI half
+ * is the disabled control with a stated reason, and the test half pins this
+ * list against the methods that throw.
+ */
+export const EMBEDDED_UNSUPPORTED_FEATURES = {
+  createPage: "Creating pages",
+  drag: "Drag and drop",
+  handleDialog: "Native dialogs",
+  setFiles: "File upload",
+  downloads: "Download quarantine",
+  scopedScreenshot: "Scoped screenshots",
+} as const
+
+export type EmbeddedUnsupportedFeature = keyof typeof EMBEDDED_UNSUPPORTED_FEATURES
+
+/** The refusal text for one of them, including the way out. */
+export function embeddedUnsupportedMessage(feature: EmbeddedUnsupportedFeature): string {
+  return `${EMBEDDED_UNSUPPORTED_FEATURES[feature]} is not supported by the embedded browser. It is available on the remote-chromium backend — enable the cloud browser in Settings → Companion and grant this domain.`
+}
+
 /** Drives the in-app embedded webview via the Tauri `browser_embed_*` commands. */
 export class EmbeddedEngine implements BrowserEngine {
   constructor() {
@@ -295,31 +325,28 @@ export class EmbeddedEngine implements BrowserEngine {
   async createPage(_url?: string): Promise<BrowserPageSummary> {
     throw new BrowserSessionError(
       "browser_feature_unsupported",
-      "Creating pages is not supported by the embedded browser"
+      embeddedUnsupportedMessage("createPage")
     )
   }
   async drag(_sourceRef: string, _targetRef: string): Promise<BrowserActionResult> {
-    throw new BrowserSessionError(
-      "browser_feature_unsupported",
-      "Drag and drop is not supported by the embedded browser"
-    )
+    throw new BrowserSessionError("browser_feature_unsupported", embeddedUnsupportedMessage("drag"))
   }
   async handleDialog(_args: HandleDialogArgs): Promise<BrowserActionResult> {
     throw new BrowserSessionError(
       "browser_feature_unsupported",
-      "Native dialogs are not supported by the embedded browser"
+      embeddedUnsupportedMessage("handleDialog")
     )
   }
   async setFiles(_reference: string, _paths: string[]): Promise<void> {
     throw new BrowserSessionError(
       "browser_feature_unsupported",
-      "File upload is not supported by the embedded browser"
+      embeddedUnsupportedMessage("setFiles")
     )
   }
   async downloads(): Promise<BrowserDownloadSummary[]> {
     throw new BrowserSessionError(
       "browser_feature_unsupported",
-      "Download quarantine is not supported by the embedded browser"
+      embeddedUnsupportedMessage("downloads")
     )
   }
   waitForText(text: string, opts: WaitForOptions = {}): Promise<WaitForResult> {
@@ -391,7 +418,7 @@ export class EmbeddedEngine implements BrowserEngine {
       return Promise.reject(
         new BrowserSessionError(
           "browser_feature_unsupported",
-          "Scoped screenshots are not supported by the embedded browser"
+          embeddedUnsupportedMessage("scopedScreenshot")
         )
       )
     }

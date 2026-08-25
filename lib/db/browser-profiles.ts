@@ -113,6 +113,18 @@ export async function grantBrowserDomain(
   return row
 }
 
+/**
+ * Every grant, across every workspace.
+ *
+ * The per-workspace read is what the settings card and session-ensure need,
+ * but routing a URL has no workspace in hand: a grant made through the card
+ * (keyed by the active project) and one made by `connectBrowserSite` (keyed by
+ * a synthetic `external-service:*` id) are equally the user's decision.
+ */
+export function listAllBrowserDomainGrants(): Promise<BrowserDomainGrantRow[]> {
+  return getDb().browserDomainGrants.toArray()
+}
+
 export function listBrowserDomainGrants(workspaceId: string): Promise<BrowserDomainGrantRow[]> {
   return getDb().browserDomainGrants.where("workspaceId").equals(workspaceId).sortBy("domain")
 }

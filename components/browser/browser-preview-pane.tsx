@@ -74,7 +74,10 @@ import {
   normalizePreviewUrl,
   toBrowserNavIntent,
 } from "@/lib/browser/protocol"
+import { resolveDesktopBackend, type BrowserBackend } from "@/lib/browser/backend-availability"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isTauri } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { openExternal } from "@/lib/tauri/opener"
 import { cn } from "@/lib/utils"
 import { serializeBrowserAdjustmentFeedback } from "@/lib/browser/adjust"
@@ -263,6 +266,18 @@ export function BrowserPreviewPane({
     (state) => state.settings?.remoteBrowserEnabled ?? false
   )
   const activeProjectId = useProjectStore((state) => state.activeProjectId)
+  // Desktop keeps the embedded webview by default and offers remote as a
+  // switch; off the desktop the sandboxed iframe is the fallback.
+  const [backendPreference, setBackendPreference] = useState<BrowserBackend | null>(null)
+  const backend = resolveDesktopBackend(
+    {
+      tauri: isTauri(),
+      remoteBrowserEnabled,
+      remoteHostActive: isRemoteHostActive(),
+      webCompanionTarget: hasWebCompanionTarget(),
+    },
+    backendPreference
+  )
 
   useEffect(() => {
     committedUrlRef.current = committedUrl
@@ -622,19 +637,31 @@ export function BrowserPreviewPane({
   // ai-elements WebPreview: a sandboxed iframe with a URL bar so web users can
   // still preview a local dev server (its primary use). Cross-origin sites that
   // forbid framing won't load, which is expected for a best-effort web preview.
+  // Which engine this shell can serve. The choice used to be made on the shell
+  // (`!isTauri()`), which meant a desktop attached to a remote Cognia host —
+  // the one place the cloud browser is genuinely reachable from the desktop —
+  // could never select it, and the browser profiles and domain grants in
+  // Settings did nothing there. See `lib/browser/backend-availability.ts`.
+  if (backend.backend === "remote") {
+    return (
+      <RemoteBrowserPreview
+        chatSessionId={effectiveSessionId ?? "browser-preview"}
+        parentChatSessionId={parentChatSessionId}
+        workspaceId={workspaceId ?? activeProjectId ?? "default"}
+        profileId={profileId}
+        initialUrl={normalizedInitialUrl ?? undefined}
+      />
+    )
+  }
   if (!isTauri()) {
-    if (remoteBrowserEnabled) {
-      return (
-        <RemoteBrowserPreview
-          chatSessionId={effectiveSessionId ?? "browser-preview"}
-          parentChatSessionId={parentChatSessionId}
-          workspaceId={workspaceId ?? activeProjectId ?? "default"}
-          profileId={profileId}
-          initialUrl={normalizedInitialUrl ?? undefined}
-        />
-      )
-    }
-    return <BrowserWebFallback initialUrl={normalizedInitialUrl ?? undefined} />
+    return (
+      <BrowserWebFallback
+        initialUrl={normalizedInitialUrl ?? undefined}
+        unreachableReason={
+          backend.reason === "no-remote-host" ? t("remote.needsRemoteHost") : undefined
+        }
+      />
+    )
   }
 
   // Read-mode address: only while the field still mirrors the live location.
@@ -770,10 +797,28 @@ export function BrowserPreviewPane({
         inspectActions={inspectActions}
         pageActions={pageActions}
         overflowExtras={
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
-            {detailControl}
-          </div>
+          <>
+            {backend.remoteReachable && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">{t("backend.label")}</span>
+                <NativeSelect
+                  value={backend.backend}
+                  onChange={(event) => setBackendPreference(event.target.value as BrowserBackend)}
+                  aria-label={t("backend.label")}
+                  size="sm"
+                  wrapperClassName="w-full"
+                  className="h-7 text-xs"
+                >
+                  <NativeSelectOption value="embedded">{t("backend.embedded")}</NativeSelectOption>
+                  <NativeSelectOption value="remote">{t("backend.remote")}</NativeSelectOption>
+                </NativeSelect>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">{t("detail.label")}</span>
+              {detailControl}
+            </div>
+          </>
         }
         trailing={
           <BrowserAgentIndicator

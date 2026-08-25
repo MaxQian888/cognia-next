@@ -16,6 +16,13 @@ const mockSendAnnotations = jest.fn().mockResolvedValue(true)
 const mockTransitionAnnotation = jest.fn().mockResolvedValue(true)
 let mockPendingAnnotations: Array<Record<string, unknown>> = []
 let mockRemoteBrowserEnabled = false
+// The web build only ships paired to a Cognia server; a test says whether one
+// is actually reachable.
+let mockWebCompanionTarget = true
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => mockWebCompanionTarget,
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({ isRemoteHostActive: () => false }))
 let mockActiveChatSessionId: string | null = "active-chat"
 let mockLoadedUrl: string | null = null
 let mockOwned = true
@@ -302,6 +309,7 @@ beforeEach(() => {
   mockTransitionAnnotation.mockReset().mockResolvedValue(true)
   mockPendingAnnotations = []
   mockRemoteBrowserEnabled = false
+  mockWebCompanionTarget = true
   mockActiveChatSessionId = "active-chat"
   mockLoadedUrl = null
   mockOwned = true
@@ -335,6 +343,15 @@ it("shows a localized error when the embedded WebView rejects an HTTPS proxy", (
   expect(toast.error).toHaveBeenCalledWith(
     "HTTPS proxying is not supported in this browser preview."
   )
+})
+
+it("keeps the iframe and says why when the cloud browser has nothing to talk to", () => {
+  mockTauri = false
+  mockRemoteBrowserEnabled = true
+  mockWebCompanionTarget = false
+  renderPane(<BrowserPreviewPane initialUrl="https://example.com" />)
+  expect(screen.queryByTestId("remote-browser-preview")).toBeNull()
+  expect(screen.getByText("Connect a Cognia server to use the cloud browser")).toBeInTheDocument()
 })
 
 it("replaces the web iframe with remote Canvas after explicit opt-in", () => {

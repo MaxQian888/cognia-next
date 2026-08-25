@@ -55,6 +55,11 @@
       "resolved": "Resolved"
     }
   },
+  "backend": {
+    "embedded": "Built-in preview",
+    "label": "Browser engine",
+    "remote": "Cloud browser"
+  },
   "comment": {
     "cancel": "Cancel",
     "failed": "Could not send the comment",
@@ -225,6 +230,8 @@
     "error": "Remote browser unavailable ({code})",
     "find": "Find in page",
     "humanControl": "You're controlling",
+    "needsRemoteHost": "Connect a Cognia server to use the cloud browser",
+    "runtimeUnavailable": "The cloud browser is not available ({reason})",
     "takeover": "Take control",
     "untitledPage": "Untitled page",
     "waiting": "Waiting for the remote browser…"

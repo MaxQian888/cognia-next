@@ -21,40 +21,24 @@ import {
 import { recordHostCapabilities } from "./host-capabilities"
 import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
 import { isCapacitor } from "@/lib/tauri"
-import { getActiveRemoteEndpoint } from "@/lib/tauri/transport-routing"
+import {
+  defaultCompanionEndpointResolver,
+  type CompanionEndpoint,
+  type CompanionEndpointResolver,
+} from "@/lib/tauri/companion-endpoint"
 import { companionErrorCode, issueSocketTicket } from "@/lib/tauri/companion-auth"
-import type { CompanionConfig } from "@/lib/tauri/companion-storage"
 
 import type { IntegrationEvent, SessionInfo, SpawnRequest, TerminalReplayGap } from "./types"
 
-export type CompanionEndpoint = Pick<
-  CompanionConfig,
-  | "baseUrl"
-  | "deviceId"
-  | "devicePrivateKeyJwk"
-  | "deviceKeyThumbprint"
-  | "accountId"
-  | "serverVersion"
-  | "serverFingerprint"
->
+/**
+ * Re-exported so existing terminal consumers keep their import path. The
+ * resolver itself moved to `lib/tauri/companion-endpoint.ts` when the remote
+ * browser needed the same answer — a desktop driving a remote host keeps its
+ * identity in the remote-host store, not the companion cache.
+ */
+export type { CompanionEndpoint, CompanionEndpointResolver } from "@/lib/tauri/companion-endpoint"
 
-export type CompanionEndpointResolver = () => Promise<CompanionEndpoint | null>
-
-const defaultResolver: CompanionEndpointResolver = async () => {
-  const remote = getActiveRemoteEndpoint()
-  if (remote) {
-    return remote
-  }
-  // Capacitor and the cloud companion (ADR-0059 C1) both keep their pairing in
-  // the companion target book. `pickCompanionStorage()` is already
-  // shell-agnostic — it resolves the Browser Vault backend in a browser and the
-  // secure-storage backend on mobile — so the only thing this gate decides is
-  // whether a pairing is expected to exist at all.
-  if (!isCapacitor() && !hasWebCompanionTarget()) return null
-  const { pickCompanionStorage } = await import("@/lib/tauri/companion-storage")
-  const config = await pickCompanionStorage().load()
-  return config
-}
+const defaultResolver = defaultCompanionEndpointResolver
 
 let endpointResolver: CompanionEndpointResolver = defaultResolver
 

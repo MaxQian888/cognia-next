@@ -19,6 +19,9 @@ import {
   revokeBrowserDomain,
   selectBrowserProfile,
 } from "@/lib/db/browser-profiles"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { isTauri } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 
@@ -28,6 +31,7 @@ export function RemoteBrowserCard() {
   const enabled = useSettingsStore((state) => state.settings?.remoteBrowserEnabled ?? false)
   const save = useSettingsStore((state) => state.save)
   const workspaceId = useProjectStore((state) => state.activeProjectId)
+  const reachable = !isTauri() ? hasWebCompanionTarget() : isRemoteHostActive()
   const profiles = useLiveQuery(
     () => (workspaceId ? listBrowserProfiles(workspaceId) : Promise.resolve([])),
     [workspaceId],
@@ -100,6 +104,14 @@ export function RemoteBrowserCard() {
         </div>
         {enabled && (
           <div className="space-y-5 border-t pt-4">
+            {/* Profiles and domain grants apply to remote-chromium sessions.
+                Letting someone configure them on a shell that cannot host one
+                is the same dead end this card used to be on the desktop. */}
+            {!reachable && (
+              <p className="text-xs text-muted-foreground" data-testid="remote-browser-unreachable">
+                {t("unreachableHint")}
+              </p>
+            )}
             {!workspaceId && <p className="text-xs text-muted-foreground">{t("workspaceHint")}</p>}
             <section className="space-y-2" aria-labelledby="remote-browser-profiles">
               <div>
