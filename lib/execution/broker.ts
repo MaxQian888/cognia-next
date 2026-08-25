@@ -91,6 +91,14 @@ interface ManagedLease {
   externalAbortHandler?: () => void
   /** The execution slot this lease holds while running, if any. */
   heldSlot?: string
+  /**
+   * True while this lease sits in a SLOT queue rather than a pool queue.
+   *
+   * The two are indistinguishable from the outside otherwise — both are
+   * `state: "queued"` with a `slotKey` and no `heldSlot` — and only one of them
+   * is something the user can act on.
+   */
+  waitingForSlot?: boolean
   /** Resolve/reject for a still-queued acquire. Cleared once admitted. */
   resolve?: (lease: ExecutionLease) => void
   reject?: (err: unknown) => void
@@ -218,7 +226,11 @@ export class ExecutionBroker {
     // second leg into the same directory the moment a permit freed.
     const slotKey = request.slotKey
     if (slotKey && this.slotHolders.has(slotKey)) {
-      this.markDirty()
+      // `queueForSlot` marks dirty ITSELF, after setting `waitingForSlot` —
+      // notifying first would let a subscriber that reads `getSnapshot()`
+      // synchronously (which is exactly what `useSyncExternalStore` does) cache
+      // a snapshot without the flag and clear `snapshotDirty`, so the monitor
+      // would say plain "Queued" until some unrelated broker event.
       return new Promise<ExecutionLease>((resolve, reject) => {
         managed.resolve = resolve
         managed.reject = reject
@@ -241,9 +253,14 @@ export class ExecutionBroker {
   }
 
   private queueForSlot(slotKey: string, managed: ManagedLease): void {
+    managed.waitingForSlot = true
     const queue = this.slotQueues.get(slotKey)
     if (queue) queue.push(managed)
     else this.slotQueues.set(slotKey, [managed])
+    // Marked dirty HERE, never by the caller before the call: `waitingForSlot`
+    // is what tells the monitor to blame the directory rather than the permit
+    // pool, and a snapshot taken between the two is missing it for good.
+    this.markDirty()
   }
 
   /**
@@ -256,6 +273,11 @@ export class ExecutionBroker {
   private drainSlot(slotKey: string): void {
     const queue = this.slotQueues.get(slotKey)
     if (!queue) return
+    // The pool drain runs first on release and may have let a leg that was
+    // waiting on a PERMIT into this very slot. If so there is nothing to hand
+    // out: the waiters stay queued and the new holder's own release drains
+    // them. Handing the slot out anyway is how two legs ended up in one tree.
+    if (this.slotHolders.has(slotKey)) return
     while (queue.length > 0) {
       const head = queue.shift()!
       if (queue.length === 0) this.slotQueues.delete(slotKey)
@@ -264,6 +286,11 @@ export class ExecutionBroker {
       if (pool.inUse + head.weight <= pool.limit) {
         this.admit(head, pool, /* consumePermit */ true)
       } else {
+        // Parked on the pool queue with the slot still free — `drain` re-checks
+        // the slot before admitting, so a leg that overtakes it here cannot
+        // strand this one outside the mutual exclusion. It is now waiting on a
+        // PERMIT, so the panel must stop blaming the directory.
+        head.waitingForSlot = false
         pool.queue.push(head)
         this.markDirty()
       }
@@ -274,13 +301,29 @@ export class ExecutionBroker {
 
   private admit(managed: ManagedLease, pool: ResourcePool, consumePermit: boolean): void {
     managed.state = "running"
+    managed.waitingForSlot = false
     if (consumePermit) pool.inUse += managed.weight
     // Claimed here, not at acquire: a leg that is only pool-queued must not
     // hold a directory nobody is working in.
     const slotKey = managed.request.slotKey
-    if (slotKey && !managed.exempt && !this.slotHolders.has(slotKey)) {
-      this.slotHolders.set(slotKey, managed.id)
-      managed.heldSlot = slotKey
+    if (slotKey && !managed.exempt) {
+      const holder = this.slotHolders.get(slotKey)
+      if (holder === undefined) {
+        this.slotHolders.set(slotKey, managed.id)
+        managed.heldSlot = slotKey
+      } else {
+        // Every admission path checks `canTakeSlot` first, so reaching here is
+        // a broker bug, not a race a caller can cause. It used to fall through
+        // silently and run the leg anyway — two turns in one working tree, the
+        // exact corruption the slot exists to prevent. Loud instead of silent:
+        // the leg still runs (refusing to resolve an admitted lease would hang
+        // the caller), but the disagreement is recorded rather than swallowed.
+        log.error("execution slot admitted while held — mutual exclusion lost", {
+          slotKey,
+          holder,
+          admitted: managed.id,
+        })
+      }
     }
     const resolve = managed.resolve
     managed.resolve = undefined
@@ -348,6 +391,36 @@ export class ExecutionBroker {
     // A freed directory may let the next leg into it — after the pool drain,
     // so a waiter that has been queued longer keeps its place.
     if (heldSlot) this.drainSlot(heldSlot)
+    // …and any tree that is standing free with waiters on it. See below.
+    this.drainFreeSlots()
+  }
+
+  /**
+   * Drain every slot queue whose directory is currently UNHELD.
+   *
+   * `drainSlot` is otherwise reachable only from the release of a lease that
+   * held the slot, and it can park its head on the pool queue with the tree
+   * left free. If that head then disappears (cancelled while pool-queued), the
+   * waiters behind it have no drainer left at all: tree free, permits free,
+   * and their `acquire()` promises never settle — the turn neither starts nor
+   * errors. Now that a slot key names the directory a turn actually runs in,
+   * slot queues are the common case and this is reachable, not theoretical.
+   */
+  private drainFreeSlots(): void {
+    // Snapshot the keys: `drainSlot` deletes emptied queues as it goes.
+    for (const slotKey of [...this.slotQueues.keys()]) {
+      if (this.slotHolders.has(slotKey)) continue
+      const head = this.slotQueues.get(slotKey)?.[0]
+      if (!head) continue
+      // Only a head that can be admitted right now (or is dead and wants
+      // reaping). `drainSlot` would otherwise park it on the pool queue, and
+      // moving a waiter across queues is the holder's job to do once — not
+      // something every unrelated release should repeat.
+      const pool = this.poolFor(head.resource)
+      if (head.cancelled || head.released || pool.inUse + head.weight <= pool.limit) {
+        this.drainSlot(slotKey)
+      }
+    }
   }
 
   private dropFromSlotQueue(managed: ManagedLease): void {
@@ -356,7 +429,10 @@ export class ExecutionBroker {
     const queue = this.slotQueues.get(slotKey)
     if (!queue) return
     const idx = queue.indexOf(managed)
-    if (idx >= 0) queue.splice(idx, 1)
+    if (idx >= 0) {
+      queue.splice(idx, 1)
+      managed.waitingForSlot = false
+    }
     if (queue.length === 0) this.slotQueues.delete(slotKey)
   }
 
@@ -370,9 +446,31 @@ export class ExecutionBroker {
         continue
       }
       if (pool.inUse + head.weight > pool.limit) break
+      // A permit is not enough. A leg reaches this queue while its slot is
+      // FREE (the slot branch in `acquire` only fires when the slot is held),
+      // and `drainSlot` parks a slot waiter here when no permit was available —
+      // so by the time a permit frees, someone else may hold the directory.
+      // Admitting anyway is how two legs ended up in one working tree.
+      if (!this.canTakeSlot(head)) {
+        pool.queue.shift()
+        this.queueForSlot(head.request.slotKey!, head)
+        continue
+      }
       pool.queue.shift()
       this.admit(head, pool, /* consumePermit */ true)
     }
+  }
+
+  /**
+   * Whether `managed` may enter its slot right now.
+   *
+   * True when it wants no slot, is exempt from slot-taking (a continuation of
+   * the work already holding it), or the slot is unheld.
+   */
+  private canTakeSlot(managed: ManagedLease): boolean {
+    const slotKey = managed.request.slotKey
+    if (!slotKey || managed.exempt) return true
+    return !this.slotHolders.has(slotKey)
   }
 
   // ── Cancellation ────────────────────────────────────────────────────────
@@ -550,6 +648,7 @@ export class ExecutionBroker {
       ...(m.request.projectId ? { projectId: m.request.projectId } : {}),
       ...(m.request.slotKey ? { slotKey: m.request.slotKey } : {}),
       ...(m.heldSlot ? { holdsSlot: true } : {}),
+      ...(m.waitingForSlot ? { waitingForSlot: true } : {}),
       weight: m.weight,
       exempt: m.exempt,
       state: m.state,

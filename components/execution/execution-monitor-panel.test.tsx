@@ -303,7 +303,7 @@ describe("queued reason", () => {
     // "Queued" alone reads as "hung", and only one of the two reasons is
     // something the user can act on.
     monitorState = {
-      rows: [row({ status: "queued", slotKey: "dir:/repos/app", label: "Second turn" })],
+      rows: [row({ status: "queued", waitingForSlot: true, label: "Second turn" })],
       runningCount: 1,
       isLoading: false,
     }
@@ -321,15 +321,18 @@ describe("queued reason", () => {
     expect(screen.getByText("Queued")).toBeInTheDocument()
   })
 
-  it("keeps the plain label for the leg that HOLDS the folder", () => {
+  it("does not blame the folder for a leg queued on a permit", () => {
+    // A leg whose tree was FREE when it arrived queues on the permit pool while
+    // the broker still knows its slot, and the leg that HOLDS the tree is in
+    // the same shape. Neither is waiting for the directory, so neither may send
+    // the user hunting for something to cancel in a folder nobody is in.
     monitorState = {
-      rows: [
-        row({ status: "queued", slotKey: "dir:/repos/app", holdsSlot: true, label: "Holder" }),
-      ],
+      rows: [row({ status: "queued", label: "Permit waiter" })],
       runningCount: 1,
       isLoading: false,
     }
     render(<ExecutionMonitorPanel />)
     expect(screen.getByText("Queued")).toBeInTheDocument()
+    expect(screen.queryByText("Waiting for the folder")).not.toBeInTheDocument()
   })
 })

@@ -115,6 +115,17 @@ export interface ExecutionLegSnapshot {
   slotKey?: string
   /** True while this leg is the one holding {@link slotKey}. */
   holdsSlot?: boolean
+  /**
+   * True while this leg is queued ON THE SLOT — waiting for the directory
+   * itself, not for a permit.
+   *
+   * `slotKey` alone cannot answer that: a leg admitted to neither queue looks
+   * identical to one blocked on the tree, because a leg whose slot was FREE
+   * when it arrived queues on the pool and still carries its `slotKey`.
+   * Surfaces used it to say "waiting for the folder" and sent the user looking
+   * for a conversation to cancel in a directory nobody was in.
+   */
+  waitingForSlot?: boolean
   weight: number
   exempt: boolean
   state: ExecutionLegState

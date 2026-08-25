@@ -48,16 +48,18 @@ export interface UnifiedExecutionRow {
   taskId?: string
   projectId?: string
   /**
-   * The execution slot (working tree / sandbox) this leg wants, and whether it
-   * currently holds it.
+   * Queued on the DIRECTORY (a working tree / sandbox already in use) rather
+   * than on a permit.
    *
-   * A queued leg with no reason reads as "hung". Waiting for a permit and
-   * waiting for a directory look identical without this, and only one of them
-   * is something the user can act on — freeing the tree means finishing or
-   * cancelling whatever is in it.
+   * A queued leg with no reason reads as "hung", and the two waits look
+   * identical without this — but only one of them is something the user can
+   * act on, because freeing the tree means finishing or cancelling whatever is
+   * in it. The broker's own `slotKey` / `holdsSlot` are deliberately NOT
+   * projected here: no surface renders them, and a leg whose tree was free
+   * when it arrived carries a `slotKey` while waiting on a permit, so reading
+   * one is how the panel started blaming an empty directory.
    */
-  slotKey?: string
-  holdsSlot?: boolean
+  waitingForSlot?: boolean
   /** Broker leg id when this row can be cancelled through the broker. */
   legId?: string
   /** True when the panel's cancel affordance should be shown. */
@@ -235,8 +237,7 @@ export function brokerLegRow(leg: ExecutionLegSnapshot): UnifiedExecutionRow {
     ...(leg.runId ? { runId: leg.runId } : {}),
     ...(leg.taskId ? { taskId: leg.taskId } : {}),
     ...(leg.projectId ? { projectId: leg.projectId } : {}),
-    ...(leg.slotKey ? { slotKey: leg.slotKey } : {}),
-    ...(leg.holdsSlot ? { holdsSlot: true } : {}),
+    ...(leg.waitingForSlot ? { waitingForSlot: true } : {}),
     legId: leg.id,
     // A leg that has already been cancelled (awaiting its release) is no
     // longer actionable.

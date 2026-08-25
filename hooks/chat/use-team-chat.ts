@@ -90,7 +90,8 @@ import {
 } from "./steer-runtime"
 import { SessionCoalescingRegistry } from "./stream-coalescing"
 import { getExecutionBroker } from "@/lib/execution/broker"
-import { slotKeyForExecutionContext } from "@/lib/execution/slot-key"
+import { slotKeyForTurn } from "@/lib/execution/slot-key"
+import { resolveEffectiveCwdForSession } from "@/hooks/chat/use-effective-cwd"
 import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
@@ -491,6 +492,10 @@ export function useTeamChat() {
       // the status watcher releases it on settle; the broker's cancel bridge
       // interrupts the live sub-sessions (their ids differ from `sessionId`).
       // Best-effort: a broker hiccup never blocks the committed turn.
+      // Resolved before the lease so the slot names the directory the members
+      // actually write into — the same chain the send resolves, not the
+      // execution binding alone (which a plain conversation does not have).
+      const turnCwd = await resolveEffectiveCwdForSession(session).catch(() => null)
       try {
         await acquireChatLease({
           sessionId,
@@ -500,7 +505,10 @@ export function useTeamChat() {
           // One slot for the whole fan-out, like the one lease: the members run
           // sequentially in the SAME tree, so a second team turn there has to
           // wait for this one rather than interleave with its members.
-          slotKey: slotKeyForExecutionContext(session.executionContext),
+          slotKey: slotKeyForTurn({
+            executionContext: session.executionContext,
+            effectiveCwd: turnCwd,
+          }),
           onCancel: () => {
             interruptedRef.current.add(sessionId)
             void interruptTeamTurn(sessionId, resolvers.current)

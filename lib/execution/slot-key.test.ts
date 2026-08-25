@@ -1,14 +1,26 @@
-import { slotKeyForExecutionContext, slotKeyForPath } from "./slot-key"
+import { slotKeyForPath, slotKeyForTurn } from "./slot-key"
+import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
 import type { SessionExecutionContext } from "@/types/execution-context"
 
 const ctx = (over: Record<string, unknown>) => over as unknown as SessionExecutionContext
 
-describe("slotKeyForExecutionContext", () => {
+/**
+ * The binding half of the chain, spelled the way a caller composes it now that
+ * `slotKeyForExecutionContext` is gone: the execution context supplies the
+ * remote case, `resolveSessionWorkspaceRoot` the directory it resolves to.
+ */
+const slotKeyForBinding = (context: SessionExecutionContext | null | undefined) =>
+  context
+    ? slotKeyForTurn({
+        executionContext: context,
+        effectiveCwd: resolveSessionWorkspaceRoot(context),
+      })
+    : undefined
+
+describe("slotKeyForTurn — the binding half of the chain", () => {
   it("keys a local conversation by the directory it works in", () => {
     expect(
-      slotKeyForExecutionContext(
-        ctx({ projectRoot: "/repos/app", workspaceBinding: { kind: "project" } })
-      )
+      slotKeyForBinding(ctx({ projectRoot: "/repos/app", workspaceBinding: { kind: "project" } }))
     ).toBe("dir:/repos/app")
   })
 
@@ -16,7 +28,7 @@ describe("slotKeyForExecutionContext", () => {
     // Holding one worktree must not block the others — that is the whole point
     // of cutting one.
     const worktree = (n: number) =>
-      slotKeyForExecutionContext(
+      slotKeyForBinding(
         ctx({
           projectRoot: "/repos/app",
           workspaceBinding: { kind: "managed" },
@@ -31,7 +43,7 @@ describe("slotKeyForExecutionContext", () => {
     // Two turns in one sandbox conflict the way two in one directory do, and
     // the path a sandbox reports means nothing outside it.
     expect(
-      slotKeyForExecutionContext(
+      slotKeyForBinding(
         ctx({ environmentId: "env-7", location: "remote", projectRoot: "/workspace" })
       )
     ).toBe("env:env-7")
@@ -39,7 +51,7 @@ describe("slotKeyForExecutionContext", () => {
 
   it("keys a local environment by its directory, not its id", () => {
     expect(
-      slotKeyForExecutionContext(
+      slotKeyForBinding(
         ctx({
           environmentId: "env-7",
           location: "local",
@@ -52,16 +64,14 @@ describe("slotKeyForExecutionContext", () => {
 
   it("gives no slot to a conversation that mutates nothing shared", () => {
     // Inventing one would queue work that never conflicts.
-    expect(slotKeyForExecutionContext(null)).toBeUndefined()
-    expect(slotKeyForExecutionContext(undefined)).toBeUndefined()
-    expect(
-      slotKeyForExecutionContext(ctx({ workspaceBinding: { kind: "project" } }))
-    ).toBeUndefined()
+    expect(slotKeyForBinding(null)).toBeUndefined()
+    expect(slotKeyForBinding(undefined)).toBeUndefined()
+    expect(slotKeyForBinding(ctx({ workspaceBinding: { kind: "project" } }))).toBeUndefined()
   })
 
   it("gives no slot when a managed workspace is unavailable", () => {
     expect(
-      slotKeyForExecutionContext(
+      slotKeyForBinding(
         ctx({
           workspaceBinding: { kind: "managed" },
           managedWorkspace: { availability: "missing" },
@@ -91,5 +101,43 @@ describe("slotKeyForExecutionContext", () => {
     expect(slotKeyForPath("")).toBeUndefined()
     expect(slotKeyForPath("   ")).toBeUndefined()
     expect(slotKeyForPath(null)).toBeUndefined()
+  })
+})
+
+describe("slotKeyForTurn", () => {
+  it("serializes two plain conversations that share a workspace root", () => {
+    // The headline case, and the one the binding-only key missed entirely:
+    // neither conversation has an execution binding, yet both run in the
+    // workspace's primary root.
+    const a = slotKeyForTurn({ effectiveCwd: "/repos/app" })
+    const b = slotKeyForTurn({ effectiveCwd: "/repos/app" })
+    expect(a).toBe("dir:/repos/app")
+    expect(b).toBe(a)
+  })
+
+  it("follows a per-session working dir over the binding it sits above", () => {
+    // `workingDir` outranks the binding in `resolveEffectiveCwd`, so the slot
+    // has to name it too — otherwise the turn guards a tree it never touches
+    // and leaves the one it does touch unprotected.
+    expect(
+      slotKeyForTurn({
+        executionContext: ctx({ projectRoot: "/repos/b", workspaceBinding: { kind: "project" } }),
+        effectiveCwd: "/repos/a",
+      })
+    ).toBe("dir:/repos/a")
+  })
+
+  it("still keys a remote environment by its id, whatever cwd it reports", () => {
+    expect(
+      slotKeyForTurn({
+        executionContext: ctx({ location: "remote", environmentId: "env-7" }),
+        effectiveCwd: "/sandbox/work",
+      })
+    ).toBe("env:env-7")
+  })
+
+  it("has no slot when nothing resolves a directory", () => {
+    expect(slotKeyForTurn({ effectiveCwd: null })).toBeUndefined()
+    expect(slotKeyForTurn({})).toBeUndefined()
   })
 })

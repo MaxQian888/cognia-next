@@ -136,7 +136,13 @@ export function ExecutionMonitorPanel({ projectId, className }: ExecutionMonitor
         // Say WHY it is queued. "Queued" alone reads as "hung", and only one
         // of the two reasons is something the user can act on: freeing a tree
         // means finishing or cancelling whatever is in it.
-        row.status === "queued" && row.slotKey && !row.holdsSlot
+        //
+        // `waitingForSlot` is the only honest signal: a leg whose tree was FREE
+        // when it arrived queues on the permit pool while the broker still
+        // knows its slot, so deriving the reason from the slot blamed the
+        // directory for the global concurrency cap and sent the user hunting in
+        // an empty folder.
+        row.status === "queued" && row.waitingForSlot
           ? t("status.queuedOnSlot")
           : t(STATUS_KEYS[row.status])
       }

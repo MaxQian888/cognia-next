@@ -516,6 +516,114 @@ describe("ExecutionBroker — execution slots", () => {
     expect(broker.slotHolder("/repos/app")).toBe(secondLease.id)
   })
 
+  it("never lets a permit drain put a second leg into a held tree", async () => {
+    // The regression, in full. A slot waiter that cannot get a permit is parked
+    // on the POOL queue with the tree left free; a later waiter then also
+    // pool-queues for that free tree. `drain` used to admit on the permit
+    // alone, and `admit` silently declined to claim an already-held slot — so
+    // the two of them ran in one working tree.
+    const broker = makeBroker(2)
+    const holder = await broker.acquire(req({ slotKey: "/repos/app", label: "holder" }))
+    const x = await broker.acquire(req({ label: "x" }))
+
+    // Held tree → slot queue.
+    const waiterA = broker.acquire(req({ slotKey: "/repos/app", label: "waiterA" }))
+    // No slot, no permit → pool queue.
+    const y = broker.acquire(req({ label: "y" }))
+    await Promise.resolve()
+    expect(broker.slotQueueLength("/repos/app")).toBe(1)
+
+    // Releasing the holder drains the pool FIRST (y gets the permit), so the
+    // slot drain finds no permit and bounces waiterA onto the pool queue —
+    // leaving the tree unheld with a pool-queued leg that wants it.
+    holder.release()
+    const yLease = await y
+    await Promise.resolve()
+    expect(broker.slotHolder("/repos/app")).toBeNull()
+    expect(broker.slotQueueLength("/repos/app")).toBe(0)
+
+    // A second leg now pool-queues for the same (free) tree.
+    const waiterB = broker.acquire(req({ slotKey: "/repos/app", label: "waiterB" }))
+    await Promise.resolve()
+
+    // First permit goes to waiterA, which takes the tree.
+    x.release()
+    const aLease = await waiterA
+    expect(broker.slotHolder("/repos/app")).toBe(aLease.id)
+
+    // Second permit frees while waiterA still holds the tree. waiterB has a
+    // permit available and is next in FIFO — but must NOT be admitted.
+    let bAdmitted = false
+    void waiterB.then(() => {
+      bAdmitted = true
+    })
+    yLease.release()
+    await Promise.resolve()
+    expect(bAdmitted).toBe(false)
+    expect(broker.slotHolder("/repos/app")).toBe(aLease.id)
+    expect(broker.slotQueueLength("/repos/app")).toBe(1)
+
+    // It gets the tree when the holder is actually done.
+    aLease.release()
+    const bLease = await waiterB
+    expect(broker.slotHolder("/repos/app")).toBe(bLease.id)
+    bLease.release()
+  })
+
+  it("never strands a tree's waiters when the leg parked ahead of them is cancelled", async () => {
+    // `drainSlot` parks its head on the POOL queue when no permit is free,
+    // leaving the tree unheld. Cancelling that head used to remove the only
+    // leg whose release would ever drain the tree again: tree free, permits
+    // free, and the waiters behind it hung forever — the turn neither started
+    // nor errored.
+    const broker = makeBroker(1)
+    const holder = await broker.acquire(req({ slotKey: "/repos/app", label: "holder" }))
+    const noSlot = broker.acquire(req({ label: "no-slot" }))
+    const waiterA = broker.acquire(req({ slotKey: "/repos/app", label: "waiterA" }))
+    const waiterB = broker.acquire(req({ slotKey: "/repos/app", label: "waiterB" }))
+    await Promise.resolve()
+    expect(broker.slotQueueLength("/repos/app")).toBe(2)
+
+    // The pool drain takes the permit, so waiterA is parked on the pool queue
+    // with the tree left free and waiterB still queued on the tree.
+    holder.release()
+    const noSlotLease = await noSlot
+    await Promise.resolve()
+    expect(broker.slotHolder("/repos/app")).toBeNull()
+    expect(broker.slotQueueLength("/repos/app")).toBe(1)
+
+    const parked = broker.list().find((leg) => leg.label === "waiterA")!
+    broker.cancel(parked.id)
+    await expect(waiterA).rejects.toThrow()
+
+    // Nothing holds the tree, so nothing will ever call `drainSlot` for it —
+    // releasing the unrelated permit holder has to be enough.
+    noSlotLease.release()
+    const bLease = await waiterB
+    expect(broker.slotHolder("/repos/app")).toBe(bLease.id)
+    bLease.release()
+  })
+
+  it("marks the snapshot dirty only once a slot waiter is flagged as one", async () => {
+    // `useSyncExternalStore` reads `getSnapshot()` synchronously inside its
+    // change handler. Notifying before `waitingForSlot` was set cached a
+    // snapshot without it and cleared the dirty bit, so the monitor said plain
+    // "Queued" for a leg that was waiting on the DIRECTORY.
+    const broker = makeBroker(4)
+    const holder = await broker.acquire(req({ slotKey: "/repos/app", label: "holder" }))
+    broker.subscribe(() => {
+      broker.getSnapshot()
+    })
+
+    const waiter = broker.acquire(req({ slotKey: "/repos/app", label: "waiter" }))
+    await Promise.resolve()
+    expect(broker.list().find((leg) => leg.label === "waiter")?.waitingForSlot).toBe(true)
+
+    holder.release()
+    const lease = await waiter
+    lease.release()
+  })
+
   it("drops a cancelled waiter from the tree's queue", async () => {
     const broker = makeBroker(4)
     const first = await broker.acquire(req({ slotKey: "/repos/app" }))

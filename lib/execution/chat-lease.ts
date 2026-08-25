@@ -67,8 +67,10 @@ export interface AcquireChatLeaseParams {
    * serialized by the broker; turns in different trees run in parallel.
    *
    * Omitted for a turn that touches nothing shared. Callers get it from
-   * `slotKeyForExecutionContext`, so a conversation in a managed worktree
-   * serializes against that worktree and not against its source repository.
+   * `slotKeyForTurn`, fed by the same `resolveEffectiveCwd` chain the send
+   * path uses — so a conversation in a managed worktree serializes against
+   * that worktree and not against its source repository, and two plain
+   * conversations sharing a workspace root serialize against each other.
    */
   slotKey?: string
   /** Leg kind for the execution panel; foreground chat turns default to
