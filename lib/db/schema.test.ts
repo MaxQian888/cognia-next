@@ -553,6 +553,40 @@ describe("getDb", () => {
     )
   })
 
+  it("v194 opens the ADR-0149 identity projection with the indexes membership needs", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(194)
+
+    for (const table of [
+      db.users,
+      db.orgs,
+      db.orgMemberships,
+      db.workspaceMemberships,
+      db.externalIdentities,
+    ]) {
+      expect(table.schema.primKey.name).toBe("id")
+    }
+
+    // Membership is read in both directions — "who is in this org" and "which
+    // orgs am I in" — so neither may be a full scan.
+    expect(db.orgMemberships.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["orgId", "userId"])
+    )
+    // Plus "which workspaces do I hold in this org", which is the query the
+    // two-tier resolver runs on every workspace switch.
+    expect(db.workspaceMemberships.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["workspaceId", "userId", "orgId", "[userId+orgId]"])
+    )
+    expect(db.externalIdentities.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["userId", "provider"])
+    )
+    expect(db.orgs.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["logtoOrganizationId"])
+    )
+  })
+
   it("v170 opens the issue tracker tables with the indexes its queries need", async () => {
     const db = getDb()
     await db.open()

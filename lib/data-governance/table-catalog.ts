@@ -132,6 +132,7 @@ export const CORE_TABLE_NAMES = [
   "executionRunEvents",
   "executionRunInterrupts",
   "executionRuns",
+  "externalIdentities",
   "feishuPrincipalBindRequests",
   "feishuPrincipals",
   "feishuTenants",
@@ -198,6 +199,8 @@ export const CORE_TABLE_NAMES = [
   "openVsxCache",
   "openrouterCatalog",
   "opticalArchives",
+  "orgMemberships",
+  "orgs",
   "outboundQueue",
   "pairedDevices",
   "performanceCaptureAttachments",
@@ -302,6 +305,7 @@ export const CORE_TABLE_NAMES = [
   "twinSources",
   "twins",
   "unattendedExecAudit",
+  "users",
   "vscodeExtensionRuntime",
   "wasmGrantLedger",
   "wikiArticles",
@@ -346,6 +350,7 @@ export const CORE_TABLE_NAMES = [
   "workflowWaitEvents",
   "workflowWaitpoints",
   "workflows",
+  "workspaceMemberships",
 ] as const
 
 export type CoreTableName = (typeof CORE_TABLE_NAMES)[number]
@@ -502,14 +507,22 @@ const PROJECTION_TABLES = new Set<CoreTableName>([
   "agentTeamBoard",
   "chatSearchText",
   "chatTurnSummaries",
+  // ADR-0149 §6 — the collaboration server owns people, orgs and
+  // membership. The client keeps a readable copy so a roster renders
+  // without a round trip; it is never where a permission is decided.
+  "externalIdentities",
   "hostStateChannels",
   "mcpServerSummaries",
   "messageMediaRefs",
+  "orgMemberships",
+  "orgs",
   "profileStoreMeta",
   "providerCostDaily",
   "remoteControlRunStatus",
   "retrievalActivePointers",
   "retrievalGenerations",
+  "users",
+  "workspaceMemberships",
 ])
 
 // Cleanup is deliberately more conservative than role inference. A table may

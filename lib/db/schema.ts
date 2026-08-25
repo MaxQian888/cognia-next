@@ -61,6 +61,13 @@ import type {
 import type { ProfileStoreMetaRow } from "./provider-profiles"
 import type { AgentCompatibilityRecordRow } from "./agent-compatibility"
 import type { BackupHistoryRow } from "./backup-history"
+import type {
+  ExternalIdentity,
+  Org,
+  OrgMembership,
+  User,
+  WorkspaceMembership,
+} from "@/types/identity"
 import type { NotificationRecord } from "@/types/notifications"
 import type { SandboxConnectionRow } from "./sandbox-connections"
 import type {
@@ -4595,6 +4602,18 @@ export class CogniaDB extends Dexie {
       chatTemplates: "&id, name, updatedAt, lastUsedAt",
     })
 
+    // ADR-0149 — people, organisations and membership. A PROJECTION: the
+    // collaboration server is authoritative for these rows (ADR-0149 §6), so
+    // this is a cache the client reads without a round trip, never the place a
+    // permission is decided from once Batch 3 lands.
+    this.version(194).stores({
+      users: "&id, email, updatedAt",
+      orgs: "&id, logtoOrganizationId, updatedAt",
+      orgMemberships: "&id, orgId, userId, updatedAt",
+      workspaceMemberships: "&id, workspaceId, userId, orgId, [userId+orgId], updatedAt",
+      externalIdentities: "&id, userId, provider, updatedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4604,6 +4623,12 @@ export class CogniaDB extends Dexie {
 
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.
   chatTemplates!: Table<ChatTemplateRow, string>
+  // v194 — ADR-0149 identity projection. See `lib/db/identity.ts`.
+  users!: Table<User, string>
+  orgs!: Table<Org, string>
+  orgMemberships!: Table<OrgMembership, string>
+  workspaceMemberships!: Table<WorkspaceMembership, string>
+  externalIdentities!: Table<ExternalIdentity, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.
