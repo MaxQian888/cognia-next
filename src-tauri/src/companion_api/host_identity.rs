@@ -31,6 +31,8 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
 
+use cognia_tenant_auth::{OrgId, UserId};
+
 use super::deployment::{deployment_mode, DeploymentMode};
 use super::security_store::{security_store, unix_time_secs, LOCAL_NAMESPACE_UNBOUND};
 
@@ -42,6 +44,8 @@ pub enum HostIdentityError {
     Unbound,
     #[error("the local account does not match this host's recorded binding")]
     BindingMismatch,
+    #[error("{0}")]
+    MalformedId(String),
     #[error("security database error: {0}")]
     Store(String),
 }
@@ -212,12 +216,29 @@ pub fn bind_person(
     user_id: &str,
     org_id: Option<&str>,
 ) -> Result<(), HostIdentityError> {
-    if local_account_namespace.trim().is_empty() || user_id.trim().is_empty() {
+    if local_account_namespace.trim().is_empty() {
         return Err(HostIdentityError::Unbound);
     }
+    // Validated before the store is even looked up: a malformed id is a caller
+    // bug, and reporting it as "no security database here" on a host that has
+    // none would hide it on exactly the machines hardest to debug.
+    let user_id = UserId::parse(user_id)
+        .map_err(|error| HostIdentityError::MalformedId(format!("user id: {error}")))?;
+    let org_id = org_id
+        .map(|value| {
+            OrgId::parse(value)
+                .map_err(|error| HostIdentityError::MalformedId(format!("org id: {error}")))
+        })
+        .transpose()?;
+
     let store = security_store().ok_or(HostIdentityError::StoreUnavailable)?;
     store
-        .bind_host_person(local_account_namespace, user_id, org_id, unix_time_secs())
+        .bind_host_person(
+            local_account_namespace,
+            user_id.as_str(),
+            org_id.as_ref().map(OrgId::as_str),
+            unix_time_secs(),
+        )
         .map_err(|error| match error {
             super::security_store::SecurityStoreError::HostBindingMismatch => {
                 HostIdentityError::BindingMismatch
@@ -410,9 +431,57 @@ mod tests {
         ));
         assert!(matches!(
             bind_person("acct_deadbeef", "   ", None).unwrap_err(),
-            HostIdentityError::Unbound
+            HostIdentityError::MalformedId(_)
         ));
         assert_eq!(person("acct_deadbeef").unwrap().user_id, None);
+    }
+
+    #[test]
+    fn a_malformed_id_is_refused_before_it_reaches_the_security_database() {
+        // The trust boundary in this module's header says Rust cannot prove a
+        // renderer-supplied id is *genuine*. It can still refuse one that is
+        // not an id at all, which is what stops a renderer bug from writing
+        // `undefined` into a column every later grant decision reads.
+        let _scope = store_scope();
+        install();
+        bind_local_account("acct_deadbeef", "digest-a").unwrap();
+
+        for junk in ["undefined", "null", "acct_deadbeef", "usr_", "{}"] {
+            assert!(
+                matches!(
+                    bind_person("acct_deadbeef", junk, None),
+                    Err(HostIdentityError::MalformedId(_))
+                ),
+                "accepted user id {junk:?}"
+            );
+        }
+        // An org id in the user slot is a wiring bug, not a coercible value.
+        assert!(matches!(
+            bind_person("acct_deadbeef", "org_acme", None),
+            Err(HostIdentityError::MalformedId(_))
+        ));
+        // And the same standard applies to the org slot.
+        assert!(matches!(
+            bind_person("acct_deadbeef", "usr_ada", Some("acme")),
+            Err(HostIdentityError::MalformedId(_))
+        ));
+
+        assert_eq!(person("acct_deadbeef").unwrap().user_id, None);
+    }
+
+    #[test]
+    fn a_malformed_id_is_reported_even_on_a_host_with_no_security_database() {
+        // `account_bind_person` maps `StoreUnavailable` to success, because a
+        // desktop that never ran a companion server is a normal state. If
+        // validation ran after the store lookup, a malformed id would be
+        // silently swallowed on exactly those machines.
+        let _scope = store_scope();
+        install_security_store(None);
+
+        assert!(matches!(
+            bind_person("acct_deadbeef", "nonsense", None),
+            Err(HostIdentityError::MalformedId(_))
+        ));
     }
 
     #[test]

@@ -156,6 +156,10 @@ cognia-files = { path = "../crates/cognia-files" }
 # ADR-0067 Tier C — SQLite mirrors of renderer-side agent state. Tauri-free
 # on purpose: the headless `cognia-server` bin links it directly.
 cognia-agent-state = { path = "../crates/cognia-agent-state" }
+# ADR-0149 — identity primitives. Default features only: the app validates
+# `usr_…` / `org_…` before persisting them and resolves membership, but never
+# mints grants, so it does not link the `grants` HMAC machinery.
+cognia-tenant-auth = { path = "../crates/cognia-tenant-auth" }
 log = "0.4"
 # `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
 # `Manager::get_webview`) that powers the embedded in-app browser pane
