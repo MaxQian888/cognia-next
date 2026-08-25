@@ -78,6 +78,7 @@ import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { useTeamMembers } from "@/hooks/use-team-members"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { getDb, whenSeeded } from "@/lib/db/schema"
@@ -245,12 +246,19 @@ export function AppShellMobile() {
   // turn dispatches, an error notification if it throws. Both no-op off-mobile
   // (the haptics wrapper resolves `unsupported`), so wrapping is harmless.
   const handleSend = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: ChatTemplateRun | null
+    ) => {
       try {
         if (isTeamSession) {
           await teamChat.send(content, { attachmentManifest: manifest })
         } else {
-          await directChat.send(content, undefined, { attachmentManifest: manifest })
+          await directChat.send(content, undefined, {
+            attachmentManifest: manifest,
+            templateRun,
+          })
         }
         void impact("light")
       } catch (err) {
@@ -268,9 +276,13 @@ export function AppShellMobile() {
   // A bare `create()` auto-applies the default preset, so typing a first
   // message does not force a character pick the way the "+" button does.
   const handleFirstTurn = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: ChatTemplateRun | null
+    ) => {
       if (useChatStore.getState().activeSessionId) {
-        await handleSend(content, manifest)
+        await handleSend(content, manifest, templateRun)
         return
       }
       const s = await create({ kind: "direct" })
@@ -279,6 +291,7 @@ export function AppShellMobile() {
       await directChat.send(content, undefined, {
         sessionId: s.id,
         attachmentManifest: manifest,
+        templateRun,
       })
       void impact("light")
     },

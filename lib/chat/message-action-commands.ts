@@ -11,6 +11,7 @@ export type MessageActionCommandId =
   | "branch"
   | "truncate"
   | "bringBack"
+  | "rerunTemplate"
   | "delete"
 
 export interface MessageActionCommandContext {
@@ -21,6 +22,8 @@ export interface MessageActionCommandContext {
   canRegenerate?: boolean
   canReadAloud?: boolean
   canBringBack?: boolean
+  /** This turn recorded the template parameters it was written from. */
+  canRerunTemplate?: boolean
   canDelete?: boolean
   streaming?: boolean
 }
@@ -57,6 +60,12 @@ export function resolveMessageActionCommands(
   }
   if (context.role === "assistant" && context.canReadAloud) commands.push({ id: "readAloud" })
   if (context.canBringBack) commands.push({ id: "bringBack" })
+  // Only ever on the user's own turn: the values belong to the question, and
+  // offering it on the answer would read as "regenerate", which is a different
+  // command sitting two rows above.
+  if (context.role === "user" && context.canRerunTemplate) {
+    commands.push({ id: "rerunTemplate", disabled: context.streaming })
+  }
   if (context.canDelete) commands.push({ id: "delete", destructive: true })
   return commands
 }

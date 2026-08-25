@@ -51,3 +51,35 @@ describe("resolveMessageActionCommands", () => {
     expect(assistant.some(({ id }) => id === "edit")).toBe(false)
   })
 })
+
+describe("rerunTemplate", () => {
+  const base = { role: "user" as const, hasContent: true, hasSession: true }
+
+  it("is offered on a user turn that recorded its parameters", () => {
+    const ids = resolveMessageActionCommands({ ...base, canRerunTemplate: true }).map((c) => c.id)
+    expect(ids).toContain("rerunTemplate")
+  })
+
+  it("is absent on a turn with nothing recorded", () => {
+    expect(resolveMessageActionCommands(base).map((c) => c.id)).not.toContain("rerunTemplate")
+  })
+
+  // On the answer it would read as "regenerate", which is a different command.
+  it("is absent on an assistant turn", () => {
+    const ids = resolveMessageActionCommands({
+      ...base,
+      role: "assistant",
+      canRerunTemplate: true,
+    }).map((c) => c.id)
+    expect(ids).not.toContain("rerunTemplate")
+  })
+
+  it("is disabled while the turn is streaming", () => {
+    const command = resolveMessageActionCommands({
+      ...base,
+      canRerunTemplate: true,
+      streaming: true,
+    }).find((c) => c.id === "rerunTemplate")
+    expect(command?.disabled).toBe(true)
+  })
+})

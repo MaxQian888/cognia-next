@@ -107,6 +107,7 @@ import {
   ImageIcon,
   PencilIcon,
   RefreshCcwIcon,
+  Repeat2Icon,
   Share2Icon,
   MoreHorizontalIcon,
   QuoteIcon,
@@ -135,6 +136,8 @@ import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
 import { MessageImActions } from "@/components/chat/message-im-actions"
+import { readChatTemplateRun } from "@/lib/chat/template/run"
+import { requestTemplateRerun } from "@/lib/chat/template/rerun-request"
 import { BranchDialog } from "@/components/chat/branch-dialog"
 import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
 import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
@@ -325,6 +328,17 @@ function MessageRendererInner({
   // Plain text of the message, for the "share as card" action + gate.
   const messageText = useMemo(() => extractText(message), [message])
   const messageShareContent = useMemo(() => buildMessageShareContent(message), [message])
+  /**
+   * The parameters this turn was written from, when it came from a template.
+   *
+   * Read defensively: `metadata` is persisted and synced, so an older build or
+   * another device can have put anything there, and one hidden button is a far
+   * better outcome than a transcript that will not render.
+   */
+  const templateRun = useMemo(
+    () => readChatTemplateRun((message as { metadata?: unknown }).metadata),
+    [message]
+  )
   const messageActionCommands = useMemo(
     () =>
       resolveMessageActionCommands({
@@ -335,6 +349,7 @@ function MessageRendererInner({
         canRegenerate: Boolean(isLastAssistant && onRegenerate),
         canReadAloud: ttsEnabled,
         canBringBack: Boolean(handBackTargetId),
+        canRerunTemplate: Boolean(templateRun && branchSessionId),
         streaming: isStreaming,
       }),
     [
@@ -346,6 +361,7 @@ function MessageRendererInner({
       messageShareContent.hasContent,
       onEditResend,
       onRegenerate,
+      templateRun,
       ttsEnabled,
     ]
   )
@@ -777,6 +793,19 @@ function MessageRendererInner({
                   onClick={startEdit}
                 >
                   <PencilIcon className="size-3.5" />
+                </MessageAction>
+              )}
+
+              {hasActionCommand("rerunTemplate") && templateRun && branchSessionId && (
+                <MessageAction
+                  tooltip={t("rerunTemplateTooltip")}
+                  label={t("rerunTemplateLabel")}
+                  onClick={() =>
+                    requestTemplateRerun({ sessionId: branchSessionId, run: templateRun })
+                  }
+                  disabled={actionCommand("rerunTemplate")?.disabled}
+                >
+                  <Repeat2Icon className="size-3.5" />
                 </MessageAction>
               )}
 

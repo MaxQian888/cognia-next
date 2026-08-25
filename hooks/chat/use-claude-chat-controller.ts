@@ -128,6 +128,7 @@ import { useGitStore } from "@/stores/git/git-store"
 import { refreshGitStatus } from "@/lib/git/load"
 import { buildChatMentionTargets } from "@/lib/claude/agents/chat-mention-targets"
 import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
@@ -471,6 +472,11 @@ export function useClaudeChat() {
          *  `buildSendContent`. Lets the optimistic user message render file
          *  cards (with filenames) instead of raw extracted text. */
         attachmentManifest?: readonly AttachmentManifestEntry[]
+        /** What this turn was written from, when a template with parameters
+         *  produced it. Persisted on the user message row so the turn can be
+         *  re-run with different values — the sent text has the values
+         *  substituted in and no longer marks which words they were. */
+        templateRun?: ChatTemplateRun | null
         /** Explicit user choice after a failed interactive setup. Scheduled
          * runs never expose or honor this bypass. */
         bypassEnvironmentSetup?: boolean
@@ -871,6 +877,12 @@ export function useClaudeChat() {
             ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
             mentions: mentionRefs,
           }
+        }
+      }
+      if (callOptions?.templateRun) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          templateRun: callOptions.templateRun,
         }
       }
       // Edit-as-branch: the replacement joins the original's sibling group, and

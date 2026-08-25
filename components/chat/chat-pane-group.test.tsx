@@ -126,10 +126,11 @@ describe("ChatPaneGroup", () => {
     await (paneA.onSend as (c: unknown) => Promise<void>)("hi-a")
     await (paneB.onSend as (c: unknown) => Promise<void>)("hi-b")
     await (paneB.onStop as () => Promise<void>)()
-    // The third argument is the attachment manifest, forwarded verbatim from
-    // the composer — undefined here because these panes send bare text.
-    expect(send).toHaveBeenCalledWith("hi-a", "a", undefined)
-    expect(send).toHaveBeenCalledWith("hi-b", "b", undefined)
+    // Third argument: the attachment manifest. Fourth: the template run this
+    // turn was written from. Both forwarded verbatim from the composer, and
+    // both undefined here because these panes send bare text.
+    expect(send).toHaveBeenCalledWith("hi-a", "a", undefined, undefined)
+    expect(send).toHaveBeenCalledWith("hi-b", "b", undefined, undefined)
     expect(stop).toHaveBeenCalledWith("b")
   })
 
@@ -139,7 +140,27 @@ describe("ChatPaneGroup", () => {
     const pane = paneRenders.find((p) => p.sessionId === "a")!
     const manifest = [{ filename: "a.pdf", mediaType: "application/pdf", kind: "document" }]
     await (pane.onSend as (c: unknown, m: unknown) => Promise<void>)("hi", manifest)
-    expect(send).toHaveBeenCalledWith("hi", "a", manifest)
+    expect(send).toHaveBeenCalledWith("hi", "a", manifest, undefined)
+  })
+
+  // The values are what make a turn re-runnable: the sent text has them
+  // substituted in and no longer marks which words they were.
+  it("forwards the template run a turn was written from", async () => {
+    const send = jest.fn()
+    render(<ChatPaneGroup {...makeProps({ send })} />)
+    const pane = paneRenders.find((p) => p.sessionId === "a")!
+    const run = {
+      templateId: "tpl",
+      version: "1",
+      text: "review {{module}}",
+      params: { module: { kind: "text", value: "auth" } },
+    }
+    await (pane.onSend as (c: unknown, m: unknown, r: unknown) => Promise<void>)(
+      "review auth",
+      undefined,
+      run
+    )
+    expect(send).toHaveBeenCalledWith("review auth", "a", undefined, run)
   })
 
   it("wires regenerate + editResend per session", async () => {

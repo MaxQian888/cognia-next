@@ -24,6 +24,7 @@ import type {
   SendContent,
 } from "@cognia/agent-config-types"
 import type { RewindFilesResult } from "@/lib/claude/ipc"
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 
 export interface ChatPaneGroupProps {
   /** All sessions (for resolving tab titles / character ids). */
@@ -32,7 +33,8 @@ export interface ChatPaneGroupProps {
   send: (
     content: SendContent,
     sessionId: string,
-    manifest?: readonly AttachmentManifestEntry[]
+    manifest?: readonly AttachmentManifestEntry[],
+    templateRun?: ChatTemplateRun | null
   ) => Promise<void> | void
   stop: (sessionId: string) => Promise<void> | void
   /** Interrupt the running turn and immediately replay the queued steer. */
@@ -176,8 +178,8 @@ export function ChatPaneGroup({
       <ChatPane
         sessionId={sessionId ?? undefined}
         activeSession={session}
-        onSend={(content, manifest) =>
-          Promise.resolve(sessionId ? send(content, sessionId, manifest) : undefined)
+        onSend={(content, manifest, templateRun) =>
+          Promise.resolve(sessionId ? send(content, sessionId, manifest, templateRun) : undefined)
         }
         onStop={() => Promise.resolve(sessionId ? stop(sessionId) : undefined)}
         onSteerNow={() => Promise.resolve(sessionId ? steerNow(sessionId) : undefined)}

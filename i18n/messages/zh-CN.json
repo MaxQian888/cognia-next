@@ -5331,6 +5331,7 @@
         "position": "第 {index} / {total} 个",
         "previewOff": "回到编辑",
         "previewOn": "预览填值后的效果",
+        "rerunBusy": "先清空输入框——重跑会覆盖你正在写的内容。",
         "searchPlaceholder": "搜索…",
         "unfilled": "{count, plural, =1 {还有 1 个参数没填} other {还有 # 个参数没填}}"
       },
@@ -6054,6 +6055,8 @@
       },
       "regenerateLabel": "重新生成",
       "regenerateTooltip": "重新生成",
+      "rerunTemplateLabel": "重跑这条消息",
+      "rerunTemplateTooltip": "换个参数重跑",
       "sendToIm": "发送到 IM…",
       "sendToImDone": "已发送到 IM 会话。",
       "sendToImFailed": "无法发送到 IM 会话。",

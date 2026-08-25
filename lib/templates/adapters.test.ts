@@ -369,7 +369,8 @@ describe("template inputs actually reach the created resource", () => {
   })
 
   it("re-uses the instance's recorded values on an update", async () => {
-    const update = jest.fn(async () => ({ id: "team-created" }))
+    const update = jest.fn()
+    update.mockResolvedValue({ id: "team-created" })
     const adapter = createAgentTeamTemplateAdapter({
       createTeam: jest.fn(),
       addTeammate: jest.fn(),

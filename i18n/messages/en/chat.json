@@ -591,6 +591,7 @@
       "position": "{index} of {total}",
       "previewOff": "Back to editing",
       "previewOn": "Preview with values filled in",
+      "rerunBusy": "Clear the composer first — re-running would replace what you have typed.",
       "searchPlaceholder": "Search…",
       "unfilled": "{count, plural, =1 {1 parameter still needs a value} other {# parameters still need values}}"
     },
@@ -1314,6 +1315,8 @@
     },
     "regenerateLabel": "Regenerate",
     "regenerateTooltip": "Regenerate",
+    "rerunTemplateLabel": "Re-run this message",
+    "rerunTemplateTooltip": "Re-run with different values",
     "sendToIm": "Send to IM…",
     "sendToImDone": "Sent to the IM conversation.",
     "sendToImFailed": "Couldn't send to the IM conversation.",

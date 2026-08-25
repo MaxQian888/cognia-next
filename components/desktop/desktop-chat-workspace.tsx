@@ -50,6 +50,7 @@ import { onComposerMentionRequest } from "@/lib/chat/composer-mention-request"
 import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
 import { useChatStore } from "@/stores/chat"
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
 import { useUIStore } from "@/stores/ui"
@@ -390,13 +391,22 @@ export function DesktopChatWorkspace() {
   // explicit session id so a background pane sends / stops / regenerates
   // against itself. Trust-prompting wraps the send for the targeted pane.
   const paneSend = useCallback(
-    (content: SendContent, sid: string, manifest?: readonly AttachmentManifestEntry[]) => {
+    (
+      content: SendContent,
+      sid: string,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: ChatTemplateRun | null
+    ) => {
       setTrustPromptNonce((n) => n + 1)
+      // Team turns take no `templateRun`: `use-team-chat` writes its own user
+      // message and has no metadata channel for it. A team composer simply
+      // offers no re-run, rather than recording something nothing reads.
       return isTeamSessionId(sid)
         ? teamChat.send(content, { sessionId: sid, attachmentManifest: manifest })
         : directChat.send(content, undefined, {
             sessionId: sid,
             attachmentManifest: manifest,
+            templateRun,
           })
     },
     [directChat, teamChat, isTeamSessionId]
@@ -544,7 +554,11 @@ export function DesktopChatWorkspace() {
   // manifest: a first message typed there can already have attachments staged,
   // and they must survive the session being created underneath them.
   const handleFirstTurn = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: ChatTemplateRun | null
+    ) => {
       const active = useChatStore.getState().activeSessionId
       if (active) {
         if (isTeamSessionId(active)) {
@@ -553,6 +567,7 @@ export function DesktopChatWorkspace() {
           await directChat.send(content, undefined, {
             sessionId: active,
             attachmentManifest: manifest,
+            templateRun,
           })
         }
         return
@@ -571,6 +586,7 @@ export function DesktopChatWorkspace() {
         await directChat.send(content, undefined, {
           sessionId: s.id,
           attachmentManifest: manifest,
+          templateRun,
         })
       }
     },

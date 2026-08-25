@@ -142,8 +142,14 @@ import {
 import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
 import type { ParamSegment } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
-import { splitParamSegments } from "@/lib/chat/template/param-segments"
+import { listParamTokens, splitParamSegments } from "@/lib/chat/template/param-segments"
 import { renderParamTokens } from "@/lib/chat/template/render-params"
+import {
+  templateRunFromBinding,
+  bindingFromRun,
+  type ChatTemplateRun,
+} from "@/lib/chat/template/run"
+import { onTemplateRerunRequest } from "@/lib/chat/template/rerun-request"
 import {
   seedParamValues,
   unfilledRequiredParams,
@@ -250,7 +256,15 @@ interface Props {
    */
   onSend: (
     content: SendContent,
-    manifest?: readonly AttachmentManifestEntry[]
+    manifest?: readonly AttachmentManifestEntry[],
+    /**
+     * What this turn was written from, when it came from a template with
+     * parameters. Recorded on the user message row so the turn can be re-run
+     * with different values — the sent text has the values substituted in and
+     * no longer says which words were parameters. Optional, so the hosts that
+     * do not record it simply ignore the argument.
+     */
+    templateRun?: ChatTemplateRun | null
   ) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
@@ -364,7 +378,8 @@ interface InnerProps {
   onSubmit: (
     text: string,
     files: SubmittedFile[],
-    precomputed?: ReadonlyMap<string, ExtractedAttachment>
+    precomputed?: ReadonlyMap<string, ExtractedAttachment>,
+    templateRun?: ChatTemplateRun | null
   ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
@@ -742,6 +757,47 @@ function ComposerInner(props: InnerProps) {
       cancelled = true
     }
   }, [templateEpoch])
+  /**
+   * Load a past turn back into the box, chips and all.
+   *
+   * Subscribed rather than passed down: the message row that offers this sits
+   * three layers inside the virtualised list and the composer is the list's
+   * SIBLING, so a callback would have to be threaded through components that
+   * have no interest in it. The address check is what keeps a split pane group
+   * from filling in every composer at once.
+   *
+   * It refuses over a non-empty box. Replacing is the obvious implementation
+   * and it silently destroys whatever was half-written — the input history only
+   * holds SENT messages, so there would be nothing to recover it from. One
+   * extra step in a rare case beats losing text in it.
+   */
+  useEffect(
+    () =>
+      onTemplateRerunRequest((detail) => {
+        if (!sessionId || detail.sessionId !== sessionId) return
+        if (controller.textInput.value.trim().length > 0) {
+          toast.info(tTemplateParams("rerunBusy"))
+          return
+        }
+        controller.textInput.setInput(detail.run.text)
+        setTemplateBinding(bindingFromRun(detail.run, Date.now()))
+        setPendingLaunchSpec(null)
+        // Land on the first parameter with its editor open — the reason to
+        // re-run a turn is to change one of them.
+        const first = listParamTokens(detail.run.text, computeCodeRanges(detail.run.text))[0]
+        requestAnimationFrame(() => {
+          const ta = textareaRef.current
+          if (!ta) return
+          ta.focus()
+          const caret = first ? first.start : detail.run.text.length
+          ta.setSelectionRange(caret, caret)
+          setCaret(caret)
+          if (first) setActiveParamId(first.paramId)
+        })
+      }),
+    [sessionId, controller.textInput, textareaRef, setCaret, tTemplateParams]
+  )
+
   // Templates that travel IN the checkout, behind the same Workspace Trust
   // verdict the send path uses. Personal ones come first: they are yours, and a
   // `git pull` must never reorder the list you built muscle memory on.
@@ -781,7 +837,11 @@ function ComposerInner(props: InnerProps) {
   const isResourceResolvable = useCallback(
     (value: Extract<ChatTemplateParamValue, { kind: "resource" }>) => {
       if (value.resourceKind === "subagent") {
-        return chatAgents.length === 0 || chatAgents.some((agent) => agent.handle === value.id)
+        // `chatAgents` is undefined outside combined-mention mode — a composer
+        // with no subagent source at all, which is the same "no evidence" case
+        // as an empty list, not a reason to flag the chip.
+        const list = chatAgents ?? []
+        return list.length === 0 || list.some((agent) => agent.handle === value.id)
       }
       if (value.resourceKind === "agent") {
         const list = props.mentionables ?? []
@@ -1412,6 +1472,11 @@ function ComposerInner(props: InnerProps) {
     // code because the chip pass already excluded it, and a `/command`'s
     // arguments stay untouched for `applyTemplate`'s own `$1` pass.
     const paramRendered = renderParamTokens(text, paramTokens, effectiveBinding)
+    // Captured from the text as it reads RIGHT HERE — before substitution and
+    // before the command pipeline rewrites anything — because that is the only
+    // form in which the parameters are still visible as parameters. What goes
+    // out has the values baked in and nothing marking which words they were.
+    const templateRun = templateRunFromBinding(effectiveBinding, text)
 
     clearInputOptimistically()
 
@@ -1530,7 +1595,8 @@ function ComposerInner(props: InnerProps) {
           sent = await props.onSubmit(
             expandPastes(outgoingText, pasteMap),
             filesToSend,
-            precomputed
+            precomputed,
+            templateRun
           )
         } else if (!ranAction && !modeRan) {
           // Defensive: no prose, no files, no action, no first-line mode —
@@ -1557,7 +1623,8 @@ function ComposerInner(props: InnerProps) {
       const sent = await props.onSubmit(
         expandPastes(pipelineText, pasteMap),
         filesToSend,
-        precomputed
+        precomputed,
+        templateRun
       )
       if (sent) finalizeSend()
       else {
@@ -2856,7 +2923,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     async (
       text: string,
       files: SubmittedFile[],
-      precomputed?: ReadonlyMap<string, ExtractedAttachment>
+      precomputed?: ReadonlyMap<string, ExtractedAttachment>,
+      templateRun?: ChatTemplateRun | null
     ) => {
       const trimmed = text.trim()
       // NOTE: `!shell` / `#memory` are NOT detected here any more. They are
@@ -3031,7 +3099,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         setOversizeConfirm(null)
         if (!ok) return false
       }
-      await onSend(content, attachmentResult.manifest)
+      await onSend(content, attachmentResult.manifest, templateRun)
       clearReferencedPaths(session?.id ?? null)
       clearContextSelections(session?.id ?? null)
       useArtifactStore.getState().consumeReviewReceipts(sentReceipts)

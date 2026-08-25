@@ -43,6 +43,7 @@ import { useChatStore } from "@/stores/chat"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { flushDebouncedDraftWrites, getDraft, setDraft } from "@/lib/db/chat-drafts"
 import { createChatTemplate, listChatTemplates } from "@/lib/db/chat-templates"
+import { requestTemplateRerun } from "@/lib/chat/template/rerun-request"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(): DataAdapter {
@@ -75,7 +76,7 @@ const session: ChatSession = {
 }
 
 async function mount(
-  onSend: (content: unknown) => void = () => undefined,
+  onSend: (content: unknown, manifest?: unknown, templateRun?: unknown) => void = () => undefined,
   sessionOverride: Partial<ChatSession> = {}
 ) {
   const view = render(
@@ -494,5 +495,98 @@ describe("Composer — repository templates", () => {
     fireEvent.change(ta, { target: { value: "/" } })
     await waitFor(() => expect(screen.getByText("Mine")).toBeInTheDocument())
     expect(screen.queryByText("House review")).not.toBeInTheDocument()
+  }, 30_000)
+})
+
+describe("Composer — re-running a turn", () => {
+  it("records what the turn was written from, tokens intact", async () => {
+    const runs: unknown[] = []
+    const { ta } = await mount((_content, _manifest, templateRun) => runs.push(templateRun))
+
+    fireEvent.change(ta, { target: { value: "review {{module}} please" } })
+    clickAt(ta, 10)
+    fireEvent.change(paramInput(), { target: { value: "auth" } })
+    await submit(ta)
+
+    // The text as it read BEFORE substitution — the only form in which the
+    // parameters are still visible as parameters.
+    expect(runs[0]).toEqual({
+      templateId: expect.any(String),
+      version: expect.any(String),
+      text: "review {{module}} please",
+      params: { module: { kind: "text", value: "auth" } },
+    })
+  }, 30_000)
+
+  it("records nothing for a turn with no parameters", async () => {
+    const runs: unknown[] = []
+    const { ta } = await mount((_content, _manifest, templateRun) => runs.push(templateRun))
+
+    fireEvent.change(ta, { target: { value: "just a message" } })
+    await submit(ta)
+
+    expect(runs[0]).toBeNull()
+  }, 30_000)
+
+  it("loads a past turn back into the box with its chips filled", async () => {
+    const { ta } = await mount()
+
+    await act(async () => {
+      requestTemplateRerun({
+        sessionId: session.id,
+        run: {
+          templateId: "tpl",
+          version: "1",
+          text: "review {{module}} please",
+          params: { module: { kind: "text", value: "billing" } },
+        },
+      })
+    })
+
+    await waitFor(() => expect(ta.value).toBe("review {{module}} please"))
+    expect(chips()[0]).toHaveAttribute("data-param-state", "filled")
+    // ...with the editor open on it, because changing a value is the reason to
+    // re-run a turn at all.
+    await waitFor(() => expect(screen.getByTestId("template-param-popover")).toBeInTheDocument())
+  }, 30_000)
+
+  // Several composers are mounted at once in a split pane group.
+  it("ignores a request addressed to another conversation", async () => {
+    const { ta } = await mount()
+
+    await act(async () => {
+      requestTemplateRerun({
+        sessionId: "ses_other",
+        run: {
+          templateId: "tpl",
+          version: "1",
+          text: "review {{module}}",
+          params: { module: { kind: "text", value: "billing" } },
+        },
+      })
+    })
+
+    expect(ta.value).toBe("")
+  }, 30_000)
+
+  // The input history only holds SENT messages, so replacing a half-written
+  // draft would leave nothing to recover it from.
+  it("refuses over a non-empty box rather than destroying the draft", async () => {
+    const { ta } = await mount()
+    fireEvent.change(ta, { target: { value: "half a thought" } })
+
+    await act(async () => {
+      requestTemplateRerun({
+        sessionId: session.id,
+        run: {
+          templateId: "tpl",
+          version: "1",
+          text: "review {{module}}",
+          params: { module: { kind: "text", value: "billing" } },
+        },
+      })
+    })
+
+    expect(ta.value).toBe("half a thought")
   }, 30_000)
 })

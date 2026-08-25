@@ -65,6 +65,7 @@ import { WorkspaceChangesCard } from "./workspace-changes-card"
 import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
 import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
+import type { ChatTemplateRun } from "@/lib/chat/template/run"
 import { hasNoLeakingPii } from "@cognia/redact"
 import { useFlowMotion } from "./motion/motion-reveal"
 import { isSupportAgentId } from "@/lib/support-agent/context"
@@ -172,7 +173,11 @@ interface ChatPaneProps {
    * projection.
    */
   sessionId?: string
-  onSend: (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => Promise<void>
+  onSend: (
+    content: SendContent,
+    manifest?: readonly AttachmentManifestEntry[],
+    templateRun?: ChatTemplateRun | null
+  ) => Promise<void>
   onStop: () => Promise<void>
   /** Interrupt the running turn and immediately replay the queued steer. */
   onSteerNow?: () => Promise<void> | void
@@ -414,8 +419,12 @@ export function ChatPane({
   })
 
   const handleSend = useCallback(
-    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
-      await onSend(content, manifest)
+    async (
+      content: SendContent,
+      manifest?: readonly AttachmentManifestEntry[],
+      templateRun?: ChatTemplateRun | null
+    ) => {
+      await onSend(content, manifest, templateRun)
     },
     [onSend]
   )
