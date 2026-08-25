@@ -267,8 +267,8 @@ describe("CompanionSection", () => {
    * Row rendering, revoke, pause and resume all moved to the device console
    * with their behaviour intact — the biometric gating and the Dexie + Rust
    * dual write are covered by `hooks/devices/use-device-grant-actions.test.tsx`
-   * and the surface by `components/devices/tabs/access-tab.test.tsx`. What is
-   * asserted here is only that Settings reports the count.
+   * and the surface by `components/devices/sections/access-section.test.tsx`.
+   * What is asserted here is only that Settings reports the count.
    */
   it("reports how many devices are paired without listing them", async () => {
     await addPairedDevice({
