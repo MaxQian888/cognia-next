@@ -59,6 +59,25 @@ export const Compact: Story = {
   },
 }
 
+/**
+ * The bordered variant used by scrolling document pages that have no band to
+ * sit in. `SettingsPageHeader` is this variant with `headingLevel={2}` — the
+ * two used to be separate components with the same visual DNA (ADR-0148).
+ */
+export const Card: Story = {
+  args: {
+    variant: "card",
+    icon: <WorkflowIcon />,
+    title: "Evaluation",
+    description: "Configure judge defaults",
+    actions: (
+      <Button size="sm" variant="outline">
+        Reset
+      </Button>
+    ),
+  },
+}
+
 export const LongLocalizedContent: Story = {
   args: {
     icon: <WorkflowIcon />,

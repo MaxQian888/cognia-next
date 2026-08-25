@@ -50,6 +50,19 @@ describe("scanSource", () => {
     assert.equal(scanSource('<div data-elevation="2" />'), 0)
   })
 
+  /**
+   * The gate's own docstring quotes `shadow-sm` and `rounded-2xl` to explain
+   * why they are refused. Counting matches inside comments made documenting the
+   * rule a violation of it.
+   */
+  test("ignores matches inside comments", () => {
+    assert.equal(scanSource('// className="rounded-2xl shadow-lg"'), 0)
+    assert.equal(scanSource("/* a rounded-2xl panel: rounded-md border bg-card */"), 0)
+    assert.equal(scanSource("/**\n * quoting `shadow-sm` in a doc comment\n */\nconst x = 1"), 0)
+    // ...but a real occurrence on the same line as a trailing comment still counts.
+    assert.equal(scanSource('className="shadow-md" // fine'), 1)
+  })
+
   test("counts every occurrence, so a file cannot hide one behind another", () => {
     assert.equal(scanSource('className="rounded-2xl" ... className="shadow-lg"'), 2)
   })

@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl"
 import { ChevronDown, Check, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
@@ -373,6 +374,14 @@ interface SettingsPageHeaderProps {
   className?: string
 }
 
+/**
+ * Kept as a named export so its callers read as settings code, but it is now
+ * `FeaturePageHeader` in its `card` variant (ADR-0148). The two components had
+ * the same visual DNA — identical gradient hairline, identical
+ * `size-9 rounded-xl` icon tile, same typography — and differed only in whether
+ * the frame was a bottom border or a rounded card. Maintaining that twice is
+ * how two headers drift apart.
+ */
 export function SettingsPageHeader({
   title,
   description,
@@ -381,26 +390,16 @@ export function SettingsPageHeader({
   className,
 }: SettingsPageHeaderProps) {
   return (
-    <div
-      className={cn(
-        "relative mb-5 flex min-h-14 flex-col gap-2 overflow-hidden rounded-xl border border-border/70 bg-background/88 px-4 py-3 shadow-xs backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between",
-        "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/35 before:to-transparent",
-        className
-      )}
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        {icon && (
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-primary/15 bg-gradient-to-br from-primary/14 via-primary/8 to-background text-primary shadow-xs [&_svg]:size-4">
-            {icon}
-          </span>
-        )}
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold tracking-tight">{title}</h2>
-          {description && <p className="truncate text-xs text-muted-foreground">{description}</p>}
-        </div>
-      </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
-    </div>
+    <FeaturePageHeader
+      variant="card"
+      // A settings section sits inside a page that already has an h1.
+      headingLevel={2}
+      icon={icon}
+      title={title}
+      description={description}
+      actions={actions}
+      className={className}
+    />
   )
 }
 

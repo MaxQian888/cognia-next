@@ -126,7 +126,7 @@ export function InboxSidebarContent({
       {/* One 48px row with a `border-b`, so the rail shares the seam the list
           and detail panes already have — this header used to stack a title, a
           full-width 3-up ToggleGroup and the drafts link with no seam at all. */}
-      <SidebarHeader className="@container/inbox-rail h-12 shrink-0 flex-row items-center gap-1 border-b px-2 py-0 md:px-3">
+      <SidebarHeader className="@container/inbox-rail h-[var(--chrome-h)] shrink-0 flex-row items-center gap-1 border-b px-2 py-0 md:px-3">
         <h2 className="me-auto hidden truncate text-sm font-semibold @[13rem]/inbox-rail:block">
           {t("title")}
         </h2>

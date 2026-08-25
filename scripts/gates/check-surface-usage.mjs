@@ -80,8 +80,18 @@ function listFiles() {
     .filter((p) => !EXCLUDED_FILE.test(p))
 }
 
+/**
+ * Strip comments before scanning. Documenting the very pattern this gate
+ * refuses — quoting `shadow-sm` in a docstring to explain why it is refused —
+ * must not itself trip the gate.
+ */
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+}
+
 /** Count violations per file. Exported for the test beside this script. */
-export function scanSource(src) {
+export function scanSource(rawSrc) {
+  const src = stripComments(rawSrc)
   let barePanels = 0
   for (const m of src.matchAll(/"([^"\n]{0,600})"/g)) {
     if (isBarePanel(m[1])) barePanels += 1

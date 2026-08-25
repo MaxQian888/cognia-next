@@ -306,7 +306,7 @@ export function TemplateStudio() {
         icon={<FileArchiveIcon />}
         title={t("title")}
         description={t("description")}
-        className="rounded-xl border shadow-sm"
+        variant="card"
         actions={
           platform === "mobile" ? null : (
             <div className="flex items-center gap-2">

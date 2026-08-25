@@ -391,7 +391,7 @@ export default function AgentTeamsListPage() {
         icon={<UsersIcon />}
         title={t("listTitle")}
         description={t("listDescription")}
-        className="rounded-xl border shadow-sm"
+        variant="card"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button

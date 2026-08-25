@@ -190,7 +190,7 @@ export function ConversationList({
   // (~110px of chrome before the first conversation).
   const header = (
     <>
-      <div className="flex h-12 shrink-0 items-center gap-1.5 border-b px-2 md:px-3">
+      <div className="flex h-[var(--chrome-h)] shrink-0 items-center gap-1.5 border-b px-2 md:px-3">
         <SidebarTrigger
           className="-ms-1 size-9 shrink-0 md:hidden"
           aria-label={t("openSidebar")}

@@ -14,7 +14,21 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-export type FeaturePageHeaderVariant = "management" | "compact"
+/**
+ * How the header meets the page.
+ *
+ *  - `management` — the full-bleed band every feature route uses
+ *  - `compact`    — the same band at column-header height
+ *  - `card`       — a bordered, rounded block with a gap beneath it, for
+ *                   scrolling document pages that have no band to sit in
+ *
+ * `card` exists because three call sites were already producing it by passing
+ * `className="rounded-xl border shadow-sm"`, and a fourth header component in
+ * `settings/common/settings-section.tsx` had reimplemented the same look — same
+ * gradient hairline, same `size-9 rounded-xl` icon tile — as a separate
+ * component (ADR-0148).
+ */
+export type FeaturePageHeaderVariant = "management" | "compact" | "card"
 
 /**
  * Where `navigation` renders.
@@ -56,6 +70,13 @@ export interface FeaturePageHeaderProps {
   overflowActions?: readonly FeatureHeaderAction[]
   overflowLabel?: string
   actions?: React.ReactNode
+  /**
+   * Which heading element the title renders as. Defaults to `1` — a feature
+   * route's header IS the page title. A header nested inside a page that
+   * already has one (a settings section, for instance) must pass `2`, or the
+   * document ends up with two `h1`s.
+   */
+  headingLevel?: 1 | 2
   className?: string
   testId?: string
 }
@@ -161,6 +182,7 @@ export function FeaturePageHeader({
   overflowActions = [],
   overflowLabel,
   actions,
+  headingLevel = 1,
   className,
   testId,
 }: FeaturePageHeaderProps) {
@@ -168,17 +190,21 @@ export function FeaturePageHeader({
   const secondaryNavigation = navigationPlacement === "inline" ? null : navigation
   const hasSecondary = Boolean(secondaryNavigation || controls)
   const showOverflow = overflowActions.length > 0 && Boolean(overflowLabel)
+  const Heading = headingLevel === 2 ? "h2" : "h1"
   const isCompact = variant === "compact"
+  const isCard = variant === "card"
 
   return (
     <header
       data-slot="feature-page-header"
       data-testid={testId}
       data-variant={variant}
+      data-elevation={isCard ? "1" : undefined}
       data-has-secondary={String(hasSecondary)}
       data-navigation-placement={navigationPlacement}
       className={cn(
-        "@container/feature-header relative z-10 shrink-0 overflow-hidden border-b border-border/70 bg-background/88 text-foreground backdrop-blur-xl supports-[backdrop-filter]:bg-background/76",
+        "@container/feature-header relative z-10 shrink-0 overflow-hidden border-border/70 bg-background/88 text-foreground backdrop-blur-xl supports-[backdrop-filter]:bg-background/76",
+        isCard ? "mb-5 rounded-stage border" : "border-b",
         "before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/35 before:to-transparent",
         className
       )}
@@ -186,7 +212,7 @@ export function FeaturePageHeader({
       <div
         className={cn(
           "relative flex min-w-0 items-center gap-2.5 px-3 @md/feature-header:px-4",
-          isCompact ? "min-h-10 py-1" : "min-h-14 py-2"
+          isCompact ? "min-h-[var(--chrome-h)] py-1" : "min-h-[var(--chrome-h-tall)] py-2"
         )}
       >
         {breadcrumb ? <div className="shrink-0">{breadcrumb}</div> : null}
@@ -205,14 +231,14 @@ export function FeaturePageHeader({
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h1
+            <Heading
               className={cn(
                 "truncate font-semibold tracking-tight",
                 isCompact ? "text-sm" : "text-base @xl/feature-header:text-[17px]"
               )}
             >
               {title}
-            </h1>
+            </Heading>
             {status ? (
               <div className="hidden shrink-0 @md/feature-header:block">{status}</div>
             ) : null}
@@ -276,7 +302,7 @@ export function FeaturePageHeader({
       </div>
 
       {hasSecondary ? (
-        <div className="relative flex min-h-10 min-w-0 items-center gap-2 border-t border-border/55 bg-muted/16 px-3 py-1.5 @md/feature-header:px-4">
+        <div className="relative flex min-h-[var(--chrome-h)] min-w-0 items-center gap-2 border-t border-border/55 bg-muted/16 px-3 py-1.5 @md/feature-header:px-4">
           {secondaryNavigation ? <div className="shrink-0">{secondaryNavigation}</div> : null}
           {secondaryNavigation && controls ? (
             <span className="h-4 w-px shrink-0 bg-border/80" aria-hidden="true" />

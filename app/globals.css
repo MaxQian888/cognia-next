@@ -147,7 +147,15 @@
      so the declarations below stay the source of truth and the default look is
      unchanged by construction (same pattern as `RadiusApplier`). */
   --pill-radius: 9999px;
+  /* Chrome bar heights (ADR-0148). Three literals with three different values
+     used to spell these, and three separate comments called `h-10` "the shared
+     column-header height" without any of them being a token.
+       --chrome-h      column headers: icon buttons and a title (40px)
+       --chrome-h-tall headers holding a full input control (56px) — forcing
+                       these down to 40px would clip a 36px input inside its
+                       own padding, which is why one number was never enough. */
   --chrome-h: 2.5rem;
+  --chrome-h-tall: 3.5rem;
   /* Layer-semantic surface colours. `<Surface>` reads these instead of
      hardcoding `bg-card`, which is what lets a surface participate in wallpaper
      translucency without a specificity fight against the unlayered rules in

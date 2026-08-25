@@ -250,7 +250,7 @@ export function ChatHeader({ session, onSplitView, onExitSplit }: Props) {
       // header (`channel-list.tsx`) and the right-hand workbench header
       // (`context-workbench.tsx`) draw the same 40px with the same bottom rule,
       // so the three columns read as one bar rather than three stepped ones.
-      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur"
+      className="flex h-[var(--chrome-h)] shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur"
       // Opt the bar into the shared wallpaper-aware tonality system
       // (app/globals.css §5), same tier as the conversation rail. Without it
       // the hardcoded `bg-background/80` stayed an opaque slab while the

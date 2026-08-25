@@ -2064,7 +2064,7 @@ function Header({
   ) : (
     <div
       data-testid="channel-list-header"
-      className="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-3"
+      className="flex h-[var(--chrome-h)] shrink-0 items-center justify-between gap-2 border-b px-3"
     >
       {title}
       <HeaderActions selectedGuild={selectedGuild} team={team} {...actions} />

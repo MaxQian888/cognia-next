@@ -650,7 +650,7 @@ export function TitleBar() {
           // bar's zones (see `title-bar-outlets.tsx`), so the row has to be as
           // tall as the headers it replaces. macOS overlay traffic lights sit
           // at y=14 (`tauri.conf.json`) to centre in it.
-          "relative flex h-10 shrink-0 items-center bg-muted/40 text-xs select-none",
+          "relative flex h-[var(--chrome-h)] shrink-0 items-center bg-muted/40 text-xs select-none",
           isMac ? "pl-20" : "pl-2"
         )}
       >
