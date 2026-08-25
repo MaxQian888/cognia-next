@@ -579,3 +579,19 @@ it("reports why the runtime is unusable instead of assuming health", async () =>
   // This suite's intl mock renders the key alone, without its values.
   await screen.findByText("browser.remote.runtimeUnavailable")
 })
+
+// The remote preview used to carry a bare recorder section and no console or
+// network readout at all; it now shares the pane's single collapsible strip.
+it("carries the same collapsible tools strip as the embedded pane", async () => {
+  render(
+    <RemoteBrowserPreview
+      chatSessionId="chat-1"
+      workspaceId="workspace-1"
+      createStream={createStream}
+    />
+  )
+  const dock = await screen.findByTestId("browser-tools-dock")
+  expect(dock).toHaveAttribute("data-expanded", "false")
+  fireEvent.click(screen.getByTestId("browser-tools-toggle"))
+  expect(screen.getByTestId("remote-browser-recorder")).toBeInTheDocument()
+})

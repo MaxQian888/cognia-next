@@ -57,9 +57,20 @@ function publicHttpHostname(value: string | null): string | null {
 export function BrowserCookieImportAction({
   currentUrl,
   onReload,
+  backend = "embedded",
 }: {
   currentUrl: string | null
   onReload: () => Promise<void>
+  /**
+   * Which engine is showing the page.
+   *
+   * Cookie import reads *this machine's* Chromium keychain and writes into
+   * *this machine's* WKWebView store, so it is embedded-only by construction —
+   * a cloud Chromium is a different browser on a different host. Rendering it
+   * disabled with that reason, rather than omitting it, is what stops "the
+   * cookie button disappeared" from reading as a bug (working rule 7).
+   */
+  backend?: "embedded" | "remote"
 }) {
   const t = useTranslations("browser.cookieImport")
   const featureEnabled = useSettingsStore(
@@ -110,19 +121,22 @@ export function BrowserCookieImportAction({
   const firstReason = CHROMIUM_BROWSERS.map((candidate) => availability[candidate]?.reason).find(
     Boolean
   )
-  const reason = !featureEnabled
-    ? t("reason.featureDisabled")
-    : !domain
-      ? t("reason.openPage")
-      : Object.keys(availability).length === 0
-        ? t("reason.checking")
-        : !CHROMIUM_BROWSERS.some((candidate) => availability[candidate]?.profiles.length)
-          ? firstReason === "macos_only"
-            ? t("reason.unsupported")
-            : firstReason === "probe_failed"
-              ? t("reason.checkFailed")
-              : t("reason.noProfiles")
-          : null
+  const reason =
+    backend === "remote"
+      ? t("reason.remoteBackend")
+      : !featureEnabled
+        ? t("reason.featureDisabled")
+        : !domain
+          ? t("reason.openPage")
+          : Object.keys(availability).length === 0
+            ? t("reason.checking")
+            : !CHROMIUM_BROWSERS.some((candidate) => availability[candidate]?.profiles.length)
+              ? firstReason === "macos_only"
+                ? t("reason.unsupported")
+                : firstReason === "probe_failed"
+                  ? t("reason.checkFailed")
+                  : t("reason.noProfiles")
+              : null
   const disabled = reason !== null
   const profiles = selectedAvailability?.profiles ?? []
   const browserOptions = useMemo(

@@ -4068,6 +4068,7 @@
         "featureDisabled": "Enable Chromium cookie import in Settings → Desktop first.",
         "noProfiles": "No compatible Chromium profiles were found on this Mac.",
         "openPage": "Open a public web page before importing cookies.",
+        "remoteBackend": "Sign-in reuse applies to the built-in preview on this Mac, not the cloud browser.",
         "unsupported": "Cookie import is unavailable on this platform. Windows App-Bound Encryption is not bypassed; use a separate browser profile instead."
       },
       "result": {

@@ -4068,6 +4068,7 @@
         "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
         "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
         "openPage": "请先打开一个公网网页，再导入 Cookie。",
+        "remoteBackend": "复用登录态只适用于本机的内置预览，不适用于云端浏览器。",
         "unsupported": "当前平台不支持 Cookie 导入。不会绕过 Windows App-Bound Encryption；请改用独立浏览器配置。"
       },
       "result": {

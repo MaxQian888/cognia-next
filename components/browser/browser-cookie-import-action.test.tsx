@@ -178,3 +178,22 @@ it("reports reload failure without also showing import success", async () => {
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith("result.failed"))
   expect(toast.success).not.toHaveBeenCalled()
 })
+
+// Working rule 7, UI half: cookie import reads this machine's Chromium keychain
+// into this machine's WKWebView store, so a cloud Chromium can never use it.
+// Disabled with the reason, not absent — an unexplained disappearance reads as
+// a bug.
+it("is inert with a stated reason on the cloud browser", () => {
+  render(
+    <TooltipProvider>
+      <BrowserCookieImportAction
+        backend="remote"
+        currentUrl={null}
+        onReload={() => Promise.resolve()}
+      />
+    </TooltipProvider>
+  )
+  expect(screen.getByRole("button", { name: "action" })).toBeDisabled()
+  // The reason is announced, not just implied by the disabled state.
+  expect(screen.getByText("reason.remoteBackend")).toBeInTheDocument()
+})

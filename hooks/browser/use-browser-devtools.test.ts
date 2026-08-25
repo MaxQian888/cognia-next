@@ -109,4 +109,57 @@ describe("useBrowserDevtools (ADR-0127)", () => {
     expect(handlers.has("browser://console")).toBe(true)
     unmount()
   })
+
+  // A remote Chromium session has no push channel into this renderer, but the
+  // engine implements the same drains — so the readouts fill by polling
+  // instead of being absent, which is what they were before.
+  it("fills the same rings by polling when a remote engine supplies the drains", async () => {
+    jest.useFakeTimers()
+    try {
+      const readConsole = jest
+        .fn()
+        .mockResolvedValueOnce([{ level: "error", text: "remote boom", ts: 1 }])
+        .mockResolvedValue([])
+      const readNetwork = jest
+        .fn()
+        .mockResolvedValueOnce([
+          { url: "https://x/a", method: "GET", status: 500, ok: false, durationMs: 4 },
+        ])
+        .mockResolvedValue([])
+      const { result, unmount } = renderHook(() =>
+        useBrowserDevtools({ poll: { readConsole, readNetwork, intervalMs: 100 } })
+      )
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(result.current.console).toHaveLength(1)
+      expect(result.current.problemCount).toBe(1)
+      expect(result.current.failedRequests).toBe(1)
+
+      // It keeps ticking, and stops on unmount.
+      await act(async () => {
+        jest.advanceTimersByTime(250)
+        await Promise.resolve()
+      })
+      const callsWhileMounted = readConsole.mock.calls.length
+      expect(callsWhileMounted).toBeGreaterThan(1)
+      unmount()
+      jest.advanceTimersByTime(500)
+      expect(readConsole).toHaveBeenCalledTimes(callsWhileMounted)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("does not poll a pane that does not own the session", async () => {
+    const readConsole = jest.fn().mockResolvedValue([])
+    const readNetwork = jest.fn().mockResolvedValue([])
+    const { unmount } = renderHook(() =>
+      useBrowserDevtools({ enabled: false, poll: { readConsole, readNetwork } })
+    )
+    await act(flush)
+    expect(readConsole).not.toHaveBeenCalled()
+    unmount()
+  })
 })

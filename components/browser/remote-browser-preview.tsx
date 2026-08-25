@@ -26,7 +26,14 @@ import { toast } from "sonner"
 import { BrowserFindBarSection, isFindShortcut } from "@/components/browser/browser-find-bar"
 import { BrowserHistoryMenu } from "@/components/browser/browser-history-menu"
 import { BrowserNavigationControls } from "@/components/browser/browser-navigation-controls"
+import { BrowserCookieImportAction } from "@/components/browser/browser-cookie-import-action"
 import { BrowserToolbar, addressDisplayParts } from "@/components/browser/browser-toolbar"
+import {
+  BrowserConsolePanel,
+  BrowserNetworkPanel,
+} from "@/components/browser/browser-devtools-panels"
+import { BrowserToolsDock } from "@/components/browser/browser-tools-dock"
+import { useBrowserDevtools } from "@/hooks/browser/use-browser-devtools"
 import { BrowserRecorderPanel } from "@/components/browser/browser-recorder-panel"
 import { BrowserZoomControl } from "@/components/browser/browser-zoom-control"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
@@ -144,7 +151,14 @@ function RemoteRecorder({
     void noteLoaded()
   }, [noteLoaded, noteNavigation, pageUrl])
 
-  return <BrowserRecorderPanel pageUrl={pageUrl} recorder={recorder} onSendToChat={onSendToChat} />
+  return (
+    <BrowserRecorderPanel
+      chrome={false}
+      pageUrl={pageUrl}
+      recorder={recorder}
+      onSendToChat={onSendToChat}
+    />
+  )
 }
 
 /** Cloud/mobile browser preview backed by a private WorkspaceRuntime Chromium. */
@@ -173,6 +187,19 @@ export function RemoteBrowserPreview({
   const [errorCode, setErrorCode] = useState<string | null>(null)
   /** Why the runtime is not usable, straight from the gateway. */
   const [runtimeReason, setRuntimeReason] = useState<string | null>(null)
+  const engineRefForDevtools = engine
+  const devtools = useBrowserDevtools({
+    poll: useMemo(
+      () =>
+        engineRefForDevtools
+          ? {
+              readConsole: () => engineRefForDevtools.readConsole(),
+              readNetwork: () => engineRefForDevtools.readNetwork(),
+            }
+          : null,
+      [engineRefForDevtools]
+    ),
+  })
   const [urlInput, setUrlInput] = useState(initialUrl ?? "")
   const [clickPointer, setClickPointer] = useState<{ x: number; y: number; key: number } | null>(
     null
@@ -596,6 +623,15 @@ export function RemoteBrowserPreview({
                 onZoomChange={handleZoom}
                 disabled={connection !== "connected"}
               />
+              {/* Embedded-only by construction: it reads this machine's
+                  Chromium keychain into this machine's WKWebView store. Shown
+                  disabled with that reason rather than omitted, so its absence
+                  cannot read as a bug. */}
+              <BrowserCookieImportAction
+                backend="remote"
+                currentUrl={null}
+                onReload={() => Promise.resolve()}
+              />
               <TooltipIconButton
                 tooltip={actionsT("openExternal")}
                 aria-label={actionsT("openExternal")}
@@ -788,11 +824,28 @@ export function RemoteBrowserPreview({
             </div>
           )}
         </div>
+        {/* The same single strip the embedded pane uses. Console and network
+            arrive by polling here: a remote session has no push channel into
+            this renderer, but the engine implements the same drains. */}
         {engine && (
-          <RemoteRecorder
-            engine={engine}
-            pageUrl={activePage?.url ?? null}
-            onSendToChat={(markdown) => void sendText(markdown, { sessionId: chatSessionId })}
+          <BrowserToolsDock
+            consoleCount={devtools.console.length}
+            networkCount={devtools.network.length}
+            problemCount={devtools.problemCount}
+            failedRequests={devtools.failedRequests}
+            recorder={
+              <RemoteRecorder
+                engine={engine}
+                pageUrl={activePage?.url ?? null}
+                onSendToChat={(markdown) => void sendText(markdown, { sessionId: chatSessionId })}
+              />
+            }
+            console={
+              <BrowserConsolePanel entries={devtools.console} onClear={devtools.clearConsole} />
+            }
+            network={
+              <BrowserNetworkPanel entries={devtools.network} onClear={devtools.clearNetwork} />
+            }
           />
         )}
       </div>
