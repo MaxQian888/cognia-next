@@ -43,7 +43,10 @@ def test_reference_plugin_full_protocol_roundtrip():
     # get_tools / get_info
     tool_names = {t["name"] for t in rt.dispatch("get_tools")}
     assert tool_names == {"greet", "countdown"}
-    assert rt.dispatch("get_info") == {"tool_count": 2, "hook_count": 1, "contribution_count": 0}
+    info = rt.dispatch("get_info")
+    assert info["runtime_id"] == "python"
+    assert info["legacy_adapter"] is False
+    assert (info["tool_count"], info["hook_count"], info["contribution_count"]) == (2, 1, 0)
 
     # config-driven tool
     rt.dispatch("push_config", {"config": {"greeting": "Yo", "shout": True}})

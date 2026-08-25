@@ -247,6 +247,10 @@ function formatPrettier(source, parser) {
   const result = execaSync(process.execPath, [prettierCliPath, "--parser", parser], {
     input: source,
     reject: false,
+    // Keep prettier's final newline: execa strips it by default, which would
+    // hand `writeOrCheck` bytes that lint-staged's prettier immediately puts
+    // back — leaving `--check` permanently stale after every commit.
+    stripFinalNewline: false,
   })
   if (result.exitCode !== 0 || result.signal) {
     throw new Error(

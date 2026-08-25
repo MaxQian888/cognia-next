@@ -1217,43 +1217,43 @@
     {
       "id": "onScheduledTaskCreate",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onScheduledTaskUpdate",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onScheduledTaskDelete",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onScheduledTaskPause",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onScheduledTaskResume",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onScheduledTaskBeforeRun",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
@@ -1357,29 +1357,29 @@
     {
       "id": "onWorkflowNodeRegister",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onWorkflowNodeUnregister",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onWorkflowTriggerRegister",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
       "id": "onWorkflowTriggerUnregister",
       "kind": "hook",
-      "stability": "stable",
-      "status": "implemented",
+      "stability": "experimental",
+      "status": "virtual",
       "introducedIn": "0.1.0"
     },
     {
