@@ -582,8 +582,26 @@ describe("getDb", () => {
     expect(db.externalIdentities.schema.indexes.map((index) => index.name)).toEqual(
       expect.arrayContaining(["userId", "provider"])
     )
+    // v196 dropped `updatedAt` here: `ExternalIdentity` never had that field,
+    // so the index matched no row. Nothing may put it back.
+    expect(db.externalIdentities.schema.indexes.map((index) => index.name)).not.toContain(
+      "updatedAt"
+    )
     expect(db.orgs.schema.indexes.map((index) => index.name)).toEqual(
       expect.arrayContaining(["logtoOrganizationId"])
+    )
+  })
+
+  it("v196 indexes the external subject the IM plane resolves people by", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(196)
+    // `findUserIdByProviderSubject` scans `provider` and filters `subject`
+    // when the tenant is unknown; without this index every Lark bind would
+    // walk the whole table.
+    expect(db.externalIdentities.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["subject", "linkedAt"])
     )
   })
 

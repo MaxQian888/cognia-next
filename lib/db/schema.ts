@@ -4625,6 +4625,19 @@ export class CogniaDB extends Dexie {
         "&id, orgId, workspaceId, issueProjectId, [orgId+workspaceId], updatedAt, fetchedAt",
     })
 
+    // ADR-0149 Batch 5 — external identities gain the index the IM plane
+    // actually queries, and lose one that never indexed anything.
+    //
+    // `updatedAt` is not a property of `ExternalIdentity` (the row carries
+    // `linkedAt`), so that index has been inert since v194. `subject` replaces
+    // it because Batch 5 introduced a lookup the deterministic primary key
+    // cannot serve: an IM principal that carries a `logtoSubject` has to find
+    // the person who already signed in with it, and the id encodes a tenant
+    // the principal row does not know. See `findUserIdByProviderSubject`.
+    this.version(196).stores({
+      externalIdentities: "&id, userId, provider, subject, linkedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {

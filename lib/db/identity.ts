@@ -22,6 +22,7 @@
 import {
   externalIdentityId,
   orgMembershipId,
+  personStandingFrom,
   resolveWorkspaceAccess,
   workspaceMembershipId,
   type EffectiveWorkspaceAccess,
@@ -30,6 +31,7 @@ import {
   type Org,
   type OrgMembership,
   type OrgRole,
+  type PersonStanding,
   type User,
   type WorkspaceMembership,
   type WorkspaceRole,
@@ -207,6 +209,50 @@ export async function findUserIdByExternalIdentity(
 ): Promise<string | undefined> {
   const row = await getDb().externalIdentities.get(externalIdentityId(provider, subject, tenant))
   return row?.userId
+}
+
+/**
+ * Which person is this external subject, when the tenant is not known?
+ *
+ * The primary key encodes the tenant, so `findUserIdByExternalIdentity` cannot
+ * answer for a caller that holds only a subject — and the IM plane is exactly
+ * that caller: a `feishuPrincipals` row carries `logtoSubject` but never the
+ * Logto issuer the projection filed it under.
+ *
+ * Safe here because ADR-0149 decision 6 makes the self-hosted Logto the single
+ * IdP, so one subject is one person. It stays safe if that ever stops being
+ * true, because an ambiguous match REFUSES rather than picking: two people
+ * behind one subject is a state where guessing attributes somebody's messages
+ * to somebody else.
+ */
+export async function findUserIdByProviderSubject(
+  provider: ExternalIdentityProvider,
+  subject: string
+): Promise<string | undefined> {
+  const rows = await getDb()
+    .externalIdentities.where("subject")
+    .equals(subject)
+    .filter((row) => row.provider === provider)
+    .toArray()
+  const userIds = new Set(rows.map((row) => row.userId))
+  if (userIds.size !== 1) return undefined
+  return rows[0]?.userId
+}
+
+/**
+ * Where this person stands across every Org on this machine.
+ *
+ * The Lark principals card reads it to say what a bound IM sender actually
+ * has: `unaffiliated` is the honest answer for somebody the registry knows and
+ * nobody has given access to, and it is the state most of them are in.
+ */
+export async function resolvePersonStanding(userId: string): Promise<PersonStanding> {
+  const db = getDb()
+  const [orgMemberships, workspaceMemberships] = await Promise.all([
+    db.orgMemberships.where("userId").equals(userId).count(),
+    db.workspaceMemberships.where("userId").equals(userId).count(),
+  ])
+  return personStandingFrom({ orgMemberships, workspaceMemberships })
 }
 
 export async function unlinkExternalIdentity(

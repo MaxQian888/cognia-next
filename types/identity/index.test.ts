@@ -11,6 +11,8 @@ import {
   isOrgId,
   isUserId,
   orgMembershipId,
+  PERSON_STANDINGS,
+  personStandingFrom,
   resolveWorkspaceAccess,
   workspaceMembershipId,
   type OrgRole,
@@ -150,5 +152,27 @@ describe("allowsCapability", () => {
     const guest = resolveWorkspaceAccess({ workspaceMembership: { role: "viewer" } })
     expect(guest?.guest).toBe(true)
     expect(allowsCapability(guest, "write")).toBe(false)
+  })
+})
+
+describe("personStandingFrom", () => {
+  it("reads the three shapes off the counts", () => {
+    expect(personStandingFrom({ orgMemberships: 1, workspaceMemberships: 0 })).toBe("org-member")
+    expect(personStandingFrom({ orgMemberships: 0, workspaceMemberships: 1 })).toBe("guest")
+    expect(personStandingFrom({ orgMemberships: 0, workspaceMemberships: 0 })).toBe("unaffiliated")
+  })
+
+  it("lets Org membership win — you are not a guest of your own Org", () => {
+    expect(personStandingFrom({ orgMemberships: 1, workspaceMemberships: 3 })).toBe("org-member")
+  })
+
+  it("returns only vocabulary the catalogue declares", () => {
+    for (const orgMemberships of [0, 1]) {
+      for (const workspaceMemberships of [0, 1]) {
+        expect(PERSON_STANDINGS).toContain(
+          personStandingFrom({ orgMemberships, workspaceMemberships })
+        )
+      }
+    }
   })
 })

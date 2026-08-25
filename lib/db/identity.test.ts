@@ -1,5 +1,7 @@
 import {
   findUserIdByExternalIdentity,
+  findUserIdByProviderSubject,
+  resolvePersonStanding,
   getOrg,
   getOrgMembership,
   getUser,
@@ -280,5 +282,103 @@ describe("resolveWorkspaceAccessFor", () => {
         workspaceId: "proj_1",
       })
     ).toBeNull()
+  })
+})
+
+describe("findUserIdByProviderSubject", () => {
+  it("finds a subject whose tenant the caller does not know", async () => {
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "logto",
+      subject: "logto_ada",
+      tenant: "https://logto.example.com/oidc",
+      now: 1,
+    })
+
+    // The deterministic id encodes the tenant, so the tenant-aware read cannot
+    // answer this — and the IM plane holds a `logtoSubject` without an issuer.
+    expect(await findUserIdByExternalIdentity("logto", "logto_ada")).toBeUndefined()
+    expect(await findUserIdByProviderSubject("logto", "logto_ada")).toBe("usr_ada")
+  })
+
+  it("does not cross providers", async () => {
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "lark",
+      subject: "shared",
+      tenant: "tk_1",
+      now: 1,
+    })
+    expect(await findUserIdByProviderSubject("logto", "shared")).toBeUndefined()
+    expect(await findUserIdByProviderSubject("lark", "shared")).toBe("usr_ada")
+  })
+
+  it("refuses rather than picking when one subject names two people", async () => {
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "logto",
+      subject: "collide",
+      tenant: "https://one.example/oidc",
+      now: 1,
+    })
+    await linkExternalIdentity({
+      userId: "usr_bob",
+      provider: "logto",
+      subject: "collide",
+      tenant: "https://two.example/oidc",
+      now: 1,
+    })
+
+    expect(await findUserIdByProviderSubject("logto", "collide")).toBeUndefined()
+  })
+
+  it("still answers when one person holds the same subject in two tenants", async () => {
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "lark",
+      subject: "on_ada",
+      tenant: "tk_1",
+      now: 1,
+    })
+    await linkExternalIdentity({
+      userId: "usr_ada",
+      provider: "lark",
+      subject: "on_ada",
+      tenant: "tk_2",
+      now: 1,
+    })
+
+    // Two rows, one person — not ambiguous.
+    expect(await findUserIdByProviderSubject("lark", "on_ada")).toBe("usr_ada")
+  })
+})
+
+describe("resolvePersonStanding", () => {
+  it("reads org-member, guest and unaffiliated off the membership rows", async () => {
+    await putOrgMembership({ orgId: "org_acme", userId: "usr_ada", role: "member", now: 1 })
+    await putWorkspaceMembership({
+      workspaceId: "proj_1",
+      orgId: "org_acme",
+      userId: "usr_bob",
+      role: "viewer",
+      now: 1,
+    })
+
+    expect(await resolvePersonStanding("usr_ada")).toBe("org-member")
+    expect(await resolvePersonStanding("usr_bob")).toBe("guest")
+    // The state a freshly-bound IM sender is in, and saying so is the point.
+    expect(await resolvePersonStanding("usr_stranger")).toBe("unaffiliated")
+  })
+
+  it("calls somebody with both memberships an org member, not a guest", async () => {
+    await putOrgMembership({ orgId: "org_acme", userId: "usr_ada", role: "member", now: 1 })
+    await putWorkspaceMembership({
+      workspaceId: "proj_1",
+      orgId: "org_acme",
+      userId: "usr_ada",
+      role: "member",
+      now: 1,
+    })
+    expect(await resolvePersonStanding("usr_ada")).toBe("org-member")
   })
 })

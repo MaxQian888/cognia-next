@@ -158,6 +158,41 @@ export interface EffectiveWorkspaceAccess {
 }
 
 /**
+ * How a person stands relative to the Orgs on this machine. Derived from the
+ * membership rows, never stored — ADR-0149 §4 makes "guest" a shape you are
+ * in, not a flag somebody set.
+ *
+ *   org-member   — holds Org membership somewhere. Their workspace access is
+ *                  ordinary membership, and an admin among them may traverse.
+ *   guest        — holds Workspace membership without Org membership. The
+ *                  landing point for outside collaborators and for people who
+ *                  arrived through IM.
+ *   unaffiliated — a known person with no membership at all. An IM sender the
+ *                  registry has bound but nobody has given access to is
+ *                  exactly this, and saying so is more useful than implying
+ *                  they are a guest of something.
+ */
+export const PERSON_STANDINGS = ["org-member", "guest", "unaffiliated"] as const
+export type PersonStanding = (typeof PERSON_STANDINGS)[number]
+
+/**
+ * The standing rule in one place, over counts rather than rows, so a caller
+ * that already knows the numbers does not have to re-read them and so the
+ * derivation can be tested without a database.
+ *
+ * Org membership wins over workspace membership: somebody who is both an Org
+ * member and a Workspace member is not a guest of their own Org.
+ */
+export function personStandingFrom(input: {
+  orgMemberships: number
+  workspaceMemberships: number
+}): PersonStanding {
+  if (input.orgMemberships > 0) return "org-member"
+  if (input.workspaceMemberships > 0) return "guest"
+  return "unaffiliated"
+}
+
+/**
  * Mint an id. Mirrors `generateAccountId` in `lib/accounts/account-db.ts`,
  * including its non-crypto fallback, so all three id spaces are minted the same
  * way and a reader comparing them finds no surprises.
