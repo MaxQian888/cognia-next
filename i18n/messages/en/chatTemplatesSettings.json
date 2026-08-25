@@ -22,6 +22,7 @@
   "paramResource": "Picks from",
   "parameters": "Parameters",
   "paramsHint": "Every parameter token in the message is a parameter. Type says how it is filled in; a parameter that is not required may be sent blank.",
+  "repoHint": "Templates in {path} travel with the repository — edit them there and they reach the whole team. They are only offered in workspaces you trust.",
   "resourceAgent": "Team member",
   "resourceFile": "Workspace file",
   "resourceSubagent": "Subagent",

@@ -42,6 +42,7 @@ import {
   type ChatTemplateParamKind,
 } from "@/lib/chat/template/template"
 import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "@/lib/chat/template/resource-kinds"
+import { REPO_TEMPLATE_DIR } from "@/lib/chat/template/repo-templates"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
@@ -80,10 +81,23 @@ export function ChatTemplatesSection() {
     [reload, t]
   )
 
+  // Repository templates are deliberately NOT listed here. They are files in a
+  // checkout — edited with the editor, reviewed in a pull request, versioned by
+  // git — and a settings page that appeared to own them would be lying about
+  // where the edit goes. Saying where they live is the honest half.
+  const repoHint = (
+    <p className="px-1 text-xs text-muted-foreground">
+      {t("repoHint", { path: REPO_TEMPLATE_DIR + "/*.md" })}
+    </p>
+  )
+
   if (rows.length === 0) {
     return (
       <Card>
-        <CardContent className="pt-6 text-sm text-muted-foreground">{t("empty")}</CardContent>
+        <CardContent className="space-y-2 pt-6 text-sm text-muted-foreground">
+          {t("empty")}
+          {repoHint}
+        </CardContent>
       </Card>
     )
   }
@@ -144,6 +158,7 @@ export function ChatTemplatesSection() {
           </Card>
         )
       )}
+      {repoHint}
     </div>
   )
 }

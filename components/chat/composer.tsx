@@ -144,8 +144,14 @@ import type { ParamSegment } from "@/lib/slash-commands/parse-segments"
 import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { splitParamSegments } from "@/lib/chat/template/param-segments"
 import { renderParamTokens } from "@/lib/chat/template/render-params"
-import { seedParamValues, unfilledRequiredParams } from "@/lib/chat/template/template"
+import {
+  seedParamValues,
+  unfilledRequiredParams,
+  type OfferedChatTemplate,
+} from "@/lib/chat/template/template"
 import { useTemplateResourceSearch } from "@/hooks/chat/use-template-resource-search"
+import { useRepoChatTemplates } from "@/hooks/chat/use-repo-chat-templates"
+import { REPO_TEMPLATE_ID_PREFIX } from "@/lib/chat/template/repo-templates"
 import {
   createChatTemplate,
   listChatTemplates,
@@ -709,8 +715,8 @@ function ComposerInner(props: InnerProps) {
   const [activeParamId, setActiveParamId] = useState<string | null>(null)
   /** Show the message with its values substituted, read-only. */
   const [previewRequested, setPreviewRequested] = useState(false)
-  /** Saved templates offered in the `/` menu. Reloaded whenever one is saved. */
-  const [chatTemplates, setChatTemplates] = useState<ChatTemplateRow[]>([])
+  /** Personal templates offered in the `/` menu. Reloaded whenever one is saved. */
+  const [savedTemplates, setSavedTemplates] = useState<ChatTemplateRow[]>([])
   const [templateEpoch, setTemplateEpoch] = useState(0)
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
   /**
@@ -727,7 +733,7 @@ function ComposerInner(props: InnerProps) {
     let cancelled = false
     listChatTemplates()
       .then((rows) => {
-        if (!cancelled) setChatTemplates(rows)
+        if (!cancelled) setSavedTemplates(rows)
       })
       // Dexie unavailable (SSR / a test without fake-indexeddb): the `/` menu
       // simply offers no templates, which is the same as having none.
@@ -736,6 +742,14 @@ function ComposerInner(props: InnerProps) {
       cancelled = true
     }
   }, [templateEpoch])
+  // Templates that travel IN the checkout, behind the same Workspace Trust
+  // verdict the send path uses. Personal ones come first: they are yours, and a
+  // `git pull` must never reorder the list you built muscle memory on.
+  const repoTemplates = useRepoChatTemplates(cwd)
+  const chatTemplates: OfferedChatTemplate[] = useMemo(
+    () => [...savedTemplates, ...repoTemplates],
+    [savedTemplates, repoTemplates]
+  )
 
   const paramTokens = useMemo(
     () => overlaySegments.filter((seg): seg is ParamSegment => seg.kind === "param"),
@@ -1352,8 +1366,12 @@ function ComposerInner(props: InnerProps) {
       // insert pre-fills them — in practice most values repeat. Fire-and-forget
       // and only after a CONFIRMED send: losing a usage counter must never
       // surface as a failure on a turn that actually went out.
+      // Repository templates deliberately remember nothing. There is no row to
+      // write to, and a checkout's template is not the sort of thing that
+      // should accumulate one person's last answers — what it wants pre-filled
+      // it declares as a default, in the file, where the team can see it.
       const usedTemplateId = effectiveBinding?.templateId
-      if (usedTemplateId) {
+      if (usedTemplateId && !usedTemplateId.startsWith(REPO_TEMPLATE_ID_PREFIX)) {
         void recordChatTemplateUse(usedTemplateId, effectiveBinding.params).catch(() => undefined)
       }
       if (clearAfterSendEnabled) {

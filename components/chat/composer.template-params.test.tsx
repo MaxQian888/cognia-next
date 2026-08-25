@@ -19,6 +19,13 @@ jest.mock("@/lib/shell/exec", () => ({
   formatShellResult: jest.fn(),
 }))
 jest.mock("@/lib/files/memory", () => ({ appendMemory: jest.fn() }))
+const listWorkspaceDir = jest.fn(async () => [] as unknown[])
+const readWorkspaceFile = jest.fn(async () => "")
+jest.mock("@/lib/files/workspace-fs", () => ({
+  ...jest.requireActual("@/lib/files/workspace-fs"),
+  listWorkspaceDir: (...args: unknown[]) => listWorkspaceDir(...(args as [])),
+  readWorkspaceFile: (...args: unknown[]) => readWorkspaceFile(...(args as [])),
+}))
 const searchWorkspace = jest.fn(async () => [] as unknown[])
 jest.mock("@/lib/files/workspace-search", () => ({
   searchWorkspace: (...args: unknown[]) => searchWorkspace(...(args as [])),
@@ -443,5 +450,49 @@ describe("Composer — reference parameters", () => {
     await submit(ta)
 
     expect(sent).toHaveLength(0)
+  }, 30_000)
+})
+
+describe("Composer — repository templates", () => {
+  const REVIEW_MD = "---\nname: House review\n---\nReview {{module}} the way we do here."
+
+  beforeEach(() => {
+    listWorkspaceDir.mockResolvedValue([
+      {
+        relPath: ".cognia/templates/review.md",
+        isDir: false,
+        absolutePath: "",
+        size: 0,
+        mtimeMs: 0,
+      },
+    ])
+    readWorkspaceFile.mockResolvedValue(REVIEW_MD)
+  })
+
+  it("offers a checkout's template beside the personal ones and inserts it", async () => {
+    await createChatTemplate({ name: "Mine", body: "my own {{thing}}" })
+    const { ta } = await mount(() => undefined, { workingDir: "/repo" })
+
+    fireEvent.change(ta, { target: { value: "/" } })
+    // Personal first: a `git pull` must not reorder the list you built muscle
+    // memory on.
+    await waitFor(() => expect(screen.getByText("Mine")).toBeInTheDocument())
+    expect(await screen.findByText("House review")).toBeInTheDocument()
+    // Where it came from is on the row — a template that arrived with the code
+    // is a different kind of thing from one you saved.
+    expect(screen.getByText(".cognia/templates/review.md")).toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByText("House review"))
+    await waitFor(() => expect(ta.value).toBe("Review {{module}} the way we do here. "))
+  }, 30_000)
+
+  it("offers nothing from a checkout with no templates directory", async () => {
+    listWorkspaceDir.mockRejectedValue(new Error("no such file or directory"))
+    await createChatTemplate({ name: "Mine", body: "my own {{thing}}" })
+    const { ta } = await mount(() => undefined, { workingDir: "/repo" })
+
+    fireEvent.change(ta, { target: { value: "/" } })
+    await waitFor(() => expect(screen.getByText("Mine")).toBeInTheDocument())
+    expect(screen.queryByText("House review")).not.toBeInTheDocument()
   }, 30_000)
 })

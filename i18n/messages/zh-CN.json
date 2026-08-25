@@ -6705,6 +6705,7 @@
     "paramResource": "选择来源",
     "parameters": "参数",
     "paramsHint": "消息里的每个参数标记都是一个参数。类型决定怎么填；非必填的参数可以留空发送。",
+    "repoHint": "放在 {path} 里的模板随仓库走——在那里编辑，整个团队都能用到。只在你信任的工作区里才会出现。",
     "resourceAgent": "团队成员",
     "resourceFile": "工作区文件",
     "resourceSubagent": "子智能体",

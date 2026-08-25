@@ -14,6 +14,7 @@
 import { listParamTokens } from "./param-segments"
 import { computeCodeRanges } from "./code-ranges"
 import { isParamFilled, type ChatTemplateBinding, type ChatTemplateParamValue } from "./binding"
+import type { ChatTemplateLaunchSpec } from "./launch-spec"
 import { RESOURCE_PARAM_KINDS, type ResourceParamKind } from "./resource-kinds"
 
 /**
@@ -41,6 +42,32 @@ export interface ChatTemplateParam {
   resourceKind?: ResourceParamKind
   /** Render the editor as a multi-line field. Ignored by the other kinds. */
   multiline?: boolean
+}
+
+/**
+ * A template as the picker sees it, whichever side it came from.
+ *
+ * Two things can be offered in the `/` menu: a row from the local table, and a
+ * file read out of a checkout (`repo-templates.ts`). They differ in everything
+ * a picker does not care about — one has usage counters and timestamps, the
+ * other has a path and no history — so the seam between them is this shape
+ * rather than a branch at every use site.
+ */
+export interface OfferedChatTemplate {
+  id: string
+  name: string
+  description?: string
+  body: string
+  params: ChatTemplateParam[]
+  launchSpec?: ChatTemplateLaunchSpec
+  /** Pinned by a draft and never followed. */
+  revision: number
+  /** What the parameters were set to last time. Repository templates have none. */
+  lastParams?: Record<string, ChatTemplateParamValue>
+  /** Absent for the local table; `"repo"` for a file in a checkout. */
+  source?: "repo"
+  /** For `source: "repo"`, the file it came from, relative to the root. */
+  sourcePath?: string
 }
 
 /** The portable half of a saved template — no ids, no timestamps, no counters. */
