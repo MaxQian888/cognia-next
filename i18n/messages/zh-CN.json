@@ -15169,6 +15169,7 @@
         "errors": {
           "codeMalformed": "无法从输入中解析出 code。请粘贴完整的回调 URL 或 code 值。",
           "missingFields": "Issuer、Client ID、API 资源与回调 URI 均为必填。",
+          "profileBoundToAnother": "此本地档案已登录为 {name}。请先在此档案退出登录，再以其他身份登录。",
           "stateMismatch": "粘贴的回调与本次登录不匹配。请重新开始。"
         },
         "field": {
@@ -15179,6 +15180,8 @@
           "expiresUnknown": "未知",
           "issuer": "Issuer",
           "org": "组织 ID（可选）",
+          "person": "登录身份",
+          "personNone": "尚未关联到 Cognia 账户",
           "redirectUri": "回调 URI",
           "resource": "API 资源",
           "scope": "作用域（可选）"
@@ -15190,6 +15193,7 @@
         "submitCode": "完成登录",
         "title": "Logto 云登录",
         "toast": {
+          "hostMirrorFailed": "已登录，但本机未能记录你的身份。配对仍然可用；等 companion 服务启动后可重试。",
           "signedIn": "已登录 Logto。",
           "signedOut": "已退出 Logto。"
         }

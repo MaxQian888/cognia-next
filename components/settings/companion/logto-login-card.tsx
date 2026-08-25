@@ -11,6 +11,12 @@
  * signs in through the system browser, and pastes the callback URL (or bare
  * code) back. The resulting access token is persisted to the OS keyring and
  * used by the cloud/headless companion gateway.
+ *
+ * Since ADR-0149 a successful sign-in also binds this LocalProfile to a
+ * `User` — the token says who you are, and `completeSignIn` is what records it
+ * in the registry, the projection and the host. The card shows the result so
+ * "signed in to Logto" and "this profile belongs to Ada" are visibly the same
+ * event rather than two states that can disagree.
  */
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
@@ -24,7 +30,14 @@ import { Label } from "@/components/ui/label"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import { getActiveLogtoSession, signInToLogto, signOutFromLogto } from "@/lib/logto/app-session"
+import {
+  completeSignIn,
+  completeSignOut,
+  readSignedInPerson,
+} from "@/lib/identity/complete-sign-in"
+import { UserBindingError } from "@/lib/identity/user-binding"
 import type { LogtoClientConfig, LogtoDrivers, LogtoSession } from "@/lib/logto/client"
+import type { UserBindingRow } from "@/lib/accounts/account-db"
 
 type Step = "idle" | "awaiting-code" | "exchanging"
 
@@ -68,6 +81,7 @@ export function LogtoLoginCard() {
   const [loading, setLoading] = useState(true)
   const [step, setStep] = useState<Step>("idle")
   const [error, setError] = useState<string | null>(null)
+  const [person, setPerson] = useState<UserBindingRow | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [codeInput, setCodeInput] = useState("")
   const codeResolver = useRef<((v: { code: string; state: string }) => void) | null>(null)
@@ -77,7 +91,9 @@ export function LogtoLoginCard() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      setSession(await getActiveLogtoSession())
+      const [active, bound] = await Promise.all([getActiveLogtoSession(), readSignedInPerson()])
+      setSession(active)
+      setPerson(bound)
     } finally {
       setLoading(false)
     }
@@ -131,8 +147,29 @@ export function LogtoLoginCard() {
       setSession(next)
       setStep("idle")
       setCodeInput("")
+
+      // The token proves who signed in; this is what makes the profile theirs.
+      let mirroredToHost = true
+      await completeSignIn(next, {
+        onHostMirrorFailed: () => {
+          mirroredToHost = false
+        },
+      })
+      setPerson(await readSignedInPerson())
       toast.success(t("toast.signedIn"))
+      if (!mirroredToHost) toast.warning(t("toast.hostMirrorFailed"))
     } catch (e) {
+      if (e instanceof UserBindingError && e.code === "already-bound-to-another-user") {
+        // Named rather than generic: the useful fact is WHO holds this profile,
+        // and that signing out here is the way forward.
+        setStep("idle")
+        setError(
+          t("errors.profileBoundToAnother", {
+            name: e.existing?.displayName ?? e.existing?.userId ?? "",
+          })
+        )
+        return
+      }
       setStep("idle")
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -165,7 +202,12 @@ export function LogtoLoginCard() {
 
   const signOut = async (): Promise<void> => {
     await signOutFromLogto()
+    // Drops the profile→person binding and tells the host to forget it. The
+    // identity projection is left alone on purpose: those rows record who
+    // people ARE, so clearing them would blank names on every existing row.
+    await completeSignOut()
     setSession(null)
+    setPerson(null)
     toast.success(t("toast.signedOut"))
   }
 
@@ -208,6 +250,10 @@ export function LogtoLoginCard() {
                   <dd className="truncate font-mono text-xs">{session.organizationId}</dd>
                 </>
               )}
+              <dt className="text-muted-foreground">{t("field.person")}</dt>
+              <dd className="truncate text-xs" data-testid="logto-person">
+                {person ? (person.displayName ?? person.userId) : t("field.personNone")}
+              </dd>
               <dt className="text-muted-foreground">{t("field.expires")}</dt>
               <dd className="text-xs">
                 {session.expiresAt
@@ -215,6 +261,15 @@ export function LogtoLoginCard() {
                   : t("field.expiresUnknown")}
               </dd>
             </dl>
+            {/* The Logto session and the profile binding can disagree: signing
+                in genuinely succeeded while the profile turned out to belong to
+                somebody else. Without this the refusal was invisible, because
+                the error only rendered on the form branches. */}
+            {error && (
+              <p className="text-xs text-destructive" data-testid="logto-error">
+                {error}
+              </p>
+            )}
             <Button
               variant="outline"
               size="sm"

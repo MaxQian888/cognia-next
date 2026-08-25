@@ -66,6 +66,7 @@
     "errors": {
       "codeMalformed": "Could not read a code from that input. Paste the full redirect URL or the code value.",
       "missingFields": "Issuer, client ID, API resource and redirect URI are all required.",
+      "profileBoundToAnother": "This local profile is already signed in as {name}. Sign out of this profile before signing in as someone else.",
       "stateMismatch": "The pasted callback does not match this sign-in attempt. Start again."
     },
     "field": {
@@ -76,6 +77,8 @@
       "expiresUnknown": "unknown",
       "issuer": "Issuer",
       "org": "Organization ID (optional)",
+      "person": "Signed in as",
+      "personNone": "Not linked to a Cognia account yet",
       "redirectUri": "Redirect URI",
       "resource": "API resource",
       "scope": "Scopes (optional)"
@@ -87,6 +90,7 @@
     "submitCode": "Finish sign-in",
     "title": "Logto cloud sign-in",
     "toast": {
+      "hostMirrorFailed": "Signed in, but this desktop could not record who you are. Pairing keeps working; try again once the companion service is running.",
       "signedIn": "Signed in to Logto.",
       "signedOut": "Signed out of Logto."
     }
@@ -202,6 +206,7 @@
     },
     "title": "Remote browser",
     "toggle": "Toggle remote browser",
+    "unreachableHint": "No Cognia server is connected, so these profiles and domains have nothing to run in yet.",
     "workspaceHint": "Select a workspace before managing profiles or domains."
   },
   "remoteControl": {
