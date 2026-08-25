@@ -69,12 +69,26 @@ const editorStub = {
   revealLineInCenter: jest.fn(),
   setPosition: jest.fn(),
 }
+/**
+ * `@monaco-editor/react` always calls `onMount(editor, monaco)` with BOTH
+ * arguments; the mock used to pass only the editor, so any consumer that
+ * registers the app's Monaco theme on mount (ADR-0148) crashed here while
+ * working fine in the product. Hand it a namespace stub with the surface the
+ * theme sync touches.
+ */
+const monacoStub = {
+  editor: { defineTheme: jest.fn(), setTheme: jest.fn() },
+}
+type MonacoMockProps = {
+  value: string
+  onMount?: (editor: unknown, monaco: unknown) => void
+}
 jest.mock("next/dynamic", () => () => {
-  const Mock = (props: { value: string; onMount?: (editor: unknown) => void }) => {
+  const Mock = (props: MonacoMockProps) => {
     // Fire onMount synchronously so editorRef is populated before the
     // ResizeObserver effect's first tick.
     if (props.onMount) {
-      Promise.resolve().then(() => props.onMount?.(editorStub))
+      Promise.resolve().then(() => props.onMount?.(editorStub, monacoStub))
     }
     return <div data-testid="monaco-editor-mock" data-value={props.value} />
   }
@@ -82,9 +96,9 @@ jest.mock("next/dynamic", () => () => {
 })
 jest.mock("@monaco-editor/react", () => ({
   __esModule: true,
-  default: (props: { value: string; onMount?: (editor: unknown) => void }) => {
+  default: (props: MonacoMockProps) => {
     if (props.onMount) {
-      Promise.resolve().then(() => props.onMount?.(editorStub))
+      Promise.resolve().then(() => props.onMount?.(editorStub, monacoStub))
     }
     return <div data-testid="monaco-editor-mock" data-value={props.value} />
   },

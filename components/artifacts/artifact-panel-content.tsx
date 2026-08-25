@@ -16,6 +16,7 @@ import type { editor as MonacoEditorNS } from "monaco-editor"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
 import { Maximize2, Minimize2, MoreHorizontal, Pencil, Save, X, FileCode } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   mountMonacoWorkbench,
@@ -90,17 +91,14 @@ type ArtifactPanelAction =
 
 export type ArtifactPanelMode = "desktop" | "tablet" | "mobile" | "fullscreen"
 
-function getMonacoTheme(theme?: string): string {
-  return theme === "dark" ? "vs-dark" : "vs"
-}
-
 export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMode }) {
+  // ADR-0148 — the app's own Monaco theme, not stock VS Code.
+  const { themeId, registerMonaco } = useMonacoActiveTheme()
   const {
     t,
     tCommon,
     activeArtifact,
     pendingReview,
-    theme,
     viewMode,
     setViewMode,
     copied,
@@ -413,10 +411,11 @@ export function ArtifactPanelContent({ panelMode }: { panelMode: ArtifactPanelMo
             <MonacoEditor
               height="100%"
               language={getMonacoLanguage(activeArtifact.language || "plaintext")}
-              theme={getMonacoTheme(theme)}
+              theme={themeId}
               value={editContent}
               onChange={handleEditorChange}
               onMount={(editor, monaco) => {
+                registerMonaco(monaco)
                 setDiag({
                   monaco: monaco as unknown as MonacoLike,
                   editor: editor as unknown as EditorLike,

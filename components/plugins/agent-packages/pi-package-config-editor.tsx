@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import Editor from "@monaco-editor/react"
-import { useTheme } from "next-themes"
+import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
 import { FileJsonIcon, WandSparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -57,7 +57,8 @@ export function PiPackageConfigEditor({
   io = { exists, readTextFile, writeTextFile },
 }: PiPackageConfigEditorProps) {
   const t = useTranslations("plugins.agentPackages.config")
-  const { resolvedTheme } = useTheme()
+  // ADR-0148 — the app's own Monaco theme, not stock VS Code.
+  const { themeId, registerMonaco } = useMonacoActiveTheme()
   /**
    * The loaded file, tagged with the path it came from. `loading` is derived
    * from that tag rather than stored, so the effect never calls `setState`
@@ -156,7 +157,8 @@ export function PiPackageConfigEditor({
               height="100%"
               language="json"
               value={value}
-              theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
+              theme={themeId}
+              onMount={(_editor, monaco) => registerMonaco(monaco)}
               onChange={(next) => {
                 setEdited(next ?? "")
                 setParseError(null)

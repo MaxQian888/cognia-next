@@ -14,11 +14,11 @@ import dynamic from "next/dynamic"
 import { useTranslations } from "next-intl"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
-import { useSettingsStore } from "@/stores/settings"
 import { computeDiff, computeDiffStats, getMonacoLanguage } from "@/lib/artifacts"
 import { cn } from "@/lib/utils"
 import { ReviewHunkItem } from "./review-hunk-item"
@@ -41,13 +41,10 @@ interface ArtifactReviewViewProps {
   panelMode: "desktop" | "tablet" | "mobile" | "fullscreen"
 }
 
-function monacoTheme(theme?: string): string {
-  return theme === "dark" ? "vs-dark" : "vs"
-}
-
 export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewProps) {
+  // ADR-0148 — the app's own Monaco theme, not stock VS Code.
+  const { themeId, registerMonaco } = useMonacoActiveTheme()
   const t = useTranslations("artifacts.review")
-  const theme = useSettingsStore((state) => state.settings?.theme)
 
   const review = useArtifactStore((state) => state.pendingReviews[artifact.id] ?? null)
   const setReviewItemStatus = useArtifactStore((state) => state.setReviewItemStatus)
@@ -116,7 +113,8 @@ export function ArtifactReviewView({ artifact, panelMode }: ArtifactReviewViewPr
           <DiffEditor
             height="100%"
             language={getMonacoLanguage(artifact.language || "plaintext")}
-            theme={monacoTheme(theme)}
+            theme={themeId}
+            onMount={(_editor, monaco) => registerMonaco(monaco)}
             original={review.originalContent}
             modified={review.proposedContent}
             options={{
