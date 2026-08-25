@@ -338,7 +338,7 @@ export function IntegrationsHub() {
     : []
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" data-bg-target="chat">
       <header className="space-y-2">
         <div className="flex items-center gap-2">
           <PlugZapIcon className="size-5" />

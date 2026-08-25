@@ -26,7 +26,7 @@ function DiscoverPageBody() {
   const platform = usePlatform()
   if (platform === "mobile") return <DiscoverMobileBody />
   return (
-    <div className="h-full w-full min-h-0 flex-1" data-bg-target="chat">
+    <div className="h-full w-full min-h-0 flex-1">
       <DiscoverDesktopBody />
     </div>
   )

@@ -11,7 +11,7 @@ import { SitesConsole } from "@/components/sites/sites-console"
  */
 export default function SitesPage() {
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-bg-target="chat">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
       <SitesConsole />
     </div>
   )

@@ -30,7 +30,7 @@ export default function GoalsPage() {
   const platform = usePlatform()
   if (platform === "mobile") return <GoalsMobileBody />
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col" data-bg-target="chat">
       <Suspense fallback={null}>
         <GoalsRoute />
       </Suspense>

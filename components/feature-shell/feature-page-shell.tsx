@@ -20,6 +20,13 @@
  * On viewports < md the panes collapse: only the center renders, with
  * "open left" / "open right" Sheet triggers in the toolbar so feature pages
  * stay usable on mobile / Capacitor.
+ *
+ * The shell owns `data-bg-target`, not its callers. Hand-marking it left seven
+ * routes ( /logs, /devices, /agent-runs, /templates, /goals, /integrations,
+ * /servers ) with no marker at all, so an enabled wallpaper simply did not
+ * appear on them — the same class of defect ADR-0007 catalogued as E1, where
+ * the scope selector existed in CSS but no component ever applied the
+ * attribute. Owning it here means a new feature route cannot forget.
  */
 
 import { PanelLeftIcon, PanelRightIcon } from "lucide-react"
@@ -96,6 +103,7 @@ export function FeaturePageShell({
   return (
     <div
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+      data-bg-target="chat"
       data-testid={`feature-shell-${storageId}`}
     >
       {header ? (
@@ -183,6 +191,7 @@ function FeaturePageShellMobile({
   return (
     <div
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+      data-bg-target="chat"
       data-testid={`feature-shell-${storageId}`}
     >
       {header ? (

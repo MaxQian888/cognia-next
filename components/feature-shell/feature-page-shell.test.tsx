@@ -105,3 +105,48 @@ test("on mobile with no panes, no sheet triggers render", () => {
   expect(screen.queryByLabelText(/^openRight/)).toBeNull()
   expect(screen.getByTestId("solo-center")).toBeInTheDocument()
 })
+
+/**
+ * The wallpaper only paints inside a `[data-bg-target]` subtree. Hand-marking
+ * it left seven routes with no marker at all, so enabling a wallpaper produced
+ * a blank page on them (ADR-0148; same shape as ADR-0007's E1 defect, where the
+ * scope selector existed in CSS but nothing ever applied the attribute). The
+ * shell owns the marker now, on both the desktop and the mobile branch.
+ */
+describe("wallpaper scope marker", () => {
+  test("desktop shell marks itself as a background target", () => {
+    isMobileValue = false
+    render(
+      <FeaturePageShell storageId="scoped">
+        <div data-testid="scoped-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("feature-shell-scoped")).toHaveAttribute("data-bg-target", "chat")
+  })
+
+  test("mobile shell marks itself too", () => {
+    isMobileValue = true
+    render(
+      <FeaturePageShell storageId="scoped-mobile">
+        <div data-testid="scoped-mobile-center" />
+      </FeaturePageShell>
+    )
+    expect(screen.getByTestId("feature-shell-scoped-mobile")).toHaveAttribute(
+      "data-bg-target",
+      "chat"
+    )
+  })
+
+  test("does not nest a second target inside itself", () => {
+    isMobileValue = false
+    const { container } = render(
+      <FeaturePageShell storageId="nesting">
+        <div data-testid="nesting-center" />
+      </FeaturePageShell>
+    )
+    // Nested targets each paint their own ::before layer, which doubles the
+    // wallpaper's effective opacity — the reason the nine page wrappers that
+    // used to carry this attribute had to give it up when the shell took over.
+    expect(container.querySelectorAll("[data-bg-target]")).toHaveLength(1)
+  })
+})

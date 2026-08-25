@@ -303,6 +303,7 @@ export function DiagnosticsWorkspace() {
   return (
     <div
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+      data-bg-target="chat"
       data-testid="diagnostics-workspace"
       data-density={density}
       data-channel={activeView}

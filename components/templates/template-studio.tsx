@@ -297,7 +297,11 @@ export function TemplateStudio() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="template-studio">
+    <div
+      className="flex h-full min-h-0 flex-col gap-4 p-4"
+      data-bg-target="chat"
+      data-testid="template-studio"
+    >
       <FeaturePageHeader
         icon={<FileArchiveIcon />}
         title={t("title")}
