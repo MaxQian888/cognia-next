@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
+import { assistantBubbleClass, messageCardClass } from "@/lib/chat/message-bubble"
 import { runMetadataOf } from "@/lib/chat/message-run-metadata"
 import { cn } from "@/lib/utils"
 import type { UIMessage } from "ai"
@@ -114,8 +115,11 @@ export function MessageShell({
         className={cn(
           "min-w-0",
           (isAssistant || display.layout === "cards") && "w-full",
-          display.layout === "cards" && "rounded-xl border bg-card p-3 shadow-sm",
-          display.layout === "bubbles" && isAssistant && "rounded-2xl bg-muted/45 px-4 py-3"
+          // Same module as the user bubble (ADR-0148). The two sides sit on
+          // different elements — the user's hugs its content, the assistant's
+          // is this shell — so the strings, not the DOM, are what is shared.
+          messageCardClass(display.layout),
+          isAssistant && assistantBubbleClass(display.layout)
         )}
       >
         {(display.metadata.identity === "header" ||

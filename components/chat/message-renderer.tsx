@@ -70,6 +70,7 @@ import {
   SILENT_CONTROL_PART_TYPES,
 } from "@/lib/chat/agent-flow-grouping"
 import { parseTodoInput } from "@/lib/chat/todos"
+import { userBubbleClass } from "@/lib/chat/message-bubble"
 import { resolveToolDisplayTitle } from "@/lib/chat/tool-summary"
 import type { AgentFlowMode } from "@/types/appearance"
 import type { ResolvedMessageDisplayOptions } from "@/lib/chat/message-display"
@@ -561,8 +562,11 @@ function MessageRendererInner({
               <MessageContent
                 className={cn(
                   "leading-relaxed",
-                  display.layout !== "cards" &&
-                    "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:bg-muted/70 group-[.is-user]:px-4 group-[.is-user]:py-2.5",
+                  // One module owns bubble geometry (ADR-0148). This branch used
+                  // to skip the `cards` layout, which left the user bubble on
+                  // ai-elements' vendored default — a colour and corner nobody
+                  // chose.
+                  userBubbleClass(display.layout),
                   "group-[.is-assistant]:w-full"
                 )}
               >
