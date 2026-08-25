@@ -4807,6 +4807,12 @@ export interface AppSettings {
   componentStyles?: import("@/types/appearance").ComponentStyles
   /** Mouse-pointer art (pack / size / tint) and the pointer effect layer. */
   cursor?: import("@/types/appearance").CursorSettings
+  /**
+   * Style pack (ADR-0148) — the "shape" half of appearance: radius base, pill
+   * shape, elevation ceiling, border tone, density, micro-label treatment.
+   * Orthogonal to the colour half, so any pack composes with any theme.
+   */
+  stylePack?: import("@/types/appearance").StylePackSettings
 
   // ---- WebRTC WAN transport (ADR-0021) ----
   /**

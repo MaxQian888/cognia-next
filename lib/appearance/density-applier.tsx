@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { DEFAULT_DENSITY, type DensityLevel, type DensitySettings } from "@/types/appearance"
+import { resolveStylePack, type StylePackSettings } from "@/types/appearance/style-pack"
 import { setDataAttr } from "./css-var"
 import { getDensityPreset } from "./density-preset-registry"
 
@@ -68,11 +69,18 @@ export function clearDensityPresetVars(): void {
  * Pure — exported for tests.
  */
 export function resolveDensityAttrs(
-  density: DensitySettings | undefined
+  density: DensitySettings | undefined,
+  packDensity: DensityLevel = DEFAULT_DENSITY.global
 ): Record<string, string | null> {
   const d: DensitySettings = { ...DEFAULT_DENSITY, ...(density ?? {}) }
+  // ADR-0148: the active style pack supplies the base level, and the user's own
+  // density choice overrides it only once it has been moved off the default —
+  // the same precedence `resolveRadiusVar` uses, so the two knobs cannot
+  // disagree about who wins. `packDensity` defaults to the canonical level, so
+  // every existing caller keeps its previous behaviour.
+  const global = d.global !== DEFAULT_DENSITY.global ? d.global : packDensity
   const attrs: Record<string, string | null> = {
-    "data-density": d.global,
+    "data-density": global,
   }
   // Per-surface overrides — only emit when they differ from the global.
   for (const [surface, attr] of [
@@ -81,13 +89,18 @@ export function resolveDensityAttrs(
     ["sidebar", "data-density-sidebar"],
   ] as const) {
     const v = d[surface]
-    if (v && v !== d.global) {
+    if (v && v !== global) {
       attrs[attr] = v
     } else {
       attrs[attr] = null
     }
   }
   return attrs
+}
+
+/** The style-pack density this applier should use as its base level. */
+export function stylePackDensity(stylePack: StylePackSettings | undefined): DensityLevel {
+  return resolveStylePack(stylePack).density
 }
 
 /** Per-surface override attribute keys that this applier owns. */
@@ -99,11 +112,12 @@ const SURFACE_ATTRS = ["data-density-chat", "data-density-table", "data-density-
  */
 export function DensityApplier(): null {
   const density = useSettingsStore((s) => s.settings?.density)
+  const stylePack = useSettingsStore((s) => s.settings?.stylePack)
 
   useEffect(() => {
     if (typeof document === "undefined") return
     const root = document.documentElement
-    const attrs = resolveDensityAttrs(density)
+    const attrs = resolveDensityAttrs(density, stylePackDensity(stylePack))
     setDataAttr(root, "data-density", attrs["data-density"] ?? null)
     for (const attr of SURFACE_ATTRS) {
       setDataAttr(root, attr, attrs[attr] ?? null)
@@ -113,7 +127,7 @@ export function DensityApplier(): null {
       root.removeAttribute("data-density")
       for (const attr of SURFACE_ATTRS) root.removeAttribute(attr)
     }
-  }, [density])
+  }, [density, stylePack])
 
   return null
 }

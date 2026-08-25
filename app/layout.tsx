@@ -88,6 +88,7 @@ import {
   DensityApplier,
   MotionApplier,
   RadiusApplier,
+  StylePackApplier,
   TypographyApplier,
 } from "@/lib/appearance"
 import { CursorEffectLayer } from "@/components/appearance/cursor-effect-layer"
@@ -295,6 +296,15 @@ export default async function RootLayout({
                                   / motion run before color appliers so the
                                   colorblind & high-contrast transforms in
                                   CustomThemeApplier see stable base values. */}
+                                              {/* ADR-0148 — the style pack writes the
+                                  shape attributes (border tone, elevation
+                                  ceiling, micro-labels, pill radius). It runs
+                                  first because Density/Radius each read the
+                                  pack as their base value; it deliberately
+                                  does NOT write --radius or data-density
+                                  itself, so no two appliers race for the same
+                                  property. */}
+                                              <StylePackApplier />
                                               <TypographyApplier />
                                               <DensityApplier />
                                               <RadiusApplier />

@@ -346,6 +346,14 @@ export const SETTINGS_SYNC = {
   // applier and the effect overlay both stand down on a coarse pointer. Syncing
   // it down would mirror a preference the phone can never express.
   cursor: { category: "desktop-only" },
+  // The style pack has to travel with `density` and `radius`, which are both
+  // shared and both read the pack as their base value (ADR-0148). Keeping it
+  // device-local would ship a phone the desktop's resolved radius without the
+  // pack that produced it, and the two would immediately disagree. Unlike
+  // `wallpapers` there is nothing device-bound in it — the whole payload is an
+  // id plus a handful of numbers. The mobile touch floor is enforced at render
+  // time by the composer resolver, not by withholding the preference.
+  stylePack: { category: "shared" },
   webrtcEnabled: {
     category: "device-local",
     rationale:

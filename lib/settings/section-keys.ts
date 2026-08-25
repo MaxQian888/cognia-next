@@ -115,6 +115,10 @@ export const SECTION_OWNED_KEYS: Partial<Record<SettingsSectionId, (keyof AppSet
     "customCssEnabled",
     "componentStyles",
     "cursor",
+    // ADR-0148 — the style pack (radius / pills / elevation / border tone /
+    // density / micro-labels). Owned here so it resets with the section and
+    // shows up in the changed-settings review like every other appearance key.
+    "stylePack",
     "importedVscodeThemes",
     // v47+ appearance behaviors now wired into the UI (auto light/dark
     // switching, editor theme linking, custom-CSS scope). Owned here so they

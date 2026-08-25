@@ -110,6 +110,22 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* ADR-0148 — named radius scale. These ALIAS the derived chain above rather
+     than replacing it, so the ~1,777 existing `rounded-sm/md/lg/xl` sites keep
+     tracking `--radius` with zero migration. The values are exact at the
+     default base (0.625rem = 10px): control 8px (identical to `--radius-md`),
+     panel 12px, stage 14px (identical to `--radius-xl`) — the same 8/12/14
+     scale `web/app/globals.css` pins for the marketing site.
+     `max(0px, …)` matters for the Sharp pack: at base 0 a bare calc() yields a
+     negative length, which drops the declaration instead of squaring the
+     corner. */
+  --radius-control: max(0px, calc(var(--radius) - 2px));
+  --radius-panel: max(0px, calc(var(--radius) + 2px));
+  --radius-stage: max(0px, calc(var(--radius) + 4px));
+  /* Pills are their own axis: `--radius` going to 0 must not square a status
+     dot or a spinner. Only surfaces that opt into `rounded-pill` follow the
+     style pack. */
+  --radius-pill: var(--pill-radius);
   --color-effort-ultra: var(--effort-ultra);
   --color-effort-ultra-muted: var(--effort-ultra-muted);
   --color-brand-action: var(--brand-action);
@@ -120,6 +136,20 @@
 :root,
 .a2ui-widget-theme-light {
   --radius: 0.625rem;
+  /* ADR-0148 — style-pack runtime knobs. `StylePackApplier` writes these onto
+     <html> for the Studio / Sharp packs; the Soft pack writes nothing at all,
+     so the declarations below stay the source of truth and the default look is
+     unchanged by construction (same pattern as `RadiusApplier`). */
+  --pill-radius: 9999px;
+  --chrome-h: 2.5rem;
+  /* Layer-semantic surface colours. `<Surface>` reads these instead of
+     hardcoding `bg-card`, which is what lets a surface participate in wallpaper
+     translucency without a specificity fight against the unlayered rules in
+     §"Wallpaper-aware UI surfaces". Redefined per layer under a wallpaper. */
+  --surface-blur: 0px;
+  --surface-bg-base: var(--background);
+  --surface-bg-raised: var(--card);
+  --surface-bg-overlay: var(--popover);
   /* v47 — Density, motion, and typography runtime knobs. Each is written by
      a dedicated applier under `lib/appearance/`; defaults below match the
      "comfortable" + 1x preset so the page looks unchanged when no preferences
@@ -367,7 +397,9 @@
   /* `letter-spacing` inherits, so one declaration on the root reaches every
      text node. Elements carrying an explicit `tracking-*` utility keep their
      own value, which is the right precedence — those are deliberate. */
-  letter-spacing: var(--letter-spacing-em);
+  /* The style pack's tightening and the user's typography slider are additive:
+     picking Sharp must not silently discard a letter-spacing the user chose. */
+  letter-spacing: calc(var(--letter-spacing-em) + var(--style-letter-spacing-em, 0em));
 }
 
 :root[data-density="compact"] {
@@ -1743,21 +1775,81 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
   -webkit-backdrop-filter: blur(var(--surface-blur-strong));
 }
 
+/* The three shadow steps live in variables (values unchanged) so a style pack
+   can lower the ceiling declaratively — see the style-pack section below —
+   without any JS having to recompute shadow strings. */
+:root {
+  --elevation-1: 0 1px 2px 0 oklch(0 0 0 / 0.08);
+  --elevation-2: 0 4px 12px -2px oklch(0 0 0 / 0.12), 0 2px 4px -2px oklch(0 0 0 / 0.08);
+  --elevation-3: 0 12px 32px -4px oklch(0 0 0 / 0.18), 0 4px 12px -4px oklch(0 0 0 / 0.1);
+}
 [data-elevation="0"] {
   box-shadow: none;
 }
 [data-elevation="1"] {
-  box-shadow: 0 1px 2px 0 oklch(0 0 0 / 0.08);
+  box-shadow: var(--elevation-1);
 }
 [data-elevation="2"] {
-  box-shadow:
-    0 4px 12px -2px oklch(0 0 0 / 0.12),
-    0 2px 4px -2px oklch(0 0 0 / 0.08);
+  box-shadow: var(--elevation-2);
 }
 [data-elevation="3"] {
-  box-shadow:
-    0 12px 32px -4px oklch(0 0 0 / 0.18),
-    0 4px 12px -4px oklch(0 0 0 / 0.1);
+  box-shadow: var(--elevation-3);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Style packs (ADR-0148) — the "shape" layer.
+ *
+ * `StylePackApplier` writes these attributes onto <html> for `studio` and
+ * `sharp` only; the `soft` pack writes nothing at all. Everything in this
+ * section is therefore dead CSS under the default look and cannot regress it.
+ * Style packs never touch a colour token, so they compose freely with the 8
+ * accent presets, the 9 built-in themes, and any imported VSCode theme.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Border tone. Once a pack removes shadows the 1px rule is the only thing
+   carrying hierarchy, so each pack tunes its contrast: `hairline` recedes (the
+   marketing site's treatment), `strong` steps forward to replace the elevation
+   a shadowless layout gives up. Specificity (0,1,1) clears the `.dark` block's
+   own `--border` declaration, so both variants track the active mode. */
+html[data-border-tone="hairline"] {
+  --border: color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+html[data-border-tone="strong"] {
+  --border: color-mix(in oklch, var(--foreground) 26%, transparent);
+}
+
+/* Elevation ceiling. Caps the semantic scale by aliasing the steps above the
+   pack's maximum, rather than rewriting each rule. */
+html[data-elevation-max="1"] {
+  --elevation-2: var(--elevation-1);
+  --elevation-3: var(--elevation-1);
+}
+html[data-elevation-max="0"] {
+  --elevation-1: none;
+  --elevation-2: none;
+  --elevation-3: none;
+}
+
+/* Tailwind's `shadow-*` utilities (252 sites) bypass `[data-elevation]`
+   entirely, so a shadowless pack has to neutralise them too. Setting
+   `box-shadow: none` would also erase focus-visible rings, which compile to
+   box-shadow — so only Tailwind's shadow channel is zeroed and
+   `--tw-ring-shadow` is left alone. `--tw-shadow` is registered with
+   `inherits: false`, hence the descendant selector rather than a bare :root. */
+html[data-elevation-max="0"] * {
+  --tw-shadow: 0 0 #0000;
+  --tw-inset-shadow: 0 0 #0000;
+}
+
+/* Micro-labels — timestamps, counts, status words. Opt-in per element via a
+   bare `data-micro-label` attribute; the pack decides whether it does anything.
+   This is what separates "hard-edged engineering tool" from "the same rounded
+   UI with the corners filed off". */
+html[data-micro-label="mono-upper"] [data-micro-label] {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Section 6 — Inline readability helpers.

@@ -44,6 +44,7 @@ export { useCursorAccentColor } from "./cursor/use-cursor-accent"
 export { TypographyApplier, resolveTypographyVars } from "./typography-applier"
 export { DensityApplier, resolveDensityAttrs, densitySurfaceProps } from "./density-applier"
 export { RadiusApplier, resolveRadiusVar } from "./radius-applier"
+export { StylePackApplier, resolveStylePackDom } from "./style-pack-applier"
 export { MotionApplier, resolveMotionState } from "./motion-applier"
 export {
   FOCAL_PRESETS,

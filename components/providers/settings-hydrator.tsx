@@ -10,7 +10,9 @@ import {
 } from "@/lib/appearance/boot-script"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { resolveActiveThemeColors } from "@/lib/themes"
-import { resolveRadiusVar } from "@/lib/appearance/radius-applier"
+import { resolveRadiusVar, stylePackRadiusBase } from "@/lib/appearance/radius-applier"
+import { stylePackDensity } from "@/lib/appearance/density-applier"
+import { resolveStylePackDom } from "@/lib/appearance/style-pack-applier"
 import { resolveTypographyVars } from "@/lib/appearance/typography-applier"
 import { DEFAULT_DENSITY } from "@/types/appearance"
 import {
@@ -47,6 +49,7 @@ export function SettingsHydrator(): null {
   const radius = useSettingsStore((s) => s.settings?.radius)
   const typography = useSettingsStore((s) => s.settings?.typographyExt)
   const density = useSettingsStore((s) => s.settings?.density)
+  const stylePack = useSettingsStore((s) => s.settings?.stylePack)
   const behaviorTelemetry = useSettingsStore((s) => s.settings?.behaviorTelemetry)
 
   useEffect(() => {
@@ -109,8 +112,20 @@ export function SettingsHydrator(): null {
     }
 
     // Corner radius — only when non-default (resolver returns null at default).
-    const radiusVar = resolveRadiusVar(radius)
+    // Reads the active style pack as its base, exactly like `RadiusApplier`, so
+    // a Sharp user does not get a rounded flash on every cold boot.
+    const radiusVar = resolveRadiusVar(radius, stylePackRadiusBase(stylePack))
     if (radiusVar) vars["--radius"] = radiusVar
+
+    // Style pack — mirror the shape attributes and the pill radius. The Soft
+    // pack resolves to all-nulls here, so a pristine user still writes nothing.
+    const packDom = resolveStylePackDom(stylePack)
+    for (const [name, value] of Object.entries(packDom.vars)) {
+      if (value) vars[name] = value
+    }
+    for (const [name, value] of Object.entries(packDom.attrs)) {
+      if (value) attrs[name] = value
+    }
 
     // Typography — include only the vars that differ from the defaults so a
     // pristine user keeps an empty mirror.
@@ -121,8 +136,12 @@ export function SettingsHydrator(): null {
     }
 
     // Density — mirror the global level when it isn't the default.
-    if (density?.global && density.global !== DEFAULT_DENSITY.global) {
-      attrs["data-density"] = density.global
+    const effectiveDensity =
+      density?.global && density.global !== DEFAULT_DENSITY.global
+        ? density.global
+        : stylePackDensity(stylePack)
+    if (effectiveDensity !== DEFAULT_DENSITY.global) {
+      attrs["data-density"] = effectiveDensity
     }
 
     if (Object.keys(vars).length > 0) payload.vars = vars
@@ -146,6 +165,7 @@ export function SettingsHydrator(): null {
     radius,
     typography,
     density,
+    stylePack,
   ])
 
   return null

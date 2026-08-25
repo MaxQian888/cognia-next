@@ -4,7 +4,11 @@
 // rides along with the existing backup/restore pipeline.
 
 export * from "./cursor"
+export * from "./style-pack"
 import { DEFAULT_CURSOR, type CursorSettings } from "./cursor"
+// Value import; `style-pack.ts` only imports `DensityLevel` back as a type, so
+// the cycle is erased at compile time and never exists at runtime.
+import { DEFAULT_STYLE_PACK, type StylePackSettings } from "./style-pack"
 
 /**
  * How the wallpaper raster is fitted into its surface.
@@ -179,6 +183,12 @@ export interface AppearanceSettingsSlice {
   componentStyles?: ComponentStyles
   /** Mouse-pointer art + pointer effect layer. See `./cursor.ts`. */
   cursor?: CursorSettings
+  /**
+   * The "shape" half of appearance — radius, pill shape, elevation ceiling,
+   * border tone, density, micro-label treatment (ADR-0148). Orthogonal to the
+   * colour half: any pack composes with any theme. See `./style-pack.ts`.
+   */
+  stylePack?: StylePackSettings
 }
 
 // ----------------------------------------------------------------------------
@@ -529,4 +539,5 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   customCssScope: "app",
   componentStyles: {},
   cursor: DEFAULT_CURSOR,
+  stylePack: DEFAULT_STYLE_PACK,
 }

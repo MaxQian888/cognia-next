@@ -97,7 +97,37 @@ describe("appearance custom properties have a consumer", () => {
   })
 
   it("applies letter-spacing where it can inherit to the whole document", () => {
-    expect(STYLESHEETS).toMatch(/letter-spacing:\s*var\(--letter-spacing-em\)/)
+    // ADR-0148 made this a sum rather than a plain read: the style pack's
+    // tightening and the user's typography slider are separate inputs and must
+    // both survive. Asserting the composition (not just the presence of one
+    // var) is what stops a future edit from dropping either side.
+    expect(STYLESHEETS).toMatch(
+      /letter-spacing:\s*calc\(\s*var\(--letter-spacing-em\)\s*\+\s*var\(--style-letter-spacing-em[^)]*\)\s*\)/
+    )
+  })
+
+  it("gives every style-pack custom property a consumer", () => {
+    // `StylePackApplier` writes these onto <html>; a token nobody reads is the
+    // exact failure mode ADR-0007 catalogued (a whole `scope` feature whose
+    // target attribute no component ever applied).
+    expect(STYLESHEETS).toMatch(/--radius-pill:\s*var\(--pill-radius\)/)
+    expect(STYLESHEETS).toMatch(/html\[data-border-tone="hairline"\]/)
+    expect(STYLESHEETS).toMatch(/html\[data-border-tone="strong"\]/)
+    expect(STYLESHEETS).toMatch(/html\[data-elevation-max="0"\]/)
+    expect(STYLESHEETS).toMatch(/html\[data-elevation-max="1"\]/)
+    expect(STYLESHEETS).toMatch(/html\[data-micro-label="mono-upper"\]/)
+  })
+
+  it("derives the named radius scale from the same base as sm/md/lg/xl", () => {
+    // The named scale is an ALIAS, not a parallel system — that is what lets
+    // the ~1,777 existing `rounded-sm/md/lg/xl` sites follow a style pack with
+    // zero migration. `max(0px, …)` keeps a 0 base from producing a negative
+    // length, which would drop the declaration instead of squaring the corner.
+    for (const name of ["control", "panel", "stage"]) {
+      expect(STYLESHEETS).toMatch(
+        new RegExp(`--radius-${name}:\\s*max\\(0px,\\s*calc\\(var\\(--radius\\)`)
+      )
+    }
   })
 
   // ADR-0127 gave the three surfaces the density card names (chat / tables /
