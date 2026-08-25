@@ -730,6 +730,18 @@ export interface CreateScheduledTaskInput {
    * from the active workspace.
    */
   projectId?: string
+  /**
+   * "Attribution was already attempted; an absent `projectId` is the answer."
+   *
+   * `SchedulerDataSource` resolves the workspace at the UI boundary, where the
+   * active workspace is a legitimate fallback. Without this, a resolution that
+   * legitimately came back empty made the scheduler run the same
+   * main-database lookup a second time under the same timeout budget — up to
+   * twice `WORKSPACE_LOOKUP_TIMEOUT_MS` before task creation returned.
+   *
+   * Transient: consumed at creation, never stored on the task.
+   */
+  workspaceResolved?: boolean
   tags?: string[]
   endAt?: Date
   onSuccessTaskIds?: string[]

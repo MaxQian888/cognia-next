@@ -63,6 +63,16 @@ jest.mock("./scheduler-db", () => ({
   },
 }))
 
+// The creating conversation's workspace. Mocked so `createTask` never reaches
+// the main database from this suite — the point under test is that it ASKS.
+jest.mock("./task-workspace-binding", () => ({
+  resolveTaskWorkspace: jest.fn(async (input: { createdBy?: { sessionId?: string } }) =>
+    input.createdBy?.sessionId === "ses_wf" ? "ws_from_session" : undefined
+  ),
+  taskVisibleInWorkspace: () => true,
+  backfillSessionWorkspace: jest.fn(async () => null),
+}))
+
 jest.mock("./notification-integration", () => ({
   notifyTaskEvent: jest.fn().mockResolvedValue(undefined),
 }))
@@ -179,6 +189,51 @@ describe("TaskScheduler", () => {
         expect(task.name).toBe("Test Task")
         expect(task.status).toBe("active")
         expect(mockSchedulerDb.createTask).toHaveBeenCalled()
+      })
+
+      it("attributes a task created straight through the scheduler to its conversation", async () => {
+        // The workflow node (`action.scheduler.task.create`) and an interval
+        // `/loop` bypass `SchedulerDataSource`, so attribution has to happen
+        // here too — otherwise the two automated creators write unattributed
+        // rows that show in every workspace at once.
+        const task = await scheduler.createTask({
+          name: "Follow-up",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+          createdBy: { kind: "agent", sessionId: "ses_wf" },
+        } as CreateScheduledTaskInput)
+        expect(task.projectId).toBe("ws_from_session")
+      })
+
+      it("does not re-ask when the UI boundary already resolved to nothing", async () => {
+        // `SchedulerDataSource` resolves first and says so. Asking again cost a
+        // second main-database round trip under the same 1.5s timeout for an
+        // answer that was already known to be empty.
+        const { resolveTaskWorkspace } = jest.requireMock("./task-workspace-binding") as {
+          resolveTaskWorkspace: jest.Mock
+        }
+        resolveTaskWorkspace.mockClear()
+        const task = await scheduler.createTask({
+          name: "Already asked",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+          createdBy: { kind: "agent", sessionId: "ses_wf" },
+          workspaceResolved: true,
+        } as CreateScheduledTaskInput)
+        expect(resolveTaskWorkspace).not.toHaveBeenCalled()
+        expect(task.projectId).toBeUndefined()
+      })
+
+      it("never guesses a workspace when there is no conversation to ask", async () => {
+        // "Whatever workspace is on screen" is the UI boundary's fallback, not
+        // this one's: a background creator must not inherit what the user
+        // happens to be looking at.
+        const task = await scheduler.createTask({
+          name: "Orphan",
+          type: "test",
+          trigger: { type: "interval", intervalMs: 60000 },
+        })
+        expect(task.projectId).toBeUndefined()
       })
 
       it("should calculate next run time for interval triggers", async () => {

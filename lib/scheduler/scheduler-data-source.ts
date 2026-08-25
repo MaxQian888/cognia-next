@@ -10,8 +10,8 @@ import type {
 import { transport } from "@/lib/tauri"
 import { getEffectiveSchedulerHostTarget } from "./scheduler-host-target"
 import { schedulerDb } from "./scheduler-db"
-import { getTaskScheduler } from "./task-scheduler"
 import { resolveTaskWorkspace } from "./task-workspace-binding"
+import { getTaskScheduler } from "./task-scheduler"
 
 export interface SchedulerDataSource {
   readonly host: "local" | "remote"
@@ -56,12 +56,17 @@ class LocalSchedulerDataSource implements SchedulerDataSource {
   readonly host = "local" as const
 
   async createTask(input: CreateScheduledTaskInput) {
-    // The boundary where the main database IS available. Resolving here rather
-    // than inside the scheduler keeps `SchedulerDatabase` independent of it,
-    // which is the whole reason it is a separate instance.
+    // The UI boundary, and the only place "the workspace on screen" is a
+    // legitimate fallback. `createTask` itself still resolves the creating
+    // conversation's workspace for the callers that bypass this one (the
+    // workflow node, an interval `/loop`) — see `resolveTaskWorkspace`.
     return getTaskScheduler().createTask({
       ...input,
       projectId: await resolveTaskWorkspace(input),
+      // Said even when the answer is `undefined`: an unattributed row IS the
+      // resolved answer here, and without this the scheduler would repeat the
+      // same main-database lookup under a second timeout budget.
+      workspaceResolved: true,
     })
   }
 

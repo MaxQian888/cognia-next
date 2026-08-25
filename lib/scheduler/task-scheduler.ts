@@ -1029,6 +1029,30 @@ class TaskSchedulerImpl {
       ...input.config,
     }
 
+    // A schedule belongs to the work it was set up for.
+    //
+    // `SchedulerDataSource` resolves this for anything created through the UI,
+    // including the "whatever workspace is on screen" fallback. But the
+    // workflow node (`action.scheduler.task.create`) and an interval `/loop`
+    // reach this method directly, so that left exactly the two automated
+    // creators — the ones a user is least likely to audit — writing
+    // unattributed rows that then show in every workspace.
+    //
+    // Here the CREATING CONVERSATION is the only source consulted, never the
+    // active workspace: a background creator must inherit the workspace it is
+    // working in, not whatever the user happens to be looking at. Skipped
+    // entirely when there is no session to ask, so this layer's independence
+    // from the main database costs nothing on the common path.
+    // Skipped when the caller already asked (`workspaceResolved`): the UI
+    // boundary resolves first, and repeating its lookup here paid a second
+    // main-database round trip under the same timeout for an answer that was
+    // already known to be empty.
+    let projectId = input.projectId
+    if (!projectId && !input.workspaceResolved && input.createdBy?.sessionId) {
+      const { resolveTaskWorkspace } = await import("./task-workspace-binding")
+      projectId = await resolveTaskWorkspace(input, { activeWorkspace: async () => null })
+    }
+
     const task: ScheduledTask = {
       id: nanoid(),
       name: input.name,
@@ -1043,12 +1067,7 @@ class TaskSchedulerImpl {
       notification: { ...DEFAULT_NOTIFICATION_CONFIG, ...input.notification },
       status: "active",
       createdBy: input.createdBy ?? { kind: "user" },
-      // A schedule belongs to the work it was set up for. Resolved by the
-      // caller, NOT here: the scheduler keeps its own Dexie instance precisely
-      // so it does not depend on the main database, and reaching into it from
-      // the creation path made task creation wait on a database this layer has
-      // no business knowing about. `SchedulerDataSource` fills it in.
-      projectId: input.projectId,
+      projectId,
       tags: input.tags,
       endAt: input.endAt,
       onSuccessTaskIds: input.onSuccessTaskIds,

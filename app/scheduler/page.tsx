@@ -47,6 +47,7 @@ import { deriveUnifiedFacets, type UnifiedStatusFilter } from "@/lib/scheduler/u
 import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
 import type { CreateScheduledTaskInput, CreateSystemTaskInput } from "@/types/scheduler"
 import { useSchedulerStore } from "@/stores/scheduler/scheduler-store"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
@@ -196,6 +197,12 @@ export default function SchedulerPage() {
   // The single filtering pass for the whole page: the rows the sidebar renders
   // AND the facet counts on its controls, so a control can never advertise a
   // count the list does not contain.
+  // Scoped to the workspace on screen. A schedule belongs to the work it was set
+  // up for, and a list mixing five repositories' schedules cannot be
+  // maintained; an UNATTRIBUTED row (no workspace — one written before
+  // scheduler v5, a backup, a system task) shows everywhere, because hiding it
+  // would make it invisible in every workspace at once.
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const facets = useMemo(
     () =>
       deriveUnifiedFacets(unifiedItems, {
@@ -203,8 +210,9 @@ export default function SchedulerPage() {
         status: statusFilter,
         kinds: selectedKinds,
         loopOnly,
+        projectId: activeProjectId ?? undefined,
       }),
-    [unifiedItems, searchQuery, statusFilter, selectedKinds, loopOnly]
+    [unifiedItems, searchQuery, statusFilter, selectedKinds, loopOnly, activeProjectId]
   )
   const visibleItems = facets.visibleItems
 

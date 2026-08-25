@@ -20,6 +20,8 @@ import {
   type UnifiedScheduledItem,
 } from "@/types/scheduler/unified"
 
+import { taskVisibleInWorkspace } from "./task-workspace-binding"
+
 /** Status buckets offered by the sidebar's segmented control. */
 export const UNIFIED_STATUS_FILTERS = ["all", "active", "paused"] as const
 
@@ -111,7 +113,10 @@ export function filterUnifiedItems(
 
   return items.filter((item) => {
     if (kinds && !kinds.has(item.kind)) return false
-    if (projectId && item.projectId && item.projectId !== projectId) return false
+    // One predicate, not a second inline copy: `taskVisibleInWorkspace` is the
+    // exported answer to "does this row belong here", and two spellings of it
+    // are how the list and everything else start disagreeing.
+    if (!taskVisibleInWorkspace(item, projectId)) return false
     if (!matchesStatus(item, status)) return false
     if (loopOnly && !isLoopItem(item)) return false
     if (query && !matchesSearch(item, query)) return false
@@ -265,14 +270,22 @@ export function deriveUnifiedFacets(
   items: readonly UnifiedScheduledItem[],
   criteria: UnifiedFilterCriteria = {}
 ): UnifiedFacets {
-  const { search, status, kinds, loopOnly } = criteria
+  // `projectId` is carried into every pass below. Each facet drops exactly the
+  // one dimension it is counting FOR and keeps the rest — a workspace scope
+  // left out here would count across every workspace while the list beside it
+  // showed one, so the sidebar read "Active 12" above three rows.
+  const { search, status, kinds, loopOnly, projectId } = criteria
 
   const visibleItems = filterUnifiedItems(items, criteria)
-  const statusCounts = countUnifiedByStatus(filterUnifiedItems(items, { search, kinds, loopOnly }))
-  const { countsByKind } = countUnifiedByKind(
-    filterUnifiedItems(items, { search, status, loopOnly })
+  const statusCounts = countUnifiedByStatus(
+    filterUnifiedItems(items, { search, kinds, loopOnly, projectId })
   )
-  const loopCount = countUnifiedByStatus(filterUnifiedItems(items, { search, status, kinds })).loop
+  const { countsByKind } = countUnifiedByKind(
+    filterUnifiedItems(items, { search, status, loopOnly, projectId })
+  )
+  const loopCount = countUnifiedByStatus(
+    filterUnifiedItems(items, { search, status, kinds, projectId })
+  ).loop
 
   return { visibleItems, statusCounts, countsByKind, loopCount }
 }

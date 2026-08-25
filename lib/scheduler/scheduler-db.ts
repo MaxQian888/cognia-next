@@ -311,16 +311,18 @@ class SchedulerDatabase extends Dexie {
   /**
    * Tasks owned by one workspace, plus the unattributed ones.
    *
-   * Backed by the v5 `projectId` index for the owned half; the unattributed
-   * half needs a scan because IndexedDB cannot index "absent".
+   * One full read rather than an index query beside it: the unattributed half
+   * cannot be indexed (IndexedDB has no index for "absent"), so the table is
+   * being scanned regardless and the `projectId` index would only fetch the
+   * owned rows a second time. The index still earns its keep for `[projectId+
+   * status]` lookups that do not need the unattributed half.
    */
   async getTasksByProject(projectId: string): Promise<ScheduledTask[]> {
-    const [owned, all] = await Promise.all([
-      this.tasks.where("projectId").equals(projectId).toArray(),
-      this.tasks.toArray(),
-    ])
-    const rows = [...owned, ...all.filter((row) => !row.projectId)]
-    return rows.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+    const rows = await this.tasks.toArray()
+    return rows
+      .filter((row) => !row.projectId || row.projectId === projectId)
+      .map(safeDeserializeTask)
+      .filter((t): t is ScheduledTask => t !== null)
   }
 
   /**

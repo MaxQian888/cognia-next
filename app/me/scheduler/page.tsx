@@ -56,6 +56,7 @@ import { useUnifiedScheduledItems } from "@/hooks/scheduler/use-unified-items"
 import { bootstrapSchedulerSources } from "@/lib/scheduler/sources/bootstrap"
 import { getSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
 import { usePlatform } from "@/hooks/use-platform"
+import { useProjectStore } from "@/stores/project/project-store"
 import { cn } from "@/lib/utils"
 import {
   SCHEDULED_ITEM_KINDS,
@@ -127,17 +128,21 @@ export default function MobileSchedulerPage() {
    */
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<UnifiedScheduledItem | null>(null)
 
-  // Derived: filter by search / kind / status. Shares the desktop page's
-  // filtering engine (`lib/scheduler/unified-filter.ts`) so the two surfaces
-  // can't drift on what "active" or a search hit means.
+  // Derived: filter by search / kind / status / workspace. Shares the desktop
+  // page's filtering engine (`lib/scheduler/unified-filter.ts`) so the two
+  // surfaces can't drift on what "active" or a search hit means.
+  const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const visibleItems = useMemo(
     () =>
       filterUnifiedItems(unifiedItems, {
         search: searchQuery,
         status: isUnifiedStatusFilter(activeFilter) ? activeFilter : "all",
         kinds: selectedKinds,
+        // Same workspace scope as the desktop page — an unattributed row still
+        // shows everywhere. See `taskVisibleInWorkspace`.
+        projectId: activeProjectId ?? undefined,
       }),
-    [unifiedItems, selectedKinds, activeFilter, searchQuery]
+    [unifiedItems, selectedKinds, activeFilter, searchQuery, activeProjectId]
   )
 
   const grouped = useMemo(() => {
