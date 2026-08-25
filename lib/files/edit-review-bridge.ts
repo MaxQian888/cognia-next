@@ -6,7 +6,7 @@
 
 import { getSession } from "@/lib/db/sessions"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { resolveSessionExecutionRoot } from "@/lib/workspace/session-root"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useProjectStore } from "@/stores/project/project-store"
 
@@ -39,10 +39,15 @@ export async function openEditInWorkbenchReview({
   if (!hasWorkspaceFsBackend()) return false
   const session = await getSession(sessionId)
   if (!session) return false
-  const { root } = resolveSessionProjectRoot(session, useProjectStore.getState().projects)
+  // The conversation's execution root, not its workspace's primary root. The
+  // containment check below compares the agent's absolute path against this,
+  // so resolving the source repository for a worktree-bound conversation made
+  // every agent edit fail it — and this function's failure mode is a silent
+  // `false`, so the action simply did nothing.
+  const { root } = resolveSessionExecutionRoot(session, useProjectStore.getState().projects)
   if (!root) return false
 
-  const base = trimTrailing(root.path)
+  const base = trimTrailing(root)
   if (absolutePath !== base && !absolutePath.startsWith(`${base}/`)) return false
   const relPath = absolutePath === base ? "" : absolutePath.slice(base.length + 1)
   if (!relPath) return false
@@ -52,7 +57,7 @@ export async function openEditInWorkbenchReview({
   // Workbench being mounted inside the already-narrow chat dock.
   useArtifactDockLayoutStore.getState().revealWorkspaceReview({
     sessionId,
-    rootPath: root.path,
+    rootPath: root,
     relPath,
   })
   return true

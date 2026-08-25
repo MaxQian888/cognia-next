@@ -23,7 +23,8 @@ import { isTauri } from "@/lib/tauri"
 import { revealInExplorer, openPath } from "@/lib/tauri/opener"
 import { saveExport } from "@/lib/files/save-export"
 import { hasWorkspaceFsBackend } from "@/lib/files/workspace-backend"
-import { resolveSessionProjectRoot, allRootPaths } from "@/lib/workspace/roots"
+import { allRootPaths } from "@/lib/workspace/roots"
+import { resolveSessionExecutionRoot } from "@/lib/workspace/session-root"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useChatStore } from "@/stores/chat"
 import { getSession } from "@/lib/db/sessions"
@@ -393,12 +394,16 @@ export function useArtifactPanelState() {
   const handleSaveToProject = async () => {
     if (!activeArtifact) return
     const sessionId = useChatStore.getState().activeSessionId
-    // Same source the workspace panel resolves its root from (see
-    // `dock-workspace.tsx`), falling back to the project the artifact was
-    // authored under when the chat itself is unbound.
+    // Same chain the workspace panel resolves its root from — the
+    // conversation's execution root first, so a save defaults into the tree the
+    // agent is working in. Falls back to the project the artifact was authored
+    // under when the chat itself is unbound.
     const session = sessionId ? await getSession(sessionId) : undefined
-    const { project, root } = resolveSessionProjectRoot(
-      { projectId: session?.projectId ?? activeArtifact.projectId },
+    const { project, root } = resolveSessionExecutionRoot(
+      {
+        projectId: session?.projectId ?? activeArtifact.projectId,
+        ...(session?.executionContext ? { executionContext: session.executionContext } : {}),
+      },
       useProjectStore.getState().projects
     )
     const filename = `${activeArtifact.title}.${getExtension(activeArtifact)}`
@@ -407,7 +412,7 @@ export function useArtifactPanelState() {
         filename,
         data: activeArtifact.content,
         mimeType: "text/plain",
-        defaultDirectory: root?.path,
+        defaultDirectory: root ?? undefined,
       })
       if (outcome.kind === "error") throw new Error(outcome.message)
       if (outcome.kind !== "saved") return

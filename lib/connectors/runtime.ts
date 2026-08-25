@@ -87,7 +87,7 @@ import {
 import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
-import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
@@ -856,7 +856,11 @@ async function resolveInboundSendOptions(params: {
   })
 
   const projects = await getAllProjects().catch(() => [])
-  const workspaceRoot = resolveSessionProjectRoot(session, projects).root?.path
+  // The conversation's OWN execution root, not its workspace's primary root:
+  // an IM message resuming a worktree-bound conversation must run where that
+  // conversation runs, or the agent writes into the checkout the worktree was
+  // cut from.
+  const workspaceRoot = sessionExecutionRootPath(session, projects)
 
   return {
     sendOptions,

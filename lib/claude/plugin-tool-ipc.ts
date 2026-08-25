@@ -251,7 +251,7 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
   const [
     { readActiveFromProjectEditor },
     { getSession },
-    { resolveSessionProjectRoot },
+    { sessionExecutionRootPath },
     { useProjectStore },
     { hasNoLeakingPiiDeep },
     { codeServerClient },
@@ -259,7 +259,7 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
   ] = await Promise.all([
     import("@/lib/files/project-editor-bridge"),
     import("@/lib/db/sessions"),
-    import("@/lib/workspace/roots"),
+    import("@/lib/workspace/session-root"),
     import("@/stores/project/project-store"),
     import("@cognia/redact"),
     import("@/lib/codeserver/client"),
@@ -269,7 +269,10 @@ async function resolveEditorToolDeps(): Promise<EditorToolRunDeps> {
     resolveRoot: async (sessionId) => {
       const session = await getSession(sessionId).catch(() => null)
       const projects = useProjectStore.getState().projects
-      return resolveSessionProjectRoot(session, projects).root?.path ?? null
+      // The conversation's execution root: a plugin reading "the open file"
+      // must read the tree the agent just edited, not the one its worktree was
+      // cut from.
+      return sessionExecutionRootPath(session, projects) ?? null
     },
     // Through the bridge, not `codeServerClient`: whichever engine is mounted
     // answers. Reading code-server directly made the tool return

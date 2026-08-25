@@ -36,8 +36,7 @@
 import type { SessionExecutionContext } from "@/types/execution-context"
 import type { Project } from "@/types"
 
-import { resolveSessionWorkspaceRoot } from "@/lib/task-workspace/session-execution-context"
-import { primaryRootOf } from "./roots"
+import { resolveExecutionRoot, type ExecutionRootSource } from "./session-root"
 
 /** Panels that may be pinned away from the conversation they belong to. */
 export const PINNABLE_PANELS = ["sourceControl", "editor", "search"] as const
@@ -58,7 +57,7 @@ export interface PanelRootTarget {
   /** Absolute directory the panel should operate on. Null when nothing resolves. */
   root: string | null
   /** Where the answer came from — drives the label, not just diagnostics. */
-  source: "pinned" | "execution" | "workspace" | "none"
+  source: "pinned" | ExecutionRootSource
   /**
    * True when `root` is a managed worktree alias rather than the user's own
    * checkout. The panel must say so: an editor silently showing a worktree
@@ -81,49 +80,34 @@ export interface ResolvePanelRootInput {
   panel: WorkspacePanel
 }
 
-const NO_TARGET: PanelRootTarget = Object.freeze({
-  root: null,
-  source: "none",
-  managed: false,
-})
-
 /**
  * Resolve one panel's directory: pin (pinnable panels only) → the
  * conversation's execution root → the workspace's primary root → nothing.
  */
 export function resolvePanelRoot(input: ResolvePanelRootInput): PanelRootTarget {
+  // The follow chain itself lives in `session-root.ts` — panels and the
+  // non-panel surfaces must not be able to answer "which directory"
+  // differently, so a panel adds only the pin layer on top of the one rule.
+  const followed = resolveExecutionRoot({
+    executionContext: input.executionContext,
+    project: input.activeProject,
+  })
+
   const pinned = input.pinnedRoot?.trim()
   if (pinned && isPinnablePanel(input.panel)) {
-    return { root: pinned, source: "pinned", managed: false }
-  }
-
-  const context = input.executionContext
-  if (context) {
-    const executionRoot = resolveSessionWorkspaceRoot(context)?.trim()
-    if (executionRoot) {
-      return {
-        root: executionRoot,
-        // "managed" is about the DIRECTORY, not the binding's label: a managed
-        // binding whose primary alias resolves to the plain project root is
-        // not something to warn about.
-        managed: isManagedRoot(context, executionRoot),
-        source: "execution",
-      }
+    return {
+      root: pinned,
+      source: "pinned",
+      // A pin onto the conversation's OWN managed worktree is still a
+      // worktree. Hardcoding `false` here rendered a pinned worktree with the
+      // plain folder icon — exactly the "looks like an ordinary checkout"
+      // mistake `managed` exists to prevent. A pin anywhere else is a
+      // directory this resolver knows nothing about, so it stays false.
+      managed: pinned === followed.root && followed.managed,
     }
   }
 
-  const workspaceRoot = input.activeProject
-    ? primaryRootOf(input.activeProject)?.path?.trim()
-    : undefined
-  if (workspaceRoot) return { root: workspaceRoot, source: "workspace", managed: false }
-
-  return NO_TARGET
-}
-
-function isManagedRoot(context: SessionExecutionContext, root: string): boolean {
-  if (context.workspaceBinding?.kind !== "managed") return false
-  const projectRoot = context.projectRoot?.trim()
-  return !projectRoot || projectRoot !== root
+  return followed
 }
 
 /**
@@ -140,4 +124,62 @@ export function pinDiverges(
   const pinned = pinnedRoot?.trim()
   if (!pinned) return false
   return pinned !== (followed ?? "")
+}
+
+/**
+ * Reconcile a panel whose PIN IS ITS ROOT SELECTION.
+ *
+ * The editor already had a root switcher — main repo plus every discovered
+ * worktree — persisted as `rootKey`. Bolting a separate pin onto it would have
+ * produced two controls answering "which directory", which is how surfaces
+ * start disagreeing. So the selection is the pin: selecting the followed root
+ * means following, selecting any other root means pinned, and there is exactly
+ * one stored field.
+ *
+ * The subtle part is a follow target that MOVES — the user switches to another
+ * conversation, or a managed worktree finishes materializing. An editor that
+ * was following must move with it; an editor the user deliberately pinned must
+ * not. `previousFollowed` is what separates those two: a selection equal to the
+ * old follow target was following, not pinned at a coincidentally equal path.
+ */
+export interface ReconcileSelectedRootInput {
+  /** The persisted selection, if any. */
+  selected?: string | null
+  /** Where this panel would follow to right now. */
+  followed?: string | null
+  /** Where it would have followed to on the previous evaluation. */
+  previousFollowed?: string | null
+  /** Roots the panel can actually select. A selection outside this is stale. */
+  available: readonly string[]
+}
+
+export interface ReconciledRoot {
+  selected: string | null
+  /** True when the selection deliberately diverges from the follow target. */
+  pinned: boolean
+}
+
+export function reconcileSelectedRoot(input: ReconcileSelectedRootInput): ReconciledRoot {
+  const available = input.available.filter((path) => path.trim())
+  const followed = input.followed?.trim() || null
+  const previous = input.previousFollowed?.trim() || null
+  const raw = input.selected?.trim() || null
+
+  // A selection that is no longer offered (a worktree that was removed, a
+  // stale persisted path) must not hold the editor on a directory that is
+  // gone. Following is the safe landing, not the first entry in the list.
+  const selectable = raw && available.includes(raw) ? raw : null
+
+  let selected = selectable
+  if (!selected) {
+    selected = followed && available.includes(followed) ? followed : (available[0] ?? followed)
+  } else if (previous && selected === previous && followed && followed !== previous) {
+    // It was following, and the target moved. Move with it.
+    selected = available.includes(followed) ? followed : selected
+  }
+
+  return {
+    selected: selected ?? null,
+    pinned: Boolean(followed && selected && selected !== followed),
+  }
 }

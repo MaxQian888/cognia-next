@@ -3,6 +3,7 @@ import {
   PINNABLE_PANELS,
   isPinnablePanel,
   pinDiverges,
+  reconcileSelectedRoot,
   resolvePanelRoot,
 } from "./panel-follow"
 import type { SessionExecutionContext } from "@/types/execution-context"
@@ -143,5 +144,90 @@ describe("pinDiverges", () => {
 
   it("counts a pin as divergent when nothing would be followed", () => {
     expect(pinDiverges("/repos/other", null)).toBe(true)
+  })
+})
+
+describe("reconcileSelectedRoot — the editor's selection IS its pin", () => {
+  const MAIN = "/repos/app"
+  const TREE = "/repos/.worktrees/feature"
+  const OTHER = "/repos/.worktrees/other"
+  const available = [MAIN, TREE, OTHER]
+
+  it("follows when nothing is selected yet", () => {
+    expect(reconcileSelectedRoot({ followed: TREE, available })).toEqual({
+      selected: TREE,
+      pinned: false,
+    })
+  })
+
+  it("reports a deliberate divergence as pinned", () => {
+    expect(reconcileSelectedRoot({ selected: MAIN, followed: TREE, available })).toEqual({
+      selected: MAIN,
+      pinned: true,
+    })
+  })
+
+  it("moves an editor that was following when the target moves", () => {
+    // The user switched to a conversation running in another tree.
+    expect(
+      reconcileSelectedRoot({
+        selected: MAIN,
+        previousFollowed: MAIN,
+        followed: TREE,
+        available,
+      })
+    ).toEqual({ selected: TREE, pinned: false })
+  })
+
+  it("leaves a pinned editor alone when the target moves", () => {
+    expect(
+      reconcileSelectedRoot({
+        selected: OTHER,
+        previousFollowed: MAIN,
+        followed: TREE,
+        available,
+      })
+    ).toEqual({ selected: OTHER, pinned: true })
+  })
+
+  it("drops a selection that is no longer offered, and lands on the follow target", () => {
+    // A worktree the user had pinned to was deleted. Holding a directory that
+    // is gone is worse than resuming follow.
+    expect(
+      reconcileSelectedRoot({ selected: "/repos/.worktrees/gone", followed: TREE, available })
+    ).toEqual({ selected: TREE, pinned: false })
+  })
+
+  it("falls back to the first available root when the follow target is not offered", () => {
+    expect(reconcileSelectedRoot({ followed: "/elsewhere", available })).toEqual({
+      selected: MAIN,
+      pinned: true,
+    })
+  })
+
+  it("keeps the follow target even when nothing is available yet", () => {
+    // Worktree discovery has not settled; the panel still knows where it goes.
+    expect(reconcileSelectedRoot({ followed: TREE, available: [] })).toEqual({
+      selected: TREE,
+      pinned: false,
+    })
+  })
+
+  it("is never pinned when there is nothing to follow", () => {
+    expect(reconcileSelectedRoot({ selected: MAIN, available })).toEqual({
+      selected: MAIN,
+      pinned: false,
+    })
+  })
+
+  it("ignores whitespace-only paths on every input", () => {
+    expect(
+      reconcileSelectedRoot({
+        selected: "   ",
+        followed: "  ",
+        previousFollowed: " ",
+        available: ["  ", MAIN],
+      })
+    ).toEqual({ selected: MAIN, pinned: false })
   })
 })

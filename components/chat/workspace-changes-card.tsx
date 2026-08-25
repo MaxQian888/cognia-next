@@ -30,7 +30,7 @@ import {
   undoWorkspaceChanges,
   type WorkspaceChangedFile,
 } from "@/lib/git/workspace-changes"
-import { resolveSessionProjectRoot } from "@/lib/workspace/roots"
+import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
 import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -59,7 +59,10 @@ export function WorkspaceChangesCard({ session }: WorkspaceChangesCardProps) {
   const repoState = useGitStore((state) => state.repoState)
   const status = useGitStore((state) => state.status)
 
-  const rootPath = resolveSessionProjectRoot(session, projects).root?.path
+  // Follows the conversation's execution root — the card compares this against
+  // the Git panel's bound repo, and a worktree-bound conversation must not be
+  // told "no changes" because the card was looking at the source checkout.
+  const rootPath = sessionExecutionRootPath(session, projects)
   const files = useMemo(() => (status ? collectWorkspaceChanges(status) : []), [status])
 
   useEffect(() => {
