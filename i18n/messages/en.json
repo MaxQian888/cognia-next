@@ -5245,6 +5245,8 @@
         "skillTitle": "Enable a skill",
         "slashTitle": "Slash command",
         "suggestionCount": "{count, plural, one {# option} other {# options}}",
+        "templateParamCount": "{count, plural, =1 {1 parameter} other {# parameters}}",
+        "templatesSection": "Templates",
         "unpinAction": "Unpin /{name}",
         "wfEdgeTitle": "Reference an edge",
         "wfNodeTitle": "Reference a node",
@@ -5272,6 +5274,17 @@
           "off": "Sandbox disabled — SDK builtin Bash / Edit / Write are unrestricted for this session.",
           "os": "Bash / Edit / Write run inside the per-platform OS sandbox."
         }
+      },
+      "saveTemplate": {
+        "cancel": "Cancel",
+        "description": "Reuse this message later from the / menu.",
+        "descriptionWithParams": "{count, plural, =1 {Reuse this message later from the / menu. One parameter will be asked for each time: {names}.} other {Reuse this message later from the / menu. # parameters will be asked for each time: {names}.}}",
+        "name": "Name",
+        "save": "Save",
+        "saved": "Template saved.",
+        "templateDescription": "Description",
+        "title": "Save as template",
+        "trigger": "Save as template"
       },
       "screenshot": {
         "captureAria": "Capture screenshot",

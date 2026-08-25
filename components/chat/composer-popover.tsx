@@ -96,6 +96,7 @@ import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
+import type { ChatTemplateRow } from "@/lib/db/chat-templates"
 
 export type PopoverItem =
   | {
@@ -125,6 +126,13 @@ export type PopoverItem =
   | { kind: "subagent"; target: SubagentMentionTarget }
   | { kind: "skill"; skill: SkillMentionTarget }
   | { kind: "preset"; preset: SystemPromptPreset }
+  /**
+   * A saved chat template. Its own kind rather than a projected `SlashCommand`
+   * on purpose: a command's body goes through `applyTemplate`, whose `$1` /
+   * `$ARGUMENTS` pass would eat a literal `$1` in a template body. The two
+   * argument syntaxes are deliberately kept from crossing.
+   */
+  | { kind: "chatTemplate"; template: ChatTemplateRow }
   | { kind: "wfElement"; element: MentionableWorkflowElement }
   | {
       kind: "doc"
@@ -195,6 +203,8 @@ interface Props {
   /** Toggle a command's pinned state from a row's pin button. */
   onTogglePin?: (name: string) => void
   /** Called when the user picks an item. */
+  /** Saved chat templates, offered in their own section of the `/` menu. */
+  chatTemplates?: ChatTemplateRow[]
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
   onDismiss: () => void
@@ -217,6 +227,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     chatAgents,
     chatSkills,
     chatPresets,
+    chatTemplates,
     workflowElements,
     onHighlightElement,
     recentCommands,
@@ -356,7 +367,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       // Empty query → grouped view: Pinned → Recent → per-category, each with a
       // section header. Non-empty → flat fuzzy-ranked list with matched-char
       // highlight (ranking wins; grouping would fight the relevance order).
-      const items: PopoverItem[] =
+      const commandItems: PopoverItem[] =
         query === ""
           ? orderedCommandsForEmptyQuery(
               slashCommands,
@@ -370,6 +381,18 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               command: item,
               positions,
             }))
+      // Templates come last and always as their own block, never interleaved
+      // with commands: picking one INSERTS a message body, where picking a
+      // command drops `/name` in for you to review. Two different outcomes from
+      // one list is exactly the sort of thing that gets clicked by mistake.
+      const templateItems: PopoverItem[] = (chatTemplates ?? [])
+        .filter(
+          (template) =>
+            query === "" ||
+            template.name.toLocaleLowerCase().includes(deferredSlashQuery.toLocaleLowerCase())
+        )
+        .map((template) => ({ kind: "chatTemplate" as const, template }))
+      const items: PopoverItem[] = [...commandItems, ...templateItems]
       return {
         items,
         loading: false,
@@ -536,6 +559,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     chatAgents,
     chatSkills,
     chatPresets,
+    chatTemplates,
     workflowElements,
     recentCommands,
     pinnedCommands,
@@ -865,6 +889,9 @@ function sectionHeader(
     const prevGroup = prev && prev.kind === "slash" ? prev.group : undefined
     return item.group !== prevGroup ? slashGroupLabel(item.group, t, safeLookup) : null
   }
+  if (item.kind === "chatTemplate" && prev?.kind !== "chatTemplate") {
+    return t("templatesSection")
+  }
   if (
     hasSubagentSection &&
     item.kind !== prev?.kind &&
@@ -955,6 +982,7 @@ function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "subagent") return `subagent-${item.target.id}`
   if (item.kind === "skill") return `skill-${item.skill.id}`
   if (item.kind === "preset") return `preset-${item.preset.id}`
+  if (item.kind === "chatTemplate") return `chat-template-${item.template.id}`
   if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
   if (item.kind === "doc") return `doc-${item.providerId}-${item.doc.kind}-${item.doc.id}`
   return `idx-${idx}`
@@ -1118,6 +1146,27 @@ const ItemRow = memo(function ItemRow({
   }
   if (item.kind === "subagent") {
     return <SubagentMentionRow target={item.target} />
+  }
+  if (item.kind === "chatTemplate") {
+    const template = item.template
+    return (
+      <>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground transition-colors group-data-[active=true]/row:bg-background/70 group-data-[active=true]/row:text-foreground motion-reduce:transition-none">
+          <FileCode2Icon className="size-4" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm">{template.name}</span>
+          {template.description ? (
+            <span className="truncate text-xs text-muted-foreground">{template.description}</span>
+          ) : null}
+        </span>
+        {template.params.length > 0 ? (
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {t("templateParamCount", { count: template.params.length })}
+          </span>
+        ) : null}
+      </>
+    )
   }
   if (item.kind === "skill") {
     return (

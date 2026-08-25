@@ -30,6 +30,7 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { flushDebouncedDraftWrites, getDraft, setDraft } from "@/lib/db/chat-drafts"
+import { createChatTemplate, listChatTemplates } from "@/lib/db/chat-templates"
 import type { ChatSession } from "@cognia/agent-config-types"
 
 function makeAdapter(): DataAdapter {
@@ -305,5 +306,63 @@ describe("Composer — {{parameter}} chips", () => {
 
       expect(screen.getByTestId("composer-param-preview")).toHaveTextContent("review {{module}}")
     })
+  })
+
+  describe("saved templates", () => {
+    it("saves what is in the box, deriving the parameters from it", async () => {
+      const { ta } = await mount()
+      fireEvent.change(ta, { target: { value: "review {{module}} on {{branch}}" } })
+
+      fireEvent.click(screen.getByTestId("composer-save-as-template"))
+      fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Review a PR" } })
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+      })
+
+      await waitFor(async () => {
+        const [saved] = await listChatTemplates()
+        expect(saved).toMatchObject({
+          name: "Review a PR",
+          body: "review {{module}} on {{branch}}",
+        })
+        expect(saved.params.map((p) => p.id)).toEqual(["module", "branch"])
+      })
+    })
+
+    it("offers no save control for an empty message", async () => {
+      await mount()
+
+      expect(screen.queryByTestId("composer-save-as-template")).not.toBeInTheDocument()
+    })
+
+    it("inserts a template's body from the / menu and lands on the first parameter", async () => {
+      await createChatTemplate({ name: "Review a PR", body: "review {{module}} please" })
+      const { ta } = await mount()
+
+      fireEvent.change(ta, { target: { value: "/" } })
+      // The popover picks on mouseDown (it must preventDefault to keep the
+      // textarea from blurring), so a plain click never reaches it.
+      fireEvent.mouseDown(await screen.findByText("Review a PR"))
+
+      await waitFor(() => expect(ta.value).toBe("review {{module}} please "))
+      // ...with its editor already open, because filling it in is the point.
+      await waitFor(() => expect(screen.getByTestId("template-param-popover")).toBeInTheDocument())
+    }, 20_000)
+
+    it("pre-fills a template with what it was set to last time", async () => {
+      const template = await createChatTemplate({
+        name: "Review a PR",
+        body: "review {{module}} please",
+      })
+      const { recordChatTemplateUse } = await import("@/lib/db/chat-templates")
+      await recordChatTemplateUse(template.id, { module: { kind: "text", value: "auth" } })
+
+      const { ta } = await mount()
+      fireEvent.change(ta, { target: { value: "/" } })
+      fireEvent.mouseDown(await screen.findByText("Review a PR"))
+
+      // Filled, not empty — nine uses in ten repeat most of the values.
+      await waitFor(() => expect(chips()[0]).toHaveAttribute("data-param-state", "filled"))
+    }, 20_000)
   })
 })

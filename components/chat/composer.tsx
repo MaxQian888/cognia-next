@@ -144,6 +144,12 @@ import { computeCodeRanges } from "@/lib/chat/template/code-ranges"
 import { splitParamSegments } from "@/lib/chat/template/param-segments"
 import { renderParamTokens } from "@/lib/chat/template/render-params"
 import {
+  createChatTemplate,
+  listChatTemplates,
+  recordChatTemplateUse,
+  type ChatTemplateRow,
+} from "@/lib/db/chat-templates"
+import {
   paramState as paramStateOfValue,
   pruneBinding,
   unfilledParams,
@@ -152,6 +158,7 @@ import {
   type ChatTemplateParamValue,
 } from "@/lib/chat/template/binding"
 import { TemplateParamPopover } from "./composer/template-param-popover"
+import { SaveAsTemplateDialog } from "./composer/save-as-template-dialog"
 import { pillDeleteRange } from "./composer-pill-delete"
 import { runSegments, type CommandError } from "@/lib/slash-commands/run-segments"
 import {
@@ -692,6 +699,23 @@ function ComposerInner(props: InnerProps) {
   const [activeParamId, setActiveParamId] = useState<string | null>(null)
   /** Show the message with its values substituted, read-only. */
   const [previewRequested, setPreviewRequested] = useState(false)
+  /** Saved templates offered in the `/` menu. Reloaded whenever one is saved. */
+  const [chatTemplates, setChatTemplates] = useState<ChatTemplateRow[]>([])
+  const [templateEpoch, setTemplateEpoch] = useState(0)
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    listChatTemplates()
+      .then((rows) => {
+        if (!cancelled) setChatTemplates(rows)
+      })
+      // Dexie unavailable (SSR / a test without fake-indexeddb): the `/` menu
+      // simply offers no templates, which is the same as having none.
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [templateEpoch])
 
   const paramTokens = useMemo(
     () => overlaySegments.filter((seg): seg is ParamSegment => seg.kind === "param"),
@@ -732,6 +756,19 @@ function ComposerInner(props: InnerProps) {
       toggle: () => setPreviewRequested((on) => !on),
     }
   }, [paramTokens, previewRequested, controller.textInput.value, effectiveBinding])
+
+  const tSaveTemplate = useTranslations("chat.composer.saveTemplate")
+  const saveCurrentAsTemplate = useCallback(
+    async (input: { name: string; description?: string }) => {
+      await createChatTemplate({ ...input, body: controller.textInput.value })
+      // Re-read rather than push onto the local list: the store derives the
+      // declarations and the id, and re-reading is the only way the `/` menu
+      // shows exactly what was stored.
+      setTemplateEpoch((epoch) => epoch + 1)
+      toast.success(tSaveTemplate("saved"))
+    },
+    [controller.textInput, tSaveTemplate]
+  )
 
   const setParamValue = useCallback((paramId: string, value: ChatTemplateParamValue) => {
     setTemplateBinding((prev) =>
@@ -942,6 +979,47 @@ function ComposerInner(props: InnerProps) {
           }
         })
         dismissPopover()
+      } else if (item.kind === "chatTemplate") {
+        // Insert the BODY over the `/query` token, not the template's name:
+        // picking a template produces a message, where picking a command drops
+        // `/name` in for review. `spliceToken` is the shared insertion primitive
+        // so the caret and trailing-space rules cannot drift from the others.
+        const template = item.template
+        const result = spliceToken(
+          controller.textInput.value,
+          trigger.tokenStart,
+          trigger.tokenEnd,
+          template.body
+        )
+        controller.textInput.setInput(result.value)
+        // Seed from what this template was set to last time — in practice most
+        // values repeat — but only for parameters the body still declares, so a
+        // value orphaned by an edit cannot come back.
+        const declared = new Set(template.params.map((param) => param.id))
+        const seeded = Object.fromEntries(
+          Object.entries(template.lastParams ?? {}).filter(([id]) => declared.has(id))
+        )
+        setTemplateBinding({
+          templateId: template.id,
+          version: String(template.revision),
+          params: seeded,
+          insertedAt: Date.now(),
+        })
+        // Land on the first parameter that still needs a value, with its editor
+        // open — the whole point of inserting a template is to fill it in.
+        const firstUnset = template.params.find((param) => !seeded[param.id])
+        const bodyStart = trigger.tokenStart
+        requestAnimationFrame(() => {
+          const ta = textareaRef.current
+          if (!ta) return
+          ta.focus()
+          const tokenAt = firstUnset ? template.body.indexOf(`{{${firstUnset.id}}}`) : -1
+          const caretAt = tokenAt >= 0 ? bodyStart + tokenAt : result.caret
+          ta.setSelectionRange(caretAt, caretAt)
+          setCaret(caretAt)
+          if (firstUnset) setActiveParamId(firstUnset.id)
+        })
+        dismissPopover()
       } else if (item.kind === "slash") {
         const cmd = item.command
         if (cmd.disabled) {
@@ -1131,6 +1209,14 @@ function ComposerInner(props: InnerProps) {
     // Run only once a send is CONFIRMED successful: now it is safe to drop (and
     // revoke) the staged attachments, the reminder chips, and the saved draft.
     const finalizeSend = () => {
+      // Remember what this template's parameters were set to, so the next
+      // insert pre-fills them — in practice most values repeat. Fire-and-forget
+      // and only after a CONFIRMED send: losing a usage counter must never
+      // surface as a failure on a turn that actually went out.
+      const usedTemplateId = effectiveBinding?.templateId
+      if (usedTemplateId) {
+        void recordChatTemplateUse(usedTemplateId, effectiveBinding.params).catch(() => undefined)
+      }
       if (clearAfterSendEnabled) {
         attachments.clear()
         setRestoredAttachments([])
@@ -2106,6 +2192,9 @@ function ComposerInner(props: InnerProps) {
           onMouseUp={onTextareaMouseUp}
           paramState={paramPillState}
           preview={preview}
+          saveAsTemplate={
+            controller.textInput.value.trim().length > 0 ? () => setSaveTemplateOpen(true) : null
+          }
           onCompositionStart={() => setIsComposing(true)}
           onCompositionEnd={() => setIsComposing(false)}
           ghost={ghost}
@@ -2148,6 +2237,13 @@ function ComposerInner(props: InnerProps) {
 
         <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
+        <SaveAsTemplateDialog
+          open={saveTemplateOpen}
+          body={controller.textInput.value}
+          onOpenChange={setSaveTemplateOpen}
+          onSave={saveCurrentAsTemplate}
+        />
+
         <TemplateParamPopover
           paramId={activeParamId}
           value={activeParamId ? effectiveBinding?.params[activeParamId] : undefined}
@@ -2171,6 +2267,7 @@ function ComposerInner(props: InnerProps) {
           chatAgents={chatAgents}
           chatSkills={chatSkills}
           chatPresets={chatPresets}
+          chatTemplates={chatTemplates}
           workflowElements={props.workflowMention?.elements}
           onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
           recentCommands={recentCommands}

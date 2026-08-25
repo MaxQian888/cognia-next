@@ -505,6 +505,8 @@
       "skillTitle": "启用技能",
       "slashTitle": "斜杠命令",
       "suggestionCount": "{count} 个选项",
+      "templateParamCount": "{count, plural, =1 {1 个参数} other {# 个参数}}",
+      "templatesSection": "模板",
       "unpinAction": "取消置顶 /{name}",
       "wfEdgeTitle": "引用一条连线",
       "wfNodeTitle": "引用一个节点",
@@ -532,6 +534,17 @@
         "off": "沙盒已关闭 —— 当前会话直接使用 SDK 内建的 Bash / Edit / Write。",
         "os": "Bash / Edit / Write 在按平台的 OS 沙盒里执行。"
       }
+    },
+    "saveTemplate": {
+      "cancel": "取消",
+      "description": "以后可以从 / 菜单再次使用这条消息。",
+      "descriptionWithParams": "{count, plural, =1 {以后可以从 / 菜单再次使用这条消息。每次会询问 1 个参数：{names}。} other {以后可以从 / 菜单再次使用这条消息。每次会询问 # 个参数：{names}。}}",
+      "name": "名称",
+      "save": "保存",
+      "saved": "模板已保存。",
+      "templateDescription": "描述",
+      "title": "存为模板",
+      "trigger": "存为模板"
     },
     "screenshot": {
       "captureAria": "截图",

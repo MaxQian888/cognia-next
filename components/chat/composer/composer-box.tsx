@@ -19,7 +19,14 @@
 
 import type { ChangeEvent, ClipboardEvent, DragEvent, ReactNode, RefObject } from "react"
 import { AnimatePresence, motion, type Transition } from "motion/react"
-import { ArrowUpIcon, EyeIcon, EyeOffIcon, Loader2Icon, SquareIcon } from "lucide-react"
+import {
+  ArrowUpIcon,
+  BookmarkPlusIcon,
+  EyeIcon,
+  EyeOffIcon,
+  Loader2Icon,
+  SquareIcon,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -109,6 +116,12 @@ export interface ComposerBoxProps {
    * character for character.
    */
   preview?: { on: boolean; text: string; toggle: () => void } | null
+  /**
+   * Turn what is in the box into a saved template. Null when there is nothing
+   * to save — an empty message, or a surface (mobile, a workflow composer)
+   * where the template library is not reachable anyway.
+   */
+  saveAsTemplate?: (() => void) | null
 
   // ── inline completion ───────────────────────────────────────────────────
   ghost: { ghost: string; candidates: readonly unknown[]; index: number; dismiss: () => void }
@@ -168,6 +181,7 @@ export function ComposerBox({
   onCompositionEnd,
   paramState,
   preview,
+  saveAsTemplate,
   ghost,
   ghostSourceLabel,
   acceptGhost,
@@ -366,6 +380,19 @@ export function ComposerBox({
           style={{ maxHeight: `${maxHeightRem}rem` }}
           value={textInput.value}
         />
+        {saveAsTemplate ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("saveTemplate.trigger")}
+            data-testid="composer-save-as-template"
+            className="absolute end-7 top-0 size-6 text-muted-foreground/70 hover:text-foreground"
+            onClick={saveAsTemplate}
+          >
+            <BookmarkPlusIcon className="size-3.5" />
+          </Button>
+        ) : null}
         {preview ? (
           <Button
             type="button"
