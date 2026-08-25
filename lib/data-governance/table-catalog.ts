@@ -95,6 +95,7 @@ export const CORE_TABLE_NAMES = [
   "chatInputHistory",
   "chatSearchState",
   "chatSearchText",
+  "chatTemplates",
   "chatTranscriptIndexState",
   "chatTurnSummaries",
   "codeAdoptionTurns",
