@@ -200,10 +200,20 @@ about each other. There are 37 crates and not one of them is about auth.
   ladder, and the `set_config('app.tenant_id', …)` RLS fixture, shared by all
   three.
 
-**Acknowledged cost:** `services/diagnostic-server` is a standalone Cargo project
-with its own lockfile and `rust-version = "1.82"` against the workspace's
-`1.89.0`. Sharing a crate requires either bringing it into the workspace or
-accepting a cross-project path dependency. This is priced in, not wished away.
+**Corrected during Batch 2 — the cost was misidentified.** This ADR originally
+priced the obstacle as a `rust-version` split (`1.82` in
+`services/diagnostic-server` against the workspace's `1.89.0`). That turned out
+to be a phantom: its `Dockerfile` builds on `rust:1.95-bookworm` and the repo
+pins `channel = "1.95"`, so the declared `rust-version` is a floor nothing
+actually compiles at.
+
+The real obstacle is the **image build context**.
+`.github/workflows/images.yml` builds that service with
+`context: services/diagnostic-server`, so a `path = "../../crates/…"`
+dependency resolves under `cargo test` and then fails inside Docker, where the
+parent directory does not exist. Changing a deploy pipeline's build context to
+serve a refactor is the worse trade, so `cognia-tenant-auth` is a workspace
+crate that diagnostic-server does not consume — see the roadmap row for Batch 2.
 
 ### 8. Authentication converges selectively, not uniformly
 
@@ -286,7 +296,21 @@ Batches are sequenced by risk, not by visible value. Batch 0 ships no feature.
 | --- | --- | --- |
 | **0** | Freeze the vocabulary; add the lint gate. Zero functional change. | `scripts/gates/check-identity-vocabulary.mjs` (modelled on `check-workspace-attribution.mjs`) — rejects bare `accountId` in new code |
 | **1** | `User` / `Org` / `Membership` model; Logto login; LocalProfile↔User first-login binding | `lib/logto/*` (org support already present), `stores/account/account-store.ts`, `src-tauri/src/companion_api/host_identity.rs` |
-| **2** | Extract `crates/cognia-tenant-auth` | merged from `services/diagnostic-server/src/auth.rs` and `crates/cognia-ops-controller/src/auth.rs`; resolve the lockfile and `rust-version` split first |
+| **2** | ✅ `crates/cognia-tenant-auth` | **Not** a merge — see the note below. Ships the identity core (`usr_`/`org_` ids, both role ladders, `resolve_workspace_access`), the RLS session-variable contract, and the HMAC grant plane behind a `grants` feature. Consumed today by `src-tauri`, which now validates the ids it persists. |
+
+**Batch 2 finding — the two files shared nothing.** This roadmap said
+`cognia-tenant-auth` would be "merged from `services/diagnostic-server/src/auth.rs`
+and `crates/cognia-ops-controller/src/auth.rs`". Those two files share no type,
+no function and no constant. They are two different auth designs for two
+different threat models: diagnostic-server verifies OIDC against a **static RSA
+PEM** (RS256 only, `tenant_id: Uuid`, four-rung role enum), while ops-controller
+runs **JWKS discovery with a TTL cache** across nine algorithms (`tenant_id:
+String`, free-form scope set). They are additionally on incompatible majors of
+`jsonwebtoken` (9 vs 11).
+
+So the OIDC verification plane stays where it is, in both services, and the
+shared crate owns the layer above it: what a verified token *means*. That is
+also the layer this ADR actually invents — neither existing file has a `User`.
 | **3** | `crates/cognia-collab-server` skeleton; Issues on the collaboration plane; `IssueActor.id` becomes required | new crate, `types/issues/index.ts`, `lib/db/issues.ts` |
 | **4** | `devices.user_id` bookkeeping, then reroute the grant decision | `security_store.rs`, `device_grants.rs`, `lib/devices/grant-capabilities.ts` — two releases, never one |
 | **5** | `ExternalIdentity` absorbs IM principals; Guest lands | `lib/connectors/principal/*` — `bootstrap.ts` stops falling back to `accountId` |

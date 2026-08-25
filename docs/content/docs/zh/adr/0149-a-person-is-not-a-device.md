@@ -173,9 +173,16 @@ grant 签发、RBAC 阶梯与租户作用域——**写了两遍**，而且是�
 - 新建 `crates/cognia-tenant-auth`——grant 的签发与校验、RBAC 阶梯，以及
   `set_config('app.tenant_id', …)` 的 RLS 夹具，供三方共用。
 
-**已认领的代价**：`services/diagnostic-server` 是独立 Cargo 工程，自带 lockfile，
-`rust-version = "1.82"`，而 workspace 是 `1.89.0`。共享 crate 要么把它拉进 workspace，
-要么接受跨工程 path 依赖。这笔账现在就认，不假装它不存在。
+**Batch 2 期间的更正——代价认错了地方。** 本 ADR 原本把障碍记为 `rust-version`
+分歧（`services/diagnostic-server` 是 `1.82`，workspace 是 `1.89.0`）。这是个幻影：
+它的 `Dockerfile` 用 `rust:1.95-bookworm` 构建，仓库也把 `channel` 钉在 `1.95`，
+所以那个 `rust-version` 只是一条没有任何东西真正据以编译的下限。
+
+真正的障碍是**镜像构建上下文**。`.github/workflows/images.yml` 用
+`context: services/diagnostic-server` 构建该服务，因此 `path = "../../crates/…"`
+依赖在 `cargo test` 下能解析，进了 Docker 就失败——那里根本没有上一级目录。
+为了一次重构去改部署流水线的构建上下文是更差的交易，所以 `cognia-tenant-auth`
+是一个 diagnostic-server 并不消费的 workspace crate——见路线图 Batch 2 行。
 
 ### 8. 认证做选择性收敛，而非一律统一
 
@@ -252,7 +259,20 @@ LocalProfile 可以独立解锁，`User` 只是叠在它之上的远端绑定。
 | --- | --- | --- |
 | **0** | 冻结词表；加 lint 门禁。零功能变更。 | `scripts/gates/check-identity-vocabulary.mjs`（仿 `check-workspace-attribution.mjs`）——拒绝新代码中裸用 `accountId` |
 | **1** | `User` / `Org` / `Membership` 模型；Logto 登录；LocalProfile↔User 首登绑定 | `lib/logto/*`（org 支持已具备）、`stores/account/account-store.ts`、`src-tauri/src/companion_api/host_identity.rs` |
-| **2** | 抽出 `crates/cognia-tenant-auth` | 由 `services/diagnostic-server/src/auth.rs` 与 `crates/cognia-ops-controller/src/auth.rs` 合并；先解决 lockfile 与 `rust-version` 分歧 |
+| **2** | ✅ `crates/cognia-tenant-auth` | **不是**合并——见下方说明。交付身份内核（`usr_`/`org_` id、两条角色阶梯、`resolve_workspace_access`）、RLS 会话变量契约，以及挂在 `grants` feature 后的 HMAC grant 面。今天已被 `src-tauri` 消费：它现在会校验自己落库的 id。 |
+
+**Batch 2 的发现——那两个文件毫无共享。** 本路线图曾写 `cognia-tenant-auth`
+将"由 `services/diagnostic-server/src/auth.rs` 与
+`crates/cognia-ops-controller/src/auth.rs` 合并"。这两个文件没有共享任何一个类型、
+函数或常量。它们是针对两种威胁模型的两套不同认证设计：diagnostic-server 用
+**静态 RSA PEM** 验 OIDC（只有 RS256、`tenant_id: Uuid`、四级角色枚举），
+ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
+（`tenant_id: String`、自由形式 scope 集合）。两者还分别依赖不兼容的
+`jsonwebtoken` 大版本（9 与 11）。
+
+所以 OIDC 验签面在两个服务里各自留在原地，共享 crate 拥有的是它上面那一层：
+一个已验证的 token **意味着什么**。那也正是本 ADR 真正新增的一层——两个既有文件
+里都没有 `User`。
 | **3** | `crates/cognia-collab-server` 骨架；Issues 上协作面；`IssueActor.id` 变必填 | 新 crate、`types/issues/index.ts`、`lib/db/issues.ts` |
 | **4** | `devices.user_id` 记账，然后改道 grant 判定 | `security_store.rs`、`device_grants.rs`、`lib/devices/grant-capabilities.ts`——两次发布，绝不合并 |
 | **5** | `ExternalIdentity` 收编 IM principal；Guest 落地 | `lib/connectors/principal/*`——`bootstrap.ts` 不再退化到 `accountId` |
