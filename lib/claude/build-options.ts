@@ -127,6 +127,7 @@ import {
 } from "@cognia/provider-routing/build-preview-engine"
 import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
+import { DEFAULT_SKILL_CATALOG_TOKEN_BUDGET } from "@/lib/skills/prompt-budget"
 import { estimateFallbackTokens } from "@/lib/ai/tokens/fallback-estimator"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { PLAN_MODE_PROMPT, PLAN_MODE_STRUCTURED_STEPS_SNIPPET } from "./plan-mode-prompt"
@@ -1720,13 +1721,28 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     }
   }
 
+  // The skills block is the one part of the system prompt that grows with the
+  // user's library rather than with the turn, so it gets a ceiling. Bounded
+  // and NAMED: a block that shrank silently is indistinguishable from skills
+  // the user forgot to enable, which is why this reports the level it reached.
+  const skillBudget = {
+    maxTokens: DEFAULT_SKILL_CATALOG_TOKEN_BUDGET,
+    onDegrade: (report: { block: string; level: string; omitted: string[]; tokens: number }) => {
+      loggers.app.warn("skills block exceeded its prompt budget", {
+        ...report,
+        maxTokens: DEFAULT_SKILL_CATALOG_TOKEN_BUDGET,
+        omittedCount: report.omitted.length,
+      })
+    },
+  }
+
   // Name-only mode (CLI progressive disclosure) renders a compact catalog
   // instead of every skill's full body — the agent pulls a skill's instructions
   // on demand via the caller's load tool. Absent / "full" keeps the legacy
   // whole-body append, so desktop behaviour is unchanged.
   let skillSection = ""
   if (ctx.skillRenderMode === "name") {
-    skillSection = renderSkillsCatalog(skills)
+    skillSection = renderSkillsCatalog(skills, skillBudget)
   } else if (ctx.skillRenderMode === "hybrid") {
     const [{ listResourcesForSkill }, runtime, tools] = await Promise.all([
       import("@/lib/db/skill-resources"),
@@ -1741,7 +1757,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
     const explicitSection = explicitSkills
       .map((skill) => runtime.renderSkillWithResources(skill, resourcesById.get(skill.id) ?? []))
       .join("\n\n")
-    const catalogSection = renderSkillsCatalog(implicitSkills)
+    const catalogSection = renderSkillsCatalog(implicitSkills, skillBudget)
     skillSection = [explicitSection, catalogSection].filter(Boolean).join("\n\n")
     if (session?.id && skills.length > 0) {
       runtime.registerSkillLoadContext(session.id, {
@@ -1759,7 +1775,7 @@ export async function resolveSendOptions(ctx: BuildOptionsContext): Promise<Send
       runtime.clearSkillLoadContext(session.id)
     }
   } else {
-    skillSection = renderSkillsSection(skills)
+    skillSection = renderSkillsSection(skills, skillBudget)
   }
   // Substitute agent-mode prompt template variables ({{date}} / {{tools_list}} /
   // {{mode_name}} / …) the custom-mode editor advertises — without this the

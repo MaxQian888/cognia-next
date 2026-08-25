@@ -1923,7 +1923,7 @@ describe("resolveSendOptions — character + skills", () => {
       skillRenderMode: "hybrid",
     })
 
-    expect(mRenderCatalog).toHaveBeenCalledWith([])
+    expect(mRenderCatalog).toHaveBeenCalledWith([], expect.objectContaining({ maxTokens: 4000 }))
     expect(opts.systemPrompt ?? "").not.toContain("manual body")
     expect(opts.allowedTools ?? []).not.toContain("Bash")
     expect(toolNames(opts)).not.toContain("load_skill")
@@ -1974,10 +1974,12 @@ describe("resolveSendOptions — character + skills", () => {
     })
 
     expect(mRender).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: "rec-1" })])
+      expect.arrayContaining([expect.objectContaining({ id: "rec-1" })]),
+      expect.objectContaining({ maxTokens: 4000 })
     )
     expect(mRender).not.toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ id: "sk1" })])
+      expect.arrayContaining([expect.objectContaining({ id: "sk1" })]),
+      expect.anything()
     )
   })
 

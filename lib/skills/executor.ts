@@ -7,13 +7,12 @@
  *   - `Skill` type from `@cognia/agent-config-types`
  *   - `renderSkillsSection` from `@/lib/db/skills`
  *
- * Anything fancier (token-budgeted progressive disclosure, MCP-aware
- * skill execution) is intentionally a thin wrapper today and can be
- * fleshed out in place when the agent-trace / planning layers land.
+ * MCP-aware skill execution is intentionally a thin wrapper today and can
+ * be fleshed out in place when the agent-trace / planning layers land.
  */
 
 import type { Skill } from "@cognia/agent-config-types"
-import { renderSkillsSection } from "@/lib/db/skills"
+import { renderSkillsSection, type RenderSkillsBudget } from "@/lib/db/skills"
 
 export interface SkillExecutionContext {
   skillId: string
@@ -44,12 +43,23 @@ export const skillsExecutor = {
  * Build the system-prompt block for a list of active skills. Wraps
  * cognia-next's existing `renderSkillsSection` so the External Agent
  * instruction stack and the Claude SDK build pipeline produce the same
- * prompt fragment. The `maxTokens` parameter is currently advisory only
- * (no truncation); add a tokenizer-aware trimmer here if needed.
+ * prompt fragment.
+ *
+ * `maxTokens` is enforced: bodies that do not fit are omitted whole, never
+ * truncated (see `lib/skills/prompt-budget.ts` for why). Omit it to render
+ * everything. It used to be accepted and silently ignored — the one caller
+ * that passes a budget, `external-agent-instruction-stack.ts`, asked for
+ * 1024 tokens and got however many the library happened to be.
  */
 export function buildProgressiveSkillsPrompt(
   activeSkills: Skill[],
-  _maxTokens?: number
+  maxTokens?: number,
+  onDegrade?: RenderSkillsBudget["onDegrade"]
 ): { prompt: string } {
-  return { prompt: renderSkillsSection(activeSkills) }
+  return {
+    prompt: renderSkillsSection(activeSkills, {
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(onDegrade ? { onDegrade } : {}),
+    }),
+  }
 }

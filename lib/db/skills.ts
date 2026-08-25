@@ -1,6 +1,7 @@
 import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
 import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
 import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
+import { estimateCJKTokenCount } from "@cognia/rag/cjk-tokenizer"
 import { applyCapabilityOverlay } from "@/lib/workspace/capability-overlay"
 import { getDb } from "./schema"
 import {
@@ -14,6 +15,13 @@ import {
   type SkillResourceDraft,
 } from "./skill-resources"
 import { allocateUniqueSkillSlug, deriveSkillSlug, isValidSkillSlug } from "@/lib/skills/slug"
+import {
+  budgetCatalogEntries,
+  budgetSkillBodies,
+  didDegrade,
+  type BudgetOutcome,
+  type SkillPromptBudget,
+} from "@/lib/skills/prompt-budget"
 
 function newId() {
   return "skill_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -570,21 +578,53 @@ export function workflowSkillBody(name: string): string {
 }
 
 /**
+ * Budget for a rendered skills block, plus an optional hook so a caller can
+ * SAY that the block shrank. Degradation without a record is the failure
+ * mode this exists to prevent: a prompt that quietly lost half the catalog
+ * looks identical to a user who forgot to enable those skills.
+ */
+export interface RenderSkillsBudget extends SkillPromptBudget {
+  onDegrade?: (report: {
+    block: "skills-section" | "skills-catalog"
+    level: BudgetOutcome<unknown>["level"]
+    omitted: string[]
+    tokens: number
+  }) => void
+}
+
+function reportDegradation(
+  block: "skills-section" | "skills-catalog",
+  outcome: BudgetOutcome<unknown>,
+  budget: RenderSkillsBudget | undefined
+): void {
+  if (!budget?.onDegrade || !didDegrade(outcome)) return
+  budget.onDegrade({
+    block,
+    level: outcome.level,
+    omitted: outcome.omitted,
+    tokens: outcome.tokens,
+  })
+}
+
+/**
  * Render a list of skills as a system-prompt suffix. Each skill becomes a
  * `## <name>` section followed by its markdown body, joined by blank lines.
  * Graph-bodied skills (`kind:"workflow"`) render the canonical runner
  * instruction instead of their stored content (see {@link workflowSkillBody}).
  * Returns an empty string when there are no skills.
  */
-export function renderSkillsSection(skills: Skill[]): string {
+export function renderSkillsSection(skills: Skill[], budget?: RenderSkillsBudget): string {
   if (skills.length === 0) return ""
-  return skills
-    .map((s) =>
+  const entries = skills.map((s) => ({
+    id: s.id,
+    text:
       s.kind === "workflow"
         ? `## ${s.name}\n\n${workflowSkillBody(s.name)}`
-        : `## ${s.name}\n\n${s.content.trim()}`
-    )
-    .join("\n\n")
+        : `## ${s.name}\n\n${s.content.trim()}`,
+  }))
+  const outcome = budgetSkillBodies(entries, budget)
+  reportDegradation("skills-section", outcome, budget)
+  return outcome.kept.join("\n\n")
 }
 
 /**
@@ -596,31 +636,35 @@ export function renderSkillsSection(skills: Skill[]): string {
  * OpenCode/Anthropic "discover, then load on demand" model. Returns "" when there
  * are no skills.
  */
-export function renderSkillsCatalog(skills: Skill[]): string {
+export function renderSkillsCatalog(skills: Skill[], budget?: RenderSkillsBudget): string {
   if (skills.length === 0) return ""
-  const lines = skills.map((s) => {
+  const entries = skills.map((s) => {
     const desc = s.description?.trim()
     const label = s.slug ? `${s.slug} (${s.name})` : s.name
     // Graph-bodied skills need no load_skill round-trip — the callable
-    // contract fits on one line, so surface it directly.
-    if (s.kind === "workflow") {
-      return (
-        `- \`${s.id}\` — ${label}${desc ? `: ${desc}` : ""} ` +
-        `(graph-bodied skill: run it by calling the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool ` +
-        `with \`{ "name": ${JSON.stringify(s.name)} }\`)`
-      )
-    }
-    return `- \`${s.id}\` — ${label}${desc ? `: ${desc}` : ""}`
+    // contract fits on one line, so surface it directly. That contract is
+    // part of the head, never the droppable description: a row that loses it
+    // tells the model a skill exists but not how to run it.
+    const head =
+      s.kind === "workflow"
+        ? `- \`${s.id}\` — ${label} ` +
+          `(graph-bodied skill: run it by calling the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool ` +
+          `with \`{ "name": ${JSON.stringify(s.name)} }\`)`
+        : `- \`${s.id}\` — ${label}`
+    return { id: s.id, head, ...(desc ? { description: desc } : {}) }
   })
-  return [
+  const preamble = [
     "## Available skills",
     "",
     "The following skills are available but their full instructions are NOT loaded. " +
       "When a skill is relevant to the current task, call the `load_skill` tool with its " +
       "id to load its instructions before you act on it. Do not guess a skill's contents.",
     "",
-    ...lines,
-  ].join("\n")
+  ]
+  const outcome = budgetCatalogEntries(entries, budget, estimateCJKTokenCount(preamble.join("\n")))
+  reportDegradation("skills-catalog", outcome, budget)
+  if (outcome.kept.length === 0) return ""
+  return [...preamble, ...outcome.kept].join("\n")
 }
 
 /**

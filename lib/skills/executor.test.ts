@@ -28,12 +28,26 @@ describe("buildProgressiveSkillsPrompt", () => {
     const skills: Skill[] = []
     const out = buildProgressiveSkillsPrompt(skills)
     expect(out).toEqual({ prompt: "RENDERED" })
-    expect(mockedRender).toHaveBeenCalledWith(skills)
+    expect(mockedRender).toHaveBeenCalledWith(skills, {})
   })
 
-  it("ignores the maxTokens advisory parameter", () => {
+  it("passes maxTokens down instead of dropping it", () => {
     mockedRender.mockReturnValueOnce("X")
     const out = buildProgressiveSkillsPrompt([], 1000)
     expect(out).toEqual({ prompt: "X" })
+    expect(mockedRender).toHaveBeenCalledWith([], { maxTokens: 1000 })
+  })
+
+  it("forwards a degradation hook when one is given", () => {
+    const onDegrade = jest.fn()
+    mockedRender.mockReturnValueOnce("X")
+    buildProgressiveSkillsPrompt([], 1000, onDegrade)
+    expect(mockedRender).toHaveBeenCalledWith([], { maxTokens: 1000, onDegrade })
+  })
+
+  it("sends no budget at all when none was asked for", () => {
+    mockedRender.mockReturnValueOnce("X")
+    buildProgressiveSkillsPrompt([])
+    expect(mockedRender).toHaveBeenCalledWith([], {})
   })
 })

@@ -87,6 +87,7 @@ import { resolveSendOptions } from "@/lib/claude/build-options"
 import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { listEnabledSkillsByIds, renderSkillsSection } from "@/lib/db/skills"
+import { DEFAULT_SKILL_CATALOG_TOKEN_BUDGET } from "@/lib/skills/prompt-budget"
 import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
 import { loggers } from "@cognia/logging"
 import { assertTaskTypeSupportedOnHost } from "../host-support"
@@ -386,7 +387,16 @@ async function applyAdHocSkill(
   if (skills.length === 0) return base
 
   const out: SendOptions = { ...base }
-  const skillSection = renderSkillsSection(skills)
+  // Same ceiling the interactive send pipeline applies — a scheduled run has
+  // no one watching to notice a prompt that grew past the model's budget.
+  const skillSection = renderSkillsSection(skills, {
+    maxTokens: DEFAULT_SKILL_CATALOG_TOKEN_BUDGET,
+    onDegrade: (report) =>
+      log.warn("skills block exceeded its prompt budget", {
+        ...report,
+        omittedCount: report.omitted.length,
+      }),
+  })
   if (skillSection) {
     out.systemPrompt = out.systemPrompt
       ? `${out.systemPrompt}\n\n---\n\n${skillSection}`
