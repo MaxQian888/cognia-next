@@ -179,15 +179,53 @@ pub fn runner_pod_manifest(spec: &RunnerSpec, opts: &KubeRunnerOptions) -> Resul
         pod_spec["runtimeClassName"] = json!(rc);
     }
 
+    // Ownership labels ride on the pod too. Without them the k8s path has the
+    // same blind spot the Docker path had: after a restart nothing can list
+    // which pods are ours, so an orphan is invisible rather than reapable.
+    let mut labels = serde_json::Map::new();
+    labels.insert("app".to_string(), json!("cognia-runner"));
+    for (key, value) in &spec.labels {
+        labels.insert(key.clone(), json!(sanitize_label_value(value)));
+    }
+
     Ok(json!({
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
             "name": pod_name(&spec.name),
-            "labels": { "app": "cognia-runner" },
+            "labels": Value::Object(labels),
         },
         "spec": pod_spec,
     }))
+}
+
+/// Coerce a value into what Kubernetes accepts for a label: alphanumerics,
+/// `-`, `_`, `.`, starting and ending alphanumeric, at most 63 characters.
+/// A value that cannot be coerced becomes `unknown` rather than failing the
+/// spawn — a pod that runs with a degraded label beats a pod that will not
+/// start, and the owner label itself is a fixed constant that always passes.
+fn sanitize_label_value(value: &str) -> String {
+    let mapped: String = value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = mapped
+        .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+        .chars()
+        .take(63)
+        .collect::<String>();
+    let trimmed = trimmed.trim_end_matches(|c: char| !c.is_ascii_alphanumeric());
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +460,9 @@ pub mod kube_api {
 
 #[cfg(test)]
 mod tests {
-    use super::super::container_backend::{RunnerMount, RunnerSpec, WORKSPACE_TARGET};
+    use super::super::container_backend::{
+        ownership_labels, RunnerMount, RunnerSpec, WORKSPACE_TARGET,
+    };
     use super::*;
 
     fn spec(mount: RunnerMount) -> RunnerSpec {
@@ -438,6 +478,7 @@ mod tests {
             nano_cpus: 1_500_000_000,
             pids_limit: 512,
             network_mode: "bridge".into(),
+            labels: ownership_labels("A_1", "test-instance"),
         }
     }
 

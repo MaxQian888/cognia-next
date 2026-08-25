@@ -151,6 +151,17 @@ pub trait ExecBackend: Send + Sync + 'static {
     async fn set_failed(&self, id: &str) -> Result<(), String>;
     /// `"local-process"` | `"container"` — for logs and healthz.
     fn kind(&self) -> &'static str;
+
+    /// Remove execution resources this process did not create but owns —
+    /// what a previous run left behind after a crash or a hard kill.
+    ///
+    /// Returns the ids reaped. The default is correct for backends whose
+    /// resources die with the process: a local child process cannot outlive
+    /// its parent, so there is nothing to find. Container-shaped backends
+    /// override it, because a container very much does outlive us.
+    async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
 }
 
 /// T1 backend: local tokio processes via the existing manager

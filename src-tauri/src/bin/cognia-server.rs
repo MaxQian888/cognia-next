@@ -1092,6 +1092,24 @@ async fn run_serve(
     // to in-container local processes would silently void the T2 isolation.
     let exec = exec_backend_from_env().map_err(|e| format!("exec backend: {e}"))?;
     eprintln!("[cognia-server] exec backend: {}", exec.kind());
+    // Reap what a previous run left behind. A container outlives the process
+    // that started it, so a crash used to leak one per agent with no way to
+    // find them again — the in-process registry was the only record that they
+    // were ours. They now carry an owner label, so the daemon can be asked.
+    // Best-effort: an unreachable daemon must not block boot, and the exec
+    // backend itself already failed loudly above if it is misconfigured.
+    match exec.reap_orphans().await {
+        Ok(reaped) if !reaped.is_empty() => {
+            eprintln!(
+                "[cognia-server] reaped {} orphaned runner(s) from a previous run",
+                reaped.len()
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("[cognia-server] orphan reap skipped: {error}");
+        }
+    }
     app_lib::companion_api::browser_gateway::install_workspace_runtime_control_from_env()
         .map_err(|error| format!("remote browser: {error}"))?;
     let remote_browser =

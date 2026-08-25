@@ -30,7 +30,7 @@
 // feature-gated bollard impl.
 #![cfg_attr(not(any(test, feature = "container-exec")), allow(dead_code))]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -157,6 +157,27 @@ pub enum RunnerMount {
     Bind { host_dir: String },
 }
 
+/// Label key marking a container as ours. Present on every container this
+/// backend creates, and required before it will touch one.
+pub const OWNER_LABEL: &str = "cognia.owner";
+
+/// The value [`OWNER_LABEL`] carries. A different value is someone else's.
+pub const OWNER_VALUE: &str = "cognia-external-agent";
+
+/// Label carrying the agent id the container was created for.
+pub const AGENT_ID_LABEL: &str = "cognia.agent-id";
+
+/// Label carrying the id of the PROCESS that created the container, so a
+/// restart can tell its own live containers from the previous run's orphans.
+pub const INSTANCE_LABEL: &str = "cognia.instance";
+
+/// Label carrying the label schema version, so a future change can recognise
+/// and migrate containers created by an older build.
+pub const SCHEMA_LABEL: &str = "cognia.schema-version";
+
+/// Current value of [`SCHEMA_LABEL`].
+pub const SCHEMA_VERSION: &str = "1";
+
 /// Everything the daemon needs to run one agent container.
 #[derive(Clone, Debug)]
 pub struct RunnerSpec {
@@ -172,6 +193,10 @@ pub struct RunnerSpec {
     pub nano_cpus: i64,
     pub pids_limit: i64,
     pub network_mode: String,
+    /// Ownership labels, sorted for determinism. The container itself carries
+    /// them, which is the whole point: a name convention lives only in this
+    /// process, and dies with it.
+    pub labels: BTreeMap<String, String>,
 }
 
 /// Demuxed output of a running container (Tty:false framing).
@@ -222,6 +247,87 @@ pub trait ContainerApi: Send + Sync + 'static {
     async fn kill(&self, container_id: &str) -> Result<(), String>;
     /// Best-effort cleanup; idempotent.
     async fn remove(&self, container_id: &str) -> Result<(), String>;
+    /// Labels on one container. `Ok(None)` when the container is gone.
+    ///
+    /// This is what makes ownership checkable at all: without it the only
+    /// evidence a container is ours is a name convention plus an in-process
+    /// map, and a name convention is something anyone can type.
+    async fn labels(&self, container_id: &str) -> Result<Option<BTreeMap<String, String>>, String>;
+    /// Ids of every container carrying our owner label, running or not.
+    /// Used to reap what a previous process left behind.
+    async fn list_owned(&self) -> Result<Vec<OwnedContainer>, String>;
+}
+
+/// One container the daemon reports as ours.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnedContainer {
+    pub id: String,
+    pub labels: BTreeMap<String, String>,
+}
+
+impl OwnedContainer {
+    /// The process that created it, if it said.
+    pub fn instance(&self) -> Option<&str> {
+        self.labels.get(INSTANCE_LABEL).map(String::as_str)
+    }
+}
+
+/// A per-process instance id: the pid plus the process start time is enough
+/// to distinguish this run from any earlier one on the same machine.
+pub fn default_instance_id() -> String {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{pid}-{nanos}")
+}
+
+/// Labels for a container this process is about to create.
+pub fn ownership_labels(agent_id: &str, instance_id: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (OWNER_LABEL.to_string(), OWNER_VALUE.to_string()),
+        (AGENT_ID_LABEL.to_string(), agent_id.to_string()),
+        (INSTANCE_LABEL.to_string(), instance_id.to_string()),
+        (SCHEMA_LABEL.to_string(), SCHEMA_VERSION.to_string()),
+    ])
+}
+
+/// Whether a label set marks a container as ours to act on.
+pub fn is_owned(labels: &BTreeMap<String, String>) -> bool {
+    labels.get(OWNER_LABEL).map(String::as_str) == Some(OWNER_VALUE)
+}
+
+/// Refuse to act on a container we cannot prove is ours.
+///
+/// `Ok(false)` means the container is already gone — nothing to protect, and
+/// every caller treats removal as idempotent. An `Err` means it exists and
+/// belongs to someone else.
+///
+/// The old evidence was a name (`cognia-agent-<id>`) plus an in-process map.
+/// Both are forgeable and neither survives a crash, so a container a user
+/// happened to name that way could be killed, and our own containers became
+/// invisible the moment the process died.
+///
+/// A free function, not a method, because the spawned stdout reader owns only
+/// an `Arc<dyn ContainerApi>` — and that reader is the one place a recycled
+/// container id would do damage.
+pub async fn assert_owned(api: &Arc<dyn ContainerApi>, container_id: &str) -> Result<bool, String> {
+    match api.labels(container_id).await? {
+        None => Ok(false),
+        Some(labels) if is_owned(&labels) => Ok(true),
+        Some(_) => Err(format!(
+            "refusing to touch container {container_id}: it does not carry {OWNER_LABEL}={OWNER_VALUE}"
+        )),
+    }
+}
+
+/// Remove a container after proving we own it. Idempotent.
+pub async fn remove_owned(api: &Arc<dyn ContainerApi>, container_id: &str) -> Result<(), String> {
+    if assert_owned(api, container_id).await? {
+        api.remove(container_id).await?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -240,15 +346,62 @@ pub struct ContainerBackend {
     api: Arc<dyn ContainerApi>,
     config: ContainerBackendConfig,
     agents: Arc<Mutex<HashMap<String, AgentEntry>>>,
+    /// Identifies THIS process on every container it creates. A container
+    /// labelled with a different instance belongs to a run that is gone.
+    instance_id: String,
 }
 
 impl ContainerBackend {
     pub fn new(api: Arc<dyn ContainerApi>, config: ContainerBackendConfig) -> Arc<Self> {
+        Self::with_instance_id(api, config, default_instance_id())
+    }
+
+    /// Construct with an explicit instance id (tests, and any caller that
+    /// wants a stable id across a restart).
+    pub fn with_instance_id(
+        api: Arc<dyn ContainerApi>,
+        config: ContainerBackendConfig,
+        instance_id: String,
+    ) -> Arc<Self> {
         Arc::new(Self {
             api,
             config,
             agents: Arc::new(Mutex::new(HashMap::new())),
+            instance_id,
         })
+    }
+
+    /// This process's instance id, as stamped on every container it creates.
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
+
+    /// Remove every container of OURS that a previous process left running.
+    ///
+    /// This is the half a name convention cannot do. `process_registry`
+    /// already treats orphan daemons as the failure mode it exists to
+    /// prevent; before ownership labels there was no way to enumerate our
+    /// containers from the daemon at all, so a crash leaked every one of
+    /// them silently.
+    ///
+    /// Returns the ids reaped. Containers from THIS process are left alone.
+    pub async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        let owned = self.api.list_owned().await?;
+        let mut reaped = Vec::new();
+        for container in owned {
+            if container.instance() == Some(self.instance_id.as_str()) {
+                continue;
+            }
+            if !is_owned(&container.labels) {
+                continue;
+            }
+            match self.api.remove(&container.id).await {
+                Ok(()) => reaped.push(container.id),
+                // One stuck container must not stop the sweep.
+                Err(_) => continue,
+            }
+        }
+        Ok(reaped)
     }
 
     /// Resolve the workspace mount for `cwd`. In volume mode the cwd must
@@ -369,6 +522,7 @@ impl ExecBackend for ContainerBackend {
             nano_cpus: self.config.nano_cpus,
             pids_limit: self.config.pids_limit,
             network_mode: self.config.network_mode.clone(),
+            labels: ownership_labels(&id, &self.instance_id),
         };
 
         let running = match self.api.run(spec.clone()).await {
@@ -442,7 +596,10 @@ impl ExecBackend for ContainerBackend {
             };
             sink.exited(&agent_id, exit_code.map(|c| c as i32), None);
             if let Some(cid) = container_id {
-                let _ = api.remove(&cid).await;
+                // Ownership-checked even here: the id came from our own map,
+                // but a recycled container id is exactly the case where an
+                // unchecked remove takes out something that is not ours.
+                let _ = remove_owned(&api, &cid).await;
             }
         });
 
@@ -469,6 +626,11 @@ impl ExecBackend for ContainerBackend {
             entry.state = ExternalAgentProcessState::Stopping;
             entry.container_id.clone()
         };
+        // Prove it is ours before signalling it. A recycled container id in
+        // our map would otherwise send a kill to whatever now holds that id.
+        if !assert_owned(&self.api, &container_id).await? {
+            return Ok(());
+        }
         // The attached-stream reader observes the exit and emits
         // Stopped + exit + registry cleanup; remove() here is idempotent
         // backup for a reader that already finished.
@@ -543,6 +705,10 @@ impl ExecBackend for ContainerBackend {
     fn kind(&self) -> &'static str {
         "container"
     }
+
+    async fn reap_orphans(&self) -> Result<Vec<String>, String> {
+        ContainerBackend::reap_orphans(self).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -605,13 +771,11 @@ pub fn exec_backend_from_env() -> Result<Arc<dyn ExecBackend>, String> {
 pub mod bollard_api {
     use super::*;
     use bollard::container::LogOutput;
-    use bollard::models::{
-        ContainerCreateBody, HostConfig, Mount, MountTypeEnum, MountVolumeOptions,
-    };
+    use bollard::models::{ContainerCreateBody, HostConfig, Mount, MountType, MountVolumeOptions};
     use bollard::query_parameters::{
         AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
-        KillContainerOptionsBuilder, RemoveContainerOptionsBuilder, StartContainerOptions,
-        WaitContainerOptionsBuilder,
+        KillContainerOptionsBuilder, ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
+        StartContainerOptions, WaitContainerOptionsBuilder,
     };
     use bollard::Docker;
     use futures_util::StreamExt;
@@ -622,6 +786,23 @@ pub mod bollard_api {
     }
 
     impl BollardContainerApi {
+        /// One `/containers/json` query, `all: true` so a stopped orphan is
+        /// still visible — a container that exited but was never removed is
+        /// exactly the thing that needs reaping.
+        async fn summaries(
+            &self,
+            filters: std::collections::HashMap<String, Vec<String>>,
+        ) -> Result<Vec<bollard::models::ContainerSummary>, String> {
+            let options = ListContainersOptionsBuilder::default()
+                .all(true)
+                .filters(&filters)
+                .build();
+            self.docker
+                .list_containers(Some(options))
+                .await
+                .map_err(|e| format!("list_containers failed: {e}"))
+        }
+
         /// Honors `DOCKER_HOST` (tcp → the T2 socket proxy); falls back to
         /// the platform-local socket/pipe.
         pub fn connect() -> Result<Arc<Self>, String> {
@@ -639,7 +820,7 @@ pub mod bollard_api {
     fn to_mount(mount: &RunnerMount) -> Mount {
         match mount {
             RunnerMount::Volume { volume, subpath } => Mount {
-                typ: Some(MountTypeEnum::VOLUME),
+                typ: Some(MountType::VOLUME),
                 source: Some(volume.clone()),
                 target: Some(WORKSPACE_TARGET.to_string()),
                 volume_options: Some(MountVolumeOptions {
@@ -649,7 +830,7 @@ pub mod bollard_api {
                 ..Default::default()
             },
             RunnerMount::Bind { host_dir } => Mount {
-                typ: Some(MountTypeEnum::BIND),
+                typ: Some(MountType::BIND),
                 source: Some(host_dir.clone()),
                 target: Some(WORKSPACE_TARGET.to_string()),
                 ..Default::default()
@@ -669,6 +850,14 @@ pub mod bollard_api {
                 cmd: Some(spec.cmd.clone()),
                 env: Some(spec.env.clone()),
                 working_dir: Some(spec.working_dir.clone()),
+                // Ownership travels ON the container. Everything else about
+                // "is this ours" lived in this process and died with it.
+                labels: Some(
+                    spec.labels
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                ),
                 attach_stdin: Some(true),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
@@ -810,6 +999,47 @@ pub mod bollard_api {
                 .map_err(|e| format!("kill_container failed: {e}"))
         }
 
+        async fn labels(
+            &self,
+            container_id: &str,
+        ) -> Result<Option<BTreeMap<String, String>>, String> {
+            let mut filters = std::collections::HashMap::new();
+            filters.insert("id".to_string(), vec![container_id.to_string()]);
+            let found = self.summaries(filters).await?;
+            Ok(found.into_iter().next().map(|summary| {
+                summary
+                    .labels
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+            }))
+        }
+
+        async fn list_owned(&self) -> Result<Vec<OwnedContainer>, String> {
+            // Ask the daemon, not our own memory. This is the query a name
+            // convention cannot answer, and the reason orphans were invisible.
+            let mut filters = std::collections::HashMap::new();
+            filters.insert(
+                "label".to_string(),
+                vec![format!("{OWNER_LABEL}={OWNER_VALUE}")],
+            );
+            let found = self.summaries(filters).await?;
+            Ok(found
+                .into_iter()
+                .filter_map(|summary| {
+                    let id = summary.id?;
+                    Some(OwnedContainer {
+                        id,
+                        labels: summary
+                            .labels
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect::<BTreeMap<_, _>>(),
+                    })
+                })
+                .collect())
+        }
+
         async fn remove(&self, container_id: &str) -> Result<(), String> {
             match self
                 .docker
@@ -849,6 +1079,8 @@ pub(crate) mod test_support {
         pub specs: Mutex<Vec<RunnerSpec>>,
         pub kills: Mutex<Vec<String>>,
         pub removes: Mutex<Vec<String>>,
+        /// What the daemon would report for each container.
+        pub labels_by_container: Mutex<HashMap<String, BTreeMap<String, String>>>,
         /// Handles for containers started through this fake, by container id.
         pub handles: Mutex<HashMap<String, FakeHandle>>,
         pub fail_run: Mutex<Option<String>>,
@@ -870,6 +1102,7 @@ pub(crate) mod test_support {
                 specs: Mutex::new(Vec::new()),
                 kills: Mutex::new(Vec::new()),
                 removes: Mutex::new(Vec::new()),
+                labels_by_container: Mutex::new(HashMap::new()),
                 handles: Mutex::new(HashMap::new()),
                 fail_run: Mutex::new(None),
                 missing_image: Mutex::new(false),
@@ -917,6 +1150,9 @@ pub(crate) mod test_support {
                 *counter += 1;
                 format!("ctr-{}", *counter)
             };
+            self.labels_by_container
+                .lock()
+                .insert(container_id.clone(), spec.labels.clone());
             self.specs.lock().push(spec);
             let (event_tx, event_rx) = mpsc::unbounded_channel();
             let (stdin_tx, stdin_rx) = mpsc::unbounded_channel();
@@ -953,7 +1189,28 @@ pub(crate) mod test_support {
             Ok(())
         }
 
+        async fn labels(
+            &self,
+            container_id: &str,
+        ) -> Result<Option<BTreeMap<String, String>>, String> {
+            Ok(self.labels_by_container.lock().get(container_id).cloned())
+        }
+
+        async fn list_owned(&self) -> Result<Vec<OwnedContainer>, String> {
+            Ok(self
+                .labels_by_container
+                .lock()
+                .iter()
+                .filter(|(_, labels)| is_owned(labels))
+                .map(|(id, labels)| OwnedContainer {
+                    id: id.clone(),
+                    labels: labels.clone(),
+                })
+                .collect())
+        }
+
         async fn remove(&self, container_id: &str) -> Result<(), String> {
+            self.labels_by_container.lock().remove(container_id);
             self.removes.lock().push(container_id.to_string());
             Ok(())
         }
@@ -1008,6 +1265,145 @@ mod tests {
     }
 
     // ── Spec construction ────────────────────────────────────────────────────
+
+    // --- ownership -------------------------------------------------------
+
+    fn foreign_labels() -> BTreeMap<String, String> {
+        BTreeMap::from([("com.example.owner".to_string(), "someone-else".to_string())])
+    }
+
+    #[tokio::test]
+    async fn spawn_stamps_ownership_onto_the_container_itself() {
+        let api = FakeContainerApi::new();
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+        let emitter = RecordingAgentEmitter::new();
+        spawn_with_events(backend.as_ref(), emitter, spawn_config("a 1"))
+            .await
+            .expect("spawn");
+
+        let specs = api.specs.lock();
+        let labels = &specs[0].labels;
+        assert_eq!(
+            labels.get(OWNER_LABEL).map(String::as_str),
+            Some(OWNER_VALUE)
+        );
+        assert_eq!(labels.get(AGENT_ID_LABEL).map(String::as_str), Some("a 1"));
+        assert_eq!(
+            labels.get(INSTANCE_LABEL).map(String::as_str),
+            Some("instance-A")
+        );
+        assert_eq!(
+            labels.get(SCHEMA_LABEL).map(String::as_str),
+            Some(SCHEMA_VERSION)
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_to_remove_a_container_it_does_not_own() {
+        let api = FakeContainerApi::new();
+        api.labels_by_container
+            .lock()
+            .insert("someone-elses".to_string(), foreign_labels());
+        let api_dyn: Arc<dyn ContainerApi> = api.clone();
+
+        let err = remove_owned(&api_dyn, "someone-elses")
+            .await
+            .expect_err("must refuse");
+        assert!(err.contains("refusing to touch"), "{err}");
+        assert!(api.removes.lock().is_empty(), "nothing may be removed");
+    }
+
+    #[tokio::test]
+    async fn removing_an_already_gone_container_is_a_no_op_not_an_error() {
+        let api = FakeContainerApi::new();
+        let api_dyn: Arc<dyn ContainerApi> = api.clone();
+        remove_owned(&api_dyn, "vanished")
+            .await
+            .expect("idempotent");
+        assert!(api.removes.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn kill_refuses_a_recycled_id_that_is_no_longer_ours() {
+        let api = FakeContainerApi::new();
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+        let emitter = RecordingAgentEmitter::new();
+        spawn_with_events(backend.as_ref(), emitter, spawn_config("a 1"))
+            .await
+            .expect("spawn");
+
+        // The daemon now reports that id as belonging to someone else — the
+        // shape a recycled container id takes.
+        let container_id = api
+            .specs
+            .lock()
+            .first()
+            .map(|_| "ctr-1".to_string())
+            .unwrap();
+        api.labels_by_container
+            .lock()
+            .insert(container_id.clone(), foreign_labels());
+
+        let err = ExecBackend::kill(backend.as_ref(), "a 1")
+            .await
+            .expect_err("must refuse");
+        assert!(err.contains("refusing to touch"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn reaps_a_previous_run_but_leaves_this_one_alone() {
+        let api = FakeContainerApi::new();
+        api.labels_by_container.lock().insert(
+            "mine".to_string(),
+            ownership_labels("agent-live", "instance-A"),
+        );
+        api.labels_by_container.lock().insert(
+            "orphan".to_string(),
+            ownership_labels("agent-dead", "instance-PREVIOUS"),
+        );
+        api.labels_by_container
+            .lock()
+            .insert("theirs".to_string(), foreign_labels());
+
+        let backend = ContainerBackend::with_instance_id(
+            api.clone(),
+            test_config(Some("cognia_workspaces")),
+            "instance-A".into(),
+        );
+        let reaped = backend.reap_orphans().await.expect("reap");
+
+        assert_eq!(reaped, vec!["orphan".to_string()]);
+        let removed = api.removes.lock().clone();
+        assert_eq!(removed, vec!["orphan".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn reaping_finds_nothing_on_a_clean_daemon() {
+        let api = FakeContainerApi::new();
+        let backend =
+            ContainerBackend::with_instance_id(api.clone(), test_config(None), "instance-A".into());
+        assert!(backend.reap_orphans().await.expect("reap").is_empty());
+    }
+
+    #[test]
+    fn ownership_is_decided_by_the_owner_label_alone() {
+        assert!(is_owned(&ownership_labels("a", "b")));
+        assert!(!is_owned(&foreign_labels()));
+        assert!(!is_owned(&BTreeMap::new()));
+    }
+
+    #[test]
+    fn each_process_gets_its_own_instance_id() {
+        assert_ne!(default_instance_id(), default_instance_id());
+    }
 
     #[tokio::test]
     async fn spawn_builds_a_locked_down_runner_spec() {
