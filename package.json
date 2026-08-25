@@ -8,6 +8,7 @@
   "packageManager": "pnpm@11.18.0",
   "scripts": {
     "agent:host:package": "node scripts/build/package-agent-host.mjs",
+    "agent:host:verify": "node scripts/build/verify-agent-host-package.mjs",
     "agent:host:smoke": "node scripts/smoke/agent-sdk-bundled-host.mjs",
     "agent:proxy": "cargo build -q -p cognia-automation --bin cognia-agent-proxy-launcher && node scripts/dev/agent-proxy.mjs",
     "agent:proxy:test": "cargo build -q -p cognia-automation --bin cognia-agent-proxy-launcher && node --test scripts/dev/agent-proxy.test.mjs",

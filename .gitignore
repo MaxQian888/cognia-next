@@ -188,3 +188,10 @@ public/swe-worker-*.js
 # Conversation/share export artifacts (produced by /export)
 cognia-export-*.md
 .smoke-workspace-*
+
+# Agent SDK host package payload + its generated closure manifest.
+# Produced by `pnpm agent:host:package` from a local `pnpm cli:build:binary`;
+# Bun standalone binaries are not byte-reproducible across machines, so the
+# manifest is a per-build record enforced at prepack, never a committed pin.
+packages/agent-host-*/bin/
+packages/agent-host-*/integrity.json

@@ -177,6 +177,16 @@ export const EXEMPTIONS = {
   "test:db-fixture:candidates":
     "reporter — lists suites that could adopt the fast fixture; asserts nothing",
   "test:db-fixture:audit:test": "covered by scripts:test:ci",
+
+  // --- agent host packaging (scripts/build/verify-agent-host-package.mjs) ---
+  // A real closure gate — it fails on a changed digest and on any packaged
+  // file the integrity manifest does not declare — but it can only run
+  // against a populated `packages/agent-host-*/bin/`, which comes from a
+  // local `pnpm cli:build:binary` and is never present in CI. It is wired
+  // where it can actually fire: each platform package's `prepack`, so a
+  // stray or mutated artifact fails the pack instead of shipping.
+  "agent:host:verify":
+    "needs a built packages/agent-host-*/bin/ that CI does not have; enforced at each platform package's prepack",
 }
 
 /**
