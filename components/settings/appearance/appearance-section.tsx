@@ -33,6 +33,7 @@ import {
   usePluginSlotHasExtensions,
 } from "@/components/plugins/plugin-extension-slot"
 import { PanelTransition } from "@/components/settings/common/panel-transition"
+import { StylePanel } from "./panels/style-panel"
 import { ThemeTab } from "./tabs/theme-tab"
 import { WallpaperTab } from "./tabs/wallpaper-tab"
 import { CustomThemeTab } from "./tabs/custom-theme-tab"
@@ -66,6 +67,8 @@ const APPEARANCE_TAB_PARAM = "appearanceTab"
 
 function renderPanel(panel: AppearancePanelId) {
   switch (panel) {
+    case "style":
+      return <StylePanel />
     case "theme":
       return <ThemeTab />
     case "auto":

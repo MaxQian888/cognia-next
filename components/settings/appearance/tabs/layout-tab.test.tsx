@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
@@ -34,18 +34,19 @@ beforeEach(() => {
 })
 
 describe("LayoutTab", () => {
-  it("renders density, radius, message-display, and usage-display sections", () => {
+  it("renders density, message-display, and usage-display sections", () => {
     render(<LayoutTab />)
     expect(screen.getByTestId("density-card")).toBeInTheDocument()
     expect(screen.getByTestId("message-display-card")).toBeInTheDocument()
     expect(screen.getByTestId("usage-display-card")).toBeInTheDocument()
-    expect(screen.getByText("radius.sectionLabel")).toBeInTheDocument()
   })
 
-  it("restores the default corner radius via the slider-row reset", () => {
-    storeState.settings = { radius: { base: 1.2 } }
+  // Corner radius moved to the Style panel (ADR-0148), where it reads as an
+  // override on the active pack rather than a free-floating number. Two
+  // controls writing `settings.radius` would let the panels disagree.
+  it("no longer owns the corner-radius control", () => {
     render(<LayoutTab />)
-    fireEvent.click(screen.getByLabelText("resetToDefault"))
-    expect(save).toHaveBeenCalledWith({ radius: { base: 0.625 } })
+    expect(screen.queryByText("radius.sectionLabel")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("resetToDefault")).not.toBeInTheDocument()
   })
 })

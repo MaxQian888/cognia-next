@@ -37,7 +37,7 @@ describe("AppearanceNav", () => {
 
   it("renders one entry per panel", () => {
     renderNav()
-    expect(screen.getAllByRole("listitem")).toHaveLength(12)
+    expect(screen.getAllByRole("listitem")).toHaveLength(13)
   })
 
   it("marks the active entry for assistive tech, not just visually", () => {
@@ -58,7 +58,7 @@ describe("AppearanceNav", () => {
   it("omits hidden entries", () => {
     renderNav({ hiddenIds: ["plugins"] })
     expect(screen.queryByTestId("appearance-nav-item-plugins")).not.toBeInTheDocument()
-    expect(screen.getAllByRole("listitem")).toHaveLength(11)
+    expect(screen.getAllByRole("listitem")).toHaveLength(12)
   })
 
   // Hiding the only member of a group must not leave a dangling header.
@@ -98,17 +98,19 @@ describe("AppearanceNav", () => {
 
     it("wraps from the first entry to the last on ArrowUp", () => {
       renderNav()
-      const theme = screen.getByTestId("appearance-nav-item-theme")
-      theme.focus()
-      fireEvent.keyDown(theme, { key: "ArrowUp" })
+      // `style` leads the theme group (ADR-0148) and is therefore the first
+      // entry the roving order wraps from.
+      const first = screen.getByTestId("appearance-nav-item-style")
+      first.focus()
+      fireEvent.keyDown(first, { key: "ArrowUp" })
       expect(screen.getByTestId("appearance-nav-item-plugins")).toHaveFocus()
     })
 
     it("skips hidden entries when wrapping", () => {
       renderNav({ hiddenIds: ["plugins"] })
-      const theme = screen.getByTestId("appearance-nav-item-theme")
-      theme.focus()
-      fireEvent.keyDown(theme, { key: "ArrowUp" })
+      const first = screen.getByTestId("appearance-nav-item-style")
+      first.focus()
+      fireEvent.keyDown(first, { key: "ArrowUp" })
       expect(screen.getByTestId("appearance-nav-item-advanced")).toHaveFocus()
     })
 
@@ -119,7 +121,7 @@ describe("AppearanceNav", () => {
       fireEvent.keyDown(wallpaper, { key: "End" })
       expect(screen.getByTestId("appearance-nav-item-plugins")).toHaveFocus()
       fireEvent.keyDown(screen.getByTestId("appearance-nav-item-plugins"), { key: "Home" })
-      expect(screen.getByTestId("appearance-nav-item-theme")).toHaveFocus()
+      expect(screen.getByTestId("appearance-nav-item-style")).toHaveFocus()
     })
 
     // Activation is manual: each selection swaps the whole detail panel and

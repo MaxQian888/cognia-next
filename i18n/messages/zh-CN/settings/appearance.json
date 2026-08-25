@@ -600,6 +600,10 @@
         "description": "插件提供的外观面板",
         "label": "插件"
       },
+      "style": {
+        "description": "圆角、胶囊、层级与密度",
+        "label": "风格"
+      },
       "theme": {
         "description": "预设配色与明暗模式",
         "label": "主题与预设"
@@ -880,5 +884,26 @@
     "tooLarge": "文件过大（不超过 32 MB）。",
     "uploadHint": "把图片拖到这里或点击浏览",
     "uploading": "上传中…"
+  },
+  "stylePack": {
+    "sectionLabel": "风格包",
+    "sectionHint": "决定形状——圆角、胶囊、层级阴影、边框粗细与密度。与配色相互独立，任意风格包都能搭配任意主题。",
+    "resetOverrides": "恢复风格包默认值",
+    "radiusFollowsPack": "当前跟随风格包。拖动滑杆即可固定为你自己的值。",
+    "radiusOverridesPack": "当前覆盖了风格包。把滑杆重置即可重新跟随。",
+    "packs": {
+      "soft": {
+        "name": "柔和",
+        "description": "当前默认。圆润的边角、胶囊徽章与柔和阴影。"
+      },
+      "studio": {
+        "name": "克制",
+        "description": "克制的圆角与发丝线，与 Cognia 官网一致。没有过大的胶囊。"
+      },
+      "sharp": {
+        "name": "硬朗",
+        "description": "除真正的圆形外一律方化。没有阴影，密度更紧，微标签使用等宽字体。"
+      }
+    }
   }
 }

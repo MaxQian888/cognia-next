@@ -17,6 +17,7 @@ import {
   PaintbrushIcon,
   PaletteIcon,
   PuzzleIcon,
+  ShapesIcon,
   SunMoonIcon,
   TypeIcon,
   UserRoundIcon,
@@ -25,6 +26,7 @@ import {
 import type { ComponentType } from "react"
 
 export type AppearancePanelId =
+  | "style"
   | "theme"
   | "auto"
   | "custom"
@@ -56,6 +58,9 @@ export const APPEARANCE_NAV_GROUPS: readonly AppearanceNavGroup[] = [
   {
     id: "themeGroup",
     items: [
+      // ADR-0148 — shape before colour: the pack decides what every other
+      // control in this section is tuning.
+      { id: "style", icon: ShapesIcon },
       { id: "theme", icon: PaletteIcon },
       { id: "auto", icon: SunMoonIcon },
       { id: "custom", icon: PaintbrushIcon },

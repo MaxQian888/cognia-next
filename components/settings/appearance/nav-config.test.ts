@@ -8,9 +8,9 @@ import enAppearance from "../../../i18n/messages/en/settings/appearance.json"
 import zhAppearance from "../../../i18n/messages/zh-CN/settings/appearance.json"
 
 describe("APPEARANCE_NAV_GROUPS", () => {
-  it("covers twelve panels across three groups", () => {
+  it("covers thirteen panels across three groups", () => {
     expect(APPEARANCE_NAV_GROUPS).toHaveLength(3)
-    expect(APPEARANCE_NAV_GROUPS.flatMap((g) => g.items)).toHaveLength(12)
+    expect(APPEARANCE_NAV_GROUPS.flatMap((g) => g.items)).toHaveLength(13)
   })
 
   it("has no duplicate panel ids", () => {
