@@ -311,7 +311,24 @@ String`, free-form scope set). They are additionally on incompatible majors of
 So the OIDC verification plane stays where it is, in both services, and the
 shared crate owns the layer above it: what a verified token *means*. That is
 also the layer this ADR actually invents — neither existing file has a `User`.
-| **3** | `crates/cognia-collab-server` skeleton; Issues on the collaboration plane; `IssueActor.id` becomes required | new crate, `types/issues/index.ts`, `lib/db/issues.ts` |
+| **3** | ✅ `crates/cognia-collab-server` + Issues on the plane | Server: RLS-scoped Postgres, the two-step auth chain, and `POST /v1/orgs/{org}/grants` — the one door in. Client: `types/issues/collab.ts` (the actor narrowing), `lib/collab/` (grant-caching client + pull), Dexie v195 `collabIssues`, and a fifth federated board source. |
+
+**Batch 3 notes.** Three things this ADR did not anticipate:
+
+1. **`IssueActor.id` is conditionally required, not unconditionally.** §10 says
+   "once Issues enter the collaboration plane", and that condition is
+   load-bearing: a machine nobody has signed in on has no `usr_` at all, and
+   decision 4 keeps it working offline. So the local type keeps `id?` and the
+   *boundary* narrows — `resolveCollabActor` refuses rather than inventing an
+   id. What ADR-0132 loses is its justification ("the local app is
+   single-user"), not its shape.
+2. **The plane needed a grant-minting endpoint.** Verification without an
+   exchange is a service nothing can authenticate to. The exchange verifies the
+   org named in the path *inside that org's own RLS scope*, which avoids needing
+   a privileged escape from row-level security.
+3. **§7's shared crate found its real justification here.** Batch 2 showed the
+   two existing services shared no code. The third service is what made a shared
+   JWKS verifier correct, and `cognia_tenant_auth::oidc` now owns it.
 | **4** | `devices.user_id` bookkeeping, then reroute the grant decision | `security_store.rs`, `device_grants.rs`, `lib/devices/grant-capabilities.ts` — two releases, never one |
 | **5** | `ExternalIdentity` absorbs IM principals; Guest lands | `lib/connectors/principal/*` — `bootstrap.ts` stops falling back to `accountId` |
 | **6** | `share-server` gains tenancy and identity; `ops-controller` gains RLS | `services/share-server/{src,worker}`, `crates/cognia-ops-controller/migrations/` |

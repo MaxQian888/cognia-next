@@ -273,7 +273,19 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 所以 OIDC 验签面在两个服务里各自留在原地，共享 crate 拥有的是它上面那一层：
 一个已验证的 token **意味着什么**。那也正是本 ADR 真正新增的一层——两个既有文件
 里都没有 `User`。
-| **3** | `crates/cognia-collab-server` 骨架；Issues 上协作面；`IssueActor.id` 变必填 | 新 crate、`types/issues/index.ts`、`lib/db/issues.ts` |
+| **3** | ✅ `crates/cognia-collab-server` + Issues 上协作面 | 服务端：RLS 隔离的 Postgres、两步鉴权链，以及 `POST /v1/orgs/{org}/grants`——唯一的入口。客户端：`types/issues/collab.ts`（actor 收窄）、`lib/collab/`（带 grant 缓存的客户端 + 拉取）、Dexie v195 `collabIssues`，以及看板的第五个联邦源。 |
+
+**Batch 3 的补充说明。** 三件本 ADR 没有预见的事：
+
+1. **`IssueActor.id` 是有条件必填，不是无条件。** §10 写的是"一旦 Issues 进入协作面"，
+   这个条件是承重的：没人登录过的机器根本没有 `usr_`，而决定 4 要求它离线可用。
+   所以本地类型保留 `id?`，收窄发生在**边界**——`resolveCollabActor` 选择拒绝，
+   而不是凭空造一个 id。ADR-0132 失去的是它的理由（"本地应用是单用户"），不是它的形状。
+2. **协作面需要一个签发 grant 的端点。** 只验不签的服务，没有任何东西能通过认证。
+   该端点在**目标 org 自己的 RLS 作用域内**校验路径里声明的 org，从而不需要为了
+   "这个 token 属于哪个 org" 去开一条绕过行级安全的特权通道。
+3. **§7 的共享 crate 在这里才找到真正的理由。** Batch 2 证明既有两个服务没有共享代码；
+   是第三个服务让共享 JWKS 验签变得正确，`cognia_tenant_auth::oidc` 现在拥有它。
 | **4** | `devices.user_id` 记账，然后改道 grant 判定 | `security_store.rs`、`device_grants.rs`、`lib/devices/grant-capabilities.ts`——两次发布，绝不合并 |
 | **5** | `ExternalIdentity` 收编 IM principal；Guest 落地 | `lib/connectors/principal/*`——`bootstrap.ts` 不再退化到 `accountId` |
 | **6** | `share-server` 补租户与身份；`ops-controller` 补 RLS | `services/share-server/{src,worker}`、`crates/cognia-ops-controller/migrations/` |
