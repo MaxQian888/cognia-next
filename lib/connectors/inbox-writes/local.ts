@@ -29,6 +29,7 @@ import { parseConversationKey } from "@/types/connectors/event"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import type { MessageSegment } from "@/types/connectors/segment"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { invalidatePersistSnapshot } from "@/lib/db/messages"
 
 export interface ManualReplyInput {
   adapterId: string
@@ -150,6 +151,7 @@ async function appendReplyMessage(input: ManualReplyInput, jobId: string): Promi
   // the same client-minted id (host and client converge on one row).
   await getDb().messages.put(row)
   markSessionDirty(input.sessionId)
+  invalidatePersistSnapshot(input.sessionId)
   publishSyncInvalidate("messages", input.conversationKey)
   return id
 }

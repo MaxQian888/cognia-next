@@ -100,6 +100,7 @@ import { handleUnresolvedPrincipal } from "./principal/unbound"
 import { bootstrapFeishuRegistry } from "./principal/bootstrap"
 import { recordConnectorMetric } from "./metrics"
 import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
+import { invalidatePersistSnapshot } from "@/lib/db/messages"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
@@ -1443,6 +1444,10 @@ export class ConnectorBus {
         parts: finalParts,
         metadata: editedMetadata,
       })
+      // See `invalidatePersistSnapshot`: an in-place edit does not change the
+      // session's id set, so the persist snapshot cannot detect it on its own
+      // and would keep reporting this row as unchanged.
+      invalidatePersistSnapshot(target.sessionId)
     }
     await appendAudit({
       adapterId: event.adapterId,
@@ -1486,6 +1491,7 @@ export class ConnectorBus {
         parts: [{ type: "text" as const, text: "[deleted]" }],
         metadata: deletedMetadata,
       })
+      invalidatePersistSnapshot(target.sessionId)
     }
     await appendAudit({
       adapterId: event.adapterId,

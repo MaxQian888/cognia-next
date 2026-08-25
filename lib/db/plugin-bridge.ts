@@ -21,6 +21,7 @@ import type { StoredMessage } from "@cognia/agent-config-types"
 import type { UIMessage } from "@/types"
 import { getDb } from "./schema"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { invalidatePersistSnapshot } from "./messages"
 
 /**
  * Proxy that lazy-resolves Dexie tables. Plugin code that hooks
@@ -150,6 +151,7 @@ export const messageRepository = {
     const row = pluginToStored(sessionId, message)
     await getDb().messages.put(row)
     markSessionDirty(sessionId)
+    invalidatePersistSnapshot(sessionId)
     void emitMessageEvent("added", { sessionId, messageId: message.id })
     return storedToPlugin(row)
   },
@@ -178,6 +180,7 @@ export const messageRepository = {
     }
 
     await dexie.messages.update(messageId, patch as Partial<StoredMessage>)
+    invalidatePersistSnapshot(existing.sessionId)
     void emitMessageEvent("updated", {
       sessionId: existing.sessionId,
       messageId,
@@ -189,6 +192,7 @@ export const messageRepository = {
     const existing = await getDb().messages.get(messageId)
     await getDb().messages.delete(messageId)
     if (existing) {
+      invalidatePersistSnapshot(existing.sessionId)
       void emitMessageEvent("deleted", {
         sessionId: existing.sessionId,
         messageId,

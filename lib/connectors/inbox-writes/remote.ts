@@ -30,6 +30,7 @@ import {
 import { markPendingOverrideMutation } from "./pending-overrides"
 import { INBOX_WRITE_COMMANDS } from "./route"
 import { markSessionDirty } from "@/lib/chat/search/indexer"
+import { invalidatePersistSnapshot } from "@/lib/db/messages"
 
 export interface RemoteWriteOptions {
   /** Human label rendered in the offline-queue UI. */
@@ -82,6 +83,7 @@ export async function sendManualReplyRemotely(
   }
   await getDb().messages.put(row)
   markSessionDirty(input.sessionId)
+  invalidatePersistSnapshot(input.sessionId)
   return { queueRow, messageId: input.clientMessageId }
 }
 

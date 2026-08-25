@@ -88,6 +88,7 @@ import { AgentRunEventProducer } from "@/lib/execution/sources/agent-turn"
 import { registerAgentRunController } from "@/lib/execution/control-handlers"
 import type { ConnectorLiveSteerCoordinator } from "./live-steer"
 import { sessionExecutionRootPath } from "@/lib/workspace/session-root"
+import { invalidatePersistSnapshot } from "@/lib/db/messages"
 import { getAllProjects } from "@/lib/db/projects"
 import { waitForExecutionRunPresentationFreeze } from "./run-presentation/runner"
 import { markConnectorInboundJobRecoveryRequired } from "@/lib/db/connector-inbound-jobs"
@@ -658,6 +659,10 @@ export async function insertInboundMessage(
     createdAt: now,
   }
   await getDb().messages.add(row)
+  // The persist snapshot in `lib/db/messages.ts` assumes it is the only
+  // writer for a session; an inbound platform message arriving mid-stream
+  // would otherwise leave it claiming rows are unchanged.
+  invalidatePersistSnapshot(sessionId)
   // Inbound platform traffic is chat history too: without this the global
   // search index never learns about it (ADR-0099 indexes only what the chat
   // paths mark dirty, and its backfill latches `complete`).
