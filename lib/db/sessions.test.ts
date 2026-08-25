@@ -104,6 +104,35 @@ describe("createSession — without default preset", () => {
     expect(session.systemPrompt).toBeUndefined()
   })
 
+  it("writes through every seeded column, not a hand-maintained subset", async () => {
+    // Regression. The signature said `Partial<ChatSession>` but the body
+    // persisted a hand-listed subset, so any column nobody had remembered to
+    // add to that list was silently discarded — every field below was one of
+    // the dropped ones. This test is the guard that the list is gone, not that
+    // it grew: adding a column to `ChatSession` must not require touching
+    // `createSession` again.
+    const seeded = {
+      squadId: "squad-1",
+      providerOverride: "openai",
+      accountId: "acct-1",
+      toolFilter: { mode: "allow" as const, tools: ["Read"] },
+      outputStyle: "concise",
+      customOutputStyle: "be terse",
+      executionPolicy: { maxTurns: 7 },
+      sandboxEnabled: true,
+      maxThinkingTokens: 4096,
+      folderId: "folder-1",
+      memoryUse: false,
+      memoryLearn: false,
+    }
+
+    const session = await createSession({ title: "Fully seeded", ...seeded })
+
+    expect(session).toMatchObject(seeded)
+    // Not just the returned object — the row Dexie actually holds.
+    await expect(getSession(session.id)).resolves.toMatchObject(seeded)
+  })
+
   it("rejects working-set writes that bypass the CAS mutation service", async () => {
     await expect(
       createSession({
@@ -232,6 +261,59 @@ describe("forkSessionFromParent", () => {
       preset: "focused",
       overrides: { actions: "hover" },
     })
+  })
+
+  it("inherits the parent's full run configuration", async () => {
+    // Regression. `createSession`'s whitelist dropped `providerOverride`, so
+    // forking a conversation pinned to a non-default provider silently reverted
+    // it to the app default — the fork then ran on a different model family
+    // than the conversation it claimed to continue. The rest were lost the same
+    // way. Field list mirrors `buildChildRow` in `lib/chat/branch-session.ts`.
+    const parent = await createSession({
+      title: "Parent",
+      sdkSessionId: "sdk-parent",
+      providerOverride: "openai",
+      accountId: "acct-7",
+      squadId: "squad-9",
+      activePresetId: "preset-3",
+      outputStyle: "concise",
+      customOutputStyle: "be terse",
+      sandboxEnabled: true,
+      maxThinkingTokens: 8192,
+      toolFilter: { mode: "deny", tools: ["Bash"] },
+      effort: "high",
+    })
+
+    const child = await forkSessionFromParent(parent.id)
+
+    expect(child).toMatchObject({
+      providerOverride: "openai",
+      accountId: "acct-7",
+      squadId: "squad-9",
+      activePresetId: "preset-3",
+      outputStyle: "concise",
+      customOutputStyle: "be terse",
+      sandboxEnabled: true,
+      maxThinkingTokens: 8192,
+      toolFilter: { mode: "deny", tools: ["Bash"] },
+      effort: "high",
+      forkedFromSdkSessionId: "sdk-parent",
+    })
+  })
+
+  it("files the fork in the parent's workspace, not the UI-active one", async () => {
+    // `listScopedSessions` reads through `[projectId+updatedAt]`, so a fork
+    // stamped with whichever workspace happens to be active shows up in the
+    // wrong conversation list — the same rule `buildChildRow` spells out.
+    const parent = await createSession({
+      title: "Parent",
+      projectId: "proj-elsewhere",
+      sdkSessionId: "sdk-parent",
+    })
+
+    const child = await forkSessionFromParent(parent.id)
+
+    expect(child.projectId).toBe("proj-elsewhere")
   })
 
   it("round-trips and resets a session override to inheritance", async () => {

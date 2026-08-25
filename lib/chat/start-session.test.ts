@@ -75,6 +75,34 @@ describe("startNewSession", () => {
     })
   })
 
+  it("seeds all three identity columns, executor included", async () => {
+    // `squadId` is the executor axis (ADR-0140) and was absent from the seed,
+    // so "start a conversation configured like that one" could name the persona
+    // and the conversation shape but never what it actually runs on.
+    const session = await startNewSession({
+      title: "Ship it",
+      characterId: "c_reviewer",
+      squadId: "sq_release",
+    })
+
+    expect(session).toMatchObject({ characterId: "c_reviewer", squadId: "sq_release" })
+    await expect(getSession(session.id)).resolves.toMatchObject({ squadId: "sq_release" })
+  })
+
+  it("files the conversation in an explicitly named workspace, over the active one", async () => {
+    const addSessionToProject = jest.fn()
+    jest.spyOn(useProjectStore, "getState").mockReturnValue({
+      ...useProjectStore.getState(),
+      activeProjectId: "p_active",
+      addSessionToProject,
+    } as ReturnType<typeof useProjectStore.getState>)
+
+    const session = await startNewSession({ title: "Elsewhere", projectId: "p_named" })
+
+    expect(session.projectId).toBe("p_named")
+    expect(addSessionToProject).toHaveBeenCalledWith("p_named", session.id)
+  })
+
   it("links the session to the active workspace", async () => {
     const addSessionToProject = jest.fn()
     jest.spyOn(useProjectStore, "getState").mockReturnValue({

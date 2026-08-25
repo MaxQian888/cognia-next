@@ -15,7 +15,17 @@ import {
   materializeManagedWorkspace,
 } from "@/lib/task-workspace/managed-workspace"
 
-/** The subset of a session a caller may seed when starting a conversation. */
+/**
+ * The subset of a session a caller may seed when starting a conversation.
+ *
+ * `characterId` / `teamId` / `squadId` are the three identity columns and they
+ * travel together: a caller that can name the persona must be able to name the
+ * executor too, or "start this conversation the way that one runs" is only ever
+ * two-thirds true. `projectId` is here for the same reason — an entry point
+ * that already knows which workspace the conversation belongs to (a template, a
+ * scheduled run, an issue) should not have to switch the UI-active workspace to
+ * say so.
+ */
 type SessionSeed = Partial<
   Pick<
     ChatSession,
@@ -26,6 +36,8 @@ type SessionSeed = Partial<
     | "kind"
     | "characterId"
     | "teamId"
+    | "squadId"
+    | "projectId"
     | "executionContext"
     | "sdkSessionId"
   >
@@ -62,7 +74,9 @@ export async function startNewSession(partial?: NewSessionInput): Promise<ChatSe
   // with the one the user just left. The store is the truth at the moment the
   // user clicked "new chat".
   const store = useProjectStore.getState()
-  const seededProjectId = store.activeProjectId ?? undefined
+  // An explicit `projectId` wins: the caller named the workspace, and a caller
+  // that names one knows something the UI pointer does not.
+  const seededProjectId = sessionSeed.projectId ?? store.activeProjectId ?? undefined
   let session = await createSession(
     seededProjectId ? { ...sessionSeed, projectId: seededProjectId } : sessionSeed
   )

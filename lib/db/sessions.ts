@@ -115,6 +115,10 @@ export async function getSession(id: string): Promise<ChatSession | undefined> {
  * action via the chat-header config sheet; rolling them into session
  * creation would couple this helper to the agent-mode store and several
  * stores at once with no UI surface to undo it.
+ *
+ * Every other field of `partial` is written through verbatim. This used to be
+ * a hand-maintained whitelist that dropped anything absent from it — see the
+ * note on the row literal below for what that cost.
  */
 export async function createSession(
   partial?: Partial<Omit<ChatSession, "id" | "createdAt" | "updatedAt" | "workingSet">>
@@ -183,29 +187,30 @@ export async function createSession(
   }
 
   const session: ChatSession = {
+    // Everything the caller seeded. The signature promises
+    // `Partial<Omit<ChatSession, …>>`, but it used to be honoured by a
+    // hand-maintained whitelist that silently dropped every column nobody had
+    // remembered to add to it — `squadId`, `providerOverride`, `accountId`,
+    // `toolFilter`, `outputStyle`, `executionPolicy`, `sandboxTier` and the
+    // rest. That is what made `forkSessionFromParent` reset a conversation
+    // bound to a non-default provider back to the app default: it passes
+    // `providerOverride`, and the row simply never received it.
+    //
+    // Spreading is what stops the signature from lying again — a column added
+    // to `ChatSession` is seedable the day it exists, with no second list to
+    // keep in step. `buildChildRow` in `lib/chat/branch-session.ts` remains the
+    // reference for which columns constitute a session's configuration.
+    ...(partial ?? {}),
+    // Owned by this function, so they always win over the spread above.
     id: newId(),
     projectId,
-    executionContext: partial?.executionContext,
     title: partial?.title ?? "New chat",
     kind: partial?.kind ?? "direct",
-    characterId: partial?.characterId,
-    teamId: partial?.teamId,
-    disabledSkillIds: partial?.disabledSkillIds,
-    trialSkillId: partial?.trialSkillId,
-    messageDisplayOverride: partial?.messageDisplayOverride,
-    pinned: partial?.pinned,
     model: partial?.model ?? autoApplied.model,
     systemPrompt: partial?.systemPrompt ?? autoApplied.systemPrompt,
     workingDir: partial?.workingDir ?? autoApplied.workingDir,
     permissionMode: partial?.permissionMode ?? autoApplied.permissionMode,
     activePresetId: partial?.activePresetId ?? autoAppliedPresetId,
-    bareMode: partial?.bareMode,
-    debugMode: partial?.debugMode,
-    briefMode: partial?.briefMode,
-    sdkSessionId: partial?.sdkSessionId,
-    forkedFromSdkSessionId: partial?.forkedFromSdkSessionId,
-    scratchpad: partial?.scratchpad,
-    integrationBinding: partial?.integrationBinding,
     // Both halves always move together — see `thinkingLevelPatch`, the only
     // supported writer of the pair.
     effort: partial?.effort ?? defaultTier?.effort,
@@ -535,6 +540,11 @@ export async function setSessionOrder(ids: readonly string[], sectionKey: string
  * tell the SDK to branch from that id (see `lib/claude/build-options.ts` and
  * `sidecar/dispatch/anthropic.mjs`).
  *
+ * The inherited field list mirrors `buildChildRow` in
+ * `lib/chat/branch-session.ts`, which is the reference for what constitutes a
+ * session's configuration — a fork that runs on a different provider, account,
+ * executor or tool filter than its parent is not a fork of that conversation.
+ *
  * Throws when the parent has no `sdkSessionId` yet (the SDK has nothing to
  * fork from until at least one turn has completed).
  */
@@ -546,19 +556,41 @@ export async function forkSessionFromParent(parentId: string): Promise<ChatSessi
   }
   return createSession({
     title: `${parent.title} (fork)`,
+    // Load-bearing, and it was missing: `listScopedSessions` reads through the
+    // `[projectId+updatedAt]` index, so a fork stamped with the UI-active
+    // workspace instead of the parent's is filed under the wrong conversation
+    // list. Same rule as `buildChildRow` — lineage follows the parent, not the
+    // pointer.
+    projectId: parent.projectId,
     kind: parent.kind,
     characterId: parent.characterId,
     teamId: parent.teamId,
+    // A fork continues the same conversation, so it continues to run on the
+    // same executor — the identity trio moves together (see `buildChildRow`).
+    squadId: parent.squadId,
     disabledSkillIds: parent.disabledSkillIds,
     model: parent.model,
     providerOverride: parent.providerOverride,
+    accountId: parent.accountId,
     systemPrompt: parent.systemPrompt,
+    activePresetId: parent.activePresetId,
     workingDir: parent.workingDir,
     permissionMode: parent.permissionMode,
     messageDisplayOverride: parent.messageDisplayOverride,
     bareMode: parent.bareMode,
     debugMode: parent.debugMode,
     briefMode: parent.briefMode,
+    outputStyle: parent.outputStyle,
+    customOutputStyle: parent.customOutputStyle,
+    sandboxEnabled: parent.sandboxEnabled,
+    computerUseTarget: parent.computerUseTarget,
+    maxThinkingTokens: parent.maxThinkingTokens,
+    toolFilter: parent.toolFilter,
+    // `createSession` only stamps the app-wide default tier when BOTH halves
+    // are absent, and its own note says branch/fork/import carry their
+    // source's tier. Fork never did.
+    effort: parent.effort,
+    thinkingLevel: parent.thinkingLevel,
     forkedFromSdkSessionId: parent.sdkSessionId,
   })
 }
