@@ -326,6 +326,73 @@ export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
   },
 }
 
+// ── Stacked branches (crates/cognia-git/src/stack.rs) ──────────────────────
+
+/** What this machine's git can do, probed rather than assumed from a version. */
+export interface GitStackCapabilities {
+  /** `git --version`, verbatim. */
+  version: string
+  /** `git replay` exists — restacking can leave every working tree alone. */
+  replay: boolean
+  /**
+   * `git replay` takes `--ref-action`, which means its default is to write refs
+   * itself. Surfaced because the difference is not cosmetic: under that default
+   * `--contained` moves every branch inside the replayed range.
+   */
+  replayRefAction: boolean
+  /** `push --force-if-includes` exists — a lease a background fetch cannot satisfy. */
+  forceIfIncludes: boolean
+}
+
+/** One layer of a stack, as git reports it rather than as anyone recorded it. */
+export interface GitStackLayerState {
+  branch: string
+  /** The recorded parent, or null for the bottom layer. */
+  parent: string | null
+  /** Resolved tip, or null when the branch does not exist. */
+  head: string | null
+  /**
+   * Whether the parent is actually an ancestor of this branch. False means the
+   * layer is behind: publishing it produces a pull request whose diff includes
+   * its parent's work.
+   */
+  containsParent: boolean
+  /**
+   * Worktree this branch is checked out in, when it is one. A restack moves the
+   * ref without moving files, so such a layer is refused rather than left
+   * disagreeing with its own HEAD.
+   */
+  checkedOutIn: string | null
+}
+
+export type GitRestackMethod = "replay" | "rebase"
+
+export interface GitStackRefUpdate {
+  branch: string
+  from: string
+  to: string
+  /** Where the previous tip was pinned, so the move can be undone. */
+  historyRef: string
+}
+
+export interface GitStackConflict {
+  branch: string
+  /** Scratch worktree the rebase stopped in — the only place to resolve it. */
+  worktree: string
+}
+
+export interface GitRestackOutcome {
+  method: GitRestackMethod
+  updates: GitStackRefUpdate[]
+  conflict: GitStackConflict | null
+}
+
+export interface GitStackPushOutcome {
+  pushed: string[]
+  /** False when this git could only offer the weaker `--force-with-lease`. */
+  forceIfIncludes: boolean
+}
+
 /** Cache key for a working-tree / staged file diff. */
 export function fileDiffKey(path: string, staged: boolean): string {
   return `${staged ? "s" : "w"}:${path}`

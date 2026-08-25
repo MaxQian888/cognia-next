@@ -39,6 +39,10 @@ import {
   type GitRemote,
   type GitRepoState,
   type GitResetMode,
+  type GitRestackOutcome,
+  type GitStackCapabilities,
+  type GitStackLayerState,
+  type GitStackPushOutcome,
   type GitStashEntry,
   type GitStatus,
   type GitTag,
@@ -849,6 +853,87 @@ export async function gitInteractiveRebase(
 ): Promise<void> {
   if (!hasGitBridge()) return
   await transport.call("git_interactive_rebase", { repoPath, base, entries })
+}
+
+// ── Stacked branches ───────────────────────────────────────────────────────
+//
+// These diverge from the rest of this file on purpose. Everywhere else a
+// missing bridge means "return the empty answer" — a browser with no git shows
+// an empty panel, which is honest. A stack operation cannot do that: a restack
+// that quietly returns while the caller reports success to a person is how a
+// stack ends up published from branches nobody moved. Reads stay inert; writes
+// throw.
+
+function requireGitBridge(operation: string): void {
+  if (!hasGitBridge()) {
+    throw new Error(`${operation} needs a Git bridge — this client has none.`)
+  }
+}
+
+export async function gitStackCapabilities(repoPath: string): Promise<GitStackCapabilities | null> {
+  if (!hasGitBridge()) return null
+  return transport.call<GitStackCapabilities>("git_stack_capabilities", { repoPath })
+}
+
+/** Every recorded parent pointer in the repository, as `[child, parent]`. */
+export async function gitStackParents(repoPath: string): Promise<Array<[string, string]>> {
+  if (!hasGitBridge()) return []
+  return transport.call<Array<[string, string]>>("git_stack_parents", { repoPath })
+}
+
+/** Record (or, with null, clear) a branch's parent. */
+export async function gitStackSetParent(
+  repoPath: string,
+  branch: string,
+  parent: string | null
+): Promise<void> {
+  requireGitBridge("Recording a stack parent")
+  await transport.call("git_stack_set_parent", { repoPath, branch, parent })
+}
+
+export async function gitStackValidate(
+  repoPath: string,
+  branches: string[]
+): Promise<GitStackLayerState[]> {
+  if (!hasGitBridge()) return []
+  return transport.call<GitStackLayerState[]>("git_stack_validate", { repoPath, branches })
+}
+
+export async function gitStackRestack(
+  repoPath: string,
+  onto: string,
+  branches: string[]
+): Promise<GitRestackOutcome> {
+  requireGitBridge("Restacking")
+  return transport.call<GitRestackOutcome>("git_stack_restack", { repoPath, onto, branches })
+}
+
+/** Previously recorded tips for a branch, newest first, as `[ref, oid]`. */
+export async function gitStackHistory(
+  repoPath: string,
+  branch: string
+): Promise<Array<[string, string]>> {
+  if (!hasGitBridge()) return []
+  return transport.call<Array<[string, string]>>("git_stack_history", { repoPath, branch })
+}
+
+/** Undo one branch's move, using a tip a restack pinned. */
+export async function gitStackRevert(
+  repoPath: string,
+  branch: string,
+  historyRef: string
+): Promise<string> {
+  requireGitBridge("Undoing a restack")
+  return transport.call<string>("git_stack_revert", { repoPath, branch, historyRef })
+}
+
+export async function gitStackPush(
+  repoPath: string,
+  remote: string,
+  branches: string[]
+): Promise<GitStackPushOutcome> {
+  requireGitBridge("Pushing a stack")
+  return transport.call<GitStackPushOutcome>("git_stack_push", { repoPath, remote, branches })
 }
 
 // The fs watcher lives in Tauri managed state and is NOT a companion RPC —

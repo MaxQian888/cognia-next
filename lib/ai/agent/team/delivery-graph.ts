@@ -4,6 +4,7 @@ import {
   putAgentTeamDeliveryNodes,
 } from "@/lib/db/agent-team-runtime"
 import { getDb } from "@/lib/db/schema"
+import { topologicalOrder } from "@/lib/stack/topology"
 import type {
   AgentTeamDeliveryGraph,
   AgentTeamDeliveryNode,
@@ -52,26 +53,24 @@ export interface DeliveryGraphServiceOptions {
   now?: () => number
 }
 
+/**
+ * Delivery order, from the shared implementation in `lib/stack/topology`.
+ *
+ * The ordering rule — dependencies first, ties broken by `order` then by
+ * repository — is not specific to Agent Team; a stack of pull requests needs
+ * exactly the same one. Identity is preserved through the id lookup because
+ * `publish` mutates the node objects it is handed.
+ */
 function topological(nodes: AgentTeamDeliveryNode[]): AgentTeamDeliveryNode[] {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  for (const node of nodes) {
-    for (const dependency of node.dependsOn) {
-      if (!byId.has(dependency)) throw new Error(`Unknown delivery dependency: ${dependency}`)
-    }
-  }
-  const complete = new Set<string>()
-  const output: AgentTeamDeliveryNode[] = []
-  while (output.length < nodes.length) {
-    const ready = nodes
-      .filter((node) => !complete.has(node.id) && node.dependsOn.every((id) => complete.has(id)))
-      .sort((a, b) => a.order - b.order || a.repositoryId.localeCompare(b.repositoryId))
-    if (ready.length === 0) throw new Error("Delivery graph contains a dependency cycle")
-    for (const node of ready) {
-      complete.add(node.id)
-      output.push(node)
-    }
-  }
-  return output
+  return topologicalOrder(
+    nodes.map((node) => ({
+      id: node.id,
+      dependsOn: node.dependsOn,
+      order: node.order,
+      tieBreaker: node.repositoryId,
+    }))
+  ).map((entry) => byId.get(entry.id) as AgentTeamDeliveryNode)
 }
 
 export function createDeliveryGraphService(options: DeliveryGraphServiceOptions) {
