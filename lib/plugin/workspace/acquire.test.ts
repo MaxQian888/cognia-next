@@ -1,6 +1,7 @@
 import {
   WorkspaceAcquireError,
   acquireWorkspace,
+  cacheIsReusable,
   isInsideOpenRoot,
   releaseWorkspace,
   type AcquireDeps,
@@ -38,6 +39,92 @@ describe("isInsideOpenRoot", () => {
 
   it("is false when nothing is open", () => {
     expect(isInsideOpenRoot("/home/u/project", [])).toBe(false)
+  })
+})
+
+describe("cacheIsReusable", () => {
+  const origin = [{ name: "origin", url: "https://github.com/o/r.git" }]
+
+  it("is false for an empty cache directory", () => {
+    expect(cacheIsReusable(null, origin, "https://github.com/o/r.git")).toBe(false)
+  })
+
+  it("is true when a populated cache points at the same remote", () => {
+    expect(cacheIsReusable("abc123", origin, "https://github.com/o/r.git")).toBe(true)
+  })
+
+  it("is false when the cache holds a different repository", () => {
+    // Cloning over it would fail on a non-empty directory, which is why the
+    // caller clears it instead.
+    expect(cacheIsReusable("abc123", origin, "https://github.com/other/repo.git")).toBe(false)
+  })
+})
+
+describe("acquireWorkspace cache reuse", () => {
+  function reusableDeps(overrides: Partial<AcquireDeps> = {}) {
+    const calls = { clone: 0, fetch: 0, checkout: [] as string[], removed: 0 }
+    const base = deps({
+      clone: (async (_url: string, destination: string) => {
+        calls.clone += 1
+        return destination
+      }) as AcquireDeps["clone"],
+      removeRepoCache: async () => {
+        calls.removed += 1
+        return true
+      },
+      headOf: async () => "cached-head",
+      remotesOf: async () => [{ name: "origin", url: "https://github.com/o/r.git" }],
+      fetchAll: async () => {
+        calls.fetch += 1
+      },
+      checkoutRef: async (_root, ref) => {
+        calls.checkout.push(ref)
+      },
+      ...overrides,
+    })
+    return { deps: base, calls }
+  }
+
+  it("refreshes an existing cache instead of cloning again", async () => {
+    const { deps: d, calls } = reusableDeps()
+    const handle = await acquireWorkspace({ kind: "git-url", url: "https://github.com/o/r.git" }, d)
+    expect(handle.origin).toBe("clone")
+    expect(calls.clone).toBe(0)
+    expect(calls.fetch).toBe(1)
+  })
+
+  it("moves a reused cache onto the requested ref", async () => {
+    const { deps: d, calls } = reusableDeps()
+    await acquireWorkspace({ kind: "git-url", url: "https://github.com/o/r.git", ref: "v2" }, d)
+    expect(calls.checkout).toEqual(["v2"])
+  })
+
+  it("clears and re-clones when the cache holds a different repository", async () => {
+    const { deps: d, calls } = reusableDeps({
+      remotesOf: async () => [{ name: "origin", url: "https://github.com/someone/else.git" }],
+    })
+    await acquireWorkspace({ kind: "git-url", url: "https://github.com/o/r.git" }, d)
+    expect(calls.removed).toBe(1)
+    expect(calls.clone).toBe(1)
+    expect(calls.fetch).toBe(0)
+  })
+
+  it("falls back to cloning when refreshing throws", async () => {
+    // A cache is an optimisation; a plugin asking for a workspace still gets one.
+    const { deps: d, calls } = reusableDeps({
+      fetchAll: async () => {
+        throw new Error("network down")
+      },
+    })
+    const handle = await acquireWorkspace({ kind: "git-url", url: "https://github.com/o/r.git" }, d)
+    expect(handle.origin).toBe("clone")
+    expect(calls.clone).toBe(1)
+  })
+
+  it("clones when the runtime supplies no refresh primitives", async () => {
+    const { deps: d, calls } = reusableDeps({ fetchAll: undefined, remotesOf: undefined })
+    await acquireWorkspace({ kind: "git-url", url: "https://github.com/o/r.git" }, d)
+    expect(calls.clone).toBe(1)
   })
 })
 

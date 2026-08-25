@@ -27,7 +27,15 @@ import {
   type WorkspaceWalkResult,
 } from "@/lib/files/workspace-fs"
 import { isDescendant } from "@/lib/claude/instructions/paths"
-import { gitCloneGuarded, gitDiffRefsFiles, gitLog, gitReadBlobAtRef } from "@/lib/git/commands"
+import {
+  gitCheckoutBranch,
+  gitCloneGuarded,
+  gitDiffRefsFiles,
+  gitFetch,
+  gitLog,
+  gitReadBlobAtRef,
+  gitRemotes,
+} from "@/lib/git/commands"
 import { transport } from "@/lib/tauri"
 
 import { parseRepoSpec, repoCacheSegments, type RepoSpec } from "./repo-spec"
@@ -80,6 +88,32 @@ export interface AcquireDeps {
   clone: typeof gitCloneGuarded
   /** Newest commit of a checkout. `null` when it is not a repository. */
   headOf?: (root: string) => Promise<string | null>
+  /** Remotes configured in a checkout. Used to tell a reusable cache from a stale one. */
+  remotesOf?: (root: string) => Promise<readonly { name: string; url: string }[]>
+  /** Refresh a cached checkout from its remote. */
+  fetchAll?: (root: string) => Promise<void>
+  /** Move a cached checkout onto `ref`. */
+  checkoutRef?: (root: string, ref: string) => Promise<void>
+}
+
+/**
+ * Whether the checkout already sitting in the cache directory is the one being
+ * asked for.
+ *
+ * The cache path is derived from host/owner/repo, so a directory can only be
+ * occupied by a different repository if a spec changed underneath it — but when
+ * that happens the old code cloned straight into the non-empty directory and
+ * git refused, leaving the plugin permanently unable to acquire the workspace.
+ * Reuse therefore requires a positive match on the remote URL, and anything
+ * else is cleared rather than cloned over.
+ */
+export function cacheIsReusable(
+  cachedHead: string | null,
+  remotes: readonly { name: string; url: string }[],
+  url: string
+): boolean {
+  if (!cachedHead) return false
+  return remotes.some((remote) => remote.url === url)
 }
 
 /**
@@ -151,12 +185,13 @@ export async function acquireWorkspace(
   }
 
   const destination = await deps.repoCacheDir(repoCacheSegments(resolved.spec))
-  const root = await deps.clone(resolved.spec.url, destination, {
-    ...(resolved.allowedHosts?.length ? { allowedHosts: resolved.allowedHosts } : {}),
-  })
-  if (!root) {
-    throw new WorkspaceAcquireError("cloning is unavailable in this runtime (no git bridge)")
-  }
+  // The cache directory was only ever a clone *destination*: every acquisition
+  // re-cloned the repository from scratch, so a plugin that scans a repo paid a
+  // full network clone every time it ran. Reuse it when it already holds this
+  // repository, refreshing rather than refetching everything.
+  const root =
+    (await reuseCachedClone(destination, resolved, deps)) ??
+    (await cloneFresh(destination, resolved, deps))
   return {
     root,
     origin: "clone",
@@ -179,6 +214,55 @@ export async function acquireWorkspace(
  * bridge, is a workspace we can still walk and read. Losing the ref costs a
  * caller the ability to ask "what changed since", not the checkout.
  */
+/**
+ * Reuse the cached checkout, or `null` to say "clone it".
+ *
+ * Never throws: any failure to refresh degrades to a fresh clone, because a
+ * cache is an optimisation and a plugin asking for a workspace must still get
+ * one. A cache holding a *different* repository is removed rather than reused,
+ * so the clone that follows has an empty directory to land in.
+ */
+async function reuseCachedClone(
+  destination: string,
+  resolved: Extract<ResolvedSpec, { kind: "remote" }>,
+  deps: AcquireDeps
+): Promise<string | null> {
+  const { remotesOf, fetchAll } = deps
+  if (!remotesOf || !fetchAll) return null
+  try {
+    const headOf = deps.headOf ?? defaultHeadOf
+    const cachedHead = await headOf(destination).catch(() => null)
+    if (!cachedHead) return null
+    const remotes = await remotesOf(destination)
+    if (!cacheIsReusable(cachedHead, remotes, resolved.spec.url)) {
+      // Occupied by something else; clear it so the clone below can proceed.
+      await deps.removeRepoCache(repoCacheSegments(resolved.spec))
+      return null
+    }
+    await fetchAll(destination)
+    if (resolved.spec.ref && deps.checkoutRef) {
+      await deps.checkoutRef(destination, resolved.spec.ref)
+    }
+    return destination
+  } catch {
+    return null
+  }
+}
+
+async function cloneFresh(
+  destination: string,
+  resolved: Extract<ResolvedSpec, { kind: "remote" }>,
+  deps: AcquireDeps
+): Promise<string> {
+  const root = await deps.clone(resolved.spec.url, destination, {
+    ...(resolved.allowedHosts?.length ? { allowedHosts: resolved.allowedHosts } : {}),
+  })
+  if (!root) {
+    throw new WorkspaceAcquireError("cloning is unavailable in this runtime (no git bridge)")
+  }
+  return root
+}
+
 async function headRefFields(root: string, deps: AcquireDeps): Promise<{ headRef?: string }> {
   const headOf = deps.headOf ?? defaultHeadOf
   try {
@@ -248,5 +332,8 @@ export function defaultAcquireDeps(
       transport.call<boolean>("plugin_workspace_repo_remove", { pluginId, segments }),
     clone: gitCloneGuarded,
     headOf: defaultHeadOf,
+    remotesOf: async (root) => (await gitRemotes(root)).map(({ name, url }) => ({ name, url })),
+    fetchAll: (root) => gitFetch(root),
+    checkoutRef: (root, ref) => gitCheckoutBranch(root, ref),
   }
 }
