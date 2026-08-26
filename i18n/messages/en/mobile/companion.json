@@ -376,5 +376,21 @@
     "turnTestButton": "Test provider",
     "turnTestFailed": "TURN provider test failed ({reason}).",
     "turnTestSuccess": "TURN provider OK — {count} ICE servers, valid until {expiresAt}."
+  },
+  "collaboration": {
+    "title": "Collaboration server",
+    "help": "Where this profile's shared issues, workspaces and membership come from. Sign in above first — the server identifies you by that session, and the organisation comes from it too.",
+    "urlLabel": "Server URL",
+    "urlPlaceholder": "https://collab.example.com",
+    "save": "Save",
+    "clear": "Disconnect",
+    "test": "Refresh now",
+    "refreshed": "Refreshed: {issues} shared issues, {workspaces} workspaces.",
+    "failed": "Could not refresh: {reason}",
+    "skipped": {
+      "not-configured": "No collaboration server is set for this profile.",
+      "not-signed-in": "Sign in above before refreshing — the server identifies you by that session.",
+      "no-org": "You are signed in, but this account belongs to no organisation, so there is nothing shared to pull."
+    }
   }
 }

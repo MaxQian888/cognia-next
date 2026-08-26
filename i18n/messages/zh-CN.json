@@ -15184,6 +15184,22 @@
         },
         "title": "连接路径"
       },
+      "collaboration": {
+        "clear": "断开",
+        "failed": "刷新失败：{reason}",
+        "help": "本配置文件的共享事项、工作区与成员关系从这里来。请先在上方登录——服务器通过该会话识别你的身份，组织也由它决定。",
+        "refreshed": "已刷新：{issues} 条共享事项、{workspaces} 个工作区。",
+        "save": "保存",
+        "skipped": {
+          "no-org": "已登录，但这个账户不属于任何组织，因此没有可拉取的共享内容。",
+          "not-configured": "该配置文件尚未设置协作服务器。",
+          "not-signed-in": "刷新前请先在上方登录——服务器通过该会话识别你的身份。"
+        },
+        "test": "立即刷新",
+        "title": "协作服务器",
+        "urlLabel": "服务器地址",
+        "urlPlaceholder": "https://collab.example.com"
+      },
       "groups": {
         "advanced": "高级与诊断",
         "cloud": "云登录",

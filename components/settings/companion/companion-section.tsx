@@ -42,6 +42,7 @@ import { DeviceConsoleLink } from "@/components/devices/device-console-link"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
 import { LogtoLoginCard } from "./logto-login-card"
+import { CollaborationCard } from "./collaboration-card"
 import { RemoteBrowserCard } from "./remote-browser-card"
 
 // ---------------------------------------------------------------------------
@@ -245,6 +246,10 @@ export function CompanionSection() {
       <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
         <RemoteBrowserCard />
         <LogtoLoginCard />
+        {/* Below sign-in on purpose: the plane needs the person before it
+            needs the address, and a card that asks for a URL first invites
+            configuring a server nothing can authenticate to. */}
+        <CollaborationCard />
       </CompanionGroup>
       <CompanionGroup id="push" title={t("push")} defaultOpen>
         <PushCredentialsCard />
