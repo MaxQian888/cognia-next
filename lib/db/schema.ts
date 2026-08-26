@@ -9,7 +9,7 @@
 // Row types co-locate with their CRUD module (or a `*-types.ts` file) and are
 // re-exported below so `@/lib/db/schema` stays the stable import surface.
 
-import Dexie, { type Table, type Version } from "dexie"
+import Dexie, { type Table } from "dexie"
 import type {
   AppSettings,
   Character,
@@ -380,16 +380,20 @@ function accountIdFromDatabaseName(databaseName: string): string | null {
 /**
  * Test-only collapsed schema declaration.
  *
- * Constructing CogniaDB declares 100+ historical `version(N).stores()` blocks,
- * and Dexie eagerly parses every index spec at declaration time. CPU profiling
- * showed that parse dominating unit-suite time: fake-indexeddb suites pay it on
- * every `__resetDbForTesting()` + `getDb()` cycle (~1s+ per construction).
+ * Constructing CogniaDB declares 180+ historical `version(N).stores()` blocks,
+ * and Dexie eagerly parses every index spec at declaration time — quadratically,
+ * because `Version.stores()` re-walks and re-parses every version declared so
+ * far on each call. CPU profiling showed that parse dominating unit-suite time:
+ * fake-indexeddb suites pay it on every `__resetDbForTesting()` + `getDb()`
+ * cycle (~4.7s for the first construction in a worker).
  *
- * Under Jest the first construction in a worker process runs the full chain
- * once, merges the per-version `stores()` deltas into the latest cumulative
- * spec, and caches it on `process` (which — unlike module state — survives
- * Jest's per-suite module registries). Every later construction in that worker
- * declares a single version with the merged spec.
+ * Under Jest the first construction in a worker process runs the inline chain
+ * against a lightweight collector (`collectCollapsedSchema`) that merges the
+ * per-version `stores()` deltas into the latest cumulative spec *without*
+ * invoking Dexie's parser at all, then caches the merged spec on `process`
+ * (which — unlike module state — survives Jest's per-suite module registries).
+ * That construction and every later one in the worker declare a single real
+ * version with the merged spec.
  *
  * This is behavior-preserving for tests because Dexie never runs upgrade hooks
  * when creating a FRESH database — it builds the latest schema directly. The
@@ -398,15 +402,15 @@ function accountIdFromDatabaseName(databaseName: string): string | null {
  * those opt out by setting `globalThis.__COGNIA_DB_FULL_SCHEMA__ = true`
  * around the individual migration test (before constructing CogniaDB).
  *
+ * `lib/db/schema-collapsed.test.ts` is the tripwire: it asserts the collapsed
+ * schema is table-for-table and index-for-index identical to the full chain.
+ *
  * Production never enters this path: it is gated on JEST_WORKER_ID.
  */
 interface CollapsedSchemaCache {
   version: number
-  stores: Record<string, string>
-}
-
-type VersionInternals = Version & {
-  _cfg: { version: number; storesSource?: Record<string, string> }
+  /** A `null` entry means "drop this table" — see `collectCollapsedSchema`. */
+  stores: Record<string, string | null>
 }
 
 function isSchemaCollapseEnabled(): boolean {
@@ -423,15 +427,49 @@ function collapsedSchemaCacheSlot(): { __cogniaCollapsedSchema?: CollapsedSchema
   return process as unknown as { __cogniaCollapsedSchema?: CollapsedSchemaCache }
 }
 
-/** Merge the declared per-version stores() deltas into the latest cumulative spec. */
-function buildCollapsedSchema(db: Dexie): CollapsedSchemaCache | undefined {
-  const versions = (db as unknown as { _versions?: VersionInternals[] })._versions
-  if (!Array.isArray(versions) || versions.length === 0) return undefined
-  const stores: Record<string, string> = {}
+/**
+ * Run `declare()` with `db.version` swapped for a no-parse collector, and
+ * return the merged cumulative spec it declared.
+ *
+ * Declaring the chain for real is quadratic: `Dexie.prototype.version` ends
+ * with `versionInstance.stores({})`, and `Version.prototype.stores` then
+ * re-walks EVERY version declared so far and re-parses each one's full index
+ * spec. The collapsed cache only ever needed each version's RAW `storesSource`
+ * object — never Dexie's parsed output — so the collector reproduces exactly
+ * the merge Dexie performs (`extend`, i.e. `Object.assign`, in declaration
+ * order) and skips the parsing entirely.
+ *
+ * A `null` spec ("drop this table") is carried through verbatim, matching
+ * Dexie: `_parseStoresSpec` skips null entries, so the single real `stores()`
+ * call omits that table exactly as the full chain does (e.g.
+ * `pluginScheduledJobs`, dropped in v113).
+ *
+ * `.upgrade()` hooks are dropped: Dexie never runs them when it creates a
+ * FRESH database, which is all a collapsed-path test ever gets. Tests that
+ * seed an older database opt out via `__COGNIA_DB_FULL_SCHEMA__`.
+ */
+function collectCollapsedSchema(db: Dexie, declare: () => void): CollapsedSchemaCache | undefined {
+  const stores: Record<string, string | null> = {}
   let latest = 0
-  for (const v of [...versions].sort((a, b) => a._cfg.version - b._cfg.version)) {
-    latest = Math.max(latest, v._cfg.version)
-    if (v._cfg.storesSource) Object.assign(stores, v._cfg.storesSource)
+  const collector = {
+    stores(spec: Record<string, string | null>) {
+      Object.assign(stores, spec)
+      return collector
+    },
+    upgrade() {
+      return collector
+    },
+  }
+  const target = db as unknown as { version?: (versionNumber: number) => unknown }
+  target.version = (versionNumber: number) => {
+    latest = Math.max(latest, versionNumber)
+    return collector
+  }
+  try {
+    declare()
+  } finally {
+    // Own-property shadow only; deleting it restores Dexie's prototype method.
+    delete target.version
   }
   if (latest === 0) return undefined
   return { version: latest, stores }
@@ -949,13 +987,40 @@ export class CogniaDB extends Dexie {
     // the full version chain — declare only the latest cumulative schema.
     // See the "Test-only collapsed schema" note above the class.
     if (isSchemaCollapseEnabled()) {
-      const collapsed = collapsedSchemaCacheSlot().__cogniaCollapsedSchema
+      const cached = collapsedSchemaCacheSlot().__cogniaCollapsedSchema
+      if (cached) {
+        this.version(cached.version).stores(cached.stores)
+        return
+      }
+      // First construction in this worker: walk the inline chain against the
+      // no-parse collector, then declare the merged spec as one real version.
+      const collapsed = collectCollapsedSchema(this, () => this.declareVersionChain(name))
       if (collapsed) {
+        collapsedSchemaCacheSlot().__cogniaCollapsedSchema = collapsed
         this.version(collapsed.version).stores(collapsed.stores)
         return
       }
     }
 
+    this.declareVersionChain(name)
+  }
+
+  /**
+   * The historical version chain. Called directly in production, and under the
+   * `collectCollapsedSchema` collector on a test worker's first construction.
+   *
+   * HARD RULE (see the file header): never reorder, edit, or delete a block
+   * below — doing so corrupts live user databases. Only ever append a new,
+   * higher version.
+   *
+   * `name` is the database name, threaded through from the constructor because
+   * v148's upgrade hook derives its account scope from it. An upgrade hook may
+   * only close over `name` and `this`: any other constructor-scope identifier
+   * resolves to a same-named DOM/Node global here instead of failing to
+   * compile, which is silent data corruption (`name` itself did exactly that
+   * until it was made a parameter).
+   */
+  private declareVersionChain(name: string) {
     this.version(1).stores({
       sessions: "id, updatedAt, createdAt",
       messages: "id, sessionId, [sessionId+createdAt]",
@@ -4668,12 +4733,6 @@ export class CogniaDB extends Dexie {
       collabPlans: "&id, orgId, workspaceId, status, updatedAt, fetchedAt",
       collabRuns: "&id, orgId, workspaceId, issueId, planId, status, startedAt, fetchedAt",
     })
-
-    // First full-chain construction under Jest: cache the merged spec so every
-    // later construction in this worker takes the collapsed fast path above.
-    if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
-      collapsedSchemaCacheSlot().__cogniaCollapsedSchema = buildCollapsedSchema(this)
-    }
   }
 
   // v193 — saved chat templates. See `lib/db/chat-templates.ts`.

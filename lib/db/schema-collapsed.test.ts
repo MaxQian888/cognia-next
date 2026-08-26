@@ -1,10 +1,15 @@
 /** @jest-environment jsdom */
 // Parity check for the Jest collapsed-schema fast path in schema.ts: a
 // CogniaDB declared from the merged (collapsed) spec must expose exactly the
-// same tables, primary keys, and indexes as one built from the full 100+
+// same tables, primary keys, and indexes as one built from the full 180+
 // version chain. If a new version(N).stores() delta ever merges incorrectly
 // (or dexie's internal `_versions`/`storesSource` shape changes), this suite
 // is the tripwire.
+//
+// It also pins the PERFORMANCE property: the collapsed path must declare a
+// single dexie version even on a worker's very first (cache-cold)
+// construction, because `Version.stores()` re-parses every version declared so
+// far and the full chain therefore costs ~4.7s of pure index parsing.
 
 import "fake-indexeddb/auto"
 import { CogniaDB, __resetDbForTesting, getDb } from "./schema"
@@ -23,7 +28,19 @@ function shapeOf(db: CogniaDB): SchemaShape {
 }
 
 const flagHolder = globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }
-const cacheHolder = process as unknown as { __cogniaCollapsedSchema?: unknown }
+const cacheHolder = process as unknown as {
+  __cogniaCollapsedSchema?: { version: number; stores: Record<string, string | null> }
+}
+
+function declaredVersionCount(db: CogniaDB): number {
+  return (db as unknown as { _versions: unknown[] })._versions.length
+}
+
+// Read through a call so TypeScript doesn't narrow the slot to `undefined` for
+// the rest of a test that cleared it with `delete`.
+function cachedCollapsedSpec() {
+  return cacheHolder.__cogniaCollapsedSchema
+}
 
 afterEach(async () => {
   delete flagHolder.__COGNIA_DB_FULL_SCHEMA__
@@ -66,14 +83,41 @@ it("opt-out flag forces the full chain even when the cache is warm", () => {
   const full = new CogniaDB("schema-collapse-optout-full")
   // The full chain declares many versions; the collapsed path declares one.
   // Dexie's internal version list is the observable difference.
-  const versionCount = (full as unknown as { _versions: unknown[] })._versions.length
-  expect(versionCount).toBeGreaterThan(100)
-
-  const collapsedCount = (warmup as unknown as { _versions: unknown[] })._versions.length
-  expect(collapsedCount).toBeLessThanOrEqual(2)
+  expect(declaredVersionCount(full)).toBeGreaterThan(100)
+  expect(declaredVersionCount(warmup)).toBeLessThanOrEqual(2)
 
   warmup.close()
   full.close()
+})
+
+it("a cache-cold collapsed construction also declares a single version", () => {
+  // The first construction in a worker has no cached spec, so it walks the
+  // inline chain against `collectCollapsedSchema`'s no-parse collector. The
+  // instance must still end up with exactly ONE real dexie version: if this
+  // ever reports the full chain's 180+, the collector was bypassed and every
+  // Jest worker pays the quadratic index parse again.
+  delete cacheHolder.__cogniaCollapsedSchema
+  const cold = new CogniaDB("schema-collapse-cold")
+
+  expect(declaredVersionCount(cold)).toBe(1)
+  expect(cachedCollapsedSpec()?.version).toBe(cold.verno)
+
+  cold.close()
+})
+
+it("carries a null stores() entry through so dropped tables stay dropped", () => {
+  // v113 dropped `pluginScheduledJobs` with `{ pluginScheduledJobs: null }`.
+  // Both halves of that semantic have to survive collapsing: the merged spec
+  // must still hold the literal null (the collector must not filter it out),
+  // and dexie's parse of that spec must then omit the table.
+  delete cacheHolder.__cogniaCollapsedSchema
+  const cold = new CogniaDB("schema-collapse-null-drop")
+
+  expect(cachedCollapsedSpec()?.stores.pluginScheduledJobs).toBeNull()
+  expect(Object.keys(cachedCollapsedSpec()?.stores ?? {})).toContain("pluginScheduledJobs")
+  expect(cold.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
+
+  cold.close()
 })
 
 it("a fresh collapsed database opens and accepts writes", async () => {

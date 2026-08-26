@@ -367,12 +367,6 @@ const projectCommon: Config = {
   // `typeof window !== "undefined"` guard, so it serves both projects.
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
 
-  // Multi-project full-suite runs keep several Jest workers CPU-bound at once.
-  // Database setup and other integration-style tests that finish in under ten
-  // seconds alone can cross Jest's five-second default while a worker is
-  // starved. Keep a finite ceiling, but budget for loaded CI and local runs.
-  testTimeout: 30_000,
-
   testPathIgnorePatterns: baseTestPathIgnorePatterns,
 
   // Several ported npm packages are ESM-only (no CJS dist), so Jest's default
@@ -407,6 +401,17 @@ const projectCommon: Config = {
 
 // Global (non-project) options: coverage, workers, reporters.
 const globalConfig: Config = {
+  // Multi-project full-suite runs keep several Jest workers CPU-bound at once.
+  // Database setup and other integration-style tests that finish in under ten
+  // seconds alone can cross Jest's five-second default while a worker is
+  // starved. Keep a finite ceiling, but budget for loaded CI and local runs.
+  //
+  // MUST live here, not in `projectCommon`: Jest normalizes `testTimeout` into
+  // the global config only, so a copy on a project is silently inert and every
+  // suite falls back to the 5s default. `--showConfig` echoes the project copy
+  // back, which makes the dead setting look live.
+  testTimeout: 30_000,
+
   // Jest's default sharding hashes paths, which keeps suite counts equal but
   // placed recent CI shards between 10 and 27 minutes. Use the previous run's
   // unified timing manifest to distribute long suites with LPT scheduling;
