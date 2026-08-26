@@ -330,7 +330,7 @@ also the layer this ADR actually invents — neither existing file has a `User`.
    two existing services shared no code. The third service is what made a shared
    JWKS verifier correct, and `cognia_tenant_auth::oidc` now owns it.
 | **4a** | ✅ `devices.user_id` bookkeeping | `security_store.rs` (column, migration, enrolment inherits the bound person, sign-in adopts the unclaimed), `lib/devices/`, the console's "Belongs to" row. **No decision path reads it**, pinned by two tests. |
-| **4b** | ⏳ Reroute the grant decision | `has_capability`, `device_grants.rs`, `lib/devices/grant-capabilities.ts`. Deliberately a **separate release** — see below. |
+| **4b** | ✅ Reroute the grant decision | `has_capability` joins `host_bindings` and refuses a device attributed to somebody else; `lib/devices/grant-capabilities.ts` mirrors the predicate so the console can say why; a new `suspended` grant state and its banner. Shipped as a **separate release** from 4a — see below. |
 
 **Why 4a and 4b are numbered apart.** §5 says "two releases, never one", and
 the roadmap row hid that inside a single line. The risk is concrete:
@@ -346,6 +346,43 @@ is listed under §9, but nothing needs it yet, and it is what makes "which perso
 does this tenant belong to" a single-row lookup — which is exactly how an
 enrolling device learns its owner. It should be relaxed when two profiles
 genuinely share one Org's tenant, and not before.
+**Batch 4b notes.** What "membership" means on a host.
+
+The rule this ADR states is `device -> user -> membership -> capability`. The
+host has no membership table and should not grow one: memberships belong to the
+collaboration server, and a local mirror would either *grant* while stale (a
+hole) or *narrow* while stale (a lockout on every network hiccup). What the
+host does have is `host_bindings`, which records the one person a tenant belongs
+to.
+
+So the host enforces the part it can prove — the device's person must be the
+person this host acts for — and the shape stays the intersection the ADR
+describes: the person's ceiling is "everything" for the bound person and
+"nothing" for anyone else, and the device's own `capability_grants` narrow it
+from there. When a membership mirror eventually lands, only the ceiling gets
+finer; the rule does not move.
+
+Concretely, what 4b stops: person A signs out, person B signs in on the same
+machine, and A's still-paired phone keeps running agents on B's host. Until now
+it could.
+
+Both NULLs still pass, and that is the whole safety argument. A host nobody has
+signed in on decides nothing by ownership, and an unattributed device — every
+device that existed before 4a — is not treated as a stranger's. Denying either
+would be the fleet-wide lockout the two-release split existed to avoid, so both
+are pinned by their own tests.
+
+The predicate now exists twice: as SQL on the hot path and as TypeScript in the
+console, which needs it only to explain a switch it is drawing as off. A test on
+each side reads the other's source, because a mirror that drifts is worse than
+no mirror — it would keep drawing a grant as live that the host has been
+refusing for weeks.
+
+`suspended` is a new grant state rather than a reuse of `denied`. Nothing was
+revoked; handing the device back to its person restores it without a re-grant,
+and showing it as "not granted" would invite an owner to re-grant something
+that is already granted.
+
 | **5** | ✅ `ExternalIdentity` absorbs IM principals | `lib/identity/external-person.ts` (find-or-mint by external subject), `lib/connectors/principal/person.ts` (the Lark id ranking), `bootstrap.ts` and `approveFeishuBind` no longer fall back to `accountId`, Dexie v196 `subject` index, and the principals card's person + standing badge. **Guest is derivable and rendered but has no producer** — see below. |
 **Batch 5 notes.** Three things this ADR did not anticipate:
 

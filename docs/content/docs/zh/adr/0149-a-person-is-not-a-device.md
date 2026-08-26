@@ -287,7 +287,7 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 3. **§7 的共享 crate 在这里才找到真正的理由。** Batch 2 证明既有两个服务没有共享代码；
    是第三个服务让共享 JWKS 验签变得正确，`cognia_tenant_auth::oidc` 现在拥有它。
 | **4a** | ✅ `devices.user_id` 记账 | `security_store.rs`（列、迁移、入册继承已绑定的人、登录认领无主设备）、`lib/devices/`、控制台的"归属"行。**没有任何判定路径读它**，由两个测试钉住。 |
-| **4b** | ⏳ grant 判定改道 | `has_capability`、`device_grants.rs`、`lib/devices/grant-capabilities.ts`。刻意留作**独立 release**——见下。 |
+| **4b** | ✅ grant 判定改道 | `has_capability` join `host_bindings`，拒绝归属他人的设备；`lib/devices/grant-capabilities.ts` 镜像该谓词，让控制台能说清原因；新增 `suspended` 授权状态与提示条。作为**独立 release** 发出——见下。 |
 
 **为什么把 4a 与 4b 分开编号。** §5 写的是"两个 release，绝不合一"，而路线图那一行
 把这件事藏进了一句话里。风险是具体的：`capability_grants` 被 `rpc.rs`、`ws_terminal.rs`
@@ -298,6 +298,33 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 `host_bindings.tenant_id` 在 4a 期间保留 `UNIQUE`。放宽它列在 §9，但目前没有任何东西
 需要它；而正是这个约束让"这个租户属于哪个人"成为单行查询——入册中的设备就是这样得知
 自己归属谁的。它应该在两个 profile 真正共享同一个 Org 租户时再放宽，不是更早。
+**Batch 4b 补记。** 在宿主上，「membership」到底指什么。
+
+本 ADR 写的规则是 `device -> user -> membership -> capability`。但宿主没有成员表，
+也不该长出一张：成员关系归协作服务器所有，本地镜像要么在过期时**放行**（是个洞），
+要么在过期时**收紧**（每次网络抖动都变成锁死）。宿主真正拥有的是 `host_bindings`，
+它记录了一个租户归属的那一个人。
+
+所以宿主只强制它能证明的那一段——设备的人必须是这台宿主为之服务的人——而形状仍然是
+本 ADR 描述的那个交集：那个人的上界对已绑定的人是「全部」、对其他人是「空」，再由设备
+自己的 `capability_grants` 从上界往下收。将来真有成员镜像落地时，只是上界变细，规则
+不动。
+
+具体挡住了什么：A 登出、B 在同一台机器上登录，而 A 那台仍然配对着的手机继续在 B 的
+宿主上跑 agent。在此之前它可以。
+
+**两个 NULL 依然放行**，这就是全部的安全论证。没人登录的宿主不按归属做任何判定；
+未归属的设备——也就是 4a 之前存在的每一台——不被当作陌生人的设备。任何一边改成拒绝
+都会造成两阶段拆分本来要避免的全设备锁死，所以两者各有一个测试钉住。
+
+这个谓词现在存在两份：热路径上的 SQL，和控制台里的 TypeScript——后者只是为了解释
+一个它画成关闭的开关。两边各有一个测试去读对方的源码，因为**会漂移的镜像比没有镜像
+更糟**：它会把宿主已经拒绝了好几周的授权继续画成生效。
+
+`suspended` 是一个新状态，而不是复用 `denied`。没有任何东西被撤销，设备回到它所属的
+人手上就会恢复，不需要重新授权；显示成「未授权」会诱导用户去重新授予一个本来就已经
+授予了的权限。
+
 | **5** | ✅ `ExternalIdentity` 收编 IM principal | `lib/identity/external-person.ts`（按外部 subject 找人或建人）、`lib/connectors/principal/person.ts`（Lark 三种 id 的强弱排序）、`bootstrap.ts` 与 `approveFeishuBind` 不再退化到 `accountId`、Dexie v196 的 `subject` 索引、principals 卡片的「人 + 身份」徽章。**Guest 可推导、可渲染，但没有生产者**——见下。 |
 **Batch 5 补记。** 三件本 ADR 没有预料到的事：
 
