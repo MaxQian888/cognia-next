@@ -67,6 +67,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/orgs/{org_id}/grants", axum::routing::post(mint_grant))
+        .route("/v1/orgs/{org_id}/memberships/me", get(my_memberships))
         .route(
             "/v1/orgs/{org_id}/issues",
             get(list_issues).post(create_issue),
@@ -259,6 +260,20 @@ pub struct MintedGrant {
     pub expires_at: i64,
 }
 
+/// What a caller holds in one org.
+///
+/// `orgRole` absent plus a non-empty `workspaces` is a guest — derived by the
+/// reader, never stated here, so the rule lives in one place.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MyMemberships {
+    pub user_id: String,
+    pub org_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_role: Option<cognia_tenant_auth::OrgRole>,
+    pub workspaces: Vec<crate::store::WorkspaceMembershipRow>,
+}
+
 /// Exchange a verified OIDC access token for a short-lived grant.
 ///
 /// This is the only door into the plane: every other route takes a grant, and
@@ -333,6 +348,43 @@ async fn mint_grant(
         user_id: grant_claims.user_id.to_string(),
         org_id: grant_claims.org_id.to_string(),
         expires_at: grant_claims.expires_at,
+    }))
+}
+
+/// What this caller holds in this org — ADR-0149 §4.
+///
+/// The client's `orgMemberships` / `workspaceMemberships` projection has had
+/// no filler since it was created: sign-in writes an org membership guessed
+/// from the token's `organization_roles`, and nothing at all writes a
+/// workspace one. Without this route "guest" is a shape the code can describe
+/// and nothing can ever be in.
+///
+/// Raw facts only. Whether somebody is a guest is DERIVED — org role absent,
+/// workspace memberships present — and deriving it here as well as on the
+/// client would be two rules to keep in step. The client's
+/// `personStandingFrom` is the one implementation.
+async fn my_memberships(
+    State(state): State<AppState>,
+    Path(org_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<MyMemberships>, Failure> {
+    let claims = verify_grant(&state.signer, authorization(&headers), &org_id).await?;
+    let user_id = claims.user_id.to_string();
+
+    // No `authorize_workspace` here on purpose: asking what you hold is not
+    // scoped to one workspace, and requiring a workspace role to find out
+    // which workspaces you have would be circular.
+    let membership = state.store.membership(&org_id, &user_id, None).await?;
+    let workspaces = state
+        .store
+        .list_workspace_memberships(&org_id, &user_id)
+        .await?;
+
+    Ok(Json(MyMemberships {
+        user_id,
+        org_id,
+        org_role: membership.org_role,
+        workspaces,
     }))
 }
 
@@ -682,6 +734,89 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CREATED, "{issue}");
         issue["id"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn memberships_report_what_the_caller_actually_holds() {
+        let (status, body) = call(
+            app(seeded()),
+            get(
+                &format!("/v1/orgs/{ORG}/memberships/me"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["userId"], ada().as_str());
+        assert_eq!(body["orgId"], ORG);
+        assert_eq!(body["orgRole"], "member");
+        assert_eq!(body["workspaces"][0]["workspaceId"], "proj-1");
+        assert_eq!(body["workspaces"][0]["role"], "member");
+    }
+
+    /// A guest is the shape ADR-0149 §4 describes: workspace membership with
+    /// no org membership. The server reports the raw facts and never the
+    /// verdict — deriving "guest" here as well as on the client would be two
+    /// rules to keep in step.
+    #[tokio::test]
+    async fn a_guest_is_reported_as_facts_not_as_a_verdict() {
+        let store = InMemoryStore::new();
+        store.add_workspace_member(ORG, "proj-1", ada().as_str(), WorkspaceRole::Viewer);
+
+        let (status, body) = call(
+            app(store),
+            get(
+                &format!("/v1/orgs/{ORG}/memberships/me"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.get("orgRole").is_none(), "{body}");
+        assert_eq!(body["workspaces"][0]["role"], "viewer");
+        assert!(body.get("guest").is_none(), "the verdict is the client's");
+    }
+
+    /// Somebody who holds nothing gets an empty answer rather than a refusal.
+    /// A 403 here would be indistinguishable from "this org does not exist",
+    /// and the caller already proved they hold a grant for it.
+    #[tokio::test]
+    async fn holding_nothing_is_an_empty_answer_not_a_refusal() {
+        let (status, body) = call(
+            app(InMemoryStore::new()),
+            get(
+                &format!("/v1/orgs/{ORG}/memberships/me"),
+                &token_for(&ada()),
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.get("orgRole").is_none());
+        assert_eq!(body["workspaces"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn memberships_need_a_grant_for_this_org() {
+        let other = OrgId::parse("org_other0000000000000000").unwrap();
+        let claims = GrantClaims::issue(
+            ada(),
+            other,
+            None,
+            None,
+            std::time::Duration::from_secs(300),
+        )
+        .unwrap();
+        let foreign = format!("Bearer {}", signer().sign(&claims).unwrap());
+
+        let (status, _) = call(
+            app(seeded()),
+            get(&format!("/v1/orgs/{ORG}/memberships/me"), &foreign),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

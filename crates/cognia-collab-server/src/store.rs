@@ -55,6 +55,14 @@ pub struct Membership {
     pub workspace_role: Option<WorkspaceRole>,
 }
 
+/// One workspace membership, as `GET …/memberships/me` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMembershipRow {
+    pub workspace_id: String,
+    pub role: WorkspaceRole,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewIssue {
     pub id: String,
@@ -131,11 +139,17 @@ pub trait Store: Send + Sync {
     /// Separate from [`Store::membership`] because a listing needs the whole
     /// set while a single-target check needs one row, and issuing the wide
     /// query on every request would be the more expensive of the two.
+    /// Every workspace membership this person holds in `org_id`, with the role.
+    ///
+    /// The role is carried because `GET …/memberships/me` answers with it: the
+    /// client's projection needs to know whether somebody is a viewer or a
+    /// maintainer to render a roster, and re-deriving that from a list of ids
+    /// would mean a second round trip per workspace.
     async fn list_workspace_memberships(
         &self,
         org_id: &str,
         user_id: &str,
-    ) -> Result<Vec<String>, StoreError>;
+    ) -> Result<Vec<WorkspaceMembershipRow>, StoreError>;
 
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError>;
 
@@ -287,15 +301,18 @@ impl Store for InMemoryStore {
         &self,
         org_id: &str,
         user_id: &str,
-    ) -> Result<Vec<String>, StoreError> {
+    ) -> Result<Vec<WorkspaceMembershipRow>, StoreError> {
         let tables = self.tables.read();
-        let mut workspaces: Vec<String> = tables
+        let mut workspaces: Vec<WorkspaceMembershipRow> = tables
             .workspace_memberships
             .iter()
             .filter(|((_, member), (org, _))| member == user_id && org == org_id)
-            .map(|((workspace, _), _)| workspace.clone())
+            .map(|((workspace, _), (_, role))| WorkspaceMembershipRow {
+                workspace_id: workspace.clone(),
+                role: *role,
+            })
             .collect();
-        workspaces.sort();
+        workspaces.sort_by(|left, right| left.workspace_id.cmp(&right.workspace_id));
         Ok(workspaces)
     }
 
@@ -641,18 +658,27 @@ impl Store for PgStore {
         &self,
         org_id: &str,
         user_id: &str,
-    ) -> Result<Vec<String>, StoreError> {
+    ) -> Result<Vec<WorkspaceMembershipRow>, StoreError> {
         let mut client = self.client().await?;
         let transaction = self.scoped(&mut client, org_id).await?;
         let rows = transaction
             .query(
-                "SELECT workspace_id FROM workspace_memberships \
+                "SELECT workspace_id, role FROM workspace_memberships \
                  WHERE org_id = $1 AND user_id = $2 ORDER BY workspace_id",
                 &[&org_id, &user_id],
             )
             .await
             .map_err(|error| StoreError::Database(error.to_string()))?;
-        Ok(rows.iter().map(|row| row.get("workspace_id")).collect())
+        rows.iter()
+            .map(|row| {
+                let raw: String = row.get("role");
+                Ok(WorkspaceMembershipRow {
+                    workspace_id: row.get("workspace_id"),
+                    role: WorkspaceRole::parse(&raw)
+                        .map_err(|error| StoreError::Corrupt(error.to_string()))?,
+                })
+            })
+            .collect()
     }
 
     async fn list_issues(&self, org_id: &str, query: IssueQuery) -> Result<Vec<Issue>, StoreError> {

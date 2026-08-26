@@ -139,7 +139,12 @@ pub async fn readable_scope(
         // a grant for an org they have since been removed from.
         return Err(AuthError::Forbidden);
     }
-    Ok(WorkspaceScope::Only(workspaces))
+    Ok(WorkspaceScope::Only(
+        workspaces
+            .into_iter()
+            .map(|membership| membership.workspace_id)
+            .collect(),
+    ))
 }
 
 /// The set of workspaces a listing may draw from.
