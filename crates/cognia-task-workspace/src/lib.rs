@@ -7,6 +7,7 @@
 mod bundle;
 mod ledger;
 mod lifecycle;
+mod mirror;
 mod registry;
 mod resource;
 mod sensitive;
@@ -25,6 +26,13 @@ pub use bundle::{
 };
 pub use lifecycle::{
     WorktreeLifecycleEmitter, WorktreeLifecycleEvent, WorktreeLifecycleKind, WorktreeLifecycleSink,
+};
+pub use mirror::{
+    clone_args as mirror_clone_args, derive_args as mirror_derive_args,
+    fetch_args as mirror_fetch_args, is_fresh as mirror_is_fresh, is_mirror,
+    maintenance_commands as mirror_maintenance_commands, mirror_path, normalize_remote_url,
+    reclaim_candidates as mirror_reclaim_candidates, stamp_fetch as mirror_stamp_fetch,
+    MirrorError, DEFAULT_MIRROR_TTL,
 };
 pub use registry::{
     compose_lock_reason, parse_lock_reason, plan_directory_reclaim, plan_reconcile,

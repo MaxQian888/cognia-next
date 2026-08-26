@@ -218,7 +218,10 @@ pub struct StackCapabilities {
 /// test. Probing costs two processes and is done once per stack operation.
 pub async fn capabilities(repo_path: &str) -> Result<StackCapabilities> {
     let root = cwd(repo_path);
-    let version = exec::capture(&root, ["--version"]).await?.trim().to_string();
+    let version = exec::capture(&root, ["--version"])
+        .await?
+        .trim()
+        .to_string();
     // `git <cmd> -h` prints its usage and exits 129 — a non-zero exit that
     // means "yes, and here is how to use me". A command git does not have says
     // so on stderr instead. So the probe reads BOTH streams and looks for the
@@ -329,7 +332,9 @@ pub async fn validate(repo_path: &str, branches: &[String]) -> Result<Vec<StackL
         let contains_parent = match (&parent, &head) {
             // A missing branch contains nothing; a missing parent is the
             // bottom of the stack and has nothing to contain.
-            (Some(parent), Some(_)) => is_ancestor(repo_path, parent, branch).await.unwrap_or(false),
+            (Some(parent), Some(_)) => is_ancestor(repo_path, parent, branch)
+                .await
+                .unwrap_or(false),
             (None, _) => true,
             (Some(_), None) => false,
         };
@@ -469,7 +474,12 @@ pub async fn restack_with(
     let states = validate(repo_path, branches).await?;
     let blocked: Vec<&str> = states
         .iter()
-        .filter_map(|state| state.checked_out_in.as_deref().map(|_| state.branch.as_str()))
+        .filter_map(|state| {
+            state
+                .checked_out_in
+                .as_deref()
+                .map(|_| state.branch.as_str())
+        })
         .collect();
     if !blocked.is_empty() {
         return Err(GitError::DirtyWorkingTree(
@@ -537,10 +547,7 @@ pub async fn restack_with(
         .collect();
     // The range's exclusion point: everything the bottom layer already shares
     // with its old base stays, everything after it is replayed.
-    let old_base = states[0]
-        .parent
-        .clone()
-        .unwrap_or_else(|| onto.to_string());
+    let old_base = states[0].parent.clone().unwrap_or_else(|| onto.to_string());
 
     let tip = branches.last().expect("checked non-empty above");
     if capabilities.replay {
@@ -797,8 +804,8 @@ async fn rebase_stack(
                 None => base.clone(),
             }
         };
-        let rebased = exec::succeeds(&scratch, ["rebase", "--onto", &base, &exclusion, branch])
-            .await?;
+        let rebased =
+            exec::succeeds(&scratch, ["rebase", "--onto", &base, &exclusion, branch]).await?;
         if !rebased {
             return Ok(RestackOutcome {
                 method: RestackMethod::Rebase,
@@ -971,7 +978,10 @@ mod tests {
         // The pointer has to live where another clone of this repository can
         // read it, which is the whole reason it is config and not a table.
         let (tmp, path) = stacked().await;
-        assert_eq!(parent_of(&path, "layer-b").unwrap().as_deref(), Some("layer-a"));
+        assert_eq!(
+            parent_of(&path, "layer-b").unwrap().as_deref(),
+            Some("layer-a")
+        );
         assert_eq!(parent_of(&path, "main").unwrap(), None);
 
         let map = parent_map(&path).unwrap();
@@ -1024,7 +1034,10 @@ mod tests {
         let (tmp, path) = stacked().await;
         let states = validate(&path, &["ghost".to_string()]).await.unwrap();
         assert_eq!(states[0].head, None);
-        assert!(states[0].contains_parent, "no parent means nothing to be behind");
+        assert!(
+            states[0].contains_parent,
+            "no parent means nothing to be behind"
+        );
         drop(tmp);
     }
 
@@ -1073,7 +1086,10 @@ mod tests {
         );
         // Every layer now contains the trunk commit, and the chain still holds.
         for branch in layers() {
-            assert!(is_ancestor(&path, "main", &branch).await.unwrap(), "{branch}");
+            assert!(
+                is_ancestor(&path, "main", &branch).await.unwrap(),
+                "{branch}"
+            );
         }
 
         // The old tips are reachable, so this is undoable and `gc` will not
@@ -1118,7 +1134,9 @@ mod tests {
             .collect();
         for capabilities in [None, Some(without_replay())] {
             let outcome = match &capabilities {
-                Some(forced) => restack_with(&path, "main", &layers(), forced).await.unwrap(),
+                Some(forced) => restack_with(&path, "main", &layers(), forced)
+                    .await
+                    .unwrap(),
                 None => restack(&path, "main", &layers()).await.unwrap(),
             };
             assert!(outcome.updates.is_empty(), "{outcome:?}");
@@ -1138,7 +1156,10 @@ mod tests {
         let (tmp, path) = stacked().await;
         let swapped = vec!["layer-b".to_string(), "layer-a".to_string()];
         let error = restack(&path, "main", &swapped).await.unwrap_err();
-        assert!(error.to_string().contains("recorded as stacked on"), "{error}");
+        assert!(
+            error.to_string().contains("recorded as stacked on"),
+            "{error}"
+        );
         drop(tmp);
     }
 
@@ -1219,14 +1240,23 @@ mod tests {
         assert_eq!(outcome.updates.len(), 3);
 
         let states = validate(&path, &layers()).await.unwrap();
-        assert!(states.iter().all(|state| state.contains_parent), "{states:?}");
+        assert!(
+            states.iter().all(|state| state.contains_parent),
+            "{states:?}"
+        );
         for branch in layers() {
-            assert!(is_ancestor(&path, "main", &branch).await.unwrap(), "{branch}");
+            assert!(
+                is_ancestor(&path, "main", &branch).await.unwrap(),
+                "{branch}"
+            );
         }
         // The whole point of the exclusion-point fix: three layers, three
         // commits on top of the trunk — not six, and not layer-a's commit
         // replayed once per layer above it.
-        let replayed = git(root, &["rev-list", "--count", &format!("{head_of_main}..layer-c")]);
+        let replayed = git(
+            root,
+            &["rev-list", "--count", &format!("{head_of_main}..layer-c")],
+        );
         assert_eq!(replayed, "3");
 
         // The scratch worktree is gone, and the user's own checkout never moved.

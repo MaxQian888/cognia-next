@@ -130,23 +130,41 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
     let remote = canonical_github_remote(&args.repo_full_name)?;
 
     let clone_branch = args.base_branch.as_deref().unwrap_or(&args.branch);
-    let mut command = Command::new("git");
-    command
-        .arg("clone")
-        .args(clone_args(&remote, &path_str, clone_branch))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    apply_git_auth_env(&mut command, &args.token);
-    let output = command
-        .output()
-        .await
-        .map_err(|e| format!("git clone spawn: {e}"))?;
-    if !output.status.success() {
-        // Redact the token before surfacing stderr — git embeds the remote URL
-        // in its error messages and we don't want it ending up in renderer logs.
-        let stderr =
-            redact_git_credentials(&String::from_utf8_lossy(&output.stderr), Some(&args.token));
-        return Err(format!("git clone failed: {stderr}"));
+
+    // Try the shared mirror first. It is a cache, so every failure below falls
+    // through to the network clone rather than failing the workspace: a
+    // corrupt or half-written mirror must cost a slow clone, never a broken
+    // issue run.
+    let derived = derive_from_mirror(
+        &mirror_root(Some(&base_dir)),
+        &remote,
+        &path_str,
+        clone_branch,
+        &args.token,
+    )
+    .await
+    .unwrap_or(false);
+
+    if !derived {
+        let mut command = Command::new("git");
+        command
+            .arg("clone")
+            .args(clone_args(&remote, &path_str, clone_branch))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        apply_git_auth_env(&mut command, &args.token);
+        let output = command
+            .output()
+            .await
+            .map_err(|e| format!("git clone spawn: {e}"))?;
+        if !output.status.success() {
+            // Redact the token before surfacing stderr — git embeds the remote
+            // URL in its error messages and we don't want it ending up in
+            // renderer logs.
+            let stderr =
+                redact_git_credentials(&String::from_utf8_lossy(&output.stderr), Some(&args.token));
+            return Err(format!("git clone failed: {stderr}"));
+        }
     }
 
     if clone_branch != args.branch {
@@ -494,6 +512,158 @@ where
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// The shared bare-mirror cache directory for a given worktree base.
+///
+/// Derived from the base directory rather than configured separately, so a
+/// caller that redirects the worktrees redirects the cache with them and there
+/// is no second setting to keep in step. The leading dot keeps it out of the
+/// way of the per-repository worktree directories beside it.
+pub(crate) fn mirror_root(base_dir: Option<&str>) -> PathBuf {
+    let base = base_dir
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_BASE_DIR);
+    PathBuf::from(base).join(".mirrors")
+}
+
+/// How long an untouched mirror is kept.
+///
+/// Long enough that a project worked on weekly never re-clones, short enough
+/// that a repository someone tried once does not sit on disk forever. A mirror
+/// is a cache: deleting one costs a slow clone, keeping one costs the whole
+/// repository's history.
+const MIRROR_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Delete mirrors nothing has fetched in [`MIRROR_MAX_AGE`]. Returns how many.
+///
+/// By age rather than by size: a mirror nobody has asked for in a month is the
+/// one to drop, and evicting the biggest instead removes the repository the
+/// user is most likely working in.
+pub(crate) async fn reclaim_stale_mirrors() -> usize {
+    let root = mirror_root(None);
+    let candidates = tokio::task::spawn_blocking(move || {
+        cognia_task_workspace::mirror_reclaim_candidates(&root, MIRROR_MAX_AGE, SystemTime::now())
+    })
+    .await
+    .unwrap_or_default();
+    let mut removed = 0usize;
+    for mirror in candidates {
+        if tokio::fs::remove_dir_all(&mirror).await.is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Bring a mirror up to date, then clone the requested branch out of it.
+///
+/// Returns `Ok(false)` when the mirror could not be used, which is a request
+/// to clone from the network instead. The only `Err` is one the network clone
+/// could not fix either.
+///
+/// # Why the derived clone re-points its own remote
+///
+/// `git clone <local path>` writes that path into the checkout's `origin`. A
+/// workspace whose `origin` is a directory on this machine cannot push, and
+/// the whole point of the workspace is to push. The URL is set back to the
+/// real remote — credential-free, exactly as the network path leaves it, for
+/// the reason the clone comment above gives at length.
+async fn derive_from_mirror(
+    root: &Path,
+    remote: &str,
+    destination: &str,
+    branch: &str,
+    token: &str,
+) -> Result<bool, String> {
+    let Ok(mirror) = cognia_task_workspace::mirror_path(root, remote) else {
+        return Ok(false);
+    };
+    if tokio::fs::create_dir_all(root).await.is_err() {
+        return Ok(false);
+    }
+
+    let exists = cognia_task_workspace::is_mirror(&mirror);
+    if !exists {
+        // A previous attempt may have died partway through; a directory that
+        // is not a bare repository is garbage, not a cache.
+        let _ = tokio::fs::remove_dir_all(&mirror).await;
+        let args = cognia_task_workspace::mirror_clone_args(remote, &mirror);
+        if !run_mirror_git(root, &args, token).await {
+            let _ = tokio::fs::remove_dir_all(&mirror).await;
+            return Ok(false);
+        }
+        let _ = cognia_task_workspace::mirror_stamp_fetch(&mirror);
+        run_mirror_maintenance(&mirror).await;
+    } else if !cognia_task_workspace::mirror_is_fresh(
+        &mirror,
+        cognia_task_workspace::DEFAULT_MIRROR_TTL,
+        SystemTime::now(),
+    ) {
+        let args = cognia_task_workspace::mirror_fetch_args();
+        if run_mirror_git(&mirror, &args, token).await {
+            let _ = cognia_task_workspace::mirror_stamp_fetch(&mirror);
+            run_mirror_maintenance(&mirror).await;
+        }
+        // A failed refresh is not fatal: a slightly stale mirror still holds
+        // the history, and the derived clone fetches from the real remote the
+        // first time it needs something newer.
+    }
+
+    let derive =
+        cognia_task_workspace::mirror_derive_args(&mirror, Path::new(destination), Some(branch));
+    if !run_mirror_git(root, &derive, token).await {
+        // The branch may simply not be in the mirror yet (created upstream
+        // after the last fetch). Leave nothing half-written behind and let the
+        // network clone answer.
+        let _ = tokio::fs::remove_dir_all(destination).await;
+        return Ok(false);
+    }
+
+    let destination_path = PathBuf::from(destination);
+    if run_git_silent(&destination_path, ["remote", "set-url", "origin", remote])
+        .await
+        .is_err()
+    {
+        // A checkout that cannot push is worse than a slow clone.
+        let _ = tokio::fs::remove_dir_all(destination).await;
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// Run one git command for the mirror, reporting only whether it worked.
+///
+/// Output is discarded rather than surfaced: every caller above treats a
+/// failure as "use the network", and a cache miss is not something to report
+/// to the user as an error.
+async fn run_mirror_git(cwd: &Path, args: &[String], token: &str) -> bool {
+    let mut command = Command::new("git");
+    command
+        .current_dir(cwd)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    apply_git_auth_env(&mut command, token);
+    matches!(command.status().await, Ok(status) if status.success())
+}
+
+/// Write the commit-graph and multi-pack-index for a mirror.
+///
+/// Best effort and never fatal. Deliberately not `git maintenance register`,
+/// which would write our cache directory into the user's global config and
+/// schedule machine-wide background jobs against it.
+async fn run_mirror_maintenance(mirror: &Path) {
+    for args in cognia_task_workspace::mirror_maintenance_commands() {
+        let mut command = Command::new("git");
+        command
+            .current_dir(mirror)
+            .args(&args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        apply_git_isolation_env(&mut command);
+        let _ = command.status().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,7 +676,10 @@ mod tests {
     #[test]
     fn clones_are_partial_and_never_shallow() {
         let args = clone_args("https://github.com/o/r.git", "/tmp/dest", "main");
-        assert!(!args.contains(&"--depth"), "shallow breaks rebasing a stack");
+        assert!(
+            !args.contains(&"--depth"),
+            "shallow breaks rebasing a stack"
+        );
         assert!(args.contains(&"--filter=blob:none"));
         assert!(
             args.contains(&"--single-branch"),
@@ -515,6 +688,239 @@ mod tests {
         assert_eq!(args[0], "https://github.com/o/r.git");
         assert_eq!(args[1], "/tmp/dest");
         assert_eq!(args[3], "main");
+    }
+
+    // ── The shared bare mirror ────────────────────────────────────────────
+
+    fn sh(cwd: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@e.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@e.com")
+            .output()
+            .unwrap_or_else(|error| panic!("spawn git {args:?}: {error}"));
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A local repository standing in for the remote. `file://` is a URL the
+    /// mirror keys on and git can actually clone, so the whole path runs with
+    /// no network.
+    fn upstream(tmp: &Path) -> (PathBuf, String) {
+        let origin = tmp.join("origin");
+        fs::create_dir_all(&origin).unwrap();
+        sh(&origin, &["init", "--initial-branch=main"]);
+        sh(&origin, &["config", "user.name", "T"]);
+        sh(&origin, &["config", "user.email", "t@e.com"]);
+        fs::write(origin.join("a.txt"), "hello\n").unwrap();
+        sh(&origin, &["add", "a.txt"]);
+        sh(&origin, &["commit", "-m", "init"]);
+        let url = format!("file://{}", origin.display());
+        (origin, url)
+    }
+
+    #[test]
+    fn the_cache_follows_the_worktree_base_directory() {
+        // One setting, not two: a caller that redirects the worktrees must not
+        // then leave the cache pointing at the default.
+        let default = mirror_root(None);
+        assert!(default.ends_with(".mirrors"));
+        assert!(default.starts_with(DEFAULT_BASE_DIR));
+        assert_eq!(
+            mirror_root(Some("/tmp/base")),
+            PathBuf::from("/tmp/base").join(".mirrors")
+        );
+        // An empty base is not a base.
+        assert_eq!(mirror_root(Some("")), default);
+    }
+
+    #[tokio::test]
+    async fn a_derived_clone_carries_the_content_and_can_still_push() {
+        // `git clone <local path>` writes that path into `origin`, and a
+        // workspace whose origin is a directory on this machine cannot push —
+        // which is the entire point of the workspace.
+        let tmp = TempDir::new().unwrap();
+        let (_origin, url) = upstream(tmp.path());
+        let cache = tmp.path().join("cache");
+        let dest = tmp.path().join("work");
+
+        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
+            .await
+            .unwrap();
+        assert!(derived, "the mirror should have served this clone");
+        assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "hello\n");
+
+        let remote = std::process::Command::new("git")
+            .current_dir(&dest)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), url);
+    }
+
+    #[tokio::test]
+    async fn the_second_clone_reuses_the_mirror_rather_than_making_another() {
+        let tmp = TempDir::new().unwrap();
+        let (_origin, url) = upstream(tmp.path());
+        let cache = tmp.path().join("cache");
+
+        for name in ["first", "second"] {
+            let dest = tmp.path().join(name);
+            assert!(
+                derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
+                    .await
+                    .unwrap()
+            );
+        }
+        let mirrors: Vec<_> = fs::read_dir(&cache)
+            .unwrap()
+            .flatten()
+            .filter(|entry| cognia_task_workspace::is_mirror(&entry.path()))
+            .collect();
+        assert_eq!(mirrors.len(), 1, "one repository is one mirror");
+    }
+
+    #[tokio::test]
+    async fn a_derived_clone_shares_no_inode_with_the_mirror() {
+        // Several of these are handed to an agent with shell access on a path
+        // whose instructions come from an issue body anyone can file. One `>`
+        // into a shared pack file would corrupt the cache for everyone.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let tmp = TempDir::new().unwrap();
+            let (_origin, url) = upstream(tmp.path());
+            let cache = tmp.path().join("cache");
+            let dest = tmp.path().join("work");
+            assert!(
+                derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
+                    .await
+                    .unwrap()
+            );
+
+            let packs = |root: &Path| -> Vec<u64> {
+                let dir = root.join("objects").join("pack");
+                fs::read_dir(dir)
+                    .map(|entries| {
+                        entries
+                            .flatten()
+                            .filter_map(|entry| entry.metadata().ok().map(|meta| meta.ino()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let mirror = fs::read_dir(&cache)
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| cognia_task_workspace::is_mirror(path))
+                .expect("a mirror");
+            let shared: Vec<_> = packs(&mirror)
+                .into_iter()
+                .filter(|inode| packs(&dest.join(".git")).contains(inode))
+                .collect();
+            assert!(
+                shared.is_empty(),
+                "derived clone shares pack inodes: {shared:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_branch_the_mirror_does_not_have_falls_through_to_the_network() {
+        // The branch may have been created upstream since the last fetch. The
+        // caller then clones normally — and must not find a half-written
+        // directory where the workspace should be.
+        let tmp = TempDir::new().unwrap();
+        let (_origin, url) = upstream(tmp.path());
+        let cache = tmp.path().join("cache");
+        let dest = tmp.path().join("work");
+
+        let derived = derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "no-such", "")
+            .await
+            .unwrap();
+        assert!(!derived);
+        assert!(!dest.exists(), "left a half-written workspace behind");
+    }
+
+    #[tokio::test]
+    async fn an_unusable_remote_is_a_cache_miss_not_an_error() {
+        // Every failure here must cost a slow clone, never a broken run.
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join("cache");
+        let dest = tmp.path().join("work");
+        assert!(
+            !derive_from_mirror(&cache, "not a url", dest.to_str().unwrap(), "main", "")
+                .await
+                .unwrap()
+        );
+        assert!(!derive_from_mirror(
+            &cache,
+            "file:///nope/nowhere",
+            dest.to_str().unwrap(),
+            "main",
+            ""
+        )
+        .await
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_directory_that_is_not_a_bare_repository_is_replaced() {
+        // A previous attempt can die partway through; that leftover is garbage,
+        // not a cache, and treating it as one wedges the repository forever.
+        let tmp = TempDir::new().unwrap();
+        let (_origin, url) = upstream(tmp.path());
+        let cache = tmp.path().join("cache");
+        let junk = cognia_task_workspace::mirror_path(&cache, &url).unwrap();
+        fs::create_dir_all(junk.join("objects")).unwrap();
+        fs::write(junk.join("stray.txt"), b"half a clone").unwrap();
+
+        let dest = tmp.path().join("work");
+        assert!(
+            derive_from_mirror(&cache, &url, dest.to_str().unwrap(), "main", "")
+                .await
+                .unwrap()
+        );
+        assert!(cognia_task_workspace::is_mirror(&junk));
+        assert!(!junk.join("stray.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_stale_mirror_is_refreshed_before_it_is_used() {
+        let tmp = TempDir::new().unwrap();
+        let (origin, url) = upstream(tmp.path());
+        let cache = tmp.path().join("cache");
+        let first = tmp.path().join("first");
+        assert!(
+            derive_from_mirror(&cache, &url, first.to_str().unwrap(), "main", "")
+                .await
+                .unwrap()
+        );
+
+        // A new commit upstream, and a mirror whose stamp says it is old.
+        fs::write(origin.join("b.txt"), "second\n").unwrap();
+        sh(&origin, &["add", "b.txt"]);
+        sh(&origin, &["commit", "-m", "second"]);
+        let mirror = cognia_task_workspace::mirror_path(&cache, &url).unwrap();
+        fs::remove_file(mirror.join("cognia-fetched-at")).unwrap();
+
+        let second = tmp.path().join("second");
+        assert!(
+            derive_from_mirror(&cache, &url, second.to_str().unwrap(), "main", "")
+                .await
+                .unwrap()
+        );
+        assert!(
+            second.join("b.txt").exists(),
+            "the refresh did not pick up the new commit"
+        );
     }
 
     #[test]

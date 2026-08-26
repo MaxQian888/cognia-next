@@ -752,7 +752,14 @@ export async function gitInit(path: string): Promise<void> {
 export interface GitCloneGuards {
   /** Hosts beyond github.com / gitlab.com / bitbucket.org. */
   allowedHosts?: string[]
-  /** `--depth`; 0 clones full history. Default 1. */
+  /**
+   * `--depth`. 0 clones full history, which is the default.
+   *
+   * Opt-in rather than the default it used to be: a shallow clone cannot be
+   * rebased past its boundary, `git log` shows one commit, and `merge-base`
+   * cannot answer — while the same checkout is handed to callers that ask for
+   * exactly those. The host clones `--filter=blob:none` instead.
+   */
   depth?: number
   /** Reject (and delete) a checkout above this size. Default 500. */
   maxSizeMb?: number

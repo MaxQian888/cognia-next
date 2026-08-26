@@ -98,7 +98,14 @@ pub const DEFAULT_CLONE_HOSTS: &[&str] = &["github.com", "gitlab.com", "bitbucke
 pub struct CloneGuards {
     /// Extra hosts beyond [`DEFAULT_CLONE_HOSTS`].
     pub allowed_hosts: Vec<String>,
-    /// `--depth`; `0` clones full history. Default 1.
+    /// `--depth`. `0` clones full history, which is the default.
+    ///
+    /// Opt-in rather than the default it used to be: a shallow clone cannot be
+    /// rebased past its boundary, `git log` shows one commit, and
+    /// `merge-base` cannot answer — while this same helper hands the checkout
+    /// to callers that then ask for exactly those. `--filter=blob:none` below
+    /// keeps the whole commit graph and omits only historical file contents,
+    /// which is the size win without the amputation.
     pub depth: Option<u32>,
     /// Reject (and delete) a checkout larger than this. Default 500 MiB.
     pub max_size_mb: Option<u64>,
@@ -106,7 +113,8 @@ pub struct CloneGuards {
     pub timeout_secs: Option<u64>,
 }
 
-const CLONE_DEFAULT_DEPTH: u32 = 1;
+/// Full history by default. See [`CloneGuards::depth`].
+const CLONE_DEFAULT_DEPTH: u32 = 0;
 const CLONE_DEFAULT_MAX_SIZE_MB: u64 = 500;
 const CLONE_DEFAULT_TIMEOUT_SECS: u64 = 120;
 
@@ -182,15 +190,45 @@ fn dir_size_bytes(root: &std::path::Path) -> u64 {
     total
 }
 
+/// The argv for a guarded clone.
+///
+/// Split out so the depth-vs-filter choice is testable without a network: it
+/// is the difference between a checkout `git log` and `merge-base` can answer
+/// about and one they cannot.
+fn guarded_clone_args(depth: u32, remote_url: &str, destination: &std::path::Path) -> Vec<String> {
+    let mut args = vec!["clone".to_string()];
+    if depth > 0 {
+        args.push("--depth".to_string());
+        args.push(depth.to_string());
+        args.push("--single-branch".to_string());
+    } else {
+        // Partial, not shallow. The commit graph is what `git log`,
+        // `merge-base` and every rebase walk; the blobs are what take the
+        // space. A server that does not offer filters ignores this with a
+        // warning and sends everything, which is the old behaviour.
+        args.push("--filter=blob:none".to_string());
+    }
+    // `--` before the URL, or a remote beginning with `-` is read as a flag.
+    args.push("--".to_string());
+    args.push(remote_url.to_string());
+    args.push(destination.to_string_lossy().into_owned());
+    args
+}
+
 /// Clone with guard rails: https-only, host allow-list, no embedded
-/// credentials, shallow by default, under a wall-clock budget, and bounded in
+/// credentials, blobless by default, under a wall-clock budget, and bounded in
 /// size.
 ///
 /// The size bound is a **post-condition**, not a pre-emptive limit: git offers
 /// no reliable "stop at N bytes", so an oversized repository is cloned, then
-/// detected and deleted. The shallow default keeps the usual case small. The
-/// bare [`clone_repo`] stays as-is for the Source Control panel, where the user
-/// typed the URL themselves.
+/// detected and deleted. A pre-flight probe would have to ask the host how big
+/// the repository is, which is a per-forge API this crate deliberately cannot
+/// make — it has no network transport at all (see `Cargo.toml`), and adding a
+/// GitHub-shaped call to a generic helper would make it not generic. The
+/// blobless default is what keeps the usual case small.
+///
+/// The bare [`clone_repo`] stays as-is for the Source Control panel, where the
+/// user typed the URL themselves.
 pub async fn clone_repo_guarded(
     remote_url: &str,
     destination: &str,
@@ -223,16 +261,11 @@ async fn clone_repo_guarded_inner(
         GitError::CommandFailed(format!("create clone parent {}: {err}", parent.display()).into())
     })?;
 
-    let depth = guards.depth.unwrap_or(CLONE_DEFAULT_DEPTH);
-    let mut args = vec!["clone".to_string()];
-    if depth > 0 {
-        args.push("--depth".to_string());
-        args.push(depth.to_string());
-        args.push("--single-branch".to_string());
-    }
-    args.push("--".to_string());
-    args.push(remote_url.trim().to_string());
-    args.push(destination_path.to_string_lossy().into_owned());
+    let args = guarded_clone_args(
+        guards.depth.unwrap_or(CLONE_DEFAULT_DEPTH),
+        remote_url.trim(),
+        &destination_path,
+    );
 
     let budget = std::time::Duration::from_secs(
         guards
@@ -549,6 +582,52 @@ mod tests {
             errors_after > errors_before,
             "a failed clone must count as an error, not a success"
         );
+    }
+
+    #[test]
+    fn a_guarded_clone_keeps_the_history_it_will_be_asked_about() {
+        // The old default was `--depth 1`, while the same checkout is handed to
+        // callers that then run `git log`, `merge-base` and rebases against it.
+        let args = guarded_clone_args(
+            0,
+            "https://github.com/o/r.git",
+            std::path::Path::new("/dest"),
+        );
+        assert!(args.contains(&"--filter=blob:none".to_string()));
+        assert!(!args.iter().any(|arg| arg == "--depth"));
+        assert!(!args.iter().any(|arg| arg == "--single-branch"));
+    }
+
+    #[test]
+    fn an_explicit_depth_is_still_honoured() {
+        let args = guarded_clone_args(
+            1,
+            "https://github.com/o/r.git",
+            std::path::Path::new("/dest"),
+        );
+        assert_eq!(
+            args.iter()
+                .position(|arg| arg == "--depth")
+                .map(|index| args[index + 1].clone()),
+            Some("1".to_string())
+        );
+        // Dropping `--depth` used to drop the implied `--single-branch` with it.
+        assert!(args.contains(&"--single-branch".to_string()));
+        assert!(!args.contains(&"--filter=blob:none".to_string()));
+    }
+
+    #[test]
+    fn the_remote_can_never_be_read_as_a_flag() {
+        for depth in [0u32, 1] {
+            let args =
+                guarded_clone_args(depth, "--upload-pack=touch", std::path::Path::new("/dest"));
+            let separator = args.iter().position(|arg| arg == "--").unwrap();
+            let url = args
+                .iter()
+                .rposition(|arg| arg == "--upload-pack=touch")
+                .unwrap();
+            assert!(separator < url, "depth {depth}");
+        }
     }
 
     #[tokio::test]

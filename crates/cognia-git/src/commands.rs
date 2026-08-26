@@ -7,17 +7,15 @@
 
 use tauri::{AppHandle, State};
 
+use super::branch::DefaultBranch;
 use super::error::GitError;
+use super::stack::{RestackOutcome, StackCapabilities, StackLayerState, StackPushOutcome};
 use super::types::{
     AheadBehind, ConflictSide, GitBlameLine, GitBranch, GitCommit, GitConflict, GitDiff,
     GitFileChange, GitFileDiffStat, GitIdentity, GitRef, GitRemote, GitRepoState, GitStashEntry,
     GitStatus, GitTag, GitWorktree, RebaseTodoEntry,
 };
 use super::watcher::GitWatcherState;
-use super::branch::DefaultBranch;
-use super::stack::{
-    RestackOutcome, StackCapabilities, StackLayerState, StackPushOutcome,
-};
 use super::{
     blame, branch, commit, diff, diff_stat, history, interactive_rebase, merge, read, remote, repo,
     reset, restore, sequencer, stack, stage, stash, status, tag, worktree,

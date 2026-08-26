@@ -68,15 +68,21 @@ pub fn start_workspace_maintenance() {
     };
     handle.spawn(async {
         loop {
+            // Mirrors are ours, not the user's repositories, so they are
+            // reclaimed on the same schedule as the workspaces they serve.
+            let mirrors = crate::github::workspace::reclaim_stale_mirrors().await;
             let result = run_workspace_maintenance_once().await;
             match result {
                 Ok(outcome) => log::info!(
-                    "task workspace maintenance completed: reclaimed={}, snapshots={}, blobs={}",
+                    "task workspace maintenance completed: reclaimed={}, snapshots={}, blobs={}, mirrors={}",
                     outcome.reclaimed_workspace_ids.len(),
                     outcome.expired_snapshot_task_ids.len(),
-                    outcome.removed_blob_count
+                    outcome.removed_blob_count,
+                    mirrors
                 ),
-                Err(error) => log::warn!("task workspace maintenance failed: {error}"),
+                Err(error) => log::warn!(
+                    "task workspace maintenance failed: {error} (mirrors reclaimed: {mirrors})"
+                ),
             }
             tokio::time::sleep(MAINTENANCE_INTERVAL).await;
         }

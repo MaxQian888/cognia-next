@@ -308,7 +308,10 @@ mod tests {
         fs::write(root.join("a.txt"), "hi\n").unwrap();
         sh(&root, &["add", "a.txt"]);
         sh(&root, &["commit", "-m", "init"]);
-        sh(&root, &["remote", "add", "origin", "https://example.invalid/o/r.git"]);
+        sh(
+            &root,
+            &["remote", "add", "origin", "https://example.invalid/o/r.git"],
+        );
         let path = root.to_str().unwrap().to_string();
         (tmp, path)
     }
@@ -319,7 +322,14 @@ mod tests {
         let root = std::path::Path::new(&path);
         // What `git clone` leaves behind: a tracking ref and a HEAD pointing at it.
         sh(root, &["update-ref", "refs/remotes/origin/release", "HEAD"]);
-        sh(root, &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/release"]);
+        sh(
+            root,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/release",
+            ],
+        );
 
         let resolved = default_branch(&path, "origin").await.unwrap();
         assert_eq!(resolved.branch, "release");
@@ -382,7 +392,10 @@ mod tests {
         let resolved = default_branch(&path, "origin").await.unwrap();
         assert_eq!(resolved.branch, "prod");
         assert_eq!(resolved.source, DefaultBranchSource::Guess);
-        assert!(resolved.exists, "the configured guess happens to be real here");
+        assert!(
+            resolved.exists,
+            "the configured guess happens to be real here"
+        );
         let _ = tmp;
     }
 
