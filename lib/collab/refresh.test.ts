@@ -3,7 +3,8 @@
 import { getDb } from "@/lib/db/schema"
 import { createDbTestFixture } from "@/lib/db/test-fixture"
 import { listCollabIssues } from "@/lib/db/collab-issue-mirror"
-import { resolvePersonStanding } from "@/lib/db/identity"
+import { listWorkspaceRoster, resolvePersonStanding } from "@/lib/db/identity"
+import { listCollabWorkspaces } from "@/lib/db/collab-workspace-mirror"
 import { saveCollabConnection, forgetCollabConnection } from "./connection"
 import { refreshCollabPlane, refreshCollabPlaneQuietly } from "./refresh"
 
@@ -19,8 +20,10 @@ beforeEach(async () => {
   const db = getDb()
   await Promise.all([
     db.collabIssues.clear(),
+    db.collabWorkspaces.clear(),
     db.orgMemberships.clear(),
     db.workspaceMemberships.clear(),
+    db.users.clear(),
   ])
   forgetCollabConnection(ACCOUNT)
 })
@@ -34,6 +37,9 @@ function registryReturning(binding: unknown) {
 interface Routes {
   memberships?: unknown
   issues?: unknown[]
+  workspaces?: unknown[]
+  /** Keyed by workspace id. A missing entry answers 403, like a revoked seat. */
+  rosters?: Record<string, unknown[]>
 }
 
 /** jsdom's `Response` has no static `json`, so build the body by hand. */
@@ -58,6 +64,15 @@ function fetchReturning(routes: Routes) {
     }
     if (input.includes("/memberships/me")) {
       return jsonResponse(routes.memberships ?? { userId: ADA, orgId: ORG, workspaces: [] })
+    }
+    const roster = input.match(/\/workspaces\/([^/]+)\/members$/)
+    if (roster) {
+      const members = routes.rosters?.[roster[1]!]
+      if (!members) return new Response("{}", { status: 403 })
+      return jsonResponse(members)
+    }
+    if (input.endsWith("/workspaces")) {
+      return jsonResponse(routes.workspaces ?? [])
     }
     return jsonResponse(routes.issues ?? [])
   }
@@ -240,5 +255,91 @@ describe("refreshCollabPlaneQuietly", () => {
       accessToken: async () => "logto-token",
     }
     expect(await refreshCollabPlaneQuietly(options)).toBeNull()
+  })
+})
+
+describe("refreshCollabPlane — workspaces and their rosters", () => {
+  beforeEach(() => {
+    saveCollabConnection(ACCOUNT, { baseUrl: "https://collab.example" })
+  })
+
+  function workspaceRoutes(rosters: Record<string, unknown[]>): Routes {
+    return {
+      memberships: {
+        userId: ADA,
+        orgId: ORG,
+        orgRole: "member",
+        workspaces: [{ workspaceId: "proj-1", role: "member" }],
+      },
+      workspaces: [{ id: "proj-1", orgId: ORG, name: "Mercury", createdAt: 1, updatedAt: 2 }],
+      rosters,
+    }
+  }
+
+  it("mirrors the name a guest has no other way to learn", async () => {
+    // Somebody invited into a workspace they did not create holds no local
+    // `projects` row for it, so without this they see an opaque id.
+    const { options } = deps(workspaceRoutes({ "proj-1": [] }))
+    await refreshCollabPlane(options)
+    expect((await listCollabWorkspaces(ORG)).map((row) => row.name)).toEqual(["Mercury"])
+  })
+
+  it("fills a roster that shows more than the caller", async () => {
+    // `memberships/me` reports only the caller, so without the roster the
+    // projection knows exactly one person per workspace — not a roster.
+    const { options } = deps(
+      workspaceRoutes({
+        "proj-1": [
+          { userId: ADA, displayName: "Ada", role: "member", orgMember: true },
+          { userId: "usr_cleo", displayName: "Cleo", role: "viewer", orgMember: false },
+        ],
+      })
+    )
+    const result = await refreshCollabPlane(options)
+    expect(result).toMatchObject({ members: 2 })
+
+    const roster = await listWorkspaceRoster("proj-1")
+    expect(roster.map((entry) => [entry.user?.displayName, entry.guest])).toEqual([
+      ["Ada", false],
+      ["Cleo", true],
+    ])
+  })
+
+  it("drops somebody the roster no longer lists", async () => {
+    const before = deps(
+      workspaceRoutes({
+        "proj-1": [
+          { userId: ADA, displayName: "Ada", role: "member", orgMember: true },
+          { userId: "usr_cleo", displayName: "Cleo", role: "viewer", orgMember: false },
+        ],
+      })
+    )
+    await refreshCollabPlane(before.options)
+
+    const after = deps(
+      workspaceRoutes({
+        "proj-1": [{ userId: ADA, displayName: "Ada", role: "member", orgMember: true }],
+      })
+    )
+    await refreshCollabPlane(after.options)
+    expect(await listWorkspaceRoster("proj-1")).toHaveLength(1)
+  })
+
+  it("keeps the other workspaces when one roster is refused", async () => {
+    // Read access can be revoked between the listing and the roster call.
+    // Emptying a roster because of that race is the worse answer.
+    const seeded = deps(
+      workspaceRoutes({
+        "proj-1": [{ userId: ADA, displayName: "Ada", role: "member", orgMember: true }],
+      })
+    )
+    await refreshCollabPlane(seeded.options)
+
+    const refused = deps(workspaceRoutes({}))
+    const result = await refreshCollabPlane(refused.options)
+    expect(result).toMatchObject({ members: 0 })
+    // The workspace is still mirrored, and its roster was left alone.
+    expect(await listCollabWorkspaces(ORG)).toHaveLength(1)
+    expect(await listWorkspaceRoster("proj-1")).toHaveLength(1)
   })
 })

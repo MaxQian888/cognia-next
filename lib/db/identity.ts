@@ -239,6 +239,125 @@ export async function findUserIdByProviderSubject(
   return rows[0]?.userId
 }
 
+/** One workspace member, with the guest question already answered. */
+export interface WorkspaceRosterEntry {
+  membership: WorkspaceMembership
+  /** Absent when the projection holds a membership but not yet the person. */
+  user?: User
+  /**
+   * Workspace membership without membership in the Org that owns it —
+   * ADR-0149 §4. Derived on every read; nothing stores it, so a promotion
+   * needs no second write and cannot be forgotten.
+   */
+  guest: boolean
+}
+
+/**
+ * Everyone in a workspace, each marked guest or not.
+ *
+ * One `orgMemberships` read per distinct Org rather than per member: a
+ * workspace's members almost all share its Org, so the per-member query would
+ * ask the same question N times.
+ */
+export async function listWorkspaceRoster(workspaceId: string): Promise<WorkspaceRosterEntry[]> {
+  const memberships = await listWorkspaceMembers(workspaceId)
+  if (memberships.length === 0) return []
+
+  const db = getDb()
+  const [users, orgMemberships] = await Promise.all([
+    listUsers([...new Set(memberships.map((membership) => membership.userId))]),
+    db.orgMemberships
+      .where("orgId")
+      .anyOf([...new Set(memberships.map((membership) => membership.orgId))])
+      .toArray(),
+  ])
+
+  const usersById = new Map(users.map((user) => [user.id, user]))
+  const inOrg = new Set(orgMemberships.map((row) => `${row.orgId}:${row.userId}`))
+
+  return memberships
+    .map((membership) => {
+      const user = usersById.get(membership.userId)
+      return {
+        membership,
+        ...(user ? { user } : {}),
+        guest: !inOrg.has(`${membership.orgId}:${membership.userId}`),
+      }
+    })
+    .sort((left, right) =>
+      (left.user?.displayName ?? left.membership.userId).localeCompare(
+        right.user?.displayName ?? right.membership.userId
+      )
+    )
+}
+
+export interface RosterMemberInput {
+  userId: string
+  displayName: string
+  role: WorkspaceRole
+  /** Whether the server says this person also belongs to the owning Org. */
+  orgMember: boolean
+}
+
+/**
+ * Replace one workspace's roster with what the server reported.
+ *
+ * Scoped to that workspace: the projection holds rows for other workspaces
+ * this pull was never told about, and wiping the org would delete facts rather
+ * than refresh them.
+ *
+ * Writes an `orgMemberships` row for a member the server says is in the org,
+ * and removes one for a member it says is not — because `guest` is derived
+ * from exactly that absence. A stale org membership here is the difference
+ * between somebody reading as a colleague and reading as a guest.
+ */
+export async function replaceWorkspaceRoster(input: {
+  workspaceId: string
+  orgId: string
+  members: readonly RosterMemberInput[]
+  now?: number
+}): Promise<void> {
+  const now = input.now ?? Date.now()
+  const keep = new Set(input.members.map((member) => member.userId))
+
+  const existing = await listWorkspaceMembers(input.workspaceId)
+  for (const row of existing) {
+    if (!keep.has(row.userId)) {
+      await removeWorkspaceMembership(input.workspaceId, row.userId)
+    }
+  }
+
+  for (const member of input.members) {
+    const existingUser = await getUser(member.userId)
+    await upsertUser({
+      id: member.userId,
+      displayName: member.displayName || existingUser?.displayName || member.userId,
+      ...(existingUser?.email ? { email: existingUser.email } : {}),
+      ...(existingUser?.avatarUrl ? { avatarUrl: existingUser.avatarUrl } : {}),
+      createdAt: existingUser?.createdAt ?? now,
+      updatedAt: now,
+    })
+    await putWorkspaceMembership({
+      workspaceId: input.workspaceId,
+      orgId: input.orgId,
+      userId: member.userId,
+      role: member.role,
+      now,
+    })
+    if (member.orgMember) {
+      const current = await getOrgMembership(input.orgId, member.userId)
+      // Only fill an absent one: the roster reports THAT somebody is in the
+      // org, not with which role, and inventing `member` would overwrite an
+      // owner with a demotion nobody asked for.
+      if (!current) {
+        await putOrgMembership({ orgId: input.orgId, userId: member.userId, role: "member", now })
+      }
+    } else {
+      await removeOrgMembership(input.orgId, member.userId)
+    }
+  }
+}
+
 /**
  * Where this person stands across every Org on this machine.
  *

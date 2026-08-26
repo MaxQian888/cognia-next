@@ -142,6 +142,7 @@ import type {
 import type { LabelRow } from "@/types/labels"
 import type { Issue, IssueCounter, IssueEvent, IssueProject, IssueRun } from "@/types/issues"
 import type { CollabIssueMirrorRow } from "./collab-issue-mirror-types"
+import type { CollabWorkspaceMirrorRow } from "./collab-workspace-mirror-types"
 import type { GithubIssueMirrorRow } from "./github-issue-mirror-types"
 import type {
   WorkflowRow,
@@ -4638,6 +4639,16 @@ export class CogniaDB extends Dexie {
       externalIdentities: "&id, userId, provider, subject, linkedAt",
     })
 
+    // ADR-0149 §6 — the collaboration plane's workspace mirror. A REBUILDABLE
+    // read-through cache, like `collabIssues`: it exists so somebody invited
+    // into a workspace they did not create has a NAME to look at rather than
+    // an opaque id, which is exactly the guest's situation. Roots, trust and
+    // provisioning are not here on purpose — those are local facts about one
+    // machine's checkout (ADR-0144 / ADR-0147).
+    this.version(197).stores({
+      collabWorkspaces: "&id, orgId, name, updatedAt, fetchedAt",
+    })
+
     // First full-chain construction under Jest: cache the merged spec so every
     // later construction in this worker takes the collapsed fast path above.
     if (isSchemaCollapseEnabled() && !collapsedSchemaCacheSlot().__cogniaCollapsedSchema) {
@@ -4656,6 +4667,9 @@ export class CogniaDB extends Dexie {
   // v195 — ADR-0149 collaboration-plane issue mirror. Rebuildable cache; see
   // `lib/db/collab-issue-mirror.ts`.
   collabIssues!: Table<CollabIssueMirrorRow, string>
+  // v197 — ADR-0149 collaboration-plane workspace mirror. Rebuildable cache;
+  // see `lib/db/collab-workspace-mirror.ts`.
+  collabWorkspaces!: Table<CollabWorkspaceMirrorRow, string>
   // v141 — Skill recorder source versions (ADR-0106). Provenance + review
   // edits only; the capture itself lives in the native bundle. See
   // `lib/db/skill-recordings.ts`.

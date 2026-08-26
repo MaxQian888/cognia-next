@@ -1,6 +1,8 @@
 import {
   findUserIdByExternalIdentity,
   findUserIdByProviderSubject,
+  listWorkspaceRoster,
+  replaceWorkspaceRoster,
   resolvePersonStanding,
   getOrg,
   getOrgMembership,
@@ -380,5 +382,121 @@ describe("resolvePersonStanding", () => {
       now: 1,
     })
     expect(await resolvePersonStanding("usr_ada")).toBe("org-member")
+  })
+})
+
+describe("workspace roster", () => {
+  const ORG = "org_acme"
+  const WORKSPACE = "proj_1"
+
+  it("marks the member without Org membership as a guest", async () => {
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "maintainer", orgMember: true },
+        { userId: "usr_bob", displayName: "Bob", role: "viewer", orgMember: false },
+      ],
+      now: 1,
+    })
+
+    const roster = await listWorkspaceRoster(WORKSPACE)
+    expect(roster.map((entry) => [entry.user?.displayName, entry.guest])).toEqual([
+      ["Ada", false],
+      ["Bob", true],
+    ])
+  })
+
+  it("stops calling somebody a guest the moment they join the Org", async () => {
+    // Derived on every read, so a promotion needs no second write. A stored
+    // flag would still say "guest" here.
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [{ userId: "usr_bob", displayName: "Bob", role: "viewer", orgMember: false }],
+      now: 1,
+    })
+    expect((await listWorkspaceRoster(WORKSPACE))[0]?.guest).toBe(true)
+
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [{ userId: "usr_bob", displayName: "Bob", role: "viewer", orgMember: true }],
+      now: 2,
+    })
+    expect((await listWorkspaceRoster(WORKSPACE))[0]?.guest).toBe(false)
+  })
+
+  it("does not demote an existing org role to `member`", async () => {
+    // The roster reports THAT somebody is in the org, not with which role.
+    // Writing `member` over an owner is a demotion nobody asked for.
+    await putOrgMembership({ orgId: ORG, userId: "usr_ada", role: "owner", now: 1 })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [{ userId: "usr_ada", displayName: "Ada", role: "member", orgMember: true }],
+      now: 2,
+    })
+    expect((await getOrgMembership(ORG, "usr_ada"))?.role).toBe("owner")
+  })
+
+  it("drops somebody the roster no longer lists, and only in that workspace", async () => {
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada", role: "member", orgMember: true },
+        { userId: "usr_bob", displayName: "Bob", role: "viewer", orgMember: false },
+      ],
+      now: 1,
+    })
+    await replaceWorkspaceRoster({
+      workspaceId: "proj_2",
+      orgId: ORG,
+      members: [{ userId: "usr_bob", displayName: "Bob", role: "viewer", orgMember: false }],
+      now: 1,
+    })
+
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [{ userId: "usr_ada", displayName: "Ada", role: "member", orgMember: true }],
+      now: 2,
+    })
+
+    expect(await listWorkspaceRoster(WORKSPACE)).toHaveLength(1)
+    // The other workspace was never mentioned, so it was not touched.
+    expect(await listWorkspaceRoster("proj_2")).toHaveLength(1)
+  })
+
+  it("keeps a person's email and creation time across a roster refresh", async () => {
+    // The roster carries a display name and nothing else; overwriting the rest
+    // of the person with blanks would lose what sign-in learned.
+    await upsertUser({
+      id: "usr_ada",
+      displayName: "Ada",
+      email: "ada@example.dev",
+      createdAt: 5,
+      updatedAt: 5,
+    })
+    await replaceWorkspaceRoster({
+      workspaceId: WORKSPACE,
+      orgId: ORG,
+      members: [
+        { userId: "usr_ada", displayName: "Ada Lovelace", role: "member", orgMember: true },
+      ],
+      now: 9,
+    })
+
+    const user = await getUser("usr_ada")
+    expect(user).toMatchObject({
+      displayName: "Ada Lovelace",
+      email: "ada@example.dev",
+      createdAt: 5,
+    })
+  })
+
+  it("is empty for a workspace nobody was recruited into", async () => {
+    expect(await listWorkspaceRoster("proj_empty")).toEqual([])
   })
 })

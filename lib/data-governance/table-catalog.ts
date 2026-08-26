@@ -100,6 +100,7 @@ export const CORE_TABLE_NAMES = [
   "chatTurnSummaries",
   "codeAdoptionTurns",
   "collabIssues",
+  "collabWorkspaces",
   "connectorAttachments",
   "connectorAudit",
   "connectorCallbackBindings",
@@ -479,6 +480,7 @@ const CACHE_TABLES = new Set<CoreTableName>([
   "chatSearchText",
   "chatTranscriptIndexState",
   "collabIssues",
+  "collabWorkspaces",
   "githubIssueMirror",
   "hostSyncCursors",
   "knowledgeBaseChunks",
@@ -538,6 +540,7 @@ const QUICK_CLEANUP_TABLES = new Set<CoreTableName>([
   "chatSearchText",
   "chatTranscriptIndexState",
   "collabIssues",
+  "collabWorkspaces",
   "githubIssueMirror",
   "knowledgeBaseChunks",
   "modelsDevCatalog",
@@ -616,6 +619,7 @@ const SECRET_TABLES = new Set<CoreTableName>(["tts_provider_keys"])
 /** Stores whose rows hold encrypted user content rather than ids and metadata. */
 const CONFIDENTIAL_TABLES = new Set<CoreTableName>([
   "collabIssues",
+  "collabWorkspaces",
   "githubIssueMirror",
   "hostDispatchQueue",
   "issueEvents",

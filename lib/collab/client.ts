@@ -64,6 +64,30 @@ export interface CollabMemberships {
   workspaces: { workspaceId: string; role: WorkspaceRole }[]
 }
 
+/** A workspace as the plane knows it — ADR-0149 §6. */
+export interface CollabWorkspace {
+  /** The local `projectId`, unchanged. */
+  id: string
+  orgId: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * One seat in a workspace.
+ *
+ * `orgMember` is the raw fact, not a verdict: whether this person is a guest
+ * is `personStandingFrom`'s answer, and the server deliberately does not give
+ * a second one.
+ */
+export interface CollabWorkspaceMember {
+  userId: string
+  displayName: string
+  role: WorkspaceRole
+  orgMember: boolean
+}
+
 interface MintedGrant {
   grant: string
   userId: string
@@ -149,6 +173,19 @@ export class CollabClient {
     return this.json<CollabMemberships>(
       orgId,
       `/v1/orgs/${encodeURIComponent(orgId)}/memberships/me`
+    )
+  }
+
+  /** Workspaces this person can see in `orgId`, narrowed by the server. */
+  async listWorkspaces(orgId: string): Promise<CollabWorkspace[]> {
+    return this.json<CollabWorkspace[]>(orgId, `/v1/orgs/${encodeURIComponent(orgId)}/workspaces`)
+  }
+
+  /** Everyone in one workspace. Requires read access to it, not just its id. */
+  async listWorkspaceMembers(orgId: string, workspaceId: string): Promise<CollabWorkspaceMember[]> {
+    return this.json<CollabWorkspaceMember[]>(
+      orgId,
+      `/v1/orgs/${encodeURIComponent(orgId)}/workspaces/${encodeURIComponent(workspaceId)}/members`
     )
   }
 

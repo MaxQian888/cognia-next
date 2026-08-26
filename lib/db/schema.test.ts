@@ -592,6 +592,18 @@ describe("getDb", () => {
     )
   })
 
+  it("v197 opens the collaboration workspace mirror", async () => {
+    const db = getDb()
+    await db.open()
+
+    expect(db.verno).toBeGreaterThanOrEqual(197)
+    expect(db.collabWorkspaces.schema.primKey.name).toBe("id")
+    // Read by org on every refresh, and sorted by name for the roster page.
+    expect(db.collabWorkspaces.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["orgId", "name", "updatedAt", "fetchedAt"])
+    )
+  })
+
   it("v196 indexes the external subject the IM plane resolves people by", async () => {
     const db = getDb()
     await db.open()

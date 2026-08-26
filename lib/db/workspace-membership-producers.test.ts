@@ -8,10 +8,12 @@
  * ever be in. The test walked the tree for a writer and asserted there was
  * none, so the claim in the ADR could not rot into a stale comment.
  *
- * Batch 7 gave it one. `pullCollabMemberships` writes what the collaboration
- * server says this person holds, which is what makes a guest reachable. The
- * test survives, inverted: there must be exactly one writer, and it must be
- * that one.
+ * Batch 7 gave it one. `lib/collab/sync.ts` writes what the collaboration
+ * server says — `pullCollabMemberships` for the caller's own seats, and
+ * `pullCollabWorkspaces` for everybody else's, through the accessor's
+ * `replaceWorkspaceRoster`. That is what makes a guest reachable, and visible
+ * to somebody other than themselves. The test survives, inverted: there must
+ * be exactly one writer, and it must be that module.
  *
  * # Why one, and not "at least one"
  *

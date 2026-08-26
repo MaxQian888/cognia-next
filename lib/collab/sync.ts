@@ -15,12 +15,15 @@
 
 import { replaceCollabIssues } from "@/lib/db/collab-issue-mirror"
 import type { CollabIssueMirrorRow } from "@/lib/db/collab-issue-mirror-types"
+import { replaceCollabWorkspaces } from "@/lib/db/collab-workspace-mirror"
+import type { CollabWorkspaceMirrorRow } from "@/lib/db/collab-workspace-mirror-types"
 import {
   listWorkspacesForUser,
   putOrgMembership,
   putWorkspaceMembership,
   removeOrgMembership,
   removeWorkspaceMembership,
+  replaceWorkspaceRoster,
 } from "@/lib/db/identity"
 
 import type { CollabClient, CollabIssue } from "./client"
@@ -162,4 +165,84 @@ export async function pullCollabMemberships(
     workspaces: memberships.workspaces.length,
     orgMember: Boolean(memberships.orgRole),
   }
+}
+
+export interface PullCollabWorkspacesResult {
+  /** Workspaces the mirror now holds for this org. */
+  workspaces: number
+  /** People across every roster pulled, counting somebody in two once each. */
+  members: number
+  fetchedAt: number
+}
+
+/**
+ * Refresh one org's workspaces and their rosters — ADR-0149 §6.
+ *
+ * # Why the roster comes with the workspace
+ *
+ * A guest holds a workspace they did not create, so they have no local
+ * `projects` row for it and no way to learn its name. And a roster is what
+ * makes "guest" visible to anybody but the guest: `pullCollabMemberships`
+ * reports only the caller, so without this the projection knows exactly one
+ * person per workspace — which is not a roster.
+ *
+ * # One request per workspace, and that is the cost
+ *
+ * The server scopes a roster to the workspace it belongs to, so there is no
+ * single call that returns all of them. The fan-out is bounded by how many
+ * workspaces this person can see, which is small by construction — but it is a
+ * real cost and it is why this runs on refresh rather than per render.
+ *
+ * A roster that fails leaves that workspace's rows alone and does not abort the
+ * rest: one workspace losing read access must not blank the others.
+ */
+export async function pullCollabWorkspaces(
+  client: CollabClient,
+  scope: { orgId: string },
+  deps: PullCollabIssuesDeps = {}
+): Promise<PullCollabWorkspacesResult> {
+  const now = deps.now ?? (() => Date.now())
+  const fetchedAt = now()
+
+  const workspaces = await client.listWorkspaces(scope.orgId)
+  const rows: CollabWorkspaceMirrorRow[] = workspaces
+    // Defensive, like the issue pull: a server answering about another org
+    // must not have its answer filed under this one.
+    .filter((workspace) => workspace.orgId === scope.orgId)
+    .map((workspace) => ({
+      id: workspace.id,
+      orgId: workspace.orgId,
+      name: workspace.name,
+      createdAt: workspace.createdAt,
+      updatedAt: workspace.updatedAt,
+      fetchedAt,
+    }))
+  await replaceCollabWorkspaces(scope.orgId, rows)
+
+  let members = 0
+  for (const workspace of rows) {
+    let roster
+    try {
+      roster = await client.listWorkspaceMembers(scope.orgId, workspace.id)
+    } catch {
+      // Read access to one workspace can be revoked between the listing and
+      // the roster call. Leaving its rows untouched is right: the alternative
+      // is emptying a roster because of a race.
+      continue
+    }
+    await replaceWorkspaceRoster({
+      workspaceId: workspace.id,
+      orgId: scope.orgId,
+      members: roster.map((member) => ({
+        userId: member.userId,
+        displayName: member.displayName,
+        role: member.role,
+        orgMember: member.orgMember,
+      })),
+      now: fetchedAt,
+    })
+    members += roster.length
+  }
+
+  return { workspaces: rows.length, members, fetchedAt }
 }

@@ -34,7 +34,7 @@ import { createPlatformFetch } from "@/lib/network/platform-fetch"
 
 import { CollabClient, type CollabFetch } from "./client"
 import { loadCollabConnection } from "./connection"
-import { pullCollabIssues, pullCollabMemberships } from "./sync"
+import { pullCollabIssues, pullCollabMemberships, pullCollabWorkspaces } from "./sync"
 
 const log = loggers.shell
 
@@ -53,7 +53,10 @@ export type RefreshCollabPlaneResult =
       orgId: string
       userId: string
       issues: number
+      /** Workspaces this person holds, from `memberships/me`. */
       workspaces: number
+      /** People across every roster pulled — 0 until a roster is readable. */
+      members: number
       orgMember: boolean
     }
 
@@ -108,6 +111,14 @@ export async function refreshCollabPlane(
     { orgId: binding.orgId },
     ...(deps.now ? [{ now: deps.now }] : [])
   )
+  // Workspaces second: their rosters write OTHER people into the projection,
+  // and doing that before this caller's own memberships are settled would let
+  // a roster's `orgMember` fact race the authoritative answer about oneself.
+  const workspaces = await pullCollabWorkspaces(
+    client,
+    { orgId: binding.orgId },
+    ...(deps.now ? [{ now: deps.now }] : [])
+  )
   const issues = await pullCollabIssues(
     client,
     { orgId: binding.orgId },
@@ -120,6 +131,7 @@ export async function refreshCollabPlane(
     userId: memberships.userId,
     issues: issues.count,
     workspaces: memberships.workspaces,
+    members: workspaces.members,
     orgMember: memberships.orgMember,
   }
 }
