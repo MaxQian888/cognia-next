@@ -32,11 +32,14 @@ import { Label } from "@/components/ui/label"
 import { getConnectorDeliveryGateway } from "@/lib/connectors/delivery-gateway"
 import { waitForOutboundTerminal } from "@/lib/db/outbound-jobs"
 import { newIdempotencyKey } from "@/types/connectors/outbound"
-import { isTauri } from "@/lib/tauri"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundResult } from "@/types/connectors/outbound"
 import type { ConversationReference } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 export interface SendTestMessageSectionProps {
   adapterId: string
@@ -129,7 +132,8 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
   const [body, setBody] = useState(t("defaultBody"))
   const [sending, setSending] = useState(false)
   const [result, setResult] = useState<OutboundResult | null>(null)
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
   const sendUnsupported = REPLY_ONLY_PLATFORMS.has(platform)
 
   const requestForTarget = () => {
@@ -271,11 +275,7 @@ export function SendTestMessageSection({ adapterId, platform }: SendTestMessageS
             )}
             {t("sendButton")}
           </Button>
-          {!desktop && (
-            <span className="text-[10px] text-amber-700 dark:text-amber-400">
-              {t("desktopOnly")}
-            </span>
-          )}
+          <ConnectorHostNotice reach={reach} className="text-[10px]" />
         </div>
 
         <details className="rounded-md border px-3 py-2 text-xs">

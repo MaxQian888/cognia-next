@@ -19,7 +19,8 @@ jest.mock("@/lib/db/outbound-jobs", () => ({
   waitForOutboundTerminal: (...args: unknown[]) => mockWaitForOutboundTerminal(...args),
 }))
 
-jest.mock("@/lib/tauri", () => ({ isTauri: () => true }))
+const hostProfile = "desktop"
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfile }))
 
 import { SendTestMessageSection } from "./send-test-message-section"
 

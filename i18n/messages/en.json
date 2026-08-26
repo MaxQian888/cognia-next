@@ -6887,6 +6887,18 @@
         "upstream_impl_unsupported": "The server this bot connects to does not implement {detail}."
       }
     },
+    "control": {
+      "block": {
+        "needs-desktop-shell": "This one needs the desktop app itself, not just a running bot.",
+        "no-runtime": "This browser is not paired with anything that runs bots, so there is no connector to configure.",
+        "runs-on-host": "This bot runs on the host you paired with. These controls talk to that runtime directly, and a browser has no route to it — replying, approving drafts and per-conversation settings do reach it, and keep working here."
+      },
+      "nextStep": {
+        "needs-desktop-shell": "Open Cognia on your desktop to use it.",
+        "no-runtime": "Open Cognia on your desktop, or pair this browser with a host that is running one.",
+        "runs-on-host": "Open Cognia on the host running this bot to change it."
+      }
+    },
     "identityMerge": {
       "cancel": "Cancel",
       "description": "Select which identity to keep as primary. The secondary identity's id will be recorded in the primary's merge history.",
@@ -29115,7 +29127,6 @@
           "recommendedAvatarHint": "Use the generated avatar for this Lark app.",
           "recommendedAvatarTitle": "Recommended avatar",
           "reprobeButton": "Re-probe",
-          "requiresDesktop": "Bot identity probe requires the desktop runtime.",
           "tenant": "Tenant",
           "title": "Bot identity",
           "unknown": "Identity has not been probed yet. Click \"Probe identity\" after saving credentials.",
@@ -29293,7 +29304,6 @@
         "adapterCount": "{count} adapter registered",
         "adapterCountPlural": "{count} adapters registered",
         "adaptersHeading": "Adapters",
-        "desktopOnlyNotice": "Platform connectors require the desktop (Tauri) runtime.",
         "disabledBadge": "disabled",
         "noAdapters": "No adapters configured yet.",
         "noRecentActivity": "No recent activity.",
@@ -29443,7 +29453,6 @@
         },
         "chatIdLabel": "Target chat / channel id",
         "defaultBody": "[cognia] Test message from the Adapters → Config tab.",
-        "desktopOnly": "Sending requires the desktop runtime so the adapter is registered with the bus.",
         "intro": "Queue a governed end-to-end test and wait for delivery. This exercises quiet hours, FIFO, retry, rate limits, and the circuit breaker.",
         "pendingResult": "The job is still queued or retrying. Check the Outbound tab for progress.",
         "probeButton": "Run direct transport probe",
@@ -29796,8 +29805,7 @@
         "windowToday": "Today"
       },
       "webModeBanner": {
-        "ariaLabel": "Web mode banner",
-        "body": "Adapters require the desktop app — open Cognia on your desktop to configure connectors. Already-configured conversations sync read-only here."
+        "ariaLabel": "Web mode banner"
       },
       "wechatOa": {
         "adapterCreated": "WeChat Official Account added",

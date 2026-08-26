@@ -10,7 +10,10 @@ import { LinkIcon, MonitorIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { usePlatform } from "@/hooks/use-platform"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 import { OverviewTab } from "./tabs/overview-tab"
 import { AdaptersTab } from "./tabs/adapters-tab"
 import { OutboundTab } from "./tabs/outbound-tab"
@@ -53,7 +56,7 @@ export function ConnectionsSection() {
     router.replace(`?${next.toString()}`, { scroll: false })
   }
 
-  const desktop = usePlatform() === "tauri"
+  const reach = useConnectorControlReach()
 
   // Tab bodies that are plain content scroll as a single block inside the fixed
   // frame. The Adapters tab owns a master-detail layout that manages its own
@@ -72,10 +75,16 @@ export function ConnectionsSection() {
         <p className="text-xs text-muted-foreground">{t("description")}</p>
       </div>
 
-      {!desktop && (
+      {/* The banner used to say "Adapters require the desktop app" on every
+       * non-Tauri shell. That is false for a companion — its adapters are
+       * running on the paired host, and the Inbox next door is replying
+       * through the relay — so the reason now comes from the host resolver. */}
+      {!reach.available && (
         <Alert role="status" aria-label={t("webModeBanner.ariaLabel")} className="shrink-0">
           <MonitorIcon className="size-4" />
-          <AlertDescription>{t("webModeBanner.body")}</AlertDescription>
+          <AlertDescription>
+            <ConnectorHostNotice reach={reach} className="text-inherit" />
+          </AlertDescription>
         </Alert>
       )}
 

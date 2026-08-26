@@ -36,7 +36,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-import { isTauri } from "@/lib/tauri"
 import { probeTelegramIdentity, TelegramWhoamiError } from "@/lib/connectors/whoami/telegram-whoami"
 import { probeDiscordIdentity, DiscordWhoamiError } from "@/lib/connectors/whoami/discord-whoami"
 import { probeSlackIdentity, SlackWhoamiError } from "@/lib/connectors/whoami/slack-whoami"
@@ -45,6 +44,10 @@ import {
   probeQQOfficialIdentity,
   QQOfficialWhoamiError,
 } from "@/lib/connectors/whoami/qq-official-whoami"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 export interface AdapterWhoamiPanelProps {
   adapterId: string
@@ -127,7 +130,8 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
   const t = useTranslations("settings.connections.lark.whoami")
   const [probing, setProbing] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
   const probeSupported = PROBEABLE_PLATFORMS.has(platform)
 
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
@@ -302,10 +306,8 @@ export function AdapterWhoamiPanel({ adapterId, platform }: AdapterWhoamiPanelPr
             </div>
           </div>
         )}
-        {!desktop && probeSupported && (
-          <p className="text-xs text-muted-foreground" data-testid="adapter-whoami-desktop-only">
-            {t("requiresDesktop")}
-          </p>
+        {probeSupported && (
+          <ConnectorHostNotice reach={reach} data-testid="adapter-whoami-desktop-only" />
         )}
       </CardContent>
     </Card>

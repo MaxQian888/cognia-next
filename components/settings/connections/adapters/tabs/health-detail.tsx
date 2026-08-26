@@ -26,13 +26,13 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { isTauri } from "@/lib/tauri"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { requeueAdapter } from "@/lib/connectors/lifecycle"
 import type { HealthCellState } from "@/lib/connectors/health/derive-history"
 import { healthReasonLabel } from "./health-reason-label"
 import { getConnectorRuntimeSupervisor } from "@/lib/connectors/runtime-supervisor"
 import { getExecutionBroker } from "@/lib/execution/broker"
+import { useConnectorControlReach } from "@/components/connectors/connector-host-notice"
 
 const STATE_TINT: Record<HealthCellState, string> = {
   running: "bg-emerald-500",
@@ -68,7 +68,8 @@ export interface HealthDetailProps {
 
 export function HealthDetail({ adapterId }: HealthDetailProps) {
   const t = useTranslations("settings.connections.adapters.health")
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
   const [reconnecting, setReconnecting] = useState(false)
   const [reconnectMessage, setReconnectMessage] = useState<string | null>(null)
   // Ticking "now" for the rate-bucket countdown so we don't read Date.now()

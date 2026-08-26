@@ -29,10 +29,13 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
-import { isTauri } from "@/lib/tauri"
 import { LarkWhoamiError, probeBotIdentity } from "@/lib/connectors/adapters/lark/whoami"
 import { AgentTeamAvatar } from "@/components/agent/workspace/agent-team-avatar"
 import { getAgentTeamAvatarPath, resolveAgentTeamAvatarId } from "@/lib/agent-team/avatar"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 const ACTIVATE_STATUS_KEYS: Record<number, string> = {
   0: "uninitialized",
@@ -49,7 +52,8 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
   const t = useTranslations("settings.connections.lark.whoami")
   const [probing, setProbing] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
 
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
     () =>
@@ -261,11 +265,7 @@ export function LarkWhoamiPanel({ adapterId }: LarkWhoamiPanelProps) {
             </div>
           </div>
         )}
-        {!desktop && (
-          <p className="text-xs text-muted-foreground" data-testid="lark-whoami-desktop-only">
-            {t("requiresDesktop")}
-          </p>
-        )}
+        <ConnectorHostNotice reach={reach} data-testid="lark-whoami-desktop-only" />
       </CardContent>
     </Card>
   )

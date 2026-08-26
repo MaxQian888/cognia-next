@@ -59,6 +59,18 @@
       "instance_setting_off": "打开该设置即可使用。"
     }
   },
+  "control": {
+    "block": {
+      "no-runtime": "此浏览器没有与任何运行机器人的宿主配对，所以这里没有可配置的连接器。",
+      "runs-on-host": "这个机器人跑在你配对的宿主上。这些控件直接与那个运行时通信，而浏览器没有到它的通路 —— 回复、批准草稿和会话级设置是能到达的，在这里照常可用。",
+      "needs-desktop-shell": "这一项需要桌面应用本身，而不只是一个正在运行的机器人。"
+    },
+    "nextStep": {
+      "no-runtime": "在桌面上打开 Cognia，或把此浏览器与一个正在运行机器人的宿主配对。",
+      "runs-on-host": "到运行这个机器人的宿主上打开 Cognia 去修改它。",
+      "needs-desktop-shell": "在桌面上打开 Cognia 来使用它。"
+    }
+  },
   "identityMerge": {
     "cancel": "取消",
     "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",

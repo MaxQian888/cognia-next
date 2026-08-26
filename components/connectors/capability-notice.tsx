@@ -22,12 +22,15 @@
  * verbatim, for the same reason `ConnectedScopesCard` shows raw scopes: they
  * are identifiers the operator matches against the platform's own console, and
  * translating them would make them unsearchable.
+ *
+ * The layout lives in `UnavailableNotice`, shared with `ConnectorHostNotice`.
+ * The two vocabularies stay separate — see that module for why.
  */
 
 import type { ReactNode } from "react"
 import { useTranslations } from "next-intl"
 
-import { cn } from "@/lib/utils"
+import { UnavailableNotice } from "@/components/connectors/unavailable-notice"
 import {
   isActionableCause,
   type CapabilityUnavailable,
@@ -73,17 +76,13 @@ export function CapabilityNotice({
   const { reason, nextStep } = describe(availability.cause, availability.detail)
 
   return (
-    <div
-      className={cn("space-y-1.5 text-xs text-muted-foreground", className)}
+    <UnavailableNotice
+      reason={reason}
+      nextStep={nextStep}
+      cause={availability.cause}
+      action={action}
+      className={className}
       data-testid={testId}
-      data-cause={availability.cause}
-      role="note"
-    >
-      <p>
-        {reason}
-        {nextStep ? ` ${nextStep}` : null}
-      </p>
-      {action}
-    </div>
+    />
   )
 }

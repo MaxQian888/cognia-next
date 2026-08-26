@@ -6887,6 +6887,18 @@
         "upstream_impl_unsupported": "此机器人连接的服务端未实现 {detail}。"
       }
     },
+    "control": {
+      "block": {
+        "needs-desktop-shell": "这一项需要桌面应用本身，而不只是一个正在运行的机器人。",
+        "no-runtime": "此浏览器没有与任何运行机器人的宿主配对，所以这里没有可配置的连接器。",
+        "runs-on-host": "这个机器人跑在你配对的宿主上。这些控件直接与那个运行时通信，而浏览器没有到它的通路 —— 回复、批准草稿和会话级设置是能到达的，在这里照常可用。"
+      },
+      "nextStep": {
+        "needs-desktop-shell": "在桌面上打开 Cognia 来使用它。",
+        "no-runtime": "在桌面上打开 Cognia，或把此浏览器与一个正在运行机器人的宿主配对。",
+        "runs-on-host": "到运行这个机器人的宿主上打开 Cognia 去修改它。"
+      }
+    },
     "identityMerge": {
       "cancel": "取消",
       "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",
@@ -29115,7 +29127,6 @@
           "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
           "recommendedAvatarTitle": "推荐头像",
           "reprobeButton": "重新探测",
-          "requiresDesktop": "机器人身份探测需要桌面端运行时。",
           "tenant": "租户",
           "title": "机器人身份",
           "unknown": "尚未探测身份。保存凭据后点击「探测身份」。",
@@ -29293,7 +29304,6 @@
         "adapterCount": "已注册 {count} 个适配器",
         "adapterCountPlural": "已注册 {count} 个适配器",
         "adaptersHeading": "适配器",
-        "desktopOnlyNotice": "平台连接器需要桌面 (Tauri) 运行时。",
         "disabledBadge": "已禁用",
         "noAdapters": "尚未配置任何适配器。",
         "noRecentActivity": "暂无最近活动。",
@@ -29443,7 +29453,6 @@
         },
         "chatIdLabel": "目标聊天 / 频道 id",
         "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
-        "desktopOnly": "发送测试需要桌面运行时，以保证适配器已注册到 bus。",
         "intro": "排入一条受治理的端到端测试并等待交付，覆盖静默时段、FIFO、重试、限流和熔断器。",
         "pendingResult": "任务仍在排队或重试中，请到“出站”页签查看进度。",
         "probeButton": "运行直接传输探测",
@@ -29796,8 +29805,7 @@
         "windowToday": "今日"
       },
       "webModeBanner": {
-        "ariaLabel": "Web 模式提示",
-        "body": "适配器需要桌面端 — 请在桌面上打开 Cognia 进行配置。已配置的会话会以只读形式同步过来。"
+        "ariaLabel": "Web 模式提示"
       },
       "wechatOa": {
         "adapterCreated": "已添加微信公众号",

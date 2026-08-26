@@ -1049,7 +1049,6 @@
       "recommendedAvatarHint": "建议为此飞书应用使用生成的头像。",
       "recommendedAvatarTitle": "推荐头像",
       "reprobeButton": "重新探测",
-      "requiresDesktop": "机器人身份探测需要桌面端运行时。",
       "tenant": "租户",
       "title": "机器人身份",
       "unknown": "尚未探测身份。保存凭据后点击「探测身份」。",
@@ -1227,7 +1226,6 @@
     "adapterCount": "已注册 {count} 个适配器",
     "adapterCountPlural": "已注册 {count} 个适配器",
     "adaptersHeading": "适配器",
-    "desktopOnlyNotice": "平台连接器需要桌面 (Tauri) 运行时。",
     "disabledBadge": "已禁用",
     "noAdapters": "尚未配置任何适配器。",
     "noRecentActivity": "暂无最近活动。",
@@ -1390,7 +1388,6 @@
     },
     "chatIdLabel": "目标聊天 / 频道 id",
     "defaultBody": "[cognia] 来自 Adapters → Config 的测试消息。",
-    "desktopOnly": "发送测试需要桌面运行时，以保证适配器已注册到 bus。",
     "intro": "排入一条受治理的端到端测试并等待交付，覆盖静默时段、FIFO、重试、限流和熔断器。",
     "pendingResult": "任务仍在排队或重试中，请到“出站”页签查看进度。",
     "probeButton": "运行直接传输探测",
@@ -1743,8 +1740,7 @@
     "windowToday": "今日"
   },
   "webModeBanner": {
-    "ariaLabel": "Web 模式提示",
-    "body": "适配器需要桌面端 — 请在桌面上打开 Cognia 进行配置。已配置的会话会以只读形式同步过来。"
+    "ariaLabel": "Web 模式提示"
   },
   "wechatOa": {
     "adapterCreated": "已添加微信公众号",

@@ -11,7 +11,10 @@ import type { AuditEntry } from "@/types/connectors/audit"
 // Shared mocks
 // ---------------------------------------------------------------------------
 
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(false) }))
+// The tab gates on the host profile, not the shell: a companion's adapters
+// run on the paired host and must not be told they need a desktop app.
+let hostProfile = "web-standalone"
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfile }))
 jest.mock("./tunnel-tab", () => ({ TunnelTab: () => <div>Tunnel controls</div> }))
 
 const mockRouterPush = jest.fn()
@@ -59,11 +62,9 @@ jest.mock("dexie-react-hooks", () => ({
 // Import component AFTER mocks
 // ---------------------------------------------------------------------------
 
-import { isTauri } from "@/lib/tauri"
 import { connectorsHealth } from "@/lib/connectors/tauri/commands"
 import { useLiveQuery } from "dexie-react-hooks"
 
-const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
 const mockConnectorsHealth = connectorsHealth as jest.MockedFunction<typeof connectorsHealth>
 const mockUseLiveQuery = useLiveQuery as jest.MockedFunction<typeof useLiveQuery>
 
@@ -94,7 +95,7 @@ function primeLiveQueries(fixtures: {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockIsTauri.mockReturnValue(false)
+  hostProfile = "web-standalone"
   mockConnectorsHealth.mockResolvedValue({
     serverRunning: false,
     boundAddr: null,
@@ -120,10 +121,21 @@ describe("OverviewTab", () => {
     expect(mockRouterPush).toHaveBeenCalledWith("/inbox")
   })
 
-  it("shows desktop-only notice in web mode", () => {
-    mockIsTauri.mockReturnValue(false)
+  it("says there is no runtime at all in a standalone browser", () => {
+    hostProfile = "web-standalone"
     render(<OverviewTab />)
-    expect(screen.getByText(/desktop.*tauri/i)).toBeInTheDocument()
+    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute("data-cause", "no-runtime")
+  })
+
+  // The server card said "Platform connectors require the desktop (Tauri)
+  // runtime" to a companion whose connectors were running on the paired host.
+  it("tells a companion its runtime is on the paired host", () => {
+    hostProfile = "cloud-companion"
+    render(<OverviewTab />)
+    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute(
+      "data-cause",
+      "runs-on-host"
+    )
   })
 
   it("renders Adapters card heading", () => {
@@ -168,7 +180,7 @@ describe("OverviewTab", () => {
   })
 
   it("survives a failing health poll", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     mockConnectorsHealth.mockRejectedValue(new Error("ipc down"))
     render(<OverviewTab />)
     // Health stays null → status renders as unknown, nothing throws.
@@ -190,7 +202,7 @@ describe("OverviewTab", () => {
   // -------------------------------------------------------------------------
 
   it("shows 'not needed' instead of 'stopped' when no enabled adapter uses the inbound server", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -212,7 +224,7 @@ describe("OverviewTab", () => {
   })
 
   it("still shows 'stopped' when a webhook adapter needs the inbound server", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         { id: "s1", displayName: "Slack", type: "slack", enabled: true, transportMode: "webhook" },
@@ -224,7 +236,7 @@ describe("OverviewTab", () => {
   })
 
   it("derives per-adapter running state from fresh heartbeats", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -253,7 +265,7 @@ describe("OverviewTab", () => {
   })
 
   it("marks an enabled adapter without a fresh heartbeat as not running", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -272,7 +284,7 @@ describe("OverviewTab", () => {
   })
 
   it("surfaces a degraded heartbeat state as a badge", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -299,7 +311,7 @@ describe("OverviewTab", () => {
   })
 
   it("shows running server address and singular registered count", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     mockConnectorsHealth.mockResolvedValue({
       serverRunning: true,
       boundAddr: "127.0.0.1:7842",
@@ -316,7 +328,7 @@ describe("OverviewTab", () => {
   })
 
   it("uses the newest heartbeat when several exist and maps 'down' to a destructive badge", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -350,7 +362,7 @@ describe("OverviewTab", () => {
   })
 
   it("treats a heartbeat without a state field as running", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {
@@ -368,7 +380,7 @@ describe("OverviewTab", () => {
   })
 
   it("keeps the disabled badge for disabled adapters without a state badge", async () => {
-    mockIsTauri.mockReturnValue(true)
+    hostProfile = "desktop"
     primeLiveQueries({
       adapters: [
         {

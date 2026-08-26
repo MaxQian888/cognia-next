@@ -16,7 +16,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { connectorsHealth, type ConnectorsHealth } from "@/lib/connectors/tauri/commands"
-import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import type { AuditEntry } from "@/types/connectors/audit"
 import type { AdapterInstanceRow, ConnectorHeartbeatRow } from "@/lib/db/connector-types"
@@ -26,6 +25,10 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { auditKindLabel } from "./audit-kind-label"
 import { DocsProvidersCard } from "../docs-providers/docs-providers-card"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 const POLL_INTERVAL_MS = 10_000
 
@@ -92,7 +95,8 @@ export function OverviewTab() {
   const tKind = useTranslations("settings.connections.audit.kind")
   const router = useRouter()
   const [health, setHealth] = useState<ConnectorsHealth | null>(null)
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
 
   useEffect(() => {
     if (!desktop) return
@@ -182,7 +186,7 @@ export function OverviewTab() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
-          {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnlyNotice")}</p>}
+          <ConnectorHostNotice reach={reach} />
           <div className="flex items-center gap-2">
             <StatusDot state={serverStatus} />
             <span>

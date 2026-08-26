@@ -29,9 +29,8 @@ jest.mock("@/lib/connectors/whoami/qq-official-whoami", () => ({
   QQOfficialWhoamiError: class extends Error {},
 }))
 
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => true,
-}))
+const hostProfile = "desktop"
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfile }))
 
 import { probeTelegramIdentity } from "@/lib/connectors/whoami/telegram-whoami"
 import { probeDiscordIdentity } from "@/lib/connectors/whoami/discord-whoami"

@@ -1,9 +1,10 @@
 /**
  * @jest-environment jsdom
  *
- * ConnectionsSection renders the web-mode banner when not running on Tauri.
- * After M4.1 (#45) the gate is `usePlatform() === "tauri"` so the test
- * mocks the hook directly.
+ * ConnectionsSection renders the web-mode banner when the connector controls
+ * cannot be driven from this host. The gate is the host profile, not the
+ * shell — a companion and a standalone browser are both "not Tauri" and need
+ * opposite explanations.
  */
 
 import { render, screen } from "@testing-library/react"
@@ -18,7 +19,8 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/settings",
 }))
 
-jest.mock("@/hooks/use-platform", () => ({ usePlatform: jest.fn(() => "web") }))
+let hostProfile = "web-standalone"
+jest.mock("@/hooks/use-host-profile", () => ({ useHostProfile: () => hostProfile }))
 
 // Stub the tab sub-components to avoid deep dep chains
 jest.mock("./tabs/overview-tab", () => ({ OverviewTab: () => <div>Overview</div> }))
@@ -31,23 +33,36 @@ jest.mock("./tabs/conversations-tab", () => ({
 jest.mock("./tabs/inbox-assets-tab", () => ({ InboxAssetsTab: () => <div>Assets</div> }))
 
 import { ConnectionsSection } from "./connections-section"
-import { usePlatform } from "@/hooks/use-platform"
 
 beforeEach(() => {
-  ;(usePlatform as jest.Mock).mockReturnValue("web")
+  hostProfile = "web-standalone"
   mockUseSearchParams.mockReturnValue(new URLSearchParams())
 })
 
 describe("ConnectionsSection", () => {
-  it("shows the web-mode banner when not on tauri", () => {
+  it("tells a standalone browser there is no runtime to configure", () => {
     render(<ConnectionsSection />)
     expect(screen.getByRole("status", { name: /web mode banner/i })).toBeInTheDocument()
-    expect(screen.getByText(/Adapters require the desktop app/i)).toBeInTheDocument()
-    expect(screen.getByText(/Already-configured conversations sync read-only/i)).toBeInTheDocument()
+    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute("data-cause", "no-runtime")
   })
 
-  it("does not show the web-mode banner on tauri", () => {
-    ;(usePlatform as jest.Mock).mockReturnValue("tauri")
+  /**
+   * The banner used to claim "Adapters require the desktop app — already
+   * configured conversations sync read-only here." Both halves were false for
+   * a companion: its adapters run on the paired host, and the Inbox writes
+   * back through the relay rather than being read-only.
+   */
+  it("tells a companion its bots run on the paired host, not that it needs a desktop", () => {
+    hostProfile = "cloud-companion"
+    render(<ConnectionsSection />)
+    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute(
+      "data-cause",
+      "runs-on-host"
+    )
+  })
+
+  it("shows no banner on the desktop", () => {
+    hostProfile = "desktop"
     render(<ConnectionsSection />)
     expect(screen.queryByRole("status", { name: /web mode banner/i })).not.toBeInTheDocument()
   })
