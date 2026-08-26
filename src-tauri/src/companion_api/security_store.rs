@@ -3,6 +3,7 @@
 //! Authorization state is transactional SQLite data. UI databases may cache
 //! projections, but they are never consulted as an authority.
 
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -277,7 +278,13 @@ pub fn owner_permits(host_person: Option<&str>, device_person: Option<&str>) -> 
 /// `host_bindings.tenant_id` is `UNIQUE`, so the `LEFT JOIN` adds at most one
 /// row and cannot multiply the count — which is the concrete reason ADR-0149
 /// §9's "relax that constraint" is not free.
-fn capability_decision_sql() -> String {
+///
+/// Built ONCE, not per call: `has_capability` sits on the companion request
+/// path — `rpc.rs`, `ws_terminal.rs` and `remote_execution.rs` all reach it —
+/// so formatting a ~400-byte query per request, before the connection lock is
+/// even taken, was pure overhead. `Lazy` keeps the single-copy-to-audit
+/// property without paying for it on every decision.
+static CAPABILITY_DECISION_SQL: Lazy<String> = Lazy::new(|| {
     format!(
         "SELECT COUNT(*)
          FROM capability_grants g
@@ -287,7 +294,7 @@ fn capability_decision_sql() -> String {
            AND g.revoked_at IS NULL AND d.status = 'active'
            AND {OWNER_PREDICATE_SQL}"
     )
-}
+});
 
 impl SecurityStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
@@ -733,7 +740,7 @@ impl SecurityStore {
         capability: &str,
     ) -> Result<bool, SecurityStoreError> {
         let count: i64 = self.conn.lock().query_row(
-            &capability_decision_sql(),
+            CAPABILITY_DECISION_SQL.as_str(),
             params![tenant_id, device_id, capability],
             |row| row.get(0),
         )?;
@@ -3686,7 +3693,10 @@ CREATE TABLE devices (
         register(&store, &tenant, "device-a", 100);
 
         // Enrolled under the bound person, so the owner check passes...
-        assert_eq!(device_user(&store, &tenant, "device-a").as_deref(), Some(ADA));
+        assert_eq!(
+            device_user(&store, &tenant, "device-a").as_deref(),
+            Some(ADA)
+        );
         assert!(store
             .has_capability(&tenant, "device-a", "host.admin")
             .unwrap());
@@ -3738,8 +3748,8 @@ CREATE TABLE devices (
     /// stranger's device.
     #[test]
     fn the_capability_query_reads_the_owner_column() {
-        assert!(capability_decision_sql().contains(OWNER_PREDICATE_SQL));
-        assert!(capability_decision_sql().contains("LEFT JOIN host_bindings"));
+        assert!(CAPABILITY_DECISION_SQL.contains(OWNER_PREDICATE_SQL));
+        assert!(CAPABILITY_DECISION_SQL.contains("LEFT JOIN host_bindings"));
     }
 
     #[test]
