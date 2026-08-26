@@ -54,6 +54,13 @@ export interface BuildAdapterContextInput {
   bus: ConnectorBus
   /** Adapter row at registration time; used to resolve `publicBaseUrl`. */
   publicUrl?: string | null
+  /**
+   * The credential names this adapter declares (`credentialsRef.accounts`).
+   * The OS keyring has no enumerate primitive, so `secrets.list()` can only
+   * report which of a supplied candidate set exists — without this it has
+   * nothing to probe and can only ever answer "none".
+   */
+  credentialAccounts?: readonly string[]
 }
 
 function createLogger(adapterId: string): AdapterLogger {
@@ -74,18 +81,21 @@ function createLogger(adapterId: string): AdapterLogger {
   }
 }
 
-function createSecrets(adapterId: string): AdapterSecrets {
+function createSecrets(adapterId: string, accounts: readonly string[]): AdapterSecrets {
   return {
     get: (name) => connectorsKeyringGet(adapterId, name),
     set: (name, value) => connectorsKeyringSet(adapterId, name, value),
     delete: (name) => connectorsKeyringDelete(adapterId, name),
     /**
-     * The Rust `connectors_keyring_list` command needs a candidate list
-     * to probe (the OS keyring has no enumerate primitive). Return an
-     * empty list when called with no candidates so callers can detect
-     * "no probe vocabulary supplied" without an exception.
+     * Which of this adapter's declared credentials are actually stored.
+     *
+     * The Rust `connectors_keyring_list` command probes a candidate list
+     * because the OS keyring has no enumerate primitive. This used to pass
+     * `[]`, so it could never report anything — a probe with no vocabulary
+     * always answers "none", which is indistinguishable from "nothing is
+     * stored". The row's `credentialsRef.accounts` IS that vocabulary.
      */
-    list: () => connectorsKeyringList(adapterId, []),
+    list: () => connectorsKeyringList(adapterId, [...accounts]),
   }
 }
 
@@ -126,7 +136,7 @@ function notImplemented(opName: string): () => Promise<never> {
 }
 
 export function buildAdapterContext(input: BuildAdapterContextInput): AdapterContext {
-  const { adapterId, signal, bus, publicUrl } = input
+  const { adapterId, signal, bus, publicUrl, credentialAccounts } = input
   return {
     adapterId,
     signal,
@@ -153,7 +163,7 @@ export function buildAdapterContext(input: BuildAdapterContextInput): AdapterCon
       unbindWebhookRoute: notImplemented("unbindWebhookRoute"),
       publicBaseUrl: async () => publicUrl ?? null,
     },
-    secrets: createSecrets(adapterId),
+    secrets: createSecrets(adapterId, credentialAccounts ?? []),
     logger: createLogger(adapterId),
   }
 }

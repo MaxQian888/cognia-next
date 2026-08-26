@@ -30,7 +30,7 @@
  * can be removed again; one whose row is already gone cannot be found.
  */
 
-import { isTauri } from "@/lib/tauri"
+import { hasCapability, serverBackedCapabilities } from "@/lib/platform/capabilities"
 import { connectorsKeyringDelete } from "@/lib/connectors/tauri/commands"
 import { pruneAttachmentsForAdapter } from "@/lib/connectors/attachment-fetcher"
 import { reapAdapterResidue, type AdapterResidueReport } from "@/lib/connectors/adapter-residue"
@@ -47,9 +47,14 @@ export type RemovableAdapterInstance = Pick<AdapterInstanceRow, "id"> &
   Partial<Pick<AdapterInstanceRow, "type" | "credentialsRef">>
 
 export interface RemoveAdapterInstanceResult {
-  /** Keyring accounts that were deleted (empty off-desktop). */
+  /** Keyring accounts that were deleted. */
   purgedCredentials: string[]
-  /** Keyring accounts whose delete threw (already gone / keyring locked). */
+  /**
+   * Keyring accounts whose delete threw — already gone, keyring locked, or
+   * a host that refused the write. Reporting them beats the old behaviour,
+   * which skipped the purge entirely off-desktop and left orphaned secrets
+   * behind under a `purgedCredentials: []` that read as "nothing to do".
+   */
   failedCredentials: string[]
   /** Attachments removed (blob + row); `null` when the prune itself failed. */
   prunedAttachments: number | null
@@ -63,7 +68,13 @@ export async function removeAdapterInstance(
   const purgedCredentials: string[] = []
   const failedCredentials: string[] = []
 
-  if (isTauri()) {
+  // Gate on the capability, not on Tauri: a companion paired to a cloud brain
+  // has a connector runtime, and skipping the purge there strands the very
+  // credentials the removal is meant to destroy.
+  const connectorRuntime =
+    hasCapability("connector-runtime") || serverBackedCapabilities().includes("connector-runtime")
+
+  if (connectorRuntime) {
     for (const account of row.credentialsRef?.accounts ?? []) {
       try {
         await connectorsKeyringDelete(row.id, account)

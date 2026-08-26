@@ -454,6 +454,7 @@ export function installConnectorRuntime(
             signal,
             bus,
             publicUrl: currentRow.publicUrl,
+            credentialAccounts: currentRow.credentialsRef?.accounts,
           })
         )
       },

@@ -187,6 +187,7 @@ describe("buildAdapterContext", () => {
       adapterId: "lark-8",
       signal: new AbortController().signal,
       bus,
+      credentialAccounts: ["appId", "appSecret"],
     })
     expect(await ctx.secrets.get("appSecret")).toBe("the-value")
     await ctx.secrets.set("appSecret", "v")
@@ -207,6 +208,23 @@ describe("buildAdapterContext", () => {
     })
     expect(mockInvoke).toHaveBeenNthCalledWith(4, "connectors_keyring_list", {
       adapterId: "lark-8",
+      accounts: ["appId", "appSecret"],
+    })
+  })
+
+  // The OS keyring cannot enumerate; a probe with no candidates always answers
+  // "none", which is indistinguishable from "nothing is stored". This used to
+  // be the only behaviour available.
+  it("secrets.list probes nothing when the adapter declares no credentials", async () => {
+    mockInvoke.mockResolvedValueOnce([])
+    const ctx = buildAdapterContext({
+      adapterId: "lark-9",
+      signal: new AbortController().signal,
+      bus: makeBus(),
+    })
+    expect(await ctx.secrets.list()).toEqual([])
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_keyring_list", {
+      adapterId: "lark-9",
       accounts: [],
     })
   })

@@ -3,8 +3,12 @@
  * path (keyring purge → attachment prune → residue reap → row delete).
  */
 
-const mockIsTauri = jest.fn().mockReturnValue(true)
-jest.mock("@/lib/tauri", () => ({ isTauri: () => mockIsTauri() }))
+const mockHasCapability = jest.fn().mockReturnValue(true)
+const mockServerBacked = jest.fn(() => [] as string[])
+jest.mock("@/lib/platform/capabilities", () => ({
+  hasCapability: (cap: string) => mockHasCapability(cap),
+  serverBackedCapabilities: () => mockServerBacked(),
+}))
 
 const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/tauri/commands", () => ({
@@ -38,7 +42,8 @@ const ROW = {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockIsTauri.mockReturnValue(true)
+  mockHasCapability.mockReturnValue(true)
+  mockServerBacked.mockReturnValue([])
   mockKeyringDelete.mockResolvedValue(undefined)
   mockPrune.mockResolvedValue(0)
   mockDelete.mockResolvedValue(undefined)
@@ -80,13 +85,25 @@ describe("removeAdapterInstance", () => {
     })
   })
 
-  it("skips the keyring off-desktop but still prunes and deletes", async () => {
-    mockIsTauri.mockReturnValue(false)
+  it("skips the keyring on a host with no connector runtime at all", async () => {
+    mockHasCapability.mockReturnValue(false)
+    mockServerBacked.mockReturnValue([])
     const result = await removeAdapterInstance(ROW)
     expect(mockKeyringDelete).not.toHaveBeenCalled()
     expect(mockPrune).toHaveBeenCalledWith("tg-1")
     expect(mockDelete).toHaveBeenCalledWith("tg-1")
     expect(result.purgedCredentials).toEqual([])
+  })
+
+  // A companion has no local connector runtime but its paired brain does, and
+  // it is the brain's keyring these credentials live in. Gating on Tauri left
+  // them behind under a `purgedCredentials: []` that read as "nothing to do".
+  it("purges through a server-backed connector runtime", async () => {
+    mockHasCapability.mockReturnValue(false)
+    mockServerBacked.mockReturnValue(["connector-runtime"])
+    const result = await removeAdapterInstance(ROW)
+    expect(mockKeyringDelete).toHaveBeenCalled()
+    expect(result.purgedCredentials.length).toBeGreaterThan(0)
   })
 
   it("swallows a keyring delete failure and records it, still deleting the row", async () => {
