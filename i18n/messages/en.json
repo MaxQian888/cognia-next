@@ -2770,6 +2770,7 @@
         "overview": "Overview",
         "plugins": "Plugins & capabilities",
         "prFeedback": "PR feedback",
+        "stackedDelivery": "Stacked delivery",
         "ultracode": "Ultracode",
         "worktrees": "Worktree isolation"
       },
@@ -2988,6 +2989,27 @@
       "saving": "Saving…",
       "sectionControls": "Controls",
       "sectionExecution": "Execution",
+      "stackedDelivery": {
+        "caveat": "Desktop app only, and only for a GitHub remote whose default branch can be resolved. A run that cannot be stacked is published as it is today.",
+        "description": "When a completed run produced several branches in one repository, open them as a chain of pull requests instead of a flat set — each based on the one below it, so every review shows only its own change.",
+        "enabled": {
+          "hint": "Off by default. Turning it on changes how a finished run reaches GitHub.",
+          "label": "Stack this team's pull requests"
+        },
+        "layerCount": "{count, plural, one {# layer} other {# layers}}",
+        "maxLayers": {
+          "label": "Most layers"
+        },
+        "mergeMode": {
+          "approvedBottomUp": "Bottom layer first, once approved",
+          "label": "Merge order"
+        },
+        "minLayers": {
+          "hint": "Runs with fewer branches than the minimum are published flat. Extra branches beyond the maximum are left out of the stack rather than dropped.",
+          "label": "Fewest layers"
+        },
+        "title": "Stacked delivery"
+      },
       "streamProgress": "Live teammate progress",
       "title": "Team Settings",
       "tokenBudget": "Token budget (0 = unlimited)",

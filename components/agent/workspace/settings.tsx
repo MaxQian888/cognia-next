@@ -37,6 +37,7 @@ import { ExecutionSection } from "./settings/section-execution"
 import { UltracodeSection } from "./settings/section-ultracode"
 import { WorktreesSection } from "./settings/section-worktrees"
 import { PrFeedbackSection } from "./settings/section-pr-feedback"
+import { StackedDeliverySection } from "./settings/section-stacked-delivery"
 import { MemorySection } from "./settings/section-memory"
 import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
@@ -127,6 +128,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionTrigger>
           <AccordionContent className="pt-3">
             <PrFeedbackSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="stackedDelivery" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.stackedDelivery")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <StackedDeliverySection team={team} />
           </AccordionContent>
         </AccordionItem>
 

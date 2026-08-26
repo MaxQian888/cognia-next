@@ -5,6 +5,7 @@ import type { AgentTeam } from "@/types/agent/agent-team"
 import type { ScmDeliveryAdapter, ScmDeliveryObservation } from "./delivery-graph"
 import { getDb } from "@/lib/db/schema"
 import type { ResolvedTeamRepo } from "./pr-feedback/resolvers"
+import { stackedDeliveryOn } from "@/lib/stack/team-policy"
 
 export interface GithubDeliveryAdapterOptions {
   octokit: OctokitLike
@@ -212,7 +213,7 @@ export async function prepareAndPublishGithubStack(
   options: ApproveAndMergeGithubStackOptions = {}
 ): Promise<string | undefined> {
   const policy = team.config.githubDeliveryPolicy
-  if (!policy?.enabled || !policy.stackedPullRequests) return undefined
+  if (!stackedDeliveryOn(policy) || !policy) return undefined
   const db = getDb()
   const existing = await db.agentTeamDeliveryGraphs.where("runId").equals(runId).first()
   if (existing) return existing.id

@@ -603,6 +603,7 @@
       "overview": "概览",
       "plugins": "插件与能力",
       "prFeedback": "PR 反馈",
+      "stackedDelivery": "分栈投递",
       "ultracode": "Ultracode",
       "worktrees": "工作树隔离"
     },
@@ -821,6 +822,27 @@
     "saving": "保存中…",
     "sectionControls": "控制项",
     "sectionExecution": "执行",
+    "stackedDelivery": {
+      "caveat": "仅桌面端，且仅适用于能解析出默认分支的 GitHub 远端。无法分栈的运行会按现有方式发布。",
+      "description": "当一次运行在同一个仓库里产出多个分支时，把它们发成一条 PR 链而不是一堆平铺的 PR——每一层基于下面一层，于是每个 PR 的评审只看到它自己的改动。",
+      "enabled": {
+        "hint": "默认关闭。打开后会改变运行结束时提交到 GitHub 的方式。",
+        "label": "把这个团队的 PR 分栈"
+      },
+      "layerCount": "{count, plural, other {# 层}}",
+      "maxLayers": {
+        "label": "最多层数"
+      },
+      "mergeMode": {
+        "approvedBottomUp": "批准后自底向上依次合并",
+        "label": "合并顺序"
+      },
+      "minLayers": {
+        "hint": "分支数少于下限的运行按平铺方式发布。超出上限的分支不会进入栈，但也不会被丢弃。",
+        "label": "最少层数"
+      },
+      "title": "分栈投递"
+    },
     "streamProgress": "实时显示队友进度",
     "title": "团队设置",
     "tokenBudget": "Token 预算（0 = 无限）",

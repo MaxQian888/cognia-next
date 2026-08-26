@@ -11,6 +11,7 @@
  */
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { stackedDeliveryOn } from "@/lib/stack/team-policy"
 import type {
   AgentTeam,
   AgentTeammate,
@@ -208,7 +209,7 @@ async function runManaged(
     team?.config.runtimeVersion === "durable-v2" &&
     result.status === "completed" &&
     result.runId &&
-    team.config.githubDeliveryPolicy?.enabled
+    stackedDeliveryOn(team.config.githubDeliveryPolicy)
   ) {
     const [{ prepareAndPublishGithubStack }, { updateAgentTeamRun }] = await Promise.all([
       import("./team/github-delivery-adapter"),
