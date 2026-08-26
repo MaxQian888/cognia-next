@@ -417,7 +417,8 @@ that is already granted.
 
 | **6** | ✅ `share-server` gains tenancy and identity; `ops-controller` gains RLS | Controller: `0002_tenant_isolation.sql` (ENABLE + FORCE on all twelve tables) and every statement inside a `tenant_scope` transaction. Share: `org_id`/`creator_user_id` columns, grant verification in both the Rust server and the Worker, and a grant-only `/v1/orgs/{org}/shares` plane. |
 | **7a** | ✅ The plane becomes reachable, and Guest lands | `lib/collab/connection.ts` (where the server is), `lib/collab/refresh.ts` (the one pull, run from `lib/issues/boot.ts`), `GET /v1/orgs/{org}/memberships/me`, `pullCollabMemberships`, and the Collaboration server card. |
-| **7b** | ⏳ Plans and Runs on the plane | follows the Issues slice — server tables, endpoints and mirrors, in the shape Batch 3 established. |
+| **7b** | ✅ Workspace metadata and the roster | `workspaces` table + `GET …/workspaces` and `…/workspaces/{id}/members`, Dexie v197 `collabWorkspaces`, `replaceWorkspaceRoster`, and the `/workspace` Members section — where a guest becomes visible to somebody other than themselves. |
+| **7c** | ⏳ Plans and Runs on the plane | follows the Issues slice — server tables, endpoints and mirrors, in the shape Batch 3 established. |
 
 **Batch 7a notes.** The missing thing was the same one three times.
 
@@ -457,6 +458,42 @@ inverted: it asserted there was no writer, and now asserts there is exactly
 one. Exactly one, because §6 makes the server authoritative — a second writer
 would be a second opinion about who belongs where, and the local one would win
 whenever it ran last.
+
+**Batch 7b notes.** Guest stops being a fact only the guest can see.
+
+7a made a guest *reachable*: `memberships/me` reports what the caller holds,
+so a person with workspace membership and no org membership finally reads as
+one. But that route answers about the caller and nobody else, so the projection
+knew exactly one person per workspace — which is not a roster, and left "guest"
+as a state nobody else could observe.
+
+Two routes close it. `GET …/workspaces` lists what this caller can see,
+narrowed by the same `readable_scope` the issue listing uses — an org admin
+traverses everything, per §4, and reusing the resolver is what keeps one answer
+to "what may this person see". `GET …/workspaces/{id}/members` returns the
+roster, and requires read access to that workspace rather than merely knowing
+its id.
+
+Three decisions worth keeping:
+
+1. **The workspace mirror is thin, and the omissions are the design.** Roots,
+   trust and provisioning stay local (ADR-0144 / ADR-0147): they describe one
+   machine's relationship to a checkout, and a client acting on somebody else's
+   paths is not a feature. What travels is the NAME — which is precisely what a
+   guest cannot otherwise learn, since they hold no local `projects` row for a
+   workspace they did not create.
+2. **The roster reports `orgMember`, never `guest`.** Same rule as 7a: the
+   derivation lives in `personStandingFrom` and `listWorkspaceRoster`, and a
+   server that also stated it would be a second implementation that disagrees
+   the first time one changes.
+3. **A roster fill never demotes an org role.** The roster says *that*
+   somebody is in the org, not with which role, so filling an absent membership
+   is right and overwriting an owner with `member` is a demotion nobody asked
+   for.
+
+One roster failing does not abort the rest: read access to a single workspace
+can be revoked between the listing and the roster call, and emptying a roster
+because of that race is the worse answer.
 
 **Batch 6 notes.** Four things worth recording.
 

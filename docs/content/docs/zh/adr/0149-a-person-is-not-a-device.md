@@ -351,7 +351,8 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
 
 | **6** | ✅ `share-server` 补租户与身份；`ops-controller` 补 RLS | 控制器：`0002_tenant_isolation.sql`（12 张表全部 ENABLE + FORCE），每条语句都跑在 `tenant_scope` 事务里。分享：`org_id`/`creator_user_id` 两列、Rust 服务与 Worker 双侧的 grant 校验、以及仅接受 grant 的 `/v1/orgs/{org}/shares` 面。 |
 | **7a** | ✅ 协作面变得可达，Guest 落地 | `lib/collab/connection.ts`（服务器在哪）、`lib/collab/refresh.ts`（唯一的那次拉取，由 `lib/issues/boot.ts` 触发）、`GET /v1/orgs/{org}/memberships/me`、`pullCollabMemberships`，以及「协作服务器」设置卡片。 |
-| **7b** | ⏳ Plans 与 Runs 上协作面 | 沿用 Issues 那一刀的形状——服务端表、端点与镜像。 |
+| **7b** | ✅ Workspace 元数据与名册 | `workspaces` 表 + `GET …/workspaces` 与 `…/workspaces/{id}/members`、Dexie v197 `collabWorkspaces`、`replaceWorkspaceRoster`，以及 `/workspace` 的「成员」区块——guest 在这里第一次能被本人以外的人看见。 |
+| **7c** | ⏳ Plans 与 Runs 上协作面 | 沿用 Issues 那一刀的形状——服务端表、端点与镜像。 |
 
 **Batch 7a 补记。** 缺的一直是同一样东西，缺了三次。
 
@@ -380,6 +381,32 @@ workspace 成员身份连同角色——`pullCollabMemberships` 把它们写进�
 `lib/db/workspace-membership-producers.test.ts` 从 Batch 5 存活了下来，并被反转：
 它当时断言「没有写入方」，现在断言「恰好有一个」。恰好一个，是因为 §6 让服务器成为权威
 ——第二个写入方就是关于「谁属于哪里」的第二种意见，而本地那份会在最后运行时胜出。
+
+**Batch 7b 补记。** Guest 不再是只有本人能看见的事实。
+
+7a 让 guest **可达**：`memberships/me` 报告调用者持有什么，于是「持 workspace 成员身份、
+不在 org 里」的人终于读作 guest。但那条路由只回答关于调用者自己的问题，所以投影里每个
+workspace 恰好只认识一个人——那不是名册，也让 guest 成了别人观察不到的状态。
+
+两条路由把它补上。`GET …/workspaces` 列出这个调用者能看到的工作区，用的是**与事项列表
+同一个** `readable_scope`——org admin 按 §4 可穿透，复用解析器是「这个人能看到什么」只有
+一个答案的原因。`GET …/workspaces/{id}/members` 返回名册，并且要求对该工作区的**读权限**，
+而不只是知道它的 id。
+
+三个值得记住的决定：
+
+1. **工作区镜像很薄，缺的那些正是设计。** 根目录、信任与供给留在本地
+   （ADR-0144 / ADR-0147）：它们描述的是某一台机器与某个 checkout 的关系，让客户端
+   对别人的路径动手不是功能。跨网络传的是**名字**——而这恰恰是 guest 无从得知的东西，
+   因为他们对一个不是自己创建的工作区没有本地 `projects` 行。
+2. **名册报告 `orgMember`，绝不报告 `guest`。** 与 7a 同一条规则：推导住在
+   `personStandingFrom` 与 `listWorkspaceRoster` 里，服务端再说一次就是第二个实现，
+   而它会在其中一个先变化的那一刻开始分歧。
+3. **名册回填绝不降级 org 角色。** 名册说的是「此人**在**org 里」，而不是「以什么角色」，
+   所以补上缺失的成员身份是对的，把 owner 覆盖成 `member` 则是没人要求过的降级。
+
+一个名册失败不会中止其余：对某个工作区的读权限可能在列表与名册两次调用之间被撤销，
+而因为这个竞态就清空一份名册是更糟的答案。
 
 **Batch 6 补记。** 四件值得记录的事。
 
