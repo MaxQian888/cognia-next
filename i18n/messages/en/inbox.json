@@ -341,8 +341,8 @@
       "modelManagedByTarget": "Provider and model are managed by the selected Agent Team or Workflow.",
       "modelOverride": "Model override",
       "modelOverridePlaceholder": "claude-opus-4-7",
-      "muted": "Muted (drops outbound)",
-      "mutedHint": "Defer every outbound delivery on this conversation (re-checked every minute) while the bot keeps replying in its other conversations. Same semantics as the adapter-level mute, scoped to one chat.",
+      "muted": "Muted",
+      "mutedHint": "The bot stops answering this conversation entirely — no turn runs and nothing is delivered. Messages still arrive and are stored, and the bot keeps replying in its other conversations.",
       "pinned": "Pinned",
       "proactivePush": "Proactive IM notifications",
       "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
@@ -372,7 +372,7 @@
       "quietHours": {
         "enabled": "Per-conversation quiet hours",
         "from": "From",
-        "help": "When enabled, outbound traffic on this conversation defers during this window. Overrides the adapter-level quiet hours.",
+        "help": "Inside this window the bot does not answer this conversation: no turn runs and nothing is delivered. Replaces the bot-wide quiet hours rather than adding to them.",
         "to": "To",
         "tz": "Time zone",
         "tzPlaceholder": "e.g. Asia/Shanghai"

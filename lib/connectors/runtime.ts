@@ -29,7 +29,7 @@ import type { A2UISegmentContent, MessageSegment } from "@/types/connectors/segm
 import { projectInboundToA2UI } from "@/lib/connectors/adapters/_shared/inbound-a2ui-dispatch"
 import type { RouteDecision } from "./mode-router"
 import type { LiveSteerHandler } from "./bus"
-import type { ResolvedBinding } from "./policy-resolve"
+import { resolveInboxSuppression, type ResolvedBinding } from "./policy-resolve"
 import { matchDispatchRule } from "./dispatch-rules"
 import type { AgentCompositionSelectionV1 } from "@cognia/agent-config-types/agent-composition"
 import { projectImComposition } from "./composition/im-composition-selection"
@@ -753,6 +753,12 @@ async function resolveInboundSendOptions(params: {
   appSettings: AppSettings | undefined
   runTitle: string
   workspaceRoot?: string
+  /**
+   * Which layer muted the turn, when one did. `suppressedReason` collapses to
+   * `"muted"` either way, and "this bot is off" vs "this chat is off" sends a
+   * troubleshooter to two different controls.
+   */
+  mutedScope?: "adapter" | "conversation"
 }> {
   const {
     event,
@@ -782,9 +788,16 @@ async function resolveInboundSendOptions(params: {
     }
   }
 
+  // Both layers, not just the bot's. A conversation quiet window or a muted
+  // conversation used to hold only the DELIVERY, so the turn still ran and
+  // spent a model call on a reply that would sit deferred — for a mute,
+  // possibly until someone unmuted days later and it answered a days-old
+  // message. `resolveInboxSuppression` is the same precedence the outbound
+  // runner applies at delivery time.
+  const suppression = resolveInboxSuppression(adapterRow, override)
   const inboxPolicy: InboxSendPolicy = {
-    quietHours: adapterRow.quietHours,
-    muted: adapterRow.muted,
+    quietHours: suppression.quietHours,
+    muted: suppression.muted,
     forcedMode: override?.mode,
   }
 
@@ -872,6 +885,7 @@ async function resolveInboundSendOptions(params: {
     appSettings,
     runTitle: character?.name?.trim() || "Agent run",
     ...(workspaceRoot ? { workspaceRoot } : {}),
+    ...(suppression.mutedScope ? { mutedScope: suppression.mutedScope } : {}),
   }
 }
 
@@ -1338,7 +1352,7 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
         // the shared helper so an ai-run and a draft prepare from identical
         // grounding. `emitTrace: true` mints the connector root span, ended on
         // the capture-error / success branches below.
-        const { sendOptions, appSettings, runTitle, workspaceRoot } =
+        const { sendOptions, appSettings, runTitle, workspaceRoot, mutedScope } =
           await resolveInboundSendOptions({
             event,
             session,
@@ -1425,7 +1439,11 @@ export function installRuntime(bus: ReturnType<typeof getBus>, opts: RuntimeOpti
             at: now,
             conversationKey: event.conversationKey,
             reason: sendOptions.suppressedReason,
-            fields: { sourceMessageId: storedMsg.id },
+            fields: {
+              sourceMessageId: storedMsg.id,
+              // Both layers can mute; only the row says which control to go to.
+              ...(mutedScope ? { mutedScope } : {}),
+            },
           })
           break
         }

@@ -10,7 +10,11 @@
  */
 
 import type { TriggerPolicy } from "@/types/connectors/policy"
-import { resolveBinding, resolveEffectiveTeamBinding } from "./policy-resolve"
+import {
+  resolveBinding,
+  resolveEffectiveTeamBinding,
+  resolveInboxSuppression,
+} from "./policy-resolve"
 import type { BindingResolutionInput } from "./policy-resolve"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -347,5 +351,43 @@ describe("resolveBinding — character platformDefaults.mode", () => {
     })
     expect(resolved.mode).toBe("auto")
     expect(resolved.modeSource).toBe("adapter-default")
+  })
+})
+
+describe("resolveInboxSuppression", () => {
+  const window = { from: "22:00", to: "08:00", tz: "UTC" }
+  const other = { from: "12:00", to: "13:00", tz: "Asia/Shanghai" }
+
+  it("is quiet about a bot and chat that are both awake", () => {
+    expect(resolveInboxSuppression({}, null)).toEqual({ quietHours: undefined, muted: false })
+  })
+
+  // A killswitch in both places: a conversation cannot un-mute a muted bot.
+  it.each([
+    [{ muted: true }, null, "adapter"],
+    [{}, { muted: true }, "conversation"],
+    [{ muted: true }, { muted: true }, "adapter"],
+    [{ muted: true }, { muted: false }, "adapter"],
+  ] as const)("mutes on either layer (%o, %o)", (adapter, override, scope) => {
+    const result = resolveInboxSuppression(adapter, override)
+    expect(result.muted).toBe(true)
+    expect(result.mutedScope).toBe(scope)
+  })
+
+  it("leaves the scope off when nothing is muted", () => {
+    expect(resolveInboxSuppression({}, { muted: false })).not.toHaveProperty("mutedScope")
+  })
+
+  // A window is a whole statement about when this chat is awake; merging two
+  // has no meaning, so the conversation's replaces the bot's outright.
+  it("lets a conversation window replace the bot's", () => {
+    expect(resolveInboxSuppression({ quietHours: window }, { quietHours: other }).quietHours).toBe(
+      other
+    )
+  })
+
+  it("falls back to the bot's window when the chat sets none", () => {
+    expect(resolveInboxSuppression({ quietHours: window }, {}).quietHours).toBe(window)
+    expect(resolveInboxSuppression({ quietHours: window }, null).quietHours).toBe(window)
   })
 })

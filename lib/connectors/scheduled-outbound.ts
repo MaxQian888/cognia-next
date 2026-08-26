@@ -29,6 +29,7 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-options"
+import { resolveInboxSuppression } from "./policy-resolve"
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
 import { resolveMemoryConfig } from "@/types/memory/memory"
@@ -248,11 +249,14 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     characterId ? getCharacter(characterId).catch(() => undefined) : Promise.resolve(undefined),
   ])
 
+  // Same resolver the inbound turn uses, so the digest cannot reach a
+  // different conclusion about the same conversation. The mute half used to be
+  // adapter-only here: a muted CONVERSATION still had its digest composed, and
+  // the reply was only held at delivery.
+  const suppression = resolveInboxSuppression(adapterRow ?? {}, overrideRow)
   const inboxPolicy: InboxSendPolicy = {
-    // Per-conversation override wins over the adapter-level default — same
-    // precedence as the delivery-time check in outbound-runner.ts.
-    quietHours: overrideRow?.quietHours ?? adapterRow?.quietHours,
-    muted: adapterRow?.muted,
+    quietHours: suppression.quietHours,
+    muted: suppression.muted,
     forcedMode: overrideRow?.mode,
   }
 

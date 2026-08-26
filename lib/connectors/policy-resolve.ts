@@ -130,3 +130,43 @@ export function resolveEffectiveTeamBinding(
   if (instanceTeamId) return { teamId: instanceTeamId, source: "instance-default" }
   return { teamId: undefined, source: "none" }
 }
+
+/**
+ * Whether an inbound turn should be suppressed before it runs, and why.
+ *
+ * The delivery-time twin of this lives in `outbound-runner.ts` (adapter mute →
+ * conversation mute → `convOverride?.quietHours ?? adapterRow.quietHours`), and
+ * the two must agree: a conversation quiet window that holds the DELIVERY but
+ * lets the turn run still spends a model call on a reply nobody asked to have
+ * sent now, and a muted conversation still burned one on a reply that would sit
+ * deferred until someone unmuted it — possibly days later, answering a message
+ * from days ago.
+ *
+ * Mute is OR across the layers because it is a killswitch in both places: a
+ * conversation cannot un-mute a muted bot. Quiet hours REPLACE, because a
+ * window is a whole statement about when this chat is awake — merging two of
+ * them has no meaning.
+ */
+export interface InboxSuppression {
+  quietHours?: NonNullable<AdapterInstanceRow["quietHours"]>
+  muted: boolean
+  /**
+   * Which layer switched the mute on. The audit trail needs the difference:
+   * "this bot is off" and "this chat is off" send a troubleshooter to two
+   * different controls.
+   */
+  mutedScope?: "adapter" | "conversation"
+}
+
+export function resolveInboxSuppression(
+  adapter: Pick<AdapterInstanceRow, "quietHours" | "muted">,
+  override: Pick<ConversationOverrideRow, "quietHours" | "muted"> | null | undefined
+): InboxSuppression {
+  const mutedScope =
+    adapter.muted === true ? "adapter" : override?.muted === true ? "conversation" : undefined
+  return {
+    quietHours: override?.quietHours ?? adapter.quietHours,
+    muted: mutedScope !== undefined,
+    ...(mutedScope ? { mutedScope } : {}),
+  }
+}
