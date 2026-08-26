@@ -2059,6 +2059,38 @@ export const PARAMS_SCHEMAS = {
     checkout: z.boolean().optional(),
     from: z.string().optional(),
   }),
+  // Stacked branches. `branches` and `tipBranch` are alternatives: name the
+  // layers, or name the top of a chain and let the parent pointers supply them.
+  "action.stack.list": z.object({
+    repoPath: z.string().optional(),
+    projectId: z.string().optional(),
+  }),
+  "action.stack.parent": z.object({
+    repoPath: z.string().optional(),
+    projectId: z.string().optional(),
+    branch: z.string(),
+    parent: z.string().optional(),
+  }),
+  "action.stack.validate": z.object({
+    repoPath: z.string().optional(),
+    projectId: z.string().optional(),
+    branches: z.array(z.string()).optional(),
+    tipBranch: z.string().optional(),
+  }),
+  "action.stack.restack": z.object({
+    repoPath: z.string().optional(),
+    projectId: z.string().optional(),
+    branches: z.array(z.string()).optional(),
+    tipBranch: z.string().optional(),
+    onto: z.string().optional(),
+  }),
+  "action.stack.push": z.object({
+    repoPath: z.string().optional(),
+    projectId: z.string().optional(),
+    branches: z.array(z.string()).optional(),
+    tipBranch: z.string().optional(),
+    remote: z.string().optional(),
+  }),
   // Embedded code-server "Pro IDE" (ADR-0088 Phase 3). `root` is optional on
   // every kind — it defaults to the bound Pro IDE at run time. `autoStart` is
   // opt-in per node because bringing code-server up is a visible, potentially

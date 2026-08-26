@@ -2533,6 +2533,58 @@
       "removeBranch": "Remove branch"
     }
   },
+  "stack": {
+    "layers": {
+      "branches": {
+        "hint": "Comma separated, bottom layer first. Ignored when a tip branch is set.",
+        "label": "Layers",
+        "placeholder": "me/api, me/ui, me/docs"
+      },
+      "tip": {
+        "hint": "Name the top of a chain and every layer below it is resolved from the recorded parent pointers — so the flow keeps working when someone adds a layer.",
+        "label": "Tip branch",
+        "placeholder": "me/docs"
+      }
+    },
+    "parent": {
+      "branch": {
+        "hint": "Required. The branch whose parent is being recorded.",
+        "label": "Branch",
+        "placeholder": "me/ui"
+      },
+      "parent": {
+        "hint": "Leave empty to clear the pointer, which makes this the bottom layer.",
+        "label": "Stacked on",
+        "placeholder": "me/api"
+      }
+    },
+    "push": {
+      "remote": {
+        "hint": "Defaults to origin.",
+        "label": "Remote",
+        "placeholder": "origin"
+      }
+    },
+    "repo": {
+      "path": {
+        "hint": "Defaults to this run's workspace, then to the folder open in Source Control.",
+        "label": "Repository path",
+        "placeholder": "/path/to/repo"
+      },
+      "workspace": {
+        "hint": "Use a different workspace than the one this run belongs to.",
+        "label": "Workspace",
+        "placeholder": "workspace id"
+      }
+    },
+    "restack": {
+      "onto": {
+        "hint": "Defaults to the trunk the chain records. Set it to move the whole stack somewhere else.",
+        "label": "Onto",
+        "placeholder": "main"
+      }
+    }
+  },
   "subworkflow": {
     "inputJson": {
       "hint": "Forwarded as the subworkflow's trigger payload.",

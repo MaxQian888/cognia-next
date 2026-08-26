@@ -25,7 +25,19 @@ import { useEdgeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { computeSmartRoute, type HandlePosition } from "@/lib/workflow/editor/edge-routing"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 
-type EdgeKind = "then" | "else" | "true" | "false" | "error" | "default" | "approved" | "rejected"
+type EdgeKind =
+  | "then"
+  | "else"
+  | "true"
+  | "false"
+  | "error"
+  | "default"
+  | "approved"
+  | "rejected"
+  | "ok"
+  | "problems"
+  | "restacked"
+  | "conflict"
 
 const KIND_CLASSES: Record<EdgeKind, string> = {
   then: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -36,6 +48,10 @@ const KIND_CLASSES: Record<EdgeKind, string> = {
   default: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
   approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   rejected: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  problems: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  restacked: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  conflict: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
 }
 
 function isEdgeKind(v: unknown): v is EdgeKind {
@@ -47,7 +63,11 @@ function isEdgeKind(v: unknown): v is EdgeKind {
     v === "error" ||
     v === "default" ||
     v === "approved" ||
-    v === "rejected"
+    v === "rejected" ||
+    v === "ok" ||
+    v === "problems" ||
+    v === "restacked" ||
+    v === "conflict"
   )
 }
 

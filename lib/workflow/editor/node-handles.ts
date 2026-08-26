@@ -27,7 +27,18 @@ export interface OutputHandleSpec {
    * the executor's `decision`. */
   id: string
   /** Render intent: fixed kinds translate via i18n; `case` uses `label`. */
-  kind: "true" | "false" | "case" | "default" | "approved" | "rejected" | "timeout"
+  kind:
+    | "true"
+    | "false"
+    | "case"
+    | "default"
+    | "approved"
+    | "rejected"
+    | "timeout"
+    | "ok"
+    | "problems"
+    | "restacked"
+    | "conflict"
   /** Author-supplied display label (case handles only). */
   label?: string
 }
@@ -75,6 +86,22 @@ export function outputHandlesFor(node: NodeShapeForHandles): OutputHandleSpec[] 
         ]
       }),
       { id: "timeout", kind: "timeout" as const },
+    ]
+  }
+  // Stack verdicts route from v1. The executors return a `decision`, and the
+  // orchestrator skips every outgoing edge whose route key does not match it —
+  // so a kind that decides MUST declare its handles here, or a plainly-drawn
+  // edge (route key "default") silently skips everything downstream.
+  if (node.kind === "action.stack.validate") {
+    return [
+      { id: "ok", kind: "ok" },
+      { id: "problems", kind: "problems" },
+    ]
+  }
+  if (node.kind === "action.stack.restack") {
+    return [
+      { id: "restacked", kind: "restacked" },
+      { id: "conflict", kind: "conflict" },
     ]
   }
   if (node.typeVersion < 2) return null

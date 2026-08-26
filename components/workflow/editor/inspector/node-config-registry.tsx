@@ -21,6 +21,13 @@ import {
   OcrExtractConfig,
 } from "./forms/git-ocr-forms"
 import {
+  StackListConfig,
+  StackParentConfig,
+  StackPushConfig,
+  StackRestackConfig,
+  StackValidateConfig,
+} from "./forms/stack-forms"
+import {
   EditorApplyEditConfig,
   EditorOpenConfig,
   EditorReadActiveConfig,
@@ -299,6 +306,12 @@ const REGISTRY: Partial<Record<WorkflowNodeKind, NodeConfigComponent>> = {
   "action.git.commit": GitCommitConfig,
   "action.git.push": GitPushConfig,
   "action.git.branch": GitBranchConfig,
+  // Stacked branches
+  "action.stack.list": StackListConfig,
+  "action.stack.parent": StackParentConfig,
+  "action.stack.validate": StackValidateConfig,
+  "action.stack.restack": StackRestackConfig,
+  "action.stack.push": StackPushConfig,
   // Data: OCR extraction (ADR-0024)
   "ocr.extract": OcrExtractConfig,
   // Eval nodes

@@ -1,3 +1,5 @@
+import enMessages from "@/i18n/messages/en.json"
+import zhMessages from "@/i18n/messages/zh-CN.json"
 import {
   defaultTypeVersionFor,
   hasErrorHandle,
@@ -170,5 +172,60 @@ describe("hasErrorHandle", () => {
     expect(hasErrorHandle({ kind: "flow.branch", errorHandling: { onError: "errorBranch" } })).toBe(
       false
     )
+  })
+})
+
+describe("stack decision handles", () => {
+  it("validate exposes ok/problems, restack exposes restacked/conflict", () => {
+    // Not cosmetic: the executors return a `decision`, and the orchestrator
+    // skips every outgoing edge whose route key does not match one. A kind
+    // that decides without declaring handles makes a plainly-drawn edge (route
+    // key "default") skip everything downstream — the graph looks fine and the
+    // run quietly does nothing.
+    expect(outputHandlesFor({ kind: "action.stack.validate", typeVersion: 1, params: {} })).toEqual(
+      [
+        { id: "ok", kind: "ok" },
+        { id: "problems", kind: "problems" },
+      ]
+    )
+    expect(outputHandlesFor({ kind: "action.stack.restack", typeVersion: 1, params: {} })).toEqual([
+      { id: "restacked", kind: "restacked" },
+      { id: "conflict", kind: "conflict" },
+    ])
+  })
+
+  it("the stack kinds that do not decide keep the plain single handle", () => {
+    for (const kind of ["action.stack.list", "action.stack.parent", "action.stack.push"] as const) {
+      expect(outputHandlesFor({ kind, typeVersion: 1, params: {} })).toBeNull()
+    }
+  })
+
+  it("every handle kind has a label in both locales", () => {
+    // The renderer resolves `outputHandles.${kind}`, a dynamic key `lint:i18n`
+    // cannot see — so a new handle kind renders as its own key path until
+    // something checks. This is that something.
+    const kinds = [
+      "true",
+      "false",
+      "default",
+      "approved",
+      "rejected",
+      "timeout",
+      "ok",
+      "problems",
+      "restacked",
+      "conflict",
+    ]
+    for (const locale of ["en", "zh-CN"]) {
+      const handles = (
+        (locale === "en" ? enMessages : zhMessages) as {
+          workflows: { node: { outputHandles: Record<string, string> } }
+        }
+      ).workflows.node.outputHandles
+      for (const kind of kinds) {
+        expect(typeof handles[kind]).toBe("string")
+        expect(handles[kind]).not.toHaveLength(0)
+      }
+    }
   })
 })

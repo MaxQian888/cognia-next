@@ -2533,6 +2533,58 @@
       "removeBranch": "移除分支"
     }
   },
+  "stack": {
+    "layers": {
+      "branches": {
+        "hint": "逗号分隔，最底层在前。设置了顶层分支时忽略此项。",
+        "label": "各层分支",
+        "placeholder": "me/api, me/ui, me/docs"
+      },
+      "tip": {
+        "hint": "只填链条顶端，下面每一层都从记录的父指针推导出来——这样别人加一层时流程仍然有效。",
+        "label": "顶层分支",
+        "placeholder": "me/docs"
+      }
+    },
+    "parent": {
+      "branch": {
+        "hint": "必填。要为其记录父层的分支。",
+        "label": "分支",
+        "placeholder": "me/ui"
+      },
+      "parent": {
+        "hint": "留空表示清除指针，即把它变成最底层。",
+        "label": "基于",
+        "placeholder": "me/api"
+      }
+    },
+    "push": {
+      "remote": {
+        "hint": "默认 origin。",
+        "label": "远端",
+        "placeholder": "origin"
+      }
+    },
+    "repo": {
+      "path": {
+        "hint": "默认取本次运行所属的工作区，其次是源代码管理里打开的目录。",
+        "label": "仓库路径",
+        "placeholder": "/path/to/repo"
+      },
+      "workspace": {
+        "hint": "使用与本次运行所属工作区不同的工作区。",
+        "label": "工作区",
+        "placeholder": "工作区 id"
+      }
+    },
+    "restack": {
+      "onto": {
+        "hint": "默认取链条记录的主干分支。设置它可以把整个栈移到别处。",
+        "label": "重排到",
+        "placeholder": "main"
+      }
+    }
+  },
   "subworkflow": {
     "inputJson": {
       "hint": "作为子工作流的触发负载转发。",

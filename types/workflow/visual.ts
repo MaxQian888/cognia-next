@@ -179,6 +179,13 @@ export type WorkflowNodeKind =
   | "action.git.commit"
   | "action.git.push"
   | "action.git.branch"
+  // Stacked branches (ADR — stacks as first-class). Local git only: publishing
+  // and merging a stack talks to a forge, which stays plugin territory.
+  | "action.stack.list"
+  | "action.stack.parent"
+  | "action.stack.validate"
+  | "action.stack.restack"
+  | "action.stack.push"
   // Embedded code-server "Pro IDE" (ADR-0088 Phase 3). Addressing mirrors
   // `action.git.*`: an explicit `root`, else the bound Pro IDE, else a throw.
   | "action.editor.open"
@@ -419,6 +426,11 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "action.git.commit",
   "action.git.push",
   "action.git.branch",
+  "action.stack.list",
+  "action.stack.parent",
+  "action.stack.validate",
+  "action.stack.restack",
+  "action.stack.push",
   "action.editor.open",
   "action.editor.reveal",
   "action.editor.showDiff",

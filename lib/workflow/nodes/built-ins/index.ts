@@ -28,6 +28,9 @@ import "../editor"
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "../source-control"
+// Stacked-branch nodes — list / parent / validate / restack / push, local git
+// only (forge delivery stays a plugin concern).
+import "../source-control/stack"
 // Web-clone node (`io.webClone`) — snapshot a live page + assets into a
 // self-contained file/bundle via the vendored sidecar engine (desktop only).
 import "../automation/web-clone"

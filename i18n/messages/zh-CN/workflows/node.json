@@ -25,9 +25,13 @@
   },
   "outputHandles": {
     "approved": "已批准",
+    "conflict": "冲突",
     "default": "默认",
     "false": "假",
+    "ok": "通过",
+    "problems": "有问题",
     "rejected": "已拒绝",
+    "restacked": "已重排",
     "timeout": "超时",
     "true": "真"
   },

@@ -42357,6 +42357,58 @@
           "removeBranch": "Remove branch"
         }
       },
+      "stack": {
+        "layers": {
+          "branches": {
+            "hint": "Comma separated, bottom layer first. Ignored when a tip branch is set.",
+            "label": "Layers",
+            "placeholder": "me/api, me/ui, me/docs"
+          },
+          "tip": {
+            "hint": "Name the top of a chain and every layer below it is resolved from the recorded parent pointers — so the flow keeps working when someone adds a layer.",
+            "label": "Tip branch",
+            "placeholder": "me/docs"
+          }
+        },
+        "parent": {
+          "branch": {
+            "hint": "Required. The branch whose parent is being recorded.",
+            "label": "Branch",
+            "placeholder": "me/ui"
+          },
+          "parent": {
+            "hint": "Leave empty to clear the pointer, which makes this the bottom layer.",
+            "label": "Stacked on",
+            "placeholder": "me/api"
+          }
+        },
+        "push": {
+          "remote": {
+            "hint": "Defaults to origin.",
+            "label": "Remote",
+            "placeholder": "origin"
+          }
+        },
+        "repo": {
+          "path": {
+            "hint": "Defaults to this run's workspace, then to the folder open in Source Control.",
+            "label": "Repository path",
+            "placeholder": "/path/to/repo"
+          },
+          "workspace": {
+            "hint": "Use a different workspace than the one this run belongs to.",
+            "label": "Workspace",
+            "placeholder": "workspace id"
+          }
+        },
+        "restack": {
+          "onto": {
+            "hint": "Defaults to the trunk the chain records. Set it to move the whole stack somewhere else.",
+            "label": "Onto",
+            "placeholder": "main"
+          }
+        }
+      },
       "subworkflow": {
         "inputJson": {
           "hint": "Forwarded as the subworkflow's trigger payload.",
@@ -43230,9 +43282,13 @@
       },
       "outputHandles": {
         "approved": "approved",
+        "conflict": "conflict",
         "default": "default",
         "false": "false",
+        "ok": "ok",
+        "problems": "problems",
         "rejected": "rejected",
+        "restacked": "restacked",
         "timeout": "timeout",
         "true": "true"
       },
@@ -43646,6 +43702,28 @@
           "upsert": {
             "description": "Creates or updates a skill with the given markdown body.",
             "label": "Upsert skill"
+          }
+        },
+        "stack": {
+          "list": {
+            "description": "Find every stacked branch chain recorded in the repository.",
+            "label": "List stacks"
+          },
+          "parent": {
+            "description": "Record (or clear) the branch a branch is stacked on.",
+            "label": "Set stack parent"
+          },
+          "push": {
+            "description": "Push every layer with a lease, so a stale local view cannot overwrite work.",
+            "label": "Push stack"
+          },
+          "restack": {
+            "description": "Replay the layers onto their base, moving every branch above the change.",
+            "label": "Restack"
+          },
+          "validate": {
+            "description": "Check every layer actually contains its parent, and report what would fix it.",
+            "label": "Validate stack"
           }
         },
         "system": {

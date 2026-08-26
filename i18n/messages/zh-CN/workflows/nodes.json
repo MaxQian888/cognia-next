@@ -408,6 +408,28 @@
         "label": "新增或更新技能"
       }
     },
+    "stack": {
+      "list": {
+        "description": "找出仓库里记录的每一条分支栈。",
+        "label": "列出栈"
+      },
+      "parent": {
+        "description": "记录（或清除）某个分支所基于的分支。",
+        "label": "设置栈父层"
+      },
+      "push": {
+        "description": "带租约推送每一层，让过期的本地视图无法覆盖别人的工作。",
+        "label": "推送栈"
+      },
+      "restack": {
+        "description": "把各层重放到基分支上，同时移动改动之上的所有分支。",
+        "label": "重排栈"
+      },
+      "validate": {
+        "description": "检查每一层是否真的包含它的父层，并给出可执行的修复动作。",
+        "label": "校验栈"
+      }
+    },
     "system": {
       "terminal": {
         "description": "在集成终端中执行 shell 命令，stdout 与退出码传递给下游。",

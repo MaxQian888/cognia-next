@@ -843,6 +843,50 @@ const ENTRIES: Partial<Record<WorkflowNodeKind, Omit<NodeCatalogEntry, "kind" | 
     desktopOnly: true,
     requires: ["shell"],
   },
+  // ── Stacked branches (ADR — stacks as first-class) ────────────────────────
+  // Addressing mirrors `action.git.*`. Every kind takes either an explicit
+  // `branches` list or a `tipBranch` whose whole chain is resolved from the
+  // recorded parent pointers.
+  "action.stack.list": {
+    label: "List stacks",
+    description: "Find every stacked branch chain recorded in the repository.",
+    iconName: "Layers",
+    keywords: ["stack", "stacked", "branch", "chain", "pull request", "source control"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.stack.parent": {
+    label: "Set stack parent",
+    description: "Record (or clear) the branch a branch is stacked on.",
+    iconName: "GitFork",
+    keywords: ["stack", "parent", "base", "branch", "source control"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.stack.validate": {
+    label: "Validate stack",
+    description: "Check every layer actually contains its parent, and report what would fix it.",
+    iconName: "ShieldCheck",
+    keywords: ["stack", "validate", "ancestry", "check", "source control"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.stack.restack": {
+    label: "Restack",
+    description: "Replay the layers onto their base, moving every branch above the change.",
+    iconName: "GitPullRequestArrow",
+    keywords: ["stack", "restack", "rebase", "replay", "source control"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
+  "action.stack.push": {
+    label: "Push stack",
+    description: "Push every layer with a lease, so a stale local view cannot overwrite work.",
+    iconName: "ArrowUpFromLine",
+    keywords: ["stack", "push", "force", "lease", "source control"],
+    desktopOnly: true,
+    requires: ["shell"],
+  },
   // ── Embedded code-server "Pro IDE" (ADR-0088) ─────────────────────────────
   // `root` is optional on every one: it defaults to the bound Pro IDE, exactly
   // as `action.git.*`'s `repoPath` defaults to the active workspace root.

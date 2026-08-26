@@ -25,9 +25,13 @@
   },
   "outputHandles": {
     "approved": "approved",
+    "conflict": "conflict",
     "default": "default",
     "false": "false",
+    "ok": "ok",
+    "problems": "problems",
     "rejected": "rejected",
+    "restacked": "restacked",
     "timeout": "timeout",
     "true": "true"
   },

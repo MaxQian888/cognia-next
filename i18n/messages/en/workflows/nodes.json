@@ -408,6 +408,28 @@
         "label": "Upsert skill"
       }
     },
+    "stack": {
+      "list": {
+        "description": "Find every stacked branch chain recorded in the repository.",
+        "label": "List stacks"
+      },
+      "parent": {
+        "description": "Record (or clear) the branch a branch is stacked on.",
+        "label": "Set stack parent"
+      },
+      "push": {
+        "description": "Push every layer with a lease, so a stale local view cannot overwrite work.",
+        "label": "Push stack"
+      },
+      "restack": {
+        "description": "Replay the layers onto their base, moving every branch above the change.",
+        "label": "Restack"
+      },
+      "validate": {
+        "description": "Check every layer actually contains its parent, and report what would fix it.",
+        "label": "Validate stack"
+      }
+    },
     "system": {
       "terminal": {
         "description": "Run a shell command in the integrated terminal dock. Routes stdout / exit code downstream.",
