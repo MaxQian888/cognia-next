@@ -1,5 +1,11 @@
 import type { AgentTeamDeliveryNode } from "@/types/agent/agent-team-runtime"
-import { createGithubDeliveryAdapter, stackRootBase } from "./github-delivery-adapter"
+import type { GitStackLayerState } from "@/types/git"
+import type { Stack } from "@/lib/stack/model"
+import {
+  assertPublishableStack,
+  createGithubDeliveryAdapter,
+  stackRootBase,
+} from "./github-delivery-adapter"
 
 const node: AgentTeamDeliveryNode = {
   id: "layer-1",
@@ -123,5 +129,73 @@ describe("stackRootBase", () => {
     ]) {
       expect(() => stackRootBase("primary", undefined, resolved)).toThrow()
     }
+  })
+})
+
+describe("assertPublishableStack", () => {
+  const stack: Stack = {
+    id: "primary",
+    repositoryRoot: "/repos/app",
+    trunk: "main",
+    model: "branchPerLayer",
+    layers: [
+      { id: "one", branch: "agent/one", title: "one", order: 0 },
+      { id: "two", branch: "agent/two", title: "two", order: 1 },
+    ],
+  }
+
+  function layerState(over: Partial<GitStackLayerState> & { branch: string }): GitStackLayerState {
+    return {
+      parent: null,
+      head: "0".repeat(40),
+      containsParent: true,
+      checkedOutIn: null,
+      ...over,
+    }
+  }
+
+  it("records the intended parent of every layer before asking git anything", async () => {
+    // Without this the run's work is invisible to the Stacks panel, and every
+    // layer reports `parentUnrecorded` — the one problem writing the pointer
+    // is supposed to fix.
+    const recordParent = jest.fn(async () => {})
+    await assertPublishableStack("/repos/app", stack, {
+      recordParent,
+      validateLayers: async () => [
+        layerState({ branch: "agent/one", parent: "main" }),
+        layerState({ branch: "agent/two", parent: "agent/one" }),
+      ],
+    })
+    expect(recordParent.mock.calls).toEqual([
+      ["/repos/app", "agent/one", "main"],
+      ["/repos/app", "agent/two", "agent/one"],
+    ])
+  })
+
+  it("refuses a chain that is only an order of completion, naming the layer", async () => {
+    // Two agents that branched off the trunk in parallel produce exactly the
+    // list this function is handed. Publishing it opens a pull request for
+    // layer 2 whose diff also contains layer 1.
+    await expect(
+      assertPublishableStack("/repos/app", stack, {
+        recordParent: async () => {},
+        validateLayers: async () => [
+          layerState({ branch: "agent/one", parent: "main" }),
+          layerState({ branch: "agent/two", parent: "agent/one", containsParent: false }),
+        ],
+      })
+    ).rejects.toThrow("agent/two does not contain agent/one")
+  })
+
+  it("refuses a layer whose branch never made it to the repository", async () => {
+    await expect(
+      assertPublishableStack("/repos/app", stack, {
+        recordParent: async () => {},
+        validateLayers: async () => [
+          layerState({ branch: "agent/one", parent: "main" }),
+          layerState({ branch: "agent/two", parent: "agent/one", head: null }),
+        ],
+      })
+    ).rejects.toThrow("agent/two does not exist")
   })
 })

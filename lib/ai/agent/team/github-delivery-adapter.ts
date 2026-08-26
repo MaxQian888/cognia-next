@@ -6,6 +6,9 @@ import type { ScmDeliveryAdapter, ScmDeliveryObservation } from "./delivery-grap
 import { getDb } from "@/lib/db/schema"
 import type { ResolvedTeamRepo } from "./pr-feedback/resolvers"
 import { stackedDeliveryOn } from "@/lib/stack/team-policy"
+import { baseBranches, type Stack } from "@/lib/stack/model"
+import { validateStack } from "@/lib/stack/validate"
+import type { GitStackLayerState } from "@/types/git"
 
 export interface GithubDeliveryAdapterOptions {
   octokit: OctokitLike
@@ -124,6 +127,65 @@ export function createGithubDeliveryAdapter(
 export interface ApproveAndMergeGithubStackOptions {
   resolveTeamRepo?: (path: string) => Promise<ResolvedTeamRepoLike | null>
   resolveOctokit?: (fullName: string) => Promise<OctokitLike | null>
+  /** Record a layer's parent in the repository's own config. */
+  recordParent?: (repositoryRoot: string, branch: string, parent: string) => Promise<void>
+  /** Ask git what is actually true about a chain of branches. */
+  validateLayers?: (repositoryRoot: string, branches: string[]) => Promise<GitStackLayerState[]>
+}
+
+/**
+ * Check that the chain a run produced is a stack in git, not just in order of
+ * completion, and record it as one.
+ *
+ * The layers come from `agentTeamChildRuns` sorted by `createdAt`, which says
+ * who finished first and nothing at all about ancestry. Two agents that
+ * branched off the trunk in parallel produce exactly that list, and publishing
+ * it as a stack opens a pull request for layer 2 whose diff also contains layer
+ * 1 — reviewed, approved and merged as one change nobody described.
+ *
+ * So the intended parent is written first (that IS the fix for a layer git was
+ * never told about, and it is what makes the Stacks panel show the run's work),
+ * and then git is asked. A chain that does not hold is refused by name rather
+ * than published and discovered later.
+ */
+export async function assertPublishableStack(
+  repositoryRoot: string,
+  stack: Stack,
+  deps: {
+    recordParent: (repositoryRoot: string, branch: string, parent: string) => Promise<void>
+    validateLayers: (repositoryRoot: string, branches: string[]) => Promise<GitStackLayerState[]>
+  }
+): Promise<void> {
+  const ordered = [...stack.layers].sort((left, right) => left.order - right.order)
+  const bases = baseBranches(stack)
+  for (const layer of ordered) {
+    const parent = bases.get(layer.branch)
+    if (parent) await deps.recordParent(repositoryRoot, layer.branch, parent)
+  }
+  const states = await deps.validateLayers(
+    repositoryRoot,
+    ordered.map((layer) => layer.branch)
+  )
+  const verdict = validateStack({ stack, states })
+  if (verdict.ok) return
+  const detail = verdict.problems
+    .map((problem) =>
+      problem.kind === "behindParent"
+        ? `${problem.branch} does not contain ${problem.parent}`
+        : problem.kind === "missingBranch"
+          ? `${problem.branch} does not exist`
+          : problem.kind === "checkedOut"
+            ? `${problem.branch} is checked out in ${problem.worktree}`
+            : problem.kind === "parentMismatch"
+              ? `${problem.branch} sits on ${problem.recorded}, not ${problem.expected}`
+              : problem.kind === "parentUnrecorded"
+                ? `${problem.branch} has no recorded parent`
+                : `only a fork of ${problem.repository} is writable`
+    )
+    .join("; ")
+  throw new Error(
+    `Repository ${stack.id} is not a stack in git, so it was not published: ${detail}`
+  )
 }
 
 /**
@@ -260,6 +322,57 @@ export async function prepareAndPublishGithubStack(
   }
   const first = Object.values(repositories)[0]
   if (!first) return undefined
+
+  // The layers, once, so the same list is what git is asked about and what is
+  // published. Deriving them twice is how the check and the publish drift.
+  const layersByBinding = new Map(
+    stackBindings.map((binding) => [
+      binding.id,
+      children
+        .filter(
+          (child) =>
+            child.repositoryId === binding.id && child.status === "completed" && child.branch
+        )
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(0, maxLayers)
+        .map((child, index) => ({
+          id: `delivery:${child.id}`,
+          branch: child.branch!,
+          title: `AgentTeam layer ${index + 1}: ${child.taskId}`,
+        })),
+    ])
+  )
+
+  const recordParent =
+    options.recordParent ??
+    (async (repositoryRoot: string, branch: string, parent: string) => {
+      const { gitStackSetParent } = await import("@/lib/git/commands")
+      await gitStackSetParent(repositoryRoot, branch, parent)
+    })
+  const validateLayers =
+    options.validateLayers ??
+    (async (repositoryRoot: string, branchNames: string[]) => {
+      const { gitStackValidate } = await import("@/lib/git/commands")
+      return gitStackValidate(repositoryRoot, branchNames)
+    })
+
+  // Before any network call: a refusal after three pull requests are open is a
+  // mess somebody has to close by hand.
+  for (const binding of stackBindings) {
+    const layers = layersByBinding.get(binding.id) ?? []
+    await assertPublishableStack(
+      binding.path,
+      {
+        id: binding.id,
+        repositoryRoot: binding.path,
+        trunk: defaults[binding.id]!,
+        model: "branchPerLayer",
+        layers: layers.map((layer, order) => ({ ...layer, order })),
+      },
+      { recordParent, validateLayers }
+    )
+  }
+
   const octokit = await resolveOctokit(first)
   if (!octokit) throw new Error("GitHub delivery credentials are unavailable")
   const { createDeliveryGraphService } = await import("./delivery-graph")
@@ -277,18 +390,7 @@ export async function prepareAndPublishGithubStack(
       dependsOn: (binding.dependsOn ?? []).filter((id) =>
         stackBindings.some((item) => item.id === id)
       ),
-      layers: children
-        .filter(
-          (child) =>
-            child.repositoryId === binding.id && child.status === "completed" && child.branch
-        )
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .slice(0, maxLayers)
-        .map((child, index) => ({
-          id: `delivery:${child.id}`,
-          branch: child.branch!,
-          title: `AgentTeam layer ${index + 1}: ${child.taskId}`,
-        })),
+      layers: layersByBinding.get(binding.id) ?? [],
     })),
   })
   await service.publish(graphId)

@@ -1,9 +1,31 @@
+/**
+ * Agent Team's delivery graph: many repositories, one approval, remediation
+ * between the checks and the merge.
+ *
+ * # Why this is not `lib/stack`
+ *
+ * They look alike and are not the same thing. A `Stack` is one repository's
+ * chain of branches, with git as the truth and a restack as the repair. This is
+ * a run's whole delivery: several repositories that depend on each other, node
+ * state persisted so a half-finished merge can be resumed, an approval gate,
+ * and a remediation loop that hands a failing layer back to an agent. None of
+ * that belongs in the single-repository engine, and folding this into
+ * `mergeStack` would drop all four.
+ *
+ * What IS shared is shared: the ordering rule (`lib/stack/topology`), the base
+ * chain (`lib/stack/model`), and — before anything is published — the ancestry
+ * check in {@link assertPublishableStack}, because "these branches finished in
+ * this order" and "these branches are a stack" are different claims and only
+ * git can settle the second.
+ */
+
 import {
   listAgentTeamDeliveryNodes,
   putAgentTeamDeliveryGraph,
   putAgentTeamDeliveryNodes,
 } from "@/lib/db/agent-team-runtime"
 import { getDb } from "@/lib/db/schema"
+import { baseBranches } from "@/lib/stack/model"
 import { topologicalOrder } from "@/lib/stack/topology"
 import type {
   AgentTeamDeliveryGraph,
@@ -97,6 +119,15 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
         if (repository.layers.length < 2 || repository.layers.length > 100) {
           throw new Error("A repository delivery stack must contain 2 to 100 layers")
         }
+        const bases = baseBranches({
+          trunk: repository.baseBranch,
+          layers: repository.layers.map((layer, index) => ({
+            id: layer.id,
+            branch: layer.branch,
+            title: layer.title,
+            order: index,
+          })),
+        })
         repository.layers.forEach((layer, index) => {
           if (nodes.some((node) => node.id === layer.id)) {
             throw new Error(`Duplicate delivery node id: ${layer.id}`)
@@ -123,7 +154,10 @@ export function createDeliveryGraphService(options: DeliveryGraphServiceOptions)
               ...(layer.dependsOn ?? []),
             ],
             branch: layer.branch,
-            baseBranch: index === 0 ? repository.baseBranch : repository.layers[index - 1]!.branch,
+            // The same rule the stack engine applies, from the same function:
+            // two copies of "layer n is based on layer n-1" is two places for
+            // an off-by-one to live.
+            baseBranch: bases.get(layer.branch) ?? repository.baseBranch,
             status: "blocked",
             createdAt,
             updatedAt: createdAt,
