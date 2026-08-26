@@ -346,6 +346,18 @@ describe("BootScreen", () => {
     expect(html).toContain("--boot-fill:0")
   })
 
+  // The ambient backdrop is two pseudo-element blobs clipped to this box, so a
+  // screen that under-fills its container paints the shortfall bare — which is
+  // what the viewport-relative floor did at every root mount (a block child of
+  // `<body>`, itself `height: 100%`): a 5rem band with the bottom-right blob
+  // sliced off. jsdom does no layout, so the floor itself is what gets pinned.
+  it("floors its height at the container's, not just at a viewport inset", () => {
+    render(<BootScreen milestone="accounts" />)
+    const screen = document.querySelector('[data-slot="boot-screen"]')!
+    const floors = /min-h-\[max\(([^\]]+)\)\]/.exec(screen.className)?.[1]
+    expect(floors?.split(",")).toContain("100%")
+  })
+
   it("marks the region busy and links its label to the heading", () => {
     render(<BootScreen milestone="accounts" />)
     const region = document.querySelector('section[aria-busy="true"]')!

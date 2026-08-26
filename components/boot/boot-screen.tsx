@@ -154,7 +154,17 @@ export function BootScreen({
       data-slot="boot-screen"
       data-milestone={milestone}
       className={cn(
-        "boot-screen flex min-h-[max(400px,calc(100dvh-5rem))] w-full items-center justify-center px-4 py-6 sm:px-8",
+        // Three floors, and the `100%` is the one that keeps the ambient
+        // backdrop honest: the two blobs are pseudo-elements clipped to this
+        // box (`overflow: hidden`, globals.css), so any strip of the container
+        // the screen fails to cover paints bare — visibly so at the bottom
+        // right, where the `::after` blob sits. The root mounts (account /
+        // recovery / onboarding gates, and the shell's pre-hydration loader)
+        // are block children of `<body>`, which is `height: 100%`, so the
+        // viewport floor alone left exactly its own 5rem inset uncovered.
+        // A `100%` that cannot resolve contributes 0, which is what leaves the
+        // other two terms in charge wherever the parent height is indefinite.
+        "boot-screen flex min-h-[max(400px,100%,calc(100dvh-5rem))] w-full items-center justify-center px-4 py-6 sm:px-8",
         className
       )}
     >
