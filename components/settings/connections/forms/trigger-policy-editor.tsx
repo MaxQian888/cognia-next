@@ -517,7 +517,9 @@ export function TriggerPolicyEditor({
         <Alert data-testid={`${idPrefix}-coverage-gaps`}>
           <AlertTriangleIcon className="size-4" />
           <AlertDescription>
-            <ul className="list-disc space-y-1 pl-4">
+            {/* Disc markers only once there is a list to mark — a lone bullet
+             * beside the alert icon reads as a rendering slip. */}
+            <ul className={gaps.length > 1 ? "list-disc space-y-1 pl-4" : "space-y-1"}>
               {gaps.map((gap) => (
                 <li key={gap} data-testid={`${idPrefix}-gap-${gap}`}>
                   {t(`gaps.${gap}`)}
@@ -532,7 +534,7 @@ export function TriggerPolicyEditor({
         <Alert variant="destructive" data-testid={`${idPrefix}-warnings`}>
           <AlertTriangleIcon className="size-4" />
           <AlertDescription>
-            <ul className="list-disc space-y-1 pl-4">
+            <ul className={warnings.length > 1 ? "list-disc space-y-1 pl-4" : "space-y-1"}>
               {warnings.map((warning) => (
                 <li key={warning} data-testid={`${idPrefix}-warning-${warning}`}>
                   {t(`warnings.${warning}`)}
