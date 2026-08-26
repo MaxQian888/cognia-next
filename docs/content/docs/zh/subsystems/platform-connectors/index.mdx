@@ -169,7 +169,7 @@ sequenceDiagram
     B-->>B: audit inbound.deduped, stop
   else new
     B->>D: adapterInstance / override / character
-    B->>B: resolveBinding (3-layer) → evaluatePolicy → routeInbound
+    B->>B: resolveBinding (3-layer) → evaluatePolicy → routeInboundFromComposition
     B->>D: audit inbound.received / policy_blocked
     B->>Run: routeHandler(event, decision, resolved)
     alt decision = ai-run

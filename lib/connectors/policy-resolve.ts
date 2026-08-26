@@ -9,8 +9,10 @@
  *     defines them.
  *   - `storeUnmatchedInDraftMode` follows the highest layer that defines it.
  *
- * Note: the Character type does not have a `mode` field or a `characterId`
- * field — those are skipped during the character layer merge.
+ * `Character` itself has no `mode` or `characterId`, but a character CAN ship
+ * `platformDefaults.mode` — a recommendation for how a bot wearing it should
+ * behave. That layer used to be skipped, so a character pack could declare a
+ * mode that never took effect anywhere.
  */
 
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -29,6 +31,11 @@ export interface BindingResolutionInput {
 
 export interface ResolvedBinding {
   mode: ConnectorMode
+  /**
+   * Which layer `mode` came from. Without it a character-recommended mode is
+   * indistinguishable from a bot default in every read-out.
+   */
+  modeSource: "adapter-default" | "character-default" | "conversation-override"
   characterId: string | undefined
   trigger: TriggerPolicy
 }
@@ -55,9 +62,18 @@ export function resolveBinding(input: BindingResolutionInput): ResolvedBinding {
   // ── mode ──────────────────────────────────────────────────────────────────
   // Layer 1: adapter default
   let mode: ConnectorMode = adapter.defaultMode
-  // Layer 2: character — Character has no `mode` field; skip
+  // Layer 2: character recommendation
+  let modeSource: ResolvedBinding["modeSource"] = "adapter-default"
+  const charMode = character?.platformDefaults?.mode
+  if (charMode !== undefined) {
+    mode = charMode
+    modeSource = "character-default"
+  }
   // Layer 3: override
-  if (override?.mode !== undefined) mode = override.mode
+  if (override?.mode !== undefined) {
+    mode = override.mode
+    modeSource = "conversation-override"
+  }
 
   // ── characterId ───────────────────────────────────────────────────────────
   // Layer 1: adapter default
@@ -82,7 +98,7 @@ export function resolveBinding(input: BindingResolutionInput): ResolvedBinding {
     trigger = mergeTrigger(trigger, override.trigger)
   }
 
-  return { mode, characterId, trigger }
+  return { mode, modeSource, characterId, trigger }
 }
 
 export interface EffectiveTeamBinding {

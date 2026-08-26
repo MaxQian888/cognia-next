@@ -38,6 +38,11 @@ export type ImConfigSource =
    */
   | "session"
   | "dispatch-rule"
+  /**
+   * The value came from the bound Character's `platformDefaults` — a
+   * recommendation shipped with the persona rather than a bot-wide default.
+   */
+  | "character-default"
   | "adapter-default"
   | "system-default"
   | "target-managed"
@@ -69,7 +74,16 @@ export function resolveImEffectiveConfig(input: {
   adapter: AdapterInstanceRow
   override: ConversationOverrideRow | null
   rule: DispatchRuleHit | null
-  system: { mode: ConnectorMode; characterId?: string }
+  system: {
+    mode: ConnectorMode
+    characterId?: string
+    /**
+     * Which layer produced `system.mode` (see `resolveBinding`). Optional so
+     * existing call sites keep reporting `adapter-default`; passing it is what
+     * lets a character-recommended mode say so.
+     */
+    modeSource?: "adapter-default" | "character-default"
+  }
   /**
    * The conversation's active ChatSession, when the caller has one resolved.
    * Optional so every existing call site keeps today's behaviour; passing it
@@ -233,7 +247,7 @@ export function resolveImEffectiveConfig(input: {
         ? override.assignmentPreviousMode !== undefined
           ? "assignment"
           : "conversation-override"
-        : "adapter-default"
+        : (system.modeSource ?? "adapter-default")
 
   function axisSource(
     fromOverride: unknown,

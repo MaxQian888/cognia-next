@@ -6,7 +6,8 @@
 
 import type { ConnectorMode } from "@/types/connectors/policy"
 import type { PolicyEvalResult } from "./policy-eval"
-import { routeInbound, routeInboundFromComposition, type RouteDecision } from "./mode-router"
+import { projectStoredMode } from "./composition/mode-projection"
+import { routeInboundFromComposition, toRouteDecision, type RouteDecision } from "./mode-router"
 
 function result(matched: boolean, blocked: boolean): PolicyEvalResult {
   return { matched, blocked, reason: blocked ? "test-blocker" : undefined }
@@ -65,17 +66,29 @@ const CELLS: Cell[] = [
   { mode: "draft", matched: false, blocked: true, storeUnmatched: false, expected: "drop" },
 ]
 
-describe("routeInbound", () => {
+// The legacy `routeInbound(mode, …)` entry point is gone: taking a
+// `ConnectorMode` forced `targetKind: "direct"` and made every stored axis
+// inert. Its truth table is worth keeping though — a row carrying only the
+// legacy mirror must still route exactly as it did — so it is asserted here
+// through the composition that mirror projects to.
+describe("legacy mode truth table, via the axes it projects to", () => {
   for (const cell of CELLS) {
     const label =
       `mode=${cell.mode} matched=${cell.matched} blocked=${cell.blocked} ` +
       `storeUnmatched=${cell.storeUnmatched} → ${cell.expected}`
 
     it(label, () => {
-      const decision = routeInbound(
-        cell.mode,
-        result(cell.matched, cell.blocked),
-        cell.storeUnmatched
+      const { autonomy, engagement } = projectStoredMode({
+        mode: cell.mode,
+        targetKind: "direct",
+      })
+      const decision = toRouteDecision(
+        routeInboundFromComposition({
+          autonomy,
+          engagement,
+          evalResult: result(cell.matched, cell.blocked),
+          storeUnmatchedInDraftMode: cell.storeUnmatched,
+        })
       )
       expect(decision).toBe(cell.expected)
     })

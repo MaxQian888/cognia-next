@@ -175,11 +175,15 @@ function mergeTrigger(base: TriggerPolicy, patch: Partial<TriggerPolicy>): Trigg
 }
 ```
 
-`CharacterPlatformDefaults { mode?, trigger? }` (`binding.ts:14`) is what a Character ships per platform; `PlatformBinding` (`binding.ts:5`) persists the `(adapterId, conversationKey, platform, conversationRef)` handle so proactive outbound has somewhere to send.
+`CharacterPlatformDefaults { mode?, trigger? }` (`binding.ts:14`) is what a Character ships per platform — both keys are merged by `resolveBinding`, which reports a character-sourced mode as `character-default`; `PlatformBinding` (`binding.ts:5`) persists the `(adapterId, conversationKey, platform, conversationRef)` handle so proactive outbound has somewhere to send.
 
 ## Mode Router
 
-With the resolved `mode`, the `evaluatePolicy` result, and the `storeUnmatchedInDraftMode` flag, `routeInbound` (`mode-router.ts:21`) maps the inbound to exactly one of five `RouteDecision`s (`mode-router.ts:11`).
+Routing reads the **composition axes**, not `mode`. `resolveImEffectiveConfig` resolves `autonomy` and `engagement` for the conversation (axis fields first, the legacy `mode` mirror as the fallback), `routeInboundFromComposition` decides whether the turn runs, and `toRouteDecision` projects that onto the five `RouteDecision`s the route handler speaks.
+
+`mode` is the stored compatibility mirror — `InboxSendPolicy.forcedMode` and the scheduled-digest path still speak it — but it is no longer an input. Deriving the axes from it forced `targetKind: "direct"` and made every axis a conversation actually stored inert: `setAssignee` and the SLA `switchMode` step both write axis fields, and `confirm` / `autopilot` have no legacy spelling at all.
+
+A row carrying only the mirror routes exactly as it did, which is why no backfill is owed:
 
 | `mode`   | `matched && !blocked` | otherwise                                            |
 | -------- | --------------------- | --------------------------------------------------- |
@@ -189,7 +193,7 @@ With the resolved `mode`, the `evaluatePolicy` result, and the `storeUnmatchedIn
 
 ```mermaid
 flowchart TD
-  A["routeInbound(mode, evalResult, storeUnmatchedInDraftMode)"] --> B{"mode?"}
+  A["routeInboundFromComposition(autonomy, engagement, evalResult, storeUnmatched)"] --> B{"engagement=human OR autonomy=observe?"}
   B -->|manual| MS["manual-store"]
   B -->|auto| C{"matched AND not blocked?"}
   C -->|yes| AR["ai-run"]

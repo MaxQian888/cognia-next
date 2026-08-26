@@ -4,7 +4,7 @@
  * Resolution order (lowest → highest precedence):
  *   adapter defaults → character platformDefaults → conversation override
  *
- * - mode:    adapter.defaultMode → override.mode
+ * - mode:    adapter.defaultMode → character.platformDefaults.mode → override.mode
  * - charId:  adapter.defaultCharacterId → override.characterId
  * - trigger: deep-merge (arrays replace, not concat)
  */
@@ -313,5 +313,39 @@ describe("resolveEffectiveTeamBinding", () => {
   it("undefined override behaves like null (no override row)", () => {
     const r = resolveEffectiveTeamBinding({ defaultTeamId: "team_bot" }, undefined)
     expect(r).toEqual({ teamId: "team_bot", source: "instance-default" })
+  })
+})
+
+// ── character-recommended mode ───────────────────────────────────────────────
+
+describe("resolveBinding — character platformDefaults.mode", () => {
+  // The layer existed in the type and was explicitly skipped by the resolver,
+  // so a character pack could ship a mode that took effect nowhere.
+  it("applies over the adapter default and reports where it came from", () => {
+    const resolved = resolveBinding({
+      ...adapterOnly(),
+      character: { platformDefaults: { mode: "draft" } },
+    })
+    expect(resolved.mode).toBe("draft")
+    expect(resolved.modeSource).toBe("character-default")
+  })
+
+  it("yields to an explicit conversation override", () => {
+    const resolved = resolveBinding({
+      ...adapterOnly(),
+      character: { platformDefaults: { mode: "draft" } },
+      override: { mode: "manual" } as BindingResolutionInput["override"],
+    })
+    expect(resolved.mode).toBe("manual")
+    expect(resolved.modeSource).toBe("conversation-override")
+  })
+
+  it("leaves the adapter default alone when the character recommends nothing", () => {
+    const resolved = resolveBinding({
+      ...adapterOnly(),
+      character: { platformDefaults: { trigger: { storeUnmatchedInDraftMode: true } } },
+    })
+    expect(resolved.mode).toBe("auto")
+    expect(resolved.modeSource).toBe("adapter-default")
   })
 })

@@ -52,7 +52,7 @@ The authoritative seams are two nullable fields: `routeHandler` (`lib/connectors
 7. **Override lookup** — `readForResolution(conversationKey)` (`lib/connectors/bus.ts:262`).
 8. **Character lookup** — `override.characterId ?? adapterRow.defaultCharacterId` (`lib/connectors/bus.ts:265`).
 9. **Resolve binding** — 3-layer merge via `resolveBinding` (`lib/connectors/bus.ts:269`).
-10. **Evaluate policy** then **route** — `evaluatePolicy` (`lib/connectors/bus.ts:272`) → `routeInbound` → `decision` (`lib/connectors/bus.ts:275`).
+10. **Evaluate policy** then **route** — `evaluatePolicy` → `resolveImEffectiveConfig` (axes) → `routeInboundFromComposition` → `toRouteDecision` → `decision`.
 11. **Bookkeep, audit, help/welcome, route, fan-out** — rate-bucket push keyed `sender.id:channel.id` (`lib/connectors/bus.ts:286`); audit `inbound.policy_blocked` or `inbound.received` (`lib/connectors/bus.ts:292`); `maybeHandleHelpCommand` returns early if served + `maybeSendWelcome` (`lib/connectors/bus.ts:316`); `routeHandler` if `decision !== "drop"` (`lib/connectors/bus.ts:333`); `fanOutWorkflowTriggers` if not blocked and not dropped (`lib/connectors/bus.ts:347`).
 
 ```mermaid
@@ -68,7 +68,7 @@ flowchart TD
   F -->|yes| G["override + character lookup"]
   G --> H["resolveBinding (3-layer)"]
   H --> I["evaluatePolicy"]
-  I --> J["routeInbound to decision"]
+  I --> J["routeInboundFromComposition to decision"]
   J --> K["rate-bucket bookkeeping"]
   K --> L{"blocked?"}
   L -->|yes| L1["audit inbound.policy_blocked"]

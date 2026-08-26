@@ -52,7 +52,8 @@ import { appendAudit } from "./audit"
 import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
 import { evaluatePolicy, rateBucketKey, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
-import { routeInbound, type RouteDecision } from "./mode-router"
+import { routeInboundFromComposition, toRouteDecision, type RouteDecision } from "./mode-router"
+import { resolveImEffectiveConfig } from "./effective-config"
 import { recordConnectorRouteGovernance } from "@/lib/governance/producers/connector"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
@@ -796,11 +797,39 @@ export class ConnectorBus {
     const evalResult = evaluatePolicy(resolved.trigger, event, this.policyState, now)
 
     // ── Step 7: route ─────────────────────────────────────────────────────────
-    const decision = routeInbound(
-      resolved.mode,
+    // Routed from the composition axes, not from `mode`. `mode` cannot express
+    // what a conversation actually stores: `setAssignee` and the SLA
+    // `switchMode` step both write `autonomy`/`engagement` directly, and
+    // `confirm` / `autopilot` have no legacy spelling at all — routed through
+    // the three-value mirror they were unreachable.
+    //
+    // `rule: null` is exact here, not a shortcut: a `DispatchRuleAction` can
+    // only redirect the character, team, workflow or sending bot. None of
+    // those can turn a turn into a human hand-off, and the only thing a rule
+    // could shift — `engagement` between `inline` and `background` — does not
+    // change WHETHER the turn runs. The runtime resolves the same facade again
+    // WITH the matched rule, where the target actually matters.
+    const axes = resolveImEffectiveConfig({
+      adapter: adapterRow,
+      override,
+      rule: null,
+      system: {
+        mode: resolved.mode,
+        characterId: resolved.characterId,
+        modeSource:
+          resolved.modeSource === "conversation-override" ? undefined : resolved.modeSource,
+      },
+    })
+    const routed = routeInboundFromComposition({
+      engagement: axes.engagement.effective,
+      autonomy: axes.autonomy.effective,
       evalResult,
-      resolved.trigger.storeUnmatchedInDraftMode
-    )
+      storeUnmatchedInDraftMode: resolved.trigger.storeUnmatchedInDraftMode,
+    })
+    // Projected back to the legacy five-value decision the route handler and
+    // every existing test speak. `requireAcceptance` survives the projection
+    // as `draft-prepare`, which the runtime reads as "run, hold the product".
+    const decision: RouteDecision = toRouteDecision(routed)
     try {
       await recordConnectorRouteGovernance({
         adapterId: event.adapterId,

@@ -179,7 +179,11 @@ function mergeTrigger(base: TriggerPolicy, patch: Partial<TriggerPolicy>): Trigg
 
 ## 模式路由器
 
-有了解析出的 `mode`、`evaluatePolicy` 结果以及 `storeUnmatchedInDraftMode` 标志，`routeInbound`（`mode-router.ts:21`）把入站映射到五个 `RouteDecision` 中恰好一个（`mode-router.ts:11`）。
+路由读的是**组合轴**，不是 `mode`。`resolveImEffectiveConfig` 解析该会话的 `autonomy` 与 `engagement`（优先读轴字段，缺失时回落到 `mode` 镜像），`routeInboundFromComposition` 决定这一轮跑不跑，`toRouteDecision` 再投影成路由处理器所说的五个 `RouteDecision`。
+
+`mode` 仍是存储侧的兼容镜像 —— `InboxSendPolicy.forcedMode` 与定时摘要路径依旧读它 —— 但它不再是路由的输入。从它反推各轴会把 `targetKind` 钉死成 `direct`，并让会话真正存下来的每一个轴都失效：`setAssignee` 与 SLA 的 `switchMode` 步骤都直接写轴字段，而 `confirm` / `autopilot` 根本没有对应的旧写法。
+
+只带镜像的旧行会与从前路由得一模一样，这正是无需回填的原因：
 
 | `mode`   | `matched && !blocked` | 否则                                                |
 | -------- | --------------------- | --------------------------------------------------- |
@@ -189,7 +193,7 @@ function mergeTrigger(base: TriggerPolicy, patch: Partial<TriggerPolicy>): Trigg
 
 ```mermaid
 flowchart TD
-  A["routeInbound(mode, evalResult, storeUnmatchedInDraftMode)"] --> B{"mode?"}
+  A["routeInboundFromComposition(autonomy, engagement, evalResult, storeUnmatched)"] --> B{"engagement=human 或 autonomy=observe?"}
   B -->|manual| MS["manual-store"]
   B -->|auto| C{"matched AND not blocked?"}
   C -->|yes| AR["ai-run"]

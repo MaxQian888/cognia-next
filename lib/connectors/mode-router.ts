@@ -4,27 +4,24 @@
  * Given a policy evaluation result and the conversation's engagement/autonomy,
  * decide how to handle an inbound event.
  *
- * The original three-value `ConnectorMode` version is kept as a projection
- * shim: it is still what `InboxSendPolicy.forcedMode` and the scheduled-digest
- * path speak, and every existing test asserts against it.
+ * `ConnectorMode` is still the stored compatibility mirror — it is what
+ * `InboxSendPolicy.forcedMode` and the scheduled-digest path speak — but it is
+ * no longer an INPUT to routing. Deriving the axes from it, as the old
+ * `routeInbound(mode, …)` did, forced `targetKind: "direct"` and made every
+ * axis a conversation actually stored inert.
  */
 
 import type { AutonomyLevel, EngagementMode } from "@cognia/agent-config-types/agent-composition"
-import type { ConnectorMode } from "@/types/connectors/policy"
-import {
-  autonomyFromConnectorMode,
-  engagementFromConnectorMode,
-} from "./composition/mode-projection"
 import type { PolicyEvalResult } from "./policy-eval"
 
 /**
- * `draft-prepare` is retained only for the legacy shim.
+ * The vocabulary the route handler and the governance producer speak.
  *
- * As an axis, "draft" is not a route at all — it is `autonomy: "suggest"`
- * producing `requireAcceptance`, which the DELIVERY stage reads. Routing it
- * separately is what made a team-bound conversation silently degrade to a
- * single-agent draft: the branch resolved no execution target, so the team it
- * was bound to never ran.
+ * `draft-prepare` is a projection artefact, not a route: as an axis, "draft"
+ * is `autonomy: "suggest"` producing `requireAcceptance`, which the DELIVERY
+ * stage reads. Routing it separately is what made a team-bound conversation
+ * silently degrade to a single-agent draft — that branch resolved no execution
+ * target, so the team it was bound to never ran.
  */
 export type RouteDecision = "ai-run" | "manual-store" | "draft-prepare" | "store-only" | "drop"
 
@@ -73,29 +70,17 @@ export function routeInboundFromComposition(input: {
 }
 
 /**
- * Legacy three-value entry point, now a projection over the axis router.
+ * Project an axis decision onto the legacy five-value `RouteDecision`.
  *
- * Kept because `ConnectorMode` remains the compatibility mirror
- * (`InboxSendPolicy.forcedMode` is a live path in scheduled outbound, and the
- * plugin SDK mirrors the field). The projection is exact for `direct`, which is
- * all this signature can express — a caller holding a target should use
- * `routeInboundFromComposition`, whose `run` decision does not lose it.
+ * The route handler, the governance producer and every existing test speak
+ * this vocabulary, so the projection has to exist — but it belongs in exactly
+ * one place. `requireAcceptance` survives it as `draft-prepare`, which the
+ * runtime reads as "run, hold the product", NOT as a second execution path.
  *
- * @param mode                      - Resolved connector mode.
- * @param evalResult                - Result of `evaluatePolicy`.
- * @param storeUnmatchedInDraftMode - From the resolved trigger policy.
+ * This replaces `routeInbound(mode, …)`, which took a `ConnectorMode` and so
+ * could only ever assume `targetKind: "direct"`.
  */
-export function routeInbound(
-  mode: ConnectorMode,
-  evalResult: PolicyEvalResult,
-  storeUnmatchedInDraftMode: boolean
-): RouteDecision {
-  const decision = routeInboundFromComposition({
-    autonomy: autonomyFromConnectorMode(mode),
-    engagement: engagementFromConnectorMode(mode, "direct"),
-    evalResult,
-    storeUnmatchedInDraftMode,
-  })
+export function toRouteDecision(decision: CompositionRouteDecision): RouteDecision {
   if (decision.kind !== "run") return decision.kind
   return decision.requireAcceptance ? "draft-prepare" : "ai-run"
 }

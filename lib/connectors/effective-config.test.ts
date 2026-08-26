@@ -384,3 +384,52 @@ describe("session layer", () => {
     })
   })
 })
+
+describe("resolveImEffectiveConfig — character-recommended mode", () => {
+  // A character shipping `platformDefaults.mode` used to be skipped by
+  // `resolveBinding` entirely. Now that it lands, the read-out has to say so:
+  // labelling it `adapter-default` would make a persona recommendation
+  // indistinguishable from a bot-wide setting in every UI.
+  it("labels a mode the character recommended", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: null,
+      rule: null,
+      system: { mode: "draft", modeSource: "character-default" },
+    })
+    expect(result.mode.effective).toBe("draft")
+    expect(result.mode.source).toBe("character-default")
+    // Autonomy is derived from that mode, so it inherits the provenance
+    // rather than claiming a default nobody chose.
+    expect(result.autonomy.effective).toBe("suggest")
+    expect(result.autonomy.source).toBe("character-default")
+  })
+
+  it("keeps reporting adapter-default when nothing recommends anything", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: null,
+      rule: null,
+      system: { mode: "auto" },
+    })
+    expect(result.mode.source).toBe("adapter-default")
+  })
+
+  it("yields to an explicit conversation override", () => {
+    const result = resolveImEffectiveConfig({
+      adapter,
+      override: {
+        id: "o1",
+        conversationKey: "telegram:a1:c1",
+        sessionId: "s1",
+        mode: "manual",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      rule: null,
+      system: { mode: "draft", modeSource: "character-default" },
+    })
+    expect(result.mode.effective).toBe("manual")
+    expect(result.mode.source).toBe("conversation-override")
+  })
+})
