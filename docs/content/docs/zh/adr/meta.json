@@ -147,6 +147,8 @@
     "0146-repowiki-plugin",
     "0147-repository-declared-workspace",
     "0148-style-packs-and-surface-tiers",
-    "0149-a-person-is-not-a-device"
+    "0149-a-person-is-not-a-device",
+    "0150-repository-supply-and-object-cache",
+    "0151-stacks-as-first-class"
   ]
 }
