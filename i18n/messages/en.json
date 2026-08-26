@@ -5057,7 +5057,10 @@
         "unavailable": "/{name} is not available yet."
       },
       "context": {
-        "ariaLabel": "Attached files, links, and references"
+        "ariaLabel": "Attached files, links, and references",
+        "foldCollapse": "Show fewer",
+        "foldCollapseShort": "Less",
+        "foldExpand": "Show {count} more"
       },
       "draftRestore": {
         "dismiss": "Dismiss",
@@ -5385,9 +5388,15 @@
         "breakdownAgents": "Subagents",
         "breakdownClaudeMd": "CLAUDE.md / system prompt",
         "breakdownCommands": "Slash commands",
+        "breakdownDeferred": "{label} (deferred)",
+        "breakdownFree": "Free space",
+        "breakdownItemsAria": "{count} items",
         "breakdownMcp": "MCP tools",
         "breakdownMemory": "Memory files",
         "breakdownMentionedFiles": "Mentioned files",
+        "breakdownMessages": "Messages",
+        "breakdownMoreItems": "+{count} more",
+        "breakdownSkills": "Skills",
         "breakdownSourceTitle": "Context by source",
         "breakdownSystemPrompt": "System prompt",
         "breakdownTaskCoordination": "Task coordination",
@@ -5396,17 +5405,29 @@
         "breakdownToolOutputs": "Tool outputs",
         "breakdownTools": "Built-in tools",
         "breakdownUserMessages": "User messages",
+        "compactAgentOwned": "Compaction is managed by the agent",
+        "compactDisabled": "Auto-compact is off",
         "compactNow": "Compact now",
         "compactThreshold": "Auto-compact at {pct}",
+        "contextTitle": "Context window",
         "contextUsageAria": "Context window {pct} used",
+        "detailsEstimated": "Estimated",
+        "detailsLive": "Live",
+        "detailsOfTranscript": "Share of the transcript this estimate could measure",
+        "detailsToggle": "Detailed analysis",
+        "latestTurn": "Latest turn",
         "modelTooltip": "Active model · change in Settings → API Key",
         "moreControls": "More controls",
+        "noUsageYet": "No turn has completed yet — token counts appear after the first reply.",
         "pluginExtensionOverflow": "More plugin actions",
         "quickActions": "Plugin quick actions",
-        "sessionTotal": "Session total ({turns} turns)",
+        "sessionCost": "Session cost",
+        "sessionTotal": "Session total ({turns, plural, =0 {no turns} =1 {# turn} other {# turns}})",
         "usageCached": "Cached",
         "usageInput": "Input",
+        "usageNotReported": "This agent reports no token usage — occupancy is unknown, not empty.",
         "usageOutput": "Output",
+        "windowUnknown": "Occupancy not reported by this runtime",
         "workflow": {
           "explain": "Explain",
           "explainAria": "Explain selected nodes",
@@ -12856,8 +12877,8 @@
     },
     "source": {
       "agent-task": "Agent Task",
-      "collab": "Shared",
       "agent-team": "Agent Team",
+      "collab": "Shared",
       "degraded": "{count, plural, one {# source failed to load} other {# sources failed to load}}",
       "github": "GitHub",
       "local": "Local",
@@ -13265,6 +13286,7 @@
       },
       "agentTraceModule": "Agent Trace",
       "agentTraceOtlp": {
+        "collectorAuthHint": "Configure authentication on the Host or Collector. The WebView sends no custom headers or credentials.",
         "endpoint": "OTLP traces endpoint",
         "endpointPlaceholder": {
           "grafanaCloud": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
@@ -13275,11 +13297,9 @@
         "grafanaApiToken": "Grafana access policy token",
         "grafanaApiTokenPlaceholder": "glc_eyJ…",
         "grafanaCloudHint": "The API token is stored in the OS secret store. Authorization is injected by the native exporter and is never persisted in browser storage.",
+        "grafanaHostRequired": "Grafana Cloud credentials require the secure desktop Host and are unavailable in a standalone WebView.",
         "grafanaInstanceId": "Grafana instance ID",
         "grafanaInstanceIdPlaceholder": "1234567",
-        "headers": "Headers",
-        "headersHint": "Comma-separated non-sensitive `Name: Value` pairs. Authorization, cookies, and API-key headers are rejected.",
-        "headersPlaceholder": "X-Tenant: prod",
         "preset": "Preset",
         "presetOptions": {
           "custom": "Custom OTLP/HTTP",
@@ -13720,10 +13740,20 @@
         "indexedDBFlushInterval": "Flush Interval",
         "indexedDBFlushIntervalDesc": "How long a partial buffer waits before being written anyway.",
         "langfuse": "Langfuse Integration",
-        "langfuseDesc": "Send logs to Langfuse for AI observability",
-        "langfuseHost": "Host",
-        "langfuseHostPlaceholder": "https://cloud.langfuse.com",
-        "langfuseMinLevel": "Minimum Level",
+        "langfuseBaseUrl": "Base URL",
+        "langfuseBaseUrlHint": "The Host always appends the fixed Langfuse v4 OTLP traces path.",
+        "langfuseBaseUrlPlaceholder": "https://cloud.langfuse.com",
+        "langfuseCaptureModelContent": "Capture model content",
+        "langfuseCaptureModelContentDesc": "Send bounded model input/output previews after the Host PII gate. Off by default.",
+        "langfuseCaptureToolContent": "Capture tool content",
+        "langfuseCaptureToolContentDesc": "Independently send bounded tool argument/result previews after the Host PII gate. Off by default.",
+        "langfuseConnectionFailed": "Connection failed. Check the Host credentials and endpoint.",
+        "langfuseConnectionSuccess": "Connection succeeded.",
+        "langfuseConnectionTest": "Test connection",
+        "langfuseConnectionTesting": "Testing…",
+        "langfuseDesc": "Send AI traces only to your account-scoped Langfuse project. Application logs and metrics stay on their existing destinations.",
+        "langfuseEnvironment": "Environment",
+        "langfuseEnvironmentPlaceholder": "production",
         "langfusePublicKey": "Public Key",
         "langfusePublicKeyPlaceholder": "pk-live-...",
         "langfuseSecretKey": "Secret Key",
@@ -13733,6 +13763,9 @@
         "nativeDesc": "Forward warn/error/fatal entries to OS-native diagnostics.",
         "nativeFlushInterval": "Flush Interval",
         "nativeMinLevel": "Minimum Level",
+        "otlpLogs": "OTLP application logs",
+        "otlpLogsDesc": "Export redacted application LogRecords independently from Agent Trace spans.",
+        "otlpLogsDetail": "Uses the OTLP destination configured below. Desktop sends through the Rust Host; web and mobile require a credentialless OTel Collector. Credentialed direct WebView export is blocked.",
         "remote": "Remote Transport",
         "remoteBatchSize": "Batch Size",
         "remoteDesc": "Ship logs to a remote endpoint with retry batching.",
@@ -13743,7 +13776,7 @@
         "remoteMaxRetries": "Max Retries",
         "remoteRetryDelay": "Retry Delay",
         "secretConfiguredPlaceholder": "Stored securely — enter a new value to replace",
-        "title": "Log Transports",
+        "title": "Observability Destinations",
         "toggleDetails": "Show {transport} configuration"
       },
       "unsavedChanges": "Unsaved changes"
@@ -29714,6 +29747,17 @@
           "hint": "Press Up / Down in an empty composer to recall previous messages.",
           "label": "Recall input history"
         },
+        "linkChips": {
+          "hint": "How a pasted link reads on its chip above the composer.",
+          "label": "Link chips",
+          "rulesHint": "One per line: a host, optionally followed by ` = ` and the prefix to drop. Yours are applied before the built-in ones.",
+          "rulesLabel": "Your own shortening rules",
+          "rulesPlaceholder": "wiki.corp.example = https://wiki.corp.example/display/",
+          "styleFull": "Full URL",
+          "styleHost": "Host only (github.com)",
+          "styleLabel": "Link label",
+          "styleShort": "Shortened (github.com/a/b → a/b)"
+        },
         "persistDrafts": {
           "hint": "Keep unsent text in each conversation when you switch away.",
           "label": "Save unsent drafts"
@@ -36459,37 +36503,63 @@
       "revert": "Revert this commit"
     },
     "stacks": {
-      "title": "Stacks",
+      "branch": "Branch",
+      "checkedOutAt": "checked out at {path}",
+      "create": "Create layer",
       "description": "Chains of branches where each one is based on the one below it. The parent is stored in this repository's Git config, so a stack survives a clone.",
       "empty": "No stacks recorded in this repository yet.",
       "emptyHint": "Pick a branch and the branch it sits on. Nothing is pushed until you say so.",
-      "trunk": "on {branch}",
-      "layerCount": "{count, plural, =1 {# layer} other {# layers}}",
-      "healthy": "Every layer sits on the one below it.",
-      "restack": "Restack",
-      "restacking": "Restacking…",
-      "unstack": "Unstack",
-      "stackOn": "Stack on",
-      "branch": "Branch",
-      "parent": "Sits on",
-      "record": "Record",
-      "checkedOutAt": "checked out at {path}",
-      "problem": {
-        "missingBranch": "{branch} does not exist yet.",
-        "behindParent": "{branch} no longer contains {parent} — its pull request would include the layer below it.",
-        "parentMismatch": "{branch} is recorded as sitting on {recorded}, not {expected}.",
-        "parentUnrecorded": "Git has not been told that {branch} sits on {expected}.",
-        "checkedOut": "{branch} is checked out in a worktree, so moving it would leave that worktree out of step.",
-        "forkOnly": "You can only push to a fork of {repository}. A stack cannot cross a fork boundary — every layer above the bottom would be based on a branch the target repository cannot see."
+      "error": "Stack operation failed: {message}",
+      "forge": {
+        "noCredential": "No GitHub credential for {repository}. Sign in with `gh auth login` and try again.",
+        "noRemote": "This repository has no remote that hosts pull requests.",
+        "unsupportedHost": "{host} is not a forge Cognia can publish to yet — only github.com."
       },
+      "healthy": "Every layer sits on the one below it.",
+      "land": "Land",
+      "layerCount": "{count, plural, =1 {# layer} other {# layers}}",
+      "mergeBlocked": {
+        "changesRequested": "a reviewer requested changes",
+        "ciFailing": "its checks are failing",
+        "ciPending": "its checks are still running",
+        "ciUnknown": "its checks could not be read",
+        "conflict": "it conflicts with its base",
+        "noPullRequest": "it has no open pull request",
+        "notMergeable": "GitHub does not consider it mergeable",
+        "reviewRequired": "it still needs a review"
+      },
+      "model": {
+        "branchPerLayer": "One branch per layer. Authoring a stack as one branch of commits is not available yet."
+      },
+      "newLayer": "New layer",
+      "newLayerBase": "On top of",
+      "newLayerBranch": "Branch name",
+      "newLayerTitle": "What the layer does",
+      "newLayerTitlePlaceholder": "Extract the retry helper",
+      "parent": "Sits on",
+      "problem": {
+        "behindParent": "{branch} no longer contains {parent} — its pull request would include the layer below it.",
+        "checkedOut": "{branch} is checked out in a worktree, so moving it would leave that worktree out of step.",
+        "forkOnly": "You can only push to a fork of {repository}. A stack cannot cross a fork boundary — every layer above the bottom would be based on a branch the target repository cannot see.",
+        "missingBranch": "{branch} does not exist yet.",
+        "parentMismatch": "{branch} is recorded as sitting on {recorded}, not {expected}.",
+        "parentUnrecorded": "Git has not been told that {branch} sits on {expected}."
+      },
+      "publish": "Publish",
+      "publishing": "Publishing…",
+      "pullRequest": "#{number}",
+      "record": "Record",
       "remedy": {
-        "none": "Nothing to do.",
-        "restack": "A restack will fix this.",
+        "blocked": "This cannot be published from here.",
         "createBranch": "Push or create the missing branch first.",
+        "none": "Nothing to do.",
         "releaseWorktree": "Close the worktree holding that layer first.",
         "repair": "The recorded shape and the real one disagree — choose which is right.",
-        "blocked": "This cannot be published from here."
+        "restack": "A restack will fix this."
       },
+      "restack": "Restack",
+      "restackAndPush": "Restack & push",
+      "restacking": "Restacking…",
       "result": {
         "blocked": "Stopped at {branch}: {reason}.",
         "conflict": "{branch} hit a conflict. Resolve it in {worktree}, then continue.",
@@ -36504,38 +36574,12 @@
         "upToDate": "Already up to date.",
         "weakLease": "Pushed with the weaker lease — this git has no --force-if-includes, so a background fetch could have satisfied it."
       },
-      "error": "Stack operation failed: {message}",
-      "publish": "Publish",
-      "publishing": "Publishing…",
-      "land": "Land",
-      "restackAndPush": "Restack & push",
-      "pullRequest": "#{number}",
+      "stackOn": "Stack on",
+      "title": "Stacks",
+      "trunk": "on {branch}",
       "undo": "Undo",
       "undoTitle": "Put this branch back on the tip kept at {ref}",
-      "newLayer": "New layer",
-      "newLayerBase": "On top of",
-      "newLayerTitle": "What the layer does",
-      "newLayerTitlePlaceholder": "Extract the retry helper",
-      "newLayerBranch": "Branch name",
-      "create": "Create layer",
-      "forge": {
-        "noCredential": "No GitHub credential for {repository}. Sign in with `gh auth login` and try again.",
-        "noRemote": "This repository has no remote that hosts pull requests.",
-        "unsupportedHost": "{host} is not a forge Cognia can publish to yet — only github.com."
-      },
-      "mergeBlocked": {
-        "changesRequested": "a reviewer requested changes",
-        "ciFailing": "its checks are failing",
-        "ciPending": "its checks are still running",
-        "ciUnknown": "its checks could not be read",
-        "conflict": "it conflicts with its base",
-        "noPullRequest": "it has no open pull request",
-        "notMergeable": "GitHub does not consider it mergeable",
-        "reviewRequired": "it still needs a review"
-      },
-      "model": {
-        "branchPerLayer": "One branch per layer. Authoring a stack as one branch of commits is not available yet."
-      }
+      "unstack": "Unstack"
     },
     "stash": {
       "apply": "Apply",
@@ -36630,9 +36674,9 @@
       "pathPlaceholder": "Choose an empty directory",
       "prune": "Prune stale",
       "pruned": "Stale worktree records pruned",
-      "relativePathPlaceholder": "worktrees/feature-name",
       "registryProtected": "This worktree is now protected by the Workspace Registry.",
       "registryUnavailable": "Workspace ownership could not be verified. Removal was blocked.",
+      "relativePathPlaceholder": "worktrees/feature-name",
       "remove": "Remove Worktree",
       "removeDescription": "Remove the linked worktree at {path}?",
       "removeTitle": "Remove worktree?",
@@ -44461,6 +44505,42 @@
     }
   },
   "workspace": {
+    "activity": {
+      "artifactsAria": "Links this run produced",
+      "empty": "No shared plans or runs in this workspace yet.",
+      "noSteps": "No steps",
+      "planStatus": {
+        "approved": "Approved",
+        "awaiting_approval": "Awaiting approval",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "draft": "Draft",
+        "executing": "Executing",
+        "failed": "Failed",
+        "paused": "Paused"
+      },
+      "planStatusAria": "Plan status",
+      "plans": "Plans",
+      "progress": "{completed} of {total} steps",
+      "runKind": {
+        "agent-task": "Agent task",
+        "agent-team": "Agent team",
+        "github-loop": "GitHub loop",
+        "plan": "Plan"
+      },
+      "runStatus": {
+        "cancelled": "Cancelled",
+        "failed": "Failed",
+        "queued": "Queued",
+        "running": "Running",
+        "succeeded": "Succeeded"
+      },
+      "runStatusAria": "Run status",
+      "runs": "Runs",
+      "startedBy": "Started by {name}",
+      "title": "Team activity",
+      "unattached": "Not attached to an issue or plan"
+    },
     "adopt": {
       "adopt": "Adopt",
       "description": "These directories are already in use — by a worktree, a terminal tab — but no workspace owns them. Adopting one mounts it as a workspace; nothing on disk moves.",
@@ -44719,42 +44799,6 @@
       "undoFollow": "Undo",
       "unpin": "Unpin {name}",
       "untrustedHint": "Untrusted workspace"
-    },
-    "activity": {
-      "artifactsAria": "Links this run produced",
-      "empty": "No shared plans or runs in this workspace yet.",
-      "noSteps": "No steps",
-      "planStatus": {
-        "approved": "Approved",
-        "awaiting_approval": "Awaiting approval",
-        "cancelled": "Cancelled",
-        "completed": "Completed",
-        "draft": "Draft",
-        "executing": "Executing",
-        "failed": "Failed",
-        "paused": "Paused"
-      },
-      "planStatusAria": "Plan status",
-      "plans": "Plans",
-      "progress": "{completed} of {total} steps",
-      "runKind": {
-        "agent-task": "Agent task",
-        "agent-team": "Agent team",
-        "github-loop": "GitHub loop",
-        "plan": "Plan"
-      },
-      "runStatus": {
-        "cancelled": "Cancelled",
-        "failed": "Failed",
-        "queued": "Queued",
-        "running": "Running",
-        "succeeded": "Succeeded"
-      },
-      "runStatusAria": "Run status",
-      "runs": "Runs",
-      "startedBy": "Started by {name}",
-      "title": "Team activity",
-      "unattached": "Not attached to an issue or plan"
     }
   },
   "worktreeWorkflow": {

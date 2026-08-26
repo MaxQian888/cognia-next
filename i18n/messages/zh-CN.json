@@ -5057,7 +5057,10 @@
         "unavailable": "/{name} 暂不可用。"
       },
       "context": {
-        "ariaLabel": "已附加的文件、链接与引用"
+        "ariaLabel": "已附加的文件、链接与引用",
+        "foldCollapse": "收起",
+        "foldCollapseShort": "收起",
+        "foldExpand": "展开另外 {count} 项"
       },
       "draftRestore": {
         "dismiss": "关闭",
@@ -5385,9 +5388,15 @@
         "breakdownAgents": "子智能体",
         "breakdownClaudeMd": "CLAUDE.md / 系统提示词",
         "breakdownCommands": "斜杠命令",
+        "breakdownDeferred": "{label}（按需加载）",
+        "breakdownFree": "空闲空间",
+        "breakdownItemsAria": "{count} 项",
         "breakdownMcp": "MCP 工具",
         "breakdownMemory": "记忆文件",
         "breakdownMentionedFiles": "引用的文件",
+        "breakdownMessages": "对话消息",
+        "breakdownMoreItems": "另有 {count} 项",
+        "breakdownSkills": "技能",
         "breakdownSourceTitle": "按来源划分的上下文",
         "breakdownSystemPrompt": "系统提示词",
         "breakdownTaskCoordination": "任务协调",
@@ -5396,17 +5405,29 @@
         "breakdownToolOutputs": "工具输出",
         "breakdownTools": "内置工具",
         "breakdownUserMessages": "用户消息",
+        "compactAgentOwned": "压缩由该 Agent 自行管理",
+        "compactDisabled": "自动压缩已关闭",
         "compactNow": "立即压缩",
         "compactThreshold": "{pct} 时自动压缩",
+        "contextTitle": "上下文窗口",
         "contextUsageAria": "上下文窗口已用 {pct}",
+        "detailsEstimated": "估算",
+        "detailsLive": "实时",
+        "detailsOfTranscript": "占本次估算可测量部分的比例",
+        "detailsToggle": "详细分析",
+        "latestTurn": "最近一轮",
         "modelTooltip": "当前模型 · 在「设置 → API Key」中切换",
         "moreControls": "更多控件",
+        "noUsageYet": "尚未完成任何一轮对话 — 首次回复后开始统计 token。",
         "pluginExtensionOverflow": "更多插件操作",
         "quickActions": "插件快捷操作",
+        "sessionCost": "会话花费",
         "sessionTotal": "会话累计（{turns} 轮）",
         "usageCached": "缓存",
         "usageInput": "输入",
+        "usageNotReported": "该 Agent 不上报 token 用量 —— 占用是未知，而非为空。",
         "usageOutput": "输出",
+        "windowUnknown": "该运行时未上报占用",
         "workflow": {
           "explain": "解释",
           "explainAria": "解释所选节点",
@@ -12856,8 +12877,8 @@
     },
     "source": {
       "agent-task": "Agent 任务",
-      "collab": "共享",
       "agent-team": "Agent 团队",
+      "collab": "共享",
       "degraded": "{count, plural, other {# 个数据源加载失败}}",
       "github": "GitHub",
       "local": "本地",
@@ -13265,6 +13286,7 @@
       },
       "agentTraceModule": "Agent 追踪",
       "agentTraceOtlp": {
+        "collectorAuthHint": "请在 Host 或 Collector 配置认证。WebView 不会发送自定义请求头或凭据。",
         "endpoint": "OTLP traces 端点",
         "endpointPlaceholder": {
           "grafanaCloud": "https://otlp-gateway-prod-us-central-0.grafana.net/otlp/v1/traces",
@@ -13275,11 +13297,9 @@
         "grafanaApiToken": "Grafana access policy token",
         "grafanaApiTokenPlaceholder": "glc_eyJ…",
         "grafanaCloudHint": "API token 存储在操作系统密钥库中。Authorization 由原生导出器注入，不会持久化到浏览器存储。",
+        "grafanaHostRequired": "Grafana Cloud 凭据需要安全的桌面 Host，独立 WebView 中不可用。",
         "grafanaInstanceId": "Grafana instance ID",
         "grafanaInstanceIdPlaceholder": "1234567",
-        "headers": "请求头",
-        "headersHint": "用逗号分隔的非敏感 `Name: Value` 列表。Authorization、Cookie 和 API key header 会被拒绝。",
-        "headersPlaceholder": "X-Tenant: prod",
         "preset": "预设",
         "presetOptions": {
           "custom": "自定义 OTLP/HTTP",
@@ -13720,10 +13740,20 @@
         "indexedDBFlushInterval": "刷写间隔",
         "indexedDBFlushIntervalDesc": "未攒满的缓冲最多等待多久也会被写出。",
         "langfuse": "Langfuse 集成",
-        "langfuseDesc": "将日志发送到 Langfuse 进行 AI 可观测性分析",
-        "langfuseHost": "Host",
-        "langfuseHostPlaceholder": "https://cloud.langfuse.com",
-        "langfuseMinLevel": "最小级别",
+        "langfuseBaseUrl": "Base URL",
+        "langfuseBaseUrlHint": "Host 会固定追加 Langfuse v4 OTLP traces 路径。",
+        "langfuseBaseUrlPlaceholder": "https://cloud.langfuse.com",
+        "langfuseCaptureModelContent": "采集模型内容",
+        "langfuseCaptureModelContentDesc": "经 Host PII gate 后发送受限长度的模型输入/输出预览，默认关闭。",
+        "langfuseCaptureToolContent": "采集工具内容",
+        "langfuseCaptureToolContentDesc": "独立授权，经 Host PII gate 后发送受限长度的工具参数/结果预览，默认关闭。",
+        "langfuseConnectionFailed": "连接失败，请检查 Host 中的凭证和端点。",
+        "langfuseConnectionSuccess": "连接成功。",
+        "langfuseConnectionTest": "测试连接",
+        "langfuseConnectionTesting": "正在测试…",
+        "langfuseDesc": "仅把 AI trace 发送到当前账户绑定的 Langfuse 项目；应用日志和 metrics 继续使用原有出口。",
+        "langfuseEnvironment": "环境",
+        "langfuseEnvironmentPlaceholder": "production",
         "langfusePublicKey": "Public Key",
         "langfusePublicKeyPlaceholder": "pk-live-...",
         "langfuseSecretKey": "Secret Key",
@@ -13733,6 +13763,9 @@
         "nativeDesc": "把 warn/error/fatal 级别日志转发到操作系统原生诊断系统。",
         "nativeFlushInterval": "刷新间隔",
         "nativeMinLevel": "最低级别",
+        "otlpLogs": "OTLP 应用日志",
+        "otlpLogsDesc": "独立于 Agent Trace span 导出已脱敏的应用 LogRecord。",
+        "otlpLogsDetail": "复用下方配置的 OTLP 目的地。桌面端统一经 Rust Host 发送；Web 与移动端必须使用无客户端凭据的 OTel Collector，并阻止 WebView 直接携带凭据导出。",
         "remote": "远程传输",
         "remoteBatchSize": "批量大小",
         "remoteDesc": "通过批量和重试队列把日志发送到远程端点。",
@@ -13743,7 +13776,7 @@
         "remoteMaxRetries": "最大重试次数",
         "remoteRetryDelay": "重试延迟",
         "secretConfiguredPlaceholder": "已安全保存——输入新值可替换",
-        "title": "日志传输",
+        "title": "可观测性出口",
         "toggleDetails": "展开 {transport} 的配置"
       },
       "unsavedChanges": "有未保存的修改"
@@ -29714,6 +29747,17 @@
           "hint": "在空输入框中按上/下方向键调出历史消息。",
           "label": "调出输入历史"
         },
+        "linkChips": {
+          "hint": "粘贴的链接在输入框上方的徽标中如何显示。",
+          "label": "链接徽标",
+          "rulesHint": "每行一条：域名，可再跟 ` = ` 和要去掉的前缀。自定义规则先于内置规则生效。",
+          "rulesLabel": "自定义缩写规则",
+          "rulesPlaceholder": "wiki.corp.example = https://wiki.corp.example/display/",
+          "styleFull": "完整网址",
+          "styleHost": "仅域名（github.com）",
+          "styleLabel": "链接文字",
+          "styleShort": "缩写（github.com/a/b → a/b）"
+        },
         "persistDrafts": {
           "hint": "切换对话时保留每个对话中未发送的文本。",
           "label": "保存未发送草稿"
@@ -36459,37 +36503,63 @@
       "revert": "还原此提交"
     },
     "stacks": {
-      "title": "栈",
+      "branch": "分支",
+      "checkedOutAt": "已检出于 {path}",
+      "create": "创建层",
       "description": "分支链，每一层都基于下面一层。父指针存在本仓库的 Git 配置里，因此克隆之后依然成立。",
       "empty": "这个仓库还没有记录任何栈。",
       "emptyHint": "选一个分支，再选它所基于的分支。在你明确要求之前不会推送任何东西。",
-      "trunk": "基于 {branch}",
-      "layerCount": "{count, plural, other {# 层}}",
-      "healthy": "每一层都正确地位于下面一层之上。",
-      "restack": "重新堆叠",
-      "restacking": "正在重新堆叠…",
-      "unstack": "解除堆叠",
-      "stackOn": "堆叠到",
-      "branch": "分支",
-      "parent": "基于",
-      "record": "记录",
-      "checkedOutAt": "已检出于 {path}",
-      "problem": {
-        "missingBranch": "{branch} 还不存在。",
-        "behindParent": "{branch} 已不再包含 {parent}——它的 PR 会把下面一层的改动也带上。",
-        "parentMismatch": "{branch} 记录的父层是 {recorded}，不是 {expected}。",
-        "parentUnrecorded": "尚未告诉 Git {branch} 基于 {expected}。",
-        "checkedOut": "{branch} 正被某个工作树检出，移动它会让那个工作树与自身 HEAD 不一致。",
-        "forkOnly": "你只能推送到 {repository} 的 fork。栈无法跨越 fork 边界——除最底层外，每一层的 base 分支目标仓库都看不到。"
+      "error": "栈操作失败：{message}",
+      "forge": {
+        "noCredential": "没有 {repository} 的 GitHub 凭据。先执行 `gh auth login` 再试。",
+        "noRemote": "这个仓库没有能托管 Pull Request 的远程。",
+        "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台——目前只支持 github.com。"
       },
+      "healthy": "每一层都正确地位于下面一层之上。",
+      "land": "合入",
+      "layerCount": "{count, plural, other {# 层}}",
+      "mergeBlocked": {
+        "changesRequested": "有评审要求修改",
+        "ciFailing": "它的检查未通过",
+        "ciPending": "它的检查还在运行",
+        "ciUnknown": "读不到它的检查状态",
+        "conflict": "它与基分支冲突",
+        "noPullRequest": "它没有打开的 Pull Request",
+        "notMergeable": "GitHub 认为它不可合并",
+        "reviewRequired": "它还需要评审"
+      },
+      "model": {
+        "branchPerLayer": "每层一个分支。以「一条分支上的多个提交」的方式创作栈，暂未提供。"
+      },
+      "newLayer": "新建层",
+      "newLayerBase": "基于",
+      "newLayerBranch": "分支名",
+      "newLayerTitle": "这一层做什么",
+      "newLayerTitlePlaceholder": "抽出重试辅助函数",
+      "parent": "基于",
+      "problem": {
+        "behindParent": "{branch} 已不再包含 {parent}——它的 PR 会把下面一层的改动也带上。",
+        "checkedOut": "{branch} 正被某个工作树检出，移动它会让那个工作树与自身 HEAD 不一致。",
+        "forkOnly": "你只能推送到 {repository} 的 fork。栈无法跨越 fork 边界——除最底层外，每一层的 base 分支目标仓库都看不到。",
+        "missingBranch": "{branch} 还不存在。",
+        "parentMismatch": "{branch} 记录的父层是 {recorded}，不是 {expected}。",
+        "parentUnrecorded": "尚未告诉 Git {branch} 基于 {expected}。"
+      },
+      "publish": "发布",
+      "publishing": "发布中…",
+      "pullRequest": "#{number}",
+      "record": "记录",
       "remedy": {
-        "none": "无需处理。",
-        "restack": "重新堆叠即可修复。",
+        "blocked": "无法从这里发布。",
         "createBranch": "请先推送或创建缺失的分支。",
+        "none": "无需处理。",
         "releaseWorktree": "请先关闭占用该层的工作树。",
         "repair": "记录的形状与实际形状不一致——请确认哪一个是对的。",
-        "blocked": "无法从这里发布。"
+        "restack": "重新堆叠即可修复。"
       },
+      "restack": "重新堆叠",
+      "restackAndPush": "重排并推送",
+      "restacking": "正在重新堆叠…",
       "result": {
         "blocked": "停在 {branch}：{reason}。",
         "conflict": "{branch} 出现冲突。请在 {worktree} 中解决后继续。",
@@ -36504,38 +36574,12 @@
         "upToDate": "已经是最新的。",
         "weakLease": "使用了较弱的租约推送——这个 git 没有 --force-if-includes，后台的一次 fetch 就能让租约形同虚设。"
       },
-      "error": "栈操作失败：{message}",
-      "publish": "发布",
-      "publishing": "发布中…",
-      "land": "合入",
-      "restackAndPush": "重排并推送",
-      "pullRequest": "#{number}",
+      "stackOn": "堆叠到",
+      "title": "栈",
+      "trunk": "基于 {branch}",
       "undo": "撤销",
       "undoTitle": "把这个分支放回 {ref} 保留的旧顶点",
-      "newLayer": "新建层",
-      "newLayerBase": "基于",
-      "newLayerTitle": "这一层做什么",
-      "newLayerTitlePlaceholder": "抽出重试辅助函数",
-      "newLayerBranch": "分支名",
-      "create": "创建层",
-      "forge": {
-        "noCredential": "没有 {repository} 的 GitHub 凭据。先执行 `gh auth login` 再试。",
-        "noRemote": "这个仓库没有能托管 Pull Request 的远程。",
-        "unsupportedHost": "{host} 还不是 Cognia 能发布到的代码托管平台——目前只支持 github.com。"
-      },
-      "mergeBlocked": {
-        "changesRequested": "有评审要求修改",
-        "ciFailing": "它的检查未通过",
-        "ciPending": "它的检查还在运行",
-        "ciUnknown": "读不到它的检查状态",
-        "conflict": "它与基分支冲突",
-        "noPullRequest": "它没有打开的 Pull Request",
-        "notMergeable": "GitHub 认为它不可合并",
-        "reviewRequired": "它还需要评审"
-      },
-      "model": {
-        "branchPerLayer": "每层一个分支。以「一条分支上的多个提交」的方式创作栈，暂未提供。"
-      }
+      "unstack": "解除堆叠"
     },
     "stash": {
       "apply": "应用",
@@ -36630,9 +36674,9 @@
       "pathPlaceholder": "选择一个空目录",
       "prune": "清理失效项",
       "pruned": "已清理失效的工作树记录",
-      "relativePathPlaceholder": "worktrees/feature-name",
       "registryProtected": "此工作树现已受 Workspace Registry 保护。",
       "registryUnavailable": "无法验证工作区所有权，已阻止移除。",
+      "relativePathPlaceholder": "worktrees/feature-name",
       "remove": "移除工作树",
       "removeDescription": "确定移除位于 {path} 的关联工作树吗？",
       "removeTitle": "移除工作树？",
@@ -44461,6 +44505,42 @@
     }
   },
   "workspace": {
+    "activity": {
+      "artifactsAria": "本次运行产出的链接",
+      "empty": "这个工作区还没有共享的计划或运行。",
+      "noSteps": "暂无步骤",
+      "planStatus": {
+        "approved": "已审批",
+        "awaiting_approval": "待审批",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "draft": "草稿",
+        "executing": "执行中",
+        "failed": "已失败",
+        "paused": "已暂停"
+      },
+      "planStatusAria": "计划状态",
+      "plans": "计划",
+      "progress": "{completed} / {total} 步",
+      "runKind": {
+        "agent-task": "Agent 任务",
+        "agent-team": "Agent 团队",
+        "github-loop": "GitHub 循环",
+        "plan": "计划"
+      },
+      "runStatus": {
+        "cancelled": "已取消",
+        "failed": "失败",
+        "queued": "排队中",
+        "running": "运行中",
+        "succeeded": "成功"
+      },
+      "runStatusAria": "运行状态",
+      "runs": "运行",
+      "startedBy": "由 {name} 发起",
+      "title": "团队动态",
+      "unattached": "未关联到议题或计划"
+    },
     "adopt": {
       "adopt": "收编",
       "description": "这些目录已经在被使用 —— 来自工作树、终端标签页 —— 但还没有工作区拥有它们。收编只是把目录挂载为工作区，磁盘上的内容不会被移动。",
@@ -44719,42 +44799,6 @@
       "undoFollow": "撤销",
       "unpin": "取消置顶 {name}",
       "untrustedHint": "未受信任的工作区"
-    },
-    "activity": {
-      "artifactsAria": "本次运行产出的链接",
-      "empty": "这个工作区还没有共享的计划或运行。",
-      "noSteps": "暂无步骤",
-      "planStatus": {
-        "approved": "已审批",
-        "awaiting_approval": "待审批",
-        "cancelled": "已取消",
-        "completed": "已完成",
-        "draft": "草稿",
-        "executing": "执行中",
-        "failed": "已失败",
-        "paused": "已暂停"
-      },
-      "planStatusAria": "计划状态",
-      "plans": "计划",
-      "progress": "{completed} / {total} 步",
-      "runKind": {
-        "agent-task": "Agent 任务",
-        "agent-team": "Agent 团队",
-        "github-loop": "GitHub 循环",
-        "plan": "计划"
-      },
-      "runStatus": {
-        "cancelled": "已取消",
-        "failed": "失败",
-        "queued": "排队中",
-        "running": "运行中",
-        "succeeded": "成功"
-      },
-      "runStatusAria": "运行状态",
-      "runs": "运行",
-      "startedBy": "由 {name} 发起",
-      "title": "团队动态",
-      "unattached": "未关联到议题或计划"
     }
   },
   "worktreeWorkflow": {
