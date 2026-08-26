@@ -29752,14 +29752,15 @@
         "copyFailed": "Couldn't copy",
         "description": "Expose this desktop's adapter webhook receiver to the public internet so Slack / Lark / Discord interactions can reach it. Uses the cloudflared `--url` quick-tunnel.",
         "desktopOnly": "Tunnel control requires the desktop app",
-        "desktopOnlyHint": "The tunnel runs from the desktop app. Open Cognia on your desktop to launch it.",
         "install": {
           "copyAria": "Copy {label} command",
           "description": "Run one of the following on your {platform} host, then start the tunnel.",
           "title": "Install cloudflared"
         },
         "modeNamed": "Named tunnel",
+        "noRuntimeHint": "A tunnel exposes a bot that is already running, and this browser is not paired with anything that runs one. Open Cognia on your desktop first.",
         "notInstalled": "cloudflared isn't installed on this machine",
+        "remoteHostHint": "The tunnel is a process on the host that runs your bots, so it starts and stops there. A server deployment does not use one at all — it serves the same inbound URL on its own origin.",
         "start": "Start tunnel",
         "started": "Tunnel started",
         "status": {

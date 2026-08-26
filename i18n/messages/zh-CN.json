@@ -29752,14 +29752,15 @@
         "copyFailed": "复制失败",
         "description": "把本机的适配器 webhook 接收端口暴露到公网，让 Slack / Lark / Discord 交互能够回到这里。使用 cloudflared 的 `--url` 临时隧道。",
         "desktopOnly": "隧道控制需要桌面端",
-        "desktopOnlyHint": "隧道由桌面端运行。请在桌面打开 Cognia 后启动。",
         "install": {
           "copyAria": "复制 {label} 命令",
           "description": "在 {platform} 上执行以下任一命令，然后回来启动隧道。",
           "title": "安装 cloudflared"
         },
         "modeNamed": "命名隧道",
+        "noRuntimeHint": "隧道用来把一个已经在运行的机器人暴露出去，而此浏览器没有与任何运行机器人的宿主配对。请先在桌面上打开 Cognia。",
         "notInstalled": "本机尚未安装 cloudflared",
+        "remoteHostHint": "隧道是运行你机器人的那台宿主上的一个进程，因此要在那边启停。服务器部署根本不用隧道 —— 它用自己的域名提供同一个入站地址。",
         "start": "启动隧道",
         "started": "隧道已启动",
         "status": {

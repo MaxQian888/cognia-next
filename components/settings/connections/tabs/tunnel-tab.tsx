@@ -35,7 +35,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { isTauri } from "@/lib/tauri"
+import { useConnectorControlReach } from "@/components/connectors/connector-host-notice"
 import {
   startTunnel,
   stopTunnel,
@@ -111,7 +111,12 @@ export interface TunnelTabProps {
 
 export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProps = {}) {
   const t = useTranslations("settings.connections.tunnel")
-  const desktop = isTauri()
+  // The cloudflared child process is genuinely the desktop's own — but the
+  // reason it is unreachable differs by host, and "open Cognia on your
+  // desktop" is wrong for a server deployment that does not use a tunnel at
+  // all. The block decides which sentence, the gate stays the same.
+  const reach = useConnectorControlReach("desktop-shell")
+  const desktop = reach.available
   const [info, setInfo] = useState<TunnelInfo | null>(null)
   const [config, setConfig] = useState<{
     mode: "quick" | "named"
@@ -284,10 +289,12 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             </Button>
           )}
           {notInstalled && <InstallHelp platform={platform} onCopy={copyText} />}
-          {!desktop && (
+          {reach.block && (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-xs text-muted-foreground dark:border-amber-800 dark:bg-amber-950/20">
               <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{t("desktopOnlyHint")}</span>
+              <span data-testid="tunnel-host-hint">
+                {reach.block === "no-runtime" ? t("noRuntimeHint") : t("remoteHostHint")}
+              </span>
             </div>
           )}
         </CardContent>

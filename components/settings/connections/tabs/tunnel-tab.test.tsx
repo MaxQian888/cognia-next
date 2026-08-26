@@ -8,7 +8,11 @@ import enMessages from "@/i18n/messages/en.json"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
+let hostProfile = "cloud-companion"
 const mockIsTauri = jest.fn()
+jest.mock("@/hooks/use-host-profile", () => ({
+  useHostProfile: () => (mockIsTauri() ? "desktop" : hostProfile),
+}))
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => mockIsTauri(),
 }))
@@ -308,5 +312,37 @@ describe("TunnelTab", () => {
     expect(mockCurrent).not.toHaveBeenCalled()
     expect(mockStart).not.toHaveBeenCalled()
     expect(mockStop).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The hint used to read "The tunnel runs from the desktop app. Open Cognia
+   * on your desktop to launch it." on every non-Tauri shell. A server
+   * deployment does not run a tunnel at all — it serves the same inbound URL
+   * on its own origin — so pointing its operator at a desktop app is advice
+   * for a different product.
+   */
+  it("does not send a companion to a desktop app it may not have", async () => {
+    mockIsTauri.mockReturnValue(false)
+    hostProfile = "cloud-companion"
+    render(<TunnelTab />)
+    const hint = await screen.findByTestId("tunnel-host-hint")
+    expect(hint).toHaveTextContent(/own origin/i)
+    expect(hint).not.toHaveTextContent(/open cognia on your desktop/i)
+  })
+
+  // A standalone browser has no bot to expose in the first place, which is a
+  // more useful thing to say than anything about tunnels.
+  it("tells a standalone browser to get a bot running first", async () => {
+    mockIsTauri.mockReturnValue(false)
+    hostProfile = "web-standalone"
+    render(<TunnelTab />)
+    expect(await screen.findByTestId("tunnel-host-hint")).toHaveTextContent(/already running/i)
+  })
+
+  it("shows no host hint on the desktop", async () => {
+    mockIsTauri.mockReturnValue(true)
+    render(<TunnelTab />)
+    await screen.findByTestId("tunnel-start")
+    expect(screen.queryByTestId("tunnel-host-hint")).toBeNull()
   })
 })
