@@ -224,6 +224,71 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The owner half of the capability decision — ADR-0149 §5, step **two**.
+///
+/// # Why this is a predicate and not a lookup
+///
+/// Authorization is meant to resolve `device -> user -> membership ->
+/// capability`. On the host, the middle step is bounded by what the host can
+/// actually know: `host_bindings` records the ONE person this tenant belongs
+/// to, and there is no membership table here — memberships are the
+/// collaboration server's, and a stale local mirror that *granted* would be a
+/// hole while one that *narrowed* would lock people out on every network
+/// hiccup. So the host enforces the part it can prove: the device's person
+/// must be the person this host acts for.
+///
+/// The shape is still the intersection the ADR describes. The person's ceiling
+/// is "everything" for the bound person and "nothing" for anyone else, and the
+/// device's own `capability_grants` narrow it from there. When a membership
+/// mirror eventually lands, only the ceiling gets finer; the rule does not
+/// move.
+///
+/// # Why both NULLs pass
+///
+/// `h.user_id IS NULL` — nobody has signed in on this host. That is a
+/// supported state (ADR-0149 §9), and the overwhelmingly common one, so it
+/// cannot mean "deny".
+///
+/// `d.user_id IS NULL` — the device was enrolled before ADR-0149, or while
+/// nobody was signed in. Every device that existed before step one is in this
+/// state; denying them is the fleet-wide lockout step one existed to avoid.
+/// Sign-in adopts them (`adopt_unowned_devices`), which is how the column
+/// fills in without a backfill that would have guessed.
+///
+/// What this DOES stop: person A signs out, person B signs in on the same
+/// machine, and A's still-paired phone keeps running agents on B's host. Until
+/// now it could.
+pub const OWNER_PREDICATE_SQL: &str =
+    "(h.user_id IS NULL OR d.user_id IS NULL OR d.user_id = h.user_id)";
+
+/// The Rust twin of [`OWNER_PREDICATE_SQL`], for callers that already hold both
+/// ids. A test drives the two over the same table of cases, so neither can
+/// drift into answering differently from the other.
+pub fn owner_permits(host_person: Option<&str>, device_person: Option<&str>) -> bool {
+    match (host_person, device_person) {
+        (Some(host), Some(device)) => host == device,
+        _ => true,
+    }
+}
+
+/// The one capability query. Built from [`OWNER_PREDICATE_SQL`] rather than
+/// spelling the predicate again, so there is a single copy to audit.
+///
+/// `host_bindings.tenant_id` is `UNIQUE`, so the `LEFT JOIN` adds at most one
+/// row and cannot multiply the count — which is the concrete reason ADR-0149
+/// §9's "relax that constraint" is not free.
+fn capability_decision_sql() -> String {
+    format!(
+        "SELECT COUNT(*)
+         FROM capability_grants g
+         JOIN devices d ON d.tenant_id = g.tenant_id AND d.id = g.device_id
+         LEFT JOIN host_bindings h ON h.tenant_id = g.tenant_id
+         WHERE g.tenant_id = ?1 AND g.device_id = ?2 AND g.capability = ?3
+           AND g.revoked_at IS NULL AND d.status = 'active'
+           AND {OWNER_PREDICATE_SQL}"
+    )
+}
+
 impl SecurityStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Arc<Self>, SecurityStoreError> {
         let path = path.as_ref();
@@ -668,11 +733,7 @@ impl SecurityStore {
         capability: &str,
     ) -> Result<bool, SecurityStoreError> {
         let count: i64 = self.conn.lock().query_row(
-            "SELECT COUNT(*)
-             FROM capability_grants g
-             JOIN devices d ON d.tenant_id = g.tenant_id AND d.id = g.device_id
-             WHERE g.tenant_id = ?1 AND g.device_id = ?2 AND g.capability = ?3
-               AND g.revoked_at IS NULL AND d.status = 'active'",
+            &capability_decision_sql(),
             params![tenant_id, device_id, capability],
             |row| row.get(0),
         )?;
@@ -2295,9 +2356,12 @@ fn host_person_for_tenant(
 
 /// Give `devices` a `user_id` — ADR-0149 §5, step **one** of two.
 ///
-/// Pure bookkeeping. The column is added nullable, nothing is backfilled, and
-/// **no decision path reads it**: [`SecurityStore::has_capability`] is byte for
-/// byte what it was, and a test pins that.
+/// The migration itself is still pure bookkeeping: the column is added
+/// nullable and nothing is backfilled, because the host cannot name the person
+/// behind a device that was enrolled before it could ask. Step **two** has
+/// since landed, so [`SecurityStore::has_capability`] does now read the column
+/// — see [`OWNER_PREDICATE_SQL`], which passes a NULL owner precisely so this
+/// migration's un-backfilled rows keep working.
 ///
 /// The split is not caution for its own sake. `capability_grants` is on the hot
 /// request path — `rpc.rs`, `ws_terminal.rs` and `remote_execution.rs` all reach
@@ -3526,60 +3590,156 @@ CREATE TABLE devices (
         assert_eq!(found.user_id.as_deref(), Some(ADA));
     }
 
-    /// Step **one** changes no decision. This is the guard that makes shipping
-    /// the column ahead of the reroute safe.
+    /// A host bound to `person`; returns the tenant its devices live under.
+    fn host_bound_to(store: &SecurityStore, person: &str) -> String {
+        let tenant = host_with_no_person(store);
+        store.bind_host_person("acct_a", person, None, 95).unwrap();
+        tenant
+    }
+
+    /// A host whose profile is bound but that nobody has signed in on — the
+    /// common state, and the one the reroute must leave alone.
+    fn host_with_no_person(store: &SecurityStore) -> String {
+        store.bind_host_account("acct_a", None, 90).unwrap();
+        store.host_binding("acct_a").unwrap().unwrap().tenant_id
+    }
+
+    /// Step **two**: the reroute itself. Person A signs out, person B signs in,
+    /// and A's still-paired phone stops being able to act on B's machine.
     #[test]
-    fn ownership_does_not_yet_influence_any_capability_decision() {
+    fn a_device_owned_by_somebody_else_loses_every_grant() {
         let store = SecurityStore::in_memory().unwrap();
-        register(&store, "tenant-a", "device-a", 100);
+        let tenant = host_bound_to(&store, ADA);
+        register(&store, &tenant, "device-a", 100);
 
-        let before = store
-            .has_capability("tenant-a", "device-a", "host.admin")
-            .unwrap();
-        assert!(before, "the owner device holds host.admin");
-
-        // Attribute it to somebody with no membership anywhere, then to nobody.
-        for owner in [Some(BOB), None] {
+        assert!(
             store
-                .assign_device_user("tenant-a", "device-a", owner, 110)
+                .has_capability(&tenant, "device-a", "host.admin")
+                .unwrap(),
+            "the bound person's own device keeps what it was granted"
+        );
+
+        store
+            .assign_device_user(&tenant, "device-a", Some(BOB), 120)
+            .unwrap();
+        assert!(
+            !store
+                .has_capability(&tenant, "device-a", "host.admin")
+                .unwrap(),
+            "a grant recorded for somebody else's device must not stand"
+        );
+
+        // The grant row itself is untouched — the decision narrowed, nothing
+        // was revoked. Handing the device back restores it without a re-grant.
+        store
+            .assign_device_user(&tenant, "device-a", Some(ADA), 130)
+            .unwrap();
+        assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
+    }
+
+    /// The lockout guard, from the other side. Every device that existed before
+    /// step one has a NULL owner, and step two must not deny them — that is the
+    /// fleet-wide lockout the two-release split existed to avoid.
+    #[test]
+    fn an_unattributed_device_keeps_its_grants() {
+        let store = SecurityStore::in_memory().unwrap();
+        let tenant = host_with_no_person(&store);
+        register(&store, &tenant, "device-a", 100);
+        // Enrolled before anyone signed in, so it carries no owner...
+        assert_eq!(device_user(&store, &tenant, "device-a"), None);
+        // ...and then somebody signs in.
+        store.bind_host_person("acct_a", ADA, None, 110).unwrap();
+
+        assert!(
+            store
+                .has_capability(&tenant, "device-a", "host.admin")
+                .unwrap(),
+            "an unattributed device is not a stranger's device"
+        );
+    }
+
+    /// A host nobody has signed in on decides nothing by ownership. This is the
+    /// common state, not a degraded one — ADR-0149 §9.
+    #[test]
+    fn an_unbound_host_ignores_device_ownership() {
+        let store = SecurityStore::in_memory().unwrap();
+        let tenant = host_with_no_person(&store);
+        register(&store, &tenant, "device-a", 100);
+        store
+            .assign_device_user(&tenant, "device-a", Some(BOB), 110)
+            .unwrap();
+
+        assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
+    }
+
+    /// Ownership narrows; it never widens. Belonging to the right person is
+    /// permission for the grants a device already has, never a grant of its
+    /// own — the device row stays the floor.
+    #[test]
+    fn ownership_never_widens_beyond_the_recorded_grants() {
+        let store = SecurityStore::in_memory().unwrap();
+        let tenant = host_bound_to(&store, ADA);
+        register(&store, &tenant, "device-a", 100);
+
+        // Enrolled under the bound person, so the owner check passes...
+        assert_eq!(device_user(&store, &tenant, "device-a").as_deref(), Some(ADA));
+        assert!(store
+            .has_capability(&tenant, "device-a", "host.admin")
+            .unwrap());
+        // ...and a capability nobody granted is still refused.
+        assert!(!store
+            .has_capability(&tenant, "device-a", "agent.worker")
+            .unwrap());
+    }
+
+    /// The predicate exists twice — once as SQL on the hot path, once as Rust
+    /// for callers that already hold both ids. They must answer identically,
+    /// so both are driven over the same table of cases.
+    #[test]
+    fn the_sql_predicate_and_its_rust_twin_agree() {
+        let store = SecurityStore::in_memory().unwrap();
+        let tenant = host_with_no_person(&store);
+        register(&store, &tenant, "device-a", 100);
+
+        let cases: [(Option<&str>, Option<&str>); 5] = [
+            (None, None),
+            (None, Some(BOB)),
+            (Some(ADA), None),
+            (Some(ADA), Some(ADA)),
+            (Some(ADA), Some(BOB)),
+        ];
+
+        for (host_person, device_person) in cases {
+            match host_person {
+                Some(person) => store.bind_host_person("acct_a", person, None, 110).unwrap(),
+                None => store.clear_host_person("acct_a", 110).unwrap(),
+            }
+            store
+                .assign_device_user(&tenant, "device-a", device_person, 120)
                 .unwrap();
+
             assert_eq!(
                 store
-                    .has_capability("tenant-a", "device-a", "host.admin")
+                    .has_capability(&tenant, "device-a", "host.admin")
                     .unwrap(),
-                before,
-                "has_capability must not read devices.user_id until step two"
+                owner_permits(host_person, device_person),
+                "SQL and Rust disagree for host={host_person:?} device={device_person:?}"
             );
         }
     }
 
-    /// The SQL half of the same guard: the decision query must not mention the
-    /// column. A future edit that joins it in fails here rather than in the
-    /// field.
+    /// The SQL half of the reroute, pinned structurally: the decision query
+    /// MUST read the column now. A future edit that drops the join — restoring
+    /// the pre-4b query — fails here rather than silently re-admitting every
+    /// stranger's device.
     #[test]
-    fn the_capability_query_does_not_mention_the_owner_column() {
-        let store = SecurityStore::in_memory().unwrap();
-        register(&store, "tenant-a", "device-a", 100);
-        let plan: Vec<String> = {
-            let conn = store.conn.lock();
-            let mut statement = conn
-                .prepare(
-                    "EXPLAIN QUERY PLAN
-                     SELECT COUNT(*)
-                     FROM capability_grants g
-                     JOIN devices d ON d.tenant_id = g.tenant_id AND d.id = g.device_id
-                     WHERE g.tenant_id = ?1 AND g.device_id = ?2 AND g.capability = ?3
-                       AND g.revoked_at IS NULL AND d.status = 'active'",
-                )
-                .unwrap();
-            let rows = statement
-                .query_map(params!["tenant-a", "device-a", "host.admin"], |row| {
-                    row.get::<_, String>(3)
-                })
-                .unwrap();
-            rows.collect::<Result<Vec<_>, _>>().unwrap()
-        };
-        assert!(!plan.join(" ").contains("user_id"), "{plan:?}");
+    fn the_capability_query_reads_the_owner_column() {
+        assert!(capability_decision_sql().contains(OWNER_PREDICATE_SQL));
+        assert!(capability_decision_sql().contains("LEFT JOIN host_bindings"));
     }
 
     #[test]
