@@ -123,6 +123,42 @@ export function buildA2UICapabilityMatrix(
 （`platform-kind.ts:7`，含 `email`/`kook`/`line`/`mattermost`/`github`）枚举 **16** 种，由
 `isPlatformKind`（`platform-kind.ts:35`）守卫。
 
+## 六种原因，一套词表
+
+`effectiveCapabilities()`（`lib/connectors/effective-capabilities.ts:225`）把声明的能力列表收窄成某个
+**实例**真正能提供的那些，并为每一项丢弃记录一条 `CapabilitySuppression`，原因取自五种：
+`transport_unsupported`、`missing_oauth_scope`、`upstream_impl_unsupported`、`instance_setting_off`、
+`scene_unsupported`。`capabilityAvailability(snapshot, capability)`
+（`lib/connectors/capability-availability.ts:100`）是它的读出面，并补上了抑制列表在结构上装不下的
+**第六种**原因：
+
+```ts
+// lib/connectors/capability-availability.ts:33
+export const CAPABILITY_UNAVAILABLE_CAUSES = [
+  ...CAPABILITY_SUPPRESSION_REASONS,
+  "not_declared",
+] as const
+```
+
+`suppressionFor` 在「能力可用」和「平台压根没声明过它」两种相反的情形下都返回 `undefined`，而后者才是
+多数情形 —— 11 个平台里有 4 个没有 `send.reply`，8 个没有 `presence.status`，7 个没有 `history.fetch`。
+所以只建立在五种抑制原因上的读出面，恰恰会在隐藏得最多的那些场景里无话可说。
+
+两种没有补救办法的原因（`scene_unsupported`、`not_declared`）被排除在 `isActionableCause` 之外，因此它们
+的读出在说明原因后就结束，而不是编造一个下一步：`CapabilityNotice`
+（`components/connectors/capability-notice.tsx`）渲染 `reason.<cause>`，只有那四种可修复的才追加
+`nextStep.<cause>`。两者都住在唯一的 `connectors.capability` i18n 命名空间下 —— 适配器的能力矩阵卡片曾经
+自带一份私有副本，这正是同一个缺失的 Slack 权限在一个界面上是一句话、在另一个界面上却是一个消失了的控件的
+原因。这两个联合由目录覆盖测试钉在该命名空间上，因为 ``t(`reason.${cause}`)`` 是模板字面量 key，
+`pnpm lint:i18n` 会全部跳过。
+
+<Callout type="warn">
+  **渲染、禁用、写明原因 —— 永远不要隐藏。** 实例无法提供的控件应当带着它存储的值渲染出来、置为禁用，并
+  配一条 `CapabilityNotice`。把它藏起来会让「该平台没有这个原语」「重新授权就能恢复」「这个界面加载失败了」
+  三件事看起来一模一样。曾经隐藏的三处是：引用回复默认值、用量在线状态的徽章档位，以及收件箱的「加载更早」
+  横条。
+</Callout>
+
 ## 运行时工厂：buildAdapterFromRow
 
 `buildAdapterFromRow(row)`（`lib/connectors/adapter-registry.ts:42`）是类型联合的运行时对偶 —— 它按

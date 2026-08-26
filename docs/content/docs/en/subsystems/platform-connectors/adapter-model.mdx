@@ -130,6 +130,45 @@ floor. `PlatformKind` (`platform-kind.ts:33`) enumerates the **16** kinds via `A
 (`platform-kind.ts:7`, incl. `email`/`kook`/`line`/`mattermost`/`github`), guarded by `isPlatformKind`
 (`platform-kind.ts:35`).
 
+## Six Causes, One Vocabulary
+
+`effectiveCapabilities()` (`lib/connectors/effective-capabilities.ts:225`) narrows the declared list to
+what one *instance* can serve and records a `CapabilitySuppression` for each drop, with one of five
+reasons: `transport_unsupported`, `missing_oauth_scope`, `upstream_impl_unsupported`,
+`instance_setting_off`, `scene_unsupported`. `capabilityAvailability(snapshot, capability)`
+(`lib/connectors/capability-availability.ts:100`) is the read-out over it, and it adds a **sixth**
+cause that the suppression list structurally cannot carry:
+
+```ts
+// lib/connectors/capability-availability.ts:33
+export const CAPABILITY_UNAVAILABLE_CAUSES = [
+  ...CAPABILITY_SUPPRESSION_REASONS,
+  "not_declared",
+] as const
+```
+
+`suppressionFor` answers `undefined` both when a capability works and when the platform never declared
+it, and the second case is the majority one — `send.reply` is undeclared on 4 of the 11 platforms,
+`presence.status` on 8, `history.fetch` on 7. A read-out built on suppressions alone would therefore be
+silent in exactly the situations that hide the most.
+
+The two causes with no remedy (`scene_unsupported`, `not_declared`) are excluded from
+`isActionableCause`, so their read-out ends after the reason instead of inventing a next step:
+`CapabilityNotice` (`components/connectors/capability-notice.tsx`) renders `reason.<cause>` and, only
+for the four fixable ones, `nextStep.<cause>`. Both live under the single `connectors.capability` i18n
+namespace — the adapter's capability matrix card used to own a private copy, which is why the same
+missing Slack scope read as a sentence on one screen and as a vanished control on another. The unions
+are pinned to that namespace by a catalogue test, because ``t(`reason.${cause}`)`` is a
+template-literal key and `pnpm lint:i18n` skips every one of those.
+
+<Callout type="warn">
+  **Render, disable, explain — never hide.** A control the instance cannot serve is rendered with its
+  stored value, disabled, and accompanied by a `CapabilityNotice`. Hiding it makes "the platform has no
+  such primitive", "re-authorizing would bring it back", and "this screen failed to load" look
+  identical. Three surfaces used to hide: the reply-quoting default, the usage-presence badge tier, and
+  the Inbox "load earlier" bar.
+</Callout>
+
 ## The Runtime Factory: buildAdapterFromRow
 
 `buildAdapterFromRow(row)` (`lib/connectors/adapter-registry.ts:42`) is the runtime dual of the type
