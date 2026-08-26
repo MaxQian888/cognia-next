@@ -36,7 +36,7 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { Switch } from "@/components/ui/switch"
 import { openUrl } from "@/lib/native/opener"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { beginLarkOAuth } from "@/lib/connectors/adapters/lark/oauth-begin"
 import type { LarkConnectedUser } from "@/lib/connectors/adapters/lark/oauth-handler"
 import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
@@ -52,7 +52,12 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { refreshSelfBotOpenId } from "@/lib/connectors/adapter-registry"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import {
+  useAdapterCredentials,
+  type UseAdapterCredentialsResult,
+} from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import { LarkAtStrategy } from "./lark/lark-at-strategy"
 import { LarkWhitelistEditor } from "./lark/lark-whitelist-editor"
@@ -132,6 +137,14 @@ interface LarkConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+// `appId` + `appSecret` mint the tenant access token, `verificationToken`
+// verifies inbound events, and `encryptKey` is optional (blank = encryption
+// disabled in the Lark app). The user tokens below are OAuth output —
+// presence only, never a field.
+const LARK_CREDENTIALS = ["appId", "appSecret", "verificationToken", "encryptKey"] as const
+const LARK_REQUIRED_CREDENTIALS = ["appId", "appSecret", "verificationToken"] as const
+const LARK_DERIVED_CREDENTIALS = ["user_token", "user_refresh_token"] as const
+
 export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkConfigDialogProps) {
   const t = useTranslations("settings.connections.lark")
   const isNew = row === null
@@ -139,10 +152,14 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
 
   // ── Form state ───────────────────────────────────────────────────────────
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [appId, setAppId] = useState("")
-  const [appSecret, setAppSecret] = useState("")
-  const [encryptKey, setEncryptKey] = useState("")
-  const [verificationToken, setVerificationToken] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: LARK_CREDENTIALS,
+    derivedAccounts: LARK_DERIVED_CREDENTIALS,
+    enabled: open,
+  })
+  const appId = credentials.value("appId")
+  const appSecret = credentials.value("appSecret")
   // Cloud installs default to `webhook`: they have a public origin and no
   // cloudflared tunnel, and a webhook survives a brain restart without
   // re-establishing an outbound socket. Desktop keeps `long-connection`, which
@@ -190,10 +207,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    appId.length > 0 ||
-    appSecret.length > 0 ||
-    encryptKey.length > 0 ||
-    verificationToken.length > 0 ||
+    credentials.dirty ||
     transport !== (persistedSettings.transport ?? "long-connection") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null) ||
@@ -304,16 +318,17 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && !appId.trim()) {
-      toast.error(t("appIdRequired"))
-      return
-    }
-    if (isNew && !appSecret.trim()) {
-      toast.error(t("appSecretRequired"))
-      return
-    }
-    if (isNew && !verificationToken.trim()) {
-      toast.error(t("verificationTokenRequired"))
+    const missing = credentials.missingRequired(LARK_REQUIRED_CREDENTIALS)
+    if (missing.length > 0) {
+      toast.error(
+        t(
+          missing[0] === "appId"
+            ? "appIdRequired"
+            : missing[0] === "appSecret"
+              ? "appSecretRequired"
+              : "verificationTokenRequired"
+        )
+      )
       return
     }
     // Quiet hours validation — if enabled, all three fields must be set.
@@ -348,7 +363,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
           settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["appId", "appSecret", "encryptKey", "verificationToken"],
+            accounts: [...LARK_CREDENTIALS],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -372,23 +387,12 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         await updateAdapterInstance(adapterId, update)
       }
 
-      // Write secrets to keyring (Tauri only)
-      if (appId.trim()) {
-        await connectorsKeyringSet(adapterId, "appId", appId.trim())
-      }
-      if (appSecret.trim()) {
-        await connectorsKeyringSet(adapterId, "appSecret", appSecret.trim())
-      }
-      // Encrypt Key is optional per the Lark Open Platform — only persist
-      // when the operator filled the field. Leaving it blank means
-      // "encryption disabled in the Lark app"; the adapter falls back to
-      // plaintext events.
-      if (encryptKey.trim()) {
-        await connectorsKeyringSet(adapterId, "encryptKey", encryptKey.trim())
-      }
-      if (verificationToken.trim()) {
-        await connectorsKeyringSet(adapterId, "verificationToken", verificationToken.trim())
-      }
+      // Encrypt Key is optional per the Lark Open Platform: blank means
+      // "encryption disabled in the Lark app" and the adapter falls back to
+      // plaintext events. Now that the field is prefilled, clearing one the
+      // operator can actually see is a real request to disable it, which is
+      // exactly what `persist` writes.
+      await credentials.persist(adapterId)
 
       // Hot-reload: tell the lifecycle layer the credentials rotated so
       // the running adapter is requeued without an app restart. Only
@@ -444,14 +448,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
       <IdentityFields
         displayName={displayName}
         setDisplayName={setDisplayName}
-        appId={appId}
-        setAppId={setAppId}
-        appSecret={appSecret}
-        setAppSecret={setAppSecret}
-        encryptKey={encryptKey}
-        setEncryptKey={setEncryptKey}
-        verificationToken={verificationToken}
-        setVerificationToken={setVerificationToken}
+        credentials={credentials}
         selfBotOpenId={selfBotOpenId}
         onRefreshOpenId={handleRefreshSelfBotOpenId}
         refreshingOpenId={refreshingOpenId}
@@ -576,7 +573,9 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>
@@ -728,14 +727,8 @@ function SendAsUserFields(p: SendAsUserFieldsProps) {
 interface IdentityFieldsProps {
   displayName: string
   setDisplayName: (s: string) => void
-  appId: string
-  setAppId: (s: string) => void
-  appSecret: string
-  setAppSecret: (s: string) => void
-  encryptKey: string
-  setEncryptKey: (s: string) => void
-  verificationToken: string
-  setVerificationToken: (s: string) => void
+  /** The whole credential facade: value, status and edit for all four fields. */
+  credentials: UseAdapterCredentialsResult
   selfBotOpenId: string | null
   onRefreshOpenId: () => void
   refreshingOpenId: boolean
@@ -772,13 +765,16 @@ function IdentityFields(p: IdentityFieldsProps) {
         {/* App ID + Test connection */}
         <FieldRow id="lk-app-id" label={t("appIdLabel")} required help={t("appIdHelp")}>
           <div className="flex gap-2">
-            <Input
+            <CredentialInput
               id="lk-app-id"
-              value={p.appId}
-              onChange={(e) => p.setAppId(e.target.value)}
+              sensitive={false}
+              value={p.credentials.value("appId")}
+              onChange={(next) => p.credentials.set("appId", next)}
+              status={p.credentials.status("appId")}
               placeholder={t("appIdPlaceholder")}
               disabled={p.saving}
               className="min-w-0 flex-1"
+              onRetry={p.credentials.retry}
             />
             <Button
               type="button"
@@ -800,14 +796,14 @@ function IdentityFields(p: IdentityFieldsProps) {
 
         {/* App Secret */}
         <FieldRow id="lk-app-secret" label={t("appSecretLabel")} required help={t("appSecretHelp")}>
-          <Input
+          <CredentialInput
             id="lk-app-secret"
-            type="password"
-            autoComplete="new-password"
-            value={p.appSecret}
-            onChange={(e) => p.setAppSecret(e.target.value)}
+            value={p.credentials.value("appSecret")}
+            onChange={(next) => p.credentials.set("appSecret", next)}
+            status={p.credentials.status("appSecret")}
             placeholder={t("appSecretPlaceholder")}
             disabled={p.saving}
+            onRetry={p.credentials.retry}
           />
         </FieldRow>
 
@@ -818,27 +814,27 @@ function IdentityFields(p: IdentityFieldsProps) {
           required
           help={t("verificationTokenHelp")}
         >
-          <Input
+          <CredentialInput
             id="lk-verification-token"
-            type="password"
-            autoComplete="new-password"
-            value={p.verificationToken}
-            onChange={(e) => p.setVerificationToken(e.target.value)}
+            value={p.credentials.value("verificationToken")}
+            onChange={(next) => p.credentials.set("verificationToken", next)}
+            status={p.credentials.status("verificationToken")}
             placeholder={t("verificationTokenPlaceholder")}
             disabled={p.saving}
+            onRetry={p.credentials.retry}
           />
         </FieldRow>
 
         {/* Encrypt Key (optional) */}
         <FieldRow id="lk-encrypt-key" label={t("encryptKeyLabel")} help={t("encryptKeyHelp")}>
-          <Input
+          <CredentialInput
             id="lk-encrypt-key"
-            type="password"
-            autoComplete="new-password"
-            value={p.encryptKey}
-            onChange={(e) => p.setEncryptKey(e.target.value)}
+            value={p.credentials.value("encryptKey")}
+            onChange={(next) => p.credentials.set("encryptKey", next)}
+            status={p.credentials.status("encryptKey")}
             placeholder={t("encryptKeyPlaceholder")}
             disabled={p.saving}
+            onRetry={p.credentials.retry}
           />
         </FieldRow>
       </div>

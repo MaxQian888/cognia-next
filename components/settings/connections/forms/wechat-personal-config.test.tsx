@@ -42,8 +42,19 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...a: unknown[]) => mockKeyringSet(...a),
+  connectorsKeyringGet: (...a: unknown[]) => mockKeyringGet(...a),
+  connectorsKeyringDelete: (...a: unknown[]) => mockKeyringDelete(...a),
+  connectorsKeyringList: (...a: unknown[]) => mockKeyringList(...a),
 }))
 
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...a: unknown[]) => mockCapability(...a),
+}))
+
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockEmitCredentialsRotated = jest.fn()
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockEmitCredentialsRotated(...a),
@@ -348,5 +359,49 @@ describe("WeChatPersonalConfigDialog — edit", () => {
       expect(mockToastError).toHaveBeenCalledWith("save denied")
     })
     expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+describe("WeChatPersonalConfigDialog — sign-in state", () => {
+  const existingRow = {
+    id: "wxp-1",
+    type: "wechat-personal",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "longpoll",
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["botToken"] },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  beforeEach(() => {
+    mockCapability.mockReturnValue(true)
+    mockKeyringList.mockResolvedValue([])
+  })
+
+  it("reports signed in when a bot token is actually stored", async () => {
+    mockKeyringList.mockResolvedValue(["botToken"])
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={existingRow} />)
+    await waitFor(() => expect(screen.getByText(/currently logged in/i)).toBeInTheDocument())
+    expect(mockKeyringList).toHaveBeenCalledWith("wxp-1", ["botToken"])
+  })
+
+  // The row existing is not the same as a session existing: a revoked or
+  // purged token used to keep reading as "logged in" forever.
+  it("reports signed out when the row exists but its token does not", async () => {
+    mockKeyringList.mockResolvedValue([])
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={existingRow} />)
+    await waitFor(() => expect(screen.queryByText(/currently logged in/i)).not.toBeInTheDocument())
+  })
+
+  it("falls back to the old assumption when the host cannot probe", async () => {
+    mockCapability.mockReturnValue(false)
+    render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={existingRow} />)
+    expect(screen.getByText(/currently logged in/i)).toBeInTheDocument()
+    expect(mockKeyringList).not.toHaveBeenCalled()
   })
 })

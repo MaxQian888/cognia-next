@@ -238,6 +238,20 @@ describe("useAdapterCredentials", () => {
     expect(mockGet).not.toHaveBeenCalledWith("adp_1", "userToken")
   })
 
+  it("probes derived tokens even when the form has no editable credential", async () => {
+    mockList.mockResolvedValue(["botToken"])
+    const { result } = renderHook(() =>
+      useAdapterCredentials({
+        adapterId: "adp_1",
+        accounts: [],
+        derivedAccounts: ["botToken"],
+      })
+    )
+
+    await waitFor(() => expect(result.current.derivedPresence("botToken")).toBe(true))
+    expect(mockGet).not.toHaveBeenCalled()
+  })
+
   it("leaves derived presence unknown when the probe itself fails", async () => {
     mockList.mockRejectedValue(new Error("nope"))
     const { result } = renderCreds({ derivedAccounts: ["userToken"] })

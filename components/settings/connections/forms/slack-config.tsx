@@ -27,7 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
@@ -40,7 +40,9 @@ import {
   resolveConnectorsIngressBase,
 } from "@/lib/connectors/server-transport"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface AuthTestResult {
@@ -138,6 +140,18 @@ interface SlackConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+// `signingSecret` and `appToken` belong to one transport each, but both are
+// read unconditionally so toggling transport does not re-probe the keyring.
+// `userToken` is OAuth output — presence only, never a field.
+const SLACK_CREDENTIALS = [
+  "botToken",
+  "signingSecret",
+  "appToken",
+  "clientId",
+  "clientSecret",
+] as const
+const SLACK_DERIVED_CREDENTIALS = ["userToken"] as const
+
 export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
   const router = useRouter()
@@ -145,11 +159,17 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const persisted = (row?.settings ?? {}) as SlackPersistedSettings
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [botToken, setBotToken] = useState("")
-  const [signingSecret, setSigningSecret] = useState("")
-  const [appToken, setAppToken] = useState("")
-  const [clientId, setClientId] = useState("")
-  const [clientSecret, setClientSecret] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: SLACK_CREDENTIALS,
+    derivedAccounts: SLACK_DERIVED_CREDENTIALS,
+    enabled: open,
+  })
+  const botToken = credentials.value("botToken")
+  const signingSecret = credentials.value("signingSecret")
+  const appToken = credentials.value("appToken")
+  const clientId = credentials.value("clientId")
+  const clientSecret = credentials.value("clientSecret")
   const [authorizing, setAuthorizing] = useState(false)
   const [transport, setTransport] = useState<TransportMode>(persisted.transport ?? "socket-mode")
   const [assistantAppEnabled, setAssistantAppEnabled] = useState<boolean>(
@@ -176,11 +196,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    botToken.length > 0 ||
-    signingSecret.length > 0 ||
-    appToken.length > 0 ||
-    clientId.length > 0 ||
-    clientSecret.length > 0 ||
+    credentials.dirty ||
     transport !== (persisted.transport ?? "socket-mode") ||
     assistantAppEnabled !== (persisted.assistantAppEnabled === true) ||
     parseSlackHistoryMaxPages(historyMaxPagesInput) !== persistedPages ||
@@ -224,12 +240,9 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
         toast.error(t("oauthNeedsRelay"))
         return
       }
-      if (clientId.trim()) {
-        await connectorsKeyringSet(row.id, "clientId", clientId.trim())
-      }
-      if (clientSecret.trim()) {
-        await connectorsKeyringSet(row.id, "clientSecret", clientSecret.trim())
-      }
+      // The exchange reads these back out of the keyring, so they must be on
+      // disk before the brain mints the pending record.
+      await credentials.persist(row.id)
       // The brain mints the state and owns the pending record, because the
       // brain is what spends it when the relay hands the code back. On the
       // desktop that is this same process; a headless install drives the very
@@ -343,25 +356,11 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
         })
       }
 
-      if (botToken.trim()) {
-        await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
-      }
       // The OAuth app credentials live in the keyring next to the tokens, the
       // same place `handleSlackOAuth` reads them from at exchange time. They
       // used to be expected from `NEXT_PUBLIC_SLACK_CLIENT_ID`, which is set
       // nowhere and which the exchange never looked at.
-      if (clientId.trim()) {
-        await connectorsKeyringSet(adapterId, "clientId", clientId.trim())
-      }
-      if (clientSecret.trim()) {
-        await connectorsKeyringSet(adapterId, "clientSecret", clientSecret.trim())
-      }
-      if (signingSecret.trim()) {
-        await connectorsKeyringSet(adapterId, "signingSecret", signingSecret.trim())
-      }
-      if (appToken.trim()) {
-        await connectorsKeyringSet(adapterId, "appToken", appToken.trim())
-      }
+      await credentials.persist(adapterId)
 
       // Hot-reload the running adapter so the new keyring material is
       // picked up without an app restart. New rows boot from the next
@@ -413,15 +412,15 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
             </Label>
             <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
             <div className="flex gap-2">
-              <Input
+              <CredentialInput
                 id="sl-bot-token"
-                type="password"
-                autoComplete="new-password"
                 value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
+                onChange={(next) => credentials.set("botToken", next)}
+                status={credentials.status("botToken")}
                 placeholder={t("botTokenPlaceholder")}
                 disabled={saving}
                 className="min-w-0 flex-1"
+                onRetry={credentials.retry}
               />
               <Button
                 type="button"
@@ -449,14 +448,14 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
               )}
             </Label>
             <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
-            <Input
+            <CredentialInput
               id="sl-signing-secret"
-              type="password"
-              autoComplete="new-password"
               value={signingSecret}
-              onChange={(e) => setSigningSecret(e.target.value)}
+              onChange={(next) => credentials.set("signingSecret", next)}
+              status={credentials.status("signingSecret")}
               placeholder={t("signingSecretPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
         </div>
@@ -498,25 +497,27 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
             <Label htmlFor="slack-client-id" className="text-xs">
               {t("clientIdLabel")}
             </Label>
-            <Input
+            <CredentialInput
               id="slack-client-id"
+              sensitive={false}
               value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
+              onChange={(next) => credentials.set("clientId", next)}
+              status={credentials.status("clientId")}
               placeholder={t("clientIdPlaceholder")}
-              autoComplete="off"
-              spellCheck={false}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1">
             <Label htmlFor="slack-client-secret" className="text-xs">
               {t("clientSecretLabel")}
             </Label>
-            <Input
+            <CredentialInput
               id="slack-client-secret"
-              type="password"
               value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              autoComplete="off"
+              onChange={(next) => credentials.set("clientSecret", next)}
+              status={credentials.status("clientSecret")}
+              placeholder={t("clientSecretPlaceholder")}
+              onRetry={credentials.retry}
             />
           </div>
           {/* The relay URL is what Slack's console must have registered; show
@@ -592,14 +593,14 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
               <span className="ml-1 text-destructive">*</span>
             </Label>
             <p className="text-xs text-muted-foreground">{t("appTokenHelp")}</p>
-            <Input
+            <CredentialInput
               id="sl-app-token"
-              type="password"
-              autoComplete="new-password"
               value={appToken}
-              onChange={(e) => setAppToken(e.target.value)}
+              onChange={(next) => credentials.set("appToken", next)}
+              status={credentials.status("appToken")}
               placeholder={t("appTokenPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
         )}
@@ -744,7 +745,9 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

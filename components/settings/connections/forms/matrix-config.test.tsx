@@ -5,6 +5,10 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "mx-new-id" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockEmitCredentialsRotated = jest.fn()
@@ -17,6 +21,13 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 }))
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...args: unknown[]) => mockEmitCredentialsRotated(...args),
@@ -34,7 +45,20 @@ const mockToastError = toast.error as jest.Mock
 
 import { MatrixConfigDialog } from "./matrix-config"
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockProbeMatrixAccessToken.mockResolvedValue({ ok: true, userId: "@bot:matrix.org" })
 })
@@ -301,7 +325,7 @@ describe("MatrixConfigDialog — edit existing", () => {
     render(<MatrixConfigDialog open onOpenChange={jest.fn()} row={row} />)
     expect(screen.getByText(/edit matrix connector/i)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await clickSave()
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "mx-1",
@@ -318,11 +342,71 @@ describe("MatrixConfigDialog — edit existing", () => {
 
     render(<MatrixConfigDialog open onOpenChange={jest.fn()} row={row} />)
     fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith("write denied")
     })
     expect(mockEmitCredentialsRotated).not.toHaveBeenCalled()
+  })
+})
+
+describe("MatrixConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "mx-1",
+    type: "matrix",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "longpoll",
+    settings: { homeserver: "https://matrix.example" },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["accessToken"] },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<MatrixConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "accessToken") return "s3cret"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const secret = document.getElementById("mx-access-token") as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((document.getElementById("mx-access-token") as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((document.getElementById("mx-access-token") as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })

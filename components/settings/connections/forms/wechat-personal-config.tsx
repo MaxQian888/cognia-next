@@ -25,6 +25,7 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
 import { isTauri } from "@/lib/tauri"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
@@ -41,6 +42,11 @@ interface WeChatPersonalConfigDialogProps {
 type LoginStatus = "idle" | "waiting" | "scaned" | "confirmed" | "expired" | "error"
 
 const POLL_INTERVAL_MS = 2500
+
+// The bot token is never typed — it only ever comes out of a QR login — so
+// there is no field to prefill. What the panel does need is whether one is
+// stored, which is the honest answer to "is this bot signed in".
+const WECHAT_PERSONAL_DERIVED_CREDENTIALS = ["botToken"] as const
 
 export function WeChatPersonalConfigDialog({
   open,
@@ -60,7 +66,16 @@ export function WeChatPersonalConfigDialog({
   const [qrcode, setQrcode] = useState<string | null>(null)
   const [qrImg, setQrImg] = useState<string | null>(null)
   const [loginStatus, setLoginStatus] = useState<LoginStatus>("idle")
-  const [loggedIn, setLoggedIn] = useState<boolean>(!isNew)
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: [],
+    derivedAccounts: WECHAT_PERSONAL_DERIVED_CREDENTIALS,
+    enabled: open,
+  })
+  const [justSignedIn, setJustSignedIn] = useState(false)
+  // `!isNew` was the old stand-in and is still the fallback: a host that
+  // cannot probe the keyring knows no better than that the row exists.
+  const loggedIn = justSignedIn || (credentials.derivedPresence("botToken") ?? !isNew)
   const persistingRef = useRef(false)
 
   const dirty =
@@ -108,7 +123,7 @@ export function WeChatPersonalConfigDialog({
       }
       await connectorsKeyringSet(adapterId, "botToken", botToken)
       if (!isNew) emitCredentialsRotated(adapterId)
-      setLoggedIn(true)
+      setJustSignedIn(true)
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
       if (isNew) onCreated?.(adapterId)
     } catch (err) {

@@ -181,7 +181,11 @@ export function useAdapterCredentials({
   const resolved = read?.identity === identity ? read : null
   const typed = edits.identity === identity ? edits.values : EMPTY_EDITS
 
-  const wantsRead = enabled && Boolean(adapterId) && accountList.length > 0 && connectorRuntime
+  // Derived accounts are probed even when there is no editable field at all:
+  // WeChat Personal has only a QR login, and whether a token is stored is the
+  // only honest answer to "is this bot signed in".
+  const wantsRead =
+    enabled && Boolean(adapterId) && accountList.length + derivedList.length > 0 && connectorRuntime
   const loading = wantsRead && !resolved
 
   useEffect(() => {

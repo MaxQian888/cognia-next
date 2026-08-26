@@ -1407,6 +1407,7 @@
     "clientIdLabel": "OAuth client ID",
     "clientIdPlaceholder": "1234567890.1234567890123",
     "clientSecretLabel": "OAuth client secret",
+    "clientSecretPlaceholder": "The App Credentials → Client Secret from your Slack app",
     "connectedAs": "{user} @ {team} (id: {userId})",
     "connectedToast": "Connected: {user} @ {team}",
     "connectionFailedLabel": "Connection failed",

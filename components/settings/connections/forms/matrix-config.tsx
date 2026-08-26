@@ -25,7 +25,9 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import {
   matrixLoginWithPassword,
@@ -43,6 +45,13 @@ interface MatrixConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+// The access token is operator input — it can be pasted from Element as
+// readily as it can be minted by the password login below — so it prefills.
+// The refresh token never does: it is login output, it is as sensitive as the
+// password that produced it, and a hand-edited one just breaks renewal.
+const MATRIX_CREDENTIALS = ["accessToken"] as const
+const MATRIX_DERIVED_CREDENTIALS = ["refreshToken"] as const
+
 export function MatrixConfigDialog({
   open,
   onOpenChange,
@@ -55,7 +64,14 @@ export function MatrixConfigDialog({
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [homeserver, setHomeserver] = useState(settings.homeserver ?? "")
-  const [accessToken, setAccessToken] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: MATRIX_CREDENTIALS,
+    derivedAccounts: MATRIX_DERIVED_CREDENTIALS,
+    enabled: open,
+  })
+  const accessToken = credentials.value("accessToken")
+  const setAccessToken = (next: string) => credentials.set("accessToken", next)
   // Never rendered: a refresh token is as sensitive as a password, and the
   // panel has no reason to show one. It only ever travels login -> keyring.
   const [refreshToken, setRefreshToken] = useState("")
@@ -75,7 +91,7 @@ export function MatrixConfigDialog({
     isNew ||
     displayName.trim() !== row?.displayName ||
     homeserver.trim() !== (settings.homeserver ?? "") ||
-    accessToken.length > 0 ||
+    credentials.dirty ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -199,9 +215,7 @@ export function MatrixConfigDialog({
         })
       }
 
-      if (accessToken.trim()) {
-        await connectorsKeyringSet(adapterId, "accessToken", accessToken.trim())
-      }
+      await credentials.persist(adapterId)
       if (refreshToken.trim()) {
         await connectorsKeyringSet(adapterId, "refreshToken", refreshToken.trim())
       }
@@ -258,17 +272,15 @@ export function MatrixConfigDialog({
           </Label>
           <p className="text-xs text-muted-foreground">{t("accessTokenHelp")}</p>
           <div className="flex gap-2">
-            <Input
+            <CredentialInput
               id="mx-access-token"
-              type="password"
-              autoComplete="new-password"
               value={accessToken}
-              onChange={(e) => setAccessToken(e.target.value)}
-              placeholder={
-                isNew ? t("accessTokenPlaceholder") : t("credentialUnchangedPlaceholder")
-              }
+              onChange={setAccessToken}
+              status={credentials.status("accessToken")}
+              placeholder={t("accessTokenPlaceholder")}
               disabled={saving}
               className="min-w-0 flex-1"
+              onRetry={credentials.retry}
             />
             <Button
               type="button"
@@ -388,7 +400,9 @@ export function MatrixConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

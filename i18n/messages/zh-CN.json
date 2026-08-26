@@ -29422,6 +29422,7 @@
         "clientIdLabel": "OAuth Client ID",
         "clientIdPlaceholder": "1234567890.1234567890123",
         "clientSecretLabel": "OAuth Client Secret",
+        "clientSecretPlaceholder": "Slack 应用「App Credentials」中的 Client Secret",
         "connectedAs": "{user} @ {team}（id: {userId}）",
         "connectedToast": "已连接：{user} @ {team}",
         "connectionFailedLabel": "连接失败",

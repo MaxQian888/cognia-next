@@ -10,6 +10,8 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 // ---------------------------------------------------------------------------
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-lark-id" })
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringGet = jest.fn().mockResolvedValue("cli_app_x")
@@ -28,6 +30,11 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringGet: (...args: unknown[]) => mockConnectorsKeyringGet(...args),
   connectorsKeyringDelete: (...args: unknown[]) => mockConnectorsKeyringDelete(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 
 jest.mock("@/lib/native/opener", () => ({
@@ -76,8 +83,23 @@ function makeTatFailResponse(msg = "invalid_app") {
   } satisfies TauriHttpResponse
 }
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
+  mockCapability.mockReturnValue(true)
+  // Restore the suite default rather than blanking it: several tests read a
+  // real app id back out of the keyring through the OAuth begin path.
+  mockConnectorsKeyringGet.mockResolvedValue("cli_app_x")
+  mockKeyringList.mockResolvedValue([])
   mockedUseTunnelStatus.mockReturnValue(RUNNING_TUNNEL)
   sessionStorage.clear()
   localStorage.clear()
@@ -266,7 +288,7 @@ describe("LarkConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Lark Bot"), {
       target: { value: "Updated Lark Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -505,3 +527,73 @@ const existingCloudRow: AdapterInstanceRow = {
   createdAt: 1000,
   updatedAt: 2000,
 }
+
+describe("LarkConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "lk-1",
+    type: "lark",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "gateway",
+    settings: {},
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["appId", "appSecret", "verificationToken", "encryptKey"],
+    },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<LarkConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockConnectorsKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "appId") return "cli_abc"
+      if (name === "appSecret") return "s3cret"
+      if (name === "verificationToken") return "vtok"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const identifier = screen.getByLabelText(/app id/i) as HTMLInputElement
+    await waitFor(() => expect(identifier.value).toBe("cli_abc"))
+    // Identifiers stay readable; only the secret is masked.
+    expect(identifier.type).toBe("text")
+
+    const secret = screen.getByLabelText(/app secret/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockConnectorsKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockConnectorsKeyringDelete).not.toHaveBeenCalled()
+  })
+})

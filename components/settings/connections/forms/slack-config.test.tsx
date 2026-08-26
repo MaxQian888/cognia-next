@@ -10,6 +10,10 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 // ---------------------------------------------------------------------------
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-slack-id" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
@@ -22,6 +26,13 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -78,7 +89,20 @@ function makeAuthTestFailResponse(error = "invalid_auth") {
   } satisfies TauriHttpResponse
 }
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockTunnel.running = false
   mockTunnel.url = null
@@ -588,7 +612,7 @@ describe("SlackConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Slack Bot"), {
       target: { value: "Updated Slack Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -640,7 +664,7 @@ describe("SlackConfigDialog — edit existing", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false")
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "sl-existing",
@@ -654,7 +678,7 @@ describe("SlackConfigDialog — edit existing", () => {
   it("persists an edited historyMaxPages as a number", async () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     fireEvent.change(screen.getByTestId("slack-history-max-pages"), { target: { value: "20" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "sl-existing",
@@ -670,7 +694,7 @@ describe("SlackConfigDialog — edit existing", () => {
     const input = screen.getByTestId("slack-history-max-pages")
     fireEvent.change(input, { target: { value: "0" } })
     expect(input).toHaveAttribute("aria-invalid", "true")
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/between 1 and 50/))
     })
@@ -691,7 +715,7 @@ describe("SlackConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Slack Bot"), {
       target: { value: "Renamed Slack Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalled()
     })
@@ -815,5 +839,74 @@ describe("SlackConfigDialog — layout", () => {
     expect(dialog.className).toContain("flex-col")
     expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
     expect(dialog.querySelector('[class*="sm:grid-cols-2"]')).not.toBeNull()
+  })
+})
+
+describe("SlackConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "sl-1",
+    type: "slack",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "gateway",
+    settings: {},
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["botToken", "appToken"],
+    },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<SlackConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "botToken") return "s3cret"
+      if (name === "clientId") return "123.456"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const identifier = screen.getByLabelText(/client id/i) as HTMLInputElement
+    await waitFor(() => expect(identifier.value).toBe("123.456"))
+    // Identifiers stay readable; only the secret is masked.
+    expect(identifier.type).toBe("text")
+
+    const secret = screen.getByLabelText(/bot token/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })
