@@ -29,7 +29,7 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import {
   connectorsHttpRequest,
-  connectorsKeyringGet,
+  connectorsKeyringDelete,
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
@@ -38,7 +38,9 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface GetMeResult {
@@ -90,6 +92,11 @@ function sameCredentialAccounts(actual: readonly string[], expected: readonly st
   return actual.length === expected.length && expected.every((account) => actual.includes(account))
 }
 
+// `secretToken` is the canonical webhook secret and the only one read back:
+// `webhookSecret` is a legacy mirror of the same value (see
+// `telegramCredentialAccounts`), so reading both would just ask twice.
+const TELEGRAM_CREDENTIALS = ["botToken", "secretToken"] as const
+
 export function TelegramConfigDialog({
   open,
   onOpenChange,
@@ -101,11 +108,16 @@ export function TelegramConfigDialog({
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [botToken, setBotToken] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: TELEGRAM_CREDENTIALS,
+    enabled: open,
+  })
+  const botToken = credentials.value("botToken")
   const [transport, setTransport] = useState<TransportMode>(
     (row?.transportMode as TransportMode) ?? "longpoll"
   )
-  const [webhookSecret, setWebhookSecret] = useState("")
+  const webhookSecret = credentials.value("secretToken")
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -118,8 +130,7 @@ export function TelegramConfigDialog({
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    botToken.length > 0 ||
-    webhookSecret.length > 0 ||
+    credentials.dirty ||
     transport !== ((row?.transportMode as TransportMode) ?? "longpoll") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
@@ -170,15 +181,11 @@ export function TelegramConfigDialog({
     // from a degraded health row. Only the desktop can read the keyring, so a
     // browser session falls back to "a secret must have been set at some
     // point", which is what the adapter's health reason then reports.
-    if (transport === "webhook" && !webhookSecret.trim()) {
-      const stored =
-        !isNew && desktop
-          ? await connectorsKeyringGet(row.id, "secretToken").catch(() => null)
-          : null
-      if (isNew || (desktop && !stored?.trim())) {
-        toast.error(t("webhookSecretRequired"))
-        return
-      }
+    // `missingRequired` answers this exactly: it reports a secret only when
+    // it is genuinely absent, never when this shell merely could not read it.
+    if (transport === "webhook" && credentials.missingRequired(["secretToken"]).length > 0) {
+      toast.error(t("webhookSecretRequired"))
+      return
     }
 
     setSaving(true)
@@ -222,16 +229,15 @@ export function TelegramConfigDialog({
         })
       }
 
-      if (botToken.trim()) {
-        await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
-      }
-      if (webhookSecret.trim()) {
-        // The Rust webhook 401-gate reads "secretToken" — saving only the old
-        // "webhookSecret" key meant every webhook delivery failed verification.
-        // Keep writing "webhookSecret" too for backward compatibility with
-        // anything still reading the legacy key.
-        await connectorsKeyringSet(adapterId, "secretToken", webhookSecret.trim())
+      await credentials.persist(adapterId)
+      // The Rust webhook 401-gate reads "secretToken"; "webhookSecret" is the
+      // legacy key kept in step for anything still reading it. Mirrored here
+      // rather than inside the hook because only Telegram has this history.
+      const secretIntent = credentials.intent("secretToken")
+      if (secretIntent === "set") {
         await connectorsKeyringSet(adapterId, "webhookSecret", webhookSecret.trim())
+      } else if (secretIntent === "clear") {
+        await connectorsKeyringDelete(adapterId, "webhookSecret")
       }
 
       // Hot-reload the running adapter so the new bot token + webhook
@@ -279,15 +285,15 @@ export function TelegramConfigDialog({
           </Label>
           <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
           <div className="flex gap-2">
-            <Input
+            <CredentialInput
               id="tg-bot-token"
-              type="password"
-              autoComplete="new-password"
               value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
+              onChange={(next) => credentials.set("botToken", next)}
+              status={credentials.status("botToken")}
               placeholder={t("botTokenPlaceholder")}
               disabled={saving}
               className="flex-1"
+              onRetry={credentials.retry}
             />
             <Button
               type="button"
@@ -374,14 +380,14 @@ export function TelegramConfigDialog({
                 <code className="text-xs">X-Telegram-Bot-Api-Secret-Token</code>{" "}
                 {t("webhookSecretHelpSuffix")}
               </p>
-              <Input
+              <CredentialInput
                 id="tg-webhook-secret"
-                type="password"
-                autoComplete="new-password"
                 value={webhookSecret}
-                onChange={(e) => setWebhookSecret(e.target.value)}
+                onChange={(next) => credentials.set("secretToken", next)}
+                status={credentials.status("secretToken")}
                 placeholder={t("webhookSecretPlaceholder")}
                 disabled={saving}
+                onRetry={credentials.retry}
               />
             </div>
 
@@ -484,7 +490,9 @@ export function TelegramConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

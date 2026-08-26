@@ -9,6 +9,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 // ---------------------------------------------------------------------------
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "ob-new-id" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringDelete = jest.fn().mockResolvedValue(undefined)
@@ -29,6 +32,12 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringDelete: (...args: unknown[]) => mockConnectorsKeyringDelete(...args),
   connectorsHealth: () => mockConnectorsHealth(),
   connectorsOnebotProbe: () => mockConnectorsOnebotProbe(),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -47,7 +56,20 @@ import { OneBotConfigDialog } from "./onebot-config"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
 })
 
@@ -240,7 +262,7 @@ describe("OneBotConfigDialog — edit existing", () => {
   it("calls updateAdapterInstance on Save", async () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     fireEvent.change(screen.getByDisplayValue("Prod QQ Bot"), { target: { value: "Updated Bot" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -340,7 +362,7 @@ describe("OneBotConfigDialog — transport mode", () => {
     fireEvent.change(screen.getByLabelText(/napcat websocket url/i), {
       target: { value: "ws://10.0.0.5:3001" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -357,7 +379,7 @@ describe("OneBotConfigDialog — transport mode", () => {
   it("blocks Save with an error when the forward-ws URL is empty", async () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={forwardRow} />)
     fireEvent.change(screen.getByLabelText(/napcat websocket url/i), { target: { value: "" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
@@ -399,5 +421,65 @@ describe("OneBotConfigDialog — layout", () => {
     expect(dialog.className).toContain("flex-col")
     expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
     expect(dialog.querySelector('[class*="sm:grid-cols-2"]')).not.toBeNull()
+  })
+})
+
+describe("OneBotConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "ob-1",
+    type: "onebot",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "reverse-ws",
+    settings: {},
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["onebotBearer"] },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<OneBotConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "onebotBearer") return "s3cret"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const secret = screen.getByLabelText(/bearer/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/bearer/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/bearer/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockConnectorsKeyringDelete).not.toHaveBeenCalled()
   })
 })

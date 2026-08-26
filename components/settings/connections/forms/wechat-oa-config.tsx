@@ -21,13 +21,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getWechatOaAccessToken } from "@/lib/connectors/adapters/wechat-oa/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface WechatOaCredentialTestResult {
@@ -44,6 +45,11 @@ interface WechatOaConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+/** Keyring accounts this dialog owns. All four are required: the pair mints
+ * the access token, and `token` + `encodingAesKey` are what verify and
+ * decrypt the inbound webhook. */
+const WECHAT_OA_CREDENTIALS = ["appId", "appSecret", "token", "encodingAesKey"] as const
+
 export function WechatOaConfigDialog({
   open,
   onOpenChange,
@@ -55,10 +61,15 @@ export function WechatOaConfigDialog({
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [appId, setAppId] = useState("")
-  const [appSecret, setAppSecret] = useState("")
-  const [token, setToken] = useState("")
-  const [encodingAesKey, setEncodingAesKey] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: WECHAT_OA_CREDENTIALS,
+    enabled: open,
+  })
+  const appId = credentials.value("appId")
+  const appSecret = credentials.value("appSecret")
+  const token = credentials.value("token")
+  const encodingAesKey = credentials.value("encodingAesKey")
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [testing, setTesting] = useState(false)
@@ -71,10 +82,7 @@ export function WechatOaConfigDialog({
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    appId.length > 0 ||
-    appSecret.length > 0 ||
-    token.length > 0 ||
-    encodingAesKey.length > 0 ||
+    credentials.dirty ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
 
@@ -130,7 +138,7 @@ export function WechatOaConfigDialog({
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && (!appId.trim() || !appSecret.trim() || !token.trim() || !encodingAesKey.trim())) {
+    if (credentials.missingRequired(WECHAT_OA_CREDENTIALS).length > 0) {
       toast.error(t("credentialsRequired"))
       return
     }
@@ -155,7 +163,7 @@ export function WechatOaConfigDialog({
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["appId", "appSecret", "token", "encodingAesKey"],
+            accounts: [...WECHAT_OA_CREDENTIALS],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -173,11 +181,7 @@ export function WechatOaConfigDialog({
         })
       }
 
-      if (appId.trim()) await connectorsKeyringSet(adapterId, "appId", appId.trim())
-      if (appSecret.trim()) await connectorsKeyringSet(adapterId, "appSecret", appSecret.trim())
-      if (token.trim()) await connectorsKeyringSet(adapterId, "token", token.trim())
-      if (encodingAesKey.trim())
-        await connectorsKeyringSet(adapterId, "encodingAesKey", encodingAesKey.trim())
+      await credentials.persist(adapterId)
 
       if (!isNew) emitCredentialsRotated(adapterId)
 
@@ -215,12 +219,15 @@ export function WechatOaConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appIdHelp")}</p>
-            <Input
+            <CredentialInput
               id="wxoa-app-id"
+              sensitive={false}
               value={appId}
-              onChange={(e) => setAppId(e.target.value)}
-              placeholder={isNew ? "wx…" : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("appId", next)}
+              status={credentials.status("appId")}
+              placeholder={t("appIdPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5">
@@ -229,14 +236,13 @@ export function WechatOaConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appSecretHelp")}</p>
-            <Input
+            <CredentialInput
               id="wxoa-app-secret"
-              type="password"
-              autoComplete="new-password"
               value={appSecret}
-              onChange={(e) => setAppSecret(e.target.value)}
-              placeholder={isNew ? "" : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("appSecret", next)}
+              status={credentials.status("appSecret")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
@@ -287,12 +293,13 @@ export function WechatOaConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("tokenHelp")}</p>
-            <Input
+            <CredentialInput
               id="wxoa-token"
               value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={isNew ? "" : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("token", next)}
+              status={credentials.status("token")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5">
@@ -301,14 +308,13 @@ export function WechatOaConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("encodingAesKeyHelp")}</p>
-            <Input
+            <CredentialInput
               id="wxoa-aes-key"
-              type="password"
-              autoComplete="new-password"
               value={encodingAesKey}
-              onChange={(e) => setEncodingAesKey(e.target.value)}
-              placeholder={isNew ? "" : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("encodingAesKey", next)}
+              status={credentials.status("encodingAesKey")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
         </div>
@@ -408,7 +414,9 @@ export function WechatOaConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

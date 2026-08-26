@@ -1324,10 +1324,10 @@
     "title": "Run operators"
   },
   "credentialField": {
-    "hideAria": "Hide the secret",
+    "hideAria": "Hide value",
     "loadingPlaceholder": "Loading…",
     "retry": "Retry",
-    "revealAria": "Show the secret",
+    "revealAria": "Reveal value",
     "statusError": "Could not read the saved value.",
     "statusLoaded": "Saved — showing the stored value.",
     "statusLoading": "Reading the saved value…",
@@ -1601,6 +1601,7 @@
     "adapterUpdated": "WeChat Official Account updated",
     "appIdHelp": "Official Account → Settings → Basic config → AppID.",
     "appIdLabel": "App ID",
+    "appIdPlaceholder": "wx…",
     "appSecretHelp": "AppSecret — used for the access token + 客服 reply API.",
     "appSecretLabel": "App Secret",
     "create": "Add connector",

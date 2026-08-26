@@ -8,6 +8,10 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 import type { TunnelStatus } from "@/hooks/use-tunnel-status"
 
 const mockCreate = jest.fn().mockResolvedValue({ id: "wxoa-new" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
@@ -25,7 +29,14 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...a: unknown[]) => mockKeyringSet(...a),
   connectorsHttpRequest: (...a: unknown[]) => mockConnectorsHttpRequest(...a),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
+}))
+
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockRotated(...a),
 }))
@@ -69,6 +80,9 @@ function httpResp(status: number, body: unknown): TauriHttpResponse {
 }
 
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockUseTunnelStatus.mockReturnValue({
     url: "https://demo.trycloudflare.com",
@@ -221,5 +235,86 @@ describe("WechatOaConfigDialog", () => {
     })
     expect(mockKeyringSet).toHaveBeenCalledWith("wxoa-new", "appId", "wx1")
     expect(mockKeyringSet).toHaveBeenCalledWith("wxoa-new", "encodingAesKey", AES_KEY)
+  })
+})
+
+describe("WechatOaConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "wxoa-1",
+    type: "wechat-oa",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "webhook",
+    settings: {},
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["appId", "appSecret", "token", "encodingAesKey"],
+    },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<WechatOaConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "appId") return "wxabc"
+      if (name === "appSecret") return "s3cret"
+      if (name === "token") return "tok"
+      if (name === "encodingAesKey") return "aes"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const identifier = screen.getByLabelText(/app ?id/i) as HTMLInputElement
+    await waitFor(() => expect(identifier.value).toBe("wxabc"))
+    // Identifiers stay readable; only the secret is masked.
+    expect(identifier.type).toBe("text")
+
+    const secret = screen.getByLabelText(/app secret/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  // The webhook signature token authenticates every inbound callback, so it
+  // is a secret; it used to render in a plain-text box.
+  it("masks the webhook signature token", async () => {
+    storedCredentials()
+    openExisting()
+    const token = screen.getByLabelText(/^token$/i) as HTMLInputElement
+    await waitFor(() => expect(token.value).toBe("tok"))
+    expect(token.type).toBe("password")
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/app secret/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })

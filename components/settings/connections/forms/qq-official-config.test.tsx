@@ -7,6 +7,10 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 const mockCreate = jest.fn().mockResolvedValue({ id: "qq-new" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
@@ -19,7 +23,14 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...a: unknown[]) => mockKeyringSet(...a),
   connectorsHttpRequest: (...a: unknown[]) => mockConnectorsHttpRequest(...a),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
+}))
+
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockRotated(...a),
 }))
@@ -40,7 +51,20 @@ function httpResp(status: number, body: unknown): TauriHttpResponse {
   }
 }
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   clearQQTokenCache("102000", "secret")
   clearQQTokenCache("bad", "secret")
@@ -128,6 +152,11 @@ describe("QQOfficialConfigDialog", () => {
   })
 
   it("persists transport changes and enters the existing runtime rebuild path", async () => {
+    // A real existing row has both credentials stored; without them the form
+    // would (correctly) refuse to save a bot that cannot authenticate.
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+      name === "appId" ? "10200" : "s3cret"
+    )
     const row = {
       id: "qq-existing",
       type: "qq-official",
@@ -145,7 +174,7 @@ describe("QQOfficialConfigDialog", () => {
     render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={row} />)
 
     fireEvent.click(screen.getByLabelText(/https webhook/i))
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await clickSave()
 
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith(
@@ -154,5 +183,74 @@ describe("QQOfficialConfigDialog", () => {
       )
     )
     expect(mockRotated).toHaveBeenCalledWith("qq-existing")
+  })
+})
+
+describe("QQOfficialConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "qq-1",
+    type: "qq-official",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "gateway",
+    settings: {},
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["appId", "clientSecret"],
+    },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "appId") return "10200"
+      if (name === "clientSecret") return "s3cret"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const identifier = screen.getByLabelText(/app ?id/i) as HTMLInputElement
+    await waitFor(() => expect(identifier.value).toBe("10200"))
+    // Identifiers stay readable; only the secret is masked.
+    expect(identifier.type).toBe("text")
+
+    const secret = screen.getByLabelText(/client secret/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/client secret/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/client secret/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })

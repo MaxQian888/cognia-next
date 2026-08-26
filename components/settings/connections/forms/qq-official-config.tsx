@@ -19,13 +19,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getQQAccessToken, getQQGatewayUrl } from "@/lib/connectors/adapters/qq-official/auth"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface QQCredentialTestResult {
@@ -43,6 +44,10 @@ interface QQOfficialConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+/** Keyring accounts this dialog owns. QQ mints its bot token from the
+ * pair, so a bot missing either cannot connect. */
+const QQ_CREDENTIALS = ["appId", "clientSecret"] as const
+
 export function QQOfficialConfigDialog({
   open,
   onOpenChange,
@@ -53,8 +58,13 @@ export function QQOfficialConfigDialog({
   const isNew = row === null
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [appId, setAppId] = useState("")
-  const [clientSecret, setClientSecret] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: QQ_CREDENTIALS,
+    enabled: open,
+  })
+  const appId = credentials.value("appId")
+  const clientSecret = credentials.value("clientSecret")
   const [transportMode, setTransportMode] = useState<"gateway" | "webhook">(
     row?.transportMode === "webhook" ? "webhook" : "gateway"
   )
@@ -69,8 +79,7 @@ export function QQOfficialConfigDialog({
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    appId.length > 0 ||
-    clientSecret.length > 0 ||
+    credentials.dirty ||
     transportMode !== (row?.transportMode === "webhook" ? "webhook" : "gateway") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
@@ -102,7 +111,7 @@ export function QQOfficialConfigDialog({
       toast.error(t("displayNameRequired"))
       return
     }
-    if (isNew && (!appId.trim() || !clientSecret.trim())) {
+    if (credentials.missingRequired(QQ_CREDENTIALS).length > 0) {
       toast.error(t("credentialsRequired"))
       return
     }
@@ -123,7 +132,7 @@ export function QQOfficialConfigDialog({
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["appId", "clientSecret"],
+            accounts: [...QQ_CREDENTIALS],
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
@@ -142,9 +151,7 @@ export function QQOfficialConfigDialog({
         })
       }
 
-      if (appId.trim()) await connectorsKeyringSet(adapterId, "appId", appId.trim())
-      if (clientSecret.trim())
-        await connectorsKeyringSet(adapterId, "clientSecret", clientSecret.trim())
+      await credentials.persist(adapterId)
 
       if (!isNew) emitCredentialsRotated(adapterId)
 
@@ -182,12 +189,15 @@ export function QQOfficialConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appIdHelp")}</p>
-            <Input
+            <CredentialInput
               id="qq-app-id"
+              sensitive={false}
               value={appId}
-              onChange={(e) => setAppId(e.target.value)}
-              placeholder={isNew ? t("appIdPlaceholder") : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("appId", next)}
+              status={credentials.status("appId")}
+              placeholder={t("appIdPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5">
@@ -196,35 +206,32 @@ export function QQOfficialConfigDialog({
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("clientSecretHelp")}</p>
-            <div className="flex gap-2">
-              <Input
-                id="qq-client-secret"
-                type="password"
-                autoComplete="new-password"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                placeholder={
-                  isNew ? t("clientSecretPlaceholder") : t("credentialUnchangedPlaceholder")
-                }
-                disabled={saving}
-                className="min-w-0 flex-1"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleTest}
-                disabled={testing || saving || !desktop}
-                aria-label={t("testCredentialsAria")}
-                className="shrink-0"
-              >
-                {testing ? (
-                  <LoaderIcon data-icon="inline-start" className="animate-spin" />
-                ) : (
-                  t("testButtonLabel")
-                )}
-              </Button>
-            </div>
+            <CredentialInput
+              id="qq-client-secret"
+              value={clientSecret}
+              onChange={(next) => credentials.set("clientSecret", next)}
+              status={credentials.status("clientSecret")}
+              placeholder={t("clientSecretPlaceholder")}
+              disabled={saving}
+              onRetry={credentials.retry}
+              trailing={
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleTest}
+                  disabled={testing || saving || !desktop}
+                  aria-label={t("testCredentialsAria")}
+                  className="shrink-0"
+                >
+                  {testing ? (
+                    <LoaderIcon data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    t("testButtonLabel")
+                  )}
+                </Button>
+              }
+            />
           </div>
         </div>
         {testResult !== null && (
@@ -314,7 +321,9 @@ export function QQOfficialConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

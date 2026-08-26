@@ -132,7 +132,7 @@ export function CredentialInput({
             placeholder={effectivePlaceholder}
             disabled={disabled || loading}
             aria-describedby={statusId}
-            data-secret-status={status}
+            data-credential-status={status}
           />
           {sensitive ? (
             <InputGroupAddon align="inline-end">

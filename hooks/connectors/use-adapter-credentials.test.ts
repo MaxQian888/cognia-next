@@ -179,6 +179,18 @@ describe("useAdapterCredentials", () => {
       expect(result.current.missingRequired(["appSecret"])).toEqual(["appSecret"])
     })
 
+    it("flags a required field that is genuinely unset on an existing adapter", async () => {
+      stored({ appKey: "k" })
+      const { result } = renderCreds()
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      expect(result.current.status("appSecret")).toBe("unset")
+      expect(result.current.missingRequired(["appKey", "appSecret"])).toEqual(["appSecret"])
+
+      act(() => result.current.set("appSecret", "now set"))
+      expect(result.current.missingRequired(["appSecret"])).toEqual([])
+    })
+
     it("does not flag a value it merely could not read", async () => {
       mockGet.mockRejectedValue(new Error("command_transport_forbidden"))
       const { result } = renderCreds()

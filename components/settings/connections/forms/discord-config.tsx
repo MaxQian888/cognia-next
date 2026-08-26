@@ -27,14 +27,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultPrivateChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface GetCurrentUserResult {
@@ -77,6 +79,11 @@ interface DiscordConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+// `publicKey` only exists on a webhook-mode bot (the Ed25519 key the Rust
+// `verify_discord` gate reads), but reading it unconditionally costs one
+// keyring probe and avoids re-reading every time the transport toggles.
+const DISCORD_CREDENTIALS = ["botToken", "publicKey"] as const
+
 export function DiscordConfigDialog({
   open,
   onOpenChange,
@@ -92,8 +99,13 @@ export function DiscordConfigDialog({
       : ""
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [botToken, setBotToken] = useState("")
-  const [publicKey, setPublicKey] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: DISCORD_CREDENTIALS,
+    enabled: open,
+  })
+  const botToken = credentials.value("botToken")
+  const publicKey = credentials.value("publicKey")
   const [intents, setIntents] = useState<string>(initialIntents)
   const [transport, setTransport] = useState<TransportMode>(
     row?.transportMode === "webhook" ? "webhook" : "gateway"
@@ -116,8 +128,7 @@ export function DiscordConfigDialog({
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    botToken.length > 0 ||
-    publicKey.length > 0 ||
+    credentials.dirty ||
     intents !== initialIntents ||
     transport !== (row?.transportMode === "webhook" ? "webhook" : "gateway") ||
     muted !== (row?.muted ?? false) ||
@@ -226,14 +237,10 @@ export function DiscordConfigDialog({
         })
       }
 
-      if (botToken.trim()) {
-        await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
-      }
       // Webhook mode verifies each Interactions call with the Ed25519 public
-      // key (Rust `verify_discord` reads it from the keyring).
-      if (useWebhook && publicKey.trim()) {
-        await connectorsKeyringSet(adapterId, "publicKey", publicKey.trim())
-      }
+      // key (Rust `verify_discord` reads it from the keyring); gateway mode has
+      // no use for it, so a gateway save leaves whatever is stored alone.
+      await credentials.persist(adapterId)
       // Hot-reload the running adapter so the new credentials are picked up
       // without an app restart.
       if (!isNew) {
@@ -275,15 +282,15 @@ export function DiscordConfigDialog({
           </Label>
           <p className="text-xs text-muted-foreground">{t("botTokenHelp")}</p>
           <div className="flex gap-2">
-            <Input
+            <CredentialInput
               id="dc-bot-token"
-              type="password"
-              autoComplete="new-password"
               value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
+              onChange={(next) => credentials.set("botToken", next)}
+              status={credentials.status("botToken")}
               placeholder={t("botTokenPlaceholder")}
               disabled={saving}
               className="flex-1"
+              onRetry={credentials.retry}
             />
             <Button
               type="button"
@@ -388,14 +395,14 @@ export function DiscordConfigDialog({
                 <span className="ml-1 text-destructive">*</span>
               </Label>
               <p className="text-xs text-muted-foreground">{t("publicKeyHelp")}</p>
-              <Input
+              <CredentialInput
                 id="dc-public-key"
-                type="password"
-                autoComplete="new-password"
                 value={publicKey}
-                onChange={(e) => setPublicKey(e.target.value)}
+                onChange={(next) => credentials.set("publicKey", next)}
+                status={credentials.status("publicKey")}
                 placeholder={t("publicKeyPlaceholder")}
                 disabled={saving}
+                onRetry={credentials.retry}
               />
             </div>
 
@@ -488,7 +495,9 @@ export function DiscordConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

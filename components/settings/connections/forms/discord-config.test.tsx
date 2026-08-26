@@ -10,6 +10,10 @@ import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 // ---------------------------------------------------------------------------
 
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-discord-id" })
+const mockKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHttpRequest = jest.fn()
@@ -22,6 +26,13 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
+  connectorsKeyringGet: (...args: unknown[]) => mockKeyringGet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -53,7 +64,20 @@ function makeMockGetCurrentUserResponse(ok: boolean, username = "testbot", id = 
   } satisfies TauriHttpResponse
 }
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
+  mockCapability.mockReturnValue(true)
+  mockKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
   jest.clearAllMocks()
   mockTunnel.running = false
   mockTunnel.url = null
@@ -345,7 +369,7 @@ describe("DiscordConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Discord Bot"), {
       target: { value: "Renamed Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -360,7 +384,7 @@ describe("DiscordConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Discord Bot"), {
       target: { value: "Updated Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -394,5 +418,69 @@ describe("DiscordConfigDialog — layout", () => {
     expect(dialog.className).toContain("max-h-[90vh]")
     expect(dialog.className).toContain("flex-col")
     expect(dialog.querySelector('[class*="overflow-y-auto"]')).not.toBeNull()
+  })
+})
+
+describe("DiscordConfigDialog — credential prefill", () => {
+  const prefillRow = {
+    id: "dc-1",
+    type: "discord",
+    displayName: "Existing",
+    enabled: true,
+    transportMode: "webhook",
+    settings: {},
+    credentialsRef: {
+      keyringService: "com.cognia.platforms",
+      accounts: ["botToken", "publicKey"],
+    },
+    trigger: {},
+    defaultMode: "auto",
+    mediaModelPolicy: "local_extract_only",
+    createdAt: 1,
+    updatedAt: 2,
+  } as unknown as AdapterInstanceRow
+
+  function openExisting() {
+    return render(<DiscordConfigDialog open onOpenChange={jest.fn()} row={prefillRow} />)
+  }
+
+  function storedCredentials() {
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) => {
+      if (name === "botToken") return "s3cret"
+      if (name === "publicKey") return "ed25519pub"
+      return null
+    })
+  }
+
+  it("reads the stored credentials back into the fields", async () => {
+    storedCredentials()
+    openExisting()
+
+    const secret = screen.getByLabelText(/bot token/i) as HTMLInputElement
+    await waitFor(() => expect(secret.value).toBe("s3cret"))
+    expect(secret.type).toBe("password")
+  })
+
+  // Prefilling puts real values in previously-empty boxes; the form must not
+  // read that as the operator having typed them.
+  it("does not look edited just because the values were read back", async () => {
+    storedCredentials()
+    openExisting()
+    await waitFor(() =>
+      expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("s3cret")
+    )
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+  })
+
+  it("says the value is saved-but-unreadable when the host refuses the read", async () => {
+    mockKeyringGet.mockRejectedValue(new Error("403 command_transport_forbidden"))
+    openExisting()
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/cannot be shown here/i).length).toBeGreaterThan(0)
+    )
+    expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("")
+    // A blank box nobody could read must never be taken for a deletion.
+    expect(mockKeyringDelete).not.toHaveBeenCalled()
   })
 })

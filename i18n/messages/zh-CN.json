@@ -29339,10 +29339,10 @@
         "title": "运行操作员"
       },
       "credentialField": {
-        "hideAria": "隐藏密钥",
+        "hideAria": "隐藏内容",
         "loadingPlaceholder": "读取中…",
         "retry": "重试",
-        "revealAria": "显示密钥",
+        "revealAria": "显示内容",
         "statusError": "无法读取已保存的值。",
         "statusLoaded": "已保存 —— 当前显示的就是已存的值。",
         "statusLoading": "正在读取已保存的值…",
@@ -29616,6 +29616,7 @@
         "adapterUpdated": "已更新微信公众号",
         "appIdHelp": "公众号 → 设置 → 基本配置 → AppID。",
         "appIdLabel": "App ID",
+        "appIdPlaceholder": "wx…",
         "appSecretHelp": "AppSecret —— 用于访问令牌与客服回复接口。",
         "appSecretLabel": "App Secret",
         "create": "添加连接器",

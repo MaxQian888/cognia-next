@@ -282,7 +282,9 @@ export function DingTalkConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

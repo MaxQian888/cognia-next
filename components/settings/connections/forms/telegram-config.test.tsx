@@ -13,6 +13,9 @@ const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "new-adapter
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringGet = jest.fn().mockResolvedValue(null)
+const mockKeyringDelete = jest.fn().mockResolvedValue(undefined)
+const mockKeyringList = jest.fn().mockResolvedValue([])
+const mockCapability = jest.fn().mockReturnValue(true)
 const mockConnectorsHttpRequest = jest.fn()
 
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -24,6 +27,12 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
   connectorsKeyringGet: (...args: unknown[]) => mockConnectorsKeyringGet(...args),
   connectorsHttpRequest: (...args: unknown[]) => mockConnectorsHttpRequest(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockKeyringDelete(...args),
+  connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
+}))
+
+jest.mock("@/hooks/use-host-profile", () => ({
+  useCapability: (...args: unknown[]) => mockCapability(...args),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -51,8 +60,21 @@ const makeMockGetMeResponse = (ok: boolean, username = "testbot", id = 123) =>
       : JSON.stringify({ ok: false, description: "Unauthorized" }),
   }) satisfies TauriHttpResponse
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form cannot tell an absent secret from one it has not read yet.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
+  mockCapability.mockReturnValue(true)
+  mockConnectorsKeyringGet.mockResolvedValue(null)
+  mockKeyringList.mockResolvedValue([])
 })
 
 // ---------------------------------------------------------------------------
@@ -271,7 +293,7 @@ describe("TelegramConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
       target: { value: "Updated Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -287,7 +309,7 @@ describe("TelegramConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
       target: { value: "Long Poll Bot" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalled()
@@ -306,7 +328,7 @@ describe("TelegramConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByLabelText(/webhook secret/i), {
       target: { value: "shh-secret" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
@@ -337,7 +359,7 @@ describe("TelegramConfigDialog — edit existing", () => {
     fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
       target: { value: "Already-Migrated" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalled()
@@ -413,8 +435,11 @@ describe("TelegramConfigDialog — webhook secret requirement", () => {
     } as AdapterInstanceRow
 
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    // Save stays disabled until the credential read lands — until then the
+    // form cannot tell an absent secret from one it has not read yet.
     fireEvent.change(screen.getByDisplayValue("Hook Bot"), { target: { value: "Renamed" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(screen.getByRole("button", { name: /save/i })).toBeEnabled())
+    await clickSave()
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/webhook secret/i))

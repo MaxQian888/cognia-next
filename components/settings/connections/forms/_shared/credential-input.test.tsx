@@ -57,20 +57,20 @@ describe("CredentialInput", () => {
   it("masks the value and reveals it on demand", () => {
     renderInput({ value: "s3cret", status: "loaded" })
     expect((document.getElementById("cred") as HTMLInputElement).type).toBe("password")
-    fireEvent.click(screen.getByLabelText("Show the secret"))
+    fireEvent.click(screen.getByLabelText("Reveal value"))
     expect((document.getElementById("cred") as HTMLInputElement).type).toBe("text")
-    fireEvent.click(screen.getByLabelText("Hide the secret"))
+    fireEvent.click(screen.getByLabelText("Hide value"))
     expect((document.getElementById("cred") as HTMLInputElement).type).toBe("password")
   })
 
   it("disables the reveal toggle when there is nothing to reveal", () => {
     renderInput({ value: "", status: "unset" })
-    expect(screen.getByLabelText("Show the secret")).toBeDisabled()
+    expect(screen.getByLabelText("Reveal value")).toBeDisabled()
   })
 
   it("disables the reveal toggle and the input while loading", () => {
     renderInput({ value: "anything", status: "loading" })
-    expect(screen.getByLabelText("Show the secret")).toBeDisabled()
+    expect(screen.getByLabelText("Reveal value")).toBeDisabled()
     expect(document.getElementById("cred")).toBeDisabled()
   })
 
@@ -146,7 +146,7 @@ describe("CredentialInput", () => {
       />
     )
     expect((document.getElementById("ident") as HTMLInputElement).type).toBe("text")
-    expect(screen.queryByLabelText("Show the secret")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Reveal value")).not.toBeInTheDocument()
     // The status line is the point of the component and survives unmasking.
     expect(screen.getByText("Saved — showing the stored value.")).toBeInTheDocument()
   })

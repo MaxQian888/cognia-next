@@ -50,6 +50,16 @@ function httpResp(status: number, body: unknown): TauriHttpResponse {
   }
 }
 
+/**
+ * Save is disabled while the credential read is in flight: until it lands the
+ * form does not know its own baseline.
+ */
+async function clickSave(): Promise<void> {
+  const save = screen.getByRole("button", { name: /save/i })
+  await waitFor(() => expect(save).toBeEnabled())
+  fireEvent.click(save)
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockCapability.mockReturnValue(true)
@@ -141,13 +151,23 @@ describe("DingTalkConfigDialog", () => {
       createdAt: 1,
       updatedAt: 2,
     } as unknown as AdapterInstanceRow
+    // A real existing row has both credentials stored; rotating one must not
+    // read as "the other is missing".
+    mockKeyringGet.mockImplementation(async (_id: string, name: string) =>
+      name === "appKey" ? "dingabc" : "s3cret"
+    )
     render(<DingTalkConfigDialog open onOpenChange={jest.fn()} row={row} />)
+    await waitFor(() =>
+      expect((screen.getByLabelText(/app key/i) as HTMLInputElement).value).toBe("dingabc")
+    )
     fireEvent.change(screen.getByLabelText(/app key/i), { target: { value: "rotated" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await clickSave()
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledWith("dt-1", expect.any(Object)))
     // the edit path never rewrites transportMode — legacy value stays put
     expect(mockUpdate.mock.calls[0][1]).not.toHaveProperty("transportMode")
     expect(mockKeyringSet).toHaveBeenCalledWith("dt-1", "appKey", "rotated")
+    // The untouched secret is not rewritten.
+    expect(mockKeyringSet).toHaveBeenCalledTimes(1)
     expect(mockRotated).toHaveBeenCalledWith("dt-1")
   })
 
@@ -209,7 +229,7 @@ describe("DingTalkConfigDialog", () => {
       )
 
       fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
-      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+      await clickSave()
 
       await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
       expect(mockKeyringSet).not.toHaveBeenCalled()
@@ -226,7 +246,7 @@ describe("DingTalkConfigDialog", () => {
       )
 
       fireEvent.change(screen.getByLabelText(/app secret/i), { target: { value: "" } })
-      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+      await clickSave()
 
       await waitFor(() => expect(mockToastError).toHaveBeenCalled())
       expect(mockUpdate).not.toHaveBeenCalled()
@@ -251,7 +271,7 @@ describe("DingTalkConfigDialog", () => {
       )
 
       fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Renamed" } })
-      fireEvent.click(screen.getByRole("button", { name: /save/i }))
+      await clickSave()
 
       await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
       // Blank boxes here mean "I could not read them", never "delete them".

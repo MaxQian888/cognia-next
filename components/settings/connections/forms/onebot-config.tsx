@@ -39,7 +39,9 @@ import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 type ExpectedClient = "napcat" | "lagrange" | "llonebot" | "other"
@@ -65,6 +67,11 @@ async function resolveWsEndpoint(adapterId: string): Promise<string> {
   }
 }
 
+// Only the bearer is an operator-typed credential. `onebotAllowUnauthenticated`
+// is a flag that happens to live in the keyring — it is reconciled from the
+// switch below, never read back into a field.
+const ONEBOT_CREDENTIALS = ["onebotBearer"] as const
+
 export function OneBotConfigDialog({
   open,
   onOpenChange,
@@ -81,7 +88,12 @@ export function OneBotConfigDialog({
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [botUin, setBotUin] = useState(settings.selfBotUin ?? "")
-  const [bearerToken, setBearerToken] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: ONEBOT_CREDENTIALS,
+    enabled: open,
+  })
+  const bearerToken = credentials.value("onebotBearer")
   const [expectedClient, setExpectedClient] = useState<ExpectedClient>(
     settings.expectedClient ?? "napcat"
   )
@@ -114,7 +126,7 @@ export function OneBotConfigDialog({
     isNew ||
     displayName.trim() !== row?.displayName ||
     botUin.trim() !== (settings.selfBotUin ?? "") ||
-    bearerToken.length > 0 ||
+    credentials.dirty ||
     expectedClient !== (settings.expectedClient ?? "napcat") ||
     transportMode !== (row?.transportMode === "forward-ws" ? "forward-ws" : "reverse-ws") ||
     forwardWsUrl.trim() !== (settings.forwardWsUrl ?? "") ||
@@ -168,7 +180,9 @@ export function OneBotConfigDialog({
 
       // A bearer always takes precedence over the unauthenticated opt-in, and
       // the opt-in only applies to inbound reverse-WS.
-      const willHaveBearer = bearerToken.trim().length > 0 || hasBearerAccount
+      const willHaveBearer =
+        bearerToken.trim().length > 0 ||
+        (hasBearerAccount && credentials.intent("onebotBearer") !== "clear")
       const wantUnauth = transportMode === "reverse-ws" && allowUnauth && !willHaveBearer
 
       if (isNew) {
@@ -205,9 +219,7 @@ export function OneBotConfigDialog({
         })
       }
 
-      if (bearerToken.trim()) {
-        await connectorsKeyringSet(adapterId, "onebotBearer", bearerToken.trim())
-      }
+      await credentials.persist(adapterId)
 
       // Reconcile the unauthenticated opt-in flag in the keyring (the Rust
       // ws_server reads it on every connection). Set when explicitly enabled
@@ -346,14 +358,14 @@ export function OneBotConfigDialog({
               {/* i18n-exempt: literal OneBot client configuration key */}
               <code className="text-xs">accessToken</code> {t("bearerTokenHelpSuffix")}
             </p>
-            <Input
+            <CredentialInput
               id="ob-bearer"
-              type="password"
-              autoComplete="new-password"
               value={bearerToken}
-              onChange={(e) => setBearerToken(e.target.value)}
+              onChange={(next) => credentials.set("onebotBearer", next)}
+              status={credentials.status("onebotBearer")}
               placeholder={t("bearerTokenPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
 
@@ -574,7 +586,9 @@ export function OneBotConfigDialog({
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

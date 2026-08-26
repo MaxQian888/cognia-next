@@ -20,14 +20,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { probeWeComCredentials } from "@/lib/connectors/adapters/wecom/probe"
 import { preflightConnectorConfig } from "@/lib/connectors/config-preflight"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
+import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
+import { CredentialInput } from "./_shared/credential-input"
 import { QuickCommandsEditor } from "./_shared/quick-commands-editor"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import { normalizeQuickCommandList, type IMQuickCommand } from "@/lib/connectors/quick-commands"
@@ -47,6 +48,10 @@ interface WeComConfigDialogProps {
   row: AdapterInstanceRow | null
 }
 
+/** Keyring accounts this dialog owns. WeCom authenticates with the pair,
+ * so a bot missing either cannot subscribe. */
+const WECOM_CREDENTIALS = ["botId", "secret"] as const
+
 export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComConfigDialogProps) {
   const t = useTranslations("settings.connections.wecom")
   const tHelp = useTranslations("settings.connections.wecom.quickCommands")
@@ -58,8 +63,13 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
   const persistedQuickCommands = normalizeQuickCommandList(settings.quickCommands)
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
-  const [botId, setBotId] = useState("")
-  const [secret, setSecret] = useState("")
+  const credentials = useAdapterCredentials({
+    adapterId: row?.id ?? null,
+    accounts: WECOM_CREDENTIALS,
+    enabled: open,
+  })
+  const botId = credentials.value("botId")
+  const secret = credentials.value("secret")
   const [welcomeMessage, setWelcomeMessage] = useState(settings.welcomeMessage ?? "")
   const [quickCommands, setQuickCommands] = useState<IMQuickCommand[]>(persistedQuickCommands)
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
@@ -72,8 +82,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
   const dirty =
     isNew ||
     displayName.trim() !== row?.displayName ||
-    botId.length > 0 ||
-    secret.length > 0 ||
+    credentials.dirty ||
     welcomeMessage.trim() !== (settings.welcomeMessage ?? "") ||
     JSON.stringify(quickCommands) !== JSON.stringify(persistedQuickCommands) ||
     muted !== (row?.muted ?? false) ||
@@ -115,9 +124,9 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
       toast.error(t("displayNameRequired"))
       return
     }
-    // BotID + Secret are required on create; on edit they're optional (only
-    // rotate when re-entered).
-    if (isNew && (!botId.trim() || !secret.trim())) {
+    // WeCom authenticates with the pair, so neither may end up empty —
+    // on create, or by the operator clearing a value they can see.
+    if (credentials.missingRequired(WECOM_CREDENTIALS).length > 0) {
       toast.error(t("credentialsRequired"))
       return
     }
@@ -128,7 +137,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
 
     setSaving(true)
     try {
-      if (botId.trim() || secret.trim()) {
+      if (credentials.dirty) {
         if (!botId.trim() || !secret.trim()) throw new Error(t("credentialsRequired"))
         try {
           await preflightConnectorConfig({
@@ -157,7 +166,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
           settings: wecomSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botId", "secret"],
+            accounts: [...WECOM_CREDENTIALS],
           },
           trigger: defaultGroupChatPolicy(),
           defaultMode: "auto",
@@ -176,8 +185,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
         })
       }
 
-      if (botId.trim()) await connectorsKeyringSet(adapterId, "botId", botId.trim())
-      if (secret.trim()) await connectorsKeyringSet(adapterId, "secret", secret.trim())
+      await credentials.persist(adapterId)
 
       // Hot-reload the running adapter so new credentials apply without a
       // restart.
@@ -218,12 +226,15 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("botIdHelp")}</p>
-            <Input
+            <CredentialInput
               id="wc-bot-id"
+              sensitive={false}
               value={botId}
-              onChange={(e) => setBotId(e.target.value)}
-              placeholder={isNew ? t("botIdPlaceholder") : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("botId", next)}
+              status={credentials.status("botId")}
+              placeholder={t("botIdPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
 
@@ -233,14 +244,14 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("secretHelp")}</p>
-            <Input
+            <CredentialInput
               id="wc-secret"
-              type="password"
-              autoComplete="new-password"
               value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              placeholder={isNew ? t("secretPlaceholder") : t("credentialUnchangedPlaceholder")}
+              onChange={(next) => credentials.set("secret", next)}
+              status={credentials.status("secret")}
+              placeholder={t("secretPlaceholder")}
               disabled={saving}
+              onRetry={credentials.retry}
             />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
@@ -349,7 +360,9 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
-            dirty={dirty}
+            // Until the stored credentials are read back the form does not know its
+            // own baseline, so it cannot honestly call itself edited.
+            dirty={dirty && !credentials.loading}
             submitLabel={isNew ? t("create") : t("save")}
           />
         </div>

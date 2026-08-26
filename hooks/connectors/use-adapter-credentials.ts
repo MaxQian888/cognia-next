@@ -265,12 +265,18 @@ export function useAdapterCredentials({
   const missingRequired = useCallback(
     (required: readonly string[]) =>
       required.filter((name) => {
-        if (intentFor(name) === "clear") return true
-        if (adapterId) return false
+        const decision = intentFor(name)
+        if (decision === "clear") return true
+        if (decision === "set") return false
         // Create dialog: nothing is stored, so the typed value is all there is.
-        return !(typed[name] ?? "").trim()
+        if (!adapterId) return !(typed[name] ?? "").trim()
+        // Untouched on an existing adapter. Missing only when the read
+        // SUCCEEDED and found nothing — `stored` and `error` mean a value may
+        // well be there, and blocking a save on what we could not see would
+        // strand every remote operator.
+        return resolved?.fields[name]?.status === "unset"
       }),
-    [adapterId, intentFor, typed]
+    [adapterId, intentFor, typed, resolved]
   )
 
   const set = useCallback(
