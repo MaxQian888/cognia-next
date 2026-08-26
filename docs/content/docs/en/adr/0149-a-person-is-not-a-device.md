@@ -416,7 +416,47 @@ that is already granted.
    says nothing, the same call the device console's owner row makes.
 
 | **6** | ✅ `share-server` gains tenancy and identity; `ops-controller` gains RLS | Controller: `0002_tenant_isolation.sql` (ENABLE + FORCE on all twelve tables) and every statement inside a `tenant_scope` transaction. Share: `org_id`/`creator_user_id` columns, grant verification in both the Rust server and the Worker, and a grant-only `/v1/orgs/{org}/shares` plane. |
-| **7** | Workspace, Plans and Runs on the collaboration plane | follows Batch 3 |
+| **7a** | ✅ The plane becomes reachable, and Guest lands | `lib/collab/connection.ts` (where the server is), `lib/collab/refresh.ts` (the one pull, run from `lib/issues/boot.ts`), `GET /v1/orgs/{org}/memberships/me`, `pullCollabMemberships`, and the Collaboration server card. |
+| **7b** | ⏳ Plans and Runs on the plane | follows the Issues slice — server tables, endpoints and mirrors, in the shape Batch 3 established. |
+
+**Batch 7a notes.** The missing thing was the same one three times.
+
+Batches 3, 5 and 6 each built a working piece of this plane and each ended with
+the same finding: nothing called it. `pullCollabIssues` had no production
+caller, `workspaceMemberships` had no writer, and the share service's org
+routes had no client. All three were waiting on one absent fact — **where the
+server is**. `lib/collab/connection.ts` and its settings card are that fact,
+and adding them turned the rest on without changing any of it.
+
+**Guest has landed.** `GET …/memberships/me` reports the raw facts — an org
+role if there is one, and every workspace membership with its role — and
+`pullCollabMemberships` writes them into the projection. Somebody holding a
+workspace membership and no org membership now reads as `guest`, which is the
+shape §4 describes and which nothing could previously be in. The server
+deliberately does not state the verdict: `personStandingFrom` is the one
+implementation of that rule, and computing it on both sides would be two rules
+to keep in step.
+
+Three details worth keeping:
+
+1. **Absent means absent.** The membership pull removes an org membership the
+   server no longer reports, and drops workspaces it no longer lists. Leaving a
+   stale row behind is exactly what would keep somebody reading as an org
+   member after they were removed from the org and kept in a workspace — the
+   case guest exists for.
+2. **The replace is scoped to the person, not the org.** The projection may
+   hold rows this pull was never told about, so wiping the org would delete
+   facts rather than refresh them.
+3. **Memberships are pulled before issues**, and the boot pull is quiet.
+   An unreachable collaboration server must not stop the board from booting;
+   its local rows are the ones that matter most and they need no network at
+   all.
+
+`lib/db/workspace-membership-producers.test.ts` survives from Batch 5,
+inverted: it asserted there was no writer, and now asserts there is exactly
+one. Exactly one, because §6 makes the server authoritative — a second writer
+would be a second opinion about who belongs where, and the local one would win
+whenever it ran last.
 
 **Batch 6 notes.** Four things worth recording.
 

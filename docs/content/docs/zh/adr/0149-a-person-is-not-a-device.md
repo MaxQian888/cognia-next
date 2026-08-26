@@ -350,7 +350,36 @@ ops-controller 则跑**带 TTL 缓存的 JWKS discovery**、支持九种算法
    而不是一个什么也没说的词——与设备控制台归属行是同一个判断。
 
 | **6** | ✅ `share-server` 补租户与身份；`ops-controller` 补 RLS | 控制器：`0002_tenant_isolation.sql`（12 张表全部 ENABLE + FORCE），每条语句都跑在 `tenant_scope` 事务里。分享：`org_id`/`creator_user_id` 两列、Rust 服务与 Worker 双侧的 grant 校验、以及仅接受 grant 的 `/v1/orgs/{org}/shares` 面。 |
-| **7** | Workspace、Plans 与 Runs 上协作面 | 承接 Batch 3 |
+| **7a** | ✅ 协作面变得可达，Guest 落地 | `lib/collab/connection.ts`（服务器在哪）、`lib/collab/refresh.ts`（唯一的那次拉取，由 `lib/issues/boot.ts` 触发）、`GET /v1/orgs/{org}/memberships/me`、`pullCollabMemberships`，以及「协作服务器」设置卡片。 |
+| **7b** | ⏳ Plans 与 Runs 上协作面 | 沿用 Issues 那一刀的形状——服务端表、端点与镜像。 |
+
+**Batch 7a 补记。** 缺的一直是同一样东西，缺了三次。
+
+Batch 3、5、6 各自造出了这个面的一块能用的东西，也各自以同一个发现收尾：**没人调用它**。
+`pullCollabIssues` 没有生产调用方、`workspaceMemberships` 没有写入方、share 服务的
+org 路由没有客户端。三者都在等同一个缺失的事实——**服务器在哪**。
+`lib/collab/connection.ts` 与它的设置卡片就是这个事实，补上之后其余部分**不需改动**
+就活了。
+
+**Guest 落地了。** `GET …/memberships/me` 只报原始事实——有 org 角色就报、以及每个
+workspace 成员身份连同角色——`pullCollabMemberships` 把它们写进投影。持有 workspace
+成员身份而不在 org 里的人现在读作 `guest`，也就是 §4 描述、而此前无人能处于的那个形状。
+服务端**刻意不下结论**：`personStandingFrom` 是这条规则的唯一实现，两边各算一次就是
+两条要同步的规则。
+
+三个值得记住的细节：
+
+1. **「没有」就是「没有」。** 成员拉取会删除服务器不再报告的 org 成员身份，并丢掉它
+   不再列出的 workspace。留下过期的行，正是会让一个已被移出 org、但仍留在某个
+   workspace 的人**永远读作 org 成员**——而这恰恰是 guest 存在的那个场景。
+2. **替换的作用域是「这个人」，不是「这个 org」。** 投影里可能有这次拉取从未被告知过的
+   行，把整个 org 清空是在删除事实，而不是刷新它。
+3. **先拉成员、再拉事项**，而且启动时的拉取是静默的。协作服务器不可达绝不能挡住看板启动
+   ——本地的行才是最要紧的，而它们根本不需要网络。
+
+`lib/db/workspace-membership-producers.test.ts` 从 Batch 5 存活了下来，并被反转：
+它当时断言「没有写入方」，现在断言「恰好有一个」。恰好一个，是因为 §6 让服务器成为权威
+——第二个写入方就是关于「谁属于哪里」的第二种意见，而本地那份会在最后运行时胜出。
 
 **Batch 6 补记。** 四件值得记录的事。
 
