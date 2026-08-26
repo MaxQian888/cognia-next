@@ -1417,16 +1417,16 @@ mod tests {
         // decision. `requires_webview_recreation` would then be true and the
         // embed would be torn down. `classify_embed_navigation` is what stops
         // this URL from ever reaching that code.
-        let sentinel = url::Url::parse("https://cognia.invalid/__cognia_loaded?data=%7B%7D").unwrap();
+        let sentinel =
+            url::Url::parse("https://cognia.invalid/__cognia_loaded?data=%7B%7D").unwrap();
         assert!(resolve_webview_proxy_url(&sentinel, &proxy)
             .unwrap()
             .is_some());
 
         let lease = EmbeddedBrowserLease::default();
         lease.record_webview_proxy(&None);
-        assert!(lease.requires_webview_recreation(
-            &resolve_webview_proxy_url(&sentinel, &proxy).unwrap()
-        ));
+        assert!(lease
+            .requires_webview_recreation(&resolve_webview_proxy_url(&sentinel, &proxy).unwrap()));
 
         assert_eq!(
             classify_embed_navigation(sentinel.as_str()),

@@ -214,7 +214,11 @@ mod tests {
             "Network.getResponseBody",
             "Performance.getMetrics",
         ] {
-            assert_eq!(capability_for_method(retired), None, "{retired} must not map");
+            assert_eq!(
+                capability_for_method(retired),
+                None,
+                "{retired} must not map"
+            );
             let grant = NativeCdpGrant {
                 id: "grant".into(),
                 session_id: "session".into(),
@@ -223,7 +227,10 @@ mod tests {
                 capabilities: vec![retired.split('.').next().unwrap().to_lowercase()],
                 expires_at: now_ms() + 1000,
             };
-            assert!(validate_grant(&grant).is_err(), "{retired} must not be grantable");
+            assert!(
+                validate_grant(&grant).is_err(),
+                "{retired} must not be grantable"
+            );
         }
     }
 
