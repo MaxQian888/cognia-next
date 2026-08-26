@@ -24,10 +24,13 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
-import { isTauri } from "@/lib/tauri"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 interface WeChatPersonalConfigDialogProps {
   open: boolean
@@ -56,7 +59,10 @@ export function WeChatPersonalConfigDialog({
 }: WeChatPersonalConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatPersonal")
   const isNew = row === null
-  const desktop = isTauri()
+  // QR login paints a login window from the desktop process; a reachable
+  // runtime elsewhere cannot show it to you.
+  const reach = useConnectorControlReach("desktop-shell")
+  const desktop = reach.available
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
@@ -273,9 +279,7 @@ export function WeChatPersonalConfigDialog({
             {loggedIn ? t("reLogin") : t("getQrButton")}
           </Button>
 
-          {!desktop ? (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{t("desktopOnly")}</p>
-          ) : null}
+          {!desktop ? <ConnectorHostNotice reach={reach} /> : null}
 
           {qrImg ? (
             <div className="space-y-2">

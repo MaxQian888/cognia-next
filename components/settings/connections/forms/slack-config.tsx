@@ -29,7 +29,6 @@ import {
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
-import { isTauri } from "@/lib/tauri"
 import { openUrl } from "@/lib/native/opener"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
@@ -44,6 +43,10 @@ import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credential
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 interface AuthTestResult {
   ok: boolean
@@ -183,7 +186,8 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
   const [testResult, setTestResult] = useState<AuthTestResult | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
   const tunnel = useTunnelStatus()
   const ingressBase = resolveConnectorsIngressBase({
     isDesktop: desktop,
@@ -487,9 +491,7 @@ export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackC
           </div>
         )}
 
-        {!desktop && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-        )}
+        <ConnectorHostNotice reach={reach} />
 
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">{t("oauthHint")}</p>

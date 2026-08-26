@@ -21,13 +21,16 @@ import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { getDingTalkAccessToken } from "@/lib/connectors/adapters/dingtalk/auth"
-import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 /** Keyring accounts this dialog owns. Both are required — Stream mode
  * authenticates with the pair, so a bot missing either cannot connect. */
@@ -70,7 +73,8 @@ export function DingTalkConfigDialog({
   const [testResult, setTestResult] = useState<DingTalkCredentialTestResult | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
 
   const dirty =
     isNew ||
@@ -248,9 +252,7 @@ export function DingTalkConfigDialog({
             {testResult.ok ? t("testSucceededStatus") : testResult.error}
           </div>
         )}
-        {!desktop && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-        )}
+        <ConnectorHostNotice reach={reach} />
       </div>
     ),
   }

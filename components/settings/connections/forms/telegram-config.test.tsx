@@ -31,8 +31,10 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...args: unknown[]) => mockKeyringList(...args),
 }))
 
+const hostProfile = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...args: unknown[]) => mockCapability(...args),
+  useHostProfile: () => hostProfile,
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))

@@ -26,8 +26,10 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringList: (...a: unknown[]) => mockKeyringList(...a),
   connectorsHttpRequest: (...a: unknown[]) => mockConnectorsHttpRequest(...a),
 }))
+const hostProfile = "desktop"
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...a: unknown[]) => mockCapability(...a),
+  useHostProfile: () => hostProfile,
 }))
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockRotated(...a),

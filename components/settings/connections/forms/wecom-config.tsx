@@ -23,7 +23,6 @@ import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { probeWeComCredentials } from "@/lib/connectors/adapters/wecom/probe"
 import { preflightConnectorConfig } from "@/lib/connectors/config-preflight"
-import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
@@ -32,6 +31,10 @@ import { CredentialInput } from "./_shared/credential-input"
 import { QuickCommandsEditor } from "./_shared/quick-commands-editor"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 import { normalizeQuickCommandList, type IMQuickCommand } from "@/lib/connectors/quick-commands"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 interface WeComCredentialTestResult {
   ok: boolean
@@ -77,7 +80,8 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<WeComCredentialTestResult | null>(null)
   const [saving, setSaving] = useState(false)
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
 
   const dirty =
     isNew ||
@@ -290,11 +294,7 @@ export function WeComConfigDialog({ open, onOpenChange, row, onCreated }: WeComC
                 {testResult.ok ? t("testSucceededStatus") : testResult.error}
               </div>
             )}
-            {!desktop && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                {t("testRequiresDesktop")}
-              </p>
-            )}
+            <ConnectorHostNotice reach={reach} />
           </div>
         </div>
 

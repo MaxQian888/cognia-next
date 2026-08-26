@@ -43,6 +43,11 @@ import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
+import type { ConnectorControlReach } from "@/lib/connectors/control-reach"
+import {
   connectorWebhookPath,
   LARK_OAUTH_RELAY_PATH,
   resolveConnectorsIngressBase,
@@ -187,7 +192,12 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   const [authorizing, setAuthorizing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const desktop = isTauri()
+  // Two different questions that `isTauri()` used to answer at once.
+  // `desktopShell` shapes the INGRESS — cloudflared versus a public origin —
+  // and is a property of the machine this page runs on. `reach` answers
+  // whether the connector controls can be driven from here at all.
+  const desktopShell = isTauri()
+  const reach = useConnectorControlReach()
   const tunnel = useTunnelStatus()
 
   // Public base a platform should be pointed at, per host. Declared up here
@@ -195,7 +205,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
   // internet through cloudflared, while a cloud install serves the same
   // connectors router nested under `/connectors` on its own origin.
   const ingressBase = resolveConnectorsIngressBase({
-    isDesktop: desktop,
+    isDesktop: desktopShell,
     tunnelUrl: tunnel.url,
     publicBase:
       resolveLarkApiBase() || (typeof window === "undefined" ? null : window.location.origin),
@@ -457,7 +467,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         testResult={testResult}
         onTest={handleTest}
         openConsoleUrl={openConsoleUrl}
-        desktop={desktop}
+        reach={reach}
         saving={saving}
       />
     ),
@@ -473,7 +483,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
         transport={transport}
         setTransport={setTransport}
         saving={saving}
-        desktop={desktop}
+        desktop={desktopShell}
         webhookUrl={webhookUrl}
         tunnelLoading={tunnel.loading}
         tunnelRunning={tunnel.running}
@@ -540,7 +550,7 @@ export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkCon
             onAuthorize={handleAuthorize}
             authorizing={authorizing}
             saving={saving}
-            desktop={desktop}
+            reach={reach}
             redirectUri={redirectUri}
             onRedirectUriChange={setRedirectUri}
             derivedRelayUrl={derivedRelayUrl}
@@ -595,7 +605,7 @@ interface SendAsUserFieldsProps {
   onAuthorize: () => void
   authorizing: boolean
   saving: boolean
-  desktop: boolean
+  reach: ConnectorControlReach
   redirectUri: string
   onRedirectUriChange: (v: string) => void
   derivedRelayUrl: string | null
@@ -682,7 +692,7 @@ function SendAsUserFields(p: SendAsUserFieldsProps) {
           size="sm"
           variant="outline"
           onClick={p.onAuthorize}
-          disabled={p.authorizing || p.saving || !p.desktop || !p.effectiveRedirectUri}
+          disabled={p.authorizing || p.saving || !p.reach.available || !p.effectiveRedirectUri}
           className="shrink-0"
         >
           {p.authorizing ? (
@@ -711,11 +721,7 @@ function SendAsUserFields(p: SendAsUserFieldsProps) {
         />
       </div>
 
-      {!p.desktop && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          {t("authorizeRequiresDesktop")}
-        </p>
-      )}
+      <ConnectorHostNotice reach={p.reach} />
     </div>
   )
 }
@@ -737,7 +743,7 @@ interface IdentityFieldsProps {
   testResult: TatTestResult | null
   onTest: () => void
   openConsoleUrl: string
-  desktop: boolean
+  reach: ConnectorControlReach
   saving: boolean
 }
 
@@ -781,7 +787,7 @@ function IdentityFields(p: IdentityFieldsProps) {
               size="sm"
               variant="outline"
               onClick={p.onTest}
-              disabled={p.testing || p.saving || !p.desktop}
+              disabled={p.testing || p.saving || !p.reach.available}
               aria-label={t("testConnectionAria")}
               className="shrink-0"
             >
@@ -864,9 +870,7 @@ function IdentityFields(p: IdentityFieldsProps) {
         </div>
       )}
 
-      {!p.desktop && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-      )}
+      <ConnectorHostNotice reach={p.reach} />
 
       {/* Console jump — available on every transport (not just webhook). */}
       <div className="flex justify-end">
@@ -896,7 +900,7 @@ function IdentityFields(p: IdentityFieldsProps) {
             size="sm"
             variant="ghost"
             onClick={p.onRefreshOpenId}
-            disabled={p.refreshingOpenId || !p.canRefreshOpenId || !p.desktop}
+            disabled={p.refreshingOpenId || !p.canRefreshOpenId || !p.reach.available}
             aria-label={t("selfBotOpenIdRefreshAria")}
             data-testid="lark-self-bot-open-id-refresh"
           >

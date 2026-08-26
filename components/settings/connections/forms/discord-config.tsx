@@ -30,7 +30,6 @@ import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-i
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { useTunnelStatus } from "@/hooks/use-tunnel-status"
-import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import type { TransportMode } from "@/types/connectors/adapter"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
@@ -38,6 +37,10 @@ import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credential
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 interface GetCurrentUserResult {
   ok: boolean
@@ -116,7 +119,8 @@ export function DiscordConfigDialog({
   const [testResult, setTestResult] = useState<GetCurrentUserResult | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
   const tunnel = useTunnelStatus()
 
   // Interactions Endpoint URL (webhook mode) — the tunnel origin + the Rust
@@ -330,9 +334,7 @@ export function DiscordConfigDialog({
             </div>
           )}
 
-          {!desktop && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-          )}
+          <ConnectorHostNotice reach={reach} />
         </div>
       </div>
     ),

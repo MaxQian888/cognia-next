@@ -35,7 +35,6 @@ import {
   connectorsOnebotProbe,
 } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
-import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
@@ -43,6 +42,10 @@ import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credential
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 
 type ExpectedClient = "napcat" | "lagrange" | "llonebot" | "other"
 type OneBotTransportMode = "reverse-ws" | "forward-ws"
@@ -120,7 +123,8 @@ export function OneBotConfigDialog({
   const [probing, setProbing] = useState(false)
   const [liveStatus, setLiveStatus] = useState<{ connected: boolean; since?: number } | null>(null)
 
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  const desktop = reach.available
 
   const dirty =
     isNew ||
@@ -473,73 +477,74 @@ export function OneBotConfigDialog({
           >
             {t("endpointCopy")}
           </Button>
-          {desktop && (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleVerify}
-                disabled={verifying}
-                aria-label={t("verifyConnectionAria")}
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleVerify}
+              disabled={verifying || !desktop}
+              aria-label={t("verifyConnectionAria")}
+            >
+              {verifying ? (
+                <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                t("verifyConnectionButton")
+              )}
+            </Button>
+            {verifyResult === "connected" && (
+              <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2Icon className="h-3.5 w-3.5" />
+                {t("verifyConnectedBadge")}
+              </span>
+            )}
+            {verifyResult === "timeout" && (
+              <span className="flex items-center gap-1 text-xs text-destructive">
+                <XCircleIcon className="h-3.5 w-3.5" />
+                {t("verifyTimeoutBadge")}
+              </span>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleProbe}
+              disabled={probing || !desktop}
+              aria-label={t("probeStatusAria")}
+            >
+              {probing ? (
+                <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                t("probeStatusButton")
+              )}
+            </Button>
+            {liveStatus?.connected && (
+              <span
+                className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
+                data-testid="onebot-live-connected"
               >
-                {verifying ? (
-                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  t("verifyConnectionButton")
-                )}
-              </Button>
-              {verifyResult === "connected" && (
-                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                  <CheckCircle2Icon className="h-3.5 w-3.5" />
-                  {t("verifyConnectedBadge")}
-                </span>
-              )}
-              {verifyResult === "timeout" && (
-                <span className="flex items-center gap-1 text-xs text-destructive">
-                  <XCircleIcon className="h-3.5 w-3.5" />
-                  {t("verifyTimeoutBadge")}
-                </span>
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleProbe}
-                disabled={probing}
-                aria-label={t("probeStatusAria")}
+                <CheckCircle2Icon className="h-3.5 w-3.5" />
+                {liveStatus.since
+                  ? t("probeConnectedSince", {
+                      time: new Date(liveStatus.since).toLocaleTimeString(),
+                    })
+                  : t("probeConnected")}
+              </span>
+            )}
+            {liveStatus && !liveStatus.connected && (
+              <span
+                className="flex items-center gap-1 text-xs text-muted-foreground"
+                data-testid="onebot-live-disconnected"
               >
-                {probing ? (
-                  <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  t("probeStatusButton")
-                )}
-              </Button>
-              {liveStatus?.connected && (
-                <span
-                  className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
-                  data-testid="onebot-live-connected"
-                >
-                  <CheckCircle2Icon className="h-3.5 w-3.5" />
-                  {liveStatus.since
-                    ? t("probeConnectedSince", {
-                        time: new Date(liveStatus.since).toLocaleTimeString(),
-                      })
-                    : t("probeConnected")}
-                </span>
-              )}
-              {liveStatus && !liveStatus.connected && (
-                <span
-                  className="flex items-center gap-1 text-xs text-muted-foreground"
-                  data-testid="onebot-live-disconnected"
-                >
-                  <XCircleIcon className="h-3.5 w-3.5" />
-                  {t("probeNotConnected")}
-                </span>
-              )}
-            </>
-          )}
+                <XCircleIcon className="h-3.5 w-3.5" />
+                {t("probeNotConnected")}
+              </span>
+            )}
+          </>
         </div>
+        {/* Rendered disabled rather than dropped: an absent Verify button is
+         * indistinguishable from a bug, and the reason is actionable. */}
+        <ConnectorHostNotice reach={reach} />
       </div>
     ) : (
       <p className="text-xs text-muted-foreground">{t("endpointNewAdapterHint")}</p>

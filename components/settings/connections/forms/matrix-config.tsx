@@ -22,13 +22,16 @@ import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
-import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultTriggerPolicyFor } from "@/types/connectors/policy"
 import { useAdapterCredentials } from "@/hooks/connectors/use-adapter-credentials"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { CredentialInput } from "./_shared/credential-input"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
+import {
+  ConnectorHostNotice,
+  useConnectorControlReach,
+} from "@/components/connectors/connector-host-notice"
 import {
   matrixLoginWithPassword,
   probeMatrixAccessToken,
@@ -85,7 +88,11 @@ export function MatrixConfigDialog({
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
   const [saving, setSaving] = useState(false)
 
-  const desktop = isTauri()
+  const reach = useConnectorControlReach()
+  // Password login drives the desktop's own Matrix crypto store, so it needs
+  // the shell itself rather than just a reachable runtime.
+  const shellReach = useConnectorControlReach("desktop-shell")
+  const desktop = reach.available
 
   const dirty =
     isNew ||
@@ -320,9 +327,7 @@ export function MatrixConfigDialog({
               </span>
             </div>
           )}
-          {!desktop && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
-          )}
+          <ConnectorHostNotice reach={reach} />
         </div>
 
         {/* Inline password-login affordance — fills the token field above. */}
@@ -355,17 +360,13 @@ export function MatrixConfigDialog({
               size="sm"
               variant="outline"
               onClick={() => void handlePasswordLogin()}
-              disabled={saving || loggingIn || !desktop}
+              disabled={saving || loggingIn || !shellReach.available}
               data-testid="matrix-password-login"
             >
               {loggingIn && <LoaderIcon className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
               {t("passwordLogin.loginButton")}
             </Button>
-            {!desktop && (
-              <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                {t("passwordLogin.desktopOnly")}
-              </span>
-            )}
+            <ConnectorHostNotice reach={shellReach} className="text-[10px]" />
           </div>
         </div>
       </div>

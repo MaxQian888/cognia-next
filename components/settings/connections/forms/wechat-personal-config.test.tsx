@@ -49,6 +49,7 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
 
 jest.mock("@/hooks/use-host-profile", () => ({
   useCapability: (...a: unknown[]) => mockCapability(...a),
+  useHostProfile: () => (mockIsTauri() ? "desktop" : "web-standalone"),
 }))
 
 const mockKeyringGet = jest.fn().mockResolvedValue(null)
@@ -121,11 +122,14 @@ describe("WeChatPersonalConfigDialog — create", () => {
     expect(mockToastError).toHaveBeenCalledWith("gateway offline")
   })
 
+  // QR login paints a login window from the desktop process, so a reachable
+  // runtime elsewhere is not enough — the notice says that specifically rather
+  // than the generic "your bot runs on the paired host".
   it("disables QR login outside the desktop runtime", async () => {
     mockIsTauri.mockReturnValue(false)
     render(<WeChatPersonalConfigDialog open onOpenChange={jest.fn()} row={null} />)
 
-    expect(screen.getByText(/desktop runtime/i)).toBeInTheDocument()
+    expect(screen.getByTestId("connector-host-notice")).toHaveAttribute("data-cause", "no-runtime")
     expect(screen.getByRole("button", { name: /get login qr/i })).toBeDisabled()
 
     await act(async () => {
