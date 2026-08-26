@@ -85,6 +85,22 @@ host-private field, and route through the same `CredentialInput` a built-in
 platform uses so they land in the OS keyring rather than in a Dexie row that
 backups copy.
 
+**6. The four keyring arms move to the device plane, gated by a lease.**
+`connectors_keyring_{set,get,delete,list}` were `target: service` /
+`capability: service.internal`, reachable only by a token that loopback alone
+can mint — which is why a paired browser could not configure a bot at all, and
+why the desktop worked only because Tauri `invoke` bypasses this protocol face
+entirely. They now carry `host-admin` / `host.admin` / `interactive` and the
+three device transports, copying `external_bridge_relay_enable` exactly. They
+also join `STEP_UP_COMMANDS` and leave `SERVICE_ONLY_COMMANDS`, so every call
+must present a valid admin lease: `host.admin` keeps a multi-tenant member
+device out, and the lease adds the time limit and revoke-on-disconnect a bare
+capability check has no way to express.
+
+The rest of the connector plane stays service-only. Nothing an operator does
+in Settings needs to open a raw websocket or drive Matrix crypto, and widening
+the whole family would trade a real boundary for nothing.
+
 ## Consequences
 
 - The web-mode banner no longer claims the Inbox is read-only on a companion.
@@ -95,10 +111,22 @@ backups copy.
   one.
 - OneBot's Verify and Probe buttons render disabled instead of disappearing,
   matching the rule the capability surfaces adopted: render, disable, explain.
-- Raising the four `connectors_keyring_*` commands to the device plane — the
-  change that would make `runs-on-host` obsolete for credential work — remains
-  out of scope here. It needs the manifest change, a consent surface and a
-  lease, and is tracked separately.
+- The four keyring arms are reachable from a device *at the protocol level*,
+  and are not yet usable from one: `lib/connectors/tauri/commands.ts` still
+  calls Tauri `invoke` rather than the routed `transport`, so the call never
+  leaves a browser, and no form requests the lease those arms now demand. The
+  door moved from "impossible" to "needs a lease you cannot yet obtain" —
+  strictly closed either way, which is why it is safe to land first. The UI
+  keeps saying `runs-on-host`, so nothing on screen claims otherwise. Routing
+  the wrappers costs ~21 adapter suites that mock `invoke` and would start
+  meeting the web stub's rejection; that is its own unit of work.
+- The generated mirrors (`host-command-catalog.json`, the OpenAPI specs, the
+  headless contract hash) are NOT regenerated: `companion-api:gen` exits 1 on
+  `dev` because eleven `git_stack_*` commands have no canonical dispatch arm.
+  Nothing enforcing reads the stale fields — Rust loads
+  `protocol/companion-commands.json` directly via `include_str!`, and
+  `cognia-headless-contract` reads only `name` / `inputSchema` /
+  `outputSchema`, none of which this change touches.
 
 ## Alternatives considered
 

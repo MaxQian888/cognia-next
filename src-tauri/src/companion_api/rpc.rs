@@ -1598,6 +1598,17 @@ const STEP_UP_COMMANDS: &[&str] = &[
     "external_bridge_restart",
     "external_bridge_relay_enable",
     "external_bridge_relay_disable",
+    // ADR-0152 — connector credentials on the device plane. Same shape as the
+    // relay pair above: `host.admin` keeps a multi-tenant member device out,
+    // and the admin lease supplies the time limit and the revoke-on-disconnect
+    // that a bare capability check does not. Without this the four arms were
+    // reachable only by a service token, which only loopback can mint — so a
+    // paired browser could not configure a bot at all, and the desktop worked
+    // solely because Tauri `invoke` bypasses this protocol face entirely.
+    "connectors_keyring_set",
+    "connectors_keyring_get",
+    "connectors_keyring_delete",
+    "connectors_keyring_list",
 ];
 
 /// True when `name` requires the remote-control capability.
@@ -1838,13 +1849,14 @@ const SERVICE_ONLY_COMMANDS: &[&str] = &[
     "fleet_project_managed_session",
     "fleet_project_worker_load",
     "fleet_remove_managed_session",
-    // ADR-0059 T-A5 — the connector command plane carries credentials and
-    // arbitrary outbound HTTP; only the brain's service token may touch it.
+    // ADR-0059 T-A5 — the connector command plane carries arbitrary outbound
+    // HTTP and raw socket control; only the brain's service token may touch
+    // it. The four `connectors_keyring_*` arms left this list in ADR-0152:
+    // they are the ones an operator has to reach to configure a bot from a
+    // paired device, and they are gated instead by `STEP_UP_COMMANDS` +
+    // `host.admin` + an admin lease. The rest stay service-only — nothing an
+    // operator does in Settings needs to open a websocket by hand.
     "connectors_health",
-    "connectors_keyring_set",
-    "connectors_keyring_get",
-    "connectors_keyring_delete",
-    "connectors_keyring_list",
     "connectors_http_request",
     "connectors_ws_open",
     "connectors_ws_send",

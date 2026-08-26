@@ -65,6 +65,18 @@ cloudflared 还是公网域名 —— 决定新建行的传输默认值和隧道
 （`writeOnly`，或 `format: "password"`），而不是宿主私有的字段，并走与内置平台相同的
 `CredentialInput`，因此落在操作系统 keyring 里，而不是备份会一并复制的 Dexie 行里。
 
+**6. 四条 keyring 命令移到设备面，由租约把守。**
+`connectors_keyring_{set,get,delete,list}` 原本是 `target: service` /
+`capability: service.internal`，只有回环才能铸出的令牌才够得到 —— 这正是配对浏览器
+根本配置不了机器人的原因，也是桌面端唯一能用只因为 Tauri `invoke` 完全绕开了这个协议面
+的原因。它们现在是 `host-admin` / `host.admin` / `interactive` 加三种设备传输，形状与
+`external_bridge_relay_enable` 完全一致。同时加入 `STEP_UP_COMMANDS`、移出
+`SERVICE_ONLY_COMMANDS`，因此每次调用都必须出示有效的 admin 租约：`host.admin` 把多租户
+下的 member 设备挡在外面，租约再补上时限与断连即撤 —— 这两件事光靠能力检查表达不了。
+
+连接器面的其余命令仍是 service-only。操作者在设置里做的任何事都不需要手工开一个 websocket
+或驱动 Matrix 加密，把整族放开等于拿一条真实边界换不来任何东西。
+
 ## 后果
 
 - web 模式横幅不再声称伴侣端的收件箱是只读的。它在那里从来就不是只读的 —— 中继会写。
@@ -72,9 +84,17 @@ cloudflared 还是公网域名 —— 决定新建行的传输默认值和隧道
 - 隧道面板不再向根本不跑隧道的部署推销隧道。
 - OneBot 的「验证」与「探测」按钮改为渲染并禁用，而不是消失 —— 与能力面采纳的规则一致：
   渲染、禁用、写明原因。
-- 把四条 `connectors_keyring_*` 命令提升到设备面 —— 那才是让 `runs-on-host` 在凭据这件
-  事上作废的改动 —— 不在本 ADR 范围内。它需要 manifest 改动、一个同意面和一段租约，
-  单独跟踪。
+- 这四条命令在**协议层面**已可从设备到达，但还不能真正从设备使用：
+  `lib/connectors/tauri/commands.ts` 仍直连 Tauri `invoke` 而非走 `transport`，
+  调用根本离不开浏览器；也还没有任何表单去申请这些命令现在要求的租约。这扇门从
+  「不可能」变成了「需要一段你还拿不到的租约」—— 两种状态都是关着的，所以先落地是安全的。
+  界面仍然显示 `runs-on-host`，屏幕上没有任何东西声称相反。把包装函数改走 transport 的代价
+  是约 21 个 mock 了 `invoke` 的适配器套件会开始撞上 web stub 的拒绝；那是另一个工作单元。
+- 生成物（`host-command-catalog.json`、OpenAPI 规格、headless 契约哈希）**没有**重新生成：
+  `companion-api:gen` 在 `dev` 上以 1 退出，因为有 11 条 `git_stack_*` 命令没有规范派发臂。
+  没有任何强制路径读取那些过期字段 —— Rust 通过 `include_str!` 直接读
+  `protocol/companion-commands.json`，而 `cognia-headless-contract` 只读
+  `name` / `inputSchema` / `outputSchema`，本次改动一个都没碰。
 
 ## 考虑过的替代方案
 

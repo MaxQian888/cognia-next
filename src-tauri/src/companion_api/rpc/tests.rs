@@ -1106,12 +1106,10 @@ fn service_only_commands_are_known_and_not_control_gated() {
         "connectors_register",
         "connectors_unregister",
         "connectors_list_adapters",
-        // ADR-0059 T-A5 — connector command plane.
+        // ADR-0059 T-A5 — connector command plane. The four
+        // `connectors_keyring_*` arms left this tier in ADR-0152; see
+        // `connector_keyring_arms_are_step_up_not_service_only`.
         "connectors_health",
-        "connectors_keyring_set",
-        "connectors_keyring_get",
-        "connectors_keyring_delete",
-        "connectors_keyring_list",
         "connectors_http_request",
         "connectors_ws_open",
         "connectors_ws_send",
@@ -1156,6 +1154,66 @@ fn service_only_commands_are_known_and_not_control_gated() {
         assert!(
             !CONTROL_COMMANDS.contains(&name),
             "{name} is scope-gated, not device-control-gated"
+        );
+    }
+}
+
+/// ADR-0152 — configuring a bot is an admin action, not a service action.
+///
+/// The four keyring arms are the ones an operator must reach to set up a
+/// connector from a paired device. Left on the service tier they were
+/// unreachable by anything but a loopback-minted service token, so a paired
+/// browser could not configure a bot at all — and the desktop only worked
+/// because Tauri `invoke` bypasses this protocol face entirely.
+///
+/// They are NOT simply opened: the step-up tier means every call must carry a
+/// valid admin lease, which supplies the time limit and the revoke-on-
+/// disconnect that a bare capability check does not. This test pins both
+/// halves, because losing either one silently is the failure that matters —
+/// dropping the step-up entry would leave them reachable with nothing but a
+/// device JWT.
+#[test]
+fn connector_keyring_arms_are_step_up_not_service_only() {
+    for name in [
+        "connectors_keyring_set",
+        "connectors_keyring_get",
+        "connectors_keyring_delete",
+        "connectors_keyring_list",
+    ] {
+        assert!(
+            STEP_UP_COMMANDS.contains(&name),
+            "{name} must require an admin lease"
+        );
+        assert!(
+            !is_service_only_command(name),
+            "{name} must be reachable from a device plane"
+        );
+        assert!(KNOWN_COMMANDS.contains(&name), "{name} must be allowlisted");
+        let descriptor = crate::companion_api::command_manifest::descriptor(name)
+            .expect("keyring arm must have a manifest descriptor");
+        assert_eq!(descriptor.capability, "host.admin", "{name}");
+    }
+}
+
+/// The rest of the connector plane stays where it was. Nothing an operator
+/// does in Settings needs to open a raw websocket or drive Matrix crypto, so
+/// widening the whole family would trade a real boundary for nothing.
+#[test]
+fn the_rest_of_the_connector_plane_stays_service_only() {
+    for name in [
+        "connectors_http_request",
+        "connectors_ws_open",
+        "connectors_ws_send",
+        "connectors_matrix_crypto_encrypt_event",
+        "connectors_attachment_read",
+    ] {
+        assert!(
+            is_service_only_command(name),
+            "{name} must stay service-only"
+        );
+        assert!(
+            !STEP_UP_COMMANDS.contains(&name),
+            "{name} is service-only; a lease must not be a way in"
         );
     }
 }
