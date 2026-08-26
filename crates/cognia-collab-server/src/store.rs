@@ -30,7 +30,10 @@ use rustls::{ClientConfig, RootCertStore};
 use tokio_postgres::Config;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
-use crate::model::{ActorError, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus};
+use crate::model::{
+    ActorError, CollabActor, Issue, IssueEvent, IssuePriority, IssueStatus, Plan, PlanStatus,
+    PlanStep, PlanStepKind, PlanStepStatus, Run, RunArtifact, RunKind, RunStatus,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -134,6 +137,169 @@ pub struct IssueQuery {
     pub workspace_scope: Option<Vec<String>>,
 }
 
+// ── Plans and Runs (Batch 7c) ────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct NewPlanStep {
+    pub id: String,
+    pub order: i32,
+    pub title: String,
+    pub description: Option<String>,
+    pub kind: PlanStepKind,
+    pub status: PlanStepStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewPlan {
+    pub id: String,
+    pub org_id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: PlanStatus,
+    pub steps: Vec<NewPlanStep>,
+    pub created_by: CollabActor,
+    pub now: i64,
+}
+
+/// One step's reported progress.
+///
+/// Carries no timestamps. `started_at` and `completed_at` are derived from the
+/// transition by [`apply_step_progress`], on the server's clock — a plan whose
+/// steps are reported by two machines would otherwise render a timeline that
+/// runs backwards whenever their clocks disagree.
+#[derive(Debug, Clone)]
+pub struct PlanStepProgress {
+    pub id: String,
+    pub status: PlanStepStatus,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PlanPatch {
+    pub title: Option<String>,
+    pub description: Option<Option<String>>,
+    pub status: Option<PlanStatus>,
+    /// Progress for the named steps only. Steps left out keep what they had —
+    /// a driver reporting step 3 must not blank steps 1 and 2.
+    pub steps: Vec<PlanStepProgress>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PlanQuery {
+    pub workspace_id: Option<String>,
+    pub status: Option<PlanStatus>,
+    /// Restrict to these workspaces, exactly as [`IssueQuery::workspace_scope`].
+    pub workspace_scope: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewRun {
+    pub id: String,
+    pub org_id: String,
+    pub workspace_id: String,
+    pub issue_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub title: String,
+    pub kind: RunKind,
+    pub status: RunStatus,
+    pub started_by: CollabActor,
+    pub artifacts: Vec<RunArtifact>,
+    pub now: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunPatch {
+    pub status: Option<RunStatus>,
+    pub summary: Option<Option<String>>,
+    pub error: Option<Option<String>>,
+    /// Replaces the whole set when present. Appending would make an engine that
+    /// re-reports its artifacts — which a retried settle does — duplicate every
+    /// link it had already published.
+    pub artifacts: Option<Vec<RunArtifact>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RunQuery {
+    pub workspace_id: Option<String>,
+    pub issue_id: Option<String>,
+    pub plan_id: Option<String>,
+    /// Only `queued`/`running`, for the "N agents working" question.
+    pub active_only: bool,
+    pub workspace_scope: Option<Vec<String>>,
+}
+
+// ── Progress rules ───────────────────────────────────────────────────────────
+//
+// One implementation, used by BOTH stores. Expressing them a second time in
+// SQL would give the test double and production two chances to disagree about
+// what a plan's progress is, and only one of the two is ever under test.
+
+/// Apply one report to a step, deriving the timestamps from the transition.
+///
+/// A step that is no longer terminal loses its outcome: `result`, `error` and
+/// `completed_at` all clear. That is what a retry is — the step is running
+/// again, so the previous answer is not its answer any more, and leaving a
+/// stale error beside a step now marked `in_progress` is the shape that makes
+/// a reader distrust the whole panel.
+pub fn apply_step_progress(step: &mut PlanStep, report: &PlanStepProgress, now: i64) {
+    step.status = report.status;
+    if report.status == PlanStepStatus::InProgress && step.started_at.is_none() {
+        step.started_at = Some(now);
+    }
+    if is_terminal_step(report.status) {
+        step.completed_at = Some(step.completed_at.unwrap_or(now));
+        step.result = report.result.clone();
+        step.error = report.error.clone();
+    } else {
+        step.completed_at = None;
+        step.result = None;
+        step.error = None;
+    }
+}
+
+/// Mirrors `isTerminalStepStatus` in `types/agent/plan.ts`.
+pub fn is_terminal_step(status: PlanStepStatus) -> bool {
+    matches!(
+        status,
+        PlanStepStatus::Completed | PlanStepStatus::Failed | PlanStepStatus::Skipped
+    )
+}
+
+/// Mirrors `isTerminalPlanStatus`.
+pub fn is_terminal_plan(status: PlanStatus) -> bool {
+    matches!(
+        status,
+        PlanStatus::Completed | PlanStatus::Failed | PlanStatus::Cancelled
+    )
+}
+
+/// `(total, completed)`, recomputed from the stored steps.
+///
+/// Never taken from a client: two writers reporting different progress for one
+/// plan is a disagreement with no tiebreak, and the steps are the tiebreak.
+pub fn plan_counts(steps: &[PlanStep]) -> (i32, i32) {
+    let completed = steps
+        .iter()
+        .filter(|step| step.status == PlanStepStatus::Completed)
+        .count();
+    (steps.len() as i32, completed as i32)
+}
+
+/// When a plan or run ended, given where it just moved to.
+///
+/// Sticky while terminal — a plan that completes twice keeps the first
+/// timestamp — and cleared on the way back out, because a plan that is
+/// executing again has not ended.
+pub fn ended_at_for(terminal: bool, previous: Option<i64>, now: i64) -> Option<i64> {
+    if terminal {
+        Some(previous.unwrap_or(now))
+    } else {
+        None
+    }
+}
+
 #[async_trait]
 pub trait Store: Send + Sync {
     /// What `user_id` may do in `org_id` / `workspace_id`.
@@ -221,6 +387,42 @@ pub trait Store: Send + Sync {
         org_id: &str,
         issue_id: &str,
     ) -> Result<Vec<IssueEvent>, StoreError>;
+
+    /// Plan headers, without their steps.
+    ///
+    /// A listing deliberately leaves `steps` as `None` rather than `Some(vec![])`
+    /// — see [`Plan::steps`]. Fetching every plan's steps to render a list that
+    /// shows only the counts would be the expensive half of a query nothing
+    /// reads.
+    async fn list_plans(&self, org_id: &str, query: PlanQuery) -> Result<Vec<Plan>, StoreError>;
+
+    /// One plan WITH its steps, ordered.
+    async fn get_plan(&self, org_id: &str, id: &str) -> Result<Option<Plan>, StoreError>;
+
+    async fn create_plan(&self, input: NewPlan) -> Result<Plan, StoreError>;
+
+    async fn patch_plan(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: PlanPatch,
+        now: i64,
+    ) -> Result<Plan, StoreError>;
+
+    /// Runs in this org, newest first, with their artifacts.
+    async fn list_runs(&self, org_id: &str, query: RunQuery) -> Result<Vec<Run>, StoreError>;
+
+    async fn get_run(&self, org_id: &str, id: &str) -> Result<Option<Run>, StoreError>;
+
+    async fn create_run(&self, input: NewRun) -> Result<Run, StoreError>;
+
+    async fn patch_run(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: RunPatch,
+        now: i64,
+    ) -> Result<Run, StoreError>;
 }
 
 // ── In-memory ────────────────────────────────────────────────────────────────
@@ -243,6 +445,10 @@ struct Tables {
     users: HashMap<String, String>,
     issues: HashMap<String, Issue>,
     events: Vec<(String, IssueEvent)>,
+    /// Plans always hold `steps: Some(..)` in here; `list_plans` strips them,
+    /// mirroring what the header-only Postgres query returns.
+    plans: HashMap<String, Plan>,
+    runs: HashMap<String, Run>,
 }
 
 /// Test double. Scopes by `org_id` in Rust on purpose — see the module note.
@@ -561,6 +767,234 @@ impl Store for InMemoryStore {
         rows.sort_by_key(|event| event.ts);
         Ok(rows)
     }
+
+    async fn list_plans(&self, org_id: &str, query: PlanQuery) -> Result<Vec<Plan>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows: Vec<Plan> = tables
+            .plans
+            .values()
+            .filter(|plan| plan.org_id == org_id)
+            .filter(|plan| {
+                query
+                    .workspace_scope
+                    .as_ref()
+                    .is_none_or(|allowed| allowed.contains(&plan.workspace_id))
+            })
+            .filter(|plan| {
+                query
+                    .workspace_id
+                    .as_ref()
+                    .is_none_or(|id| &plan.workspace_id == id)
+            })
+            .filter(|plan| query.status.is_none_or(|status| plan.status == status))
+            // A listing carries no steps, matching what Postgres returns from
+            // the header-only query.
+            .map(|plan| Plan {
+                steps: None,
+                ..plan.clone()
+            })
+            .collect();
+        rows.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(rows)
+    }
+
+    async fn get_plan(&self, org_id: &str, id: &str) -> Result<Option<Plan>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .plans
+            .get(id)
+            .filter(|plan| plan.org_id == org_id)
+            .cloned())
+    }
+
+    async fn create_plan(&self, input: NewPlan) -> Result<Plan, StoreError> {
+        let steps: Vec<PlanStep> = input
+            .steps
+            .into_iter()
+            .map(|step| PlanStep {
+                id: step.id,
+                plan_id: input.id.clone(),
+                order: step.order,
+                title: step.title,
+                description: step.description,
+                kind: step.kind,
+                status: step.status,
+                result: None,
+                error: None,
+                started_at: None,
+                completed_at: None,
+            })
+            .collect();
+        let (total, completed) = plan_counts(&steps);
+        let plan = Plan {
+            id: input.id,
+            org_id: input.org_id,
+            workspace_id: input.workspace_id,
+            title: input.title,
+            description: input.description,
+            status: input.status,
+            total_steps: total,
+            completed_steps: completed,
+            created_by: input.created_by,
+            created_at: input.now,
+            updated_at: input.now,
+            ended_at: ended_at_for(is_terminal_plan(input.status), None, input.now),
+            steps: Some(steps),
+        };
+        self.tables
+            .write()
+            .plans
+            .insert(plan.id.clone(), plan.clone());
+        Ok(plan)
+    }
+
+    async fn patch_plan(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: PlanPatch,
+        now: i64,
+    ) -> Result<Plan, StoreError> {
+        let mut tables = self.tables.write();
+        let plan = tables
+            .plans
+            .get_mut(id)
+            .filter(|plan| plan.org_id == org_id)
+            .ok_or(StoreError::NotFound)?;
+        if let Some(title) = patch.title {
+            plan.title = title;
+        }
+        if let Some(description) = patch.description {
+            plan.description = description;
+        }
+        if let Some(status) = patch.status {
+            plan.status = status;
+        }
+        let steps = plan.steps.get_or_insert_with(Vec::new);
+        for report in &patch.steps {
+            let Some(step) = steps.iter_mut().find(|step| step.id == report.id) else {
+                // A report for a step this plan does not have. Refused rather
+                // than inserted: a step that appeared from a patch would have no
+                // order, no kind and no title, which is not a step.
+                return Err(StoreError::NotFound);
+            };
+            apply_step_progress(step, report, now);
+        }
+        let (total, completed) = plan_counts(steps);
+        plan.total_steps = total;
+        plan.completed_steps = completed;
+        plan.ended_at = ended_at_for(is_terminal_plan(plan.status), plan.ended_at, now);
+        plan.updated_at = now;
+        Ok(plan.clone())
+    }
+
+    async fn list_runs(&self, org_id: &str, query: RunQuery) -> Result<Vec<Run>, StoreError> {
+        let tables = self.tables.read();
+        let mut rows: Vec<Run> = tables
+            .runs
+            .values()
+            .filter(|run| run.org_id == org_id)
+            .filter(|run| {
+                query
+                    .workspace_scope
+                    .as_ref()
+                    .is_none_or(|allowed| allowed.contains(&run.workspace_id))
+            })
+            .filter(|run| {
+                query
+                    .workspace_id
+                    .as_ref()
+                    .is_none_or(|id| &run.workspace_id == id)
+            })
+            .filter(|run| {
+                query
+                    .issue_id
+                    .as_ref()
+                    .is_none_or(|id| run.issue_id.as_ref() == Some(id))
+            })
+            .filter(|run| {
+                query
+                    .plan_id
+                    .as_ref()
+                    .is_none_or(|id| run.plan_id.as_ref() == Some(id))
+            })
+            .filter(|run| !query.active_only || run.status.is_active())
+            .cloned()
+            .collect();
+        rows.sort_by(|a, b| {
+            b.started_at
+                .cmp(&a.started_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(rows)
+    }
+
+    async fn get_run(&self, org_id: &str, id: &str) -> Result<Option<Run>, StoreError> {
+        Ok(self
+            .tables
+            .read()
+            .runs
+            .get(id)
+            .filter(|run| run.org_id == org_id)
+            .cloned())
+    }
+
+    async fn create_run(&self, input: NewRun) -> Result<Run, StoreError> {
+        let run = Run {
+            id: input.id,
+            org_id: input.org_id,
+            workspace_id: input.workspace_id,
+            issue_id: input.issue_id,
+            plan_id: input.plan_id,
+            title: input.title,
+            kind: input.kind,
+            status: input.status,
+            started_by: input.started_by,
+            started_at: input.now,
+            updated_at: input.now,
+            ended_at: ended_at_for(!input.status.is_active(), None, input.now),
+            summary: None,
+            error: None,
+            artifacts: input.artifacts,
+        };
+        self.tables.write().runs.insert(run.id.clone(), run.clone());
+        Ok(run)
+    }
+
+    async fn patch_run(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: RunPatch,
+        now: i64,
+    ) -> Result<Run, StoreError> {
+        let mut tables = self.tables.write();
+        let run = tables
+            .runs
+            .get_mut(id)
+            .filter(|run| run.org_id == org_id)
+            .ok_or(StoreError::NotFound)?;
+        if let Some(status) = patch.status {
+            run.status = status;
+        }
+        if let Some(summary) = patch.summary {
+            run.summary = summary;
+        }
+        if let Some(error) = patch.error {
+            run.error = error;
+        }
+        if let Some(artifacts) = patch.artifacts {
+            run.artifacts = artifacts;
+        }
+        run.ended_at = ended_at_for(!run.status.is_active(), run.ended_at, now);
+        run.updated_at = now;
+        Ok(run.clone())
+    }
 }
 
 // ── Postgres ─────────────────────────────────────────────────────────────────
@@ -690,6 +1124,201 @@ fn issue_from_row(row: &tokio_postgres::Row) -> Result<Issue, StoreError> {
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })
+}
+
+const PLAN_COLUMNS: &str = "id, org_id, workspace_id, title, description, status, total_steps, \
+     completed_steps, created_by_kind, created_by_id, created_at, updated_at, ended_at";
+
+const PLAN_STEP_COLUMNS: &str = "id, org_id, plan_id, step_order, title, description, kind, \
+     status, result, error, started_at, completed_at";
+
+const RUN_COLUMNS: &str = "id, org_id, workspace_id, issue_id, plan_id, title, kind, status, \
+     started_by_kind, started_by_id, started_at, updated_at, ended_at, summary, error";
+
+fn plan_from_row(
+    row: &tokio_postgres::Row,
+    steps: Option<Vec<PlanStep>>,
+) -> Result<Plan, StoreError> {
+    let status: String = row.get("status");
+    Ok(Plan {
+        id: row.get("id"),
+        org_id: row.get("org_id"),
+        workspace_id: row.get("workspace_id"),
+        title: row.get("title"),
+        description: row.get("description"),
+        status: PlanStatus::parse(&status)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown plan status `{status}`")))?,
+        total_steps: row.get("total_steps"),
+        completed_steps: row.get("completed_steps"),
+        created_by: CollabActor::from_columns(
+            &row.get::<_, String>("created_by_kind"),
+            &row.get::<_, String>("created_by_id"),
+            None,
+        )?,
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        ended_at: row.get("ended_at"),
+        steps,
+    })
+}
+
+fn plan_step_from_row(row: &tokio_postgres::Row) -> Result<PlanStep, StoreError> {
+    let kind: String = row.get("kind");
+    let status: String = row.get("status");
+    Ok(PlanStep {
+        id: row.get("id"),
+        plan_id: row.get("plan_id"),
+        order: row.get("step_order"),
+        title: row.get("title"),
+        description: row.get("description"),
+        kind: PlanStepKind::parse(&kind)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown step kind `{kind}`")))?,
+        status: PlanStepStatus::parse(&status)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown step status `{status}`")))?,
+        result: row.get("result"),
+        error: row.get("error"),
+        started_at: row.get("started_at"),
+        completed_at: row.get("completed_at"),
+    })
+}
+
+fn run_from_row(row: &tokio_postgres::Row, artifacts: Vec<RunArtifact>) -> Result<Run, StoreError> {
+    let kind: String = row.get("kind");
+    let status: String = row.get("status");
+    Ok(Run {
+        id: row.get("id"),
+        org_id: row.get("org_id"),
+        workspace_id: row.get("workspace_id"),
+        issue_id: row.get("issue_id"),
+        plan_id: row.get("plan_id"),
+        title: row.get("title"),
+        kind: RunKind::parse(&kind)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown run kind `{kind}`")))?,
+        status: RunStatus::parse(&status)
+            .ok_or_else(|| StoreError::Corrupt(format!("unknown run status `{status}`")))?,
+        started_by: CollabActor::from_columns(
+            &row.get::<_, String>("started_by_kind"),
+            &row.get::<_, String>("started_by_id"),
+            None,
+        )?,
+        started_at: row.get("started_at"),
+        updated_at: row.get("updated_at"),
+        ended_at: row.get("ended_at"),
+        summary: row.get("summary"),
+        error: row.get("error"),
+        artifacts,
+    })
+}
+
+async fn read_plan_steps(
+    transaction: &deadpool_postgres::Transaction<'_>,
+    org_id: &str,
+    plan_id: &str,
+) -> Result<Vec<PlanStep>, StoreError> {
+    let rows = transaction
+        .query(
+            &format!(
+                "SELECT {PLAN_STEP_COLUMNS} FROM plan_steps \
+                 WHERE org_id = $1 AND plan_id = $2 ORDER BY step_order ASC, id ASC"
+            ),
+            &[&org_id, &plan_id],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    rows.iter().map(plan_step_from_row).collect()
+}
+
+async fn insert_plan_step(
+    transaction: &deadpool_postgres::Transaction<'_>,
+    org_id: &str,
+    step: &PlanStep,
+) -> Result<(), StoreError> {
+    transaction
+        .execute(
+            &format!(
+                "INSERT INTO plan_steps ({PLAN_STEP_COLUMNS}) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+            ),
+            &[
+                &step.id,
+                &org_id,
+                &step.plan_id,
+                &step.order,
+                &step.title,
+                &step.description,
+                &step.kind.as_str(),
+                &step.status.as_str(),
+                &step.result,
+                &step.error,
+                &step.started_at,
+                &step.completed_at,
+            ],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    Ok(())
+}
+
+async fn read_run_artifacts(
+    transaction: &deadpool_postgres::Transaction<'_>,
+    org_id: &str,
+    run_id: &str,
+) -> Result<Vec<RunArtifact>, StoreError> {
+    let rows = transaction
+        .query(
+            "SELECT label, href FROM run_artifacts \
+             WHERE org_id = $1 AND run_id = $2 ORDER BY id ASC",
+            &[&org_id, &run_id],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    Ok(rows
+        .iter()
+        .map(|row| RunArtifact {
+            label: row.get("label"),
+            href: row.get("href"),
+        })
+        .collect())
+}
+
+/// Replace a run's whole artifact set.
+///
+/// Delete-then-insert rather than an upsert: an engine that re-reports fewer
+/// artifacts than last time means it withdrew one, and an upsert would leave
+/// the withdrawn link on a colleague's screen forever.
+async fn replace_run_artifacts(
+    transaction: &deadpool_postgres::Transaction<'_>,
+    org_id: &str,
+    run_id: &str,
+    artifacts: &[RunArtifact],
+) -> Result<(), StoreError> {
+    transaction
+        .execute(
+            "DELETE FROM run_artifacts WHERE org_id = $1 AND run_id = $2",
+            &[&org_id, &run_id],
+        )
+        .await
+        .map_err(|error| StoreError::Database(error.to_string()))?;
+    for (index, artifact) in artifacts.iter().enumerate() {
+        transaction
+            .execute(
+                "INSERT INTO run_artifacts (id, org_id, run_id, label, href) \
+                 VALUES ($1, $2, $3, $4, $5)",
+                &[
+                    // Ordinal-suffixed rather than random: the ORDER BY id in
+                    // `read_run_artifacts` is what preserves the order the
+                    // engine reported, and a uuid would shuffle it on rewrite.
+                    &format!("{run_id}#{index:04}"),
+                    &org_id,
+                    &run_id,
+                    &artifact.label,
+                    &artifact.href,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -1078,6 +1707,359 @@ impl Store for PgStore {
             })
             .collect()
     }
+
+    async fn list_plans(&self, org_id: &str, query: PlanQuery) -> Result<Vec<Plan>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let rows = transaction
+            .query(
+                &format!(
+                    "SELECT {PLAN_COLUMNS} FROM plans \
+                     WHERE org_id = $1 \
+                       AND ($2::text IS NULL OR workspace_id = $2) \
+                       AND ($3::text IS NULL OR status = $3) \
+                       AND ($4::text[] IS NULL OR workspace_id = ANY($4)) \
+                     ORDER BY updated_at DESC, id ASC"
+                ),
+                &[
+                    &org_id,
+                    &query.workspace_id,
+                    &query.status.map(PlanStatus::as_str),
+                    &query.workspace_scope,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        rows.iter().map(|row| plan_from_row(row, None)).collect()
+    }
+
+    async fn get_plan(&self, org_id: &str, id: &str) -> Result<Option<Plan>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let Some(row) = transaction
+            .query_opt(
+                &format!("SELECT {PLAN_COLUMNS} FROM plans WHERE org_id = $1 AND id = $2"),
+                &[&org_id, &id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let steps = read_plan_steps(&transaction, org_id, id).await?;
+        Ok(Some(plan_from_row(&row, Some(steps))?))
+    }
+
+    async fn create_plan(&self, input: NewPlan) -> Result<Plan, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, &input.org_id).await?;
+        let steps: Vec<PlanStep> = input
+            .steps
+            .iter()
+            .map(|step| PlanStep {
+                id: step.id.clone(),
+                plan_id: input.id.clone(),
+                order: step.order,
+                title: step.title.clone(),
+                description: step.description.clone(),
+                kind: step.kind,
+                status: step.status,
+                result: None,
+                error: None,
+                started_at: None,
+                completed_at: None,
+            })
+            .collect();
+        let (total, completed) = plan_counts(&steps);
+        let ended_at = ended_at_for(is_terminal_plan(input.status), None, input.now);
+        let row = transaction
+            .query_one(
+                &format!(
+                    "INSERT INTO plans ({PLAN_COLUMNS}) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+                     RETURNING {PLAN_COLUMNS}"
+                ),
+                &[
+                    &input.id,
+                    &input.org_id,
+                    &input.workspace_id,
+                    &input.title,
+                    &input.description,
+                    &input.status.as_str(),
+                    &total,
+                    &completed,
+                    &input.created_by.kind.as_str(),
+                    &input.created_by.id,
+                    &input.now,
+                    &input.now,
+                    &ended_at,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        for step in &steps {
+            insert_plan_step(&transaction, &input.org_id, step).await?;
+        }
+        let plan = plan_from_row(&row, Some(steps))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(plan)
+    }
+
+    /// Read-modify-write, unlike `patch_issue`'s single COALESCE statement.
+    ///
+    /// The progress rules live in Rust ([`apply_step_progress`]) precisely so
+    /// the test double and production cannot disagree about them, and that
+    /// means the current step must be read before it can be updated. Both
+    /// halves run inside the tenant-scoped transaction, so a concurrent writer
+    /// is serialised rather than lost.
+    async fn patch_plan(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: PlanPatch,
+        now: i64,
+    ) -> Result<Plan, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let existing = transaction
+            .query_opt(
+                &format!(
+                    "SELECT {PLAN_COLUMNS} FROM plans WHERE org_id = $1 AND id = $2 FOR UPDATE"
+                ),
+                &[&org_id, &id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::NotFound)?;
+        let mut steps = read_plan_steps(&transaction, org_id, id).await?;
+        let mut plan = plan_from_row(&existing, None)?;
+
+        if let Some(title) = patch.title {
+            plan.title = title;
+        }
+        if let Some(description) = patch.description {
+            plan.description = description;
+        }
+        if let Some(status) = patch.status {
+            plan.status = status;
+        }
+        for report in &patch.steps {
+            let Some(step) = steps.iter_mut().find(|step| step.id == report.id) else {
+                return Err(StoreError::NotFound);
+            };
+            apply_step_progress(step, report, now);
+            transaction
+                .execute(
+                    "UPDATE plan_steps SET status = $3, result = $4, error = $5, \
+                       started_at = $6, completed_at = $7 \
+                     WHERE org_id = $1 AND id = $2",
+                    &[
+                        &org_id,
+                        &step.id,
+                        &step.status.as_str(),
+                        &step.result,
+                        &step.error,
+                        &step.started_at,
+                        &step.completed_at,
+                    ],
+                )
+                .await
+                .map_err(|error| StoreError::Database(error.to_string()))?;
+        }
+
+        let (total, completed) = plan_counts(&steps);
+        plan.total_steps = total;
+        plan.completed_steps = completed;
+        plan.ended_at = ended_at_for(is_terminal_plan(plan.status), plan.ended_at, now);
+        plan.updated_at = now;
+
+        transaction
+            .execute(
+                "UPDATE plans SET title = $3, description = $4, status = $5, \
+                   total_steps = $6, completed_steps = $7, updated_at = $8, ended_at = $9 \
+                 WHERE org_id = $1 AND id = $2",
+                &[
+                    &org_id,
+                    &id,
+                    &plan.title,
+                    &plan.description,
+                    &plan.status.as_str(),
+                    &plan.total_steps,
+                    &plan.completed_steps,
+                    &plan.updated_at,
+                    &plan.ended_at,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        plan.steps = Some(steps);
+        Ok(plan)
+    }
+
+    async fn list_runs(&self, org_id: &str, query: RunQuery) -> Result<Vec<Run>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let rows = transaction
+            .query(
+                &format!(
+                    "SELECT {RUN_COLUMNS} FROM runs \
+                     WHERE org_id = $1 \
+                       AND ($2::text IS NULL OR workspace_id = $2) \
+                       AND ($3::text IS NULL OR issue_id = $3) \
+                       AND ($4::text IS NULL OR plan_id = $4) \
+                       AND ($5::text[] IS NULL OR workspace_id = ANY($5)) \
+                       AND (NOT $6::bool OR status IN ('queued', 'running')) \
+                     ORDER BY started_at DESC, id ASC"
+                ),
+                &[
+                    &org_id,
+                    &query.workspace_id,
+                    &query.issue_id,
+                    &query.plan_id,
+                    &query.workspace_scope,
+                    &query.active_only,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+
+        let mut runs = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let id: String = row.get("id");
+            let artifacts = read_run_artifacts(&transaction, org_id, &id).await?;
+            runs.push(run_from_row(row, artifacts)?);
+        }
+        Ok(runs)
+    }
+
+    async fn get_run(&self, org_id: &str, id: &str) -> Result<Option<Run>, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        let Some(row) = transaction
+            .query_opt(
+                &format!("SELECT {RUN_COLUMNS} FROM runs WHERE org_id = $1 AND id = $2"),
+                &[&org_id, &id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let artifacts = read_run_artifacts(&transaction, org_id, id).await?;
+        Ok(Some(run_from_row(&row, artifacts)?))
+    }
+
+    async fn create_run(&self, input: NewRun) -> Result<Run, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, &input.org_id).await?;
+        let ended_at = ended_at_for(!input.status.is_active(), None, input.now);
+        let row = transaction
+            .query_one(
+                &format!(
+                    "INSERT INTO runs ({RUN_COLUMNS}) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+                     RETURNING {RUN_COLUMNS}"
+                ),
+                &[
+                    &input.id,
+                    &input.org_id,
+                    &input.workspace_id,
+                    &input.issue_id,
+                    &input.plan_id,
+                    &input.title,
+                    &input.kind.as_str(),
+                    &input.status.as_str(),
+                    &input.started_by.kind.as_str(),
+                    &input.started_by.id,
+                    &input.now,
+                    &input.now,
+                    &ended_at,
+                    &None::<String>,
+                    &None::<String>,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        replace_run_artifacts(&transaction, &input.org_id, &input.id, &input.artifacts).await?;
+        let run = run_from_row(&row, input.artifacts)?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(run)
+    }
+
+    async fn patch_run(
+        &self,
+        org_id: &str,
+        id: &str,
+        patch: RunPatch,
+        now: i64,
+    ) -> Result<Run, StoreError> {
+        let mut client = self.client().await?;
+        let transaction = self.scoped(&mut client, org_id).await?;
+        // `ended_at` is derived from the status the row ends up with, so the
+        // current status has to be read first — same reason as `patch_plan`.
+        let existing = transaction
+            .query_opt(
+                &format!("SELECT {RUN_COLUMNS} FROM runs WHERE org_id = $1 AND id = $2 FOR UPDATE"),
+                &[&org_id, &id],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?
+            .ok_or(StoreError::NotFound)?;
+        let mut run = run_from_row(&existing, Vec::new())?;
+
+        if let Some(status) = patch.status {
+            run.status = status;
+        }
+        if let Some(summary) = patch.summary {
+            run.summary = summary;
+        }
+        if let Some(error) = patch.error {
+            run.error = error;
+        }
+        run.ended_at = ended_at_for(!run.status.is_active(), run.ended_at, now);
+        run.updated_at = now;
+
+        transaction
+            .execute(
+                "UPDATE runs SET status = $3, summary = $4, error = $5, \
+                   updated_at = $6, ended_at = $7 \
+                 WHERE org_id = $1 AND id = $2",
+                &[
+                    &org_id,
+                    &id,
+                    &run.status.as_str(),
+                    &run.summary,
+                    &run.error,
+                    &run.updated_at,
+                    &run.ended_at,
+                ],
+            )
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+
+        run.artifacts = match patch.artifacts {
+            Some(artifacts) => {
+                replace_run_artifacts(&transaction, org_id, id, &artifacts).await?;
+                artifacts
+            }
+            None => read_run_artifacts(&transaction, org_id, id).await?,
+        };
+        transaction
+            .commit()
+            .await
+            .map_err(|error| StoreError::Database(error.to_string()))?;
+        Ok(run)
+    }
 }
 
 #[cfg(test)]
@@ -1287,5 +2269,437 @@ mod tests {
             .unwrap();
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].id, "iss_ada");
+    }
+
+    // ── Plans and Runs (Batch 7c) ────────────────────────────────────────────
+
+    fn new_plan(id: &str, org: &str) -> NewPlan {
+        NewPlan {
+            id: id.into(),
+            org_id: org.into(),
+            workspace_id: "proj-1".into(),
+            title: "Migrate the store".into(),
+            description: None,
+            status: PlanStatus::Executing,
+            steps: (0..3)
+                .map(|order| NewPlanStep {
+                    id: format!("{id}-step-{order}"),
+                    order,
+                    title: format!("Step {order}"),
+                    description: None,
+                    kind: PlanStepKind::AgentTurn,
+                    status: PlanStepStatus::Pending,
+                })
+                .collect(),
+            created_by: CollabActor::human(&ada(), None),
+            now: 100,
+        }
+    }
+
+    fn new_run(id: &str, org: &str) -> NewRun {
+        NewRun {
+            id: id.into(),
+            org_id: org.into(),
+            workspace_id: "proj-1".into(),
+            issue_id: Some("iss_1".into()),
+            plan_id: None,
+            title: "Fix the flake".into(),
+            kind: RunKind::AgentTask,
+            status: RunStatus::Running,
+            started_by: CollabActor::human(&ada(), None),
+            artifacts: vec![],
+            now: 100,
+        }
+    }
+
+    fn progress(id: &str, status: PlanStepStatus) -> PlanStepProgress {
+        PlanStepProgress {
+            id: id.into(),
+            status,
+            result: None,
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn plans_and_runs_never_cross_an_org_boundary() {
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+        store.create_run(new_run("run_1", "org_a")).await.unwrap();
+
+        assert_eq!(
+            store
+                .list_plans("org_b", PlanQuery::default())
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(store.get_plan("org_b", "plan_1").await.unwrap().is_none());
+        assert_eq!(
+            store
+                .list_runs("org_b", RunQuery::default())
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        assert!(store.get_run("org_b", "run_1").await.unwrap().is_none());
+        // And the patches, which would otherwise be a write across the boundary.
+        assert!(store
+            .patch_plan("org_b", "plan_1", PlanPatch::default(), 200)
+            .await
+            .is_err());
+        assert!(store
+            .patch_run("org_b", "run_1", RunPatch::default(), 200)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn a_listing_carries_no_steps_and_a_single_read_does() {
+        // `None` and `Some(vec![])` are different answers: "not asked for"
+        // against "asked, and there are none". A listing that sent the latter
+        // would make every plan look empty until the detail view loaded.
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+
+        let listed = store
+            .list_plans("org_a", PlanQuery::default())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].steps.is_none());
+        assert_eq!(listed[0].total_steps, 3);
+
+        let one = store.get_plan("org_a", "plan_1").await.unwrap().unwrap();
+        assert_eq!(one.steps.as_ref().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn progress_recomputes_the_counts_from_the_steps() {
+        // The client never supplies counts. Two writers reporting different
+        // progress for one plan is a disagreement with no tiebreak, and the
+        // steps are the tiebreak.
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+
+        let patched = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    steps: vec![
+                        progress("plan_1-step-0", PlanStepStatus::Completed),
+                        progress("plan_1-step-1", PlanStepStatus::InProgress),
+                    ],
+                    ..Default::default()
+                },
+                200,
+            )
+            .await
+            .unwrap();
+        assert_eq!((patched.total_steps, patched.completed_steps), (3, 1));
+
+        let steps = patched.steps.unwrap();
+        // A step nobody reported keeps what it had — a driver reporting step 2
+        // must not blank the others.
+        assert_eq!(steps[2].status, PlanStepStatus::Pending);
+        assert_eq!(steps[0].completed_at, Some(200));
+        assert_eq!(steps[1].started_at, Some(200));
+        assert_eq!(steps[1].completed_at, None);
+    }
+
+    #[tokio::test]
+    async fn a_retried_step_drops_the_outcome_it_no_longer_has() {
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+        // The realistic sequence: it ran, then it failed. A step that goes
+        // straight from `pending` to `failed` never started, and correctly ends
+        // up with no start time at all.
+        store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    steps: vec![progress("plan_1-step-0", PlanStepStatus::InProgress)],
+                    ..Default::default()
+                },
+                150,
+            )
+            .await
+            .unwrap();
+        store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    steps: vec![PlanStepProgress {
+                        id: "plan_1-step-0".into(),
+                        status: PlanStepStatus::Failed,
+                        result: None,
+                        error: Some("timed out".into()),
+                    }],
+                    ..Default::default()
+                },
+                200,
+            )
+            .await
+            .unwrap();
+
+        let retried = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    steps: vec![progress("plan_1-step-0", PlanStepStatus::InProgress)],
+                    ..Default::default()
+                },
+                300,
+            )
+            .await
+            .unwrap();
+        let step = &retried.steps.unwrap()[0];
+        // A stale error beside a step now marked in_progress is what makes a
+        // reader distrust the whole panel.
+        assert_eq!(step.error, None);
+        assert_eq!(step.completed_at, None);
+        // But the first start time survives: the step has been running since
+        // then, and resetting it would hide how long the retry loop has run.
+        assert_eq!(step.started_at, Some(150));
+    }
+
+    #[tokio::test]
+    async fn a_progress_report_for_a_step_the_plan_does_not_have_is_refused() {
+        // Inserting it would create a step with no order, no kind and no title,
+        // which is not a step.
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .patch_plan(
+                    "org_a",
+                    "plan_1",
+                    PlanPatch {
+                        steps: vec![progress("some-other-plans-step", PlanStepStatus::Completed)],
+                        ..Default::default()
+                    },
+                    200,
+                )
+                .await,
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_end_time_is_sticky_while_terminal_and_clears_on_the_way_out() {
+        let store = InMemoryStore::new();
+        store
+            .create_plan(new_plan("plan_1", "org_a"))
+            .await
+            .unwrap();
+
+        let done = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    status: Some(PlanStatus::Completed),
+                    ..Default::default()
+                },
+                200,
+            )
+            .await
+            .unwrap();
+        assert_eq!(done.ended_at, Some(200));
+
+        // A second terminal write keeps the first timestamp — a plan does not
+        // finish twice.
+        let again = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    status: Some(PlanStatus::Failed),
+                    ..Default::default()
+                },
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(again.ended_at, Some(200));
+
+        let reopened = store
+            .patch_plan(
+                "org_a",
+                "plan_1",
+                PlanPatch {
+                    status: Some(PlanStatus::Executing),
+                    ..Default::default()
+                },
+                400,
+            )
+            .await
+            .unwrap();
+        assert_eq!(reopened.ended_at, None);
+    }
+
+    #[tokio::test]
+    async fn a_run_listing_answers_the_n_agents_working_question() {
+        let store = InMemoryStore::new();
+        store.create_run(new_run("run_1", "org_a")).await.unwrap();
+        store
+            .create_run(NewRun {
+                status: RunStatus::Succeeded,
+                now: 50,
+                ..new_run("run_2", "org_a")
+            })
+            .await
+            .unwrap();
+
+        let all = store.list_runs("org_a", RunQuery::default()).await.unwrap();
+        // Newest first.
+        assert_eq!(
+            all.iter().map(|run| run.id.as_str()).collect::<Vec<_>>(),
+            ["run_1", "run_2"]
+        );
+        // A run created in a terminal state ends the moment it starts, rather
+        // than sitting open forever because nobody patched it.
+        assert_eq!(all[1].ended_at, Some(50));
+
+        let active = store
+            .list_runs(
+                "org_a",
+                RunQuery {
+                    active_only: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, "run_1");
+    }
+
+    #[tokio::test]
+    async fn a_run_listing_narrows_by_its_subject() {
+        let store = InMemoryStore::new();
+        store.create_run(new_run("run_1", "org_a")).await.unwrap();
+        store
+            .create_run(NewRun {
+                issue_id: None,
+                plan_id: Some("plan_1".into()),
+                ..new_run("run_2", "org_a")
+            })
+            .await
+            .unwrap();
+        store
+            .create_run(NewRun {
+                issue_id: None,
+                plan_id: None,
+                title: "Ad-hoc sweep".into(),
+                ..new_run("run_3", "org_a")
+            })
+            .await
+            .unwrap();
+
+        let by_issue = store
+            .list_runs(
+                "org_a",
+                RunQuery {
+                    issue_id: Some("iss_1".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(by_issue.len(), 1);
+        assert_eq!(by_issue[0].id, "run_1");
+
+        let by_plan = store
+            .list_runs(
+                "org_a",
+                RunQuery {
+                    plan_id: Some("plan_1".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(by_plan.len(), 1);
+        assert_eq!(by_plan[0].id, "run_2");
+
+        // The unattached one is reachable from the workspace and from nothing
+        // else — which is the whole reason it carries a title.
+        let all = store.list_runs("org_a", RunQuery::default()).await.unwrap();
+        assert_eq!(all.len(), 3);
+        assert!(all.iter().any(|run| run.title == "Ad-hoc sweep"));
+    }
+
+    #[tokio::test]
+    async fn patching_a_run_replaces_its_artifacts_rather_than_appending() {
+        let store = InMemoryStore::new();
+        store
+            .create_run(NewRun {
+                artifacts: vec![
+                    RunArtifact::new("PR #1", "https://example.com/pr/1").unwrap(),
+                    RunArtifact::new("Build", "https://example.com/build/1").unwrap(),
+                ],
+                ..new_run("run_1", "org_a")
+            })
+            .await
+            .unwrap();
+
+        // An engine that re-reports fewer artifacts withdrew one; appending
+        // would leave the withdrawn link on a colleague's screen forever.
+        let patched = store
+            .patch_run(
+                "org_a",
+                "run_1",
+                RunPatch {
+                    status: Some(RunStatus::Succeeded),
+                    summary: Some(Some("merged".into())),
+                    artifacts: Some(vec![
+                        RunArtifact::new("PR #1", "https://example.com/pr/1").unwrap()
+                    ]),
+                    ..Default::default()
+                },
+                200,
+            )
+            .await
+            .unwrap();
+        assert_eq!(patched.artifacts.len(), 1);
+        assert_eq!(patched.ended_at, Some(200));
+        assert_eq!(patched.summary.as_deref(), Some("merged"));
+
+        // Absent means "leave them alone", not "clear them".
+        let untouched = store
+            .patch_run(
+                "org_a",
+                "run_1",
+                RunPatch {
+                    error: Some(Some("flaked".into())),
+                    ..Default::default()
+                },
+                300,
+            )
+            .await
+            .unwrap();
+        assert_eq!(untouched.artifacts.len(), 1);
     }
 }
