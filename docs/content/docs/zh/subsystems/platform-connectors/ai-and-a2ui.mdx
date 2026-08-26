@@ -106,6 +106,49 @@ if (native.length > 0) {
 
 该段落告知助手哪些种类原生渲染、哪些仅经多步 UX 可用（不要假设同回合同步回复）、哪些降级为纯文本、哪些根本不能发出。一个可选的 `skillCapabilities` 条目声明本渠道可服务的内置技能族，使助手跳过逐工具探测。（本模块早前还有一条逐 surface 的 `evaluateSurfaceAgainstCapability` / `CapabilityEvaluation` 最坏情况阶梯；它没有运行时消费者，已于 2026-08-18 移除。）
 
+## A2UI 在哪里被打开
+
+IM 轮次上的 A2UI 过去是无条件的：只要适配器缓存了能力矩阵就强制开启，覆盖会话、
+角色和应用级的所有开关。理由本身站得住 —— IM 回复没有 artifact dock，做成按会话
+opt-in 会让每一条富回复退化成纯 markdown —— 但一个只想要纯文本的渠道因此完全没有
+表达的余地。
+
+现在它在两个 IM 作用域上都是三态，按 会话 → 机器人 → 渠道 解析：
+
+| `a2uiEnabled` | 含义 |
+| --- | --- |
+| `ConversationOverrideRow.a2uiEnabled` | 本会话的答案，优先于机器人 |
+| `AdapterInstanceRow.a2uiEnabled` | 本机器人的答案，优先于渠道能力 |
+| 两者都是 `undefined` | 按渠道支持情况 —— 也就是原先那个强制行为，保留为**默认值** |
+
+显式的 `false` 同时会跳过下面那段能力提示：对一个没有 A2UI 工具的轮次说明「哪些
+A2UI 组件在本渠道会降级」，是在描述模型并不具备的能力。两个作用域共用
+`ConversationBehaviorEditor` 里的同一行控件。
+
+## 入站媒体与模型
+
+入站的**字节**和入站的**文本**是两个决定，由 `lib/connectors/media-model-gate.ts`
+负责：默认是 `local_extract_only`，只有本地抽取器产出的文字（OCR、语音转写）—— 而且
+还要再过一遍 PII 闸 —— 才能成为模型输入。字节留在本机，收件箱照常渲染。
+
+`MediaModelGrant` 是会话说「可以」的方式。它按供应商限定、可撤销、可设过期，因为
+「可以给这台机器上跑的视觉模型看」和「可以上传给第三方」是两个不同的答案，不能在
+会话切换供应商时悄悄互相转化。任何一处含糊 —— 没有授权、授权已过期、授权没有列出
+任何供应商、授权没有点名本轮真正使用的供应商 —— 都回落到 `local_extract_only`。
+
+三个入口写的是同一个字段：
+
+| 界面 | 作用域 | 说明 |
+| --- | --- | --- |
+| 会话内同意卡片（`lib/connectors/hitl/media-grant.ts`） | 单个会话 | 当授权能解开被扣下的媒体时，每个会话只投一次；**从下一条消息开始生效**，见下 |
+| 会话覆盖里的 `MediaGrantEditor` | 单个会话 | 供应商范围、有效期、撤销；已过期的授权会被标注，而不是当作仍然生效来渲染 |
+| 机器人权限卡里的 `mediaModelPolicy` | 所有会话 | 授权叠加其上的底线；既不能限定供应商也不会过期，所以带警告 |
+
+卡片**不会**挂起当前轮次，也不会追溯解开触发它的那条消息。媒体闸跑在入站管线里、
+在轮次之前，在那里等一个人回答会把持久化的入站任务一直占住。`pii_gate` 造成的拦截
+同样不会弹卡片：那段文字没通过脱敏，而「同意发送媒体」不等于「同意发送其中的身份
+信息」。
+
 ## 回调往返
 
 交互组件需要让按钮点击找回其源 surface。每个平台映射器调用 `buildActionId(surfaceId, componentId, action)`（`_shared/a2ui-mapper.ts:119`），返回平台在回调时送回的带命名空间的值（Slack `action_id`、Telegram `callback_data`、Discord `custom_id`、飞书 `value.tag`）：

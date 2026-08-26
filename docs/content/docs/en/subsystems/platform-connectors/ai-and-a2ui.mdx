@@ -106,6 +106,58 @@ if (native.length > 0) {
 
 The section tells the assistant which kinds render natively, which are available only via multi-step UX (do not assume a synchronous same-turn reply), which degrade to plain text, and which must not be emitted at all. An optional `skillCapabilities` bullet declares the built-in skill families this channel serves so the assistant skips per-tool probing. (An earlier per-surface `evaluateSurfaceAgainstCapability` / `CapabilityEvaluation` worst-case ladder also lived in this module; it had no runtime consumer and was removed on 2026-08-18.)
 
+## Where A2UI is switched on
+
+A2UI on an IM turn used to be unconditional: any adapter with a cached
+capability matrix forced it on, overriding the session, character and app-level
+toggles. The reason was sound — an IM reply has no artifact dock, so an opt-in
+default degrades every rich reply to plain markdown — but a channel that wanted
+plain text had no way to say so.
+
+It is tri-state at both IM scopes, resolved conversation → bot → channel:
+
+| `a2uiEnabled` | Meaning |
+| --- | --- |
+| `ConversationOverrideRow.a2uiEnabled` | This chat's answer, whatever the bot says |
+| `AdapterInstanceRow.a2uiEnabled` | This bot's answer, whatever the channel supports |
+| both `undefined` | Whatever this channel supports — the old forced behaviour, kept as the DEFAULT |
+
+An explicit `false` also skips the capability-prompt section below: telling a
+turn with no A2UI tools which A2UI kinds degrade on its channel describes an
+ability the model does not have. Both scopes are edited from the same
+`ConversationBehaviorEditor` row.
+
+## Inbound media and the model
+
+Inbound bytes are a separate decision from inbound text, and
+`lib/connectors/media-model-gate.ts` owns it: the default is
+`local_extract_only`, so only text a LOCAL extractor produced (OCR,
+transcription) — itself re-gated for PII — may become model input. The bytes
+stay on the device and the Inbox still renders them.
+
+`MediaModelGrant` is how a conversation says otherwise. It is provider-scoped,
+revocable and optionally expiring, because "you may show this to the vision
+model on this machine" and "you may upload this to a third party" are different
+answers and one must not silently become the other when the conversation's
+provider changes. Every ambiguity — no grant, an expired one, one with no
+providers, one that does not name the provider this turn will use — resolves
+back to `local_extract_only`.
+
+It is granted in three places, all writing the same field:
+
+| Surface | Scope | Notes |
+| --- | --- | --- |
+| In-chat consent card (`lib/connectors/hitl/media-grant.ts`) | One conversation | Projected once per conversation when a grant would unblock withheld media. Applies from the next message — see below |
+| `MediaGrantEditor` on the conversation override | One conversation | Provider scope, expiry, revocation; marks an expired grant instead of rendering it as in force |
+| `mediaModelPolicy` in the bot's permissions card | Every conversation | The floor a grant sits on top of; cannot be provider-scoped or expired, hence the warning |
+
+The card does **not** suspend the turn or retroactively unblock the message that
+triggered it. The gate runs inside the inbound pipeline, before the turn, and
+awaiting a human there would hold the durable inbound job for as long as they
+take to answer. A `pii_gate` block never raises the card either: that text
+failed redaction, and consent to send media is not consent to send the
+identifiers inside it.
+
 ## Callback Round-trip
 
 Interactive components need their button presses to find their way back to the originating surface. Each platform mapper calls `buildActionId(surfaceId, componentId, action)` (`_shared/a2ui-mapper.ts:119`), which returns the namespaced value the platform delivers back on callback (Slack `action_id`, Telegram `callback_data`, Discord `custom_id`, Lark `value.tag`):
