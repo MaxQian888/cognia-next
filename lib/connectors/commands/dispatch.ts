@@ -39,6 +39,7 @@ import { resolveWorkflowByNameOrId } from "@/lib/workflow/library/lookup"
 import { resolveWorkflowDeployment } from "@/lib/db/workflow-deployments"
 import { matchDispatchRule } from "@/lib/connectors/dispatch-rules"
 import { resolveImEffectiveConfig } from "@/lib/connectors/effective-config"
+import { authorityFromApprovalMode } from "@/lib/connectors/composition/mode-projection"
 import { isBuiltInProviderId } from "@cognia/provider-types/built-in-provider-catalog"
 import { clearSessionBypass } from "@/lib/connectors/hitl/approval-registry"
 import {
@@ -521,14 +522,31 @@ export async function maybeHandleControlCommand(
     case "mode": {
       const v = arg.toLowerCase()
       if (v === "yolo" || v === "prompt") {
-        await persist({ approvalMode: v })
+        // `approvalMode` was a second permission model saying what the
+        // Authority axis already says. Write the axis and mirror the legacy
+        // field, so a client that predates the axis keeps reading the same
+        // answer and the two cannot drift while both exist.
+        await persist({ authority: authorityFromApprovalMode(v), approvalMode: v })
         await reply(R.confirmApprovalMode(v), "applied")
         return true
       }
       if (CONNECTOR_MODES.has(v)) {
         // Explicit mode edit: drop the assignment marker so a later unassign
-        // does not undo the operator's choice (slice 1A).
-        await persist({ mode: v as ConnectorMode, ...ASSIGNMENT_ROUTING_MARKER_CLEAR })
+        // does not undo the operator's choice (slice 1A), AND clear the axis
+        // fields so the mode the operator just typed is what routing reads.
+        //
+        // Clearing rather than mirroring is deliberate. Routing prefers the
+        // axes, so a stale `autonomy: "observe"` left behind by an assignment
+        // would silently swallow `/mode auto`. Writing the derived axes
+        // instead would be worse: `engagement` follows the execution target,
+        // so freezing it here would strand the conversation on whatever
+        // target it happened to have at the moment the mode was typed.
+        await persist({
+          mode: v as ConnectorMode,
+          autonomy: undefined,
+          engagement: undefined,
+          ...ASSIGNMENT_ROUTING_MARKER_CLEAR,
+        })
         await reply(R.confirmMode(v), "applied")
         return true
       }

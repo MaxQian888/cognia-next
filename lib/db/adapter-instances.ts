@@ -131,6 +131,13 @@ export type AdapterInstancePatch = Partial<
     // Slice 1B — bot-wide response SLA + escalation chain defaults.
     | "defaultSlaResponseMinutes"
     | "defaultEscalation"
+    // ADR-0117 — bot-wide composition axes. The row has carried these since
+    // the axis model landed, but the whitelist did not, so they could not be
+    // written even programmatically: the only values a conversation ever saw
+    // were the ones derived from `defaultMode`.
+    | "defaultAutonomy"
+    | "defaultEngagement"
+    | "defaultAuthority"
   >
 >
 

@@ -504,7 +504,12 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(h.patches[0].patch).toEqual({ approvalMode: "yolo" })
+    // `approvalMode` is the legacy mirror of the Authority axis: both are
+    // written so a client predating the axis reads the same answer.
+    expect(h.patches[0].patch).toEqual({
+      authority: "bypassPermissions",
+      approvalMode: "yolo",
+    })
   })
 
   it("rejects an invalid /mode with a usage hint and no mutation", async () => {
@@ -713,7 +718,10 @@ describe("maybeHandleControlCommand", () => {
         },
       ],
       ["/team off", { teamId: undefined, teamDisabled: true }],
-      ["/mode draft", { mode: "draft" }],
+      // An explicit mode edit also clears the axis fields: routing prefers
+      // them, so a stale `autonomy` left by an assignment would otherwise
+      // swallow the command outright.
+      ["/mode draft", { mode: "draft", autonomy: undefined, engagement: undefined }],
     ]
     for (const [text, expected] of cases) {
       const h = harness({ active: session("s1") })
@@ -739,7 +747,7 @@ describe("maybeHandleControlCommand", () => {
       RESOLVED,
       h.deps
     )
-    expect(Object.keys(h.patches[0].patch)).toEqual(["approvalMode"])
+    expect(Object.keys(h.patches[0].patch).sort()).toEqual(["approvalMode", "authority"])
   })
 
   it("/status surfaces bot-instance defaults (annotated) when no override is set", async () => {
