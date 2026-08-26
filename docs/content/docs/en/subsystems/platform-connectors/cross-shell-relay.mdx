@@ -90,6 +90,31 @@ Losing the runtime lease is a third state, distinct from unmounting and from def
 
 Relayed writes that reach a process which no longer owns the runtime throw `connector_runtime_not_owner`. **The wording is load-bearing**: `lib/queue/retry-policy.ts` classifies it as retryable, so the phone's durable queue replays across the handoff window (5 attempts ≈ 31 s) instead of dead-lettering the reply.
 
+## Configuring is not writing
+
+The relay is why "this shell cannot configure a bot" and "this shell cannot use
+one" are different sentences, and why the settings page says so. Inbox writes
+travel as four named companion RPCs; the connector *admin* surface — register
+an adapter, test a token, probe the bot identity, send a test message,
+reconnect, start the tunnel — calls the `connectors_*` command family, whose
+42 entries are all `target: service` with an empty `transports` list. A paired
+browser has a route to the first set and none to the second.
+
+`connectorControlReach` (`lib/connectors/control-reach.ts`) is what the
+settings controls gate on, and its three blocks are the three real answers:
+
+| Host | Inbox writes | Connector controls | What the screen says |
+| --- | --- | --- | --- |
+| Desktop | local | yes | nothing — everything works |
+| Cloud / mobile companion | relayed | no | `runs-on-host` — the bot runs on the paired host; replying and per-conversation settings keep working here |
+| Standalone browser / unpaired phone | refused | no | `no-runtime` — nothing runs bots here or anywhere this browser is paired to |
+| Headless | local | yes (no UI today) | — |
+
+Three controls answer `needs-desktop-shell` on every host but the desktop,
+including headless: the cloudflared child process, personal-WeChat QR login and
+Matrix password login need the desktop process itself, not a reachable runtime.
+See [ADR-0152](../../adr/0152-connector-controls-name-their-host).
+
 ## Shells that cannot write
 
 A standalone browser tab or unpaired phone can read the Inbox but never write to it — no adapter runs in a browser. That is permanent, so it is documented on all three axes CLAUDE.md rule 7 requires: the surface contract is `standalone: "explain"` with `standaloneInboxRequiresHost` carrying the reason, `StateCard.RequiresHost` renders it and points at `/pair`, and both are pinned by tests.

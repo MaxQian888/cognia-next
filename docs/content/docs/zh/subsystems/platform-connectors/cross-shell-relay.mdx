@@ -90,6 +90,28 @@ headless brain 没有 Tauri 运行时，因此 `lib/companion/host-event-publish
 
 到达已不再持有运行时的进程的中继写入会抛出 `connector_runtime_not_owner`。**措辞是承重的**：`lib/queue/retry-policy.ts` 将其归类为可重试，因此手机的持久化队列会跨越交接窗口重放（5 次尝试 ≈ 31 秒），而不是把这条回复投入死信。
 
+## 能用不等于能配
+
+中继正是「这个壳配不了机器人」和「这个壳用不了机器人」是两句不同的话的原因，也是设置页
+现在这么说的原因。收件箱的写入以四条具名伴侣 RPC 传输；而连接器的**管理面** —— 注册
+适配器、测试令牌、探测机器人身份、发测试消息、重连、启动隧道 —— 调用的是 `connectors_*`
+命令族，它的 42 条全部是 `target: service` 且 `transports` 为空。配对的浏览器有到前者的
+通路，没有到后者的。
+
+设置控件门禁于 `connectorControlReach`（`lib/connectors/control-reach.ts`），它的三种
+阻断就是三个真实答案：
+
+| 宿主 | 收件箱写入 | 连接器控件 | 界面会说 |
+| --- | --- | --- | --- |
+| 桌面 | 本地 | 可以 | 什么都不说 —— 一切正常 |
+| 云端 / 移动伴侣 | 中继 | 不可以 | `runs-on-host` —— 机器人跑在配对宿主上；回复和会话级设置在这里照常可用 |
+| 独立浏览器 / 未配对手机 | 拒绝 | 不可以 | `no-runtime` —— 这里和此浏览器配对的任何地方都没有机器人在跑 |
+| Headless | 本地 | 可以（今天没有界面） | — |
+
+有三个控件在除桌面外的每一种宿主上（含 headless）都回答 `needs-desktop-shell`：
+cloudflared 子进程、微信个人号扫码登录、Matrix 密码登录需要的是桌面进程本身，而不是一个
+可达的运行时。参见 [ADR-0152](../../adr/0152-connector-controls-name-their-host)。
+
 ## 无法写入的壳
 
 独立浏览器标签页或未配对手机可以读收件箱，但永远无法写入——浏览器里不运行任何 adapter。这是永久设计，因此按 CLAUDE.md 规则 7 要求的三个轴全部记录：surface contract 为 `standalone: "explain"` 并由 `standaloneInboxRequiresHost` 承载原因，`StateCard.RequiresHost` 渲染它并指向 `/pair`，两者均由测试钉住。
