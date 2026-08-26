@@ -27,6 +27,7 @@
       "noResults": "No platforms match your search.",
       "planned": "Planned",
       "plannedHint": "Not configurable yet — this platform is on the roadmap.",
+      "providedBy": "Provided by the “{plugin}” plugin",
       "searchPlaceholder": "Search platforms…",
       "title": "Add a connector"
     },
@@ -1856,5 +1857,17 @@
     "welcomeLabel": "Welcome message (optional)",
     "welcomePlaceholder": "Hi! How can I help you today?",
     "testConflictLiveConnection": "This bot already has its one WeCom connection open. Stop the bot before testing different credentials — WeCom allows only one connection per bot, and testing now would drop the live one."
+  },
+  "pluginConnector": {
+    "create": "Add connector",
+    "createTitle": "Add {name} connector",
+    "credentialsRequired": "Fill in: {fields}",
+    "editTitle": "Configure {name}",
+    "nameLabel": "Display name",
+    "nameRequired": "Give this connector a name.",
+    "providedBy": "Provided by the “{plugin}” plugin.",
+    "save": "Save",
+    "saved": "Connector saved",
+    "unregistered": "No enabled plugin provides the “{kind}” connector any more. Its settings are kept, but it cannot start until the plugin is enabled again."
   }
 }

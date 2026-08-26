@@ -15,6 +15,7 @@ import {
   isUsableConfigSchema,
   listPluginConnectors,
   listPluginConnectorsFor,
+  pluginConnectorSecretFields,
   registerPluginConnector,
   unregisterPluginConnectors,
 } from "./plugin-connector-registry"
@@ -186,5 +187,45 @@ describe("buildPluginAdapter", () => {
 
   it("returns null for an unowned kind, so the row is explainable rather than fatal", async () => {
     expect(await buildPluginAdapter({ id: "row-1", type: "mastodon" })).toBeNull()
+  })
+})
+
+/**
+ * The schema is the only place an author can say "this one is a secret", and
+ * getting it wrong writes a bot token into `settings` — a plain Dexie row that
+ * backups and exports copy. Both JSON-Schema spellings are honoured because
+ * both are what authors actually write.
+ */
+describe("pluginConnectorSecretFields", () => {
+  it("reads draft-07 writeOnly", () => {
+    expect(
+      pluginConnectorSecretFields({
+        type: "object",
+        properties: { host: { type: "string" }, token: { type: "string", writeOnly: true } },
+      })
+    ).toEqual(["token"])
+  })
+
+  it("reads format: password", () => {
+    expect(
+      pluginConnectorSecretFields({
+        properties: { apiKey: { type: "string", format: "password" } },
+      })
+    ).toEqual(["apiKey"])
+  })
+
+  it("treats an ordinary field as ordinary", () => {
+    expect(pluginConnectorSecretFields({ properties: { endpoint: { type: "string" } } })).toEqual(
+      []
+    )
+  })
+
+  it("says nothing about a schema the host already refuses", () => {
+    expect(pluginConnectorSecretFields(null)).toEqual([])
+    expect(pluginConnectorSecretFields({ type: "array" })).toEqual([])
+  })
+
+  it("tolerates a schema with no properties at all", () => {
+    expect(pluginConnectorSecretFields({ type: "object" })).toEqual([])
   })
 })

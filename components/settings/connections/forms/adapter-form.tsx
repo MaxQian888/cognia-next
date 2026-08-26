@@ -1,11 +1,22 @@
 "use client"
 
-// Generic JSON Schema (draft-07) driven form.
-// Renders fields based on the schema's `properties` object.
-// Supported field types: string → Input, boolean → Switch, enum → Select.
-// Fields whose names appear in `secretFields` are rendered as
-// type="password" inputs and are NOT included in the returned `values`
-// object — the parent is responsible for calling connectorsKeyringSet.
+/**
+ * Generic JSON-Schema (draft-07) driven settings form.
+ *
+ * The configuration surface for connector kinds contributed by plugins. A
+ * plugin can own a `PlatformKind`, run the full supervisor path and appear in
+ * the Inbox, but until now it could not be CONFIGURED: the picker's kind list
+ * was eleven hardcoded literals and this generator — written for exactly this
+ * job, `secretFields` and all — sat in the unreachable-components baseline.
+ *
+ * string → Input, boolean → Switch, enum → Select. Fields named in
+ * `secretFields` (derived from the schema by `pluginConnectorSecretFields`)
+ * render the shared `CredentialInput` and are bound to a `useAdapterCredentials`
+ * controller, so a plugin connector gets exactly what a built-in one has:
+ * values stored in the OS keyring rather than in a Dexie row, prefilled masked
+ * on reopen, revealable, and honest about a value the host refused to read.
+ * They are never part of the submitted `values`.
+ */
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
@@ -13,6 +24,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { CredentialInput } from "@/components/settings/connections/forms/_shared/credential-input"
+import type { UseAdapterCredentialsResult } from "@/hooks/connectors/use-adapter-credentials"
 import {
   Select,
   SelectContent,
@@ -28,6 +41,10 @@ export interface JsonSchemaProperty {
   description?: string
   enum?: string[]
   default?: unknown
+  /** draft-07: may be sent but never returned. Treated as a secret. */
+  writeOnly?: boolean
+  /** `"password"` is the other spelling of the same intent. */
+  format?: string
 }
 
 export interface JsonSchema {
@@ -39,12 +56,15 @@ export interface JsonSchema {
 export interface AdapterFormProps {
   schema: JsonSchema
   initialValues?: Record<string, unknown>
-  /** Field names that hold secrets — rendered as password inputs. */
+  /** Field names that hold secrets — rendered as `CredentialInput`. */
   secretFields?: string[]
-  onSubmit: (
-    values: Record<string, unknown>,
-    secrets: Record<string, string>
-  ) => void | Promise<void>
+  /**
+   * Keyring-backed state for the secret fields. Required whenever
+   * `secretFields` is non-empty: the form deliberately has no local secret
+   * state, so there is no path on which a secret reaches `values`.
+   */
+  credentials?: UseAdapterCredentialsResult
+  onSubmit: (values: Record<string, unknown>) => void | Promise<void>
   onCancel?: () => void
   submitLabel?: string
   disabled?: boolean
@@ -61,6 +81,7 @@ export function AdapterForm({
   schema,
   initialValues = {},
   secretFields = [],
+  credentials,
   onSubmit,
   onCancel,
   submitLabel,
@@ -82,22 +103,13 @@ export function AdapterForm({
     return init
   })
 
-  // Secret field state (separate; not mixed into values)
-  const [secrets, setSecrets] = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {}
-    for (const key of secretFields) {
-      init[key] = ""
-    }
-    return init
-  })
-
   const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     try {
-      await onSubmit(values, secrets)
+      await onSubmit(values)
     } finally {
       setSubmitting(false)
     }
@@ -105,10 +117,6 @@ export function AdapterForm({
 
   const updateValue = (key: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const updateSecret = (key: string, value: string) => {
-    setSecrets((prev) => ({ ...prev, [key]: value }))
   }
 
   return (
@@ -180,13 +188,13 @@ export function AdapterForm({
             {prop.description && (
               <p className="text-xs text-muted-foreground">{prop.description}</p>
             )}
-            {isSecret ? (
-              <Input
+            {isSecret && credentials ? (
+              <CredentialInput
                 id={fieldId}
-                type="password"
-                autoComplete="new-password"
-                value={secrets[key] ?? ""}
-                onChange={(e) => updateSecret(key, e.target.value)}
+                sensitive
+                value={credentials.value(key)}
+                status={credentials.status(key)}
+                onChange={(next) => credentials.set(key, next)}
                 disabled={disabled || submitting}
                 placeholder={t("enterField", { label })}
               />

@@ -26,6 +26,16 @@ jest.mock("@/hooks/use-tunnel-status", () => ({
   useTunnelStatus: () => ({ running: false, url: null, loading: false }),
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
+const mockPluginConnectors = jest.fn(() => [] as unknown[])
+jest.mock("@/lib/connectors/plugin-connector-registry", () => {
+  const actual = jest.requireActual("@/lib/connectors/plugin-connector-registry")
+  return { ...actual, listPluginConnectors: () => mockPluginConnectors() }
+})
+jest.mock("../forms/plugin-connector-config", () => ({
+  PluginConnectorConfigDialog: ({ kind }: { kind: string }) => (
+    <div data-testid="plugin-connector-dialog">{kind}</div>
+  ),
+}))
 
 // Each AdapterListRow calls useAdapterHealth → useLiveQuery. Stub it to a
 // nominal state so it doesn't consume the modulo-2 useLiveQuery sequence
@@ -448,5 +458,47 @@ describe("AdaptersTab", () => {
     render(<AdaptersTab />)
     const badge = screen.getByTestId(`adapter-pending-${baseAdapter.id}`)
     expect(badge.textContent).toMatch(/1/)
+  })
+
+  /**
+   * A plugin could always own a `PlatformKind` and run the full supervisor
+   * path — it just could not be configured, because this list was eleven
+   * hardcoded literals and the picker never showed the kind.
+   */
+  it("offers a contributed kind in the picker, named by its contribution", async () => {
+    mockPluginConnectors.mockReturnValue([
+      {
+        pluginId: "acme-chat",
+        type: "acme",
+        def: { type: "acme", displayName: "Acme Chat" },
+      },
+    ])
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    expect(await screen.findByText("Acme Chat")).toBeInTheDocument()
+  })
+
+  it("opens the schema-driven dialog for a contributed kind", async () => {
+    mockPluginConnectors.mockReturnValue([
+      { pluginId: "acme-chat", type: "acme", def: { type: "acme", displayName: "Acme Chat" } },
+    ])
+    setupAdapterQueries({ adapters: [baseAdapter] })
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByTestId("add-adapter-button"))
+    fireEvent.click(await screen.findByTestId("add-connector-card-acme"))
+    expect(await screen.findByTestId("plugin-connector-dialog")).toHaveTextContent("acme")
+  })
+
+  // The Configure button on a row whose plugin was since disabled used to be a
+  // no-op; the dialog is what explains the implementation is gone.
+  it("still opens a row whose contributing plugin is no longer registered", async () => {
+    mockPluginConnectors.mockReturnValue([])
+    setupAdapterQueries({
+      adapters: [{ ...baseAdapter, id: "px-1", type: "acme", displayName: "Acme prod" }],
+    })
+    render(<AdaptersTab />)
+    fireEvent.click(screen.getByText("Configure"))
+    expect(await screen.findByTestId("plugin-connector-dialog")).toHaveTextContent("acme")
   })
 })

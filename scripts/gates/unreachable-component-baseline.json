@@ -10,7 +10,6 @@
     "components/inbox/outbound-status-pill.tsx",
     "components/mobile/settings/mobile-settings-panel.tsx",
     "components/settings/built-in-skills/index.tsx",
-    "components/settings/connections/forms/adapter-form.tsx",
     "components/settings/connections/tabs/tunnel-tab.tsx",
     "components/settings/developer/lsp-dev-toggle.tsx",
     "components/workflow/editor/chat/sticky-proposal-banner.tsx"

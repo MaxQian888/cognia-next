@@ -28092,6 +28092,7 @@
           "noResults": "没有匹配的平台。",
           "planned": "计划中",
           "plannedHint": "暂不可配置——该平台已列入路线图。",
+          "providedBy": "由「{plugin}」插件提供",
           "searchPlaceholder": "搜索平台…",
           "title": "添加连接器"
         },
@@ -29346,6 +29347,18 @@
         "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
         "skillPlaceholder": "lark.calendar.*, lark.task.list",
         "title": "权限"
+      },
+      "pluginConnector": {
+        "create": "添加连接器",
+        "createTitle": "添加 {name} 连接器",
+        "credentialsRequired": "请填写：{fields}",
+        "editTitle": "配置 {name}",
+        "nameLabel": "显示名称",
+        "nameRequired": "请为这个连接器起个名字。",
+        "providedBy": "由「{plugin}」插件提供。",
+        "save": "保存",
+        "saved": "连接器已保存",
+        "unregistered": "已经没有启用的插件提供「{kind}」连接器了。它的设置会保留，但在插件重新启用之前无法启动。"
       },
       "qqOfficial": {
         "adapterCreated": "已添加 QQ 官方机器人",

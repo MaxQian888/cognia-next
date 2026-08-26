@@ -10,7 +10,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow, OutboundJobRow } from "@/lib/db/connector-types"
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import { isPlatformKind, type PlatformKind } from "@/types/connectors/platform-kind"
+import { listPluginConnectors } from "@/lib/connectors/plugin-connector-registry"
+import { PluginConnectorConfigDialog } from "../forms/plugin-connector-config"
 import { TelegramConfigDialog } from "../forms/telegram-config"
 import { LarkConfigDialog } from "../forms/lark-config"
 import { DiscordConfigDialog } from "../forms/discord-config"
@@ -30,9 +32,11 @@ import { useSelectedAdapter } from "../adapters/use-selected-adapter"
 import { listConnectorMetadata } from "@/lib/connectors/adapter-metadata"
 import { SettingsListDetail } from "@/components/settings/common/settings-master-detail"
 
-// Platform kinds whose configuration dialog is wired into this tab. Each ships
-// with a dialog under `../forms/`; the dispatcher below picks the right one by
-// `row.type`. This list also drives the AddConnectorGrid picker.
+// Built-in platform kinds with a bespoke configuration dialog under
+// `../forms/`; the dispatcher below picks one by `row.type`. Plugin-contributed
+// kinds are NOT listed here — they are resolved at render time from the
+// registry and configured by the schema-driven `PluginConnectorConfigDialog`,
+// because their set changes whenever a plugin is enabled or disabled.
 type ConfigurableKind =
   | "telegram"
   | "lark"
@@ -72,8 +76,12 @@ function isConfigurableKind(kind: PlatformKind): kind is ConfigurableKind {
 }
 
 type EditingDialog = {
-  /** Which config dialog is currently visible; null = none. */
-  kind: ConfigurableKind
+  /**
+   * Which config dialog is currently visible; null = none. A kind outside
+   * `ConfigurableKind` is a plugin contribution and opens the schema-driven
+   * dialog instead.
+   */
+  kind: PlatformKind
   /** Pre-fill row for edit; null = adding a new instance. */
   row: AdapterInstanceRow | null
 }
@@ -91,6 +99,33 @@ export function AdaptersTab() {
     () =>
       typeof window === "undefined" ? Promise.resolve([]) : getDb().adapterInstances.toArray(),
     []
+  )
+
+  // Contributions are registered when a plugin is enabled and dropped when it
+  // is disabled, so the picker's kind list cannot be a module constant. Keyed
+  // on the adapter list because that is what re-renders this tab; a plugin
+  // toggled while the tab is open lands on the next configuration change.
+  const pluginConnectors = useMemo(() => listPluginConnectors(), [])
+  const pluginKinds = useMemo(
+    () => pluginConnectors.map((registration) => registration.type),
+    [pluginConnectors]
+  )
+  const pickerKinds = useMemo<PlatformKind[]>(
+    () => [...CONFIGURABLE_KINDS, ...pluginKinds],
+    [pluginKinds]
+  )
+  const pluginLabels = useMemo(
+    () =>
+      new Map(
+        pluginConnectors.map((registration) => [
+          registration.type,
+          {
+            label: registration.def.displayName ?? registration.type,
+            description: registration.pluginId,
+          },
+        ])
+      ),
+    [pluginConnectors]
   )
 
   // Per-adapter pending+sending count for the row badge. Reads the
@@ -136,14 +171,17 @@ export function AdaptersTab() {
     [adapters, selectedAdapterId]
   )
 
+  // A row whose plugin has since been disabled still opens: the schema-driven
+  // dialog says the implementation is gone rather than the button doing
+  // nothing, which is what a kind outside the hardcoded list used to do.
   const onConfigure = (row: AdapterInstanceRow) => {
-    if (isConfigurableKind(row.type)) {
+    if (isConfigurableKind(row.type) || !isPlatformKind(row.type)) {
       setEditing({ kind: row.type, row })
     }
   }
 
   const onPickPlatform = (kind: PlatformKind) => {
-    if (isConfigurableKind(kind)) {
+    if (isConfigurableKind(kind) || pluginKinds.includes(kind)) {
       setAddOpen(false)
       setEditing({ kind, row: null })
     }
@@ -274,7 +312,8 @@ export function AdaptersTab() {
       <AddConnectorGrid
         open={addOpen}
         onOpenChange={setAddOpen}
-        kinds={CONFIGURABLE_KINDS}
+        kinds={pickerKinds}
+        labelsByKind={pluginLabels}
         plannedKinds={PLANNED_KINDS}
         configuredCounts={configuredCounts}
         onPick={onPickPlatform}
@@ -284,6 +323,20 @@ export function AdaptersTab() {
        * active `editing.kind` is open at any time so cross-platform state
        * cannot leak between forms. Mounting them all lets the dispatcher
        * stay a pure switch on `editing.kind`. */}
+      {/* Schema-driven fallback for every contributed kind. Mounted once and
+       * keyed by kind so switching between two contributions cannot carry
+       * state, the same rule the bespoke dialogs follow by being separate
+       * components. */}
+      {editing && !isConfigurableKind(editing.kind) && (
+        <PluginConnectorConfigDialog
+          key={editing.kind}
+          open
+          kind={editing.kind}
+          onOpenChange={closeDialog}
+          onCreated={setSelectedAdapterId}
+          row={editing.row}
+        />
+      )}
       <TelegramConfigDialog
         open={editing?.kind === "telegram"}
         onOpenChange={closeDialog}

@@ -205,6 +205,34 @@ export function isUsableConfigSchema(schema: unknown): boolean {
   return typeof obj.properties === "object" && !Array.isArray(obj.properties)
 }
 
+/**
+ * Which fields of a contributed schema hold secrets.
+ *
+ * Derived from the schema rather than a new `PluginConnectorDef` field,
+ * because JSON Schema already says it two ways and both are what an author
+ * reaches for: `writeOnly` (draft-07, "may be sent but never returned") and
+ * `format: "password"` (the annotation that means "mask this"). A plugin
+ * author who writes either gets the same credential handling a built-in
+ * platform has — stored in the OS keyring, prefilled masked, revealable —
+ * without the host inventing a private vocabulary for it.
+ *
+ * Secrets are NEVER persisted into `AdapterInstanceRow.settings`; that is the
+ * whole point of separating them, and it is why the form generator keeps two
+ * value maps rather than one.
+ */
+export function pluginConnectorSecretFields(schema: unknown): string[] {
+  if (!isUsableConfigSchema(schema)) return []
+  const properties = (schema as { properties?: Record<string, unknown> }).properties
+  if (!properties) return []
+  return Object.entries(properties)
+    .filter(([, prop]) => {
+      if (!prop || typeof prop !== "object") return false
+      const p = prop as { writeOnly?: unknown; format?: unknown }
+      return p.writeOnly === true || p.format === "password"
+    })
+    .map(([name]) => name)
+}
+
 /** Resolve the owner of a connector kind, if any. */
 export function getPluginConnector(type: string): PluginConnectorRegistration | undefined {
   return byKind.get(type)

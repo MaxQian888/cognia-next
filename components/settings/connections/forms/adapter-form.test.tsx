@@ -3,7 +3,33 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import type { UseAdapterCredentialsResult } from "@/hooks/connectors/use-adapter-credentials"
+
 import { AdapterForm, type JsonSchema } from "./adapter-form"
+
+/**
+ * The keyring controller as the form sees it. Stubbed rather than driven
+ * through Dexie + the keyring commands: this suite is about the generator,
+ * and `use-adapter-credentials` has its own.
+ */
+function fakeCredentials(
+  overrides: Partial<UseAdapterCredentialsResult> = {}
+): UseAdapterCredentialsResult {
+  return {
+    value: () => "",
+    status: () => "new",
+    set: jest.fn(),
+    dirty: false,
+    intent: () => "unchanged",
+    missingRequired: () => [],
+    persist: jest.fn(async () => undefined),
+    derivedPresence: () => undefined,
+    loading: false,
+    retry: jest.fn(),
+    refused: false,
+    ...overrides,
+  } as unknown as UseAdapterCredentialsResult
+}
 
 // ---------------------------------------------------------------------------
 // Mock schema fixtures
@@ -65,29 +91,59 @@ describe("AdapterForm — string fields", () => {
     expect(nameLabel.innerHTML).toContain("*")
   })
 
-  it("renders secret fields as password inputs", () => {
-    render(<AdapterForm schema={MIXED_SCHEMA} secretFields={["token"]} onSubmit={jest.fn()} />)
+  it("renders secret fields masked, through the shared credential input", () => {
+    render(
+      <AdapterForm
+        schema={MIXED_SCHEMA}
+        secretFields={["token"]}
+        credentials={fakeCredentials()}
+        onSubmit={jest.fn()}
+      />
+    )
     const tokenInput = screen.getByLabelText(/bot token/i) as HTMLInputElement
     expect(tokenInput.type).toBe("password")
   })
 
-  it("calls onSubmit with non-secret values + secrets separately", async () => {
+  /**
+   * The separation is the point: a secret typed here goes to the keyring
+   * controller, never into `values`, which is what gets written to
+   * `AdapterInstanceRow.settings` — a plain Dexie row that backups copy.
+   */
+  it("routes a secret to the credential controller and keeps it out of values", async () => {
     const handleSubmit = jest.fn()
-    render(<AdapterForm schema={MIXED_SCHEMA} secretFields={["token"]} onSubmit={handleSubmit} />)
+    const credentials = fakeCredentials()
+    render(
+      <AdapterForm
+        schema={MIXED_SCHEMA}
+        secretFields={["token"]}
+        credentials={credentials}
+        onSubmit={handleSubmit}
+      />
+    )
 
-    // Fill in the token (secret)
     fireEvent.change(screen.getByLabelText(/bot token/i), {
       target: { value: "my-secret-token" },
     })
-    // Submit the form
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(credentials.set).toHaveBeenCalledWith("token", "my-secret-token")
 
-    await waitFor(() => {
-      expect(handleSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({ enabled: false }), // non-secrets
-        expect.objectContaining({ token: "my-secret-token" }) // secrets
-      )
-    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(handleSubmit).toHaveBeenCalled())
+    expect(handleSubmit.mock.calls[0][0]).not.toHaveProperty("token")
+    expect(handleSubmit.mock.calls[0][0]).toEqual(expect.objectContaining({ enabled: false }))
+  })
+
+  // The controller's own state drives the field, so a stored value shows up
+  // prefilled on reopen exactly as it does on a built-in platform form.
+  it("shows the value the controller already read back", () => {
+    render(
+      <AdapterForm
+        schema={MIXED_SCHEMA}
+        secretFields={["token"]}
+        credentials={fakeCredentials({ value: () => "stored-token", status: () => "loaded" })}
+        onSubmit={jest.fn()}
+      />
+    )
+    expect((screen.getByLabelText(/bot token/i) as HTMLInputElement).value).toBe("stored-token")
   })
 })
 

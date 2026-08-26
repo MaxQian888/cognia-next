@@ -43,6 +43,12 @@ export interface AddConnectorGridProps {
    * "Planned" badge; never passed to `onPick`.
    */
   plannedKinds?: readonly PlatformKind[]
+  /**
+   * Names for kinds outside the built-in vocabulary. A plugin contribution has
+   * no `platforms.*` message, so without this every contributed connector would
+   * render as "Unknown" — the label comes from the contribution itself.
+   */
+  labelsByKind?: ReadonlyMap<string, { label: string; description: string }>
   /** Count of already-configured instances per platform kind. */
   configuredCounts: Map<PlatformKind, number>
   /** Called with the chosen kind; the parent opens its config dialog. */
@@ -56,6 +62,7 @@ export function AddConnectorGrid({
   onOpenChange,
   kinds,
   plannedKinds = NO_PLANNED_KINDS,
+  labelsByKind,
   configuredCounts,
   onPick,
 }: AddConnectorGridProps) {
@@ -65,10 +72,13 @@ export function AddConnectorGrid({
   const items = useMemo(() => {
     const toItem = (kind: PlatformKind, planned: boolean) => {
       const meta = getPlatformMeta(kind)
+      const contributed = labelsByKind?.get(kind)
       return {
         kind,
-        label: t(`platforms.${meta.labelKey}`),
-        description: t(`platformDescriptions.${meta.labelKey}`),
+        label: contributed?.label ?? t(`platforms.${meta.labelKey}`),
+        description: contributed
+          ? t("addConnector.providedBy", { plugin: contributed.description })
+          : t(`platformDescriptions.${meta.labelKey}`),
         Icon: meta.Icon,
         count: configuredCounts.get(kind) ?? 0,
         planned,
@@ -89,7 +99,7 @@ export function AddConnectorGrid({
         it.description.toLowerCase().includes(q) ||
         it.kind.toLowerCase().includes(q)
     )
-  }, [kinds, plannedKinds, configuredCounts, query, t])
+  }, [kinds, plannedKinds, labelsByKind, configuredCounts, query, t])
 
   const handlePick = (kind: PlatformKind) => {
     setQuery("")
