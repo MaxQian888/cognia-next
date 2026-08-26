@@ -1271,6 +1271,11 @@
       "schedule_tools": "Schedule Tools"
     },
     "hostCapabilities": "主机能力",
+    "mediaPolicy": "附件与模型",
+    "mediaPolicyCloud": "发送原始附件",
+    "mediaPolicyHelp": "机器人级的底线。单个会话可以在此之上按供应商授权、并可随时撤销；这个设置既不能限定供应商也不会过期。",
+    "mediaPolicyLocal": "仅本地识别",
+    "mediaPolicyWarning": "这个机器人在所有会话中收到的每一张图片、每一段语音、每一个文件，都会被上传给它的模型供应商。",
     "save": "保存",
     "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
     "skillPlaceholder": "lark.calendar.*, lark.task.list",

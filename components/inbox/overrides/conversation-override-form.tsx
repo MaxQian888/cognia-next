@@ -40,6 +40,8 @@ import { parseConversationKey } from "@/types/connectors/event"
 import type { EscalationPolicy } from "@/types/connectors/escalation"
 import { EscalationPolicyEditor } from "./escalation-policy-editor"
 import { ConversationTriggerOverride } from "./conversation-trigger-override"
+import { MediaGrantEditor } from "./media-grant-editor"
+import type { MediaModelGrant } from "@/lib/connectors/media-model-gate"
 import { updateAdapterConfigSection, type AdapterInstancePatch } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -229,6 +231,10 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   // is routinely what the conversation is about. `false` is the only value
   // worth persisting.
   const [allowOcr, setAllowOcr] = useState(initialRow?.allowOcr !== false)
+  // The durable half of media consent; the in-chat card writes the same field.
+  const [mediaGrant, setMediaGrant] = useState<MediaModelGrant | undefined>(
+    initialRow?.mediaModelGrant
+  )
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   // The composition axes. `undefined` means "follow the layer below", which is
   // what an unset field has always meant here.
@@ -395,6 +401,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           replyQuoting: replyQuoting ? undefined : false,
           allowComputerUse: allowComputerUse ? true : undefined,
           allowOcr: allowOcr ? undefined : false,
+          mediaModelGrant: mediaGrant,
           a2uiEnabled: a2ui,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           allowScheduleTools: allowScheduleTools ? true : undefined,
@@ -687,6 +694,25 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
           </div>
         </div>
+        {/* Rendered only once the bot row is readable: the switch seeds the
+         * grant with the provider this conversation resolves to, and seeding
+         * from an unloaded row would produce a grant naming nobody — which the
+         * resolver reads as no grant at all. */}
+        {adapterRow && (
+          <div className="border-t pt-4">
+            <MediaGrantEditor
+              value={mediaGrant}
+              onChange={setMediaGrant}
+              providers={Array.from(
+                new Set(providerModelOptions.map((option) => option.providerId))
+              )}
+              // What this conversation actually resolves to, not just what it
+              // overrides — a grant seeded from an empty override would name no
+              // provider, and a grant naming none grants nothing.
+              effectiveProvider={providerOverride.trim() || adapterRow.defaultProvider}
+            />
+          </div>
+        )}
         {/* Default-ALLOW, and the only member of this group that is — no
          * destructive marker, because switching it OFF is the restriction. */}
         <div className="flex items-start gap-3 border-t pt-4">

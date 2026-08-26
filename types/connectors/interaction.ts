@@ -225,6 +225,14 @@ export type ConnectorCallbackBindingKind =
   // proposed plan, and a rejection's feedback re-enters the lead's existing
   // re-planning loop. See `lib/connectors/hitl/plan-approval.ts`.
   | "plan_approve"
+  // A2UI media-consent card. A button press writes (or withdraws) the
+  // conversation's `MediaModelGrant`, which is what makes
+  // `mediaModelPolicy: "allow_cloud_binary"` reachable at all. Payload carries
+  // `{ decision, provider }`; the grant is provider-scoped because "the local
+  // vision model" and "a third party" are different answers. Re-clickable on
+  // purpose — the same card is how a grant is withdrawn. See
+  // `lib/connectors/hitl/media-grant.ts`.
+  | "media_grant"
 
 /**
  * Persisted association between an outbound A2UI surface and the

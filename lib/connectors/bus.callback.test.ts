@@ -922,3 +922,83 @@ describe("callback authorization guard (plan 2026-07-24 Phase 2)", () => {
     expect(startMock).toHaveBeenCalledTimes(1)
   })
 })
+
+/**
+ * The media-consent card is the ONLY writer of `mediaModelGrant`, which is in
+ * turn the only thing that makes `mediaModelPolicy: "allow_cloud_binary"`
+ * reachable. If the press does not land on the row, inbound images stay
+ * withheld from the model forever and the card is decoration.
+ */
+describe("media_grant callback", () => {
+  const conversationKey = "telegram:adp_tg:c_media"
+
+  async function press(decision: string, actionId: string) {
+    await recordCallbackBinding({
+      adapterId: "adp_tg",
+      actionId,
+      kind: "media_grant",
+      surfaceId: "media_grant:1",
+      componentId: "session",
+      conversationKey,
+      payload: { decision, provider: "anthropic" },
+    })
+    const bus = getBus()
+    const handler = jest.fn<ReturnType<CallbackHandler>, Parameters<CallbackHandler>>()
+    bus.callbackHandler = handler
+    await bus.dispatchConnectorCallback(
+      makeEvent({ triggerId: actionId, value: actionId, conversationKey })
+    )
+    return handler
+  }
+
+  beforeEach(async () => {
+    await getDb().conversationOverrides.put({
+      id: "co_media",
+      conversationKey,
+      sessionId: "ses_media",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+  })
+
+  it("writes a provider-scoped grant and never falls through to the model", async () => {
+    const handler = await press("allow_always", "mga:b1")
+    expect(handler).not.toHaveBeenCalled()
+    const row = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(conversationKey)
+      .first()
+    expect(row?.mediaModelGrant).toMatchObject({
+      policy: "allow_cloud_binary",
+      providers: ["anthropic"],
+    })
+    expect(row?.mediaModelGrant).not.toHaveProperty("expiresAt")
+  })
+
+  it("gives the 24h choice an expiry", async () => {
+    await press("allow_24h", "mgs:b2")
+    const row = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(conversationKey)
+      .first()
+    expect(typeof row?.mediaModelGrant?.expiresAt).toBe("number")
+  })
+
+  // "Not now" on an already-granted chat means withdraw; leaving the previous
+  // grant in force would make the button a lie.
+  it("withdraws an existing grant on a refusal", async () => {
+    await press("allow_always", "mga:b3")
+    await press("deny", "mgd:b4")
+    const row = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(conversationKey)
+      .first()
+    expect(row?.mediaModelGrant).toBeUndefined()
+  })
+
+  it("audits the decision so the grant is traceable to a press", async () => {
+    await press("allow_always", "mga:b5")
+    const kinds = (await getDb().connectorAudit.toArray()).map((row) => row.kind)
+    expect(kinds).toContain("media_grant.granted")
+  })
+})

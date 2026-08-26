@@ -288,6 +288,13 @@ export type AuditKind =
   | "tool_approve.granted"
   | "tool_approve.denied"
   | "tool_approve.expired"
+  // In-chat media-consent card lifecycle. `requested` is projected once per
+  // conversation when a grant would unblock withheld media; `granted` /
+  // `denied` record the press. Carries `fields.provider` and, on a press,
+  // `fields.decision`. See `lib/connectors/hitl/media-grant.ts`.
+  | "media_grant.requested"
+  | "media_grant.granted"
+  | "media_grant.denied"
   // Plan approval over chat (ADR-0070 gate reached through the surface that
   // started the run). `requested` when the lead's plan projected an
   // Approve/Reject card; `granted` / `denied` on the press; `expired` when the

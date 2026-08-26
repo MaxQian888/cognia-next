@@ -957,4 +957,67 @@ describe("ConversationOverrideForm", () => {
       ).toBeUndefined()
     })
   })
+
+  /**
+   * `mediaModelGrant` is what makes `allow_cloud_binary` reachable, and until
+   * this form and the in-chat card existed it had no writer of any kind — so
+   * every inbound image was withheld from the model forever.
+   */
+  it("persists a media grant and revokes it again", async () => {
+    await getDb().adapterInstances.put({
+      id: "lark-1",
+      type: "lark",
+      displayName: "Bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "test", accounts: [] },
+      trigger: defaultTriggerPolicyFor("lark"),
+      defaultMode: "auto",
+      defaultProvider: "anthropic",
+      mediaModelPolicy: "local_extract_only",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    const key = "lark:lark-1:oc_media"
+    const { unmount } = render(
+      <ConversationOverrideForm adapterId="lark-1" conversationKey={key} sessionId="s_media" />
+    )
+
+    fireEvent.click(await screen.findByTestId("conv-override-media-grant"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const persisted = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals(key)
+        .first()
+      expect(persisted?.mediaModelGrant).toMatchObject({
+        policy: "allow_cloud_binary",
+        providers: ["anthropic"],
+      })
+    })
+    unmount()
+
+    const existing = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(key)
+      .first()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={key}
+        sessionId="s_media"
+        initialRow={existing}
+      />
+    )
+    fireEvent.click(await screen.findByTestId("media-grant-revoke"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const cleared = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals(key)
+        .first()
+      expect(cleared?.mediaModelGrant).toBeUndefined()
+    })
+  })
 })

@@ -12164,6 +12164,20 @@
         "workflowProduction": "Production"
       },
       "gearAria": "打开该会话的覆盖设置",
+      "mediaGrant": {
+        "duration": "有效期",
+        "duration_0": "长期有效",
+        "duration_168": "7 天后失效",
+        "duration_24": "24 小时后失效",
+        "expired": "已过期",
+        "help": "关闭时，只有本地识别出的文字（OCR、语音转写）会进入模型，图片、语音和文件本身留在本机。开启后，原始字节会上传给下方勾选的供应商。",
+        "label": "把附件发送给模型",
+        "noProviders": "本会话尚未配置任何供应商。",
+        "noneSelected": "没有勾选任何供应商，因此这条授权不生效。",
+        "providerAria": "允许向 {provider} 发送附件",
+        "providers": "允许的供应商",
+        "revoke": "撤销"
+      },
       "noOverrideYet": "尚未配置覆盖 — 当前继承适配器默认。",
       "reset": "取消",
       "save": "保存",
@@ -29306,6 +29320,11 @@
           "schedule_tools": "Schedule Tools"
         },
         "hostCapabilities": "主机能力",
+        "mediaPolicy": "附件与模型",
+        "mediaPolicyCloud": "发送原始附件",
+        "mediaPolicyHelp": "机器人级的底线。单个会话可以在此之上按供应商授权、并可随时撤销；这个设置既不能限定供应商也不会过期。",
+        "mediaPolicyLocal": "仅本地识别",
+        "mediaPolicyWarning": "这个机器人在所有会话中收到的每一张图片、每一段语音、每一个文件，都会被上传给它的模型供应商。",
         "save": "保存",
         "skillHelp": "使用逗号分隔 Skill ID 或通配符。留空表示 Adapter 不追加限制；会话显式空白名单仍会阻止全部 Skill。",
         "skillPlaceholder": "lark.calendar.*, lark.task.list",

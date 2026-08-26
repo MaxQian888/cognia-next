@@ -1271,6 +1271,11 @@
       "schedule_tools": "Schedule Tools"
     },
     "hostCapabilities": "Host Capabilities",
+    "mediaPolicy": "Attachments and the model",
+    "mediaPolicyCloud": "Send raw attachments",
+    "mediaPolicyHelp": "The bot-wide floor. A conversation can grant more than this, scoped to a provider and revocable; this setting cannot be scoped or expired.",
+    "mediaPolicyLocal": "Local extraction only",
+    "mediaPolicyWarning": "Every image, voice note and file this bot receives will be uploaded to its model provider, in every conversation.",
     "save": "Save",
     "skillHelp": "Comma-separated skill ids or wildcards. Leave blank to impose no additional adapter restriction; an explicit empty conversation allowlist still blocks all skills.",
     "skillPlaceholder": "lark.calendar.*, lark.task.list",

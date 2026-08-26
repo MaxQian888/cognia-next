@@ -451,6 +451,47 @@ export class ConnectorBus {
     return { resumed: jobs.length, recoveryRequired }
   }
 
+  /**
+   * Conversations already asked for media consent this process. In memory on
+   * purpose: the point is not to carpet a chat that sends photos all day with
+   * consent prompts, and a restart re-asking once is the correct failure — the
+   * alternative is a durable "asked" flag that outlives the reason for asking.
+   */
+  private readonly mediaGrantAsked = new Set<string>()
+
+  /**
+   * Project the media-consent card, at most once per conversation.
+   *
+   * Deliberately does not suspend the turn: this runs inside the inbound
+   * pipeline, and awaiting a human here would hold the durable inbound job for
+   * as long as they take. The card says the grant applies from the next
+   * message, which is true.
+   */
+  private async maybeRequestMediaGrant(
+    event: NormalizedInboundEvent,
+    adapterRow: AdapterInstanceRow,
+    override: ConversationOverrideRow | null,
+    now: number
+  ): Promise<void> {
+    if (this.mediaGrantAsked.has(event.conversationKey)) return
+    // A grant already covering another provider is still a grant the operator
+    // wrote; re-asking would read as the bot forgetting. The provider mismatch
+    // is already audited as `provider_not_granted`.
+    const provider = override?.providerOverride ?? adapterRow.defaultProvider
+    if (!provider) return
+    this.mediaGrantAsked.add(event.conversationKey)
+    const { requestMediaGrant } = await import("@/lib/connectors/hitl/media-grant")
+    await requestMediaGrant({
+      adapterId: event.adapterId,
+      conversationKey: event.conversationKey,
+      conversationRef: event.conversationRef,
+      deliveryTarget: deliveryTargetFromEvent(event),
+      provider,
+      initiatorUserId: event.sender.id,
+      now,
+    })
+  }
+
   private async runInboundPipeline(
     event: NormalizedInboundEvent,
     recoveredJob?: ConnectorInboundJobRow,
@@ -1018,6 +1059,15 @@ export class ConnectorBus {
           reason: block.reason,
           fields: { segmentType: block.segmentType, policy: mediaDecision.policy },
         }).catch(() => undefined)
+      }
+      // Ask, once, when a grant is what would unblock this. `pii_gate` is not
+      // grant-fixable — that text failed redaction, and consent to send media
+      // is not consent to send the identifiers inside it.
+      const grantWouldHelp = mediaDecision.blocked.some(
+        (block) => block.reason === "no_local_text" || block.reason === "provider_not_granted"
+      )
+      if (grantWouldHelp) {
+        await this.maybeRequestMediaGrant(event, adapterRow, override, now).catch(() => undefined)
       }
     }
 
@@ -2516,6 +2566,46 @@ export class ConnectorBus {
           at: Date.now(),
           conversationKey: resolvedConversationKey ?? undefined,
           fields: { toolName, requestId, decision, resolved },
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return true
+    }
+
+    // ── Step 4-pre-c2: media_grant short-circuit ──
+    //
+    // A button on the media-consent card. Writes (or withdraws) the
+    // conversation's `MediaModelGrant`, which is the only writer of that field
+    // and therefore the only thing that makes `allow_cloud_binary` reachable.
+    // No turn is resumed — the card never suspended one; the grant applies from
+    // the next message, which is what the card says.
+    if (resolvedBinding?.kind === "media_grant") {
+      const decision = String(resolvedBinding.payload?.["decision"] ?? "deny") as
+        "allow_24h" | "allow_always" | "deny"
+      const provider = String(resolvedBinding.payload?.["provider"] ?? "")
+      try {
+        const { applyMediaGrantCallback } = await import("@/lib/connectors/hitl/media-grant")
+        const { granted } = await applyMediaGrantCallback({
+          adapterId: event.adapterId,
+          conversationKey: resolvedConversationKey ?? resolvedBinding.conversationKey ?? "",
+          decision,
+          provider,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: granted ? "media_grant.granted" : "media_grant.denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          fields: { provider, decision },
         })
       } catch (err) {
         await appendAudit({

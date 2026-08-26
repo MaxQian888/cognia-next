@@ -11,7 +11,18 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { updateAdapterConfigSection } from "@/lib/db/adapter-instances"
 import { getDb } from "@/lib/db/schema"
-import type { AdapterInstanceRow, ImHostCapabilityId } from "@/lib/db/connector-types"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import type {
+  AdapterInstanceRow,
+  ImHostCapabilityId,
+  MediaModelPolicy,
+} from "@/lib/db/connector-types"
 
 const HOST_CAPABILITIES: ImHostCapabilityId[] = [
   "computer_use",
@@ -56,6 +67,13 @@ function AdapterPermissionsDraft({
     () => row?.hostCapabilityCeiling ?? HOST_CAPABILITIES
   )
   const [hitl, setHitl] = useState(() => row?.requireHitlForWrites ?? true)
+  // Bot-wide media policy. Hard-coded to `local_extract_only` by all eleven
+  // create dialogs and editable nowhere, so `allow_cloud_binary` was
+  // unreachable at this scope even though the resolver reads it as the base
+  // every conversation grant sits on top of.
+  const [mediaPolicy, setMediaPolicy] = useState<MediaModelPolicy>(
+    () => row?.mediaModelPolicy ?? "local_extract_only"
+  )
 
   const save = async () => {
     if (typeof window !== "undefined" && !window.confirm(t("confirmImpact"))) return
@@ -70,6 +88,7 @@ function AdapterPermissionsDraft({
         builtInSkillCeiling: skills.trim() ? parsed : undefined,
         hostCapabilityCeiling: host.length === HOST_CAPABILITIES.length ? undefined : host,
         requireHitlForWrites: hitl,
+        mediaModelPolicy: mediaPolicy,
       },
       "settings.adapter.permissions"
     )
@@ -113,6 +132,30 @@ function AdapterPermissionsDraft({
               />
             </div>
           ))}
+        </div>
+        {/* Bot-WIDE, and therefore the blunter of the two controls: a
+         * conversation grant is provider-scoped, revocable and expiring, and
+         * this is none of those. The warning is not decoration. */}
+        <div className="space-y-2">
+          <Label htmlFor="adapter-media-policy">{t("mediaPolicy")}</Label>
+          <Select
+            value={mediaPolicy}
+            onValueChange={(next) => setMediaPolicy(next as MediaModelPolicy)}
+          >
+            <SelectTrigger id="adapter-media-policy" data-testid="adapter-media-policy">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="local_extract_only">{t("mediaPolicyLocal")}</SelectItem>
+              <SelectItem value="allow_cloud_binary">{t("mediaPolicyCloud")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">{t("mediaPolicyHelp")}</p>
+          {mediaPolicy === "allow_cloud_binary" && (
+            <p className="text-xs text-destructive" data-testid="adapter-media-policy-warning">
+              {t("mediaPolicyWarning")}
+            </p>
+          )}
         </div>
         <div className="flex items-center justify-between gap-3">
           <div>

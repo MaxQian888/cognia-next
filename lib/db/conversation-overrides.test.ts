@@ -649,3 +649,42 @@ describe("conversation-overrides — CRM (v83)", () => {
     })
   })
 })
+
+/**
+ * A row created before the workspace column carries no `projectId`, and a
+ * caller editing an existing row has no reason to re-supply `sessionId` — which
+ * together reached `resolveSessionProjectId(undefined)` and threw
+ * `Invalid argument to Table.get()`. The in-chat media-consent card is exactly
+ * such a caller.
+ */
+describe("updateConversationConfigSection without a sessionId", () => {
+  it("edits an existing row that has no projectId", async () => {
+    const conversationKey = "telegram:adp_1:c_legacy"
+    await getDb().conversationOverrides.put({
+      id: "co_legacy",
+      conversationKey,
+      sessionId: "ses_legacy",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    await expect(
+      updateConversationConfigSection({
+        adapterId: "adp_1",
+        conversationKey,
+        section: "permissions",
+        patch: { allowOcr: false },
+      })
+    ).resolves.toMatchObject({ allowOcr: false })
+  })
+
+  it("still refuses to invent a row it has no session for", async () => {
+    await expect(
+      updateConversationConfigSection({
+        adapterId: "adp_1",
+        conversationKey: "telegram:adp_1:c_absent",
+        section: "permissions",
+        patch: { allowOcr: false },
+      })
+    ).rejects.toThrow(/no row/)
+  })
+})

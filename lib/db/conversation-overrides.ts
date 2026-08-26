@@ -180,8 +180,14 @@ export async function updateConversationConfigSection(input: {
       `conversationOverrides: no row for ${input.conversationKey} and no sessionId to create one`
     )
   }
+  // An existing row already knows its session, so a caller editing one does not
+  // have to re-supply it. Without this fallback a row created before the
+  // workspace column (no `projectId`) reached `resolveSessionProjectId(undefined)`
+  // and threw `Invalid argument to Table.get()` — a crash the caller could only
+  // avoid by passing a field it had no reason to have.
+  const sessionId = input.sessionId ?? existing?.sessionId
   const projectId =
-    existing?.projectId ?? (await resolveSessionProjectId(input.sessionId as string))
+    existing?.projectId ?? (sessionId ? await resolveSessionProjectId(sessionId) : undefined)
   const now = Date.now()
   const changedKeys = Object.keys(input.patch).sort()
   if (changedKeys.length === 0 && existing) return existing
@@ -201,7 +207,7 @@ export async function updateConversationConfigSection(input: {
         : {
             id: newId(),
             conversationKey: input.conversationKey,
-            sessionId: input.sessionId as string,
+            sessionId: sessionId as string,
             projectId,
             ...input.patch,
             createdAt: now,

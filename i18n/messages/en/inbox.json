@@ -416,6 +416,20 @@
       "workflowProduction": "Production"
     },
     "gearAria": "Open per-conversation override settings",
+    "mediaGrant": {
+      "duration": "Expires",
+      "duration_0": "Never",
+      "duration_168": "After 7 days",
+      "duration_24": "After 24 hours",
+      "expired": "Expired",
+      "help": "Off, only text extracted locally (OCR, transcription) reaches the model — the image, voice note or file itself stays on this device. On, the raw bytes are uploaded to the providers you pick below.",
+      "label": "Send attachments to the model",
+      "noProviders": "No provider is configured for this conversation yet.",
+      "noneSelected": "No provider is selected, so this grants nothing.",
+      "providerAria": "Allow sending attachments to {provider}",
+      "providers": "Allowed providers",
+      "revoke": "Revoke"
+    },
     "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
     "reset": "Cancel",
     "save": "Save",
