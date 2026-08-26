@@ -104,6 +104,13 @@ export function MediaGrantEditor({
   const currentHours = value?.expiresAt
     ? Math.round((value.expiresAt - value.grantedAt) / 3_600_000)
     : 0
+  // A stored span that matches no preset — a grant written by the in-chat card,
+  // or one whose window was chosen elsewhere — gets its own read-out item.
+  // Snapping it to the nearest preset would misreport the deadline, and leaving
+  // it out renders the picker BLANK, which is what an expired grant did.
+  const customHours = DURATIONS.includes(currentHours as (typeof DURATIONS)[number])
+    ? null
+    : currentHours
 
   return (
     <div className="space-y-3" data-testid="media-grant-editor">
@@ -174,6 +181,11 @@ export function MediaGrantEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                {customHours !== null && (
+                  <SelectItem value={String(customHours)} data-testid="media-grant-duration-custom">
+                    {t("duration_custom", { hours: customHours })}
+                  </SelectItem>
+                )}
                 {DURATIONS.map((hours) => (
                   <SelectItem key={hours} value={String(hours)}>
                     {t(`duration_${hours}`)}

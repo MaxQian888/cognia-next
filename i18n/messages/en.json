@@ -12169,6 +12169,7 @@
         "duration_0": "Never",
         "duration_168": "After 7 days",
         "duration_24": "After 24 hours",
+        "duration_custom": "After {hours} hours",
         "expired": "Expired",
         "help": "Off, only text extracted locally (OCR, transcription) reaches the model — the image, voice note or file itself stays on this device. On, the raw bytes are uploaded to the providers you pick below.",
         "label": "Send attachments to the model",

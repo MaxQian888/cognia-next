@@ -174,3 +174,42 @@ it("can drop the expiry entirely", async () => {
   await user.click(await screen.findByRole("option", { name: "duration_0" }))
   expect(seen.at(-1)?.expiresAt).toBeUndefined()
 })
+
+/**
+ * Radix renders nothing when the value matches no item, so a stored span that
+ * is not one of the presets used to leave the picker BLANK — which is exactly
+ * what an expired grant looked like. Snapping it to the nearest preset would
+ * misreport the deadline instead.
+ */
+it("reads out a stored duration that matches no preset", () => {
+  render(
+    <Harness
+      initial={{
+        policy: "allow_cloud_binary",
+        providers: ["anthropic"],
+        grantedAt: NOW - 48 * 3_600_000,
+        expiresAt: NOW - 3_600_000,
+      }}
+    />
+  )
+  expect(screen.getByTestId("media-grant-duration")).toHaveTextContent(
+    'duration_custom:{"hours":47}'
+  )
+})
+
+it("shows a preset span as that preset, with no extra item", async () => {
+  const user = userEvent.setup()
+  render(
+    <Harness
+      initial={{
+        policy: "allow_cloud_binary",
+        providers: ["anthropic"],
+        grantedAt: NOW,
+        expiresAt: NOW + 24 * 3_600_000,
+      }}
+    />
+  )
+  expect(screen.getByTestId("media-grant-duration")).toHaveTextContent("duration_24")
+  await user.click(screen.getByTestId("media-grant-duration"))
+  expect(screen.queryByTestId("media-grant-duration-custom")).not.toBeInTheDocument()
+})
