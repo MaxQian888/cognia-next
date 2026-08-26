@@ -159,7 +159,11 @@ test(
       pnpm,
       `#!/usr/bin/env node
 import fs from "node:fs"
-fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slice(2)) + "\\n")
+fs.appendFileSync(
+  process.env.COGNIA_BUILD_LOG,
+  JSON.stringify({ args: process.argv.slice(2), tauriConfig: process.env.TAURI_CONFIG ?? null }) +
+    "\\n"
+)
 `
     )
     await writeFile(server, "#!/bin/sh\nprintf 'cgnp3|fresh-invitation\\n'\n")
@@ -175,11 +179,79 @@ fs.appendFileSync(process.env.COGNIA_BUILD_LOG, JSON.stringify(process.argv.slic
 
     assert.equal(result.code, 0, result.stderr)
     assert.match(result.stdout, /cgnp3\|fresh-invitation/)
-    assert.deepEqual(JSON.parse((await readFile(buildLog, "utf8")).trim()), [
-      "terminal-host:prepare:dev",
-    ])
+    assert.deepEqual(JSON.parse((await readFile(buildLog, "utf8")).trim()), {
+      args: ["terminal-host:prepare:dev"],
+      // The pairing rebuild compiles the same headless binary, so it skips the
+      // multi-gigabyte tauri resource staging for the same reason the serve
+      // build does.
+      tauriConfig: '{"bundle":{"resources":[]}}',
+    })
   }
 )
+
+test("the headless compile stages no tauri bundle resources, and no other build step is affected", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-build-env-"))
+  const dataDir = path.join(root, "data")
+  const buildLog = path.join(root, "build.jsonl")
+  const pnpm = path.join(root, "pnpm")
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(
+    pnpm,
+    `#!/usr/bin/env node
+import fs from "node:fs"
+fs.appendFileSync(
+  process.env.COGNIA_BUILD_LOG,
+  JSON.stringify({ args: process.argv.slice(2), tauriConfig: process.env.TAURI_CONFIG ?? null }) +
+    "\\n"
+)
+`
+  )
+  await chmod(pnpm, 0o755)
+  const artifact = async (name, contents = "fixture\n", executable = false) => {
+    const target = path.join(root, name)
+    await writeFile(target, contents)
+    if (executable) await chmod(target, 0o755)
+    return target
+  }
+
+  const result = await run(["--data-dir", dataDir, "--port", "28902"], {
+    COGNIA_BUILD_LOG: buildLog,
+    COGNIA_HEADLESS_PNPM_BIN: pnpm,
+    COGNIA_MASTER_KEY: "",
+    COGNIA_MASTER_KEY_FILE: "",
+    COGNIA_HEADLESS_SERVER_BIN: await artifact("cognia-server", "#!/bin/sh\nexit 0\n", true),
+    COGNIA_BRAIN_ENTRY: await artifact("brain.mjs"),
+    COGNIA_SIDECAR_SCRIPT: await artifact("sidecar.mjs"),
+    COGNIA_MCP_SIDECAR_PATH: await artifact("mcp.mjs"),
+    COGNIA_VSCODE_EXT_HOST_SCRIPT: await artifact("vscode-host.js"),
+    COGNIA_CODE_SERVER_AGENT_VSIX: await artifact("agent.vsix"),
+  })
+
+  assert.equal(result.code, 0, result.stderr)
+  const steps = (await readFile(buildLog, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+  assert.deepEqual(
+    steps.map((step) => step.args),
+    [
+      ["cli:native-hosts:build"],
+      ["support:docs:build"],
+      ["exec", "node", "scripts/build/build-cli.mjs"],
+      ["exec", "node", "scripts/build/build-mcp-sidecar.mjs"],
+      ["exec", "node", "scripts/build/build-vscode-ext-host-sidecar.mjs"],
+      ["sidecar:codeserver-agent:build"],
+      ["terminal-host:prepare:dev"],
+    ]
+  )
+  // Only the cargo step reads TAURI_CONFIG, and only it may be overridden:
+  // leaking the empty resource list into any other step would be a silent
+  // configuration change for builds that do need the bundle.
+  assert.deepEqual(
+    steps.map((step) => step.tauriConfig),
+    [null, null, null, null, null, null, '{"bundle":{"resources":[]}}']
+  )
+})
 
 test("dry-run prints a redacted launch plan without writing development state", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "cognia-headless-plan-"))

@@ -188,6 +188,28 @@ function secretConfig(dataDir, env) {
   }
 }
 
+/**
+ * Resource-free tauri configuration for the headless compile.
+ *
+ * `bundle.resources` in `src-tauri/tauri.conf.json` globs three sidecar
+ * `node_modules` trees. pnpm materializes those as symlinks into its
+ * content-addressed store, so `tauri-build`'s resource walk follows the links
+ * and copies ~149k real files (2.9 GB) into `target/<profile>/_up_/` — with a
+ * plain `std::fs::copy` per file, unconditionally, every time the build script
+ * re-runs. It re-runs on every edit to `src-tauri/src/lib.rs` (a declared
+ * `rerun-if-changed` input), which spends 4-5 silent minutes of this build on a
+ * payload the headless binary never reads: it resolves no Tauri resource paths,
+ * and `launchEnvironment` hands the brain, agent sidecar, MCP sidecar, VS Code
+ * host and code-server extension their absolute repo paths instead.
+ *
+ * Emptying the list applies to the headless compile only; `pnpm tauri dev` and
+ * the packaged bundles still stage the real resources. `tauri-build` declares
+ * `rerun-if-env-changed=TAURI_CONFIG`, so alternating between a headless build
+ * and a desktop build re-runs the build script — and pays the copy once — on
+ * each switch.
+ */
+const HEADLESS_TAURI_CONFIG = JSON.stringify({ bundle: { resources: [] } })
+
 function buildSteps(pnpmBin) {
   return [
     { command: pnpmBin, args: ["cli:native-hosts:build"] },
@@ -199,7 +221,11 @@ function buildSteps(pnpmBin) {
       args: ["exec", "node", "scripts/build/build-vscode-ext-host-sidecar.mjs"],
     },
     { command: pnpmBin, args: ["sidecar:codeserver-agent:build"] },
-    { command: pnpmBin, args: ["terminal-host:prepare:dev"] },
+    {
+      command: pnpmBin,
+      args: ["terminal-host:prepare:dev"],
+      env: { TAURI_CONFIG: HEADLESS_TAURI_CONFIG },
+    },
   ]
 }
 
@@ -565,14 +591,14 @@ async function buildHeadlessArtifacts(env) {
   const steps = buildSteps(env.COGNIA_HEADLESS_PNPM_BIN || "pnpm")
   for (const [index, step] of steps.entries()) {
     process.stdout.write(`Building headless artifacts (${index + 1}/${steps.length})...\n`)
-    const buildEnv = { ...env }
+    const buildEnv = { ...env, ...step.env }
     delete buildEnv.COGNIA_MASTER_KEY
     await runProcess(step.command, step.args, `headless build step ${index + 1}`, buildEnv)
   }
 }
 
 async function buildPairArtifact(paths, env) {
-  const buildEnv = { ...env }
+  const buildEnv = { ...env, TAURI_CONFIG: HEADLESS_TAURI_CONFIG }
   delete buildEnv.COGNIA_MASTER_KEY
   if (path.basename(path.dirname(paths.server)) === "debug") {
     buildEnv.CARGO_TARGET_DIR = path.dirname(path.dirname(paths.server))
